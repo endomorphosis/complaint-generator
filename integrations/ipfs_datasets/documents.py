@@ -13,7 +13,7 @@ from email.parser import BytesParser
 from html import unescape
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from .loader import import_attr_optional, import_module_optional
 from .types import (
@@ -90,10 +90,10 @@ def _build_parse_summary(
     parser_version: str,
     input_format: str,
     paragraph_count: int,
-    extraction_method: str,
-    quality_tier: str,
-    quality_score: float,
-    page_count: int,
+    extraction_method: str = "",
+    quality_tier: str = "",
+    quality_score: float = 0.0,
+    page_count: int = 0,
 ) -> DocumentParseSummary:
     return DocumentParseSummary(
         status=status,
@@ -511,6 +511,56 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 100) -> List[Di
     return chunks
 
 
+def _chunk_page_index(text: str, offset: int, page_count: int) -> int:
+    """Return the one-based page containing an extracted-text offset."""
+    if page_count <= 0 or not text:
+        return 0
+    return min(max(1, text[: max(offset, 0)].count("\f") + 1), page_count)
+
+
+def _annotate_chunk_metadata(
+    chunks: List[Dict[str, Any]],
+    *,
+    text: str,
+    source: str,
+    input_format: str,
+    parser_version: str,
+    page_count: int,
+    extraction_method: str,
+    quality_tier: str,
+) -> List[Dict[str, Any]]:
+    """Give every chunk enough lineage to travel between ingestion paths."""
+    annotated: List[Dict[str, Any]] = []
+    text_length = len(text or "")
+    for chunk in chunks:
+        start = int(chunk.get("start", 0) or 0)
+        end = int(chunk.get("end", start) or start)
+        page_start = _chunk_page_index(text, start, page_count)
+        page_end = _chunk_page_index(text, max(start, end - 1), page_count)
+        chunk_metadata = dict(chunk.get("metadata") or {})
+        chunk_metadata.update(
+            {
+                "source": source,
+                "input_format": input_format,
+                "parser_version": parser_version,
+                "extraction_method": extraction_method,
+                "quality_tier": quality_tier,
+                "page_start": page_start,
+                "page_end": page_end,
+                "source_span": {
+                    "char_start": start,
+                    "char_end": end,
+                    "text_length": text_length,
+                    "page_start": page_start,
+                    "page_end": page_end,
+                    "page_count": page_count,
+                },
+            }
+        )
+        annotated.append({**chunk, "metadata": chunk_metadata})
+    return annotated
+
+
 def parse_document_text(
     text: str,
     *,
@@ -537,6 +587,16 @@ def parse_document_text(
         raw_size=len(raw_text.encode("utf-8", errors="ignore")),
     )
     chunks = chunk_text(normalized_text, chunk_size=chunk_size, overlap=overlap) if normalized_text else []
+    chunks = _annotate_chunk_metadata(
+        chunks,
+        text=normalized_text,
+        source=source,
+        input_format=input_format,
+        parser_version=PARSER_VERSION,
+        page_count=int(parse_quality["page_count"]),
+        extraction_method=str(parse_quality["extraction_method"]),
+        quality_tier=str(parse_quality["quality_tier"]),
+    )
     typed_chunks = [
         DocumentChunk(
             chunk_id=str(chunk.get("chunk_id") or ""),
@@ -695,6 +755,192 @@ def parse_document_file(
         source="file",
         chunk_size=chunk_size,
         overlap=overlap,
+    )
+
+
+def _merge_parse_context(
+    document_parse: Dict[str, Any],
+    *,
+    source: str,
+    metadata: Optional[Mapping[str, Any]] = None,
+    lineage: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Attach caller context while keeping parser-owned fields authoritative.
+
+    Evidence, authority, and web ingestion attach different source identity to
+    the same parse result.  MIME detection, quality, chunking, and parser
+    version must continue to describe what the parser actually did, so caller
+    context only fills missing fields.  ``source`` is the sole exception: an
+    explicit source names the ingestion lane and is propagated consistently.
+    """
+    payload = dict(document_parse)
+    parse_metadata = dict(payload.get("metadata") or {})
+    transform_lineage = payload.get("lineage")
+    if not isinstance(transform_lineage, dict):
+        transform_lineage = parse_metadata.get("transform_lineage")
+    transform_lineage = dict(transform_lineage) if isinstance(transform_lineage, dict) else {}
+
+    for key, value in dict(metadata or {}).items():
+        if value not in (None, "", [], (), {}):
+            parse_metadata.setdefault(str(key), value)
+    for key, value in dict(lineage or {}).items():
+        if value not in (None, "", [], (), {}):
+            transform_lineage.setdefault(str(key), value)
+
+    resolved_source = str(
+        source
+        or parse_metadata.get("source")
+        or transform_lineage.get("source")
+        or ""
+    )
+    if resolved_source:
+        parse_metadata["source"] = resolved_source
+        transform_lineage["source"] = resolved_source
+
+    normalized_chunks: List[Dict[str, Any]] = []
+    for chunk in payload.get("chunks", []) or []:
+        if not isinstance(chunk, dict):
+            continue
+        chunk_payload = dict(chunk)
+        chunk_metadata = dict(chunk_payload.get("metadata") or {})
+        if resolved_source:
+            chunk_metadata["source"] = resolved_source
+        chunk_payload["metadata"] = chunk_metadata
+        normalized_chunks.append(chunk_payload)
+
+    parse_metadata["transform_lineage"] = transform_lineage
+    payload["chunks"] = normalized_chunks
+    payload["metadata"] = parse_metadata
+    payload["lineage"] = transform_lineage
+    return payload
+
+
+def parse_document(
+    content: Any = None,
+    *,
+    data: Optional[bytes] = None,
+    text: Optional[str] = None,
+    file_path: Optional[str | Path] = None,
+    filename: Optional[str] = None,
+    mime_type: Optional[str] = None,
+    source: Optional[str] = None,
+    metadata: Optional[Mapping[str, Any]] = None,
+    lineage: Optional[Mapping[str, Any]] = None,
+    chunk_size: int = 1000,
+    overlap: int = 100,
+) -> Dict[str, Any]:
+    """Parse one document input through the shared ingestion contract.
+
+    Exactly one of ``content``, ``data``, ``text``, or ``file_path`` must be
+    supplied.  Positional ``content`` dispatches bytes, :class:`~pathlib.Path`,
+    strings, and readable streams.  A string is always document text; local
+    string paths must use ``file_path`` so fetched web content cannot be
+    mistaken for a filesystem path.
+
+    The result retains the normalized dictionary returned by the legacy
+    ``parse_document_*`` helpers.  Those helpers remain public compatibility
+    entry points, while ingestion code can use this source-agnostic function.
+    """
+    supplied = (content is not None, data is not None, text is not None, file_path is not None)
+    if sum(supplied) != 1:
+        raise ValueError("exactly one of content, data, text, or file_path must be provided")
+
+    parsed: Dict[str, Any]
+    resolved_source = str(source or "")
+
+    if file_path is not None:
+        path = Path(file_path)
+        parsed = parse_document_file(
+            str(path),
+            mime_type=mime_type,
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+        resolved_source = resolved_source or "file"
+    elif data is not None:
+        if not isinstance(data, (bytes, bytearray, memoryview)):
+            raise TypeError("data must be bytes-like")
+        parsed = parse_document_bytes(
+            bytes(data),
+            filename=filename,
+            mime_type=mime_type,
+            source=resolved_source or "bytes",
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+        resolved_source = resolved_source or "bytes"
+    elif text is not None:
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        parsed = parse_document_text(
+            text,
+            filename=filename,
+            mime_type=mime_type,
+            source=resolved_source or "text",
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+        resolved_source = resolved_source or "text"
+    elif isinstance(content, Path):
+        parsed = parse_document_file(
+            str(content),
+            mime_type=mime_type,
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+        resolved_source = resolved_source or "file"
+    elif isinstance(content, (bytes, bytearray, memoryview)):
+        parsed = parse_document_bytes(
+            bytes(content),
+            filename=filename,
+            mime_type=mime_type,
+            source=resolved_source or "bytes",
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+        resolved_source = resolved_source or "bytes"
+    elif isinstance(content, str):
+        parsed = parse_document_text(
+            content,
+            filename=filename,
+            mime_type=mime_type,
+            source=resolved_source or "text",
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+        resolved_source = resolved_source or "text"
+    elif hasattr(content, "read"):
+        stream_value = content.read()
+        stream_name = filename or Path(str(getattr(content, "name", ""))).name
+        if isinstance(stream_value, str):
+            parsed = parse_document_text(
+                stream_value,
+                filename=stream_name,
+                mime_type=mime_type,
+                source=resolved_source or "stream",
+                chunk_size=chunk_size,
+                overlap=overlap,
+            )
+        elif isinstance(stream_value, (bytes, bytearray, memoryview)):
+            parsed = parse_document_bytes(
+                bytes(stream_value),
+                filename=stream_name,
+                mime_type=mime_type,
+                source=resolved_source or "stream",
+                chunk_size=chunk_size,
+                overlap=overlap,
+            )
+        else:
+            raise TypeError("document stream read() must return str or bytes")
+        resolved_source = resolved_source or "stream"
+    else:
+        raise TypeError("content must be text, bytes, a Path, or a readable stream")
+
+    return _merge_parse_context(
+        parsed,
+        source=resolved_source,
+        metadata=metadata,
+        lineage=lineage,
     )
 
 
@@ -1049,6 +1295,7 @@ __all__ = [
     "extract_text_content",
     "ingest_download_manifest",
     "ingest_local_document",
+    "parse_document",
     "parse_document_text",
     "parse_document_bytes",
     "parse_document_file",

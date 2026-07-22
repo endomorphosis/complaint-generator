@@ -2375,6 +2375,8 @@ def test_review_api_registers_formal_complaint_document_route():
             optimization_provider=None,
             optimization_model_name=None,
             optimization_persist_artifacts=False,
+            email_timeline_handoff_path=None,
+            email_authority_enrichment_path=None,
             service_method="CM/ECF",
             service_recipients=["Registered Agent for Acme Corporation", "Defense Counsel"],
             service_recipient_details=[

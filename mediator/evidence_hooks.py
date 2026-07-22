@@ -28,7 +28,7 @@ from integrations.ipfs_datasets.provenance import (
     merge_metadata_with_provenance,
     stable_content_hash,
 )
-from integrations.ipfs_datasets.documents import parse_document_bytes, should_parse_document_input
+from integrations.ipfs_datasets.documents import parse_document, should_parse_document_input
 from integrations.ipfs_datasets.graphs import extract_graph_from_text, persist_graph_snapshot
 from integrations.ipfs_datasets.types import CaseArtifact, CaseFact
 from integrations.ipfs_datasets.storage import (
@@ -287,8 +287,8 @@ class EvidenceStorageHook:
             )
             result = artifact.as_dict()
             if self._should_parse_evidence(evidence_type, metadata):
-                document_parse = parse_document_bytes(
-                    data,
+                document_parse = parse_document(
+                    data=data,
                     filename=str((metadata or {}).get('filename', '')),
                     mime_type=str((metadata or {}).get('mime_type', '')),
                     source=str((metadata or {}).get('parse_source', 'bytes')),
@@ -708,6 +708,11 @@ class EvidenceStateHook:
             default_source=str((document_parse.get('metadata', {}) or {}).get('source', '')),
         )
         for chunk in chunks:
+            chunk_metadata = dict(chunk.get('metadata') or {})
+            chunk_metadata.setdefault('length', chunk.get('length', 0))
+            chunk_metadata.setdefault('parser_version', parse_contract.get('summary', {}).get('parser_version', ''))
+            chunk_metadata.setdefault('source', parse_contract.get('source', ''))
+            chunk_metadata.setdefault('input_format', parse_contract.get('summary', {}).get('input_format', ''))
             conn.execute(
                 """
                 INSERT INTO evidence_chunks (
@@ -722,12 +727,7 @@ class EvidenceStateHook:
                     chunk.get('start'),
                     chunk.get('end'),
                     chunk.get('text'),
-                    json.dumps(_merge_intake_summary_handoff_metadata({
-                        'length': chunk.get('length', 0),
-                        'parser_version': parse_contract.get('summary', {}).get('parser_version', ''),
-                        'source': parse_contract.get('source', ''),
-                        'input_format': parse_contract.get('summary', {}).get('input_format', ''),
-                    }, self.mediator)),
+                    json.dumps(_merge_intake_summary_handoff_metadata(chunk_metadata, self.mediator)),
                 ],
             )
 
