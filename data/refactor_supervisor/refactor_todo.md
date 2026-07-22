@@ -1784,7 +1784,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-087 Resolve code annotation in complaint_phases/knowledge_graph.py:2168
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P3
 - Track: runtime
