@@ -2475,8 +2475,6 @@ def start_daemon(args: argparse.Namespace) -> dict[str, Any]:
         "--implement",
         "--implementation-timeout",
         str(float(args.implementation_timeout)),
-        "--worktree-submodule-path",
-        "ipfs_datasets_py/ipfs_accelerate_py",
         "--llm-merge-resolver-command",
         merge_resolver_command(),
         "--llm-merge-resolver-timeout-seconds",
