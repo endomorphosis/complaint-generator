@@ -70,6 +70,8 @@ class FormalLogicOperation(str, Enum):
 class FormalLogicCapabilityError(RuntimeError):
     """Base error raised when a capability cannot satisfy a requested gate."""
 
+    error_code = "formal_logic_capability_error"
+
     def __init__(self, capability: "FormalLogicCapability", *, required: str) -> None:
         self.capability = capability
         self.operation = capability.operation
@@ -81,13 +83,29 @@ class FormalLogicCapabilityError(RuntimeError):
             f"state is '{capability.state.value}': {reason}"
         )
 
+    def as_dict(self) -> dict[str, Any]:
+        """Return a stable error payload for API and job-runner boundaries."""
+
+        return {
+            "error": self.error_code,
+            "operation": self.operation.value,
+            "required": self.required,
+            "status": self.state.value,
+            "reason": self.capability.reason,
+            "capability": self.capability.as_dict(),
+        }
+
 
 class FormalLogicUnavailableError(FormalLogicCapabilityError):
     """Raised when an operation has no executable provider or fallback."""
 
+    error_code = "formal_logic_unavailable"
+
 
 class FormalLogicDegradedError(FormalLogicCapabilityError):
     """Raised when full formal validation is requested from a fallback."""
+
+    error_code = "formal_logic_degraded"
 
 
 @dataclass(frozen=True)
@@ -163,6 +181,33 @@ class FormalLogicCapability:
         }
 
 
+def _capability_payload(value: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Locate the most specific capability contract in an adapter payload."""
+
+    nested = value.get("capability")
+    if isinstance(nested, Mapping):
+        return nested
+
+    metadata = value.get("metadata")
+    if isinstance(metadata, Mapping):
+        nested = metadata.get("capability")
+        if isinstance(nested, Mapping):
+            return nested
+        details = metadata.get("details")
+        if isinstance(details, Mapping):
+            nested = details.get("capability")
+            if isinstance(nested, Mapping):
+                return nested
+        return metadata
+
+    details = value.get("details")
+    if isinstance(details, Mapping):
+        nested = details.get("capability")
+        if isinstance(nested, Mapping):
+            return nested
+    return value
+
+
 def capability_state_from_payload(
     payload: Mapping[str, Any] | None,
 ) -> Optional[LogicCapabilityState]:
@@ -174,41 +219,51 @@ def capability_state_from_payload(
     ``None`` means the payload contains no recognizable capability signal.
     """
 
-    value: Mapping[str, Any] = payload if isinstance(payload, Mapping) else {}
-    nested = value.get("capability")
-    if isinstance(nested, Mapping):
-        value = nested
-
-    if value.get("implemented") is True or value.get("capability_implemented") is True:
-        return LogicCapabilityState.IMPLEMENTED
-    if value.get("degraded") is True or value.get("capability_degraded") is True:
-        return LogicCapabilityState.DEGRADED
-    if value.get("available") is False or value.get("capability_available") is False:
-        return LogicCapabilityState.UNAVAILABLE
-
+    root: Mapping[str, Any] = payload if isinstance(payload, Mapping) else {}
+    value = _capability_payload(root)
     raw_state = value.get("status") or value.get("implementation_status")
-    if not raw_state and value is not payload and isinstance(payload, Mapping):
-        raw_state = payload.get("implementation_status") or payload.get("status")
+    if not raw_state and value is not root:
+        raw_state = root.get("implementation_status") or root.get("status")
     normalized = str(raw_state or "").strip().lower()
-    if not normalized:
-        if isinstance(payload, Mapping) and payload.get("backend_available") is False:
-            return LogicCapabilityState.UNAVAILABLE
-        return None
+
+    signals: list[LogicCapabilityState] = []
     try:
-        return LogicCapabilityState(normalized)
+        if normalized:
+            signals.append(LogicCapabilityState(normalized))
     except ValueError:
         # Compatibility for stored payloads created before the v1 contract.
         if normalized == "not_implemented":
-            return (
+            signals.append(
                 LogicCapabilityState.DEGRADED
-                if not isinstance(payload, Mapping) or payload.get("backend_available") is not False
+                if value.get("backend_available", root.get("backend_available")) is not False
                 else LogicCapabilityState.UNAVAILABLE
             )
-        if normalized == "error":
-            return LogicCapabilityState.DEGRADED
-        if normalized in {"available", "success"}:
-            return LogicCapabilityState.IMPLEMENTED
+        elif normalized == "error":
+            signals.append(LogicCapabilityState.DEGRADED)
+        elif normalized in {"available", "success"}:
+            signals.append(LogicCapabilityState.IMPLEMENTED)
+
+    if value.get("implemented") is True or value.get("capability_implemented") is True:
+        signals.append(LogicCapabilityState.IMPLEMENTED)
+    if value.get("degraded") is True or value.get("capability_degraded") is True:
+        signals.append(LogicCapabilityState.DEGRADED)
+    if value.get("available") is False or value.get("capability_available") is False:
+        signals.append(LogicCapabilityState.UNAVAILABLE)
+    if not normalized and value.get("backend_available") is False:
+        signals.append(LogicCapabilityState.UNAVAILABLE)
+
+    if not signals:
         return None
+
+    # Persisted payloads can contain stale duplicate flags.  Select the least
+    # capable recognized signal so authoritative validation never proceeds
+    # because one optimistic field disagrees with the rest of the contract.
+    precedence = {
+        LogicCapabilityState.UNAVAILABLE: 0,
+        LogicCapabilityState.DEGRADED: 1,
+        LogicCapabilityState.IMPLEMENTED: 2,
+    }
+    return min(signals, key=precedence.__getitem__)
 
 
 __all__ = [
