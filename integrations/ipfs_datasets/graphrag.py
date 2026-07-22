@@ -123,14 +123,23 @@ def _run_pdf_facade(
 def create_ontology_generator() -> Any:
     if OntologyGenerator is None:
         return None
-    try:
-        return OntologyGenerator()
-    except Exception:
-        return None
+    return OntologyGenerator()
 
 
 def build_ontology(text: str, config: Any | None = None) -> Dict[str, Any]:
-    generator = create_ontology_generator()
+    try:
+        generator = create_ontology_generator()
+    except Exception as exc:
+        return with_adapter_metadata(
+            {
+                "status": "error",
+                "ontology": None,
+                "metadata": {"text_length": len(text), "error": str(exc)},
+            },
+            operation="build_ontology",
+            backend_available=True,
+            implementation_status="error",
+        )
     if generator is None:
         return with_adapter_metadata(
             {
