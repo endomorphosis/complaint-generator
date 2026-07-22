@@ -1668,7 +1668,9 @@ def _try_parse_json_object(text: str) -> Optional[Dict[str, Any]]:
         s = m.group(0)
     try:
         obj = json.loads(s)
-    except Exception:
+    except json.JSONDecodeError:
+        # Model output is untrusted and malformed JSON is an expected miss.
+        # Unexpected decoder/runtime failures must remain visible to callers.
         return None
     return obj if isinstance(obj, dict) else None
 
