@@ -3377,7 +3377,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-203-addanalyzercanariesparserfailurebudgetsandfail-c
 - Acceptance: Deterministic fixtures exercise every supported finding kind and parser path on each analyzer version.; Missing canaries, excessive skips, parser failures, incomplete git-root discovery, and impossible candidate funnels classify the scan as unhealthy or partial.; Health thresholds are configurable, recorded in the receipt, and cannot silently downgrade a failed scan to exhausted.; The daemon continues safe implementation work while preventing unhealthy analysis from closing goals.
 
-- [ ] Task checkbox-204: REF-204 Implement fingerprint-independent audit scans and exhaustion quorum
+- [x] Task checkbox-204: REF-204 Implement fingerprint-independent audit scans and exhaustion quorum
 
 ## REF-204 Implement fingerprint-independent audit scans and exhaustion quorum
 
@@ -3398,11 +3398,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-204-implementfingerprint-independentauditscansandexh
 - Acceptance: Audit mode scans without mutating or trusting the normal seen set and reports known, stale, changed, and novel findings separately.; Exhaustion requires a configurable quorum of healthy exhaustive receipts tied to repository tree, analyzer version, configuration, and objective revision.; Relevant code, configuration, analyzer, or objective changes invalidate prior quorum members deterministically.; Repeated scans of an unchanged tree are deduplicated and cannot manufacture quorum confidence.
 
-- [ ] Task checkbox-205: REF-205 Escalate low-backlog analysis through AST and llm_router planning before declaring exhaustion
+- [x] Task checkbox-205: REF-205 Escalate low-backlog analysis through AST and llm_router planning before declaring exhaustion
 
 ## REF-205 Escalate low-backlog analysis through AST and llm_router planning before declaring exhaustion
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G10
@@ -3444,7 +3444,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-207 Build goal-to-task, code, AST, acceptance, and validation coverage maps
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
