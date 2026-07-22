@@ -247,7 +247,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-015 Keep the refactor taskboard synchronized with generated goals and subgoals
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G5
