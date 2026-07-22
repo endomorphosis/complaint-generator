@@ -1813,7 +1813,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-088 Review swallowed exception path in adversarial_harness/session.py:4284
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -1873,8 +1873,8 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-090 Review swallowed exception path in adversarial_harness/session.py:4416
 
-- Status: todo
-- Completion: manual
+- Status: completed
+- Completion: deduplicated:REF-080
 - Priority: P1
 - Track: runtime
 - Depends on: 
@@ -1903,8 +1903,8 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-091 Replace placeholder runtime path in complaint_analysis/indexer.py:231
 
-- Status: todo
-- Completion: manual
+- Status: completed
+- Completion: deduplicated:REF-084
 - Priority: P1
 - Track: runtime
 - Depends on: 
@@ -1933,8 +1933,8 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-092 Review swallowed exception path in complaint_analysis/research_bootstrap_workflow.py:425
 
-- Status: todo
-- Completion: manual
+- Status: completed
+- Completion: deduplicated:REF-085
 - Priority: P1
 - Track: runtime
 - Depends on: 
@@ -1963,8 +1963,8 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-093 Review swallowed exception path in complaint_analysis/research_bootstrap_workflow.py:438
 
-- Status: todo
-- Completion: manual
+- Status: completed
+- Completion: deduplicated:REF-086
 - Priority: P1
 - Track: runtime
 - Depends on: 
