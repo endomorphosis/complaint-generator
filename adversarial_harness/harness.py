@@ -477,6 +477,19 @@ class AdversarialHarness:
         safe = self._safe_session_id(session_id)
         return os.path.join(self.session_state_dir, safe)
 
+    @staticmethod
+    def _initialize_session_databases(*database_paths: str | None) -> None:
+        """Create each configured session database and surface initialization failures."""
+        configured_paths = [path for path in database_paths if path]
+        if not configured_paths:
+            return
+
+        import duckdb  # type: ignore
+
+        for database_path in configured_paths:
+            connection = duckdb.connect(database_path)
+            connection.close()
+
     def _create_mediator_for_session(
         self,
         *,
@@ -918,21 +931,14 @@ class AdversarialHarness:
             legal_authority_db_path = os.path.join(session_dir, "legal_authorities.duckdb") if session_dir else None
             claim_support_db_path = os.path.join(session_dir, "claim_support.duckdb") if session_dir else None
 
-            # Proactively create valid DuckDB container files so they are always present
-            # in the session folder (hooks will still initialize schemas when DuckDB is available).
-            try:
-                import duckdb  # type: ignore
-                if evidence_db_path:
-                    conn = duckdb.connect(evidence_db_path)
-                    conn.close()
-                if legal_authority_db_path:
-                    conn = duckdb.connect(legal_authority_db_path)
-                    conn.close()
-                if claim_support_db_path:
-                    conn = duckdb.connect(claim_support_db_path)
-                    conn.close()
-            except Exception:
-                pass
+            # Proactively create valid DuckDB containers before constructing
+            # hooks. A missing or unusable session database is a session
+            # initialization failure, not an optional-artifact condition.
+            self._initialize_session_databases(
+                evidence_db_path,
+                legal_authority_db_path,
+                claim_support_db_path,
+            )
 
             # Create new mediator instance (thread-safe). If supported, use per-session DuckDB paths.
             mediator = self._create_mediator_for_session(
