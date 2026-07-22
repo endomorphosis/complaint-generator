@@ -29,7 +29,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-024 Define first three implementation claims from the queued taskboard
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G8
