@@ -8,7 +8,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-023 Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G8
