@@ -9,6 +9,7 @@ implementation supervision to ``ipfs_accelerate_py.agent_supervisor``.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 import re
@@ -50,12 +51,16 @@ MERGE_RESOLVER_REGISTRY_DIR = STATE_ROOT / "merge_resolver_registry"
 STATUS_PATH = STATE_ROOT / "refactor_supervisor_status.json"
 PID_PATH = STATE_ROOT / "refactor_supervisor.pid"
 LOG_PATH = STATE_ROOT / "refactor_supervisor.log"
+UPSTREAM_SUPERVISOR_STATUS_PATH = SUPERVISOR_STATE_DIR / "complaint_generator_refactor_supervisor_status.json"
 TASKBOARD_DOC_PATH = PROJECT_ROOT / "docs" / "REFACTOR_SUPERVISOR_TASKBOARD.md"
 
 TASK_PREFIX = "REF-"
 TASK_HEADER_PREFIX = "## REF-"
 TASK_TYPES = ("codex.todo_bundle",)
 MODEL_NAME = "complaint-generator-refactor-supervisor"
+STATUS_SCHEMA = "complaint_generator.refactor_supervisor.status.v1"
+STOP_TIMEOUT_SECONDS = 20.0
+STOP_POLL_SECONDS = 0.1
 
 
 def _ensure_accelerate_import_path() -> None:
@@ -1284,6 +1289,103 @@ def _todo_counts() -> dict[str, int]:
     return task_status_counts(parse_markdown_tasks(TODO_PATH.read_text(encoding="utf-8", errors="replace")))
 
 
+def _queue_counts() -> dict[str, int]:
+    counts = {"queued": 0, "running": 0, "completed": 0, "failed": 0}
+    if not QUEUE_PATH.exists():
+        return counts
+    TaskQueue = _task_queue_class()
+    queue = TaskQueue(str(QUEUE_PATH))
+    return {
+        status: queue.count(status=status, task_types=TASK_TYPES)
+        for status in counts
+    }
+
+
+def _collect_counts() -> tuple[dict[str, dict[str, int]], dict[str, str]]:
+    """Return current board counts without making status reporting brittle."""
+
+    errors: dict[str, str] = {}
+    try:
+        todo_counts = _todo_counts()
+    except Exception as exc:
+        todo_counts = {"needed": 0, "in_progress": 0, "complete": 0, "blocked": 0}
+        errors["todo_counts_error"] = f"{type(exc).__name__}: {exc}"
+    try:
+        queue_counts = _queue_counts()
+    except Exception as exc:
+        queue_counts = {"queued": 0, "running": 0, "completed": 0, "failed": 0}
+        errors["queue_counts_error"] = f"{type(exc).__name__}: {exc}"
+    return {"todo": todo_counts, "queue": queue_counts}, errors
+
+
+def _scan_summary(scan: dict[str, Any] | None) -> dict[str, Any]:
+    """Compact a full codebase scan into the durable handoff metrics."""
+
+    if not isinstance(scan, dict):
+        return {}
+    signals = scan.get("signals") if isinstance(scan.get("signals"), dict) else {}
+    summary = {
+        "scanned_at": scan.get("scanned_at"),
+        "python_file_count": int(scan.get("python_file_count") or 0),
+        "python_total_lines": int(scan.get("python_total_lines") or 0),
+        "test_file_count": int(scan.get("test_file_count") or 0),
+        "direct_ipfs_import_count": int(signals.get("direct_ipfs_import_count") or 0),
+        "sys_path_mutation_count": int(signals.get("sys_path_mutation_count") or 0),
+        "broad_exception_count": int(signals.get("broad_exception_count") or 0),
+        "wildcard_import_count": int(signals.get("wildcard_import_count") or 0),
+        "silent_pass_count": int(signals.get("silent_pass_count") or 0),
+    }
+    return {key: value for key, value in summary.items() if value is not None}
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _status_scan_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    direct = payload.get("scan_summary")
+    if isinstance(direct, dict) and direct:
+        return dict(direct)
+    for seed_key in ("last_seed", "seed"):
+        seed = payload.get(seed_key)
+        if not isinstance(seed, dict):
+            continue
+        nested_summary = seed.get("scan_summary")
+        if isinstance(nested_summary, dict) and nested_summary:
+            return dict(nested_summary)
+        summary = _scan_summary(seed.get("scan"))
+        if summary:
+            return summary
+    return _scan_summary(payload.get("scan"))
+
+
+def _status_counts(payload: dict[str, Any]) -> dict[str, Any]:
+    direct = payload.get("counts")
+    if isinstance(direct, dict) and direct:
+        return dict(direct)
+    for seed_key in ("last_seed", "seed"):
+        seed = payload.get(seed_key)
+        if isinstance(seed, dict) and isinstance(seed.get("counts"), dict):
+            return dict(seed["counts"])
+    return {}
+
+
+def _seed_status_summary(result: dict[str, Any]) -> dict[str, Any]:
+    """Keep runtime status useful without embedding a complete source scan."""
+
+    return {
+        "counts": dict(result.get("counts") or {}),
+        "scan_summary": _scan_summary(result.get("scan")),
+        "objective_result": dict(result.get("objective_result") or {}),
+        "backlog_result": dict(result.get("backlog_result") or {}),
+        "bundle_seed": dict(result.get("bundle_seed") or {}),
+    }
+
+
 def _todo_task_header_count(path: Path = TODO_PATH) -> int:
     if not path.exists():
         return 0
@@ -1400,18 +1502,7 @@ def seed_taskboard(
         backlog_args = backlog_parser().parse_args(backlog_argv)
         backlog_result = run_backlog_refinery(backlog_args)
 
-    queue_counts: dict[str, int] = {}
-    if QUEUE_PATH.exists():
-        TaskQueue = _task_queue_class()
-        queue = TaskQueue(str(QUEUE_PATH))
-        queue_counts = {
-            "queued": queue.count(status="queued", task_types=TASK_TYPES),
-            "running": queue.count(status="running", task_types=TASK_TYPES),
-            "completed": queue.count(status="completed", task_types=TASK_TYPES),
-            "failed": queue.count(status="failed", task_types=TASK_TYPES),
-        }
-
-    counts = {"todo": _todo_counts(), "queue": queue_counts}
+    counts, count_errors = _collect_counts()
     _write_taskboard_doc(goals, scan, counts, objective_result, backlog_result)
     _write_status(
         {
@@ -1423,16 +1514,12 @@ def seed_taskboard(
             "bundle_dir": str(BUNDLE_DIR),
             "graph_path": str(GRAPH_PATH),
             "queue_path": str(QUEUE_PATH),
+            "scan_summary": _scan_summary(scan),
+            "counts": counts,
+            **count_errors,
             "last_seed": {
                 "counts": counts,
-                "scan_summary": {
-                    "python_file_count": scan["python_file_count"],
-                    "python_total_lines": scan["python_total_lines"],
-                    "test_file_count": scan["test_file_count"],
-                    "direct_ipfs_import_count": scan["signals"]["direct_ipfs_import_count"],
-                    "sys_path_mutation_count": scan["signals"]["sys_path_mutation_count"],
-                    "broad_exception_count": scan["signals"]["broad_exception_count"],
-                },
+                "scan_summary": _scan_summary(scan),
                 "objective_result": objective_result,
                 "backlog_result": backlog_result,
                 "bundle_seed": bundle_seed,
@@ -1474,6 +1561,9 @@ def _write_taskboard_doc(
         f"- Bundle dir: `{BUNDLE_DIR.relative_to(PROJECT_ROOT)}`",
         f"- Objective graph: `{GRAPH_PATH.relative_to(PROJECT_ROOT)}`",
         f"- Queue path: `{QUEUE_PATH.relative_to(PROJECT_ROOT)}`",
+        f"- Status JSON: `{STATUS_PATH.relative_to(PROJECT_ROOT)}`",
+        f"- Daemon PID: `{PID_PATH.relative_to(PROJECT_ROOT)}`",
+        f"- Daemon log: `{LOG_PATH.relative_to(PROJECT_ROOT)}`",
         "",
         "## Counts",
         "",
@@ -1496,6 +1586,13 @@ def _write_taskboard_doc(
         f"- `sys.path` mutation hits: {scan['signals']['sys_path_mutation_count']}",
         f"- Broad `except Exception` hits: {scan['signals']['broad_exception_count']}",
         "",
+        "## Operations",
+        "",
+        "- Inspect the current heartbeat, scan summary, and board/queue counts with "
+        "`python scripts/refactor_agent_supervisor.py status`.",
+        "- Stop the background supervisor and its managed workers cleanly with "
+        "`python scripts/refactor_agent_supervisor.py stop`.",
+        "",
         "## Goals",
         "",
     ]
@@ -1516,10 +1613,43 @@ def _write_taskboard_doc(
 
 
 def _write_status(payload: dict[str, Any]) -> None:
+    """Atomically persist a complete, stable operator handoff snapshot."""
+
     STATE_ROOT.mkdir(parents=True, exist_ok=True)
-    payload = dict(payload)
-    payload["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    STATUS_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    previous = _load_json_object(STATUS_PATH) if STATUS_PATH.exists() else {}
+    current = {**previous, **dict(payload)}
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    current["schema"] = STATUS_SCHEMA
+    current["updated_at"] = now
+    current["heartbeat"] = now
+    current["heartbeat_at"] = now
+
+    try:
+        current["pid"] = int(current.get("pid") or 0)
+    except (TypeError, ValueError):
+        current["pid"] = 0
+    if "pid_alive" not in payload:
+        current["pid_alive"] = _pid_alive(current["pid"])
+
+    scan_summary = _status_scan_summary(current)
+    if not scan_summary and GOALS_PATH.exists():
+        scan_summary = _scan_summary(_load_json_object(GOALS_PATH).get("scan"))
+    current["scan_summary"] = scan_summary
+
+    counts = _status_counts(current)
+    if not counts:
+        counts, count_errors = _collect_counts()
+        current.update(count_errors)
+    current["counts"] = counts
+    current["todo_counts"] = dict(counts.get("todo") or {})
+    current["queue_counts"] = dict(counts.get("queue") or {})
+
+    temporary_path = STATUS_PATH.with_name(f".{STATUS_PATH.name}.{os.getpid()}.tmp")
+    try:
+        temporary_path.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temporary_path, STATUS_PATH)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1527,6 +1657,14 @@ def _pid_alive(pid: int) -> bool:
         return False
     try:
         os.kill(pid, 0)
+        stat_path = Path(f"/proc/{pid}/stat")
+        if stat_path.exists():
+            try:
+                # A zombie has exited and only awaits parent reaping; it is not a live daemon.
+                if stat_path.read_text(encoding="utf-8", errors="replace").split()[2] == "Z":
+                    return False
+            except (OSError, IndexError):
+                pass
         return True
     except ProcessLookupError:
         return False
@@ -1540,6 +1678,7 @@ def run_daemon(*, interval_s: float, refill_floor: int, once: bool = False) -> d
     host = socket.gethostname()
     cycle = 0
     last_result: dict[str, Any] = {}
+    stop_reason = "completed" if once else "stopped"
 
     def _stop(signum: int, frame: object) -> None:
         raise KeyboardInterrupt
@@ -1547,34 +1686,69 @@ def run_daemon(*, interval_s: float, refill_floor: int, once: bool = False) -> d
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
 
+    _write_status(
+        {
+            "status": "starting",
+            "pid": os.getpid(),
+            "pid_alive": True,
+            "host": host,
+            "cycle": cycle,
+            "queue_path": str(QUEUE_PATH),
+            "goals_path": str(GOALS_PATH),
+            "taskboard_doc_path": str(TASKBOARD_DOC_PATH),
+        }
+    )
     try:
         while True:
             cycle += 1
             result = seed_taskboard(refill_floor=refill_floor)
             last_result = result
+            seed_summary = _seed_status_summary(result)
             _write_status(
                 {
                     "status": "running",
                     "pid": os.getpid(),
+                    "pid_alive": True,
                     "host": host,
                     "cycle": cycle,
                     "queue_path": str(QUEUE_PATH),
                     "goals_path": str(GOALS_PATH),
                     "taskboard_doc_path": str(TASKBOARD_DOC_PATH),
-                    "last_seed": result,
+                    "scan_summary": seed_summary["scan_summary"],
+                    "counts": seed_summary["counts"],
+                    "last_seed": seed_summary,
                 }
             )
             if once:
                 break
             time.sleep(max(5.0, float(interval_s)))
     except KeyboardInterrupt:
-        _write_status({"status": "stopped", "pid": os.getpid(), "host": host, "cycle": cycle, "last_seed": last_result})
+        stop_reason = "signal"
     finally:
         try:
             if PID_PATH.exists() and PID_PATH.read_text(encoding="utf-8").strip() == str(os.getpid()):
                 PID_PATH.unlink()
         except Exception:
             pass
+        final_payload: dict[str, Any] = {
+            "status": "stopped",
+            "pid": os.getpid(),
+            "pid_alive": False,
+            "host": host,
+            "cycle": cycle,
+            "stop_reason": stop_reason,
+            "stopped_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        if last_result:
+            seed_summary = _seed_status_summary(last_result)
+            final_payload.update(
+                {
+                    "scan_summary": seed_summary["scan_summary"],
+                    "counts": seed_summary["counts"],
+                    "last_seed": seed_summary,
+                }
+            )
+        _write_status(final_payload)
     return last_result
 
 
@@ -1659,23 +1833,36 @@ def start_daemon(args: argparse.Namespace) -> dict[str, Any]:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ACCELERATE_REPO) + os.pathsep + env.get("PYTHONPATH", "")
     log_handle = LOG_PATH.open("a", encoding="utf-8")
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(PROJECT_ROOT),
-        env=env,
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    finally:
+        log_handle.close()
     time.sleep(1.0)
-    PID_PATH.write_text(str(proc.pid) + "\n", encoding="utf-8")
+    seed_summary = _seed_status_summary(seed_result)
+    started = _pid_alive(proc.pid)
+    if started:
+        PID_PATH.write_text(str(proc.pid) + "\n", encoding="utf-8")
+    else:
+        PID_PATH.unlink(missing_ok=True)
     payload = {
-        "status": "started",
+        "status": "started" if started else "start_failed",
         "pid": proc.pid,
+        "pid_alive": started,
+        "exit_code": proc.poll(),
         "status_path": str(STATUS_PATH),
         "log_path": str(LOG_PATH),
         "upstream_supervisor": True,
-        "seed": seed_result,
+        "upstream_status_path": str(UPSTREAM_SUPERVISOR_STATUS_PATH),
+        "scan_summary": seed_summary["scan_summary"],
+        "counts": seed_summary["counts"],
+        "seed": seed_summary,
         "command": cmd,
     }
     _write_status(payload)
@@ -2041,29 +2228,88 @@ def stop_merge_resolver_watchdog() -> dict[str, Any]:
 
 def stop_daemon() -> dict[str, Any]:
     if not PID_PATH.exists():
-        return {"status": "not_running"}
+        result = {"status": "not_running", "pid": 0, "pid_alive": False, "status_path": str(STATUS_PATH)}
+        _write_status(result)
+        return result
     try:
         pid = int(PID_PATH.read_text(encoding="utf-8").strip())
     except Exception:
         pid = 0
     if not _pid_alive(pid):
-        try:
-            PID_PATH.unlink()
-        except Exception:
-            pass
-        return {"status": "not_running"}
-    os.kill(pid, signal.SIGTERM)
-    for _ in range(20):
-        if not _pid_alive(pid):
-            break
-        time.sleep(0.2)
-    return {"status": "stopped" if not _pid_alive(pid) else "stopping", "pid": pid}
+        PID_PATH.unlink(missing_ok=True)
+        result = {"status": "not_running", "pid": pid, "pid_alive": False, "status_path": str(STATUS_PATH)}
+        _write_status(result)
+        return result
+
+    signal_scope = "process"
+    try:
+        # ``start_daemon`` creates a new session. Signalling its group also gives the
+        # supervised implementation worker a chance to handle SIGTERM and exit.
+        process_group_id = os.getpgid(pid)
+        if process_group_id == pid:
+            os.killpg(process_group_id, signal.SIGTERM)
+            signal_scope = "process_group"
+        else:
+            os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except PermissionError as exc:
+        return {
+            "status": "stop_failed",
+            "pid": pid,
+            "pid_alive": True,
+            "status_path": str(STATUS_PATH),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
+    while _pid_alive(pid) and time.monotonic() < deadline:
+        time.sleep(STOP_POLL_SECONDS)
+    stopped = not _pid_alive(pid)
+    if stopped:
+        PID_PATH.unlink(missing_ok=True)
+    result = {
+        "status": "stopped" if stopped else "stopping",
+        "pid": pid,
+        "pid_alive": not stopped,
+        "signal": "SIGTERM",
+        "signal_scope": signal_scope,
+        "status_path": str(STATUS_PATH),
+    }
+    counts, count_errors = _collect_counts()
+    result["counts"] = counts
+    result.update(count_errors)
+    if stopped:
+        result["stopped_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    _write_status(result)
+    return result
+
+
+def _heartbeat_age_seconds(value: Any) -> float | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return round(max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds()), 3)
 
 
 def status_payload() -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "status": "unknown",
+        "schema": STATUS_SCHEMA,
+        "status": "not_running",
+        "pid": 0,
         "pid_alive": False,
+        "heartbeat": None,
+        "heartbeat_at": None,
+        "scan_summary": {},
+        "counts": {
+            "todo": {"needed": 0, "in_progress": 0, "complete": 0, "blocked": 0},
+            "queue": {"queued": 0, "running": 0, "completed": 0, "failed": 0},
+        },
         "objective_path": str(OBJECTIVE_PATH),
         "todo_path": str(TODO_PATH),
         "bundle_dir": str(BUNDLE_DIR),
@@ -2074,30 +2320,68 @@ def status_payload() -> dict[str, Any]:
         "bundle_coordination_path": str(BUNDLE_COORDINATION_PATH),
         "merge_resolver_command": merge_resolver_command(),
         "merge_resolver_enabled_for_new_launches": True,
+        "status_path": str(STATUS_PATH),
+        "upstream_status_path": str(UPSTREAM_SUPERVISOR_STATUS_PATH),
     }
     if STATUS_PATH.exists():
         try:
             payload.update(json.loads(STATUS_PATH.read_text(encoding="utf-8")))
         except Exception as exc:
             payload["status_read_error"] = str(exc)
-    if PID_PATH.exists():
+    has_pid_file = PID_PATH.exists()
+    if has_pid_file:
         try:
             pid = int(PID_PATH.read_text(encoding="utf-8").strip())
         except Exception:
             pid = 0
         payload["pid"] = pid
         payload["pid_alive"] = _pid_alive(pid)
-    payload["todo_counts"] = _todo_counts()
+    else:
+        try:
+            payload["pid"] = int(payload.get("pid") or 0)
+        except (TypeError, ValueError):
+            payload["pid"] = 0
+        payload["pid_alive"] = False
+
+    if UPSTREAM_SUPERVISOR_STATUS_PATH.exists():
+        upstream_status = _load_json_object(UPSTREAM_SUPERVISOR_STATUS_PATH)
+        payload["upstream_supervisor_status"] = upstream_status
+        if payload["pid_alive"]:
+            upstream_heartbeat = upstream_status.get("heartbeat_at") or upstream_status.get("updated_at")
+            if upstream_heartbeat:
+                payload["heartbeat"] = upstream_heartbeat
+                payload["heartbeat_at"] = upstream_heartbeat
+
+    counts, count_errors = _collect_counts()
+    payload["counts"] = counts
+    payload["todo_counts"] = counts["todo"]
+    payload["queue_counts"] = counts["queue"]
+    payload.update(count_errors)
+    scan_summary = _status_scan_summary(payload)
+    if not scan_summary and GOALS_PATH.exists():
+        scan_summary = _scan_summary(_load_json_object(GOALS_PATH).get("scan"))
+    payload["scan_summary"] = scan_summary
+
+    heartbeat = payload.get("heartbeat_at") or payload.get("heartbeat")
+    heartbeat_source = "status" if heartbeat else None
+    if payload.get("upstream_supervisor_status") and heartbeat:
+        heartbeat_source = "upstream_supervisor"
+    if not heartbeat:
+        # A checkout may intentionally omit ignored runtime files. The last scan time
+        # is still a useful, durable indication of the latest supervisor activity.
+        heartbeat = scan_summary.get("scanned_at")
+        heartbeat_source = "scan" if heartbeat else None
+    payload["heartbeat"] = heartbeat
+    payload["heartbeat_at"] = heartbeat
+    payload["heartbeat_source"] = heartbeat_source
+    payload["heartbeat_age_seconds"] = _heartbeat_age_seconds(heartbeat)
+    if payload["status"] in {"running", "starting", "started"} and not payload["pid_alive"]:
+        payload["status"] = "stale"
+
     if QUEUE_PATH.exists():
         try:
             TaskQueue = _task_queue_class()
             queue = TaskQueue(str(QUEUE_PATH))
-            payload["queue_counts"] = {
-                "queued": queue.count(status="queued", task_types=TASK_TYPES),
-                "running": queue.count(status="running", task_types=TASK_TYPES),
-                "completed": queue.count(status="completed", task_types=TASK_TYPES),
-                "failed": queue.count(status="failed", task_types=TASK_TYPES),
-            }
             payload["next_tasks"] = [
                 {
                     "task_id": item.get("task_id"),
