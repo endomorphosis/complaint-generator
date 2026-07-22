@@ -3524,11 +3524,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-210-generateboundedgoalssubgoalsandtasksfromuncovere
 - Acceptance: Deterministic rules and llm_router proposals can create bounded child goals, subgoals, and tasks from uncovered criteria, unsupported surfaces, or contradiction receipts.; Generated work records parent objective terms, expected evidence delta, dependencies, predicted files and symbols, validation, confidence, cost, and novelty.; Canonical identity and semantic deduplication prevent equivalent goals or tasks from being regenerated across cycles.; Depth, breadth, token, retry, and open-work limits keep autonomous refinement finite and scheduler-aware.
 
-- [ ] Task checkbox-211: REF-211 Migrate existing goals and expose trustworthy completion diagnostics
+- [x] Task checkbox-211: REF-211 Migrate existing goals and expose trustworthy completion diagnostics
 
 ## REF-211 Migrate existing goals and expose trustworthy completion diagnostics
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
