@@ -1637,6 +1637,59 @@ def _durable_task_statuses() -> dict[str, str]:
     return statuses
 
 
+def _durable_canonical_task_statuses(statuses: dict[str, str]) -> dict[str, str]:
+    terminal_statuses = {"blocked", "completed"}
+    state = _load_json_object(TASK_STATE_PATH)
+    identities = state.get("task_identities")
+    identity_by_task_id = identities if isinstance(identities, dict) else {}
+    parsed_by_task_id: dict[str, Any] = {}
+    if TODO_PATH.exists():
+        parse_task_file = _upstream_portal_task_parser()
+        parsed_by_task_id = {
+            task.task_id: task
+            for task in parse_task_file(TODO_PATH, TASK_HEADER_PREFIX)
+        }
+
+    canonical_statuses: dict[str, str] = {}
+    for task_id, status in statuses.items():
+        if status not in terminal_statuses:
+            continue
+        identity = identity_by_task_id.get(task_id)
+        canonical_task_cid = (
+            str(identity.get("canonical_task_cid") or "")
+            if isinstance(identity, dict)
+            else ""
+        )
+        if not canonical_task_cid:
+            task = parsed_by_task_id.get(task_id)
+            canonical_task_cid = str(getattr(task, "canonical_task_cid", "") or "")
+        if not canonical_task_cid:
+            continue
+        previous = canonical_statuses.get(canonical_task_cid)
+        if previous != "completed" or status == "completed":
+            canonical_statuses[canonical_task_cid] = status
+    return canonical_statuses
+
+
+def _statuses_for_canonical_tasks(path: Path, canonical_statuses: dict[str, str]) -> dict[str, str]:
+    if not path.exists() or not canonical_statuses:
+        return {}
+    parse_task_file = _upstream_portal_task_parser()
+    tasks_by_id: dict[str, list[Any]] = {}
+    for task in parse_task_file(path, TASK_HEADER_PREFIX):
+        tasks_by_id.setdefault(task.task_id, []).append(task)
+
+    statuses: dict[str, str] = {}
+    for task_id, tasks in tasks_by_id.items():
+        matched = {
+            canonical_statuses.get(str(task.canonical_task_cid or ""), "")
+            for task in tasks
+        }
+        if len(matched) == 1 and "" not in matched:
+            statuses[task_id] = matched.pop()
+    return statuses
+
+
 def _project_task_statuses(path: Path, statuses: dict[str, str]) -> list[str]:
     if not path.exists() or not statuses:
         return []
@@ -1680,13 +1733,17 @@ def _project_task_statuses(path: Path, statuses: dict[str, str]) -> list[str]:
 
 def synchronize_taskboard_statuses() -> dict[str, Any]:
     statuses = _durable_task_statuses()
+    canonical_statuses = _durable_canonical_task_statuses(statuses)
     updated: dict[str, list[str]] = {}
     primary_updates = _project_task_statuses(TODO_PATH, statuses)
     if primary_updates:
         updated[str(TODO_PATH)] = primary_updates
     if BUNDLE_DIR.exists():
         for path in sorted(BUNDLE_DIR.glob("*.todo.md")):
-            task_updates = _project_task_statuses(path, statuses)
+            task_updates = _project_task_statuses(
+                path,
+                _statuses_for_canonical_tasks(path, canonical_statuses),
+            )
             if task_updates:
                 updated[str(path)] = task_updates
     return {

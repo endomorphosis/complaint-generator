@@ -503,6 +503,17 @@ def test_durable_status_projection_repairs_primary_counts_and_bundle_shards(tmp_
 """,
         encoding="utf-8",
     )
+    colliding_shard = supervisor.BUNDLE_DIR / "repair.todo.md"
+    colliding_shard.write_text(
+        """- [ ] Task checkbox-1: REF-001 Different repair task
+
+## REF-001 Different repair task
+
+- Status: todo
+- Dedupe key: reconciliation_guardrail:different_repair
+""",
+        encoding="utf-8",
+    )
     supervisor.TASK_STATE_PATH.write_text(
         json.dumps({"completed_task_ids": ["REF-001"], "blocked_task_ids": []}),
         encoding="utf-8",
@@ -522,6 +533,9 @@ def test_durable_status_projection_repairs_primary_counts_and_bundle_shards(tmp_
     assert "- [x] Task checkbox-1: REF-001" in shard_text
     assert "- [x] Task checkbox-2: REF-002" in shard_text
     assert shard_text.count("- Status: completed") == 2
+    colliding_text = colliding_shard.read_text(encoding="utf-8")
+    assert "- [ ] Task checkbox-1: REF-001 Different repair task" in colliding_text
+    assert "- Status: todo" in colliding_text
 
 
 def test_seed_bundle_index_carries_durable_member_status(tmp_path, monkeypatch) -> None:
