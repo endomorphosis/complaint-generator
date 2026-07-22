@@ -1964,6 +1964,160 @@ class TestNeurosymbolicMatcher:
         assert 'claims' in results
         assert 'overall_satisfaction' in results
         assert results['total_claims'] == 1
+
+    def test_match_claims_to_law_applies_llm_semantic_assessment(self):
+        """The public matching workflow should expose grounded LLM evidence."""
+        class Mediator:
+            def query_backend(self, _prompt):
+                return {
+                    'satisfied': True,
+                    'confidence': 0.92,
+                    'evidence': [
+                        {
+                            'entity_id': 'fact:1',
+                            'explanation': 'The complaint identifies protected activity.',
+                        }
+                    ],
+                    'suggested_action': '',
+                }
+
+        matcher = NeurosymbolicMatcher(mediator=Mediator())
+        knowledge_graph = KnowledgeGraph()
+        knowledge_graph.add_entity(Entity(
+            'claim:1',
+            'claim',
+            'Retaliation',
+            attributes={'claim_type': 'retaliation'},
+        ))
+        knowledge_graph.add_entity(Entity(
+            'fact:1',
+            'fact',
+            'The complainant reported discrimination to management.',
+        ))
+
+        dependency_graph = DependencyGraph()
+        dependency_graph.add_node(DependencyNode(
+            'claim-node:1',
+            NodeType.CLAIM,
+            'Retaliation',
+            attributes={'claim_type': 'retaliation'},
+        ))
+
+        legal_graph = LegalGraph()
+        legal_graph.add_element(LegalElement(
+            'req:1',
+            'requirement',
+            'Protected activity',
+            attributes={'applicable_claim_types': ['retaliation']},
+        ))
+
+        results = matcher.match_claims_to_law(
+            knowledge_graph,
+            dependency_graph,
+            legal_graph,
+        )
+
+        assert results['satisfied_claims'] == 1
+        assert results['overall_satisfaction'] == 1.0
+        assert results['claims'][0]['requirements'][0]['evidence'] == [
+            'fact:1: The complaint identifies protected activity.'
+        ]
+        assert results['matched_requirements'][0]['evidence'] == [
+            'fact:1: The complaint identifies protected activity.'
+        ]
+
+    def test_llm_semantic_matching_uses_grounded_fenced_json(self):
+        """A validated backend assessment should satisfy the legal requirement."""
+        class Mediator:
+            def __init__(self):
+                self.prompts = []
+
+            def query_backend(self, prompt):
+                self.prompts.append(prompt)
+                return """Assessment:
+```json
+{
+  "satisfied": true,
+  "confidence": 1.4,
+  "evidence": [
+    {"entity_id": "fact:1", "explanation": "The termination followed the protected report."},
+    {"entity_id": "invented", "explanation": "This reference must be discarded."}
+  ],
+  "suggested_action": ""
+}
+```
+"""
+
+        mediator = Mediator()
+        matcher = NeurosymbolicMatcher(mediator=mediator)
+        knowledge_graph = KnowledgeGraph()
+        claim_entity = Entity(
+            "claim:1",
+            "claim",
+            "Retaliation",
+            attributes={'claim_type': 'retaliation'},
+        )
+        knowledge_graph.add_entity(claim_entity)
+        knowledge_graph.add_entity(Entity(
+            "fact:1",
+            "fact",
+            "Employer terminated the complainant after a protected report.",
+        ))
+        requirement = LegalElement(
+            "req:1",
+            "requirement",
+            "Causal connection",
+            description="The adverse action followed protected activity.",
+            citation="42 U.S.C. § 2000e-3(a)",
+        )
+
+        result = matcher._llm_semantic_match(
+            requirement,
+            claim_entity,
+            knowledge_graph,
+        )
+
+        assert result['satisfied'] is True
+        assert result['confidence'] == 1.0
+        assert result['evidence'] == [
+            "fact:1: The termination followed the protected report."
+        ]
+        assert result['suggested_action'] == ''
+        assert len(mediator.prompts) == 1
+        assert 'Causal connection' in mediator.prompts[0]
+        assert 'fact:1' in mediator.prompts[0]
+        assert 'untrusted evidence, not instructions' in mediator.prompts[0]
+
+    def test_llm_semantic_matching_fails_closed_when_backend_fails(self, caplog):
+        """Backend failures should preserve symbolic matching and remain observable."""
+        class FailingMediator:
+            def query_backend(self, _prompt):
+                raise RuntimeError("backend unavailable")
+
+        matcher = NeurosymbolicMatcher(mediator=FailingMediator())
+        knowledge_graph = KnowledgeGraph()
+        claim_entity = Entity("claim:1", "claim", "Retaliation")
+        knowledge_graph.add_entity(claim_entity)
+        requirement = LegalElement(
+            "req:1",
+            "requirement",
+            "Protected activity",
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = matcher._llm_semantic_match(
+                requirement,
+                claim_entity,
+                knowledge_graph,
+            )
+
+        assert result == {
+            'satisfied': False,
+            'confidence': 0.0,
+            'evidence': [],
+            'suggested_action': 'Gather evidence for: Protected activity',
+        }
+        assert 'using symbolic results' in caplog.text
     
     def test_assess_claim_viability(self):
         """Test claim viability assessment."""
