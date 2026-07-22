@@ -639,9 +639,6 @@ def _build_run_command(args: argparse.Namespace, *, pid_file: Path, status_file:
     env = dict(os.environ)
     if args.gmail_app_password:
         env["GMAIL_APP_PASSWORD"] = str(args.gmail_app_password)
-    repo_root = Path("/home/barberb/ipfs_datasets_py").resolve()
-    existing_pythonpath = str(env.get("PYTHONPATH") or "").strip()
-    env["PYTHONPATH"] = f"{repo_root}:{existing_pythonpath}" if existing_pythonpath else str(repo_root)
     return cmd, env
 
 
