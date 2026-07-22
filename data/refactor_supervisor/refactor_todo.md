@@ -175,11 +175,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Document parsing is still fallback-oriented and should be reusable across ingestion paths.
 - Acceptance: Evidence, authority, and web ingestion can call one parse contract.; Fallback mode preserves current behavior.
 
-- [ ] Task checkbox-11: REF-011 Define graph persistence and query interfaces before moving support scoring
+- [x] Task checkbox-11: REF-011 Define graph persistence and query interfaces before moving support scoring
 
 ## REF-011 Define graph persistence and query interfaces before moving support scoring
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G3
@@ -810,11 +810,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-040-buildanastandchanged-pathconflictgraphforlanecol
 - Acceptance: Conflict surfaces include all predicted files, AST symbols, interfaces, submodules, and generated artifacts.; Lane planning colors the conflict graph so overlapping tasks do not run concurrently unless explicitly allowed.; Actual branch diffs and conflict receipts update future conflict weights.; Planner output explains every co-location or separation decision.
 
-- [ ] Task checkbox-41: REF-041 Use llm_router to generate and evaluate structured plan branches
+- [x] Task checkbox-41: REF-041 Use llm_router to generate and evaluate structured plan branches
 
 ## REF-041 Use llm_router to generate and evaluate structured plan branches
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G9
@@ -831,11 +831,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-041-usellm-routertogenerateandevaluatestructuredplan
 - Acceptance: Each eligible subgoal can produce multiple schema-validated plan branches through llm_router.; Candidates declare predicted files and symbols, dependencies, validation proof, cost, risk, and expected objective delta.; A deterministic evaluator selects a branch and retains rejected alternatives plus rationale.; Router failure falls back to deterministic planning without blocking ready work.
 
-- [ ] Task checkbox-42: REF-042 Schedule lanes from live resources and llm_router provider capacity
+- [x] Task checkbox-42: REF-042 Schedule lanes from live resources and llm_router provider capacity
 
 ## REF-042 Schedule lanes from live resources and llm_router provider capacity
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G9
@@ -873,7 +873,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-043-addimpact-selectedcachedandparallelvalidationsta
 - Acceptance: Cheap deterministic checks run before expensive tests and fail fast.; Independent validations run in parallel under a bounded resource budget.; Cache keys include target commit, command, relevant environment, and dependency state.; Impact selection is conservative, explainable, and escalates to broader validation before merge completion.
 
-- [ ] Task checkbox-44: REF-044 Publish authoritative throughput metrics and scheduler state
+- [x] Task checkbox-44: REF-044 Publish authoritative throughput metrics and scheduler state
 
 ## REF-044 Publish authoritative throughput metrics and scheduler state
 
@@ -1202,3 +1202,288 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: 5bcc4ed60686d81a
 - Repair evidence: data/refactor_supervisor/discovery/2026-07-22-ref-057-objective-validation-repair.md; objective validation repair
 - Acceptance: Objective scan filed this gap for G1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-057-objective-gap-08d9b0956fd6.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+- [ ] Task checkbox-63: REF-063 Recover structured plan branch implementation in the nested supervisor
+
+## REF-063 Recover structured plan branch implementation in the nested supervisor
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G9
+- Depends on: REF-041
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q
+- Bundle: refactor/g9/g9-s2
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G9.S2
+- Missing evidence: REF-041 validated nested changes in a lane that did not forward managed submodule paths, so its root merge recorded only taskboard documentation.
+- AST symbols: PromptBuilder, BootstrapCallback, DEFAULT_OPEN_TASK_STATUSES, DEFAULT_TASK_PROPOSAL_TEST_OUTPUT, TaskProposalRouterError, TaskProposalRouterConfig, TaskProposalRouterCliConfig, TaskProposalRoutePaths, TaskProposalRouteSpec, _repo_path, build_task_proposal_route_paths, _task_values, _task_value, task_metadata_lines, build_task_proposal_prompt, standard_task_proposal_requested_outputs, build_task_proposal_prompt_builder, build_task_proposal_router_cli_config, run_configured_task_proposal_router_cli, ConfiguredTaskProposalRouterRunner, build_configured_task_proposal_router_runner, build_repo_task_proposal_router_runner, build_repo_task_proposal_route_runner, build_repo_task_proposal_route_runner_from_spec, select_proposal_task, _artifact_relative_path, run_task_proposal_router, build_task_proposal_router_parser, run_task_proposal_router_cli, resolved
+- Merge key: refactor/g9/g9-s2
+- Candidate kind: seed
+- Todo vector key: ref-063-recoverstructuredplanbranchimplementationinthene
+- Acceptance: The structured plan router, evaluator, objective-daemon integration, and focused tests are tracked in the nested ipfs_accelerate_py repository.; Selected and rejected branches remain visible to the scheduler with deterministic fallback when llm_router fails.; The implementation receipt records nested commits and the parent gitlink chain instead of completing from documentation alone.
+
+## REF-064 Close objective gap: Stabilize repository boundaries
+
+- Status: completed
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest --collect-only -q
+- Bundle: refactor/g1
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g1.todo.md
+- Bundle strategy: explicit
+- Graph parents: none
+- Graph depth: 0
+- Parallel lane: refactor/g1
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, pyproject.toml, scripts/graphrag_email_manifest.py, scripts/import_gmail_evidence.py, scripts/import_local_eml_directory.py, applications/dashboard_ui.py, complaint_generator/agentic_evidence_download.py, complaint_generator/data_migration.py
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G1
+- Canonical task key: task/v1/63f8a12ab8f6f70661ea087a02dc1b7a95cdcd4d0ba225f0d7989ef3170d8e44
+- Canonical task CID: baguqeeramp4kckvy633qmypkbb5afxa3pkk43tknborcl4gxtcppgfynrzca
+- Missing evidence: objective validation repair
+- Embedding query: Stabilize repository boundaries
+- AST query: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, docs/ARCHITECTURE.md, pyproject.toml, scripts/graphrag_email_manifest.py, scripts/import_gmail_evidence.py, scripts/import_local_eml_directory.py, applications/dashboard_ui.py, complaint_generator/agentic_evidence_download.py, complaint_generator/data_migration.py
+- Surplus group: objective/G1
+- Merge key: 9c3d2b35296e9add
+- Merge family: objective/G1
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: 5bcc4ed60686d81a
+- Acceptance: Objective scan filed this gap for G1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-064-objective-gap-08d9b0956fd6.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-065 Close objective gap: Decompose oversized orchestration modules
+
+- Status: completed
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest --collect-only -q
+- Bundle: refactor/g2
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g2.todo.md
+- Bundle strategy: explicit
+- Graph parents: none
+- Graph depth: 0
+- Parallel lane: refactor/g2
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, mediator/__init__.py, mediator/claim_support_hooks.py, applications/complaint_workspace.py, applications/dashboard_ui.py, playwright/server.js
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G2
+- Canonical task key: task/v1/3b42a1c4efdfe552a2d1b443b7f11b9a00404792fa8f344348b885e9e6cdded7
+- Canonical task CID: baguqeerahnbkdrhp37svfiwrwrb3p4i3tiaear4s7khtiq2ixcc6tzwn33lq
+- Missing evidence: objective validation repair
+- Embedding query: Decompose oversized orchestration modules
+- AST query: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, mediator/__init__.py, mediator/claim_support_hooks.py, applications/complaint_workspace.py, applications/dashboard_ui.py, playwright/server.js
+- Surplus group: objective/G2
+- Merge key: 711e65b47b204d01
+- Merge family: objective/G2
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: ce8c3a3f03eb4308
+- Acceptance: Objective scan filed this gap for G2. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-065-objective-gap-eac2cf021fa2.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-066 Close objective gap: Harden adapter contracts and degraded mode
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest --collect-only -q
+- Bundle: refactor/g3
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g3.todo.md
+- Bundle strategy: explicit
+- Graph parents: none
+- Graph depth: 0
+- Parallel lane: refactor/g3
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, integrations/ipfs_datasets/capabilities.py, integrations/ipfs_datasets/loader.py, integrations/ipfs_datasets/documents.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/graphs.py, complaint_phases/knowledge_graph.py, integrations/ipfs_datasets/logic.py, lib/formal_logic
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G3
+- Canonical task key: task/v1/f500136e795cd3a0abfbd06f56d0e513ee683b8691f8c0d78923d27f6396d1fa
+- Canonical task CID: baguqeera6uabg3tzltj2bk732bxvnuhfcpxgqo4gsh4mbv4jepjh6y4w2h5a
+- Missing evidence: objective validation repair
+- Embedding query: Harden adapter contracts and degraded mode
+- AST query: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, integrations/ipfs_datasets/capabilities.py, integrations/ipfs_datasets/loader.py, integrations/ipfs_datasets/documents.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/graphs.py, complaint_phases/knowledge_graph.py, integrations/ipfs_datasets/logic.py, lib/formal_logic
+- Surplus group: objective/G3
+- Merge key: db792db498edee78
+- Merge family: objective/G3
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: 0f8671bcac0f111f
+- Acceptance: Objective scan filed this gap for G3. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-066-objective-gap-1eba844e57d9.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-067 Close objective gap: Prepare incremental implementation slices
+
+- Status: completed
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest --collect-only -q
+- Bundle: refactor/g8
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g8.todo.md
+- Bundle strategy: explicit
+- Graph parents: none
+- Graph depth: 0
+- Parallel lane: refactor/g8
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md, data/refactor_supervisor/refactor_goals.json, scripts/refactor_agent_supervisor.py, tests/test_refactor_agent_supervisor.py
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G8
+- Canonical task key: task/v1/86f2184f96844164f721836c9a87d1f35ecb0e622c026c8007e7fa19254518e1
+- Canonical task CID: baguqeeraq3zbqt4wqrawj5zbqnwjvb6r6npmwdtcfqbgzaah475bsjkfddqq
+- Missing evidence: objective validation repair
+- Embedding query: Prepare incremental implementation slices
+- AST query: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, data/refactor_supervisor/refactor_goals.json, scripts/refactor_agent_supervisor.py, tests/test_refactor_agent_supervisor.py
+- Surplus group: objective/G8
+- Merge key: 73c2c19911fd953e
+- Merge family: objective/G8
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: bf05e040a4792343
+- Acceptance: Objective scan filed this gap for G8. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-067-objective-gap-8237ed56b27c.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-068 Close objective gap: Increase agent-supervisor planning quality and throughput
+
+- Status: completed
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest --collect-only -q
+- Bundle: refactor/g9
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g9.todo.md
+- Bundle strategy: explicit
+- Graph parents: none
+- Graph depth: 0
+- Parallel lane: refactor/g9
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G9
+- Canonical task key: task/v1/ee4561db0e9f594bcbb921c5a6ce89bb05fbd4ad0d8258eb97a31f21b68f462f
+- Canonical task CID: baguqeera5zcwdwyot5muxs5zehc2ntujxmc7xvfnbwbfr24xumpsdnupiyxq
+- Missing evidence: objective validation repair
+- Embedding query: Increase agent-supervisor planning quality and throughput
+- AST query: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py
+- Surplus group: objective/G9
+- Merge key: efb4c826202e946c
+- Merge family: objective/G9
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: 8ac5bc4a64ea0dd0
+- Acceptance: Objective scan filed this gap for G9. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-068-objective-gap-6686ce3fc621.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-069 Close objective gap: Map package ownership and runtime entrypoints
+
+- Status: completed
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest tests/test_package_imports.py -q
+- Bundle: refactor/g1/g1-s1
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g1-g1-s1.todo.md
+- Bundle strategy: explicit
+- Graph parents: G1
+- Graph depth: 1
+- Parallel lane: refactor/g1/g1-s1
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, scripts/synthesize_hacc_complaint.py, tests/test_review_api.py, complaint_phases/denoiser.py, A short module ownership map exists., Entrypoints are grouped by CLI, web, mediator, and workflow role., python -m pytest tests/test_package_imports.py -q, docs/ARCHITECTURE.md, pyproject.toml, Architecture docs identify allowed imports., New work has a simple rule for where shared code belongs.
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G1.S1
+- Canonical task key: task/v1/cba035a6013e2ca56c7624d03ca454d9965b4c9fbc75e3c2186b835478bdb080
+- Canonical task CID: baguqeerazoqdljqbhywkk3dwetidzjcu3glfwte7xr26hqqynobvi6f5wcaa
+- Missing evidence: objective validation repair
+- Embedding query: Map package ownership and runtime entrypoints
+- AST query: mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, scripts/synthesize_hacc_complaint.py, tests/test_review_api.py, complaint_phases/denoiser.py, A short module ownership map exists., Entrypoints are grouped by CLI, web, mediator, and workflow role., python -m pytest tests/test_package_imports.py -q, docs/ARCHITECTURE.md, pyproject.toml, Architecture docs identify allowed imports., New work has a simple rule for where shared code belongs., python -m pytest tests/test_package_imports.py -q
+- Surplus group: objective/G1.S1
+- Merge key: 4003ea72cdc5444e
+- Merge family: objective/G1.S1
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: 9ca9d1d1566fc3e7
+- Acceptance: Objective scan filed this gap for G1.S1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-069-objective-gap-f307b3b05fa3.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
