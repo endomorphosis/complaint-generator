@@ -377,13 +377,21 @@ def _build_prompt(
         # focus generation below.
         kg_d_entities = None
 
+    kg_d_rels_raw = optimizer.get("kg_avg_relationships_delta_per_iter")
+    try:
+        kg_d_rels = float(kg_d_rels_raw) if kg_d_rels_raw is not None else None
+    except (TypeError, ValueError):
+        # Persisted optimizer metrics can be malformed. Expected conversion
+        # errors simply omit this diagnostic; unexpected failures must remain
+        # visible rather than being swallowed by the focus-generation fallback.
+        kg_d_rels = None
+
     try:
         kg_with = int(optimizer.get("kg_sessions_with_data") or 0)
         dg_with = int(optimizer.get("dg_sessions_with_data") or 0)
         kg_empty = int(optimizer.get("kg_sessions_empty") or 0)
         dg_empty = int(optimizer.get("dg_sessions_empty") or 0)
         dg_avg_nodes = optimizer.get("dg_avg_total_nodes")
-        kg_d_rels = optimizer.get("kg_avg_relationships_delta_per_iter")
         kg_d_gaps = optimizer.get("kg_avg_gaps_delta_per_iter")
         kg_not_reducing = int(optimizer.get("kg_sessions_gaps_not_reducing") or 0)
 
@@ -403,12 +411,8 @@ def _build_prompt(
                 pass
         if kg_d_entities is not None and kg_d_entities < 0.1:
             focus.append("Knowledge graph is not growing per iteration")
-        if kg_d_rels is not None:
-            try:
-                if float(kg_d_rels) < 0.05:
-                    focus.append("Knowledge graph relationships are not growing per iteration")
-            except Exception:
-                pass
+        if kg_d_rels is not None and kg_d_rels < 0.05:
+            focus.append("Knowledge graph relationships are not growing per iteration")
 
         if dg_with > 0 and dg_empty == dg_with:
             focus.append("Dependency graphs are empty across analyzed sessions")
