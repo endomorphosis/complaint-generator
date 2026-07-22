@@ -1,6 +1,6 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
-  "generated_at": "2026-07-22T04:32:41Z",
+  "generated_at": "2026-07-22T05:38:26Z",
   "goals": [
     {
       "id": "G1",
@@ -109,22 +109,27 @@
               "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
               "depends_on": [],
               "files": [
-                "applications/complaint_cli.py",
-                "applications/complaint_workspace.py",
                 "applications/dashboard_ui.py",
                 "complaint_generator/agentic_evidence_download.py",
                 "complaint_generator/data_migration.py",
                 "complaint_generator/email_agentic_search.py",
                 "complaint_generator/email_authority_enrichment.py",
                 "complaint_generator/email_credentials.py",
-                "complaint_generator/email_graphrag.py"
+                "complaint_generator/email_graphrag.py",
+                "complaint_generator/email_import.py",
+                "complaint_generator/email_oauth.py",
+                "complaint_generator/email_pipeline.py",
+                "complaint_generator/email_seed_planner.py",
+                "complaint_generator/email_timeline_handoff.py",
+                "complaint_generator/evidence_relevance.py",
+                "integrations/ipfs_datasets/llm.py"
               ],
               "goal_id": "G1",
               "objective": "Refactor complaint-generator safely and incrementally.",
               "priority": "P0",
               "rationale": "Optional dependency behavior should stay behind the adapter boundary.",
               "stable_key": "g1:g1.s2:route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G1.S2",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-004",
@@ -186,7 +191,7 @@
               "priority": "P0",
               "rationale": "Claim support hooks are large enough to hide unrelated concerns.",
               "stable_key": "g2:g2.s1:move claim support orchestration helpers into focused private modules",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G2.S1",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-006",
@@ -399,7 +404,7 @@
               "priority": "P1",
               "rationale": "The repo has many tests; refactor agents need fast confidence lanes.",
               "stable_key": "g4:g4.s1:define smoke, adapter, mediator, document, and ui test lanes",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G4.S1",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-013",
@@ -525,7 +530,7 @@
               "priority": "P1",
               "rationale": "The scan found many broad exception handlers; refactors need predictable failure semantics.",
               "stable_key": "g6:g6.s1:audit broad exception handlers in mediator and adapter paths",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G6.S1",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-017",
@@ -551,7 +556,7 @@
               "priority": "P1",
               "rationale": "Silent failures hide regressions during long-running automation.",
               "stable_key": "g6:g6.s1:convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G6.S1",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-018",
@@ -583,7 +588,7 @@
               "priority": "P1",
               "rationale": "Multiple daemon surfaces should be inspectable with the same status fields.",
               "stable_key": "g6:g6.s2:standardize daemon status payload shape across ui, scraper, gmail, and refactor supervisors",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G6.S2",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-019",
@@ -608,7 +613,7 @@
               "priority": "P2",
               "rationale": "Operators need consistent guidance for stalled background workflows.",
               "stable_key": "g6:g6.s2:add queue count and last-cycle metrics to long-running automation docs",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G6.S2",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-020",
@@ -1245,11 +1250,11 @@
   "scan": {
     "largest_python_files": [
       {
-        "lines": 10555,
+        "lines": 10591,
         "path": "mediator/mediator.py"
       },
       {
-        "lines": 8148,
+        "lines": 8154,
         "path": "applications/complaint_workspace.py"
       },
       {
@@ -1273,7 +1278,7 @@
         "path": "applications/dashboard_ui.py"
       },
       {
-        "lines": 5118,
+        "lines": 4916,
         "path": "mediator/claim_support_hooks.py"
       },
       {
@@ -1281,7 +1286,7 @@
         "path": "tests/test_document_pipeline.py"
       },
       {
-        "lines": 4152,
+        "lines": 4297,
         "path": "tests/test_claim_support_hooks.py"
       },
       {
@@ -1321,15 +1326,15 @@
         "path": "tests/test_formal_document_pipeline.py"
       },
       {
+        "lines": 2354,
+        "path": "mediator/evidence_hooks.py"
+      },
+      {
         "lines": 2319,
         "path": "tests/test_web_evidence_hooks.py"
       },
       {
-        "lines": 2230,
-        "path": "mediator/evidence_hooks.py"
-      },
-      {
-        "lines": 2171,
+        "lines": 2237,
         "path": "applications/ui_review.py"
       },
       {
@@ -1350,21 +1355,13 @@
       "pyproject": true,
       "pytest_ini": true
     },
-    "python_file_count": 439,
-    "python_total_lines": 245858,
-    "scanned_at": "2026-07-22T04:32:27Z",
+    "python_file_count": 440,
+    "python_total_lines": 246812,
+    "scanned_at": "2026-07-22T05:38:10Z",
     "signals": {
-      "broad_exception_count": 375,
-      "direct_ipfs_import_count": 219,
+      "broad_exception_count": 362,
+      "direct_ipfs_import_count": 211,
       "direct_ipfs_imports": [
-        "applications/complaint_cli.py:265",
-        "applications/complaint_cli.py:266",
-        "applications/complaint_cli.py:270",
-        "applications/complaint_cli.py:410",
-        "applications/complaint_cli.py:411",
-        "applications/complaint_cli.py:479",
-        "applications/complaint_workspace.py:1578",
-        "applications/complaint_workspace.py:4207",
         "applications/dashboard_ui.py:892",
         "complaint_generator/agentic_evidence_download.py:10",
         "complaint_generator/data_migration.py:13",
@@ -1556,9 +1553,17 @@
         "tests/unit/optimizers/graphrag/test_ontology_batch_processing.py:21",
         "tests/unit/optimizers/graphrag/test_ontology_comparator.py:10",
         "tests/unit/optimizers/graphrag/test_ontology_critic_hypothesis.py:17",
-        "tests/unit/optimizers/graphrag/test_ontology_serialization.py:19"
+        "tests/unit/optimizers/graphrag/test_ontology_serialization.py:19",
+        "tests/unit/optimizers/graphrag/test_pipeline_json_logger.py:13",
+        "tests/unit/optimizers/graphrag/test_query_graph_traversal_performance.py:22",
+        "tests/unit/optimizers/graphrag/test_score_analyzer.py:19",
+        "tests/unit_tests/optimizers/graphrag/test_domain_aware_config.py:16",
+        "tests/unit_tests/optimizers/graphrag/test_parallel_relationship_inference.py:13",
+        "tests/unit_tests/optimizers/test_batch_entity_deduplication.py:9",
+        "tests/unit_tests/optimizers/test_benchmark_utils.py:12",
+        "tests/unit_tests/optimizers/test_circuit_breaker.py:8"
       ],
-      "silent_pass_count": 122,
+      "silent_pass_count": 114,
       "sys_path_mutation_count": 46,
       "sys_path_mutations": [
         "scripts/graphrag_email_manifest.py:9",
@@ -1631,15 +1636,15 @@
         "failed": 0,
         "failed_work_items": 0,
         "queued": 15,
-        "queued_work_items": 23,
+        "queued_work_items": 16,
         "running": 0,
         "running_work_items": 0
       },
       "todo": {
         "blocked": 0,
-        "complete": 24,
+        "complete": 32,
         "in_progress": 0,
-        "needed": 25
+        "needed": 18
       }
     },
     "goal_count": 9,
@@ -1648,43 +1653,32 @@
       "skipped": true
     },
     "queue_refill": {
-      "available_bundle_count": 13,
-      "available_work_items": 25,
+      "available_bundle_count": 9,
+      "available_work_items": 18,
       "configured_floor": 20,
       "enabled": true,
-      "floor_satisfied": true,
+      "floor_satisfied": false,
       "floor_unit": "active_taskboard_work_items",
-      "queued_work_items_after": 23,
-      "queued_work_items_before": 23,
+      "queued_work_items_after": 16,
+      "queued_work_items_before": 16,
+      "reason": "fewer unique active generated work items are available than the configured floor",
       "submitted_bundle_count": 0,
       "submitted_queue_ids": [],
       "submitted_task_ids": []
     },
     "status_projection": {
       "blocked_count": 0,
-      "completed_count": 24,
-      "task_count": 49,
-      "updated": {
-        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g2-g2-s1.todo.md": [
-          "REF-005"
-        ],
-        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md": [
-          "REF-023"
-        ],
-        "/home/barberb/complaint-generator/data/refactor_supervisor/refactor_todo.md": [
-          "REF-005",
-          "REF-023",
-          "REF-027"
-        ]
-      },
-      "updated_file_count": 3
+      "completed_count": 32,
+      "task_count": 50,
+      "updated": {},
+      "updated_file_count": 0
     },
     "subgoal_count": 17,
-    "synchronized_at": "2026-07-22T04:32:41Z",
+    "synchronized_at": "2026-07-22T05:38:26Z",
     "task_count": 36
   },
   "taskboard": {
-    "task_count": 49,
+    "task_count": 50,
     "tasks": [
       {
         "checkbox_id": 1,
@@ -1706,7 +1700,7 @@
       },
       {
         "checkbox_id": 4,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-004",
         "title": "Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing"
       },
@@ -1718,7 +1712,7 @@
       },
       {
         "checkbox_id": 6,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-006",
         "title": "Move claim support orchestration helpers into focused private modules"
       },
@@ -1760,7 +1754,7 @@
       },
       {
         "checkbox_id": 13,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-013",
         "title": "Define smoke, adapter, mediator, document, and UI test lanes"
       },
@@ -1784,25 +1778,25 @@
       },
       {
         "checkbox_id": 17,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-017",
         "title": "Audit broad exception handlers in mediator and adapter paths"
       },
       {
         "checkbox_id": 18,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-018",
         "title": "Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks"
       },
       {
         "checkbox_id": 19,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-019",
         "title": "Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors"
       },
       {
         "checkbox_id": 20,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-020",
         "title": "Add queue count and last-cycle metrics to long-running automation docs"
       },
@@ -1846,7 +1840,7 @@
         "checkbox_id": 27,
         "status": "complete",
         "task_id": "REF-027",
-        "title": "Resolve dirty main checkout blocking 4 worktree merges"
+        "title": "Resolve dirty main checkout blocking 3 worktree merges"
       },
       {
         "checkbox_id": 28,
@@ -1979,6 +1973,12 @@
         "status": "complete",
         "task_id": "REF-049",
         "title": "Close objective gap: Establish canonical coordination and merge flow"
+      },
+      {
+        "checkbox_id": 50,
+        "status": "complete",
+        "task_id": "REF-050",
+        "title": "Close objective gap: Decompose oversized orchestration modules"
       }
     ]
   },
