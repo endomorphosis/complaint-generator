@@ -3140,7 +3140,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-131 Review swallowed exception path in integrations/ipfs_datasets/loader.py:407
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -3171,7 +3171,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-132 Review swallowed exception path in integrations/ipfs_datasets/storage.py:218
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -3233,7 +3233,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-134 Replace placeholder runtime path in lib/formal_logic/core.py:116
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -3264,7 +3264,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-135 Replace placeholder runtime path in lib/knowledge_graph_formats.py:82
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
