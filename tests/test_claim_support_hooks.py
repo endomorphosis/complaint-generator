@@ -42,6 +42,151 @@ def _confirmed_intake_status(*, note: str) -> dict:
     }
 
 
+class TestClaimSupportReasoningPayloads:
+    def test_reasoning_signal_helpers_distinguish_invalid_results_from_adapter_errors(self):
+        from mediator._claim_support_reasoning import extract_ontology_validation_signal
+
+        assert extract_ontology_validation_signal({
+            'ontology_validation': {
+                'status': 'success',
+                'result': {'valid': False},
+            },
+        }) == 'invalid'
+        assert extract_ontology_validation_signal({
+            'ontology_validation': {
+                'status': 'error',
+                'result': None,
+                'error': 'backend initialization failed',
+                'metadata': {'implementation_status': 'error'},
+            },
+        }) == 'unknown'
+
+    def test_reasoning_helpers_preserve_adapter_and_claim_summary_contracts(self):
+        from mediator._claim_support_reasoning import (
+            summarize_adapter_result,
+            summarize_claim_reasoning_diagnostics,
+        )
+
+        adapter_summary = summarize_adapter_result(
+            {
+                'status': 'degraded',
+                'provable_elements': ['protected_activity'],
+                'unprovable_elements': ['causation', 'damages'],
+                'metadata': {
+                    'operation': 'prove_claim_elements',
+                    'implementation_status': 'fallback',
+                    'backend_available': False,
+                    'degraded_reason': 'backend_unavailable',
+                },
+            },
+            count_fields=['provable_elements', 'unprovable_elements'],
+        )
+        assert adapter_summary == {
+            'status': 'degraded',
+            'operation': 'prove_claim_elements',
+            'implementation_status': 'fallback',
+            'backend_available': False,
+            'degraded_reason': 'backend_unavailable',
+            'provable_elements_count': 1,
+            'unprovable_elements_count': 2,
+        }
+
+        claim_summary = summarize_claim_reasoning_diagnostics(
+            [
+                {
+                    'reasoning_diagnostics': {
+                        'predicate_count': 4,
+                        'ontology_entity_count': 3,
+                        'ontology_relationship_count': 2,
+                        'backend_available_count': 1,
+                        'used_fallback_ontology': True,
+                        'adapter_statuses': {
+                            'logic_proof': adapter_summary,
+                            'custom_adapter': {'status': 'ready'},
+                        },
+                        'hybrid_reasoning': {
+                            'result': {
+                                'compiler_bridge_available': True,
+                                'tdfol_formulas': ['Before(a,b)'],
+                                'dcec_formulas': ['Happens(a,t)'],
+                            },
+                        },
+                        'temporal_summary': {
+                            'fact_count': 2,
+                            'relation_count': 1,
+                            'issue_count': 1,
+                            'warning_count': 1,
+                            'partial_order_ready': True,
+                        },
+                        'temporal_rule_profile': {
+                            'available': True,
+                            'status': 'partial',
+                        },
+                        'temporal_proof_bundle': {'bundle_id': 'proof:1'},
+                    },
+                },
+                None,
+            ]
+        )
+
+        assert claim_summary['adapter_status_counts']['logic_proof'] == {'fallback': 1}
+        assert claim_summary['adapter_status_counts']['custom_adapter'] == {'ready': 1}
+        assert claim_summary['predicate_count'] == 4
+        assert claim_summary['ontology_entity_count'] == 3
+        assert claim_summary['ontology_relationship_count'] == 2
+        assert claim_summary['backend_available_count'] == 1
+        assert claim_summary['fallback_ontology_count'] == 1
+        assert claim_summary['hybrid_bridge_available_count'] == 1
+        assert claim_summary['hybrid_tdfol_formula_count'] == 1
+        assert claim_summary['hybrid_dcec_formula_count'] == 1
+        assert claim_summary['temporal_fact_count'] == 2
+        assert claim_summary['temporal_relation_count'] == 1
+        assert claim_summary['temporal_issue_count'] == 1
+        assert claim_summary['temporal_warning_count'] == 1
+        assert claim_summary['temporal_partial_order_ready_count'] == 1
+        assert claim_summary['temporal_rule_profile_available_count'] == 1
+        assert claim_summary['temporal_rule_profile_partial_count'] == 1
+        assert claim_summary['temporal_proof_bundle_count'] == 1
+
+    def test_reasoning_helpers_preserve_validation_decision_contract(self):
+        from mediator._claim_support_reasoning import summarize_claim_validation_decisions
+
+        summary = summarize_claim_validation_decisions(
+            [
+                {
+                    'proof_decision_trace': {
+                        'decision_source': 'logic_proof_supported',
+                        'logic_contradiction_count': 0,
+                        'used_fallback_ontology': False,
+                        'ontology_validation_signal': 'valid',
+                    },
+                },
+                {
+                    'proof_decision_trace': {
+                        'decision_source': 'logic_unprovable',
+                        'logic_contradiction_count': 1,
+                        'used_fallback_ontology': True,
+                        'ontology_validation_signal': 'invalid',
+                        'temporal_rule_status': 'failed',
+                    },
+                },
+            ]
+        )
+
+        assert summary == {
+            'decision_source_counts': {
+                'logic_proof_supported': 1,
+                'logic_unprovable': 1,
+            },
+            'adapter_contradicted_element_count': 1,
+            'fallback_ontology_element_count': 1,
+            'proof_supported_element_count': 1,
+            'logic_unprovable_element_count': 1,
+            'ontology_invalid_element_count': 1,
+            'temporal_rule_gap_element_count': 1,
+        }
+
+
 class TestClaimSupportHook:
     def test_get_recent_follow_up_execution_exposes_adaptive_retry_metadata(self):
         try:
