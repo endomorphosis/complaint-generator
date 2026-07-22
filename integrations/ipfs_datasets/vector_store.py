@@ -4,14 +4,6 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-try:
-    import numpy as np
-except ModuleNotFoundError as exc:
-    np = None
-    _numpy_error = str(exc)
-else:
-    _numpy_error = ""
-
 from .loader import import_attr_optional, import_module_optional, import_failure_message
 from .types import with_adapter_metadata
 
@@ -325,7 +317,7 @@ def create_vector_index(
     document_list = _normalize_documents(documents)
     resolved_index_name = index_name or "vector_index"
 
-    if np is None or embed_texts_batched is None:
+    if embed_texts_batched is None:
         return with_adapter_metadata(
             {
                 "status": "unavailable",
@@ -350,6 +342,16 @@ def create_vector_index(
             backend_available=True,
             implementation_status="error",
         )
+
+    if output_dir and np is None:
+        unavailable = _numpy_required_error("create_vector_index")
+        unavailable.update(
+            {
+                "index_name": resolved_index_name,
+                "document_count": len(document_list),
+            }
+        )
+        return unavailable
 
     texts = [document["text"] for document in document_list]
     try:
@@ -380,19 +382,12 @@ def create_vector_index(
         "index_name": resolved_index_name,
         "document_count": len(document_list),
         "dimension": len(vectors[0]) if vectors else 0,
-        "provider": provider or "ipfs_datasets_py.auto",
+        # Keep the top-level ``provider`` key available for the canonical
+        # adapter provider added by ``with_adapter_metadata``.
+        "embedding_provider": provider or "ipfs_datasets_py.auto",
         "model_name": model_name or "",
     }
     if output_dir:
-        if np is None:
-            unavailable = _numpy_required_error("create_vector_index")
-            unavailable.update(
-                {
-                    "index_name": resolved_index_name,
-                    "document_count": len(document_list),
-                }
-            )
-            return unavailable
         payload["files"] = _write_index_payload(
             output_dir=Path(output_dir),
             index_name=resolved_index_name,
@@ -421,7 +416,19 @@ def search_vector_index(
     model_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     resolved_index_name = index_name or "vector_index"
-    if np is None or embed_texts_batched is None:
+    if np is None:
+        unavailable = _numpy_required_error("search_vector_index")
+        unavailable.update(
+            {
+                "index_name": resolved_index_name,
+                "query": query,
+                "top_k": top_k,
+                "results": [],
+            }
+        )
+        return unavailable
+
+    if embed_texts_batched is None:
         return with_adapter_metadata(
             {
                 "status": "unavailable",
@@ -435,18 +442,6 @@ def search_vector_index(
             degraded_reason=VECTOR_STORE_ERROR,
             implementation_status="unavailable",
         )
-
-    if np is None:
-        unavailable = _numpy_required_error("search_vector_index")
-        unavailable.update(
-            {
-                "index_name": resolved_index_name,
-                "query": query,
-                "top_k": top_k,
-                "results": [],
-            }
-        )
-        return unavailable
 
     if not index_dir:
         return with_adapter_metadata(

@@ -1,3 +1,15 @@
+"""Complaint workflow mediator and audited orchestration boundaries.
+
+Broad-exception audit (REF-017)
+---------------------------------
+The remaining broad handlers are orchestration boundaries: backend invocation,
+optional neurosymbolic/authority enrichment, queued scraper execution, and
+claim-support aggregation.  User/backend failures are re-raised after logging;
+optional enrichment failures return their documented neutral fallback and log
+an operation plus error type.  No broad handler in this module silently drops
+an unexpected failure.
+"""
+
 from time import time
 import re
 from typing import List, Optional, Dict, Any
@@ -734,7 +746,13 @@ class Mediator:
 			if not getattr(legal_graph, 'elements', {}):
 				return pressure_map
 			matching = self.neurosymbolic_matcher.match_claims_to_law(knowledge_graph, dependency_graph, legal_graph)
-		except Exception:
+		except Exception as exc:
+			self.log(
+				'intake_matching_pressure_degraded',
+				operation='build_intake_matching_pressure_map',
+				error=str(exc),
+				error_type=type(exc).__name__,
+			)
 			return pressure_map
 
 		for claim_result in matching.get('claims', []) if isinstance(matching, dict) else []:
@@ -1358,7 +1376,7 @@ class Mediator:
 			self.log('user_output', text=output)
 		except Exception as exception:
 			self.log('io_error', error=str(exception))
-			raise exception
+			raise
 
 		return output
 
@@ -6319,7 +6337,13 @@ class Mediator:
 		try:
 			if hasattr(self.denoiser, "is_stagnating") and self.denoiser.is_stagnating():
 				max_questions = 8
-		except Exception:
+		except Exception as exc:
+			self.log(
+				'denoising_stagnation_check_degraded',
+				operation='is_stagnating',
+				error=str(exc),
+				error_type=type(exc).__name__,
+			)
 			max_questions = 5
 		question_candidates = self.denoiser.collect_question_candidates(
 			kg,
@@ -6887,14 +6911,26 @@ class Mediator:
 				user_id=resolved_user_id,
 				required_support_kinds=required_support_kinds,
 			)
-		except Exception:
+		except Exception as exc:
+			self.log(
+				'claim_support_packet_degraded',
+				operation='get_claim_support_validation',
+				error=str(exc),
+				error_type=type(exc).__name__,
+			)
 			validation = {'claims': {}}
 		try:
 			gaps = self.get_claim_support_gaps(
 				user_id=resolved_user_id,
 				required_support_kinds=required_support_kinds,
 			)
-		except Exception:
+		except Exception as exc:
+			self.log(
+				'claim_support_packet_degraded',
+				operation='get_claim_support_gaps',
+				error=str(exc),
+				error_type=type(exc).__name__,
+			)
 			gaps = {'claims': {}}
 
 		validation_claims = validation.get('claims', {}) if isinstance(validation, dict) else {}
@@ -10539,7 +10575,7 @@ class Mediator:
 			response = backend(prompt)
 		except Exception as exception:
 			self.log('backend_error', backend=backend.id, prompt=prompt, error=str(exception))
-			raise exception
+			raise
 
 		self.log('backend_query', backend=backend.id, prompt=prompt, response=response)
 

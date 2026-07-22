@@ -1,6 +1,18 @@
+"""Search and download adapters with explicit degradation boundaries.
+
+Broad-exception audit (REF-017)
+---------------------------------
+The remaining ``except Exception`` blocks in this module are confined to I/O
+adapter boundaries: Playwright, HTTP/filesystem downloads, and
+``ipfs_datasets_py`` search/scraper implementations.  Those libraries do not
+share a stable exception hierarchy, so an adapter boundary must be able to
+translate any ordinary runtime failure.  Boundary failures return structured
+error dictionaries or :class:`DegradedSearchResults`; parsing and local control
+flow use narrow exception types and are never silently ignored.
+"""
+
 from __future__ import annotations
 
-import asyncio
 import inspect
 import json
 import os
@@ -16,7 +28,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from .loader import import_attr_optional, run_async_compat
+from .loader import import_attr_optional, import_failure_type, run_async_compat
 from .types import with_adapter_metadata
 
 
@@ -68,6 +80,8 @@ UNIFIED_WEB_SCRAPER_AVAILABLE = (
 )
 MULTI_ENGINE_SEARCH_AVAILABLE = MultiEngineOrchestrator is not None and OrchestratorConfig is not None
 SCRAPER_VALIDATION_AVAILABLE = ScraperValidator is not None and ScraperDomain is not None
+MULTI_ENGINE_SEARCH_ERROR = _orchestrator_error or _orchestrator_config_error
+UNIFIED_WEB_SCRAPER_ERROR = _unified_scraper_error or _scraper_config_error or _scraper_method_error
 SEARCH_ERROR = (
     _common_crawl_error
     or _brave_api_error
@@ -87,6 +101,50 @@ class QuerySpec:
     sites: list[str]
     phrases: list[str]
     tokens: list[str]
+
+
+class DegradedSearchResults(list[Dict[str, Any]]):
+    """List-compatible, typed result for a search adapter fallback.
+
+    Search callers historically consume a list, so this type deliberately
+    preserves iteration, indexing, slicing, and equality behavior.  The typed
+    fields make degradation observable without forcing every existing caller
+    to migrate to a new container shape in one release.
+    """
+
+    status: str
+    operation: str
+    degraded_reason: str
+    error_type: str
+    fallback_provider: str
+
+    def __init__(
+        self,
+        records: Iterable[Dict[str, Any]] = (),
+        *,
+        operation: str,
+        degraded_reason: str,
+        error_type: str = "",
+        fallback_provider: str = "",
+    ) -> None:
+        super().__init__(records)
+        self.status = "degraded"
+        self.operation = operation
+        self.degraded_reason = str(degraded_reason or "adapter unavailable")
+        self.error_type = str(error_type or "")
+        self.fallback_provider = str(fallback_provider or "")
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Return a serialization-safe representation for status surfaces."""
+        return {
+            "status": self.status,
+            "operation": self.operation,
+            "degraded_reason": self.degraded_reason,
+            "error_type": self.error_type,
+            "fallback_provider": self.fallback_provider,
+            "result_count": len(self),
+            "results": list(self),
+        }
 
 
 def _looks_like_pdf_bytes(data: bytes) -> bool:
@@ -191,7 +249,7 @@ def commoncrawl_list_urls(session: requests.Session, cdx_api: str, site: str, li
             continue
         try:
             rows.append(json.loads(stripped))
-        except Exception:
+        except json.JSONDecodeError:
             continue
     return rows
 
@@ -312,7 +370,14 @@ def discover_seeded_commoncrawl(
                         time.sleep(sleep_seconds)
                     text = fetch_archive_text(session, str(url))
                 except Exception as exc:
-                    fetched_rows.append({"url": url, "error": str(exc)})
+                    fetched_rows.append(
+                        {
+                            "url": url,
+                            "error": str(exc),
+                            "error_type": type(exc).__name__,
+                            "status": "degraded",
+                        }
+                    )
                     continue
                 hits: list[str] = []
                 lowered_text = text.lower()
@@ -359,10 +424,17 @@ def _build_pdf_search_query(url: str) -> str:
 def _try_playwright_download(url: str, dest: Path, timeout_ms: int = 90000) -> Dict[str, Any]:
     try:
         from playwright.sync_api import sync_playwright
-    except Exception:
-        return {"status": "unavailable", "saved": False, "note": "playwright not available"}
+    except Exception as exc:
+        return {
+            "status": "unavailable",
+            "saved": False,
+            "note": "playwright not available",
+            "degraded_reason": str(exc) or type(exc).__name__,
+            "error_type": type(exc).__name__,
+        }
 
     user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+    degradations: List[Dict[str, str]] = []
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -373,19 +445,37 @@ def _try_playwright_download(url: str, dest: Path, timeout_ms: int = 90000) -> D
             except Exception as exc:
                 context.close()
                 browser.close()
-                return {"status": "error", "saved": False, "note": f"goto failed: {exc}"}
+                return {
+                    "status": "error",
+                    "saved": False,
+                    "note": f"goto failed: {exc}",
+                    "error_type": type(exc).__name__,
+                }
 
             try:
                 body = response.body() if response else b""
-            except Exception:
+            except Exception as exc:
                 body = b""
+                degradations.append(
+                    {
+                        "operation": "playwright_response_body",
+                        "error": str(exc),
+                        "error_type": type(exc).__name__,
+                    }
+                )
 
             content_type = (response.headers.get("content-type") if response else "") or ""
             if ("application/pdf" in content_type.lower()) or _looks_like_pdf_bytes(body):
                 _write_bytes(dest, body)
                 context.close()
                 browser.close()
-                return {"status": "success", "saved": True, "note": "saved from playwright response", "content_type": content_type}
+                return {
+                    "status": "success",
+                    "saved": True,
+                    "note": "saved from playwright response",
+                    "content_type": content_type,
+                    "degradations": degradations,
+                }
 
             try:
                 locator = page.locator("a[href$='.pdf'], a[href*='.pdf']").first
@@ -400,17 +490,41 @@ def _try_playwright_download(url: str, dest: Path, timeout_ms: int = 90000) -> D
                             _write_bytes(dest, body)
                             context.close()
                             browser.close()
-                            return {"status": "success", "saved": True, "note": f"followed pdf link {pdf_url}", "content_type": content_type, "final_url": pdf_url}
-            except Exception:
-                pass
+                            return {
+                                "status": "success",
+                                "saved": True,
+                                "note": f"followed pdf link {pdf_url}",
+                                "content_type": content_type,
+                                "final_url": pdf_url,
+                                "degradations": degradations,
+                            }
+            except Exception as exc:
+                degradations.append(
+                    {
+                        "operation": "playwright_pdf_link_recovery",
+                        "error": str(exc),
+                        "error_type": type(exc).__name__,
+                    }
+                )
 
             if body:
                 _write_bytes(dest, body)
             context.close()
             browser.close()
-            return {"status": "non_pdf", "saved": False, "note": f"not a PDF ({content_type or 'unknown'})", "content_type": content_type}
+            return {
+                "status": "non_pdf",
+                "saved": False,
+                "note": f"not a PDF ({content_type or 'unknown'})",
+                "content_type": content_type,
+                "degradations": degradations,
+            }
     except Exception as exc:
-        return {"status": "error", "saved": False, "note": f"playwright error: {exc}"}
+        return {
+            "status": "error",
+            "saved": False,
+            "note": f"playwright error: {exc}",
+            "error_type": type(exc).__name__,
+        }
 
 
 def download_url(
@@ -458,7 +572,9 @@ def download_url(
             },
             operation="download_url",
             backend_available=True,
+            degraded_reason=exc,
             implementation_status="error",
+            extra_metadata={"error_type": type(exc).__name__},
         )
 
 
@@ -492,7 +608,11 @@ def download_with_recovery(
     if use_search_fallback:
         query = _build_pdf_search_query(url)
         candidates = search_brave_web(query, max_results=10)
-        rate_limit_delay = float(os.environ.get("BRAVE_RATE_LIMIT_DELAY", "0.5"))
+        raw_rate_limit_delay = os.environ.get("BRAVE_RATE_LIMIT_DELAY", "0.5")
+        try:
+            rate_limit_delay = max(0.0, float(raw_rate_limit_delay))
+        except ValueError:
+            rate_limit_delay = 0.5
         for candidate in candidates[:6]:
             candidate_url = str(candidate.get("url") or "")
             if not candidate_url:
@@ -505,10 +625,8 @@ def download_with_recovery(
                     "recovery_strategy": "search_fallback",
                 }
                 return with_adapter_metadata(payload, operation="download_with_recovery", backend_available=True, implementation_status="implemented")
-            try:
+            if rate_limit_delay > 0:
                 time.sleep(rate_limit_delay)
-            except Exception:
-                pass
 
     payload = {
         **direct,
@@ -763,20 +881,58 @@ def search_brave_web(
     return normalized
 
 
+def _degraded_brave_fallback(
+    query: str,
+    max_results: int,
+    *,
+    error: Any,
+    error_type: str,
+) -> DegradedSearchResults:
+    """Run the Brave fallback and preserve failures from both boundaries."""
+    reason = str(error) or error_type or "multi-engine search backend unavailable"
+    try:
+        fallback = search_brave_web(query=query, max_results=max_results)
+        fallback_provider = "brave"
+    except Exception as fallback_error:
+        fallback = []
+        fallback_provider = ""
+        reason = f"{reason}; brave fallback failed: {fallback_error}"
+    return DegradedSearchResults(
+        fallback,
+        operation="search_multi_engine_web",
+        degraded_reason=reason,
+        error_type=error_type,
+        fallback_provider=fallback_provider,
+    )
+
+
 def search_multi_engine_web(
     query: str,
     max_results: int = 10,
     engines: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     if not MULTI_ENGINE_SEARCH_AVAILABLE:
-        return search_brave_web(query=query, max_results=max_results)
+        backend_error = MULTI_ENGINE_SEARCH_ERROR
+        return _degraded_brave_fallback(
+            query,
+            max_results,
+            error=backend_error or "multi-engine search backend unavailable",
+            error_type=import_failure_type(backend_error) or "BackendUnavailable",
+        )
 
     target_engines = engines or ["brave", "duckduckgo", "google_cse"]
     try:
         orchestrator = MultiEngineOrchestrator(OrchestratorConfig(engines=target_engines))
         response = orchestrator.search(query, max_results=max_results)
-    except Exception:
-        return search_brave_web(query=query, max_results=max_results)
+    except Exception as exc:
+        # Optional orchestrators expose backend-specific exceptions.  Translate
+        # that unstable boundary into a typed, list-compatible degraded result.
+        return _degraded_brave_fallback(
+            query,
+            max_results,
+            error=exc,
+            error_type=type(exc).__name__,
+        )
 
     results = [_normalize_search_item(item, "multi_engine_search", query=query) for item in getattr(response, "results", [])]
     return _deduplicate_results(results[:max_results])
@@ -830,19 +986,32 @@ def scrape_archived_domain(
     timeout: int = 30,
 ) -> List[Dict[str, Any]]:
     if not UNIFIED_WEB_SCRAPER_AVAILABLE:
-        return []
+        backend_error = UNIFIED_WEB_SCRAPER_ERROR
+        return DegradedSearchResults(
+            operation="scrape_archived_domain",
+            degraded_reason=str(backend_error or "unified web scraper unavailable"),
+            error_type=import_failure_type(backend_error) or "BackendUnavailable",
+        )
 
-    scraper = UnifiedWebScraper(ScraperConfig(timeout=timeout))
     try:
+        scraper = UnifiedWebScraper(ScraperConfig(timeout=timeout))
         results = scraper.scrape_domain(url, max_pages=max_pages)
-    except Exception:
-        return []
+    except Exception as exc:
+        return DegradedSearchResults(
+            operation="scrape_archived_domain",
+            degraded_reason=str(exc) or type(exc).__name__,
+            error_type=type(exc).__name__,
+        )
 
     if inspect.isawaitable(results):
         try:
-            results = asyncio.run(results)
-        except Exception:
-            return []
+            results = run_async_compat(results)
+        except Exception as exc:
+            return DegradedSearchResults(
+                operation="scrape_archived_domain.await",
+                degraded_reason=str(exc) or type(exc).__name__,
+                error_type=type(exc).__name__,
+            )
 
     normalized = [_normalize_scrape_result(item, "archived_domain_scrape") for item in results]
     return _deduplicate_results(normalized)
@@ -895,6 +1064,7 @@ __all__ = [
     "MULTI_ENGINE_SEARCH_AVAILABLE",
     "SCRAPER_VALIDATION_AVAILABLE",
     "SEARCH_ERROR",
+    "DegradedSearchResults",
     "search_brave_web",
     "discover_seeded_commoncrawl",
     "fetch_archive_text",
