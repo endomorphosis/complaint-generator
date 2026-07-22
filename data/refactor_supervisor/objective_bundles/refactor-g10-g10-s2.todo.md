@@ -29,7 +29,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-204 Implement fingerprint-independent audit scans and exhaustion quorum
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
