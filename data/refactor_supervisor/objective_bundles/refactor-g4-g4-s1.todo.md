@@ -75,7 +75,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-016 Resolve dependency guardrail for REF-015
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
