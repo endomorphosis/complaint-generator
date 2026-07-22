@@ -45,6 +45,7 @@ _EXPORT_MODULES = {
     "extract_text_content": "documents",
     "ingest_download_manifest": "documents",
     "ingest_local_document": "documents",
+    "parse_document": "documents",
     "parse_pdf_to_record": "documents",
     "generate_text_with_metadata": "llm",
     "llm_router_status": "llm",
