@@ -1038,7 +1038,7 @@ def _render_objective_heap(goals: list[dict[str, Any]]) -> str:
                     f"- Bundle: refactor/{goal['id'].lower()}/{subgoal['id'].replace('.', '-').lower()}",
                     "- Goal: " + subgoal["title"],
                     "- Evidence: " + ", ".join(_goal_evidence(task) for task in subgoal_tasks),
-                    "- Validation: " + ", ".join(
+                    "- Validation: " + "; ".join(
                         dict.fromkeys(command for task in subgoal_tasks for command in task.validation)
                     ),
                     "",
@@ -1147,7 +1147,7 @@ def _task_ast_symbols(files: tuple[str, ...], *, limit: int = 80) -> list[str]:
 
 def _task_block(task: RefactorTask, task_id: str, index: int) -> str:
     outputs = ", ".join(task.files) or str(TASKBOARD_DOC_PATH.relative_to(PROJECT_ROOT))
-    validation = ", ".join(task.validation) or "python -m pytest --collect-only -q"
+    validation = "; ".join(task.validation) or "python -m pytest --collect-only -q"
     bundle_key = f"refactor/{task.goal_id.lower()}/{task.subgoal_id.replace('.', '-').lower()}"
     symbols = ", ".join(_task_ast_symbols(task.files)[:30])
     return "\n".join(
