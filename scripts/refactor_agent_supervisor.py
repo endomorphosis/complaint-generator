@@ -67,6 +67,8 @@ TASK_HEADER_PREFIX = "## REF-"
 TASK_TYPES = ("codex.todo_bundle",)
 MODEL_NAME = "complaint-generator-refactor-supervisor"
 STATUS_SCHEMA = "complaint_generator.refactor_supervisor.status.v1"
+TASK_PAYLOAD_SCHEMA = "complaint_generator.refactor_supervisor.task.v1"
+BUNDLE_TASK_PAYLOAD_SCHEMA = "complaint_generator.refactor_supervisor.bundle_task.v1"
 STOP_TIMEOUT_SECONDS = 20.0
 STOP_POLL_SECONDS = 0.1
 
@@ -168,7 +170,8 @@ class RefactorTask:
         return f"{self.goal_id}:{self.subgoal_id}:{self.title}".lower()
 
     def payload(self) -> dict[str, Any]:
-        return {
+        payload = {
+            "schema": TASK_PAYLOAD_SCHEMA,
             "supervisor": "refactor_agent_supervisor",
             "objective": "Refactor complaint-generator safely and incrementally.",
             "goal_id": self.goal_id,
@@ -184,6 +187,48 @@ class RefactorTask:
             "stable_key": self.stable_key,
             "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
         }
+        _validate_task_payload_fields(payload, context=f"refactor task {self.task_id or self.title!r}")
+        return payload
+
+
+def _payload_strings(value: Any) -> list[str]:
+    """Normalize a scalar or sequence payload field without splitting strings."""
+
+    values = value if isinstance(value, (list, tuple)) else [value]
+    return list(
+        dict.fromkeys(
+            str(item).strip()
+            for item in values
+            if item is not None and str(item).strip()
+        )
+    )
+
+
+def _validate_task_payload_fields(payload: dict[str, Any], *, context: str) -> None:
+    """Reject task payloads that cannot provide an actionable work contract."""
+
+    errors: list[str] = []
+    for field in ("goal_id", "subgoal_id"):
+        value = payload.get(field)
+        valid = (isinstance(value, str) and bool(value.strip())) or (
+            isinstance(value, list)
+            and bool(value)
+            and all(isinstance(item, str) and bool(item.strip()) for item in value)
+        )
+        if not valid:
+            errors.append(f"{field} must be a non-empty string or list")
+    if not isinstance(payload.get("priority"), str) or not str(payload["priority"]).strip():
+        errors.append("priority must be a non-empty string")
+    for field in ("acceptance", "validation"):
+        value = payload.get(field)
+        if not (
+            isinstance(value, list)
+            and bool(value)
+            and all(isinstance(item, str) and bool(item.strip()) for item in value)
+        ):
+            errors.append(f"{field} must be a non-empty list")
+    if errors:
+        raise ValueError(f"Malformed {context} payload: " + "; ".join(errors))
 
 
 def _iter_py_files() -> list[Path]:
@@ -1459,45 +1504,61 @@ def _task_ids_from_queue_payload(payload: dict[str, Any]) -> set[str]:
 def _queue_payload_contract(payload: dict[str, Any], active_task_ids: set[str]) -> dict[str, Any]:
     """Project an upstream bundle payload into the stable refactor queue contract."""
 
-    tasks = [
-        dict(item)
-        for item in payload.get("tasks", [])
-        if isinstance(item, dict) and str(item.get("task_id") or "") in active_task_ids
-    ]
+    tasks: list[dict[str, Any]] = []
+    for raw_item in payload.get("tasks", []):
+        if not isinstance(raw_item, dict) or str(raw_item.get("task_id") or "") not in active_task_ids:
+            continue
+        item = dict(raw_item)
+        item["priority"] = str(item.get("priority") or "P2").strip()
+        item["acceptance"] = _payload_strings(
+            item.get("acceptance") or item.get("acceptance_criteria")
+        )
+        item["validation"] = _payload_strings(
+            item.get("validation") or item.get("validation_commands")
+        )
+        goal_values = _payload_strings(
+            item.get("parent_goal_id") or item.get("parent_goal_ids") or item.get("goal_id")
+        )
+        subgoal_values = _payload_strings(item.get("subgoal_id") or item.get("goal_packet_key"))
+        _validate_task_payload_fields(
+            {
+                **item,
+                "goal_id": goal_values,
+                "subgoal_id": subgoal_values,
+            },
+            context=f"queue task {item.get('task_id') or '<unknown>'!r}",
+        )
+        tasks.append(item)
     task_ids = [str(item["task_id"]) for item in tasks]
     goal_ids = list(
         dict.fromkeys(
-            str(
-                item.get("parent_goal_id")
-                or (item.get("parent_goal_ids") or [""])[0]
-                or item.get("goal_id")
-            )
+            value
             for item in tasks
-            if item.get("parent_goal_id") or item.get("goal_id") or item.get("parent_goal_ids")
+            for value in _payload_strings(
+                item.get("parent_goal_id") or item.get("parent_goal_ids") or item.get("goal_id")
+            )[:1]
         )
     )
     subgoal_ids = list(
         dict.fromkeys(
-            str(item.get("subgoal_id") or item.get("goal_packet_key") or "")
+            value
             for item in tasks
-            if item.get("subgoal_id") or item.get("goal_packet_key")
+            for value in _payload_strings(item.get("subgoal_id") or item.get("goal_packet_key"))[:1]
         )
     )
     priorities = [str(item.get("priority") or "P2") for item in tasks]
     acceptance = list(
         dict.fromkeys(
-            str(value)
+            value
             for item in tasks
-            for value in item.get("acceptance", [])
-            if value
+            for value in _payload_strings(item.get("acceptance"))
         )
     )
     validation = list(
         dict.fromkeys(
-            str(value)
+            value
             for item in tasks
-            for value in item.get("validation", [])
-            if value
+            for value in _payload_strings(item.get("validation"))
         )
     )
     files = list(
@@ -1512,7 +1573,7 @@ def _queue_payload_contract(payload: dict[str, Any], active_task_ids: set[str]) 
     contracted = dict(payload)
     contracted.update(
         {
-            "schema": "complaint_generator.refactor_supervisor.bundle_task.v1",
+            "schema": BUNDLE_TASK_PAYLOAD_SCHEMA,
             "supervisor": "refactor_agent_supervisor",
             "bundle_key": str(payload.get("bundle_key") or ""),
             "task_ids": task_ids,
@@ -1529,6 +1590,8 @@ def _queue_payload_contract(payload: dict[str, Any], active_task_ids: set[str]) 
             "files": files,
         }
     )
+    if tasks:
+        _validate_task_payload_fields(contracted, context=f"bundle {contracted['bundle_key']!r}")
     return contracted
 
 
@@ -1586,10 +1649,23 @@ def refill_bundle_queue(*, refill_floor: int, enabled: bool = True) -> dict[str,
         result["queued_work_items_before"] = len(covered_task_ids)
 
         build_bundle_task_payloads = _upstream_bundle_payload_builder()
-        candidates = [
-            _queue_payload_contract(dict(payload), active_task_ids)
-            for payload in build_bundle_task_payloads(index_path)
-        ]
+        candidates: list[dict[str, Any]] = []
+        rejected_payloads: list[dict[str, str]] = []
+        for payload in build_bundle_task_payloads(index_path):
+            try:
+                candidates.append(_queue_payload_contract(dict(payload), active_task_ids))
+            except (TypeError, ValueError) as exc:
+                rejected_payloads.append(
+                    {
+                        "bundle_key": str(payload.get("bundle_key") or "")
+                        if isinstance(payload, dict)
+                        else "",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+        result["rejected_bundle_count"] = len(rejected_payloads)
+        if rejected_payloads:
+            result["rejected_payloads"] = rejected_payloads
         candidates = [candidate for candidate in candidates if candidate["task_ids"]]
         candidates.sort(
             key=lambda item: (
