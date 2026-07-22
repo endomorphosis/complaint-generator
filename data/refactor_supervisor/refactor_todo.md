@@ -124,7 +124,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: The workspace module mixes UI routing, state shaping, and workflow calls.
 - Acceptance: One handler group is isolated.; Routes keep the same response shape.
 
-- [ ] Task checkbox-8: REF-008 Separate dashboard fixture data from live route logic
+- [x] Task checkbox-8: REF-008 Separate dashboard fixture data from live route logic
 
 ## REF-008 Separate dashboard fixture data from live route logic
 
@@ -852,7 +852,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-042-schedulelanesfromliveresourcesandllm-routerprovi
 - Acceptance: Heartbeats report measured CPU, memory, disk, active phase, and available worker capacity.; Scheduler honors llm_router health, quota, latency, context, and token-budget constraints.; Concurrency scales within configured limits and applies backpressure before provider or host exhaustion.; Idle lanes advertise zero occupied capacity and can be reassigned.
 
-- [ ] Task checkbox-43: REF-043 Add impact-selected cached and parallel validation stages
+- [x] Task checkbox-43: REF-043 Add impact-selected cached and parallel validation stages
 
 ## REF-043 Add impact-selected cached and parallel validation stages
 
@@ -898,7 +898,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-045 Make AST scans and implementation workspaces incremental and reusable
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P2
 - Track: G9
