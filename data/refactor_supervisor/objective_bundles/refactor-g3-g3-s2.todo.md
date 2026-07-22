@@ -4,7 +4,7 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-11: REF-011 Define graph persistence and query interfaces before moving support scoring
+- [x] Task checkbox-11: REF-011 Define graph persistence and query interfaces before moving support scoring
 
 ## REF-011 Define graph persistence and query interfaces before moving support scoring
 
@@ -48,7 +48,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-013 Resolve dirty main checkout blocking 1 worktree merges
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
