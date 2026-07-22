@@ -19,6 +19,7 @@ def _load_codex_autopatch_module():
 _codex_autopatch = _load_codex_autopatch_module()
 _parse_iso_dt = _codex_autopatch._parse_iso_dt
 _parse_codex_human_reset_at = _codex_autopatch._parse_codex_human_reset_at
+_extract_rate_limit_reset_info = _codex_autopatch._extract_rate_limit_reset_info
 _debug_extract_reset_info_from_message = _codex_autopatch._debug_extract_reset_info_from_message
 _extract_rate_limit_reset_info_with_exec_fallback = _codex_autopatch._extract_rate_limit_reset_info_with_exec_fallback
 _pick_reset_at_raw_from_rate_limit_artifact = _codex_autopatch._pick_reset_at_raw_from_rate_limit_artifact
@@ -102,6 +103,23 @@ def test_parse_iso_reset_at_and_derive_seconds() -> None:
     assert isinstance(info["resets_in_seconds"], int)
     # Allow small clock skew.
     assert 0 < info["resets_in_seconds"] <= 35
+
+
+def test_derive_reset_seconds_does_not_swallow_unexpected_clock_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reset_at = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
+
+    class FailingDateTime:
+        @staticmethod
+        def now(_timezone: timezone) -> datetime:
+            raise RuntimeError("unexpected system clock failure")
+
+    monkeypatch.setattr(_codex_autopatch, "_parse_iso_dt", lambda _value: reset_at)
+    monkeypatch.setattr(_codex_autopatch, "datetime", FailingDateTime)
+
+    with pytest.raises(RuntimeError, match="unexpected system clock failure"):
+        _extract_rate_limit_reset_info("HTTP 429 reset_at=2026-07-22T12:00:00+00:00")
 
 
 def test_parse_resets_in_seconds_jsonish() -> None:
