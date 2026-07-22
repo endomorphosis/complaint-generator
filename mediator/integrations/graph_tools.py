@@ -145,6 +145,7 @@ class GraphAwareRetrievalReranker:
             )
 
         try:
+            unsatisfied_priority_terms: List[str] = []
             unsatisfied = (
                 dg.find_unsatisfied_requirements()
                 if hasattr(dg, "find_unsatisfied_requirements")
@@ -155,15 +156,20 @@ class GraphAwareRetrievalReranker:
                     continue
                 node_name = str(item.get("node_name", "") or "")
                 if node_name:
-                    priority_terms.append(node_name)
+                    unsatisfied_priority_terms.append(node_name)
                 for missing in item.get("missing_dependencies", []) or []:
                     if not isinstance(missing, dict):
                         continue
                     source_name = str(missing.get("source_name", "") or "")
                     if source_name and source_name.lower() != "unknown":
-                        priority_terms.append(source_name)
+                        unsatisfied_priority_terms.append(source_name)
+            priority_terms.extend(unsatisfied_priority_terms)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to extract unsatisfied dependency-graph requirements; "
+                "continuing without requirement priority terms",
+                exc_info=True,
+            )
 
         return {
             "overall_readiness": max(0.0, min(1.0, overall_readiness)),
