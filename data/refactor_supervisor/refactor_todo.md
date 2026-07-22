@@ -3314,11 +3314,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-200-defineatypedrefillscanresultandterminalreasontax
 - Acceptance: A versioned result contract distinguishes generated, exhausted, duplicate-only, threshold-satisfied, cooldown, disabled, partial, failed, and timed-out outcomes.; The contract records scan mode, analyzer version, repository and tree identity, start and finish timestamps, and whether the result is safe for completion reasoning.; Legacy list-returning callbacks remain supported through an explicit compatibility adapter rather than implicit truthiness.; No empty result is interpreted as goal completion without a typed terminal reason.
 
-- [ ] Task checkbox-201: REF-201 Instrument scan inventory, parser coverage, exclusions, and candidate accounting
+- [x] Task checkbox-201: REF-201 Instrument scan inventory, parser coverage, exclusions, and candidate accounting
 
 ## REF-201 Instrument scan inventory, parser coverage, exclusions, and candidate accounting
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
@@ -3335,7 +3335,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-201-instrumentscaninventoryparsercoverageexclusionsa
 - Acceptance: Receipts count git roots, tracked files, eligible files, parsed files, cache hits, excluded files, parser failures, raw candidates, seen candidates, deduplicated candidates, and appended tasks.; Every skipped file and parser failure has a bounded reason code plus representative paths, with full details available as a durable artifact.; Candidate accounting balances from raw detection through filtering and task materialization.; Incremental and exhaustive scans report equivalent coverage dimensions.
 
-- [ ] Task checkbox-202: REF-202 Persist scan receipts in events, strategy state, status, and scheduler metrics
+- [x] Task checkbox-202: REF-202 Persist scan receipts in events, strategy state, status, and scheduler metrics
 
 ## REF-202 Persist scan receipts in events, strategy state, status, and scheduler metrics
 
@@ -3356,11 +3356,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-202-persistscanreceiptsineventsstrategystatestatusan
 - Acceptance: Each refill attempt emits one canonical receipt CID and a compact event projection regardless of outcome.; Strategy and status payloads expose the latest successful scan, latest attempted scan, terminal reason, freshness, health, and candidate funnel.; Large per-file details are referenced by artifact path or CID rather than embedded repeatedly in heartbeat files.; Metrics distinguish skipped, duplicate-only, exhausted, partial, and failed scans without breaking older consumers.
 
-- [ ] Task checkbox-203: REF-203 Add analyzer canaries, parser failure budgets, and fail-closed health classification
+- [x] Task checkbox-203: REF-203 Add analyzer canaries, parser failure budgets, and fail-closed health classification
 
 ## REF-203 Add analyzer canaries, parser failure budgets, and fail-closed health classification
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
@@ -3381,7 +3381,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-204 Implement fingerprint-independent audit scans and exhaustion quorum
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
@@ -3419,7 +3419,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-205-escalatelow-backloganalysisthroughastandllm-rout
 - Acceptance: A policy escalates from incremental static scan to exhaustive AST coverage and then schema-constrained llm_router proposals when healthy backlog remains below target.; Each escalation records cost, scope, novelty, confidence, rejected candidates, and the objective terms it attempted to cover.; Router failure or low-confidence output produces an analysis-inconclusive result and deterministic fallback, never a false completion.; Rate, token, retry, and novelty limits prevent an unbounded task-generation loop.
 
-- [ ] Task checkbox-206: REF-206 Define an evidence-backed goal lifecycle and completion state machine
+- [x] Task checkbox-206: REF-206 Define an evidence-backed goal lifecycle and completion state machine
 
 ## REF-206 Define an evidence-backed goal lifecycle and completion state machine
 
