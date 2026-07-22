@@ -1209,6 +1209,23 @@ def test_session_runs_document_generation_handoff_and_records_grounding_summary(
     assert result.final_state["claim_support_packet_summary"]["claim_count"] == 1
 
 
+def test_document_generation_logs_formalization_transition_failure_and_continues(caplog):
+    class _FailingFormalizationMediator(_DocumentMediator):
+        def advance_to_formalization_phase(self):
+            raise RuntimeError("formalization transition failed")
+
+    mediator = _FailingFormalizationMediator()
+    session = _make_document_session(mediator)
+
+    with caplog.at_level("WARNING", logger="adversarial_harness.session"):
+        result = session._run_document_generation({"type": "housing_discrimination"})
+
+    assert result["ready_to_file"] is True
+    assert mediator.document_kwargs["user_id"] == "document_session"
+    assert "Could not advance adversarial session document_session to formalization" in caplog.text
+    assert "formalization transition failed" in caplog.text
+
+
 def test_session_builds_fallback_document_packet_when_builder_is_unavailable():
     mediator = _FallbackDocumentMediator()
     session = _make_fallback_document_session(mediator)
