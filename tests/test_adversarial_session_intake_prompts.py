@@ -1209,6 +1209,23 @@ def test_session_runs_document_generation_handoff_and_records_grounding_summary(
     assert result.final_state["claim_support_packet_summary"]["claim_count"] == 1
 
 
+def test_document_generation_logs_intake_confirmation_failure_and_continues(caplog):
+    class _FailingConfirmationMediator(_DocumentMediator):
+        def confirm_intake_summary(self, confirmation_note="", confirmation_source="complainant"):
+            raise RuntimeError("intake confirmation failed")
+
+    mediator = _FailingConfirmationMediator()
+    session = _make_document_session(mediator)
+
+    with caplog.at_level("WARNING", logger="adversarial_harness.session"):
+        result = session._run_document_generation({"type": "housing_discrimination"})
+
+    assert result["ready_to_file"] is True
+    assert mediator.document_kwargs["user_id"] == "document_session"
+    assert "Could not confirm the intake summary for adversarial session document_session" in caplog.text
+    assert "intake confirmation failed" in caplog.text
+
+
 def test_document_generation_logs_formalization_transition_failure_and_continues(caplog):
     class _FailingFormalizationMediator(_DocumentMediator):
         def advance_to_formalization_phase(self):

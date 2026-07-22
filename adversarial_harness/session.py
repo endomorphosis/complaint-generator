@@ -4464,7 +4464,12 @@ class AdversarialSession:
                     confirmation_source='adversarial_optimizer',
                 )
             except Exception:
-                pass
+                logger.warning(
+                    "Could not confirm the intake summary for adversarial session %s; "
+                    "continuing with the direct document-generation handoff",
+                    self.session_id,
+                    exc_info=True,
+                )
 
         advance_to_evidence = getattr(self.mediator, 'advance_to_evidence_phase', None)
         if callable(advance_to_evidence):
