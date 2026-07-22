@@ -1295,6 +1295,41 @@ def test_session_builds_fallback_document_packet_when_builder_is_unavailable():
     assert result.final_state["document_generation"]["draft_text_available"] is True
 
 
+def test_fallback_document_logs_failed_phase_read_and_recovers_remaining_inputs(caplog):
+    class _PartiallyFailingPhaseManager:
+        def get_phase_data(self, phase, key):
+            if key == "uploaded_evidence_summary":
+                raise RuntimeError("evidence summary read failed")
+            if key == "claim_support_packet_summary":
+                return {"claim_count": 2}
+            if key == "intake_case_file":
+                return {
+                    "canonical_facts": [
+                        {"fact_text": "The agency issued a dated termination notice."},
+                    ],
+                }
+            return None
+
+    mediator = _FallbackDocumentMediator()
+    mediator.phase_manager = _PartiallyFailingPhaseManager()
+    session = _make_fallback_document_session(mediator)
+
+    with caplog.at_level("WARNING", logger="adversarial_harness.session"):
+        result = session._build_document_generation_fallback(
+            {"type": "housing_discrimination"},
+        )
+
+    claim = result["draft"]["claims_for_relief"][0]
+    assert claim["support_summary"]["uploaded_evidence_count"] == 0
+    assert claim["support_summary"]["claim_support_claim_count"] == 2
+    assert result["draft"]["factual_allegations"] == [
+        "The agency issued a dated termination notice.",
+    ]
+    assert "Could not read uploaded_evidence_summary phase data" in caplog.text
+    assert "fallback_document_session" in caplog.text
+    assert "evidence summary read failed" in caplog.text
+
+
 def test_session_result_preserves_optimizer_graph_targets_and_kg_dynamics():
     mediator = _OptimizerStatusMediator()
     session = _make_converging_session(mediator)
