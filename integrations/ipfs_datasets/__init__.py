@@ -12,6 +12,7 @@ _EXPORT_MODULES = {
     "summarize_ipfs_datasets_startup_payload": "capabilities",
     "CaseArtifact": "types",
     "CaseAuthority": "types",
+    "AuthorityTreatmentEdge": "types",
     "CaseClaimElement": "types",
     "CaseFact": "types",
     "CaseSupportEdge": "types",
@@ -40,13 +41,21 @@ _EXPORT_MODULES = {
     "scrape_web_content": "search",
     "search_brave_web": "search",
     "search_multi_engine_web": "search",
+    "archive_url_snapshot": "search",
+    "rank_search_results": "search",
     "DOCUMENTS_AVAILABLE": "documents",
     "DOCUMENTS_ERROR": "documents",
+    "detect_document_input_format": "documents",
     "extract_text_content": "documents",
     "ingest_download_manifest": "documents",
     "ingest_local_document": "documents",
     "parse_document": "documents",
+    "parse_document_bytes": "documents",
+    "parse_document_file": "documents",
+    "parse_document_text": "documents",
     "parse_pdf_to_record": "documents",
+    "should_parse_document_input": "documents",
+    "summarize_document_parse": "documents",
     "generate_text_with_metadata": "llm",
     "llm_router_status": "llm",
     "get_router_status_report": "router_status",
@@ -59,8 +68,22 @@ _EXPORT_MODULES = {
     "cross_analyze_pdf_documents": "graphrag",
     "batch_process_pdfs": "graphrag",
     "query_pdf_knowledge_graph": "graphrag",
+    "score_ontology_support_paths": "graphrag",
+    "identify_ontology_gaps": "graphrag",
+    "score_support_path_quality": "graphrag",
+    "build_validate_score_ontology": "graphrag",
+    "KNOWLEDGE_GRAPHS_AVAILABLE": "graphs",
+    "GRAPHS_ERROR": "graphs",
+    "extract_graph_from_text": "graphs",
+    "query_graph_support": "graphs",
+    "persist_graph_snapshot": "graphs",
+    "query_graph_snapshot": "graphs",
+    "resolve_duplicate_entities": "graphs",
+    "attach_provenance_edges": "graphs",
+    "get_authority_graph_api_version": "graphs",
     "build_policy_rule_corpus": "policy_rules",
     "extract_policy_rules_from_pdf": "policy_rules",
+    "check_policy_rules_with_deontic_norms": "policy_rules",
     "pin_cid": "storage",
     "retrieve_bytes": "storage",
     "storage_backend_status": "storage",
@@ -79,16 +102,54 @@ _EXPORT_MODULES = {
     "create_vector_index": "vector_store",
     "get_embeddings_router": "vector_store",
     "search_vector_index": "vector_store",
+    "THEOREM_EXPORT_VERSION": "theorem_export",
+    "export_formulas_to_lean4": "theorem_export",
+    "export_formulas_to_coq": "theorem_export",
+    "export_proof_result_to_theorems": "theorem_export",
+    "LOGIC_AVAILABLE": "logic",
+    "LOGIC_ERROR": "logic",
+    "Z3_AVAILABLE": "logic",
+    "REASONER_BRIDGE_AVAILABLE": "logic",
+    "REASONER_BRIDGE_ERROR": "logic",
+    "LOCAL_FORMAL_LOGIC_AVAILABLE": "logic",
+    "LOCAL_FORMAL_LOGIC_PATH": "logic",
+    "text_to_fol": "logic",
+    "legal_text_to_deontic": "logic",
+    "prove_claim_elements": "logic",
+    "check_contradictions": "logic",
+    "run_hybrid_reasoning": "logic",
+    "get_predicate_templates": "logic",
+    "map_claim_elements_to_predicates": "logic",
+    "LEGAL_SCRAPERS_AVAILABLE": "legal",
+    "LEGAL_SCRAPERS_ERROR": "legal",
+    "LEGAL_SOURCE_AVAILABILITY": "legal",
+    "search_us_code": "legal",
+    "search_federal_register": "legal",
+    "search_recap_documents": "legal",
+    "search_state_laws": "legal",
+    "search_state_administrative_rules": "legal",
+    "search_legal_authority_program": "legal",
+    "constrain_assertions_to_corpus": "legal",
+    "DRAFT_LOGIC_PIPELINE_VERSION": "draft_logic_pipeline",
+    "run_draft_logic_pipeline": ("draft_logic_pipeline", "run_pipeline"),
+    "render_proof_report": "draft_logic_pipeline",
+    "pin_proof_report_to_ipfs": "draft_logic_pipeline",
+    "QUALITY_SCORER_VERSION": "quality",
+    "score_draft_quality": "quality",
 }
 
 __all__ = list(_EXPORT_MODULES)
 
 
 def __getattr__(name: str) -> Any:
-    module_name = _EXPORT_MODULES.get(name)
-    if module_name is None:
+    module_spec = _EXPORT_MODULES.get(name)
+    if module_spec is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    if isinstance(module_spec, tuple):
+        module_name, attribute_name = module_spec
+    else:
+        module_name, attribute_name = module_spec, name
     module = import_module(f"{__name__}.{module_name}")
-    value = getattr(module, name)
+    value = getattr(module, attribute_name)
     globals()[name] = value
     return value

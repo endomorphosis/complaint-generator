@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from .complaint_mcp_protocol import handle_jsonrpc_message, tool_list_payload
 from .complaint_workspace import ComplaintWorkspaceService, generate_decentralized_id
+from .fastapi_compat import attach_router_routes
 
 try:
     import python_multipart  # type: ignore  # noqa: F401
@@ -281,6 +282,7 @@ class MikeHandoffRequest(BaseModel):
     project_id: Optional[str] = None
     workspace_id: Optional[str] = None
     generate_draft_if_missing: bool = True
+    grounding_mode: Optional[str] = None
 
 
 class MikeDraftSyncRequest(BaseModel):
@@ -297,6 +299,10 @@ class MikeDraftSyncRequest(BaseModel):
     source_updated_at: Optional[str] = None
     structured_deltas: List[Dict[str, Any]] = Field(default_factory=list)
     editor_metadata: Dict[str, Any] = Field(default_factory=dict)
+    grounding_mode: Optional[str] = None
+    assertion_annotations: List[Dict[str, Any]] = Field(default_factory=list)
+    authority_links: List[Dict[str, Any]] = Field(default_factory=list)
+    sync_provenance: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SynopsisUpdateRequest(BaseModel):
@@ -571,6 +577,7 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             project_id=request.project_id,
             workspace_id=request.workspace_id,
             generate_draft_if_missing=request.generate_draft_if_missing,
+            grounding_mode=request.grounding_mode,
         )
 
     @router.get("/api/complaint-workspace/mike/status")
@@ -593,6 +600,10 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             source_updated_at=request.source_updated_at,
             structured_deltas=request.structured_deltas,
             editor_metadata=request.editor_metadata,
+            grounding_mode=request.grounding_mode,
+            assertion_annotations=request.assertion_annotations,
+            authority_links=request.authority_links,
+            sync_provenance=request.sync_provenance,
         )
 
     @router.post("/api/complaint-workspace/update-synopsis")
@@ -814,5 +825,4 @@ def attach_complaint_workspace_routes(
     app: FastAPI,
     service: Optional[ComplaintWorkspaceService] = None,
 ) -> FastAPI:
-    app.include_router(create_complaint_workspace_router(service))
-    return app
+    return attach_router_routes(app, create_complaint_workspace_router(service))

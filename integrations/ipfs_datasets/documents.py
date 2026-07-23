@@ -64,8 +64,14 @@ _PARSEABLE_MIME_TYPES = {
     "application/pdf",
     "application/rtf",
     "text/rtf",
+    "text/csv",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.presentation",
 }
 _PARSEABLE_EXTENSIONS = {
     ".txt",
@@ -78,6 +84,12 @@ _PARSEABLE_EXTENSIONS = {
     ".rtf",
     ".doc",
     ".docx",
+    ".csv",
+    ".xlsx",
+    ".pptx",
+    ".odt",
+    ".ods",
+    ".odp",
     ".eml",
 }
 
@@ -145,6 +157,16 @@ def _determine_normalization_label(input_format: str, text_present: bool) -> str
         return "rtf_to_text"
     if input_format == "docx":
         return "docx_xml_to_text"
+    if input_format == "xlsx":
+        return "xlsx_xml_to_text"
+    if input_format == "pptx":
+        return "pptx_xml_to_text"
+    if input_format in {"odt", "ods", "odp"}:
+        return "opendocument_xml_to_text"
+    if input_format == "csv":
+        return "csv_to_text"
+    if input_format == "doc":
+        return "office_binary_unparsed" if not text_present else "office_binary_text_fallback"
     if input_format == "pdf":
         return "pdf_text_fallback" if text_present else "pdf_unparsed"
     return "text_normalization"
@@ -178,8 +200,10 @@ def _compute_parse_quality(
         flags.append("empty_text")
     if input_format == "pdf":
         flags.append("pdf_binary_fallback" if text_present else "requires_ocr_or_binary_pdf")
-    if input_format in {"docx", "rtf"} and not text_present:
+    if input_format in {"docx", "xlsx", "pptx", "odt", "ods", "odp", "rtf"} and not text_present:
         flags.append("format_extraction_empty")
+    if input_format == "doc":
+        flags.append("legacy_office_binary_fallback" if text_present else "legacy_office_requires_external_parser")
 
     if text_present and raw_size > 0 and (len(text) / max(raw_size, 1)) < 0.05:
         flags.append("low_text_density")
@@ -189,6 +213,13 @@ def _compute_parse_quality(
         "html": 95.0,
         "email": 93.0,
         "docx": 88.0,
+        "xlsx": 84.0,
+        "pptx": 84.0,
+        "odt": 84.0,
+        "ods": 80.0,
+        "odp": 80.0,
+        "csv": 90.0,
+        "doc": 55.0,
         "rtf": 82.0,
         "pdf": 68.0,
     }
@@ -396,6 +427,49 @@ def _extract_docx_text(data: bytes) -> str:
     return _normalize_whitespace(unescape(text))
 
 
+def _strip_xml_text(xml_text: str) -> str:
+    text = re.sub(r"</(?:w:p|a:p|p|text:p|table:table-row|row)>", "\n", xml_text)
+    text = re.sub(r"<(?:w:tab|a:tab)[^>]*/>", " ", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return _normalize_whitespace(unescape(text))
+
+
+def _extract_ooxml_text(data: bytes, *, input_format: str) -> str:
+    if not data:
+        return ""
+    if input_format == "xlsx":
+        include_prefixes = ("xl/sharedStrings.xml", "xl/worksheets/", "xl/comments", "xl/tables/")
+    elif input_format == "pptx":
+        include_prefixes = ("ppt/slides/", "ppt/notesSlides/", "ppt/comments")
+    else:
+        return ""
+
+    try:
+        with zipfile.ZipFile(BytesIO(data)) as archive:
+            xml_parts: List[str] = []
+            for name in archive.namelist():
+                if not name.endswith(".xml"):
+                    continue
+                if not any(name.startswith(prefix) for prefix in include_prefixes):
+                    continue
+                xml_parts.append(archive.read(name).decode("utf-8", errors="ignore"))
+    except (zipfile.BadZipFile, KeyError, RuntimeError, ValueError):
+        return ""
+
+    return _strip_xml_text("\n".join(xml_parts))
+
+
+def _extract_opendocument_text(data: bytes) -> str:
+    if not data:
+        return ""
+    try:
+        with zipfile.ZipFile(BytesIO(data)) as archive:
+            content = archive.read("content.xml").decode("utf-8", errors="ignore")
+    except (zipfile.BadZipFile, KeyError, RuntimeError, ValueError):
+        return ""
+    return _strip_xml_text(content)
+
+
 def _extract_pdf_text_fallback(data: bytes) -> str:
     decoded = _decode_text_fallback(data)
     if not _is_mostly_text(decoded):
@@ -425,8 +499,22 @@ def detect_document_input_format(
         return "email"
     if lowered_mime in {"application/rtf", "text/rtf"} or lowered_name.endswith(".rtf"):
         return "rtf"
+    if lowered_mime == "text/csv" or lowered_name.endswith(".csv"):
+        return "csv"
     if lowered_mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or lowered_name.endswith(".docx"):
         return "docx"
+    if lowered_mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" or lowered_name.endswith(".xlsx"):
+        return "xlsx"
+    if lowered_mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation" or lowered_name.endswith(".pptx"):
+        return "pptx"
+    if lowered_mime == "application/vnd.oasis.opendocument.text" or lowered_name.endswith(".odt"):
+        return "odt"
+    if lowered_mime == "application/vnd.oasis.opendocument.spreadsheet" or lowered_name.endswith(".ods"):
+        return "ods"
+    if lowered_mime == "application/vnd.oasis.opendocument.presentation" or lowered_name.endswith(".odp"):
+        return "odp"
+    if lowered_mime == "application/msword" or lowered_name.endswith(".doc"):
+        return "doc"
     if lowered_mime == "application/pdf" or lowered_name.endswith(".pdf") or binary_prefix.startswith(b"%PDF-"):
         return "pdf"
     if text is not None:
@@ -537,8 +625,8 @@ def _annotate_chunk_metadata(
         end = int(chunk.get("end", start) or start)
         page_start = _chunk_page_index(text, start, page_count)
         page_end = _chunk_page_index(text, max(start, end - 1), page_count)
-        chunk_metadata = dict(chunk.get("metadata") or {})
-        chunk_metadata.update(
+        metadata = dict(chunk.get("metadata") or {})
+        metadata.update(
             {
                 "source": source,
                 "input_format": input_format,
@@ -547,6 +635,7 @@ def _annotate_chunk_metadata(
                 "quality_tier": quality_tier,
                 "page_start": page_start,
                 "page_end": page_end,
+                "section_label": str(metadata.get("section_label") or ""),
                 "source_span": {
                     "char_start": start,
                     "char_end": end,
@@ -557,7 +646,7 @@ def _annotate_chunk_metadata(
                 },
             }
         )
-        annotated.append({**chunk, "metadata": chunk_metadata})
+        annotated.append({**chunk, "metadata": metadata})
     return annotated
 
 
@@ -577,6 +666,8 @@ def parse_document_text(
         normalized_text = _strip_html(raw_text)
     elif input_format == "rtf":
         normalized_text = _strip_rtf(raw_text)
+    elif input_format == "csv":
+        normalized_text = _normalize_whitespace(raw_text.replace(",", " "))
     else:
         normalized_text = _normalize_whitespace(raw_text)
     paragraphs = _split_into_paragraphs(normalized_text)
@@ -695,6 +786,12 @@ def parse_document_bytes(
         text = _strip_rtf(_decode_text_fallback(data))
     elif input_format == "docx":
         text = _extract_docx_text(data)
+    elif input_format in {"xlsx", "pptx"}:
+        text = _extract_ooxml_text(data, input_format=input_format)
+    elif input_format in {"odt", "ods", "odp"}:
+        text = _extract_opendocument_text(data)
+    elif input_format == "csv":
+        text = _normalize_whitespace(_decode_text_fallback(data).replace(",", " "))
     elif input_format == "pdf":
         text = _extract_pdf_text_fallback(data)
     else:
@@ -724,6 +821,16 @@ def parse_document_bytes(
     parsed["lineage"]["normalization"] = str(parse_quality["extraction_method"])
     parsed["lineage"]["extraction"] = dict(parse_quality["extraction"])
     parsed["lineage"]["source_span"] = dict(parse_quality["source_span"])
+    parsed["chunks"] = _annotate_chunk_metadata(
+        list(parsed.get("chunks", []) or []),
+        text=str(parsed.get("text") or ""),
+        source=source,
+        input_format=input_format,
+        parser_version=PARSER_VERSION,
+        page_count=int(parse_quality["page_count"]),
+        extraction_method=str(parse_quality["extraction_method"]),
+        quality_tier=str(parse_quality["quality_tier"]),
+    )
     parsed["metadata"]["input_format"] = input_format
     parsed["metadata"]["page_count"] = parse_quality["page_count"]
     parsed["metadata"]["extraction_method"] = parse_quality["extraction_method"]
@@ -1290,28 +1397,111 @@ def summarize_document_parse(document_parse: Dict[str, Any]) -> Dict[str, Any]:
             "parser_version": "",
             "input_format": "",
             "paragraph_count": 0,
+            "extraction_method": "",
+            "quality_tier": "",
+            "quality_score": 0.0,
+            "page_count": 0,
         }
 
+    metadata = document_parse.get("metadata", {}) if isinstance(document_parse.get("metadata"), dict) else {}
+    parse_quality = metadata.get("parse_quality", {}) if isinstance(metadata.get("parse_quality"), dict) else {}
+    source_span = metadata.get("source_span", {}) if isinstance(metadata.get("source_span"), dict) else {}
     summary = document_parse.get("summary")
     if isinstance(summary, dict):
-        return DocumentParseSummary(
+        payload = DocumentParseSummary(
             status=str(summary.get("status") or ""),
             chunk_count=int(summary.get("chunk_count", 0) or 0),
             text_length=int(summary.get("text_length", 0) or 0),
             parser_version=str(summary.get("parser_version") or ""),
             input_format=str(summary.get("input_format") or ""),
             paragraph_count=int(summary.get("paragraph_count", 0) or 0),
+            extraction_method=str(summary.get("extraction_method") or metadata.get("extraction_method") or ""),
+            quality_tier=str(summary.get("quality_tier") or parse_quality.get("quality_tier") or ""),
+            quality_score=float(summary.get("quality_score", parse_quality.get("quality_score", 0.0)) or 0.0),
+            page_count=int(summary.get("page_count", metadata.get("page_count", source_span.get("page_count", 0))) or 0),
         ).as_dict()
+        source = str(summary.get("source") or metadata.get("source") or "")
+        if source:
+            payload["source"] = source
+        return payload
 
-    metadata = document_parse.get("metadata", {}) if isinstance(document_parse.get("metadata"), dict) else {}
-    return _build_parse_summary(
+    payload = _build_parse_summary(
         status=str(document_parse.get("status") or ""),
         text=str(document_parse.get("text") or ""),
         chunks=document_parse.get("chunks", []) or [],
         parser_version=str(metadata.get("parser_version") or ""),
         input_format=str(metadata.get("input_format") or ""),
         paragraph_count=int(metadata.get("paragraph_count", 0) or 0),
+        extraction_method=str(metadata.get("extraction_method") or parse_quality.get("extraction_method") or ""),
+        quality_tier=str(parse_quality.get("quality_tier") or metadata.get("quality_tier") or ""),
+        quality_score=float(parse_quality.get("quality_score", metadata.get("quality_score", 0.0)) or 0.0),
+        page_count=int(metadata.get("page_count", source_span.get("page_count", 0)) or 0),
     ).as_dict()
+    source = str(metadata.get("source") or "")
+    if source:
+        payload["source"] = source
+    return payload
+
+
+def extraction_method_for_format(input_format: str, text_present: bool = True) -> str:
+    """Return the canonical extraction-method label for a given input format.
+
+    This is the single source of truth for the format→extraction-method mapping
+    used by all parse pipelines and hooks.  Callers should import this helper
+    instead of maintaining local lookup tables.
+
+    Args:
+        input_format: Normalised input format string (e.g. ``"html"``, ``"pdf"``).
+        text_present: Whether usable text was extracted from the document.  Only
+            relevant for PDF inputs where the absence of text implies the document
+            needs OCR rather than a text-extraction fallback.
+
+    Returns:
+        A human-readable extraction-method label string.
+    """
+    return _determine_normalization_label(input_format, text_present)
+
+
+def quality_score_for_format(input_format: str, text_present: bool = True) -> Dict[str, Any]:
+    """Return the canonical quality-score and quality-tier for a given input format.
+
+    Like :func:`extraction_method_for_format`, this is the authoritative source
+    for the format→quality mapping so that hooks and downstream consumers do not
+    maintain their own duplicate lookup tables.
+
+    Args:
+        input_format: Normalised input format string (e.g. ``"html"``, ``"pdf"``).
+        text_present: Whether usable text was extracted.  When ``False`` the
+            returned quality score is 0.0 and the tier is ``"empty"``.
+
+    Returns:
+        A dict with keys ``quality_score`` (float) and ``quality_tier`` (str).
+    """
+    _base_scores: Dict[str, float] = {
+        "text": 98.0,
+        "html": 95.0,
+        "email": 93.0,
+        "docx": 88.0,
+        "xlsx": 84.0,
+        "pptx": 84.0,
+        "odt": 84.0,
+        "ods": 80.0,
+        "odp": 80.0,
+        "csv": 90.0,
+        "doc": 55.0,
+        "rtf": 82.0,
+        "pdf": 68.0,
+    }
+    quality_score = 0.0 if not text_present else _base_scores.get(input_format, 75.0)
+    if quality_score >= 90.0:
+        quality_tier = "high"
+    elif quality_score >= 75.0:
+        quality_tier = "medium"
+    elif quality_score > 0.0:
+        quality_tier = "low"
+    else:
+        quality_tier = "empty"
+    return {"quality_score": round(quality_score, 2), "quality_tier": quality_tier}
 
 
 __all__ = [
@@ -1322,6 +1512,7 @@ __all__ = [
     "PARSER_VERSION",
     "chunk_text",
     "detect_document_input_format",
+    "extraction_method_for_format",
     "extract_text_content",
     "ingest_download_manifest",
     "ingest_local_document",
@@ -1330,6 +1521,7 @@ __all__ = [
     "parse_document_bytes",
     "parse_document_file",
     "parse_pdf_to_record",
+    "quality_score_for_format",
     "should_parse_document_input",
     "summarize_document_parse",
 ]

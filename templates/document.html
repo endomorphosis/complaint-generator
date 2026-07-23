@@ -2240,7 +2240,7 @@
             return `<section><h2>Artifacts</h2>${gateNote}<div class="artifact-grid">${cards}</div></section>`;
         }
 
-        function renderClaims(claims, readinessClaims = []) {
+        function renderClaims(claims, readinessClaims = [], reviewLinks = {}) {
             if (!Array.isArray(claims) || !claims.length) {
                 return '';
             }
@@ -2251,11 +2251,20 @@
             );
             const cards = claims.map((claim) => {
                 const readiness = readinessByClaim.get(String(claim.claim_type || '').toLowerCase()) || null;
+                const claimType = String(claim.claim_type || '').trim();
+                const claimReviewUrl = appendClaimElementFocusToReviewUrl(
+                    resolveClaimReviewUrl({ claim_type: claimType, review_url: readiness && readiness.review_url }, reviewLinks),
+                    resolvePreferredClaimElementFocus(reviewLinks, { claimType }),
+                );
                 const readinessWarningBlock = readiness && Array.isArray(readiness.warnings) && readiness.warnings.length
                     ? `
                         <div class="claim-warning-callout">
                             <strong>Open filing warnings</strong>
-                            ${renderWarningList(readiness.warnings)}
+                            ${renderWarningList(readiness.warnings, {
+                                claimType,
+                                reviewUrl: claimReviewUrl,
+                                reviewLinks,
+                            })}
                         </div>
                     `
                     : '';
@@ -2618,15 +2627,142 @@
             return `<ul class="metric-list">${items}</ul>`;
         }
 
-        function renderWarningList(warnings) {
+        function formatBuilderCountMap(values) {
+            const entries = Object.entries(values && typeof values === 'object' ? values : {})
+                .filter(([, value]) => Number(value || 0) > 0);
+            return entries.length
+                ? entries.map(([label, value]) => `${humanizeKey(label)}=${Number(value || 0)}`).join(', ')
+                : 'No counts reported.';
+        }
+
+        function renderBuilderSupportSummary(summary) {
+            const builderSummary = summary && typeof summary === 'object' ? summary : {};
+            if (!Object.keys(builderSummary).length) {
+                return '';
+            }
+            const artifactProvenance = builderSummary.artifact_provenance && typeof builderSummary.artifact_provenance === 'object'
+                ? builderSummary.artifact_provenance
+                : {};
+            const documentProvenance = builderSummary.document_provenance_summary && typeof builderSummary.document_provenance_summary === 'object'
+                ? builderSummary.document_provenance_summary
+                : {};
+            const sectionSupport = Array.isArray(builderSummary.section_support)
+                ? builderSummary.section_support.filter((item) => item && typeof item === 'object')
+                : [];
+            const sectionCards = sectionSupport.slice(0, 4).map((section) => {
+                const reviewLink = section.review_url
+                    ? `<div class="inline-link-row"><a class="inline-link" data-review-intent-link="true" href="${escapeHtml(section.review_url)}">Open support review</a></div>`
+                    : '';
+                return `
+                    <article class="readiness-detail-card">
+                        <div class="readiness-card-header">
+                            <h3>${escapeHtml(section.title || humanizeKey(section.section_key || 'section'))}</h3>
+                            ${renderStatusPill(section.support_status || section.status || 'ready')}
+                        </div>
+                        <ul class="metric-list">
+                            <li><strong>Claim elements:</strong> ${escapeHtml(String(section.claim_element_count || 0))}</li>
+                            <li><strong>Source refs:</strong> ${escapeHtml(String(section.source_ref_count || 0))}</li>
+                            <li><strong>Explicit gaps:</strong> ${escapeHtml(String(section.explicit_gap_count || 0))}</li>
+                        </ul>
+                        ${reviewLink}
+                    </article>
+                `;
+            }).join('');
+            const provenanceChips = [
+                `<span class="readiness-chip"><strong>Support statuses:</strong> ${escapeHtml(formatBuilderCountMap(builderSummary.support_status_counts))}</span>`,
+                `<span class="readiness-chip"><strong>Source refs:</strong> ${escapeHtml(String(builderSummary.source_ref_count || 0))}</span>`,
+                `<span class="readiness-chip"><strong>Source families:</strong> ${escapeHtml(formatBuilderCountMap(builderSummary.source_family_counts))}</span>`,
+                `<span class="readiness-chip"><strong>Artifact families:</strong> ${escapeHtml(formatBuilderCountMap(builderSummary.artifact_family_counts))}</span>`,
+                `<span class="readiness-chip"><strong>Guardrails:</strong> ${escapeHtml(String(builderSummary.guardrail_warning_count || 0))} warnings / ${escapeHtml(String(builderSummary.guardrail_blocker_count || 0))} blockers</span>`,
+                `<span class="readiness-chip"><strong>Artifact downloads:</strong> ${escapeHtml(String(artifactProvenance.downloadable_count || 0))}/${escapeHtml(String(artifactProvenance.artifact_count || 0))} managed</span>`,
+            ];
+            const groundingLine = Object.keys(documentProvenance).length
+                ? `<div class="preview-meta"><strong>Document grounding:</strong> fact-backed ratio ${escapeHtml(String(documentProvenance.fact_backed_ratio ?? 'n/a'))}; low-grounding flag ${documentProvenance.low_grounding_flag ? 'yes' : 'no'}.</div>`
+                : '';
+            const warningTypeLine = Object.keys(builderSummary.warning_type_counts || {}).length
+                ? `<div class="preview-meta"><strong>Guardrail types:</strong> ${escapeHtml(formatBuilderCountMap(builderSummary.warning_type_counts))}</div>`
+                : '';
+            return `
+                <div class="readiness-subtitle">Builder Support Summary</div>
+                <div class="readiness-grid">${provenanceChips.join('')}</div>
+                ${groundingLine}
+                ${warningTypeLine}
+                ${sectionCards ? `<div class="readiness-detail-grid">${sectionCards}</div>` : ''}
+            `;
+        }
+
+        function inferWarningSupportKind(warning, sectionKey = '') {
+            const normalizedSectionKey = String(sectionKey || '').trim().toLowerCase();
+            const explicitSupportKind = String((warning && warning.support_kind) || '').trim().toLowerCase();
+            if (explicitSupportKind === 'authority' || explicitSupportKind === 'evidence') {
+                return explicitSupportKind;
+            }
+            const warningCode = String((warning && (warning.code || warning.warning_type)) || '').trim().toLowerCase();
+            if (warningCode.includes('authority') || warningCode.includes('legal') || warningCode.includes('jurisdiction')) {
+                return 'authority';
+            }
+            if (warningCode.includes('proof') || warningCode.includes('chronology') || warningCode.includes('evidence') || warningCode.includes('intake')) {
+                return 'evidence';
+            }
+            if (['claims_for_relief', 'jurisdiction_and_venue'].includes(normalizedSectionKey)) {
+                return 'authority';
+            }
+            if (['summary_of_facts', 'chronology', 'proof_leads', 'exhibits'].includes(normalizedSectionKey)) {
+                return 'evidence';
+            }
+            return '';
+        }
+
+        function buildWarningReviewTargets({ warning, reviewUrl = '', claimType = '', sectionKey = '', reviewLinks = {} } = {}) {
+            const normalizedClaimType = String(claimType || '').trim();
+            const normalizedSectionKey = String(sectionKey || '').trim().toLowerCase();
+            const baseReviewUrl = String(reviewUrl || '').trim()
+                || (normalizedSectionKey
+                    ? resolveSectionReviewUrl(normalizedSectionKey, {}, reviewLinks)
+                    : resolveClaimReviewUrl({ claim_type: normalizedClaimType }, reviewLinks));
+            if (!baseReviewUrl) {
+                return { proofCardUrl: '', supportLedgerUrl: '' };
+            }
+            const warningClaimElementId = String(
+                (warning && (warning.claim_element_id || warning.target_claim_element_id || warning.claim_element || warning.element_id)) || ''
+            ).trim();
+            const preferredClaimElementId = resolvePreferredClaimElementFocus(reviewLinks, {
+                claimType: normalizedClaimType,
+                sectionKey: normalizedSectionKey,
+            });
+            const claimElementId = warningClaimElementId || preferredClaimElementId;
+            const proofCardUrl = appendClaimElementFocusToReviewUrl(baseReviewUrl, claimElementId) || baseReviewUrl;
+            const supportKind = inferWarningSupportKind(warning, normalizedSectionKey);
+            const supportSectionKey = normalizedSectionKey || (supportKind === 'authority' ? 'claims_for_relief' : 'summary_of_facts');
+            const supportLedgerUrl = appendTaskUpdateIntentToReviewUrl(
+                appendSupportKindToReviewUrl(proofCardUrl, supportKind),
+                supportSectionKey,
+                supportKind,
+            );
+            return { proofCardUrl, supportLedgerUrl };
+        }
+
+        function renderWarningList(warnings, options = {}) {
             const normalized = Array.isArray(warnings) ? warnings.filter((warning) => warning && typeof warning === 'object') : [];
             if (!normalized.length) {
                 return '<div class="preview-meta">No drafting warnings are currently reported.</div>';
             }
             const items = normalized.map((warning) => {
                 const severity = warning.severity ? `[${String(warning.severity).toUpperCase()}] ` : '';
-                const code = warning.code ? `${humanizeKey(warning.code)}: ` : '';
-                return `<li>${escapeHtml(`${severity}${code}${warning.message || 'Warning reported.'}`)}</li>`;
+                const warningCode = warning.code || warning.warning_type || '';
+                const code = warningCode ? `${humanizeKey(warningCode)}: ` : '';
+                const { proofCardUrl, supportLedgerUrl } = buildWarningReviewTargets({
+                    warning,
+                    reviewUrl: options.reviewUrl || '',
+                    claimType: options.claimType || '',
+                    sectionKey: options.sectionKey || '',
+                    reviewLinks: options.reviewLinks || {},
+                });
+                const actionLinks = [
+                    proofCardUrl ? `<a class="inline-link" data-review-intent-link="true" href="${escapeHtml(proofCardUrl)}">Open proof card</a>` : '',
+                    supportLedgerUrl ? `<a class="inline-link" data-review-intent-link="true" href="${escapeHtml(supportLedgerUrl)}">Open support ledger</a>` : '',
+                ].filter(Boolean).join(' · ');
+                return `<li>${escapeHtml(`${severity}${code}${warning.message || 'Warning reported.'}`)}${actionLinks ? `<div class="preview-meta" style="margin-top: 6px;">${actionLinks}</div>` : ''}</li>`;
             }).join('');
             return `<ul class="warning-list">${items}</ul>`;
         }
@@ -2696,12 +2832,23 @@
 
         function renderReviewLinks(reviewLinks) {
             const dashboardUrl = String((reviewLinks && reviewLinks.dashboard_url) || '').trim() || '/claim-support-review';
+            const focusedDashboardUrl = appendClaimElementFocusToReviewUrl(
+                dashboardUrl,
+                resolvePreferredClaimElementFocus(reviewLinks),
+            ) || dashboardUrl;
             const intakeStatus = reviewLinks && typeof reviewLinks.intake_status === 'object' ? reviewLinks.intake_status : {};
             const blockers = Array.isArray(intakeStatus.blockers) ? intakeStatus.blockers : [];
             const contradictions = Array.isArray(intakeStatus.contradictions) ? intakeStatus.contradictions : [];
             const resumeIntent = normalizeReviewIntent(state.reviewIntent);
+            const focusedResumeUrl = appendClaimElementFocusToReviewUrl(
+                resumeIntent && resumeIntent.review_url ? resumeIntent.review_url : '',
+                resolvePreferredClaimElementFocus(reviewLinks, {
+                    claimType: resumeIntent && resumeIntent.claim_type ? resumeIntent.claim_type : '',
+                    sectionKey: resumeIntent && resumeIntent.section ? resumeIntent.section : '',
+                }),
+            );
             const resumeLink = resumeIntent && resumeIntent.review_url && resumeIntent.review_url !== dashboardUrl
-                ? `<a class="inline-link" data-review-intent-link="true" href="${escapeHtml(resumeIntent.review_url)}">Resume Review Focus</a>`
+                ? `<a class="inline-link" data-review-intent-link="true" href="${escapeHtml(focusedResumeUrl || resumeIntent.review_url)}">Resume Review Focus</a>`
                 : '';
             const intakeStatusSummary = (() => {
                 if (!Object.keys(intakeStatus).length) {
@@ -2733,7 +2880,7 @@
             })();
             return `
                 <div class="inline-link-row">
-                    <a class="inline-link" data-review-intent-link="true" href="${escapeHtml(dashboardUrl)}">Open Review Dashboard</a>
+                    <a class="inline-link" data-review-intent-link="true" href="${escapeHtml(focusedDashboardUrl)}">Open Review Dashboard</a>
                     ${resumeLink}
                 </div>
                 ${intakeStatusSummary}
@@ -3076,6 +3223,49 @@
             return reviewUrl;
         }
 
+        function appendClaimElementFocusToReviewUrl(reviewUrl, claimElementId) {
+            const normalizedUrl = String(reviewUrl || '').trim();
+            const normalizedElementId = String(claimElementId || '').trim();
+            if (!normalizedUrl || !normalizedElementId) {
+                return normalizedUrl;
+            }
+            const parsedUrl = new URL(normalizedUrl, window.location.origin);
+            parsedUrl.searchParams.set('claim_element_id', normalizedElementId);
+            return `${parsedUrl.pathname}${parsedUrl.search}`;
+        }
+
+        function resolvePrimaryValidationTarget(reviewLinks) {
+            const target = reviewLinks && typeof reviewLinks.primary_validation_target === 'object'
+                ? reviewLinks.primary_validation_target
+                : {};
+            return {
+                claimType: String(target.claim_type || '').trim().toLowerCase(),
+                sectionKey: String(target.section || target.section_key || '').trim().toLowerCase(),
+                claimElementId: String(
+                    target.claim_element_id
+                    || target.target_claim_element_id
+                    || target.claim_element
+                    || ''
+                ).trim(),
+            };
+        }
+
+        function resolvePreferredClaimElementFocus(reviewLinks, { claimType = '', sectionKey = '' } = {}) {
+            const target = resolvePrimaryValidationTarget(reviewLinks);
+            if (!target.claimElementId) {
+                return '';
+            }
+            const normalizedClaimType = String(claimType || '').trim().toLowerCase();
+            const normalizedSectionKey = String(sectionKey || '').trim().toLowerCase();
+            if (normalizedClaimType && target.claimType && normalizedClaimType !== target.claimType) {
+                return '';
+            }
+            if (normalizedSectionKey && target.sectionKey && normalizedSectionKey !== target.sectionKey) {
+                return '';
+            }
+            return target.claimElementId;
+        }
+
         function appendSectionReviewIntentToReviewUrl(reviewUrl, sectionKey) {
             const normalizedSectionKey = String(sectionKey || '').trim().toLowerCase();
             if (!normalizedSectionKey) {
@@ -3365,10 +3555,17 @@
                             manualReviewClaims,
                             pendingReviewClaims,
                         );
-                        if (!claimType || !reviewUrl) {
+                        const focusedReviewUrl = appendClaimElementFocusToReviewUrl(
+                            reviewUrl,
+                            resolvePreferredClaimElementFocus(reviewLinks, {
+                                claimType,
+                                sectionKey,
+                            }),
+                        );
+                        if (!claimType || !focusedReviewUrl) {
                             return '';
                         }
-                        return `<a class="inline-link" data-review-intent-link="true" href="${escapeHtml(reviewUrl)}">Open ${escapeHtml(humanizeKey(claimType))} Section Review</a>`;
+                        return `<a class="inline-link" data-review-intent-link="true" href="${escapeHtml(focusedReviewUrl)}">Open ${escapeHtml(humanizeKey(claimType))} Section Review</a>`;
                     }).join('')}
                 </div>
             `;
@@ -3376,11 +3573,15 @@
 
         function renderClaimActions(claim, reviewLinks, manualReviewClaims, pendingReviewClaims) {
             const claimType = String((claim && claim.claim_type) || '').trim();
-            const reviewUrl = appendClaimQueueIntentToReviewUrl(
+            const claimReviewUrl = appendClaimQueueIntentToReviewUrl(
                 resolveClaimReviewUrl(claim, reviewLinks),
                 claimType,
                 manualReviewClaims,
                 pendingReviewClaims,
+            );
+            const reviewUrl = appendClaimElementFocusToReviewUrl(
+                claimReviewUrl,
+                resolvePreferredClaimElementFocus(reviewLinks, { claimType }),
             );
             if (!claimType || !reviewUrl) {
                 return '';
@@ -3496,6 +3697,10 @@
                     resolveSectionReviewUrl(key, section, reviewLinks),
                     key,
                 );
+                const focusedReviewUrl = appendClaimElementFocusToReviewUrl(
+                    reviewUrl,
+                    resolvePreferredClaimElementFocus(reviewLinks, { sectionKey: key }),
+                );
                 return `
                 <article class="readiness-detail-card">
                     <div class="readiness-card-header">
@@ -3505,8 +3710,12 @@
                     <div class="readiness-subtitle">Section Metrics</div>
                     ${renderMetricList(section.metrics || {})}
                     <div class="readiness-subtitle">Section Warnings</div>
-                    ${renderWarningList(section.warnings || [])}
-                    ${reviewUrl ? `<div class="inline-link-row"><a class="inline-link" data-review-intent-link="true" href="${escapeHtml(reviewUrl)}">Open Section Review</a></div>` : ''}
+                    ${renderWarningList(section.warnings || [], {
+                        sectionKey: key,
+                        reviewUrl: focusedReviewUrl,
+                        reviewLinks,
+                    })}
+                    ${focusedReviewUrl ? `<div class="inline-link-row"><a class="inline-link" data-review-intent-link="true" href="${escapeHtml(focusedReviewUrl)}">Open Section Review</a></div>` : ''}
                     ${renderSectionClaimLinks(key, section, reviewLinks, manualReviewClaims, pendingReviewClaims)}
                 </article>
             `;
@@ -3521,6 +3730,16 @@
             }
             const cards = values.map((claim) => {
                 const supportByKind = Object.entries(claim.support_by_kind || {}).filter(([, value]) => value !== null && value !== undefined && value !== '');
+                const claimType = String(claim.claim_type || '').trim();
+                const claimReviewUrl = appendClaimElementFocusToReviewUrl(
+                    appendClaimQueueIntentToReviewUrl(
+                        resolveClaimReviewUrl(claim, reviewLinks),
+                        claimType,
+                        manualReviewClaims,
+                        pendingReviewClaims,
+                    ),
+                    resolvePreferredClaimElementFocus(reviewLinks, { claimType }),
+                );
                 const supportSummary = supportByKind.length
                     ? supportByKind.map(([key, value]) => `${humanizeKey(key)}=${value}`).join(', ')
                     : 'No support-by-kind counts reported.';
@@ -3553,10 +3772,14 @@
                             contradiction_candidate_count: claim.contradiction_candidate_count,
                         })}
                         <div class="readiness-subtitle">Claim Warnings</div>
-                        ${renderWarningList(claim.warnings || [])}
+                        ${renderWarningList(claim.warnings || [], {
+                            claimType,
+                            reviewUrl: claimReviewUrl,
+                            reviewLinks,
+                        })}
                         <div class="readiness-subtitle">Source Drilldown</div>
                         ${renderProvenanceList(claim, exhibits)}
-                        ${renderClaimActions(claim, reviewLinks, manualReviewClaims, pendingReviewClaims)}
+                        ${claimReviewUrl ? `<div class="inline-link-row"><a class="inline-link" data-review-intent-link="true" href="${escapeHtml(claimReviewUrl)}">Open Claim Support Review</a></div>` : ''}
                     </article>
                 `;
             }).join('');
@@ -3678,7 +3901,63 @@
             `;
         }
 
-        function renderReadiness(readiness, exhibits, reviewLinks, intakeCaseSummary) {
+        function renderChronologyBlockerSummary(chronologyBlockerSummary) {
+            if (!chronologyBlockerSummary || typeof chronologyBlockerSummary !== 'object') {
+                return '';
+            }
+            const blocked = Boolean(chronologyBlockerSummary.chronology_blocked);
+            const summary = String(chronologyBlockerSummary.summary || '').trim();
+            const failedCount = Number(chronologyBlockerSummary.temporal_rule_profile_failed_element_count || 0);
+            const partialCount = Number(chronologyBlockerSummary.temporal_rule_profile_partial_element_count || 0);
+            const unresolvedCount = Number(chronologyBlockerSummary.unresolved_temporal_issue_count || 0);
+            const gapTaskCount = Number(chronologyBlockerSummary.temporal_gap_task_count || 0);
+            const proofScore = Number(chronologyBlockerSummary.proof_readiness_score || 0);
+            const failedRuleFrameIds = Array.isArray(chronologyBlockerSummary.failed_rule_frame_ids)
+                ? chronologyBlockerSummary.failed_rule_frame_ids.filter((id) => String(id || '').trim())
+                : [];
+
+            if (!blocked && !unresolvedCount && !gapTaskCount && !failedCount && !partialCount) {
+                return '';
+            }
+
+            const tone = blocked ? 'critical' : 'important';
+            const statusLabel = blocked ? 'blocked' : 'pending';
+            const chips = [];
+            if (failedCount > 0) {
+                chips.push(`<span class="triage-chip" data-tone="critical">failed rule elements: ${escapeHtml(String(failedCount))}</span>`);
+            }
+            if (partialCount > 0) {
+                chips.push(`<span class="triage-chip" data-tone="${escapeHtml(tone)}">partial rule elements: ${escapeHtml(String(partialCount))}</span>`);
+            }
+            if (unresolvedCount > 0) {
+                chips.push(`<span class="triage-chip" data-tone="${escapeHtml(tone)}">unresolved issues: ${escapeHtml(String(unresolvedCount))}</span>`);
+            }
+            if (gapTaskCount > 0) {
+                chips.push(`<span class="triage-chip" data-tone="${escapeHtml(tone)}">chronology tasks: ${escapeHtml(String(gapTaskCount))}</span>`);
+            }
+            chips.push(`<span class="triage-chip">proof readiness: ${escapeHtml(proofScore.toFixed(2))}</span>`);
+            if (failedRuleFrameIds.length) {
+                chips.push(`<span class="triage-chip">failed frames: ${escapeHtml(failedRuleFrameIds.join(', '))}</span>`);
+            }
+
+            const claimSupportUrl = '/claim-support-review';
+            return `
+                <div class="intake-handoff-card" id="document-chronology-blocker-summary" data-tone="${escapeHtml(tone)}">
+                    <div class="readiness-subtitle">Chronology</div>
+                    <div class="readiness-card-header">
+                        <h3>${blocked ? 'Chronology blockers present' : 'Chronology issues pending'}</h3>
+                        ${renderStatusPill(statusLabel)}
+                    </div>
+                    ${summary ? `<div class="preview-meta">${escapeHtml(summary)}</div>` : ''}
+                    <div class="triage-chip-row">${chips.join('')}</div>
+                    <div class="inline-link-row" style="margin-top: 12px;">
+                        <a class="inline-link" data-review-intent-link="true" href="${escapeHtml(claimSupportUrl)}">Review Claim Support</a>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderReadiness(readiness, exhibits, reviewLinks, intakeCaseSummary, chronologyBlockerSummary, builderSummary = {}) {
             if (!readiness || typeof readiness !== 'object') {
                 return '';
             }
@@ -3701,8 +3980,10 @@
                     ${renderMikeWorkflowJourney(getEffectiveUserId())}
                     ${renderReviewLinks(reviewLinks)}
                     ${renderWorkflowPriority(reviewLinks, workflowPhasePlan)}
+                    ${renderChronologyBlockerSummary(chronologyBlockerSummary)}
                     ${renderIntakeSummaryConfirmation(reviewLinks, intakeCaseSummary)}
                     ${renderWorkflowPhaseGuidance(workflowPhasePlan)}
+                    ${renderBuilderSupportSummary(builderSummary)}
                     <div class="readiness-grid">${sectionCards}</div>
                     <div class="readiness-subtitle">Section Readiness</div>
                     ${renderSectionReadiness(readiness.sections || {}, reviewLinks, manualReviewClaims, pendingReviewClaims)}
@@ -3776,6 +4057,13 @@
                         pendingReviewClaims,
                     );
                 }
+                checklistReviewUrl = appendClaimElementFocusToReviewUrl(
+                    checklistReviewUrl,
+                    resolvePreferredClaimElementFocus(reviewLinks, {
+                        claimType: checklistClaimType,
+                        sectionKey: checklistSectionKey,
+                    }),
+                );
                 return `
                 <article class="checklist-card">
                     <div class="checklist-card-header">
@@ -4213,6 +4501,14 @@
                 claimSupportPacketSummary.proof_readiness_score != null
                     ? `Packet proof readiness: ${Number(claimSupportPacketSummary.proof_readiness_score || 0).toFixed(2)}`
                     : '',
+                (() => {
+                    const laneLine = formatSummaryCountLine(normalizeSummaryCountMap(claimSupportPacketSummary.support_lane_label_counts));
+                    return laneLine ? `Packet support lanes: ${laneLine}` : '';
+                })(),
+                (() => {
+                    const qualityLine = formatSummaryCountLine(normalizeSummaryCountMap(claimSupportPacketSummary.support_quality_counts));
+                    return qualityLine ? `Packet support quality: ${qualityLine}` : '';
+                })(),
                 claimSupportPacketSummary.claim_support_unresolved_without_review_path_count != null
                     ? `Packet unresolved without path: ${Number(claimSupportPacketSummary.claim_support_unresolved_without_review_path_count || 0)}`
                     : '',
@@ -4240,6 +4536,18 @@
                     : '',
                 claimSupportPacketSummary.temporal_warning_count != null
                     ? `Packet temporal warnings: ${Number(claimSupportPacketSummary.temporal_warning_count || 0)}`
+                    : '',
+                claimSupportPacketSummary.temporal_rule_profile_available_element_count != null
+                    ? `Packet rule profiles: ${Number(claimSupportPacketSummary.temporal_rule_profile_available_element_count || 0)}`
+                    : '',
+                claimSupportPacketSummary.temporal_rule_profile_satisfied_element_count != null
+                    ? `Packet rule satisfied: ${Number(claimSupportPacketSummary.temporal_rule_profile_satisfied_element_count || 0)}`
+                    : '',
+                claimSupportPacketSummary.temporal_rule_profile_partial_element_count != null
+                    ? `Packet rule partial: ${Number(claimSupportPacketSummary.temporal_rule_profile_partial_element_count || 0)}`
+                    : '',
+                claimSupportPacketSummary.temporal_rule_profile_failed_element_count != null
+                    ? `Packet rule failed: ${Number(claimSupportPacketSummary.temporal_rule_profile_failed_element_count || 0)}`
                     : '',
                 claimSupportPacketSummary.temporal_gap_task_count != null
                     ? `Packet chronology tasks: ${Number(claimSupportPacketSummary.temporal_gap_task_count || 0)}`
@@ -4663,6 +4971,9 @@
             const readiness = payload.drafting_readiness || draft.drafting_readiness || {};
             const filingChecklist = payload.filing_checklist || draft.filing_checklist || [];
             const reviewLinks = payload.review_links || {};
+            const builderSummary = payload.document_builder_summary && typeof payload.document_builder_summary === 'object'
+                ? payload.document_builder_summary
+                : {};
             const optimizationReport = payload.document_optimization || null;
             const readinessIntakeCaseSummary = optimizationReport && optimizationReport.intake_case_summary && typeof optimizationReport.intake_case_summary === 'object'
                 ? optimizationReport.intake_case_summary
@@ -4670,6 +4981,10 @@
                     ? payload.intake_case_summary
                     : (reviewLinks.intake_case_summary && typeof reviewLinks.intake_case_summary === 'object' ? reviewLinks.intake_case_summary : {}));
             const { manualReviewClaims, pendingReviewClaims } = buildClaimQueueIntentSets(optimizationReport && optimizationReport.intake_case_summary);
+            const draftSourceContext = draft.source_context && typeof draft.source_context === 'object' ? draft.source_context : {};
+            const chronologyBlockerSummary = draftSourceContext.chronology_blocker_summary && typeof draftSourceContext.chronology_blocker_summary === 'object'
+                ? draftSourceContext.chronology_blocker_summary
+                : null;
             const payloadReviewIntent = normalizeReviewIntent(payload.review_intent);
             if (payloadReviewIntent) {
                 persistReviewIntent(payloadReviewIntent);
@@ -4698,7 +5013,7 @@
             const html = `
                 ${renderArtifacts(payload.artifacts || {})}
                 <div class="draft-shell">
-                    ${renderReadiness(readiness, draft.exhibits || [], reviewLinks, readinessIntakeCaseSummary)}
+                    ${renderReadiness(readiness, draft.exhibits || [], reviewLinks, readinessIntakeCaseSummary, chronologyBlockerSummary, builderSummary)}
                     ${renderFilingChecklist(filingChecklist, manualReviewClaims, pendingReviewClaims)}
                     ${renderOptimizationReport(optimizationReport, reviewLinks)}
                     <div class="court-header">${escapeHtml(draft.court_header || '')}</div>
@@ -4741,7 +5056,7 @@
                         </article>
                     </div>
 
-                    ${renderClaims(draft.claims_for_relief || [], readiness.claims || [])}
+                    ${renderClaims(draft.claims_for_relief || [], readiness.claims || [], reviewLinks)}
 
                     <section>
                         <h2>Requested Relief</h2>

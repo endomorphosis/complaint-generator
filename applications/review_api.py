@@ -2,23 +2,36 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from claim_support_review import (
     ClaimSupportDocumentSaveRequest,
     ClaimSupportFollowUpExecuteRequest,
     ClaimSupportIntakeSummaryConfirmRequest,
     ClaimSupportManualReviewResolveRequest,
+    ClaimSupportReparseDocumentRequest,
     ClaimSupportReviewRequest,
     ClaimSupportTestimonySaveRequest,
     build_claim_support_document_payload,
     build_claim_support_follow_up_execution_payload,
     build_claim_support_intake_summary_confirmation_payload,
     build_claim_support_manual_review_resolution_payload,
+    build_claim_support_reparse_document_payload,
     build_claim_support_review_payload,
     build_claim_support_testimony_payload,
     build_claim_support_uploaded_document_payload,
 )
-from .document_api import create_document_router
+from .document_api import attach_document_routes
+from .fastapi_compat import attach_router_routes
 
 try:
     import python_multipart  # type: ignore  # noqa: F401
@@ -250,6 +263,7 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
             source_url: Optional[str] = Form(default=None),
             mime_type: Optional[str] = Form(default=None),
             evidence_type: str = Form(default="document"),
+            testimony_id: Optional[str] = Form(default=None),
             required_support_kinds: Optional[str] = Form(default=None),
             include_post_save_review: bool = Form(default=True),
             include_support_summary: bool = Form(default=True),
@@ -270,6 +284,7 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
                     source_url=source_url,
                     mime_type=mime_type or file.content_type,
                     evidence_type=evidence_type,
+                    testimony_id=testimony_id,
                     document_metadata={},
                     required_support_kinds=_normalize_required_support_kinds_form(required_support_kinds),
                     include_post_save_review=include_post_save_review,
@@ -290,16 +305,283 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
                 ),
             )
 
+    # -----------------------------------------------------------------------
+    # M1: Document Intake And Decomposition — reparse action
+    # -----------------------------------------------------------------------
+
+    @router.post("/api/claim-support/reparse-document")
+    async def claim_support_reparse_document(
+        request: ClaimSupportReparseDocumentRequest,
+    ) -> Dict[str, Any]:
+        return build_claim_support_reparse_document_payload(mediator, request)
+
+    # -----------------------------------------------------------------------
+    # M0: Question And Testimony Foundation
+    # -----------------------------------------------------------------------
+
+    @router.get("/api/claim-support/question-recommendations")
+    async def claim_support_question_recommendations(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        max_recommendations: int = Query(default=20, ge=1, le=200),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_question_recommendations(
+            resolved_user,
+            claim_type=claim_type,
+            max_recommendations=max_recommendations,
+        )
+
+    # -----------------------------------------------------------------------
+    # M3: Graph snapshot persistence and support-path query routes.
+    # -----------------------------------------------------------------------
+
+    @router.get("/api/claim-support/support-paths")
+    async def claim_support_paths(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        claim_element_id: Optional[str] = Query(default=None),
+        path_kind: Optional[str] = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_support_paths_for_element(
+            claim_type or "",
+            user_id=resolved_user,
+            claim_element_id=claim_element_id,
+            path_kind=path_kind,
+            limit=limit,
+        )
+
+    @router.get("/api/claim-support/contradiction-paths")
+    async def claim_contradiction_paths(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        claim_element_id: Optional[str] = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_contradiction_paths_for_element(
+            claim_type or "",
+            user_id=resolved_user,
+            claim_element_id=claim_element_id,
+            limit=limit,
+        )
+
+    @router.get("/api/claim-support/graph-snapshots")
+    async def claim_support_graph_snapshots(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        claim_element_id: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        refs = mediator.get_graph_snapshot_refs_for_element(
+            claim_type or "",
+            user_id=resolved_user,
+            claim_element_id=claim_element_id,
+        )
+        return {
+            'available': True,
+            'user_id': resolved_user,
+            'claim_type': claim_type,
+            'claim_element_id': claim_element_id,
+            'graph_snapshot_refs': refs,
+            'graph_snapshot_count': len(refs),
+        }
+
+    # -----------------------------------------------------------------------
+    # M4: Operator drilldown routes (timeline, archive-history, graph-trace,
+    #     enrichment-queue, background enrichment submission).
+    # -----------------------------------------------------------------------
+
+    @router.get("/api/claim-support/support-timeline")
+    async def claim_support_timeline(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        claim_element_id: Optional[str] = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=1000),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_support_timeline(
+            claim_type=claim_type,
+            user_id=resolved_user,
+            claim_element_id=claim_element_id,
+            limit=limit,
+        )
+
+    @router.get("/api/claim-support/archive-history")
+    async def claim_support_archive_history(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        domain: Optional[str] = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_archive_history(
+            user_id=resolved_user,
+            claim_type=claim_type,
+            domain=domain,
+            limit=limit,
+        )
+
+    @router.get("/api/claim-support/graph-trace")
+    async def claim_support_graph_trace(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        claim_element_id: Optional[str] = Query(default=None),
+        support_ref: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_graph_trace_drilldown(
+            user_id=resolved_user,
+            claim_type=claim_type,
+            claim_element_id=claim_element_id,
+            support_ref=support_ref,
+        )
+
+    @router.get("/api/claim-support/enrichment-queue")
+    async def claim_support_enrichment_queue(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        status: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_enrichment_queue_state(
+            user_id=resolved_user,
+            claim_type=claim_type,
+            status=status,
+        )
+
+    @router.get("/api/claim-support/enrichment-job/{job_id}")
+    async def claim_support_enrichment_job(
+        job_id: int,
+        user_id: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_background_enrichment_job(
+            job_id=job_id,
+            user_id=resolved_user,
+        )
+
+    @router.post("/api/claim-support/enrich-background")
+    async def claim_support_enrich_background(
+        enrichment_type: str = Query(...),
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        priority: int = Query(default=0, ge=0, le=10),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        submission = mediator.submit_background_enrichment_job(
+            enrichment_type=enrichment_type,
+            user_id=resolved_user,
+            claim_type=claim_type,
+            priority=priority,
+        )
+        if not isinstance(submission, dict):
+            submission = {"submitted": False, "error": "Invalid enrichment queue response"}
+        get_queue_state = getattr(mediator, "get_enrichment_queue_state", None)
+        if callable(get_queue_state):
+            queue_state = get_queue_state(
+                resolved_user,
+                claim_type=claim_type,
+            )
+            if isinstance(queue_state, dict):
+                submission["queue_state"] = queue_state
+        return submission
+
+    # M4: Retrieval session routes
+    @router.post("/api/claim-support/retrieval-session")
+    async def create_retrieval_session(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: str = Query(...),
+        claim_element_id: Optional[str] = Query(default=None),
+        claim_element_text: Optional[str] = Query(default=None),
+        query_text: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.create_retrieval_session(
+            claim_type,
+            user_id=resolved_user,
+            claim_element_id=claim_element_id or '',
+            claim_element_text=claim_element_text or '',
+            query_text=query_text or '',
+        )
+
+    @router.get("/api/claim-support/retrieval-session")
+    async def get_retrieval_session(
+        session_id: str = Query(...),
+        user_id: Optional[str] = Query(default=None),
+        max_results: int = Query(default=50, ge=1, le=200),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_retrieval_session(
+            session_id,
+            user_id=resolved_user,
+            max_results=max_results,
+        )
+
+    @router.get("/api/claim-support/retrieval-sessions")
+    async def list_retrieval_sessions(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        claim_element_id: Optional[str] = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.list_retrieval_sessions(
+            user_id=resolved_user,
+            claim_type=claim_type,
+            claim_element_id=claim_element_id,
+            limit=limit,
+        )
+
+    @router.get("/api/claim-support/retrieval-context")
+    async def get_retrieval_context(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: str = Query(...),
+        claim_element_id: str = Query(...),
+        max_results: int = Query(default=10, ge=1, le=50),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_retrieval_context_for_element(
+            claim_type,
+            claim_element_id,
+            user_id=resolved_user,
+            max_results=max_results,
+        )
+
+    @router.get("/api/claim-support/element-proof-cards")
+    async def get_element_proof_cards(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_element_proof_cards(resolved_user, claim_type=claim_type)
+
+    @router.get("/api/claim-support/element-proof-card")
+    async def get_element_proof_card(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: str = Query(...),
+        claim_element_id: Optional[str] = Query(default=None),
+        claim_element_text: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_element_proof_card(
+            resolved_user,
+            claim_type,
+            claim_element_id=claim_element_id,
+            claim_element_text=claim_element_text,
+        )
+
     return router
 
 
 def attach_claim_support_review_routes(app: FastAPI, mediator: Any) -> FastAPI:
-    _include_router_routes(app, create_claim_support_review_router(mediator))
-    return app
+    return attach_router_routes(app, create_claim_support_review_router(mediator))
 
 
 def create_review_api_app(mediator: Any) -> FastAPI:
     app = FastAPI(title="Complaint Generator Review API")
     attach_claim_support_review_routes(app, mediator)
-    _include_router_routes(app, create_document_router(mediator))
+    attach_document_routes(app, mediator)
     return app

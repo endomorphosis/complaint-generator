@@ -30,17 +30,20 @@ from integrations.ipfs_datasets.documents import (
     parse_document_file,
     parse_pdf_to_record,
     should_parse_document_input,
+    summarize_document_parse,
 )
 from integrations.ipfs_datasets.graphs import (
     GraphPersistence,
     GraphQuery,
     extract_graph_from_text,
     persist_graph_snapshot,
+    query_graph_snapshot,
     query_graph_support,
 )
 from integrations.ipfs_datasets.graphrag import (
     analyze_pdf_relationships,
     batch_process_pdfs,
+    build_validate_score_ontology,
     build_ontology,
     create_ontology_generator,
     cross_analyze_pdf_documents,
@@ -55,6 +58,7 @@ from integrations.ipfs_datasets.legal import (
     get_last_legal_search_diagnostic,
     search_federal_register,
     search_recap_documents,
+    search_legal_authority_program,
     search_state_administrative_rules,
     search_state_laws,
     search_us_code,
@@ -65,10 +69,12 @@ from integrations.ipfs_datasets.mcp_gateway import execute_gateway_tool, list_ga
 from integrations.ipfs_datasets.scraper_daemon import ScraperDaemon, ScraperDaemonConfig
 from integrations.ipfs_datasets.search import (
     DegradedSearchResults,
+    archive_url_snapshot,
     download_url,
     download_with_recovery,
     evaluate_scraped_content,
     recover_manifest_downloads,
+    rank_search_results,
     scrape_web_content,
     search_brave_web,
     search_multi_engine_web,
@@ -153,8 +159,18 @@ def test_adapter_root_exports_search_and_vector_entrypoints():
     assert callable(adapter.scrape_web_content)
     assert callable(adapter.download_with_recovery)
     assert callable(adapter.parse_pdf_to_record)
+    assert callable(adapter.query_graph_snapshot)
     assert callable(adapter.create_vector_index)
     assert callable(adapter.search_vector_index)
+
+
+def test_adapter_root_exports_document_parse_entrypoints():
+    assert adapter.parse_document_bytes is parse_document_bytes
+    assert callable(adapter.parse_document_file)
+    assert callable(adapter.parse_document_text)
+    assert callable(adapter.should_parse_document_input)
+    assert callable(adapter.detect_document_input_format)
+    assert callable(adapter.summarize_document_parse)
 
 
 def test_capability_summary_returns_strings():
@@ -578,6 +594,32 @@ def test_legal_source_availability_exposes_state_families():
     assert 'administrative_rules' in LEGAL_SOURCE_AVAILABILITY
 
 
+def test_search_legal_authority_program_routes_by_authority_family():
+    program = {
+        'program_id': 'legal_search_program:test',
+        'program_type': 'adverse_authority_search',
+        'authority_intent': 'oppose',
+        'query_text': 'retaliation adverse authority exception',
+        'jurisdiction': 'OR',
+        'authority_families': ['case_law', 'docket_material'],
+    }
+
+    with patch('integrations.ipfs_datasets.legal.search_recap_documents', return_value=[
+        {'citation': 'Example v. Agency', 'type': 'case_law'},
+    ]) as recap_search:
+        with patch('integrations.ipfs_datasets.legal.search_us_code') as us_code_search:
+            result = search_legal_authority_program(program, max_results=2)
+
+    assert recap_search.call_count == 2
+    recap_search.assert_any_call('retaliation adverse authority exception', max_results=2)
+    us_code_search.assert_not_called()
+    assert result['result_count'] == 2
+    assert result['results']['case_law'][0]['citation'] == 'Example v. Agency'
+    assert result['results']['docket_materials'][0]['citation'] == 'Example v. Agency'
+    assert result['metadata']['details']['operation'] == 'search_legal_authority_program'
+    assert result['metadata']['details']['authority_intent'] == 'oppose'
+
+
 def test_mediator_adapter_detects_current_legal_scraper_paths():
     with tempfile.TemporaryDirectory() as tmpdir:
         package_root = Path(tmpdir) / 'ipfs_datasets_py'
@@ -690,6 +732,64 @@ def test_search_multi_engine_web_returns_typed_degradation_on_orchestrator_failu
         'result_count': 1,
         'results': fallback_records,
     }
+
+
+def test_rank_search_results_explains_claim_element_and_archive_priority():
+    results = rank_search_results(
+        [
+            {
+                'title': 'Generic workplace result',
+                'description': 'General workplace article',
+                'source_type': 'web',
+                'metadata': {'score': 0.4},
+            },
+            {
+                'title': 'Archived retaliation termination memo',
+                'description': 'Adverse action after protected complaint within 180 days',
+                'source_type': 'web_archive',
+                'metadata': {
+                    'score': 0.25,
+                    'content_origin': 'historical_archive_capture',
+                    'quality_score': 0.9,
+                    'published_date': '2025-03-15',
+                    'graph_trace_summary': {'traced_link_count': 2},
+                    'support_quality_summary': {'dominant_quality_tier': 'strong_support'},
+                },
+            },
+        ],
+        query='retaliation termination 2025',
+        claim_element_text='Adverse action after protected complaint',
+        temporal_context='within 180 days in 2025',
+        max_results=2,
+    )
+
+    assert results[0]['source_type'] == 'web_archive'
+    factors = results[0]['metadata']['search_ranking_factors']
+    assert factors['claim_element_fit_weight'] > 0.0
+    assert factors['source_quality_weight'] > 0.0
+    assert factors['temporal_relevance_weight'] > 0.0
+    assert factors['graph_signal_weight'] > 0.0
+    assert factors['archive_signal_weight'] > 0.0
+    assert results[0]['metadata']['search_ranking_explanation']
+
+
+def test_archive_url_snapshot_normalizes_wayback_capture_metadata():
+    response = Mock()
+    response.status_code = 302
+    response.headers = {
+        'Content-Location': '/web/20260719010101/https://example.com/policy',
+    }
+    response.url = 'https://web.archive.org/save/https://example.com/policy'
+    session = Mock()
+    session.get = Mock(return_value=response)
+
+    result = archive_url_snapshot('https://example.com/policy', session=session)
+
+    assert result['archived'] is True
+    assert result['archive_url'] == 'https://web.archive.org/web/20260719010101/https://example.com/policy'
+    assert result['captured_at'] == '20260719010101'
+    assert result['content_origin'] == 'historical_archive_capture'
+    assert result['metadata']['details']['operation'] == 'archive_url_snapshot'
 
 
 def test_download_url_persists_bytes_and_normalizes_metadata():
@@ -995,6 +1095,8 @@ def test_scraper_daemon_optimizes_tactics_across_iterations():
 
 
 def test_parse_document_bytes_returns_normalized_shape():
+    from integrations.ipfs_datasets.provenance import build_document_parse_contract
+
     result = parse_document_bytes(b'Hello world', filename='note.txt', mime_type='text/plain')
 
     assert result['text'] == 'Hello world'
@@ -1008,8 +1110,19 @@ def test_parse_document_bytes_returns_normalized_shape():
     assert result['metadata']['transform_lineage']['source'] == 'bytes'
     assert result['metadata']['source_span']['char_end'] == len('Hello world')
     assert result['lineage']['extraction']['method'] == 'text_normalization'
+    assert result['chunks'][0]['metadata']['source'] == 'bytes'
+    assert result['chunks'][0]['metadata']['input_format'] == 'text'
+    assert result['chunks'][0]['metadata']['parser_version'] == 'documents-adapter:1'
+    assert result['chunks'][0]['metadata']['source_span']['char_start'] == 0
+    assert result['chunks'][0]['metadata']['source_span']['char_end'] == len('Hello world')
+    assert result['chunks'][0]['metadata']['source_span']['page_start'] == 1
+    assert result['chunks'][0]['metadata']['source_span']['page_end'] == 1
+    assert result['chunks'][0]['metadata']['section_label'] == ''
     assert result['metadata']['operation'] == 'parse_document_text'
     assert result['metadata']['implementation_status'] in {'implemented', 'fallback'}
+    contract = build_document_parse_contract(result, default_source='bytes')
+    assert contract['chunks'][0]['chunk_id'] == result['chunks'][0]['chunk_id']
+    assert contract['chunks'][0]['metadata']['source_span']['char_end'] == len('Hello world')
 
 
 def test_parse_document_bytes_normalizes_html_input():
@@ -1026,6 +1139,8 @@ def test_parse_document_bytes_normalizes_html_input():
     assert result['lineage']['normalization'] == 'html_to_text'
     assert result['summary']['extraction_method'] == 'html_to_text'
     assert result['metadata']['parse_quality']['quality_tier'] == 'high'
+    assert result['chunks'][0]['metadata']['input_format'] == 'html'
+    assert result['chunks'][0]['metadata']['extraction_method'] == 'html_to_text'
 
 
 def test_parse_document_bytes_normalizes_email_input():
@@ -1087,6 +1202,128 @@ def test_parse_document_bytes_extracts_docx_xml_text():
     assert result['lineage']['normalization'] == 'docx_xml_to_text'
     assert result['summary']['quality_tier'] in {'medium', 'high'}
     assert result['metadata']['source_span']['page_count'] == 1
+    assert result['chunks'][0]['metadata']['input_format'] == 'docx'
+    assert result['chunks'][0]['metadata']['source_span']['page_count'] == 1
+
+
+def test_parse_document_bytes_extracts_xlsx_shared_strings():
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        archive.writestr(
+            '[Content_Types].xml',
+            '<?xml version="1.0" encoding="UTF-8"?>',
+        )
+        archive.writestr(
+            'xl/sharedStrings.xml',
+            (
+                '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                '<si><t>Intake Date</t></si>'
+                '<si><t>March 5 discrimination complaint</t></si>'
+                '</sst>'
+            ),
+        )
+        archive.writestr(
+            'xl/worksheets/sheet1.xml',
+            '<worksheet><sheetData><row><c><v>1</v></c></row></sheetData></worksheet>',
+        )
+
+    result = parse_document_bytes(
+        buffer.getvalue(),
+        filename='timeline.xlsx',
+        mime_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+
+    assert 'Intake Date' in result['text']
+    assert 'March 5 discrimination complaint' in result['text']
+    assert result['metadata']['input_format'] == 'xlsx'
+    assert result['summary']['input_format'] == 'xlsx'
+    assert result['lineage']['normalization'] == 'xlsx_xml_to_text'
+    assert result['summary']['quality_tier'] == 'medium'
+    assert result['chunks'][0]['metadata']['extraction_method'] == 'xlsx_xml_to_text'
+
+
+def test_parse_document_bytes_extracts_pptx_slide_text():
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        archive.writestr(
+            '[Content_Types].xml',
+            '<?xml version="1.0" encoding="UTF-8"?>',
+        )
+        archive.writestr(
+            'ppt/slides/slide1.xml',
+            (
+                '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+                'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+                '<p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Board presentation</a:t></a:r></a:p>'
+                '<a:p><a:r><a:t>Reasonable accommodation timeline</a:t></a:r></a:p>'
+                '</p:txBody></p:sp></p:spTree></p:cSld></p:sld>'
+            ),
+        )
+
+    result = parse_document_bytes(
+        buffer.getvalue(),
+        filename='presentation.pptx',
+        mime_type='application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    )
+
+    assert 'Board presentation' in result['text']
+    assert 'Reasonable accommodation timeline' in result['text']
+    assert result['metadata']['input_format'] == 'pptx'
+    assert result['lineage']['normalization'] == 'pptx_xml_to_text'
+    assert result['summary']['quality_tier'] == 'medium'
+
+
+def test_parse_document_bytes_extracts_opendocument_content_xml():
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        archive.writestr('mimetype', 'application/vnd.oasis.opendocument.spreadsheet')
+        archive.writestr(
+            'content.xml',
+            (
+                '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+                'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">'
+                '<office:body><office:spreadsheet><text:p>Voucher record</text:p>'
+                '<text:p>Payment interruption evidence</text:p></office:spreadsheet></office:body>'
+                '</office:document-content>'
+            ),
+        )
+
+    result = parse_document_bytes(
+        buffer.getvalue(),
+        filename='records.ods',
+        mime_type='application/vnd.oasis.opendocument.spreadsheet',
+    )
+
+    assert 'Voucher record' in result['text']
+    assert 'Payment interruption evidence' in result['text']
+    assert result['metadata']['input_format'] == 'ods'
+    assert result['lineage']['normalization'] == 'opendocument_xml_to_text'
+
+
+def test_parse_document_bytes_normalizes_csv_input():
+    result = parse_document_bytes(
+        b'date,event\n2026-03-05,Reported discrimination\n',
+        filename='events.csv',
+        mime_type='text/csv',
+    )
+
+    assert 'Reported discrimination' in result['text']
+    assert result['metadata']['input_format'] == 'csv'
+    assert result['lineage']['normalization'] == 'csv_to_text'
+    assert result['summary']['quality_tier'] == 'high'
+
+
+def test_parse_document_bytes_reports_legacy_doc_degraded_contract():
+    result = parse_document_bytes(
+        b'\xd0\xcf\x11\xe0 legacy office binary',
+        filename='statement.doc',
+        mime_type='application/msword',
+    )
+
+    assert result['metadata']['input_format'] == 'doc'
+    assert result['summary']['input_format'] == 'doc'
+    assert result['summary']['extraction_method'] in {'office_binary_text_fallback', 'office_binary_unparsed'}
+    assert 'legacy_office_binary_fallback' in result['metadata']['parse_quality']['quality_flags']
 
 
 def test_parse_document_bytes_reports_low_quality_for_unparsed_pdf():
@@ -1103,6 +1340,10 @@ def test_parse_document_bytes_reports_low_quality_for_unparsed_pdf():
 def test_should_parse_document_input_covers_adapter_supported_formats():
     assert should_parse_document_input(evidence_type='attachment', filename='message.eml', mime_type='message/rfc822') is True
     assert should_parse_document_input(evidence_type='attachment', filename='notes.docx', mime_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document') is True
+    assert should_parse_document_input(evidence_type='attachment', filename='events.csv', mime_type='text/csv') is True
+    assert should_parse_document_input(evidence_type='attachment', filename='records.xlsx', mime_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') is True
+    assert should_parse_document_input(evidence_type='attachment', filename='slides.pptx', mime_type='application/vnd.openxmlformats-officedocument.presentationml.presentation') is True
+    assert should_parse_document_input(evidence_type='attachment', filename='records.ods', mime_type='application/vnd.oasis.opendocument.spreadsheet') is True
     assert should_parse_document_input(evidence_type='image', filename='photo.png', mime_type='image/png') is False
 
 
@@ -1124,6 +1365,57 @@ def test_parse_document_file_reads_and_normalizes_file():
     assert result['metadata']['transform_lineage']['source'] == 'file'
 
 
+def test_summarize_document_parse_preserves_quality_fields():
+    result = parse_document_bytes(
+        b'<html><body><p>Employment discrimination is prohibited.</p></body></html>',
+        filename='policy.html',
+        mime_type='text/html',
+        source='web_document',
+    )
+
+    summary = summarize_document_parse(result)
+
+    assert summary['status'] == result['summary']['status']
+    assert summary['input_format'] == 'html'
+    assert summary['extraction_method'] == 'html_to_text'
+    assert summary['quality_tier'] == 'high'
+    assert summary['quality_score'] == 95.0
+    assert summary['page_count'] == 1
+    assert summary['source'] == 'web_document'
+
+
+def test_summarize_document_parse_handles_metadata_only_contract():
+    summary = summarize_document_parse({
+        'status': 'fallback',
+        'text': 'Email body',
+        'chunks': [{'chunk_id': 'chunk-0', 'text': 'Email body'}],
+        'metadata': {
+            'parser_version': 'documents-adapter:1',
+            'input_format': 'email',
+            'paragraph_count': 1,
+            'source': 'bytes',
+            'extraction_method': 'email_to_text',
+            'parse_quality': {
+                'quality_tier': 'high',
+                'quality_score': 93.0,
+            },
+            'source_span': {
+                'page_count': 1,
+            },
+        },
+    })
+
+    assert summary['status'] == 'fallback'
+    assert summary['chunk_count'] == 1
+    assert summary['text_length'] == len('Email body')
+    assert summary['input_format'] == 'email'
+    assert summary['extraction_method'] == 'email_to_text'
+    assert summary['quality_tier'] == 'high'
+    assert summary['quality_score'] == 93.0
+    assert summary['page_count'] == 1
+    assert summary['source'] == 'bytes'
+
+
 def test_extract_graph_from_text_returns_normalized_shape():
     result = extract_graph_from_text('Example complaint text', source_id='artifact-1')
 
@@ -1132,6 +1424,29 @@ def test_extract_graph_from_text_returns_normalized_shape():
     assert any(entity['type'] == 'fact' for entity in result['entities'])
     assert any(relationship['relation_type'] == 'has_fact' for relationship in result['relationships'])
     assert result['metadata']['operation'] == 'extract_graph_from_text'
+
+
+def test_build_validate_score_ontology_returns_compact_workflow_gap_summary():
+    with patch('integrations.ipfs_datasets.graphrag.GRAPHRAG_AVAILABLE', False):
+        with patch('integrations.ipfs_datasets.graphrag.GRAPHRAG_ERROR', 'GraphRAG extras missing'):
+            result = build_validate_score_ontology(
+                'I complained to HR and was fired the next week.',
+                claim_type='retaliation',
+            )
+
+    quality = result['ontology_quality']
+
+    assert quality['workflow_operation'] == 'build_validate_score_ontology'
+    assert quality['workflow_backend_available'] is False
+    assert quality['workflow_implementation_status'] == 'implemented'
+    assert quality['workflow_degraded_reason'] == 'GraphRAG extras missing'
+    assert quality['gap_count'] == len(result['gaps']['gaps'])
+    assert quality['gap_type_counts']
+    assert quality['gap_severity_counts']
+    assert quality['gap_follow_up_action_counts']
+    assert 'entity_count' in quality
+    assert quality['relation_count'] >= 0
+    assert quality['concept_count'] >= 0
 
 
 def test_ingest_pdf_to_graphrag_delegates_to_upstream_pdf_tool():
@@ -1210,14 +1525,15 @@ def test_persist_graph_snapshot_returns_stable_contract():
 
     result = persist_graph_snapshot(
         graph_payload,
+        graph_id='graph:test-stable-contract',
         graph_changed=True,
         existing_graph=False,
         persistence_metadata={'projection_target': 'complaint_phase_knowledge_graph'},
     )
 
-    assert result['status'] in {'pending', 'noop'}
-    assert result['graph_id'].startswith('graph:')
-    assert result['persisted'] is False
+    assert result['status'] == 'stored-fallback'
+    assert result['graph_id'] == 'graph:test-stable-contract'
+    assert result['persisted'] is True
     assert result['created'] is True
     assert result['reused'] is False
     assert result['node_count'] >= 1
@@ -1225,6 +1541,7 @@ def test_persist_graph_snapshot_returns_stable_contract():
     assert result['metadata']['source_id'] == 'artifact-1'
     assert result['metadata']['projection_target'] == 'complaint_phase_knowledge_graph'
     assert result['metadata']['lineage']['status'] == graph_payload['status']
+    assert result['metadata']['persistence_scope'] == 'adapter_memory'
     assert result['metadata']['operation'] == 'persist_graph_snapshot'
 
 
@@ -1299,6 +1616,72 @@ def test_graph_query_interface_receives_query_and_provenance_fields():
     assert backend.query['graph_version'] == '7'
     assert backend.query['filters'] == {'source_type': 'evidence'}
     assert backend.query['provenance']['source_system'] == 'complaint-generator'
+
+
+def test_query_graph_snapshot_returns_persisted_adapter_record():
+    graph_payload = {
+        **extract_graph_from_text('Protected activity appears in the complaint.', source_id='artifact-query-1'),
+        'support_facts': [
+            {
+                'fact_id': 'fact:registry-1',
+                'text': 'Protected activity appears in the complaint.',
+                'source_family': 'evidence',
+                'source_record_id': 12,
+                'source_ref': 'bafy-evidence',
+                'record_scope': 'evidence',
+                'artifact_family': 'archived_web_page',
+                'corpus_family': 'web_page',
+                'content_origin': 'historical_archive_capture',
+                'parse_source': 'web_document',
+                'input_format': 'html',
+                'quality_tier': 'high',
+                'chunk_id': 'chunk-0',
+                'source_passage': {'chunk_id': 'chunk-0', 'text': 'Protected activity'},
+            }
+        ],
+    }
+    persisted = persist_graph_snapshot(
+        graph_payload,
+        graph_id='graph:test-query-contract',
+        graph_changed=True,
+        existing_graph=False,
+        persistence_metadata={'record_scope': 'evidence', 'record_key': '12'},
+    )
+    reused = persist_graph_snapshot(
+        graph_payload,
+        graph_id='graph:test-query-contract',
+        graph_changed=True,
+        existing_graph=False,
+        persistence_metadata={'record_scope': 'evidence', 'record_key': '12'},
+    )
+
+    by_id = query_graph_snapshot('graph:test-query-contract')
+    by_source = query_graph_snapshot(source_id='artifact-query-1')
+
+    assert persisted['created'] is True
+    assert reused['created'] is False
+    assert reused['reused'] is True
+    assert by_id['status'] == 'found'
+    assert by_id['found'] is True
+    assert by_id['snapshot_count'] == 1
+    assert by_id['fact_registry_summary']['aggregation_scope'] == 'graph_snapshot_query'
+    assert by_id['fact_registry_summary']['snapshot_count'] == 1
+    assert by_id['fact_registry_summary']['fact_count'] == 1
+    assert by_id['fact_registry_summary']['source_family_counts'] == {'evidence': 1}
+    assert by_id['fact_registry_summary']['source_ref_counts'] == {'bafy-evidence': 1}
+    assert by_id['fact_registry_summary']['passage_anchored_count'] == 1
+    assert by_id['snapshots'][0]['graph_id'] == 'graph:test-query-contract'
+    assert by_id['snapshots'][0]['source_id'] == 'artifact-query-1'
+    assert by_id['snapshots'][0]['metadata']['record_scope'] == 'evidence'
+    assert by_id['snapshots'][0]['metadata']['record_key'] == '12'
+    assert by_id['snapshots'][0]['fact_registry_summary']['fact_count'] == 1
+    assert by_id['snapshots'][0]['fact_registry_summary']['source_family_counts'] == {'evidence': 1}
+    assert by_id['snapshots'][0]['fact_registry_summary']['artifact_family_counts'] == {'archived_web_page': 1}
+    assert by_id['snapshots'][0]['fact_registry_summary']['passage_anchored_count'] == 1
+    assert by_id['snapshots'][0]['metadata']['fact_registry_summary'] == by_id['snapshots'][0]['fact_registry_summary']
+    assert by_id['snapshots'][0]['entities']
+    assert by_id['metadata']['operation'] == 'query_graph_snapshot'
+    assert any(snapshot['graph_id'] == 'graph:test-query-contract' for snapshot in by_source['snapshots'])
 
 
 def test_query_graph_support_ranks_fact_backed_results():
@@ -1750,3 +2133,91 @@ def test_ensure_ipfs_backend_uses_local_fallback_when_kubo_missing():
     assert isinstance(backend, LocalCacheIPFSBackend)
     mock_set_default.assert_called_once()
     mock_clear.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# extraction_method_for_format and quality_score_for_format helpers
+# ---------------------------------------------------------------------------
+
+def test_extraction_method_for_format_returns_canonical_labels():
+    from integrations.ipfs_datasets.documents import extraction_method_for_format
+
+    assert extraction_method_for_format("html") == "html_to_text"
+    assert extraction_method_for_format("email") == "email_to_text"
+    assert extraction_method_for_format("rtf") == "rtf_to_text"
+    assert extraction_method_for_format("docx") == "docx_xml_to_text"
+    assert extraction_method_for_format("xlsx") == "xlsx_xml_to_text"
+    assert extraction_method_for_format("pptx") == "pptx_xml_to_text"
+    assert extraction_method_for_format("ods") == "opendocument_xml_to_text"
+    assert extraction_method_for_format("csv") == "csv_to_text"
+    assert extraction_method_for_format("doc", text_present=False) == "office_binary_unparsed"
+    assert extraction_method_for_format("pdf", text_present=True) == "pdf_text_fallback"
+    assert extraction_method_for_format("pdf", text_present=False) == "pdf_unparsed"
+    assert extraction_method_for_format("text") == "text_normalization"
+    assert extraction_method_for_format("unknown") == "text_normalization"
+
+
+def test_quality_score_for_format_returns_expected_scores():
+    from integrations.ipfs_datasets.documents import quality_score_for_format
+
+    html_qs = quality_score_for_format("html")
+    assert html_qs["quality_score"] == 95.0
+    assert html_qs["quality_tier"] == "high"
+
+    email_qs = quality_score_for_format("email")
+    assert email_qs["quality_score"] == 93.0
+    assert email_qs["quality_tier"] == "high"
+
+    docx_qs = quality_score_for_format("docx")
+    assert docx_qs["quality_score"] == 88.0
+    assert docx_qs["quality_tier"] == "medium"
+
+    xlsx_qs = quality_score_for_format("xlsx")
+    assert xlsx_qs["quality_score"] == 84.0
+    assert xlsx_qs["quality_tier"] == "medium"
+
+    csv_qs = quality_score_for_format("csv")
+    assert csv_qs["quality_score"] == 90.0
+    assert csv_qs["quality_tier"] == "high"
+
+    rtf_qs = quality_score_for_format("rtf")
+    assert rtf_qs["quality_score"] == 82.0
+    assert rtf_qs["quality_tier"] == "medium"
+
+    pdf_qs = quality_score_for_format("pdf")
+    assert pdf_qs["quality_score"] == 68.0
+    assert pdf_qs["quality_tier"] == "low"
+
+    empty_qs = quality_score_for_format("pdf", text_present=False)
+    assert empty_qs["quality_score"] == 0.0
+    assert empty_qs["quality_tier"] == "empty"
+
+
+def test_extraction_method_for_format_matches_parse_document_bytes_output():
+    """extraction_method_for_format must agree with the value embedded in parse results."""
+    from integrations.ipfs_datasets.documents import (
+        extraction_method_for_format,
+        parse_document_bytes,
+    )
+
+    for fmt, payload, mime in [
+        ("html", b"<html><body><p>Hello</p></body></html>", "text/html"),
+        ("text", b"Plain text evidence.", "text/plain"),
+    ]:
+        parse_result = parse_document_bytes(payload, mime_type=mime)
+        expected = extraction_method_for_format(fmt, text_present=True)
+        assert parse_result["summary"]["extraction_method"] == expected
+
+
+def test_quality_score_for_format_matches_parse_document_bytes_output():
+    """quality_score_for_format must agree with the quality_score in parse results."""
+    from integrations.ipfs_datasets.documents import (
+        quality_score_for_format,
+        parse_document_bytes,
+    )
+
+    html_payload = b"<html><body><p>Evidence content.</p></body></html>"
+    parse_result = parse_document_bytes(html_payload, mime_type="text/html")
+    expected = quality_score_for_format("html", text_present=True)
+    assert parse_result["summary"]["quality_score"] == expected["quality_score"]
+    assert parse_result["summary"]["quality_tier"] == expected["quality_tier"]

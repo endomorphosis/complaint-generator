@@ -1068,6 +1068,8 @@ class AdversarialHarness:
         durations = [r.duration_seconds for r in successful]
         anchor_summary = self._anchor_section_statistics(successful)
         intake_priority_summary = self._intake_priority_statistics(successful)
+        phase1_summary = self._phase1_statistics(successful)
+        phase2_summary = self._phase2_statistics(successful)
         
         return {
             'total_sessions': len(self.results),
@@ -1081,6 +1083,8 @@ class AdversarialHarness:
             'score_distribution': self._score_distribution(scores),
             'anchor_sections': anchor_summary,
             'intake_priority': intake_priority_summary,
+            'phase1_metrics': phase1_summary,
+            'phase2_metrics': phase2_summary,
         }
     
     def _score_distribution(self, scores: List[float]) -> Dict[str, int]:
@@ -1251,4 +1255,161 @@ class AdversarialHarness:
             'coverage_by_objective': coverage_by_objective,
             'sessions_with_full_coverage': sessions_with_full_coverage,
             'sessions_with_partial_coverage': max(0, len(successful_results) - sessions_with_full_coverage),
+        }
+
+    def _phase1_statistics(self, successful_results: List[SessionResult]) -> Dict[str, Any]:
+        """Compute Phase 1 (intake) metrics aggregated across sessions.
+
+        Metrics:
+        - ``chronology_completeness``: average ratio of anchored events to total
+          events, derived from ``intake_chronology_readiness`` in final state.
+        - ``contradiction_count``: average number of intake contradictions per
+          session, from ``contradiction_summary.count``.
+        - ``duplicate_question_rate``: fraction of question candidates that
+          share a goal with an earlier candidate in the same session, estimated
+          from ``question_candidate_summary.source_counts``.
+        - ``proof_lead_density``: average proof leads per candidate claim.
+        """
+        chronology_completeness_values: List[float] = []
+        contradiction_counts: List[int] = []
+        duplicate_question_rate_values: List[float] = []
+        proof_lead_density_values: List[float] = []
+
+        for result in successful_results:
+            final_state = dict(getattr(result, 'final_state', {}) or {})
+
+            # chronology_completeness from intake_chronology_readiness
+            chronology_readiness = final_state.get('intake_chronology_readiness')
+            if not isinstance(chronology_readiness, dict):
+                intake_case_summary = final_state.get('intake_case_summary')
+                if isinstance(intake_case_summary, dict):
+                    chronology_readiness = intake_case_summary.get('intake_chronology_readiness') or {}
+            if isinstance(chronology_readiness, dict) and chronology_readiness:
+                anchor_coverage = chronology_readiness.get('anchor_coverage_ratio')
+                if anchor_coverage is not None:
+                    chronology_completeness_values.append(float(anchor_coverage))
+                else:
+                    event_count = int(chronology_readiness.get('event_count') or 0)
+                    anchored = int(chronology_readiness.get('anchored_event_count') or 0)
+                    if event_count > 0:
+                        chronology_completeness_values.append(anchored / event_count)
+
+            # contradiction_count from contradiction_summary
+            contradiction_summary = final_state.get('contradiction_summary')
+            if not isinstance(contradiction_summary, dict):
+                intake_case_summary = final_state.get('intake_case_summary')
+                if isinstance(intake_case_summary, dict):
+                    contradiction_summary = intake_case_summary.get('contradiction_summary') or {}
+            if isinstance(contradiction_summary, dict):
+                count = int(contradiction_summary.get('count') or 0)
+                contradiction_counts.append(count)
+
+            # duplicate_question_rate: estimate from question_candidate_summary
+            question_summary = final_state.get('question_candidate_summary')
+            if not isinstance(question_summary, dict):
+                intake_case_summary = final_state.get('intake_case_summary')
+                if isinstance(intake_case_summary, dict):
+                    question_summary = intake_case_summary.get('question_candidate_summary') or {}
+            if isinstance(question_summary, dict):
+                total_candidates = int(question_summary.get('count') or 0)
+                goal_counts = dict(question_summary.get('question_goal_counts') or {})
+                if total_candidates > 0 and goal_counts:
+                    # Count duplicates as (count - 1) per goal: the first candidate per goal is not a duplicate
+                    duplicate_count = sum(max(0, cnt - 1) for cnt in goal_counts.values())
+                    duplicate_question_rate_values.append(duplicate_count / total_candidates)
+                elif total_candidates > 0:
+                    duplicate_question_rate_values.append(0.0)
+
+            # proof_lead_density: proof leads per candidate claim
+            proof_lead_summary = final_state.get('proof_lead_summary')
+            if not isinstance(proof_lead_summary, dict):
+                intake_case_summary = final_state.get('intake_case_summary')
+                if isinstance(intake_case_summary, dict):
+                    proof_lead_summary = intake_case_summary.get('proof_lead_summary') or {}
+            candidate_claims = final_state.get('candidate_claims')
+            if not isinstance(candidate_claims, list):
+                intake_case_summary = final_state.get('intake_case_summary')
+                if isinstance(intake_case_summary, dict):
+                    candidate_claims = intake_case_summary.get('candidate_claims') or []
+            if isinstance(proof_lead_summary, dict):
+                lead_count = int(proof_lead_summary.get('count') or 0)
+                claim_count = len(candidate_claims) if isinstance(candidate_claims, list) else 0
+                if claim_count > 0:
+                    proof_lead_density_values.append(lead_count / claim_count)
+
+        def _avg(values: List[float]) -> Optional[float]:
+            return sum(values) / len(values) if values else None
+
+        return {
+            'average_chronology_completeness': _avg(chronology_completeness_values),
+            'average_contradiction_count': (_avg([float(c) for c in contradiction_counts])
+                                            if contradiction_counts else None),
+            'average_duplicate_question_rate': _avg(duplicate_question_rate_values),
+            'average_proof_lead_density': _avg(proof_lead_density_values),
+            'sessions_with_chronology_data': len(chronology_completeness_values),
+            'sessions_with_contradiction_data': len(contradiction_counts),
+            'sessions_with_question_data': len(duplicate_question_rate_values),
+            'sessions_with_proof_lead_data': len(proof_lead_density_values),
+        }
+
+    def _phase2_statistics(self, successful_results: List[SessionResult]) -> Dict[str, Any]:
+        """Compute Phase 2 (evidence) metrics aggregated across sessions.
+
+        Metrics:
+        - ``support_sufficiency``: average ``credible_support_ratio`` from the
+          claim support packet summary.
+        - ``support_quality_rate``: ratio of high-quality support events
+          (corroborated / documentary / authority_only) to total support events
+          across the ``support_quality_counts`` map.
+        - ``proof_readiness``: average ``proof_readiness_score`` from the
+          claim support packet summary.
+        """
+        _HIGH_QUALITY_LABELS = frozenset({
+            'corroborated', 'documentary', 'authority_only', 'high', 'strong',
+        })
+
+        support_sufficiency_values: List[float] = []
+        support_quality_rate_values: List[float] = []
+        proof_readiness_values: List[float] = []
+
+        for result in successful_results:
+            final_state = dict(getattr(result, 'final_state', {}) or {})
+
+            packet_summary = final_state.get('claim_support_packet_summary')
+            if not isinstance(packet_summary, dict):
+                intake_case_summary = final_state.get('intake_case_summary')
+                if isinstance(intake_case_summary, dict):
+                    packet_summary = intake_case_summary.get('claim_support_packet_summary') or {}
+
+            if not isinstance(packet_summary, dict):
+                continue
+
+            credible_ratio = packet_summary.get('credible_support_ratio')
+            if credible_ratio is not None:
+                support_sufficiency_values.append(float(credible_ratio))
+
+            proof_readiness = packet_summary.get('proof_readiness_score')
+            if proof_readiness is not None:
+                proof_readiness_values.append(float(proof_readiness))
+
+            quality_counts = dict(packet_summary.get('support_quality_counts') or {})
+            if quality_counts:
+                total_quality = sum(int(v or 0) for v in quality_counts.values())
+                high_quality = sum(
+                    int(quality_counts.get(label, 0) or 0)
+                    for label in _HIGH_QUALITY_LABELS
+                )
+                if total_quality > 0:
+                    support_quality_rate_values.append(high_quality / total_quality)
+
+        def _avg(values: List[float]) -> Optional[float]:
+            return sum(values) / len(values) if values else None
+
+        return {
+            'average_support_sufficiency': _avg(support_sufficiency_values),
+            'average_support_quality_rate': _avg(support_quality_rate_values),
+            'average_proof_readiness': _avg(proof_readiness_values),
+            'sessions_with_support_data': len(support_sufficiency_values),
+            'sessions_with_quality_data': len(support_quality_rate_values),
+            'sessions_with_proof_readiness_data': len(proof_readiness_values),
         }

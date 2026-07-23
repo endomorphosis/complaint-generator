@@ -488,6 +488,7 @@ def build_mike_handoff(
     project_id: Optional[str] = None,
     workspace_id: Optional[str] = None,
     generate_draft_if_missing: bool = True,
+    grounding_mode: Optional[str] = None,
     service: Optional[ComplaintWorkspaceService] = None,
     root_dir: Optional[str | Path] = None,
 ) -> dict[str, Any]:
@@ -497,6 +498,7 @@ def build_mike_handoff(
         project_id=project_id,
         workspace_id=workspace_id,
         generate_draft_if_missing=generate_draft_if_missing,
+        grounding_mode=grounding_mode,
     )
 
 
@@ -524,6 +526,10 @@ def sync_mike_final_draft(
     source_updated_at: Optional[str] = None,
     structured_deltas: Optional[list[dict[str, Any]]] = None,
     editor_metadata: Optional[dict[str, Any]] = None,
+    grounding_mode: Optional[str] = None,
+    assertion_annotations: Optional[list[dict[str, Any]]] = None,
+    authority_links: Optional[list[dict[str, Any]]] = None,
+    sync_provenance: Optional[dict[str, Any]] = None,
     service: Optional[ComplaintWorkspaceService] = None,
     root_dir: Optional[str | Path] = None,
 ) -> dict[str, Any]:
@@ -541,6 +547,10 @@ def sync_mike_final_draft(
         source_updated_at=source_updated_at,
         structured_deltas=structured_deltas,
         editor_metadata=editor_metadata,
+        grounding_mode=grounding_mode,
+        assertion_annotations=assertion_annotations,
+        authority_links=authority_links,
+        sync_provenance=sync_provenance,
     )
 
 

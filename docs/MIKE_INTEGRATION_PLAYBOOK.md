@@ -37,9 +37,15 @@ Use one of the aligned surfaces below:
   - claim type
   - draft body/title/relief
   - support review
+  - centralized `router_policy` so Mike routes assistance through Complaint Generator's LLM control plane
+  - `skill_asset_manifest` so Mike can roundtrip only complaint-generator-owned skill IDs, including corpus-search, containment-policy, and authority-graph assets owned by complaint-generator
+  - `grounding_mode`, `corpus_boundaries`, and `legal_corpus_context`
+  - legal-corpus adapter lane metadata that keeps strict containment rooted in `integrations/ipfs_datasets/legal.py`, `search.py`, `policy_rules.py`, and `graphs.py`
+  - `logic_handoff` with proof constraints, theorem-export metadata, formal predicates to preserve, and the optional Leanstral assist lane policy for unresolved proof work
   - summarized evidence context by claim element
   - `structured_legal_packet_context` with stable section/paragraph/claim IDs
   - `editor_guardrails` with unsupported elements, weak links, and contradiction hotspots
+  - `submodule_inventory` and `compatibility_target_matrix` for repeatable upstream refreshes, including current `HEAD` and `origin/main` SHAs for `mike` and `ipfs_datasets_py`
   - `non_negotiable_constraints` machine-readable must-hold legal/proof invariants
 
 ## 2.5) Check integration status and next action
@@ -99,12 +105,19 @@ Use one of the aligned surfaces below:
 - `source_updated_at`
 - `structured_deltas` (paragraph/citation/claim/relief/metadata edit operations)
 - `editor_metadata` (editor attribution/session/source transport metadata)
+- `grounding_mode`
+- `assertion_annotations` (grounded or unsupported substantive assertions)
+- `authority_links` (retrieved legal authorities tied to assertions)
+- `sync_provenance` (editor version, enabled skill assets, base-draft identity, redline metadata)
 
 ### Sync behavior
 
 - Persists draft text into the complaint workspace session.
 - Marks `draft.sync_source = "mike"` with `draft.sync_metadata`.
 - Runs citation-link integrity checks and returns conflict metadata (`citation_link_check`) in the sync response.
+- Runs legal-corpus grounding checks and returns `legal_corpus_review`.
+- Runs prose-to-logic / theorem-export review and returns `logic_review`.
+- Returns normalized `sync_provenance` so complaint-generator remains authoritative for enabled skill IDs, base-draft identity, and redline metadata after the editor roundtrip.
 - Stores sync diagnostics (`sync_diagnostics`) with severity tiers and remediation guidance.
 - Stores tamper-evident `sync_integrity_hash` in sync metadata and sync history.
 - Updates Mike integration history (`last_handoff`, `last_sync`).

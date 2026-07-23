@@ -444,9 +444,13 @@ def _build_alignment_evidence_task_summary(alignment_evidence_tasks: Any) -> Dic
         "resolution_status_counts": {},
         "temporal_gap_task_count": 0,
         "temporal_gap_targeted_task_count": 0,
+        "temporal_next_action_count": 0,
         "temporal_rule_status_counts": {},
         "temporal_rule_blocking_reason_counts": {},
         "temporal_resolution_status_counts": {},
+        "temporal_follow_up_target_counts": {},
+        "temporal_question_objective_counts": {},
+        "temporal_proof_criticality_counts": {},
     }
 
     for task in normalized_tasks:
@@ -464,6 +468,28 @@ def _build_alignment_evidence_task_summary(alignment_evidence_tasks: Any) -> Dic
             continue
 
         summary["temporal_gap_task_count"] += 1
+        temporal_next_actions = [
+            action
+            for action in (task.get("temporal_next_actions") if isinstance(task.get("temporal_next_actions"), list) else [])
+            if isinstance(action, dict)
+        ]
+        summary["temporal_next_action_count"] += len(temporal_next_actions)
+        for temporal_action in temporal_next_actions:
+            follow_up_target = str(temporal_action.get("follow_up_target") or "").strip().lower()
+            if follow_up_target:
+                summary["temporal_follow_up_target_counts"][follow_up_target] = (
+                    summary["temporal_follow_up_target_counts"].get(follow_up_target, 0) + 1
+                )
+            question_objective = str(temporal_action.get("question_objective") or "").strip().lower()
+            if question_objective:
+                summary["temporal_question_objective_counts"][question_objective] = (
+                    summary["temporal_question_objective_counts"].get(question_objective, 0) + 1
+                )
+            proof_criticality = str(temporal_action.get("proof_criticality") or "").strip().lower()
+            if proof_criticality:
+                summary["temporal_proof_criticality_counts"][proof_criticality] = (
+                    summary["temporal_proof_criticality_counts"].get(proof_criticality, 0) + 1
+                )
         temporal_rule_status = str(task.get("temporal_rule_status") or "").strip().lower()
         if temporal_rule_status in {"partial", "failed"}:
             summary["temporal_gap_targeted_task_count"] += 1
@@ -505,6 +531,13 @@ def _merge_alignment_task_summary(raw_summary: Any, alignment_evidence_tasks: An
             )
             or 0
         ),
+        "temporal_next_action_count": int(
+            provided_summary.get(
+                "temporal_next_action_count",
+                derived_summary.get("temporal_next_action_count", 0),
+            )
+            or 0
+        ),
         "temporal_rule_status_counts": dict(
             provided_summary.get(
                 "temporal_rule_status_counts",
@@ -523,6 +556,27 @@ def _merge_alignment_task_summary(raw_summary: Any, alignment_evidence_tasks: An
             provided_summary.get(
                 "temporal_resolution_status_counts",
                 derived_summary.get("temporal_resolution_status_counts", {}),
+            )
+            or {}
+        ),
+        "temporal_follow_up_target_counts": dict(
+            provided_summary.get(
+                "temporal_follow_up_target_counts",
+                derived_summary.get("temporal_follow_up_target_counts", {}),
+            )
+            or {}
+        ),
+        "temporal_question_objective_counts": dict(
+            provided_summary.get(
+                "temporal_question_objective_counts",
+                derived_summary.get("temporal_question_objective_counts", {}),
+            )
+            or {}
+        ),
+        "temporal_proof_criticality_counts": dict(
+            provided_summary.get(
+                "temporal_proof_criticality_counts",
+                derived_summary.get("temporal_proof_criticality_counts", {}),
             )
             or {}
         ),
@@ -802,6 +856,8 @@ def _build_intake_chronology_readiness(raw_status: Any) -> Dict[str, Any]:
             "timeline_relation_summary",
             "temporal_issue_registry",
             "temporal_issue_registry_summary",
+            "timeline_issues",
+            "timeline_issue_summary",
             "timeline_consistency_summary",
         )
     )
@@ -816,7 +872,13 @@ def _build_intake_chronology_readiness(raw_status: Any) -> Dict[str, Any]:
     timeline_relations = status.get("timeline_relations") if isinstance(status.get("timeline_relations"), list) else []
     timeline_relation_summary = status.get("timeline_relation_summary") if isinstance(status.get("timeline_relation_summary"), dict) else {}
     temporal_issue_registry = status.get("temporal_issue_registry") if isinstance(status.get("temporal_issue_registry"), list) else []
-    temporal_issue_registry_summary = summarize_temporal_issue_registry(status.get("temporal_issue_registry_summary"))
+    timeline_issues = status.get("timeline_issues") if isinstance(status.get("timeline_issues"), list) else []
+    issue_summary_source = status.get("temporal_issue_registry_summary")
+    if not isinstance(issue_summary_source, dict) or not issue_summary_source:
+        issue_summary_source = status.get("timeline_issue_summary")
+    if not temporal_issue_registry and timeline_issues:
+        temporal_issue_registry = timeline_issues
+    temporal_issue_registry_summary = summarize_temporal_issue_registry(issue_summary_source)
     timeline_consistency_summary = status.get("timeline_consistency_summary") if isinstance(status.get("timeline_consistency_summary"), dict) else {}
 
     event_records = temporal_fact_registry if temporal_fact_registry else event_ledger
@@ -962,6 +1024,8 @@ def build_intake_status_summary(
     document_provenance_summary = raw_status.get("document_provenance_summary")
     evidence_workflow_action_queue = raw_status.get("evidence_workflow_action_queue")
     alignment_evidence_tasks = raw_status.get("alignment_evidence_tasks")
+    open_item_summary = raw_status.get("open_item_summary")
+    proof_lead_collection_summary = raw_status.get("proof_lead_collection_summary")
     raw_document_drafting_next_action = raw_status.get("document_drafting_next_action")
     raw_document_grounding_recovery_action = raw_status.get("document_grounding_recovery_action")
     document_drafting_next_action = (
@@ -994,6 +1058,32 @@ def build_intake_status_summary(
                 compact_next_action["validation_target_count"] = int(next_action.get("validation_target_count") or 0)
             except (TypeError, ValueError):
                 compact_next_action["validation_target_count"] = 0
+        if isinstance(next_action.get("temporal_next_actions"), list):
+            compact_next_action["temporal_next_actions"] = [
+                dict(item)
+                for item in next_action.get("temporal_next_actions", [])
+                if isinstance(item, dict)
+            ]
+            compact_next_action["temporal_next_action_count"] = len(compact_next_action["temporal_next_actions"])
+        for field_name in (
+            "temporal_rule_profile_id",
+            "temporal_rule_status",
+            "temporal_missingness_kind",
+        ):
+            if field_name in next_action:
+                compact_next_action[field_name] = str(next_action.get(field_name) or "").strip()
+        for field_name in (
+            "temporal_issue_ids",
+            "missing_temporal_predicates",
+            "required_temporal_predicates",
+            "required_provenance_kinds",
+        ):
+            if isinstance(next_action.get(field_name), list):
+                compact_next_action[field_name] = [
+                    str(item).strip()
+                    for item in next_action.get(field_name, [])
+                    if str(item).strip()
+                ]
         primary_validation_target_value = next_action.get("primary_validation_target")
         if isinstance(primary_validation_target_value, dict) and primary_validation_target_value:
             primary_validation_target = {
@@ -1009,6 +1099,13 @@ def build_intake_status_summary(
         compact_next_action["document_grounding_recovery_action"] = dict(document_grounding_recovery_action)
     if document_grounding_improvement_next_action:
         compact_next_action["document_grounding_improvement_next_action"] = dict(document_grounding_improvement_next_action)
+
+    raw_claim_support_packet_summary = raw_status.get("claim_support_packet_summary")
+    claim_support_packet_summary = (
+        raw_claim_support_packet_summary
+        if isinstance(raw_claim_support_packet_summary, dict)
+        else {}
+    )
 
     summary = {
         "current_phase": str(raw_status.get("current_phase") or "").strip(),
@@ -1036,6 +1133,37 @@ def build_intake_status_summary(
         "canonical_fact_count": int(readiness.get("canonical_fact_count", 0) or 0),
         "proof_lead_count": int(readiness.get("proof_lead_count", 0) or 0),
     }
+    if claim_support_packet_summary:
+        try:
+            summary["proof_readiness_score"] = float(
+                claim_support_packet_summary.get("proof_readiness_score", 0.0) or 0.0
+            )
+        except (TypeError, ValueError):
+            pass
+        support_quality_counts = claim_support_packet_summary.get("support_quality_counts")
+        if isinstance(support_quality_counts, dict) and support_quality_counts:
+            summary["support_quality_counts"] = dict(support_quality_counts)
+        support_lane_label_counts = claim_support_packet_summary.get("support_lane_label_counts")
+        if isinstance(support_lane_label_counts, dict) and support_lane_label_counts:
+            summary["support_lane_label_counts"] = dict(support_lane_label_counts)
+        summary["temporal_gap_task_count"] = int(claim_support_packet_summary.get("temporal_gap_task_count", 0) or 0)
+        summary["temporal_gap_targeted_task_count"] = int(claim_support_packet_summary.get("temporal_gap_targeted_task_count", 0) or 0)
+        summary["temporal_next_action_count"] = int(claim_support_packet_summary.get("temporal_next_action_count", 0) or 0)
+        for field_name in (
+            "temporal_rule_status_counts",
+            "temporal_rule_blocking_reason_counts",
+            "temporal_resolution_status_counts",
+            "temporal_follow_up_target_counts",
+            "temporal_question_objective_counts",
+            "temporal_proof_criticality_counts",
+        ):
+            field_value = claim_support_packet_summary.get(field_name)
+            if isinstance(field_value, dict):
+                summary[field_name] = dict(field_value)
+    if isinstance(open_item_summary, dict) and open_item_summary:
+        summary["open_item_summary"] = dict(open_item_summary)
+    if isinstance(proof_lead_collection_summary, dict) and proof_lead_collection_summary:
+        summary["proof_lead_collection_summary"] = dict(proof_lead_collection_summary)
     if document_grounding_recovery_action:
         summary["document_grounding_recovery_action"] = document_grounding_recovery_action
     if document_grounding_improvement_next_action:
@@ -1074,8 +1202,10 @@ def build_intake_case_review_summary(mediator: Any) -> Dict[str, Any]:
     canonical_fact_intent_summary = raw_status.get("canonical_fact_intent_summary")
     proof_lead_summary = raw_status.get("proof_lead_summary")
     proof_lead_intent_summary = raw_status.get("proof_lead_intent_summary")
+    proof_lead_collection_summary = raw_status.get("proof_lead_collection_summary")
     blocker_follow_up_summary = raw_status.get("blocker_follow_up_summary")
     open_items = raw_status.get("open_items")
+    open_item_summary = raw_status.get("open_item_summary")
     event_ledger = raw_status.get("event_ledger")
     event_ledger_summary = raw_status.get("event_ledger_summary")
     timeline_anchors = raw_status.get("timeline_anchors")
@@ -1083,11 +1213,13 @@ def build_intake_case_review_summary(mediator: Any) -> Dict[str, Any]:
     temporal_relation_registry = raw_status.get("temporal_relation_registry")
     timeline_relations = raw_status.get("timeline_relations")
     temporal_issue_registry = raw_status.get("temporal_issue_registry")
+    timeline_issues = raw_status.get("timeline_issues")
     timeline_anchor_summary = raw_status.get("timeline_anchor_summary")
     temporal_fact_registry_summary = raw_status.get("temporal_fact_registry_summary")
     temporal_relation_registry_summary = raw_status.get("temporal_relation_registry_summary")
     timeline_relation_summary = raw_status.get("timeline_relation_summary")
     temporal_issue_registry_summary = raw_status.get("temporal_issue_registry_summary")
+    timeline_issue_summary = raw_status.get("timeline_issue_summary")
     timeline_consistency_summary = raw_status.get("timeline_consistency_summary")
     harm_profile = raw_status.get("harm_profile")
     remedy_profile = raw_status.get("remedy_profile")
@@ -1148,14 +1280,44 @@ def build_intake_case_review_summary(mediator: Any) -> Dict[str, Any]:
     claim_support_packet_summary_value = (
         claim_support_packet_summary if isinstance(claim_support_packet_summary, dict) else {}
     )
+    # Aggregate lane label and quality counts from per-claim alignment summaries
+    # so the packet summary exposes a cross-claim distribution without requiring
+    # consumers to iterate individual claim entries.
+    _alignment_summary_dict = (
+        intake_evidence_alignment_summary
+        if isinstance(intake_evidence_alignment_summary, dict)
+        else {}
+    )
+    _alignment_claims = (
+        _alignment_summary_dict.get("claims", {})
+        if isinstance(_alignment_summary_dict.get("claims"), dict)
+        else {}
+    )
+    _agg_lane_counts: Dict[str, int] = {}
+    _agg_quality_counts: Dict[str, int] = {}
+    for _claim_entry in _alignment_claims.values():
+        if not isinstance(_claim_entry, dict):
+            continue
+        for _lane, _cnt in (_claim_entry.get("support_lane_label_counts") or {}).items():
+            _agg_lane_counts[_lane] = _agg_lane_counts.get(_lane, 0) + int(_cnt or 0)
+        for _qual, _cnt in (_claim_entry.get("support_quality_counts") or {}).items():
+            _agg_quality_counts[_qual] = _agg_quality_counts.get(_qual, 0) + int(_cnt or 0)
     claim_support_packet_summary_value = {
         **claim_support_packet_summary_value,
         "temporal_gap_task_count": int(alignment_task_summary.get("temporal_gap_task_count", 0) or 0),
         "temporal_gap_targeted_task_count": int(alignment_task_summary.get("temporal_gap_targeted_task_count", 0) or 0),
+        "temporal_next_action_count": int(alignment_task_summary.get("temporal_next_action_count", 0) or 0),
         "temporal_rule_status_counts": dict(alignment_task_summary.get("temporal_rule_status_counts", {}) or {}),
         "temporal_rule_blocking_reason_counts": dict(alignment_task_summary.get("temporal_rule_blocking_reason_counts", {}) or {}),
         "temporal_resolution_status_counts": dict(alignment_task_summary.get("temporal_resolution_status_counts", {}) or {}),
+        "temporal_follow_up_target_counts": dict(alignment_task_summary.get("temporal_follow_up_target_counts", {}) or {}),
+        "temporal_question_objective_counts": dict(alignment_task_summary.get("temporal_question_objective_counts", {}) or {}),
+        "temporal_proof_criticality_counts": dict(alignment_task_summary.get("temporal_proof_criticality_counts", {}) or {}),
     }
+    if _agg_lane_counts and "support_lane_label_counts" not in claim_support_packet_summary_value:
+        claim_support_packet_summary_value["support_lane_label_counts"] = _agg_lane_counts
+    if _agg_quality_counts and "support_quality_counts" not in claim_support_packet_summary_value:
+        claim_support_packet_summary_value["support_quality_counts"] = _agg_quality_counts
 
     summary = {
         "candidate_claims": candidate_claims if isinstance(candidate_claims, list) else [],
@@ -1172,11 +1334,19 @@ def build_intake_case_review_summary(mediator: Any) -> Dict[str, Any]:
         "proof_lead_summary": (
             proof_lead_summary if isinstance(proof_lead_summary, dict) else {}
         ),
+        "proof_lead_collection_summary": (
+            proof_lead_collection_summary
+            if isinstance(proof_lead_collection_summary, dict)
+            else {}
+        ),
         "blocker_follow_up_summary": (
             blocker_follow_up_summary if isinstance(blocker_follow_up_summary, dict) else {}
         ),
         "open_items": (
             open_items if isinstance(open_items, list) else []
+        ),
+        "open_item_summary": (
+            open_item_summary if isinstance(open_item_summary, dict) else {}
         ),
         "proof_lead_intent_summary": (
             proof_lead_intent_summary
@@ -1228,8 +1398,20 @@ def build_intake_case_review_summary(mediator: Any) -> Dict[str, Any]:
         "temporal_issue_registry": (
             temporal_issue_registry if isinstance(temporal_issue_registry, list) else []
         ),
+        "timeline_issues": (
+            timeline_issues
+            if isinstance(timeline_issues, list)
+            else (temporal_issue_registry if isinstance(temporal_issue_registry, list) else [])
+        ),
+        "timeline_issue_summary": summarize_temporal_issue_registry(
+            timeline_issue_summary
+            if isinstance(timeline_issue_summary, dict)
+            else temporal_issue_registry_summary
+        ),
         "temporal_issue_registry_summary": summarize_temporal_issue_registry(
             temporal_issue_registry_summary
+            if isinstance(temporal_issue_registry_summary, dict)
+            else timeline_issue_summary
         ),
         "intake_chronology_readiness": _build_intake_chronology_readiness(raw_status),
         "timeline_consistency_summary": (
@@ -1364,9 +1546,13 @@ def _build_alignment_task_update_summary(
         "promoted_document_count": 0,
         "temporal_gap_task_count": 0,
         "temporal_gap_targeted_task_count": 0,
+        "temporal_next_action_count": 0,
         "temporal_rule_status_counts": {},
         "temporal_rule_blocking_reason_counts": {},
         "temporal_resolution_status_counts": {},
+        "temporal_follow_up_target_counts": {},
+        "temporal_question_objective_counts": {},
+        "temporal_proof_criticality_counts": {},
     }
     task_lookup = _build_alignment_task_lookup(alignment_evidence_tasks)
     for item in visible_updates:
@@ -1391,6 +1577,28 @@ def _build_alignment_task_update_summary(
             continue
 
         summary["temporal_gap_task_count"] += 1
+        temporal_next_actions = [
+            action
+            for action in (task.get("temporal_next_actions") if isinstance(task.get("temporal_next_actions"), list) else [])
+            if isinstance(action, dict)
+        ]
+        summary["temporal_next_action_count"] += len(temporal_next_actions)
+        for temporal_action in temporal_next_actions:
+            follow_up_target = str(temporal_action.get("follow_up_target") or "").strip().lower()
+            if follow_up_target:
+                summary["temporal_follow_up_target_counts"][follow_up_target] = (
+                    summary["temporal_follow_up_target_counts"].get(follow_up_target, 0) + 1
+                )
+            question_objective = str(temporal_action.get("question_objective") or "").strip().lower()
+            if question_objective:
+                summary["temporal_question_objective_counts"][question_objective] = (
+                    summary["temporal_question_objective_counts"].get(question_objective, 0) + 1
+                )
+            proof_criticality = str(temporal_action.get("proof_criticality") or "").strip().lower()
+            if proof_criticality:
+                summary["temporal_proof_criticality_counts"][proof_criticality] = (
+                    summary["temporal_proof_criticality_counts"].get(proof_criticality, 0) + 1
+                )
         temporal_rule_status = str(task.get("temporal_rule_status") or "").strip().lower()
         if temporal_rule_status in {"partial", "failed"}:
             summary["temporal_gap_targeted_task_count"] += 1

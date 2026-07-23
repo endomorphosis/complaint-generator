@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from .dashboard_ui import attach_dashboard_ui_routes
 from .complaint_workspace_api import attach_complaint_workspace_routes
 from .document_ui import attach_document_ui_routes
+from .fastapi_compat import attach_router_routes
 from .site_ui import attach_core_site_ui_routes
 
 
@@ -34,11 +35,7 @@ def create_claim_support_review_ui_router() -> APIRouter:
 
 
 def attach_claim_support_review_ui_routes(app: FastAPI) -> FastAPI:
-    router = create_claim_support_review_ui_router()
-    app.router.routes.extend(router.routes)
-    if hasattr(app.router, "_mark_routes_changed"):
-        app.router._mark_routes_changed()
-    return app
+    return attach_router_routes(app, create_claim_support_review_ui_router())
 
 
 def create_review_health_router(surface_name: str) -> APIRouter:
@@ -56,8 +53,7 @@ def create_review_health_router(surface_name: str) -> APIRouter:
 
 
 def attach_review_health_routes(app: FastAPI, surface_name: str) -> FastAPI:
-    app.include_router(create_review_health_router(surface_name))
-    return app
+    return attach_router_routes(app, create_review_health_router(surface_name))
 
 
 def attach_static_asset_routes(app: FastAPI) -> FastAPI:

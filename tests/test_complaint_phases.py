@@ -476,6 +476,42 @@ class TestComplaintDenoiser:
         """Test denoiser creation."""
         denoiser = ComplaintDenoiser()
         assert len(denoiser.questions_asked) == 0
+
+    def test_review_recommendations_use_structural_quality_gap_prompt(self):
+        """GraphRAG support-quality gaps should produce targeted denoising prompts."""
+        denoiser = ComplaintDenoiser()
+        recommendations = denoiser.generate_review_question_recommendations(
+            'employment',
+            gap_claim={
+                'unresolved_elements': [
+                    {
+                        'element_id': 'employment:1',
+                        'element_text': 'Protected activity',
+                        'status': 'partially_supported',
+                        'missing_support_kinds': [],
+                        'total_links': 2,
+                        'fact_count': 1,
+                        'recommended_action': 'strengthen_support_path',
+                        'support_quality_summary': {
+                            'recommended_quality_action': 'strengthen_support_path',
+                            'quality_signal_counts': {'weak_graph_connectivity': 1},
+                        },
+                    }
+                ]
+            },
+            contradiction_claim={},
+        )
+
+        assert recommendations
+        rec = recommendations[0]
+        assert rec['question_lane'] == 'testimony'
+        assert rec['support_quality_summary']['recommended_quality_action'] == 'strengthen_support_path'
+        assert rec['quality_signal_counts']['weak_graph_connectivity'] == 1
+        assert rec['primary_quality_signal']['signal_type'] == 'weak_graph_connectivity'
+        assert rec['primary_quality_signal']['follow_up_action'] == 'persist_or_query_graph_support'
+        assert rec['quality_follow_up_action'] == 'persist_or_query_graph_support'
+        assert 'connect' in rec['question_text'].lower()
+        assert 'GraphRAG support-path scoring' in rec['question_reason']
     
     def test_generate_questions(self):
         """Test question generation from graphs."""

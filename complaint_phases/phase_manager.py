@@ -311,6 +311,8 @@ class PhaseManager:
         event_ledger = intake_case_file.get('event_ledger') if isinstance(intake_case_file.get('event_ledger'), list) else []
         temporal_fact_registry = intake_case_file.get('temporal_fact_registry') if isinstance(intake_case_file.get('temporal_fact_registry'), list) else []
         temporal_issue_registry = intake_case_file.get('temporal_issue_registry') if isinstance(intake_case_file.get('temporal_issue_registry'), list) else []
+        if not temporal_issue_registry and isinstance(intake_case_file.get('timeline_issues'), list):
+            temporal_issue_registry = intake_case_file.get('timeline_issues')
         timeline_consistency_summary = intake_case_file.get('timeline_consistency_summary') if isinstance(intake_case_file.get('timeline_consistency_summary'), dict) else {}
 
         event_records = temporal_fact_registry if temporal_fact_registry else event_ledger
@@ -333,6 +335,7 @@ class PhaseManager:
         issue_count = len(temporal_issue_registry)
         open_issue_count = 0
         blocking_issue_count = 0
+        unsupported_order_assumption_count = 0
         missing_temporal_predicates: List[str] = []
         required_provenance_kinds: List[str] = []
         for issue in temporal_issue_registry:
@@ -343,6 +346,15 @@ class PhaseManager:
                 open_issue_count += 1
             if bool(issue.get('blocking')) or str(issue.get('severity') or '').strip().lower() == 'blocking':
                 blocking_issue_count += 1
+            # Detect unsupported ordering assumptions (relative-only or order-gap issues)
+            issue_type = str(issue.get('issue_type') or issue.get('category') or '').strip().lower()
+            if status_value != 'resolved' and issue_type in {
+                'relative_only_ordering',
+                'unsupported_ordering',
+                'order_gap',
+                'missing_absolute_date',
+            }:
+                unsupported_order_assumption_count += 1
             for predicate in issue.get('missing_temporal_predicates') or []:
                 normalized_predicate = str(predicate or '').strip()
                 if normalized_predicate and normalized_predicate not in missing_temporal_predicates:
@@ -372,6 +384,10 @@ class PhaseManager:
             failure_reasons.append(f'{blocking_issue_count} blocking chronology issue(s) remain open')
         elif open_issue_count > 0:
             failure_reasons.append(f'{open_issue_count} chronology issue(s) remain unresolved')
+        if unsupported_order_assumption_count > 0:
+            failure_reasons.append(
+                f'{unsupported_order_assumption_count} unsupported ordering assumption(s) must be anchored'
+            )
         if missing_temporal_predicates:
             failure_reasons.append(f'missing temporal predicates: {", ".join(missing_temporal_predicates[:3])}')
         if required_provenance_kinds:
@@ -386,6 +402,7 @@ class PhaseManager:
             'unanchored_event_count': unanchored_event_count,
             'open_issue_count': open_issue_count,
             'blocking_issue_count': blocking_issue_count,
+            'unsupported_order_assumption_count': unsupported_order_assumption_count,
             'missing_temporal_predicates': missing_temporal_predicates,
             'required_provenance_kinds': required_provenance_kinds,
             'failure_reasons': failure_reasons,
@@ -466,6 +483,8 @@ class PhaseManager:
                 blockers.append('chronology_provenance_coverage_incomplete')
             if chronology_readiness.get('open_issue_count', 0) > 0:
                 blockers.append('chronology_open_issues')
+            if chronology_readiness.get('unsupported_order_assumption_count', 0) > 0:
+                blockers.append('order_assumption_unsupported')
 
         for blocker in data.get('intake_blockers', []) or []:
             normalized = str(blocker or '').strip()
@@ -523,6 +542,72 @@ class PhaseManager:
             'blocking_contradictions': list(data.get('blocking_contradictions', [])),
             'escalated_blocking_contradictions': list(data.get('escalated_blocking_contradictions', [])),
             'complainant_summary_confirmation': dict(data.get('complainant_summary_confirmation', {})),
+        }
+
+    # Proof-readiness score below which formalization is blocked.
+    _PROOF_READINESS_FORMALIZATION_THRESHOLD: float = 0.6
+
+    def get_evidence_readiness(self) -> Dict[str, Any]:
+        """Return current evidence-phase proof-readiness metrics and formalization blockers.
+
+        This is the Batch 6 proof-readiness gate: callers can inspect
+        ``formalization_blockers`` to understand why a case cannot yet advance
+        to formalization, and ``proof_readiness_score`` to see how close it is
+        to the threshold.
+        """
+        data = self.phase_data.get(ComplaintPhase.EVIDENCE, {}) or {}
+        packets = data.get('claim_support_packets')
+        if not isinstance(packets, dict) or not packets:
+            return {
+                'ready': False,
+                'proof_readiness_score': 0.0,
+                'credible_support_ratio': 0.0,
+                'draft_ready_element_ratio': 0.0,
+                'evidence_completion_ready': False,
+                'formalization_blockers': ['no_claim_support_data'],
+                'blocker_count': 1,
+                'chronology_failure_reasons': [],
+            }
+        summary = self._build_evidence_packet_summary(data)
+        proof_readiness_score = float(summary.get('proof_readiness_score', 0.0) or 0.0)
+        evidence_completion_ready = bool(summary.get('evidence_completion_ready', False))
+        credible_support_ratio = float(summary.get('credible_support_ratio', 0.0) or 0.0)
+        draft_ready_element_ratio = float(summary.get('draft_ready_element_ratio', 0.0) or 0.0)
+        blocking_contradictions = int(summary.get('claim_support_blocking_contradictions', 0) or 0)
+        unresolved_without_review_path = int(
+            summary.get('claim_support_unresolved_without_review_path_count', 0) or 0
+        )
+        unresolved_temporal_issues = int(summary.get('claim_support_unresolved_temporal_issue_count', 0) or 0)
+        missing_anchor_tasks = int(summary.get('temporal_missing_anchor_task_count', 0) or 0)
+        missing_predicate_count = int(summary.get('temporal_missing_predicate_count', 0) or 0)
+        open_provenance_requirements = int(summary.get('temporal_required_provenance_kind_count', 0) or 0)
+        chronology_failure_reasons = list(summary.get('chronology_failure_reasons', []) or [])
+
+        formalization_blockers: List[str] = []
+        if proof_readiness_score < self._PROOF_READINESS_FORMALIZATION_THRESHOLD:
+            formalization_blockers.append('below_proof_readiness_threshold')
+        if blocking_contradictions > 0:
+            formalization_blockers.append('has_blocking_contradictions')
+        if unresolved_without_review_path > 0:
+            formalization_blockers.append('has_unresolved_elements_without_review_path')
+        if unresolved_temporal_issues > 0:
+            formalization_blockers.append('has_unresolved_chronology_issues')
+        if missing_anchor_tasks > 0:
+            formalization_blockers.append('has_missing_chronology_anchors')
+        if missing_predicate_count > 0:
+            formalization_blockers.append('has_missing_temporal_predicates')
+        if open_provenance_requirements > 0:
+            formalization_blockers.append('has_open_provenance_requirements')
+
+        return {
+            'ready': evidence_completion_ready and not formalization_blockers,
+            'proof_readiness_score': proof_readiness_score,
+            'credible_support_ratio': credible_support_ratio,
+            'draft_ready_element_ratio': draft_ready_element_ratio,
+            'evidence_completion_ready': evidence_completion_ready,
+            'formalization_blockers': formalization_blockers,
+            'blocker_count': len(formalization_blockers),
+            'chronology_failure_reasons': chronology_failure_reasons,
         }
 
     def _build_evidence_packet_summary(self, data: Dict[str, Any]) -> Dict[str, Any]:

@@ -7,7 +7,8 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from document_pipeline import DEFAULT_OUTPUT_DIR
+from document_pipeline import DEFAULT_OUTPUT_DIR, _build_claim_checklist_chip_labels as _pipeline_claim_chip_labels
+from .fastapi_compat import attach_router_routes
 from integrations.ipfs_datasets.storage import retrieve_bytes
 from intake_status import (
     build_intake_case_review_summary,
@@ -152,6 +153,18 @@ def _build_optimization_trace_url(cid: str) -> str:
 
 def _build_optimization_trace_view_url(cid: str) -> str:
     return f"/document/optimization-trace?cid={cid}"
+
+
+def _dedupe_text_values(values: Any) -> List[str]:
+    normalized: List[str] = []
+    seen = set()
+    for value in values if isinstance(values, list) else []:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
 
 
 def _build_review_url(
@@ -981,6 +994,117 @@ def _annotate_artifacts_with_download_urls(payload: Dict[str, Any]) -> Dict[str,
     return payload
 
 
+def _build_document_builder_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    draft = payload.get("draft") if isinstance(payload.get("draft"), dict) else {}
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    drafting_readiness = payload.get("drafting_readiness") if isinstance(payload.get("drafting_readiness"), dict) else {}
+    sections = drafting_readiness.get("sections") if isinstance(drafting_readiness.get("sections"), dict) else {}
+    claims = drafting_readiness.get("claims") if isinstance(drafting_readiness.get("claims"), list) else []
+    guardrails = (
+        drafting_readiness.get("drafting_guardrails")
+        if isinstance(drafting_readiness.get("drafting_guardrails"), dict)
+        else {}
+    )
+    document_provenance_summary = (
+        dict(payload.get("document_provenance_summary") or draft.get("document_provenance_summary") or {})
+        if isinstance(payload.get("document_provenance_summary") or draft.get("document_provenance_summary"), dict)
+        else {}
+    )
+
+    support_status_counts: Dict[str, int] = {}
+    section_support: List[Dict[str, Any]] = []
+    support_source_refs: List[str] = []
+    for section_key, section in sections.items():
+        if not isinstance(section, dict):
+            continue
+        support_status = str(section.get("support_status") or section.get("status") or "ready").strip().lower() or "ready"
+        support_status_counts[support_status] = support_status_counts.get(support_status, 0) + 1
+        source_refs = [
+            str(item or "").strip()
+            for item in list(section.get("source_refs") or [])
+            if str(item or "").strip()
+        ]
+        support_source_refs.extend(source_refs)
+        section_support.append(
+            {
+                "section_key": str(section_key or "").strip(),
+                "title": section.get("title") or str(section_key or "").replace("_", " ").title(),
+                "status": str(section.get("status") or "ready").strip().lower() or "ready",
+                "support_status": support_status,
+                "claim_element_count": int(section.get("claim_element_count") or len(section.get("claim_elements") or [])),
+                "source_ref_count": len(source_refs),
+                "explicit_gap_count": len(section.get("explicit_gaps") or []),
+                "review_url": section.get("review_url"),
+            }
+        )
+
+    source_family_counts: Dict[str, int] = {}
+    artifact_family_counts: Dict[str, int] = {}
+    content_origin_counts: Dict[str, int] = {}
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        for source_key, target in (
+            ("source_family_counts", source_family_counts),
+            ("artifact_family_counts", artifact_family_counts),
+            ("content_origin_counts", content_origin_counts),
+        ):
+            counts = claim.get(source_key) if isinstance(claim.get(source_key), dict) else {}
+            for label, count in counts.items():
+                normalized_label = str(label or "").strip()
+                if not normalized_label:
+                    continue
+                target[normalized_label] = target.get(normalized_label, 0) + int(count or 0)
+
+    guardrail_warnings = [
+        warning
+        for warning in list(guardrails.get("warnings") or [])
+        if isinstance(warning, dict)
+    ]
+    warning_type_counts: Dict[str, int] = {}
+    for warning in guardrail_warnings:
+        warning_type = str(warning.get("warning_type") or warning.get("code") or "drafting_warning").strip()
+        if warning_type:
+            warning_type_counts[warning_type] = warning_type_counts.get(warning_type, 0) + 1
+
+    artifact_entries = []
+    for format_name, artifact in artifacts.items():
+        if not isinstance(artifact, dict):
+            continue
+        artifact_entries.append(
+            {
+                "format": str(format_name or "").strip(),
+                "filename": artifact.get("filename"),
+                "size_bytes": int(artifact.get("size_bytes") or 0),
+                "download_url": artifact.get("download_url"),
+                "managed_download": bool(artifact.get("download_url")),
+            }
+        )
+
+    return {
+        "status": str(drafting_readiness.get("status") or "ready").strip().lower() or "ready",
+        "warning_count": int(drafting_readiness.get("warning_count") or 0),
+        "guardrail_warning_count": int(guardrails.get("warning_count") or len(guardrail_warnings)),
+        "guardrail_blocker_count": int(guardrails.get("blocker_count") or 0),
+        "support_status_counts": support_status_counts,
+        "section_support": section_support,
+        "source_ref_count": len(_dedupe_text_values(support_source_refs)),
+        "source_family_counts": source_family_counts,
+        "artifact_family_counts": artifact_family_counts,
+        "content_origin_counts": content_origin_counts,
+        "warning_type_counts": warning_type_counts,
+        "artifact_provenance": {
+            "managed_output_dir": str(_default_generated_documents_root()),
+            "artifact_count": len(artifact_entries),
+            "downloadable_count": len([entry for entry in artifact_entries if entry.get("managed_download")]),
+            "artifacts": artifact_entries,
+        },
+        "document_provenance_summary": document_provenance_summary,
+    }
+
+
 def _section_claim_types(section_key: str, claim_types: List[str]) -> List[str]:
     claim_oriented_sections = {
         "summary_of_facts",
@@ -992,31 +1116,14 @@ def _section_claim_types(section_key: str, claim_types: List[str]) -> List[str]:
 
 
 def _build_claim_review_chip_labels(claim: Dict[str, Any]) -> List[str]:
-    if not isinstance(claim, dict):
-        return []
+    """Build chip labels for claim review using the canonical pipeline implementation.
 
-    chip_labels: List[str] = []
-    claim_status = str(claim.get("status") or "").strip().lower()
-    if claim_status:
-        chip_labels.append(f"claim status: {humanize_workflow_priority_label(claim_status)}")
-
-    temporal_gap_hint_count = int(claim.get("temporal_gap_hint_count") or 0)
-    if temporal_gap_hint_count > 0:
-        chip_labels.append(f"chronology gaps: {temporal_gap_hint_count}")
-
-    proof_gap_count = int(claim.get("proof_gap_count") or 0)
-    if proof_gap_count > 0:
-        chip_labels.append(f"proof gaps: {proof_gap_count}")
-
-    unresolved_element_count = int(claim.get("unresolved_element_count") or 0)
-    if unresolved_element_count > 0:
-        chip_labels.append(f"unresolved elements: {unresolved_element_count}")
-
-    contradiction_candidate_count = int(claim.get("contradiction_candidate_count") or 0)
-    if contradiction_candidate_count > 0:
-        chip_labels.append(f"contradiction candidates: {contradiction_candidate_count}")
-
-    return chip_labels
+    Delegates to ``_pipeline_claim_chip_labels`` so that the application layer
+    stays in sync with the richer set of chip signals maintained by
+    ``document_pipeline`` (temporal predicates, provenance kinds, authority
+    treatment, etc.) rather than duplicating a simplified version here.
+    """
+    return _pipeline_claim_chip_labels(claim)
 
 
 def _annotate_checklist_review_links(
@@ -1387,6 +1494,7 @@ def _annotate_review_links(payload: Dict[str, Any], *, mediator: Any, user_id: O
         section=preferred_section,
         follow_up_support_kind=_default_support_kind_for_section(preferred_section),
     )
+    payload["document_builder_summary"] = _build_document_builder_summary(payload)
     if intake_summary_handoff:
         payload["intake_summary_handoff"] = intake_summary_handoff
         document_optimization = payload.get("document_optimization")
@@ -1508,5 +1616,4 @@ def create_document_router(mediator: Any) -> APIRouter:
 
 
 def attach_document_routes(app: FastAPI, mediator: Any) -> FastAPI:
-    app.include_router(create_document_router(mediator))
-    return app
+    return attach_router_routes(app, create_document_router(mediator))
