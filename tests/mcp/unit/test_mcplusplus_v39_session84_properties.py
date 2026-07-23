@@ -194,10 +194,8 @@ class TestCircuitBreakerProperties:
         
         for i in range(call_count):
             if i % 2 == 0:
-                try:
-                    cb.call(lambda: "ok")
-                except Exception:
-                    pass
+                result = cb.call(lambda: "ok")
+                assert result == "ok"
             else:
                 with pytest.raises(
                     ZeroDivisionError,
@@ -206,7 +204,11 @@ class TestCircuitBreakerProperties:
                     cb.call(lambda: 1/0)
         
         metrics = cb.metrics
-        # Total calls must equal sum of successes and failures
+        expected_successes = (call_count + 1) // 2
+        expected_failures = call_count // 2
+        assert metrics.total_calls == call_count
+        assert metrics.success_count == expected_successes
+        assert metrics.failure_count == expected_failures
         assert metrics.total_calls == metrics.success_count + metrics.failure_count
 
 
