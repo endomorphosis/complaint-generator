@@ -151,24 +151,27 @@ class TestRecoveryFromErrors:
         assert all(key in result for key in ("entities", "relationships", "metadata"))
     
     def test_multiple_sequential_errors(self):
-        """Handle multiple sequential errors gracefully."""
+        """Handle multiple sequential edge-case inputs without corrupting state."""
         context = OntologyGenerationContext(
             data_source="test", data_type="text", domain="general"
         )
         generator = OntologyGenerator()
         
-        invalid_inputs = ["", "!@#", "   ", "\x00"]
+        edge_case_inputs = ["", "!@#", "   ", "\x00"]
         
-        for invalid in invalid_inputs:
-            try:
-                result = generator.generate_ontology(invalid, context)
-                assert result is not None
-            except Exception:
-                pass
+        for text in edge_case_inputs:
+            result = generator.generate_ontology(text, context)
+            assert isinstance(result, dict)
+            assert all(
+                key in result for key in ("entities", "relationships", "metadata")
+            )
         
-        # Should still work after errors
+        # The same instance should still produce a valid ontology afterward.
         valid_result = generator.generate_ontology("test", context)
-        assert valid_result is not None
+        assert isinstance(valid_result, dict)
+        assert all(
+            key in valid_result for key in ("entities", "relationships", "metadata")
+        )
 
 
 class TestBoundaryConditions:
