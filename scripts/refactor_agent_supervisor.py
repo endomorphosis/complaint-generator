@@ -3185,6 +3185,17 @@ def _pid_alive(pid: int) -> bool:
         return True
 
 
+def _remove_owned_pid_file(pid_path: Path, *, pid: int) -> str | None:
+    """Remove this process's PID file, returning an actionable filesystem error."""
+
+    try:
+        if pid_path.exists() and pid_path.read_text(encoding="utf-8").strip() == str(pid):
+            pid_path.unlink()
+    except OSError as exc:
+        return f"Could not remove owned PID file {pid_path}: {type(exc).__name__}: {exc}"
+    return None
+
+
 def run_daemon(*, interval_s: float, refill_floor: int, once: bool = False) -> dict[str, Any]:
     STATE_ROOT.mkdir(parents=True, exist_ok=True)
     PID_PATH.write_text(str(os.getpid()) + "\n", encoding="utf-8")
@@ -3238,11 +3249,7 @@ def run_daemon(*, interval_s: float, refill_floor: int, once: bool = False) -> d
     except KeyboardInterrupt:
         stop_reason = "signal"
     finally:
-        try:
-            if PID_PATH.exists() and PID_PATH.read_text(encoding="utf-8").strip() == str(os.getpid()):
-                PID_PATH.unlink()
-        except Exception:
-            pass
+        pid_cleanup_error = _remove_owned_pid_file(PID_PATH, pid=os.getpid())
         final_payload: dict[str, Any] = {
             "status": "stopped",
             "pid": os.getpid(),
@@ -3251,6 +3258,8 @@ def run_daemon(*, interval_s: float, refill_floor: int, once: bool = False) -> d
             "cycle": cycle,
             "stop_reason": stop_reason,
             "stopped_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "pid_cleanup_error": pid_cleanup_error,
+            "last_error": pid_cleanup_error,
         }
         if last_result:
             seed_summary = _seed_status_summary(last_result)
