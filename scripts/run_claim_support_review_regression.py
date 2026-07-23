@@ -63,6 +63,7 @@ def playwright_chromium_available() -> bool:
     except Exception:
         return False
 
+    playwright = None
     try:
         playwright = sync_playwright().start()
         executable_path = Path(playwright.chromium.executable_path)
@@ -70,10 +71,8 @@ def playwright_chromium_available() -> bool:
     except Exception:
         return False
     finally:
-        try:
+        if playwright is not None:
             playwright.stop()
-        except Exception:
-            pass
 
 
 def resolve_test_targets(
