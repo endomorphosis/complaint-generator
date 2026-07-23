@@ -25,11 +25,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-275-defineacanonicalformalwork-plancontractandlogicv
 - Acceptance: FormalWorkPlan records actors, goals, subgoals, tasks, events, fluents, preconditions, effects, norms, temporal constraints, evidence requirements, and deterministic identities.; A reviewed DCEC vocabulary models belief, knowledge, intention, obligation, permission, prohibition, delegation, and execution events without deriving formulas from free-form model text.; A reviewed TDFOL vocabulary models dependency ordering, deadlines, liveness, safety, and goal satisfaction over finite supervisor traces.; A versioned frame-logic projection derives bounded worlds, accessibility relations, and relevant evidence-graph neighborhoods without treating graph reachability as code proof.; Plan consistency, plan conformance, and generated-code assurance are separate levels; no plan proof is promoted into a code proof.
 
-- [ ] Task checkbox-276: REF-276 Compile objective, taskboard, AST, and policy records into formal plans
+- [x] Task checkbox-276: REF-276 Compile objective, taskboard, AST, and policy records into formal plans
 
 ## REF-276 Compile objective, taskboard, AST, and policy records into formal plans
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
