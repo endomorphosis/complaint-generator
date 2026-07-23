@@ -3,6 +3,7 @@
 import os
 import json
 import re
+from contextlib import closing
 from html import unescape
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -2596,38 +2597,45 @@ class LegalAuthorityStorageHook:
             return []
 
     def get_authority_by_id(self, authority_id: int) -> Optional[Dict[str, Any]]:
-        """Get a single authority record by its DuckDB ID."""
+        """Get a single authority record by its DuckDB ID.
+
+        ``None`` means the query completed successfully but the record does not
+        exist. Database and record-decoding failures are logged and propagated
+        so callers do not mistake an unavailable lookup for a missing record.
+        """
         if not DUCKDB_AVAILABLE:
             return None
 
         try:
-            conn = duckdb.connect(self.db_path)
-            row = conn.execute(
-                """
-                SELECT id, claim_type, authority_type, source, citation,
-                      title, content, url, metadata, relevance_score, timestamp,
-                        jurisdiction, source_system, provenance, claim_element_id, claim_element,
-                                                parse_status, chunk_count, parsed_text_preview, parse_metadata,
-                                                graph_status, graph_entity_count, graph_relationship_count, graph_metadata,
-                      (
-                          SELECT COUNT(*) FROM legal_authority_facts laf WHERE laf.authority_id = legal_authorities.id
-                      ) AS fact_count
-                FROM legal_authorities
-                WHERE id = ?
-                LIMIT 1
-                """,
-                [authority_id],
-            ).fetchone()
-            if row is None:
-                conn.close()
-                return None
-            record = self._authority_record_from_row(row, include_claim_type=True)
-            record = self._attach_treatment_payloads(conn, record)
-            conn.close()
-            return record
-        except Exception as e:
-            self.mediator.log('legal_authority_query_error', error=str(e), authority_id=authority_id)
-            return None
+            with closing(duckdb.connect(self.db_path)) as conn:
+                row = conn.execute(
+                    """
+                    SELECT id, claim_type, authority_type, source, citation,
+                          title, content, url, metadata, relevance_score, timestamp,
+                            jurisdiction, source_system, provenance, claim_element_id, claim_element,
+                                                    parse_status, chunk_count, parsed_text_preview, parse_metadata,
+                                                    graph_status, graph_entity_count, graph_relationship_count, graph_metadata,
+                          (
+                              SELECT COUNT(*) FROM legal_authority_facts laf WHERE laf.authority_id = legal_authorities.id
+                          ) AS fact_count
+                    FROM legal_authorities
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    [authority_id],
+                ).fetchone()
+                if row is None:
+                    return None
+                record = self._authority_record_from_row(row, include_claim_type=True)
+                return self._attach_treatment_payloads(conn, record)
+        except Exception as exc:
+            self.mediator.log(
+                'legal_authority_query_error',
+                error=str(exc),
+                error_type=type(exc).__name__,
+                authority_id=authority_id,
+            )
+            raise
 
     def get_authority_treatments(self, authority_id: int) -> List[Dict[str, Any]]:
         """Get persisted treatment records for a stored legal authority."""
