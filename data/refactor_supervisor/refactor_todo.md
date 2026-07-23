@@ -4605,11 +4605,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-248-compilecandidatediffsintotypedastproofscopes
 - Acceptance: Python diffs produce qualified symbols, imports, calls, state transitions, interfaces, source hashes, and changed-path scopes.; Renames, deletes, generated files, syntax failures, and non-Python changes have explicit conservative handling.; Scopes reuse existing AST and conflict-graph records by blob identity.; Equivalent cold and warm scans produce the same canonical scope identities.
 
-- [ ] Task checkbox-249: REF-249 Build a reviewed code-invariant obligation template registry
+- [x] Task checkbox-249: REF-249 Build a reviewed code-invariant obligation template registry
 
 ## REF-249 Build a reviewed code-invariant obligation template registry
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
