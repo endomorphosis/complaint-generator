@@ -228,32 +228,42 @@ class TestCircuitBreakerPropertyBased:
     @settings(max_examples=50)
     def test_circuit_state_reflects_failure_sequence(self, success_sequence):
         """
-        Property: Circuit state depends on failure count, not order.
+        Property: Fewer consecutive failures than the threshold keep the circuit closed.
         
-        For any ordering of successes and failures with total
-        failures < threshold, the circuit remains closed.
+        For any sequence shorter than the configured failure threshold,
+        successful calls return normally, failed calls propagate the expected
+        service error, and the circuit remains closed.
         """
-        cb = get_circuit_breaker(f"test_cb_{id(success_sequence)}")
+        cb = get_circuit_breaker("test_cb_failure_sequence")
+        # Named breakers are process-wide singletons, and Hypothesis runs many
+        # examples inside one test invocation. Start every example with clean
+        # state and metrics so a prior example cannot affect this property.
+        cb.reset()
         cb.failure_threshold = 100  # High threshold
         
         def service(should_succeed):
             if should_succeed:
                 return "ok"
-            raise Exception("Failure")
+            raise RuntimeError("Synthetic failure")
         
-        initial_state = cb.state.value
+        expected_successes = 0
+        expected_failures = 0
+        for expected_total, success in enumerate(success_sequence, start=1):
+            if success:
+                assert cb.call(service, success) == "ok"
+                expected_successes += 1
+            else:
+                with pytest.raises(RuntimeError, match="Synthetic failure"):
+                    cb.call(service, success)
+                expected_failures += 1
+
+            metrics = cb.metrics
+            assert metrics.total_calls == expected_total
+            assert metrics.success_count == expected_successes
+            assert metrics.failure_count == expected_failures
+            assert cb.state.value == "closed"
         
-        for success in success_sequence:
-            try:
-                cb.call(service, success)
-            except CircuitBreakerOpenError:
-                break
-            except Exception:
-                pass
-        
-        # With high threshold, state shouldn't change much
-        # CircuitState enum uses lowercase values
-        assert cb.state.value in ["closed", "open"], "Invalid state"
+        assert cb.metrics.total_calls == len(success_sequence)
 
 
 # ============================================================================
