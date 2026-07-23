@@ -230,17 +230,23 @@ class GraphAwareRetrievalReranker:
             pass
 
         try:
+            legal_graph_terms: List[str] = []
             legal_graph = phase_manager.get_phase_data(ComplaintPhase.FORMALIZATION, "legal_graph")
             if legal_graph is not None and hasattr(legal_graph, "elements"):
                 for element in list(getattr(legal_graph, "elements", {}).values())[:50]:
                     element_name = str(getattr(element, "name", "") or "")
                     element_description = str(getattr(element, "description", "") or "")
                     if element_name:
-                        terms.append(element_name)
+                        legal_graph_terms.append(element_name)
                     if element_description:
-                        terms.append(element_description)
+                        legal_graph_terms.append(element_description)
+            terms.extend(legal_graph_terms)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to extract legal-graph retrieval terms; "
+                "continuing with other graph sources",
+                exc_info=True,
+            )
 
         deduped: List[str] = []
         seen = set()
