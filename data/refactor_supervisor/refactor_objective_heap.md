@@ -133,7 +133,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P1
 - Bundle: refactor/g6
 - Goal: Pay down error-handling and observability debt
-- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/search.py, applications/ui_review.py, complaint_generator/ui_optimizer_daemon.py, mediator/state.py, integrations/ipfs_datasets/scraper_daemon.py, scripts/gmail_duckdb_daemon.py, docs/OBSERVABILITY_INDEX.md, docs/observability/TROUBLESHOOTING.md, data/refactor_supervisor/discovery/2026-07-21-ref-032-objective-validation-repair.md, objective validation repair
+- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/search.py, applications/ui_review.py, complaint_generator/ui_optimizer_daemon.py, mediator/state.py, integrations/ipfs_datasets/scraper_daemon.py, scripts/gmail_duckdb_daemon.py, docs/OBSERVABILITY_INDEX.md, docs/observability/TROUBLESHOOTING.md, data/refactor_supervisor/discovery/2026-07-21-ref-032-objective-validation-repair.md, data/refactor_supervisor/discovery/2026-07-23-ref-333-objective-validation-repair.md, objective validation repair
 - Validation: python -m pytest --collect-only -q
 
 ## G6.S1 Replace silent failures with typed outcomes
