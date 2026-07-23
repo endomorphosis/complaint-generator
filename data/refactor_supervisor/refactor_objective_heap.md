@@ -57,7 +57,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 
 ## G2 Decompose oversized orchestration modules
 
-- Status: active
+- Status: provisionally_complete
 - Priority: P0
 - Bundle: refactor/g2
 - Goal: Decompose oversized orchestration modules
@@ -70,6 +70,9 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Analyzer health: {"evidence":{},"passed":false,"reason_code":"analyzer_health_missing","status":"missing"}
 - Exhaustion quorum: {"evidence":{},"member_count":null,"reason_code":"exhaustion_quorum_missing","required_members":null,"satisfied":false,"stale_members":[]}
 - Reopen reasons: []
+- State transitioned at: 2026-07-23T18:35:56.065750+00:00
+- State transition reason: Produce completion evidence for: docs/ARCHITECTURE.md; Map every mandatory acceptance criterion to fresh, verified implementation and validation proof bound to the current tree.; Every submitted validation proof must be fresh and passing, and every mandatory criterion must have one.; Require an explicitly healthy analyzer that is safe for completion reasoning.; Require the configured number of independent, fresh, healthy exhaustive receipts bound to the current repository tree.; Every descendant must remain verified with all proof requirements fresh, conclusive, uncontradicted, and satisfied.; Task completion is provisional until every criterion has valid evidence.
+- Provisional at: 2026-07-23T18:35:56.065750+00:00
 
 ## G2.S1 Extract mediator service seams
 
@@ -93,7 +96,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 
 ## G2.S2 Reduce application surface coupling
 
-- Status: active
+- Status: provisionally_complete
 - Parent: G2
 - Priority: P0
 - Bundle: refactor/g2/g2-s2
@@ -102,11 +105,14 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Validation: python -m pytest tests/test_review_api.py -q; python -m pytest tests/test_claim_support_review_playwright_smoke.py -q
 - Goal completion schema version: 1
 - Completion confidence: 0.166667
-- Uncovered criteria: ["applications/complaint_workspace.py","One handler group is isolated.","Routes keep the same response shape.","python -m pytest tests/test_review_api.py -q","applications/dashboard_ui.py","playwright/server.js","Fixture builders are named and reusable.","Playwright smoke tests remain stable.","python -m pytest tests/test_claim_support_review_playwright_smoke.py -q"]
+- Uncovered criteria: ["applications/complaint_workspace.py","One handler group is isolated.","Routes keep the same response shape.","python -m pytest tests/test_review_api.py -q","applications/dashboard_ui.py","playwright/server.js","Fixture builders are named and reusable.","Playwright smoke tests remain stable.","python -m pytest tests/test_claim_support_review_playwright_smoke.py -q","data/refactor_supervisor/discovery/2026-07-23-ref-324-objective-validation-repair.md","objective validation repair"]
 - Stale evidence: []
 - Analyzer health: {"evidence":{},"passed":false,"reason_code":"analyzer_health_missing","status":"missing"}
 - Exhaustion quorum: {"evidence":{},"member_count":null,"reason_code":"exhaustion_quorum_missing","required_members":null,"satisfied":false,"stale_members":[]}
 - Reopen reasons: []
+- State transitioned at: 2026-07-23T18:35:56.065750+00:00
+- State transition reason: Produce completion evidence for: applications/complaint_workspace.py; Map every mandatory acceptance criterion to fresh, verified implementation and validation proof bound to the current tree.; Every submitted validation proof must be fresh and passing, and every mandatory criterion must have one.; Require an explicitly healthy analyzer that is safe for completion reasoning.; Require the configured number of independent, fresh, healthy exhaustive receipts bound to the current repository tree.; Task completion is provisional until every criterion has valid evidence.
+- Provisional at: 2026-07-23T18:35:56.065750+00:00
 
 ## G3 Harden adapter contracts and degraded mode
 
@@ -268,7 +274,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P1
 - Bundle: refactor/g6/g6-s1
 - Goal: Replace silent failures with typed outcomes
-- Evidence: mediator/mediator.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/search.py, Top production broad-exception clusters are documented., At least one cluster returns a typed degraded result., python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q, applications/ui_review.py, complaint_generator/ui_optimizer_daemon.py, mediator/state.py, Intentional ignores are named., Unexpected failures leave diagnostic breadcrumbs., python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q, data/refactor_supervisor/discovery/2026-07-23-ref-336-objective-validation-repair.md, objective validation repair
+- Evidence: mediator/mediator.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/search.py, Top production broad-exception clusters are documented., At least one cluster returns a typed degraded result., python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q, applications/ui_review.py, complaint_generator/ui_optimizer_daemon.py, mediator/state.py, Intentional ignores are named., Unexpected failures leave diagnostic breadcrumbs., python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q
 - Validation: python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q; python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q
 - Goal completion schema version: 1
 - Completion confidence: 0.166667
@@ -300,7 +306,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 
 ## G7 Rationalize frontend and review surfaces
 
-- Status: active
+- Status: provisionally_complete
 - Priority: P1
 - Bundle: refactor/g7
 - Goal: Rationalize frontend and review surfaces
@@ -308,11 +314,14 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Validation: python -m pytest --collect-only -q
 - Goal completion schema version: 1
 - Completion confidence: 0.083333
-- Uncovered criteria: ["docs/ARCHITECTURE.md","docs/REFACTOR_SUPERVISOR_TASKBOARD.md","applications/review_api.py","applications/ui_review.py","mediator/claim_support_hooks.py","tests/test_claim_support_review_playwright_smoke.py","tests/test_review_surface_site_playwright.py","data/refactor_supervisor/discovery/2026-07-21-ref-033-objective-validation-repair.md","objective validation repair"]
+- Uncovered criteria: ["docs/ARCHITECTURE.md","docs/REFACTOR_SUPERVISOR_TASKBOARD.md","applications/review_api.py","applications/ui_review.py","mediator/claim_support_hooks.py","tests/test_claim_support_review_playwright_smoke.py","tests/test_review_surface_site_playwright.py","data/refactor_supervisor/discovery/2026-07-21-ref-033-objective-validation-repair.md","data/refactor_supervisor/discovery/2026-07-23-ref-334-objective-validation-repair.md","objective validation repair"]
 - Stale evidence: []
 - Analyzer health: {"evidence":{},"passed":false,"reason_code":"analyzer_health_missing","status":"missing"}
 - Exhaustion quorum: {"evidence":{},"member_count":null,"reason_code":"exhaustion_quorum_missing","required_members":null,"satisfied":false,"stale_members":[]}
 - Reopen reasons: []
+- State transitioned at: 2026-07-23T19:00:43.239682+00:00
+- State transition reason: Produce completion evidence for: docs/ARCHITECTURE.md; Map every mandatory acceptance criterion to fresh, verified implementation and validation proof bound to the current tree.; Every submitted validation proof must be fresh and passing, and every mandatory criterion must have one.; Require an explicitly healthy analyzer that is safe for completion reasoning.; Require the configured number of independent, fresh, healthy exhaustive receipts bound to the current repository tree.; Every descendant must remain verified with all proof requirements fresh, conclusive, uncontradicted, and satisfied.; Task completion is provisional until every criterion has valid evidence.
+- Provisional at: 2026-07-23T19:00:43.239682+00:00
 
 ## G7.S1 Separate review API contracts from display assembly
 
