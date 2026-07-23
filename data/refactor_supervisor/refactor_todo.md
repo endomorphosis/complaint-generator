@@ -4379,7 +4379,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-240 Review swallowed exception path in tests/mcp/unit/test_mcplusplus_v39_session84_properties.py:203
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
@@ -4410,7 +4410,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-241 Review swallowed exception path in tests/mcp/unit/test_mcplusplus_v39_session84_properties.py:298
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
@@ -4441,7 +4441,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-242 Review swallowed exception path in tests/mcp/unit/test_mcplusplus_v39_session84_properties.py:424
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
@@ -4472,7 +4472,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-243 Review swallowed exception path in tests/mcp/unit/test_observability_property_based.py:213
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
@@ -4501,11 +4501,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: 421d34ca5ec8347d
 - Acceptance: Codebase scan filed this finding from tests/mcp/unit/test_observability_property_based.py:213. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-243-codebase-scan-421d34ca5ec8.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
 
-- [ ] Task checkbox-244: REF-244 Probe formal-logic providers, toolchains, and optional dependency health
+- [x] Task checkbox-244: REF-244 Probe formal-logic providers, toolchains, and optional dependency health
 
 ## REF-244 Probe formal-logic providers, toolchains, and optional dependency health
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -4522,11 +4522,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-244-probeformal-logicproviderstoolchainsandoptionald
 - Acceptance: A versioned capability report covers Hammer, TDFOL, external provers, Lean, Leanstral, frame logic, knowledge graphs, and ZKP backends.; Provider, executable, package, model, circuit, and optional dependency health are reported separately.; Missing spaCy, model weights, Python bindings, or prover executables produce explicit degraded or unavailable reasons without breaking supervisor import.; Capability probes are bounded, cacheable, and never count availability as proof success.
 
-- [ ] Task checkbox-245: REF-245 Define canonical proof obligations, plans, receipts, and assurance levels
+- [x] Task checkbox-245: REF-245 Define canonical proof obligations, plans, receipts, and assurance levels
 
 ## REF-245 Define canonical proof obligations, plans, receipts, and assurance levels
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -5151,3 +5151,423 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Candidate kind: seed
 - Todo vector key: ref-274-benchmarkcontextreductioncachereuseandcpuproofth
 - Acceptance: Benchmarks compare raw repository context with bounded proof capsules by bytes, tokens, retrieval precision, and accepted-task cost.; Cold and warm runs report translation, solver, kernel, cache, model, validation, and merge latency plus CPU and memory use.; Parallel runs detect nested oversubscription and quantify cancellation and single-flight savings.; Documented thresholds gate rollout expansion and identify unsupported or low-value obligation templates.
+
+- [ ] Task checkbox-275: REF-275 Define a canonical formal work-plan contract and logic vocabulary
+
+## REF-275 Define a canonical formal work-plan contract and logic vocabulary
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-245
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/docs/architecture/AGENT_SUPERVISOR_FORMAL_PLANNING_PROVER_MATRIX_PLAN.md, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_planning_contracts.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_logic_vocabulary.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_planning_contracts.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_planning_contracts.py -q
+- Bundle: refactor/g12/g12-s1
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S1
+- Missing evidence: The supervisor needs a deterministic semantic model of intended work before a language model is asked to implement it.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s1
+- Candidate kind: seed
+- Todo vector key: ref-275-defineacanonicalformalwork-plancontractandlogicv
+- Acceptance: FormalWorkPlan records actors, goals, subgoals, tasks, events, fluents, preconditions, effects, norms, temporal constraints, evidence requirements, and deterministic identities.; A reviewed DCEC vocabulary models belief, knowledge, intention, obligation, permission, prohibition, delegation, and execution events without deriving formulas from free-form model text.; A reviewed TDFOL vocabulary models dependency ordering, deadlines, liveness, safety, and goal satisfaction over finite supervisor traces.; Plan consistency, plan conformance, and generated-code assurance are separate levels; no plan proof is promoted into a code proof.
+
+- [ ] Task checkbox-276: REF-276 Compile objective, taskboard, AST, and policy records into formal plans
+
+## REF-276 Compile objective, taskboard, AST, and policy records into formal plans
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-248, REF-250, REF-275
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_plan_compiler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/code_evidence_graph.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_plan_compiler.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_plan_compiler.py -q
+- Bundle: refactor/g12/g12-s1
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S1
+- Missing evidence: Formal plans must be derived from canonical supervisor and AST records rather than reconstructed by an LLM inside its context window.
+- AST symbols: DEFAULT_EMBEDDING_DIMENSIONS, DEFAULT_EMBEDDING_MIN_SCORE, DEFAULT_BUNDLE_CLUSTER_MIN_SCORE, DEFAULT_OBJECTIVE_TASK_SUMMARY_PREFIX, parse_python_ast_quietly, DEFAULT_DISCOVERY_OUTPUT_PATH, DEFAULT_SURPLUS_FINDINGS_PER_GOAL, DEFAULT_SURPLUS_MIN_TERMS_PER_TODO, DEFAULT_SCAN_OVERSAMPLE_MULTIPLIER, DEFAULT_TASK_PREFIX, OBJECTIVE_SCAN_ANALYZER_VERSION, DEFAULT_AST_DATASET_MAX_CHARS, AST_DATASET_RECORD_SCHEMA_VERSION, LAUNCH_PLAYWRIGHT_VALIDATION_COMMAND, LAUNCH_PLAYWRIGHT_VALIDATION_MARKERS, LAUNCH_PLAYWRIGHT_VALIDATION_GATE_EVIDENCE, SCAN_SUFFIXES, SKIP_DIRS, ObjectiveGoal, ObjectiveFinding, ObjectiveTaskRecord, ObjectiveHeapRecord, DEPENDENCY_EDGE_KINDS, SUCCESSFUL_MERGE_RECEIPT_STATUSES, CoverageSurfaceKind, CoverageStatus, _coverage_json_value, _coverage_enum_value, ObjectiveCoverageEdge, ObjectiveCoverageGraph
+- Merge key: refactor/g12/g12-s1
+- Candidate kind: seed
+- Todo vector key: ref-276-compileobjectivetaskboardastandpolicyrecordsinto
+- Acceptance: The compiler maps goals, task dependencies, leases, resource needs, changed AST scopes, acceptance criteria, and proof policy into canonical plan predicates and events.; Compilation preserves task, goal, tree, symbol, policy, and evidence CIDs and records every abstraction or unsupported field.; Equivalent JSON and DuckDB inputs produce the same plan identity and graph projection.; Syntax failures, cycles, ambiguous effects, and missing semantics produce explicit unsupported or invalid plan results.
+
+- [ ] Task checkbox-277: REF-277 Check formal plans for temporal, deontic, and dependency consistency
+
+## REF-277 Check formal plans for temporal, deontic, and dependency consistency
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-247, REF-276
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_plan_validator.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_verification_provider.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_plan_validator.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_plan_validator.py -q
+- Bundle: refactor/g12/g12-s1
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S1
+- Missing evidence: The supervisor should reject contradictory, unauthorized, impossible, or non-terminating plans before spending model tokens on implementation.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s1
+- Candidate kind: seed
+- Todo vector key: ref-277-checkformalplansfortemporaldeonticanddependencyc
+- Acceptance: Bounded DCEC and TDFOL checks cover dependency readiness, actor authority, unique leases, fencing, required evidence, legal transitions, eventual terminal outcomes, and forbidden merge states.; Contradictions, countermodels, unsupported operators, timeout, and incomplete search remain distinct outcomes.; Native DCEC or TDFOL success is plan-check evidence only unless the exact obligation is reconstructed by an accepted kernel or model checker.; Validation is deterministic, resource bounded, cancellable, and records all assumptions and finite bounds.
+
+- [ ] Task checkbox-278: REF-278 Give Codex and Leanstral proof-carrying formal plan capsules
+
+## REF-278 Give Codex and Leanstral proof-carrying formal plan capsules
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-252, REF-277
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_plan_context.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/proof_context.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_plan_context.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_plan_context.py -q
+- Bundle: refactor/g12/g12-s1
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S1
+- Missing evidence: Language models should receive the verified slice of intended work, not rediscover task semantics and repository-wide dependencies in every prompt.
+- AST symbols: PLAN_EVALUATOR_VERSION, OBJECTIVE_WORK_EVALUATOR_VERSION, _BRANCH_ID_RE, PlanBranchValidationError, _required_string, _string_tuple, _repo_paths, _number, _first, _to_millionths, PlanBranch, AnalysisProposal, RejectedAnalysisProposal, AnalysisProposalEvaluation, EvaluatedPlanBranch, PlanEvaluation, _score_branch, evaluate_plan_branches, evaluate_analysis_proposals, _proposal_value, _proposal_strings, _normalized_semantic_value, _objective_work_payload, _profile_g_objective_work_payload, ObjectiveWorkEvaluationPolicy, EvaluatedObjectiveWorkProposal, RejectedObjectiveWorkProposal, ObjectiveWorkProposalEvaluation, _ObjectiveWorkCandidate, _objective_work_candidate
+- Merge key: refactor/g12/g12-s1
+- Candidate kind: seed
+- Todo vector key: ref-278-givecodexandleanstralproof-carryingformalplancap
+- Acceptance: Capsules contain the selected task transition, assumptions, required preconditions and effects, relevant AST symbols, trusted evidence, counterexamples, allowed paths, tests, and unresolved obligations.; Graph queries enforce row, hop, byte, token, and source-excerpt limits before model invocation.; Model responses bind the plan and task CIDs and cannot alter the theorem, acceptance policy, or authoritative evidence.; Measurements compare capsule size and implementation outcomes against the existing unbounded planning prompt.
+
+- [ ] Task checkbox-279: REF-279 Build an executable, self-testing prover capability matrix
+
+## REF-279 Build an executable, self-testing prover capability matrix
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-244, REF-246
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/docs/architecture/AGENT_SUPERVISOR_FORMAL_PLANNING_PROVER_MATRIX_PLAN.md, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/prover_matrix_registry.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_verification_capabilities.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_prover_matrix_registry.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_prover_matrix_registry.py -q
+- Bundle: refactor/g12/g12-s2
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S2
+- Missing evidence: Source files, installers, and executable discovery do not establish that a prover can soundly check a supervisor obligation.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s2
+- Candidate kind: seed
+- Todo vector key: ref-279-buildanexecutableself-testingprovercapabilitymat
+- Acceptance: The registry covers Z3, CVC5, TLA+/TLC, Apalache, Datalog/SecPAL, Tamarin, ProVerif, HyperLTL/AutoHyper/MCHyper, Lean, Coq, runtime MTL, DCEC, TDFOL, Hammer, Vampire, E, Isabelle, ShadowProver, Leanstral, and ZKP backends.; Each entry distinguishes absent, discovered, versioned, smoke-tested, translation-conformant, reconstruction-capable, and authoritative-for states.; Bounded self-tests bind executable, package, model, translator, semantic profile, and fixture identities.; The repository prover matrix is projected into queryable JSON and DuckDB without treating documentation claims as runtime evidence.
+
+- [ ] Task checkbox-280: REF-280 Conformance-test and quarantine logic translations and legacy prover paths
+
+## REF-280 Conformance-test and quarantine logic translations and legacy prover paths
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-275, REF-279
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/prover_conformance.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/logic_translation_validation.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_prover_conformance.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_prover_conformance.py -q
+- Bundle: refactor/g12/g12-s2
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S2
+- Missing evidence: A solver is only as sound as the translation and semantic abstraction used to invoke it.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s2
+- Candidate kind: seed
+- Todo vector key: ref-280-conformance-testandquarantinelogictranslationsan
+- Acceptance: Translation contracts label exact, equisatisfiable, bounded abstraction, conservative approximation, and heuristic mappings and define permitted assurance for each.; Round-trip, differential, metamorphic, mutation, and negative fixtures cover AST, DCEC, TDFOL, FOL, TPTP, SMT-LIB, TLA+, protocol, and hyperproperty forms.; Known CEC deontic API drift and timing-sensitive cache tests keep affected paths degraded until semantic conformance fixtures pass.; Dropped agents, times, quantifiers, modal operators, bounds, or premises are detected and cannot silently promote a result.
+
+- [ ] Task checkbox-281: REF-281 Route obligations through property-specific multi-prover portfolios
+
+## REF-281 Route obligations through property-specific multi-prover portfolios
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-253, REF-255, REF-280
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_prover_router.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/proof_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_multi_prover_router.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_multi_prover_router.py -q
+- Bundle: refactor/g12/g12-s2
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S2
+- Missing evidence: Different supervisor claims require different semantics; one generic solver-success flag cannot verify them all.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s2
+- Candidate kind: seed
+- Todo vector key: ref-281-routeobligationsthroughproperty-specificmulti-pr
+- Acceptance: Routing selects SMT for finite constraints, TLA tools for state machines, Datalog/SecPAL for authorization, Tamarin/ProVerif for protocols, HyperLTL tools for hyperproperties, runtime MTL for traces, and Lean/Coq/Isabelle for kernel checking.; DCEC and TDFOL provide typed planning and temporal-deontic reasoning while Hammer coordinates premise selection, ATP/SMT candidates, and kernel reconstruction.; Disagreement, unknown, unsupported, timeout, and malformed output fail closed according to property policy and retain every attempt.; Conclusive counterexamples cancel redundant attempts while successful solver candidates still require the configured reconstruction or model-checking authority.
+
+- [ ] Task checkbox-282: REF-282 Persist conformance-bound prover receipts, caches, and matrix projections
+
+## REF-282 Persist conformance-bound prover receipts, caches, and matrix projections
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-250, REF-254, REF-260, REF-279, REF-281
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/prover_evidence_store.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_verification_cache.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/artifact_store.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_prover_evidence_store.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_prover_evidence_store.py -q
+- Bundle: refactor/g12/g12-s2
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S2
+- Missing evidence: Multi-prover reuse must bind every semantic, model, bound, toolchain, and trust dimension and remain queryable without loading raw transcripts.
+- AST symbols: BUNDLE_INDEX_KIND, SCHEDULER_MANIFEST_KIND, QUERY_SCHEMA, MAX_QUERY_ROWS, _IDENTIFIER, _READ_ONLY_SQL, QueryArtifactPaths, query_artifact_paths, _duckdb_module, _json_text, _json_value, _as_int, _as_bool, _as_float, _string_values, _atomic_write_text, _artifact_kind, _query_descriptor, _common_schema, _bundle_schema, _manifest_schema, _top_level_fields, _graph_mapping, _mapping_items, _populate_bundle_tables, _populate_manifest_tables, _table_descriptions, _write_duckdb, write_queryable_artifact, write_bundle_index_artifact
+- Merge key: refactor/g12/g12-s2
+- Candidate kind: seed
+- Todo vector key: ref-282-persistconformance-boundproverreceiptscachesandm
+- Acceptance: Receipt and cache identities include property class, normalized model, translator profile, assumptions, finite bounds, prover and kernel versions, policy, tree, and conformance fixture set.; Stale, lower-assurance, model-only, or non-conformant results cannot satisfy a stronger request.; JSON and DuckDB projections expose capabilities, attempts, disagreements, counterexamples, assurance, freshness, and invalidation lineage.; Single-flight ownership deduplicates equivalent heavy prover requests across serial and parallel supervisors.
+
+- [ ] Task checkbox-283: REF-283 Model-check supervisor state machines with TLA+, TLC, and Apalache
+
+## REF-283 Model-check supervisor state machines with TLA+, TLC, and Apalache
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-276, REF-277, REF-279
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_state_model.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_supervisor_state_model.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_supervisor_state_model.py -q
+- Bundle: refactor/g12/g12-s3
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S3
+- Missing evidence: Leases, retries, merges, refill, cancellation, and resource scheduling are concurrent state machines suited to bounded model checking.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s3
+- Candidate kind: seed
+- Todo vector key: ref-283-model-checksupervisorstatemachineswithtlatlcanda
+- Acceptance: A deterministic generator emits a finite TLA+ model from the supervisor transition schema rather than a domain-specific hard-coded workflow.; Safety covers unique acceptance, fencing, dependency order, idempotent merge, capacity, and evidence gates; liveness covers bounded progress and terminal outcomes.; TLC and Apalache execution receipts record exact model, configuration, bounds, versions, output, and counterexample traces.; Bounded model-check success is labeled by its explored bounds and is never described as an unbounded proof.
+
+- [ ] Task checkbox-284: REF-284 Formalize task authority and delegation with Datalog and SecPAL-style policy
+
+## REF-284 Formalize task authority and delegation with Datalog and SecPAL-style policy
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-275, REF-277, REF-279
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/authorization_logic.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_authorization_logic.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_authorization_logic.py -q
+- Bundle: refactor/g12/g12-s3
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S3
+- Missing evidence: Claims, leases, merge authority, proof promotion, and overrides need explicit delegation and revocation semantics.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s3
+- Candidate kind: seed
+- Todo vector key: ref-284-formalizetaskauthorityanddelegationwithdatalogan
+- Acceptance: Rules model principals, capabilities, delegation depth, lease scope, fencing epoch, proof authority, override scope, expiration, and revocation.; The reference evaluator and any external Datalog or SecPAL lane agree on positive, negative, revocation, confused-deputy, and stale-lease fixtures.; Missing engines remain unsupported while deterministic policy checks continue in shadow mode.; Authorization evidence can permit an action but cannot establish generated-code correctness.
+
+- [ ] Task checkbox-285: REF-285 Verify claim, fencing, receipt, and attestation protocols with Tamarin and ProVerif
+
+## REF-285 Verify claim, fencing, receipt, and attestation protocols with Tamarin and ProVerif
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-264, REF-279, REF-284
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/protocol_verification.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_protocol_verification.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_protocol_verification.py -q
+- Bundle: refactor/g12/g12-s3
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S3
+- Missing evidence: Supervisor coordination and evidence exchange have protocol properties that unit tests and state invariants alone do not cover.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s3
+- Candidate kind: seed
+- Todo vector key: ref-285-verifyclaimfencingreceiptandattestationprotocols
+- Acceptance: Versioned models cover claimant authentication, lease grants, fencing freshness, replay resistance, receipt binding, merge authorization, and optional attestation exchange.; Tamarin and ProVerif lanes expose secrecy, authenticity, correspondence, and replay queries with exact model and toolchain receipts.; Attack traces become canonical counterexamples and model abstractions are documented per query.; Executable presence or installer success cannot satisfy protocol verification without a passing end-to-end model fixture.
+
+- [ ] Task checkbox-286: REF-286 Check cross-lane information-flow hyperproperties
+
+## REF-286 Check cross-lane information-flow hyperproperties
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-252, REF-265, REF-279
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/hyperproperty_verification.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_hyperproperty_verification.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_hyperproperty_verification.py -q
+- Bundle: refactor/g12/g12-s3
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S3
+- Missing evidence: Single-trace checks cannot establish that secrets, witnesses, or unrelated lane data do not affect observable prompts, logs, or artifacts.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s3
+- Candidate kind: seed
+- Todo vector key: ref-286-checkcross-laneinformation-flowhyperproperties
+- Acceptance: Hyperproperty models cover prompt isolation, worktree isolation, log redaction, provider routing, ZKP witness noninterference, and cross-task cache separation.; HyperLTL, AutoHyper, and MCHyper adapters are capability-gated and report unavailable until executable conformance fixtures pass.; Bounded self-composition tests provide non-authoritative fallback evidence when no hyperproperty engine is available.; Counterexample hypertraces are redacted, minimized, and bound to the exact observation policy.
+
+- [ ] Task checkbox-287: REF-287 Generalize runtime MTL monitoring to supervisor event traces
+
+## REF-287 Generalize runtime MTL monitoring to supervisor event traces
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-276, REF-277, REF-279
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/runtime_temporal_monitor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_runtime_temporal_monitor.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_runtime_temporal_monitor.py -q
+- Bundle: refactor/g12/g12-s4
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S4
+- Missing evidence: Offline plans and proofs need a bounded runtime conformance layer for actual daemon, lane, proof, validation, and merge events.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s4
+- Candidate kind: seed
+- Todo vector key: ref-287-generalizeruntimemtlmonitoringtosupervisoreventt
+- Acceptance: Versioned temporal properties cover event ordering, lease expiration, no action after revocation or cancellation, proof-before-merge, bounded retry, eventual terminal status, and resource-release deadlines.; The monitor handles rotated logs, restart epochs, duplicate events, missing timestamps, and bounded out-of-order windows explicitly.; Violations emit durable counterexamples and reopen affected work; absence of observed violations is not promoted into a proof.; Streaming state is bounded and partitioned by task, lane, tree, and policy identity.
+
+- [ ] Task checkbox-288: REF-288 Normalize proof failures and traces into a counterexample knowledge graph
+
+## REF-288 Normalize proof failures and traces into a counterexample knowledge graph
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-250, REF-256, REF-280, REF-283, REF-287
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_counterexamples.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/code_evidence_graph.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_counterexamples.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_counterexamples.py -q
+- Bundle: refactor/g12/g12-s4
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S4
+- Missing evidence: Models should receive compact actionable counterexamples instead of raw solver, model-checker, or runtime transcripts.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s4
+- Candidate kind: seed
+- Todo vector key: ref-288-normalizeprooffailuresandtracesintoacounterexamp
+- Acceptance: A canonical IR represents SMT models and unsat cores, DCEC or TDFOL contradictions, TLA traces, protocol attacks, hypertraces, kernel errors, and runtime MTL violations.; Graph edges bind each counterexample to plans, tasks, AST scopes, assumptions, obligations, providers, receipts, and invalidated evidence.; Minimization, semantic deduplication, redaction, and byte limits run before persistence or prompt assembly.; Hidden witnesses, credentials, unrelated source, and unbounded prover output never enter a context capsule.
+
+- [ ] Task checkbox-289: REF-289 Generate bounded counterexample-guided plan repairs
+
+## REF-289 Generate bounded counterexample-guided plan repairs
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-270, REF-278, REF-288
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_replanner.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/backlog_refinery.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_replanner.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_replanner.py -q
+- Bundle: refactor/g12/g12-s4
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S4
+- Missing evidence: A failed formal plan should yield focused repair work instead of another repository-wide language-model analysis.
+- AST symbols: logger, DEFAULT_CODEBASE_SCAN_MIN_OPEN_TASKS, DEFAULT_CODEBASE_SCAN_MAX_FINDINGS, DEFAULT_CODEBASE_SCAN_COOLDOWN_SECONDS, DEFAULT_OBJECTIVE_SCAN_MIN_OPEN_TASKS, DEFAULT_OBJECTIVE_SCAN_MAX_FINDINGS, DEFAULT_OBJECTIVE_SCAN_COOLDOWN_SECONDS, DEFAULT_VALIDATION_RETRY_BUDGET, DEFAULT_MERGE_RETRY_BUDGET, DEFAULT_IMPLEMENTATION_RETRY_BUDGET, DEFAULT_STALE_GIT_LOCK_SECONDS, DEFAULT_GENERATED_DIRTY_HARD_PATH_CAP, DEFAULT_GENERATED_DIRTY_MAX_DELETE_PATHS, DEFAULT_GENERATED_DIRTY_ALLOW_DELETIONS, DEFAULT_DEPENDENCY_GUARDRAIL_MAX_FINDINGS, DEFAULT_RECONCILIATION_GUARDRAIL_MAX_FINDINGS, DEFAULT_TASK_ID_PREFIX, DEFAULT_TASK_HEADER_PREFIX, CODEBASE_SCAN_ANALYZER_VERSION, CODEBASE_AUDIT_SCANNER_VERSION, CODEBASE_SCAN_REASON_SAMPLE_LIMIT, CODEBASE_SCAN_MAX_FILE_BYTES, CODEBASE_SCAN_SUFFIXES, CODEBASE_SCAN_SKIP_PARTS, CODEBASE_SCAN_SKIP_PREFIXES, ANNOTATION_FOLLOWUP_RE, CodebaseFinding, CodebaseScanInventory, utc_now, task_id_prefix
+- Merge key: refactor/g12/g12-s4
+- Candidate kind: seed
+- Todo vector key: ref-289-generateboundedcounterexample-guidedplanrepairs
+- Acceptance: Typed repair rules can add missing dependencies, split effects, tighten authority, add tests or proof templates, change resource bounds, or request scoped human review.; Every candidate repair is recompiled and rechecked against the original goal and counterexample before taskboard admission.; Semantic identities, retry budgets, refinement depth, and progress measures prevent duplicate or infinite repair generation.; Codex receives only the selected repair transition and bounded counterexample capsule.
+
+- [ ] Task checkbox-290: REF-290 Bind plan conformance and formal evidence into goal completion
+
+## REF-290 Bind plan conformance and formal evidence into goal completion
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-267, REF-287, REF-288, REF-289
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_plan_conformance.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/goal_completion.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_plan_conformance.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_plan_conformance.py -q
+- Bundle: refactor/g12/g12-s4
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S4
+- Missing evidence: A goal should close only when intended transitions occurred and all required implementation, validation, and proof evidence remains fresh.
+- AST symbols: GOAL_COMPLETION_SCHEMA_VERSION, GOAL_COMPLETION_MIGRATION_SCHEMA_VERSION, DEFAULT_EVIDENCE_FRESHNESS_SECONDS, DEFAULT_CLOCK_SKEW_SECONDS, GoalState, _GOAL_STATE_ALIASES, LEGACY_COMPLETED_GOAL_STATES, is_legacy_completed_goal_state, normalize_goal_state, legal_goal_transitions, is_terminal_goal_state, is_schedulable_goal_state, IllegalGoalTransitionError, IllegalGoalTransition, _utc_datetime, _now, _criterion_key, _json_value, _canonical_json, _stable_fingerprint, _string_tuple, _mapping_tuple, CONTRADICTION_KINDS, ContradictionEvidence, CompletionEvidence, EvidenceValidationResult, _validation_passed, _bool_value, _freshness_claim, validate_completion_evidence
+- Merge key: refactor/g12/g12-s4
+- Candidate kind: seed
+- Todo vector key: ref-290-bindplanconformanceandformalevidenceintogoalcomp
+- Acceptance: Conformance compares canonical execution events with the accepted plan and distinguishes skipped, reordered, unauthorized, failed, overridden, and superseded transitions.; Plan consistency alone never verifies code; completion policy independently requires configured code, test, kernel, model-check, protocol, and runtime evidence.; Plan, policy, AST, premise, or counterexample changes invalidate affected conformance and reopen the goal.; Restart and replay reproduce the same conformance verdict from JSON or DuckDB evidence.
+
+- [ ] Task checkbox-291: REF-291 Admit every prover family through one shared CPU and process budget
+
+## REF-291 Admit every prover family through one shared CPU and process budget
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-258, REF-281, REF-283, REF-285, REF-286, REF-287
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_prover_resources.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/proof_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_multi_prover_resources.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_multi_prover_resources.py -q
+- Bundle: refactor/g12/g12-s5
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S5
+- Missing evidence: JVM model checkers, SMT solvers, ATPs, kernels, protocol tools, tests, and models must not create nested pools that oversubscribe the host.
+- AST symbols: UNKNOWN_LIMIT, DEFAULT_RESOURCE_CLASSES, _integer, _boolean, _first, _strings, _mapping, HostResourceSnapshot, sample_host_resources, ProviderCapacity, normalize_provider_capacity, normalize_provider_capacities, LaneResourceRequirements, ResourcePolicy, AdmissionDecision, ResourceScheduleSnapshot, _ProviderReservation, ResourceScheduler, __all__, __post_init__, occupied_worker_capacity, cpu_millionths, memory_used_bytes, disk_used_bytes, to_dict, from_mapping, active, limit, target, cpu_percent
+- Merge key: refactor/g12/g12-s5
+- Candidate kind: seed
+- Todo vector key: ref-291-admiteveryproverfamilythroughonesharedcpuandproc
+- Acceptance: Resource classes cover translation, SMT, ATP, ITP kernels, JVM model checking, protocol verification, hyperproperty checking, runtime monitors, LLM inference, and artifact IO.; One top-level lease accounts for child processes, threads, memory, disk, provider quota, and model concurrency across serial and bundle supervisors.; Timeout and cancellation terminate process groups, release capacity, and preserve bounded diagnostics and partial receipts.; Portfolio width adapts to host pressure and critical-path value while deterministic cache hits bypass execution safely.
+
+- [ ] Task checkbox-292: REF-292 Adversarially test formal plans and every prover-matrix trust boundary
+
+## REF-292 Adversarially test formal plans and every prover-matrix trust boundary
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-271, REF-281, REF-282, REF-283, REF-284, REF-285, REF-286, REF-290, REF-291
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_planning_adversarial.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_plan_validator.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_prover_router.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_planning_adversarial.py -q
+- Bundle: refactor/g12/g12-s5
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S5
+- Missing evidence: The expanded planner must resist forged plans, unsound translations, stale evidence, malicious tool output, and cross-lane leakage.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s5
+- Candidate kind: seed
+- Todo vector key: ref-292-adversariallytestformalplansandeveryprover-matri
+- Acceptance: Tests mutate actor authority, temporal bounds, task dependencies, formulas, models, premises, tool versions, cache keys, receipts, traces, and assurance labels.; Fixtures cover unavailable tools, fake executable versions, solver disagreement, incomplete exploration, protocol false positives, hypertrace leakage, and monitor gaps.; No path promotes model text, native heuristic proofs, bounded results without bounds, simulated ZKP, or stale cache entries beyond policy.; Parallel crash, cancellation, restart, and duplicate claims preserve single-flight and fail-closed behavior.
+
+- [ ] Task checkbox-293: REF-293 Exercise an end-to-end proof-carrying planning and implementation workflow
+
+## REF-293 Exercise an end-to-end proof-carrying planning and implementation workflow
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G12
+- Depends on: REF-268, REF-282, REF-289, REF-290, REF-291, REF-292
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/proof_carrying_planner.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_proof_carrying_planner_e2e.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_proof_carrying_planner_e2e.py -q
+- Bundle: refactor/g12/g12-s5
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S5
+- Missing evidence: Formal planning, bounded model context, implementation, verification, runtime monitoring, and replanning must work as one restartable workflow.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s5
+- Candidate kind: seed
+- Todo vector key: ref-293-exerciseanend-to-endproof-carryingplanningandimp
+- Acceptance: The workflow compiles and verifies a plan, dispatches independent Codex tasks, verifies changed scopes, merges accepted work, monitors execution, and repairs a seeded counterexample.; It exercises Hammer reconstruction, Lean or Coq checking, Leanstral shadow proposals, optional ZKP attestation, matrix-specific lanes, and test fallbacks without conflating assurance.; Independent plan and proof nodes execute concurrently while conflict, dependency, and shared-resource constraints remain authoritative.; All decisions are reproducible from paired JSON and DuckDB artifacts after restart.
+
+- [ ] Task checkbox-294: REF-294 Benchmark and gate formal-planning rollout by assurance and throughput
+
+## REF-294 Benchmark and gate formal-planning rollout by assurance and throughput
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: G12
+- Depends on: REF-273, REF-274, REF-293
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_planning_metrics.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/proof_metrics.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/formal_verification_policy.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_planning_benchmarks.py, ipfs_datasets_py/ipfs_accelerate_py/docs/architecture/AGENT_SUPERVISOR_FORMAL_PLANNING_PROVER_MATRIX_PLAN.md
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_formal_planning_benchmarks.py -q
+- Bundle: refactor/g12/g12-s5
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G12.S5
+- Missing evidence: The broader prover matrix should expand only when it reduces model work and improves defect detection without unacceptable CPU or scheduling regressions.
+- AST symbols: 
+- Merge key: refactor/g12/g12-s5
+- Candidate kind: seed
+- Todo vector key: ref-294-benchmarkandgateformal-planningrolloutbyassuranc
+- Acceptance: Cold and warm benchmarks measure context tokens, plan defects found before LLM dispatch, proof support, counterexample quality, cache reuse, queue latency, CPU saturation, memory, and accepted-task throughput.; Metrics separate property class, translator profile, prover, kernel, finite bound, rollout mode, task risk, and authoritative assurance.; Shadow, canary, and enforcement thresholds are explicit; unavailable or low-value lanes remain advisory and operator overrides remain durable and scoped.; Operator projections expose the executable matrix, degraded reasons, active formal plans, unmet obligations, trace violations, and rollout decisions without raw context dumps.
