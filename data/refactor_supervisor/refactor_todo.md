@@ -5235,11 +5235,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-278-givecodexandleanstralproof-carryingformalplancap
 - Acceptance: Capsules contain the selected task transition, assumptions, required preconditions and effects, relevant AST symbols, trusted evidence, counterexamples, allowed paths, tests, and unresolved obligations.; Graph queries enforce row, hop, byte, token, and source-excerpt limits before model invocation.; Model responses bind the plan and task CIDs and cannot alter the theorem, acceptance policy, or authoritative evidence.; Measurements compare capsule size and implementation outcomes against the existing unbounded planning prompt.
 
-- [ ] Task checkbox-279: REF-279 Build an executable, self-testing prover capability matrix
+- [x] Task checkbox-279: REF-279 Build an executable, self-testing prover capability matrix
 
 ## REF-279 Build an executable, self-testing prover capability matrix
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
