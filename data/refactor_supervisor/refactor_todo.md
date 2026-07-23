@@ -5256,11 +5256,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-279-buildanexecutableself-testingprovercapabilitymat
 - Acceptance: The registry covers Z3, CVC5, TLA+/TLC, Apalache, Datalog/SecPAL, Tamarin, ProVerif, HyperLTL/AutoHyper/MCHyper, Lean, Coq, runtime MTL, DCEC, TDFOL, Hammer, Vampire, E, Isabelle, ShadowProver, Leanstral, and ZKP backends.; Each entry distinguishes absent, discovered, versioned, smoke-tested, translation-conformant, reconstruction-capable, and authoritative-for states.; Bounded self-tests bind executable, package, model, translator, semantic profile, and fixture identities.; The repository prover matrix is projected into queryable JSON and DuckDB without treating documentation claims as runtime evidence.
 
-- [ ] Task checkbox-280: REF-280 Conformance-test and quarantine logic translations and legacy prover paths
+- [x] Task checkbox-280: REF-280 Conformance-test and quarantine logic translations and legacy prover paths
 
 ## REF-280 Conformance-test and quarantine logic translations and legacy prover paths
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
