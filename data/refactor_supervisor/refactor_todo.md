@@ -6000,7 +6000,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-308 Close objective gap: Compile AST changes into obligations and bounded graph context
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
