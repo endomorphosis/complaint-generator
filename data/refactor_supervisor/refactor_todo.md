@@ -4689,11 +4689,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-252-generateboundedproofcontextcapsulesforcodexandle
 - Acceptance: Context queries select exact task, symbol, dependency, obligation, receipt, and contradiction neighborhoods.; Row, byte, token, graph-hop, source-excerpt, and proof-transcript limits are enforced before prompt assembly.; Capsules distinguish trusted facts, untrusted suggestions, unsupported semantics, and required fallback checks.; Repository-wide AST records, full graphs, hidden witnesses, and unrelated transcripts never enter a capsule.
 
-- [ ] Task checkbox-253: REF-253 Adapt code obligations to the ipfs_datasets_py Hammer portfolio
+- [x] Task checkbox-253: REF-253 Adapt code obligations to the ipfs_datasets_py Hammer portfolio
 
 ## REF-253 Adapt code obligations to the ipfs_datasets_py Hammer portfolio
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
