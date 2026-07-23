@@ -5277,11 +5277,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-280-conformance-testandquarantinelogictranslationsan
 - Acceptance: Translation contracts label exact, equisatisfiable, bounded abstraction, conservative approximation, and heuristic mappings and define permitted assurance for each.; Round-trip, differential, metamorphic, mutation, and negative fixtures cover AST, DCEC, TDFOL, FOL, TPTP, SMT-LIB, TLA+, protocol, and hyperproperty forms.; Known CEC deontic API drift and timing-sensitive cache tests keep affected paths degraded until semantic conformance fixtures pass.; Dropped agents, times, quantifiers, modal operators, bounds, or premises are detected and cannot silently promote a result.
 
-- [ ] Task checkbox-281: REF-281 Route obligations through property-specific multi-prover portfolios
+- [x] Task checkbox-281: REF-281 Route obligations through property-specific multi-prover portfolios
 
 ## REF-281 Route obligations through property-specific multi-prover portfolios
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
