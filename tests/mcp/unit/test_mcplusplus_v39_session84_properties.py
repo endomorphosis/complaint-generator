@@ -198,10 +198,11 @@ class TestCircuitBreakerProperties:
                 except Exception:
                     pass
             else:
-                try:
+                with pytest.raises(
+                    ZeroDivisionError,
+                    match="division by zero",
+                ):
                     cb.call(lambda: 1/0)
-                except Exception:
-                    pass
         
         metrics = cb.metrics
         # Total calls must equal sum of successes and failures
