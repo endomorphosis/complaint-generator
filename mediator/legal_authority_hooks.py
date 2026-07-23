@@ -17,7 +17,7 @@ from integrations.ipfs_datasets.provenance import (
     build_provenance,
     enrich_document_parse,
 )
-from integrations.ipfs_datasets.documents import detect_document_input_format, parse_document_text
+from integrations.ipfs_datasets.documents import detect_document_input_format, parse_document
 from integrations.ipfs_datasets.graphs import extract_graph_from_text, persist_graph_snapshot
 from integrations.ipfs_datasets.types import (
     AuthorityTreatmentRecord,
@@ -1541,8 +1541,8 @@ class LegalAuthorityStorageHook:
             'pdf': 'application/pdf',
         }
 
-        parsed = parse_document_text(
-            str(authority_text),
+        parsed = parse_document(
+            text=str(authority_text),
             filename=filename,
             mime_type=mime_type_map.get(input_format, 'text/plain'),
             source='legal_authority',

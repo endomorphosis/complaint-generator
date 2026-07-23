@@ -129,3 +129,36 @@ def test_evidence_storage_routes_document_inputs_through_shared_contract():
     )
     assert result["document_parse"]["metadata"]["source"] == "uploaded_evidence"
     assert result["metadata"]["document_parse_contract"]["source"] == "uploaded_evidence"
+
+
+def test_legal_authority_routes_text_through_shared_contract():
+    from mediator.legal_authority_hooks import LegalAuthorityStorageHook
+
+    authority = {
+        "type": "regulation",
+        "source": "federal_register",
+        "citation": "92 Fed. Reg. 67890",
+        "title": "Workplace investigations",
+        "html_body": (
+            "<html><body><h1>Investigation duties</h1>"
+            "<p>Employers must investigate complaints promptly.</p></body></html>"
+        ),
+    }
+    hook = object.__new__(LegalAuthorityStorageHook)
+
+    with patch(
+        "mediator.legal_authority_hooks.parse_document",
+        wraps=parse_document,
+    ) as shared_parser:
+        result = hook._parse_authority_text(authority)
+
+    shared_parser.assert_called_once_with(
+        text=authority["html_body"],
+        filename=authority["citation"],
+        mime_type="text/html",
+        source="legal_authority",
+    )
+    assert result["text"].startswith("Investigation duties")
+    assert result["summary"]["input_format"] == "html"
+    assert result["metadata"]["source"] == "legal_authority"
+    assert result["lineage"]["content_origin"] == "authority_full_text"
