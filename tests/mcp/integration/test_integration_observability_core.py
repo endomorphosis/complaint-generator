@@ -527,10 +527,7 @@ class TestMetricCorrelation:
             
             # Decision call
             start = time.time()
-            try:
-                cb_decision.call(decision_tree.decide, {"test": i})
-            except:
-                pass
+            cb_decision.call(decision_tree.decide, {"test": i})
             elapsed = time.time() - start
             metrics.record_circuit_breaker_call("decision_tree", elapsed, success=True)
         
