@@ -25,11 +25,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-244-probeformal-logicproviderstoolchainsandoptionald
 - Acceptance: A versioned capability report covers Hammer, TDFOL, external provers, Lean, Leanstral, frame logic, knowledge graphs, and ZKP backends.; Provider, executable, package, model, circuit, and optional dependency health are reported separately.; Missing spaCy, model weights, Python bindings, or prover executables produce explicit degraded or unavailable reasons without breaking supervisor import.; Capability probes are bounded, cacheable, and never count availability as proof success.
 
-- [ ] Task checkbox-245: REF-245 Define canonical proof obligations, plans, receipts, and assurance levels
+- [x] Task checkbox-245: REF-245 Define canonical proof obligations, plans, receipts, and assurance levels
 
 ## REF-245 Define canonical proof obligations, plans, receipts, and assurance levels
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
