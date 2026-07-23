@@ -42,7 +42,7 @@ Conflict policy: keep edits inside this bundle when possible; use the LLM merge 
 
 ## REF-334 Close objective gap: Rationalize frontend and review surfaces
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
