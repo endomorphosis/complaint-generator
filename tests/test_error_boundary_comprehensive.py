@@ -95,18 +95,17 @@ class TestInvalidContextHandling:
         assert isinstance(result, dict)
     
     def test_domain_case_sensitivity(self):
-        """Test domain case handling."""
-        try:
-            context = OntologyGenerationContext(
-                data_source="test", data_type="text", domain="LEGAL"
-            )
-            generator = OntologyGenerator()
-            
-            result = generator.generate_ontology("test", context)
-            assert result is not None
-        except Exception:
-            # Case sensitivity might be expected, but shouldn't crash
-            pass
+        """Accept and preserve an uppercase domain without raising."""
+        context = OntologyGenerationContext(
+            data_source="test", data_type="text", domain="LEGAL"
+        )
+        generator = OntologyGenerator()
+
+        result = generator.generate_ontology("test", context)
+
+        assert isinstance(result, dict)
+        assert result["domain"] == "LEGAL"
+        assert result["metadata"]["domain"] == "LEGAL"
     
     def test_special_chars_in_source(self):
         """Handle special characters in data_source."""
