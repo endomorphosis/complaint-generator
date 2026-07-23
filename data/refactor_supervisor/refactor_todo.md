@@ -4725,7 +4725,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S3
 - Missing evidence: Parallel lanes must reuse sound results without executing the same expensive obligation or trusting a stale or weaker cache entry.
-- AST symbols: CacheLookupStatus, CacheRejectionReason, SingleFlightError, SingleFlightTimeout, SingleFlightExecutionError, _json_value, _identity_component, _premises, _sha256, ProofCacheKey, build_proof_cache_key, make_proof_cache_key, FormalVerificationCacheKey, CacheRequirements, ProofCacheEntry, CacheLookupResult, CacheStoreResult, SingleFlightLease, _strict_json_loads, _component_identifier, _obligation_identifier, _premise_identifiers, _binding_reasons, _trust_reasons, T, FormalVerificationCache, ProofCache, TrustAwareProofCache, __all__, HIT
+- AST symbols: CacheLookupStatus, CacheRejectionReason, SingleFlightError, SingleFlightTimeout, SingleFlightExecutionError, _json_value, _identity_component, _premises, _sha256, _rfc3339_from_ms, _timestamp_ms, ProofCacheKey, build_proof_cache_key, make_proof_cache_key, FormalVerificationCacheKey, CacheRequirements, ProofCacheEntry, AttestationCacheEntry, CacheLookupResult, CacheStoreResult, AttestationCacheLookupResult, AttestationCacheStoreResult, SingleFlightLease, _strict_json_loads, _component_identifier, _obligation_identifier, _premise_identifiers, _binding_reasons, _trust_reasons, T
 - Merge key: refactor/g11/g11-s3
 - Candidate kind: seed
 - Todo vector key: ref-254-addtrust-awareproofcachingandsingle-flightexecut
@@ -4935,7 +4935,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S6
 - Missing evidence: A ZKP can bind a trusted proof receipt or protect private premises, but it does not independently prove arbitrary Python correctness.
-- AST symbols: PROOF_ATTESTATION_CONTRACT_VERSION, PROOF_ATTESTATION_STATEMENT_SCHEMA, PROOF_ATTESTATION_ENVELOPE_SCHEMA, PROOF_ATTESTATION_VERIFICATION_SCHEMA, ATTESTATION_BACKEND_POLICY_SCHEMA, ATTESTATION_BACKEND_TEST_RESULT_SCHEMA, ATTESTATION_BACKEND_HEALTH_SCHEMA, ZKP_RECEIPT_ATTESTATION_STATEMENT_SCHEMA, ZKP_RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ZKP_RECEIPT_ATTESTATION_VERIFICATION_SCHEMA, RECEIPT_ATTESTATION_STATEMENT_SCHEMA, RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ATTESTATION_VERIFICATION_SCHEMA, AttestationValidationError, WitnessDisclosureError, CryptographicBackendFailure, AttestationBackendMode, ZKPBackendMode, AttestationTrust, AttestationGate, AttestationVerificationVerdict, AttestationMode, AttestationBackendHealth, BackendTestCase, BackendTestVerdict, REQUIRED_BACKEND_TEST_CASES, _timestamp, _timestamp_value, AttestationBackendPolicy, CryptographicBackendPolicy
+- AST symbols: PROOF_ATTESTATION_CONTRACT_VERSION, PROOF_ATTESTATION_STATEMENT_SCHEMA, PROOF_ATTESTATION_ENVELOPE_SCHEMA, PROOF_ATTESTATION_VERIFICATION_SCHEMA, PROOF_ATTESTATION_RECORD_SCHEMA, PERSISTED_ATTESTATION_SCHEMA, ATTESTATION_BACKEND_POLICY_SCHEMA, ATTESTATION_BACKEND_TEST_RESULT_SCHEMA, ATTESTATION_BACKEND_HEALTH_SCHEMA, ZKP_RECEIPT_ATTESTATION_STATEMENT_SCHEMA, ZKP_RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ZKP_RECEIPT_ATTESTATION_VERIFICATION_SCHEMA, RECEIPT_ATTESTATION_STATEMENT_SCHEMA, RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ATTESTATION_VERIFICATION_SCHEMA, ZKP_RECEIPT_ATTESTATION_RECORD_SCHEMA, RECEIPT_ATTESTATION_RECORD_SCHEMA, AttestationValidationError, WitnessDisclosureError, CryptographicBackendFailure, AttestationBackendMode, ZKPBackendMode, AttestationTrust, AttestationGate, AttestationVerificationVerdict, AttestationMode, AttestationBackendHealth, BackendTestCase, BackendTestVerdict, REQUIRED_BACKEND_TEST_CASES
 - Merge key: refactor/g11/g11-s6
 - Candidate kind: seed
 - Todo vector key: ref-264-definezkpreceipt-attestationstatementsandtrustse
@@ -4956,7 +4956,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S6
 - Missing evidence: ProveKit or Groth16 must fail closed when binaries, circuits, verification keys, schemas, or witness protections are unavailable or stale.
-- AST symbols: PROOF_ATTESTATION_CONTRACT_VERSION, PROOF_ATTESTATION_STATEMENT_SCHEMA, PROOF_ATTESTATION_ENVELOPE_SCHEMA, PROOF_ATTESTATION_VERIFICATION_SCHEMA, ATTESTATION_BACKEND_POLICY_SCHEMA, ATTESTATION_BACKEND_TEST_RESULT_SCHEMA, ATTESTATION_BACKEND_HEALTH_SCHEMA, ZKP_RECEIPT_ATTESTATION_STATEMENT_SCHEMA, ZKP_RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ZKP_RECEIPT_ATTESTATION_VERIFICATION_SCHEMA, RECEIPT_ATTESTATION_STATEMENT_SCHEMA, RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ATTESTATION_VERIFICATION_SCHEMA, AttestationValidationError, WitnessDisclosureError, CryptographicBackendFailure, AttestationBackendMode, ZKPBackendMode, AttestationTrust, AttestationGate, AttestationVerificationVerdict, AttestationMode, AttestationBackendHealth, BackendTestCase, BackendTestVerdict, REQUIRED_BACKEND_TEST_CASES, _timestamp, _timestamp_value, AttestationBackendPolicy, CryptographicBackendPolicy
+- AST symbols: PROOF_ATTESTATION_CONTRACT_VERSION, PROOF_ATTESTATION_STATEMENT_SCHEMA, PROOF_ATTESTATION_ENVELOPE_SCHEMA, PROOF_ATTESTATION_VERIFICATION_SCHEMA, PROOF_ATTESTATION_RECORD_SCHEMA, PERSISTED_ATTESTATION_SCHEMA, ATTESTATION_BACKEND_POLICY_SCHEMA, ATTESTATION_BACKEND_TEST_RESULT_SCHEMA, ATTESTATION_BACKEND_HEALTH_SCHEMA, ZKP_RECEIPT_ATTESTATION_STATEMENT_SCHEMA, ZKP_RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ZKP_RECEIPT_ATTESTATION_VERIFICATION_SCHEMA, RECEIPT_ATTESTATION_STATEMENT_SCHEMA, RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ATTESTATION_VERIFICATION_SCHEMA, ZKP_RECEIPT_ATTESTATION_RECORD_SCHEMA, RECEIPT_ATTESTATION_RECORD_SCHEMA, AttestationValidationError, WitnessDisclosureError, CryptographicBackendFailure, AttestationBackendMode, ZKPBackendMode, AttestationTrust, AttestationGate, AttestationVerificationVerdict, AttestationMode, AttestationBackendHealth, BackendTestCase, BackendTestVerdict, REQUIRED_BACKEND_TEST_CASES
 - Merge key: refactor/g11/g11-s6
 - Candidate kind: seed
 - Todo vector key: ref-265-gatecryptographicbackendsonhealthcircuitkeyandno
@@ -4977,7 +4977,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S6
 - Missing evidence: Verified envelopes should be queryable and optionally content-addressed without changing the underlying proof verdict or exposing witnesses.
-- AST symbols: PROOF_ATTESTATION_CONTRACT_VERSION, PROOF_ATTESTATION_STATEMENT_SCHEMA, PROOF_ATTESTATION_ENVELOPE_SCHEMA, PROOF_ATTESTATION_VERIFICATION_SCHEMA, ATTESTATION_BACKEND_POLICY_SCHEMA, ATTESTATION_BACKEND_TEST_RESULT_SCHEMA, ATTESTATION_BACKEND_HEALTH_SCHEMA, ZKP_RECEIPT_ATTESTATION_STATEMENT_SCHEMA, ZKP_RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ZKP_RECEIPT_ATTESTATION_VERIFICATION_SCHEMA, RECEIPT_ATTESTATION_STATEMENT_SCHEMA, RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ATTESTATION_VERIFICATION_SCHEMA, AttestationValidationError, WitnessDisclosureError, CryptographicBackendFailure, AttestationBackendMode, ZKPBackendMode, AttestationTrust, AttestationGate, AttestationVerificationVerdict, AttestationMode, AttestationBackendHealth, BackendTestCase, BackendTestVerdict, REQUIRED_BACKEND_TEST_CASES, _timestamp, _timestamp_value, AttestationBackendPolicy, CryptographicBackendPolicy
+- AST symbols: PROOF_ATTESTATION_CONTRACT_VERSION, PROOF_ATTESTATION_STATEMENT_SCHEMA, PROOF_ATTESTATION_ENVELOPE_SCHEMA, PROOF_ATTESTATION_VERIFICATION_SCHEMA, PROOF_ATTESTATION_RECORD_SCHEMA, PERSISTED_ATTESTATION_SCHEMA, ATTESTATION_BACKEND_POLICY_SCHEMA, ATTESTATION_BACKEND_TEST_RESULT_SCHEMA, ATTESTATION_BACKEND_HEALTH_SCHEMA, ZKP_RECEIPT_ATTESTATION_STATEMENT_SCHEMA, ZKP_RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ZKP_RECEIPT_ATTESTATION_VERIFICATION_SCHEMA, RECEIPT_ATTESTATION_STATEMENT_SCHEMA, RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ATTESTATION_VERIFICATION_SCHEMA, ZKP_RECEIPT_ATTESTATION_RECORD_SCHEMA, RECEIPT_ATTESTATION_RECORD_SCHEMA, AttestationValidationError, WitnessDisclosureError, CryptographicBackendFailure, AttestationBackendMode, ZKPBackendMode, AttestationTrust, AttestationGate, AttestationVerificationVerdict, AttestationMode, AttestationBackendHealth, BackendTestCase, BackendTestVerdict, REQUIRED_BACKEND_TEST_CASES
 - Merge key: refactor/g11/g11-s6
 - Candidate kind: seed
 - Todo vector key: ref-266-persistoptionalzkpenvelopesbesidetrustedproofrec
@@ -5208,7 +5208,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G12.S1
 - Missing evidence: The supervisor should reject contradictory, unauthorized, impossible, or non-terminating plans before spending model tokens on implementation.
-- AST symbols: 
+- AST symbols: PlanValidationStatus, ValidationStatus, PlanValidationVerdict, PlanValidationOutcome, ValidationOutcome, PlanCheckKind, FindingDisposition, PlanFindingCode, ValidationBounds, FormalPlanValidationBounds, AppliedValidationBounds, PlanValidationAssumption, PlanAssumption, _assumption, PlanValidationFinding, ValidationFinding, CountermodelState, PlanCountermodel, PlanCheckEvidence, PlanValidationResult, FormalPlanValidationResult, _Cancelled, _TimedOut, _SearchExhausted, _TraceModel, _BudgetGuard, FormalPlanValidator, PlanValidator, BoundedFormalPlanValidator, PlanValidationConfig
 - Merge key: refactor/g12/g12-s1
 - Candidate kind: seed
 - Todo vector key: ref-277-checkformalplansfortemporaldeonticanddependencyc
@@ -5229,7 +5229,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G12.S1
 - Missing evidence: Language models should receive the verified slice of intended work, not rediscover task semantics and repository-wide dependencies in every prompt.
-- AST symbols: 
+- AST symbols: FormalPlanContextError, FormalPlanContextBudgetError, FormalPlanResponseError, FormalPlanContextTarget, ImplementationOutcomeStatus, _text, _positive, _strings, _ordered_strings, _canonical_mapping, _canonical_records, _truncate_utf8, _path, _public_value, _public_mapping, FormalPlanContextLimits, FormalPlanContextQuery, FormalPlanSourceExcerpt, FormalPlanGraphSlice, FormalTaskTransition, FormalPlanContextUsage, FormalPlanResponseBinding, FormalPlanContextCapsule, _safe_graph_node, _safe_graph_edge, _graph_records, query_formal_plan_graph, _task_for, _transition_for, _formula_records
 - Merge key: refactor/g12/g12-s1
 - Candidate kind: seed
 - Todo vector key: ref-278-givecodexandleanstralproof-carryingformalplancap
@@ -5319,11 +5319,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-282-persistconformance-boundproverreceiptscachesandm
 - Acceptance: Receipt and cache identities include property class, normalized model, translator profile, assumptions, finite bounds, prover and kernel versions, policy, tree, and conformance fixture set.; Stale, lower-assurance, model-only, or non-conformant results cannot satisfy a stronger request.; JSON and DuckDB projections expose capabilities, attempts, disagreements, counterexamples, assurance, freshness, and invalidation lineage.; Single-flight ownership deduplicates equivalent heavy prover requests across serial and parallel supervisors.
 
-- [ ] Task checkbox-283: REF-283 Model-check supervisor state machines with TLA+, TLC, and Apalache
+- [x] Task checkbox-283: REF-283 Model-check supervisor state machines with TLA+, TLC, and Apalache
 
 ## REF-283 Model-check supervisor state machines with TLA+, TLC, and Apalache
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
