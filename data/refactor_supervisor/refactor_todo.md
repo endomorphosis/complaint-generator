@@ -6485,7 +6485,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-319 Close objective gap: Stabilize repository boundaries
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -6529,7 +6529,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-320 Close objective gap: Decompose oversized orchestration modules
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -6661,7 +6661,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-323 Close objective gap: Remove ad hoc import path behavior from production surfaces
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
