@@ -5214,11 +5214,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-277-checkformalplansfortemporaldeonticanddependencyc
 - Acceptance: Bounded DCEC and TDFOL checks cover dependency readiness, actor authority, unique leases, fencing, required evidence, legal transitions, eventual terminal outcomes, and forbidden merge states.; Contradictions, countermodels, unsupported operators, timeout, and incomplete search remain distinct outcomes.; Native DCEC or TDFOL success is plan-check evidence only unless the exact obligation is reconstructed by an accepted kernel or model checker.; Validation is deterministic, resource bounded, cancellable, and records all assumptions and finite bounds.
 
-- [ ] Task checkbox-278: REF-278 Give Codex and Leanstral proof-carrying formal plan capsules
+- [x] Task checkbox-278: REF-278 Give Codex and Leanstral proof-carrying formal plan capsules
 
 ## REF-278 Give Codex and Leanstral proof-carrying formal plan capsules
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
