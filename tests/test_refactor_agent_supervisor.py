@@ -76,6 +76,53 @@ def test_renderers_use_supervisor_validation_command_delimiter() -> None:
     assert expected in supervisor._task_block(task, "REF-900", 900)
 
 
+def test_synchronize_explicit_task_blocks_preserves_status_and_refreshes_contract(
+    tmp_path,
+) -> None:
+    old_task = supervisor.RefactorTask(
+        goal_id="G12",
+        subgoal_id="G12.S2",
+        title="Refresh an existing task",
+        priority="P1",
+        files=("old.py",),
+        rationale="Old rationale.",
+        acceptance=("Old acceptance.",),
+        validation=("python -m pytest old_test.py -q",),
+        task_id="REF-279",
+        depends_on=("REF-246",),
+    )
+    new_task = supervisor.RefactorTask(
+        goal_id="G12",
+        subgoal_id="G12.S2",
+        title="Refresh an existing task",
+        priority="P0",
+        files=("new.py",),
+        rationale="New rationale.",
+        acceptance=("New acceptance.",),
+        validation=("python -m pytest new_test.py -q",),
+        task_id="REF-279",
+        depends_on=("REF-275",),
+    )
+    board = tmp_path / "todo.md"
+    existing = supervisor._task_block(old_task, "REF-279", 279)
+    existing = existing.replace("- [ ] Task", "- [x] Task", 1)
+    existing = existing.replace("- Status: todo", "- Status: completed", 1)
+    board.write_text("# Board\n\n" + existing + "\n", encoding="utf-8")
+
+    assert supervisor._synchronize_explicit_task_blocks(board, [new_task])
+    refreshed = board.read_text(encoding="utf-8")
+
+    assert "- [x] Task checkbox-279: REF-279 Refresh an existing task" in refreshed
+    assert "- Status: completed" in refreshed
+    assert "- Priority: P0" in refreshed
+    assert "- Depends on: REF-275" in refreshed
+    assert "- Outputs: new.py" in refreshed
+    assert "- Validation: python -m pytest new_test.py -q" in refreshed
+    assert "Old rationale." not in refreshed
+    assert "old.py" not in refreshed
+    assert not supervisor._synchronize_explicit_task_blocks(board, [new_task])
+
+
 def test_refactor_task_payload_has_actionable_schema_fields() -> None:
     task = supervisor.RefactorTask(
         goal_id="G8",
@@ -634,9 +681,71 @@ def test_formal_planning_prover_matrix_program_is_additive_and_dependency_closed
         any(path.startswith("ipfs_datasets_py/ipfs_accelerate_py/") for path in task.files)
         for task in tasks
     )
-    assert {"REF-275", "REF-279"} <= {task.task_id for task in tasks}
+    declared_paths = [path for task in tasks for path in task.files]
+    assert len(declared_paths) == len(set(declared_paths))
+    g11_paths = {
+        path
+        for task in supervisor.flatten_tasks(
+            [next(item for item in goals if item["id"] == "G11")]
+        )
+        for path in task.files
+    }
+    assert not g11_paths.intersection(declared_paths)
+
+    g12_task_ids = {task.task_id for task in tasks}
+    remaining = {
+        task.task_id: {item for item in task.depends_on if item in g12_task_ids}
+        for task in tasks
+    }
+    completed: set[str] = set()
+    while remaining:
+        ready = sorted(
+            task_id
+            for task_id, dependencies in remaining.items()
+            if dependencies <= completed
+        )
+        assert ready, f"cycle in G12 task dependencies: {remaining}"
+        for task_id in ready:
+            completed.add(task_id)
+            remaining.pop(task_id)
+
+    task_by_id = {
+        task.task_id: task
+        for task in supervisor.flatten_tasks(goals)
+        if task.task_id
+    }
+
+    def prerequisite_closure(task_ids: set[str]) -> set[str]:
+        closure: set[str] = set()
+        pending = list(task_ids)
+        while pending:
+            task_id = pending.pop()
+            if task_id in closure:
+                continue
+            closure.add(task_id)
+            dependency = task_by_id.get(task_id)
+            if dependency is not None:
+                pending.extend(dependency.depends_on)
+        return closure
+
+    for task in tasks:
+        for direct_dependency in task.depends_on:
+            inherited = prerequisite_closure(
+                set(task.depends_on) - {direct_dependency}
+            )
+            assert direct_dependency not in inherited, (
+                f"{task.task_id} redundantly declares transitive dependency "
+                f"{direct_dependency}"
+            )
+
+    assert {"REF-275", "REF-279"} <= g12_task_ids
     assert any("DCEC" in criterion for task in tasks for criterion in task.acceptance)
     assert any("TDFOL" in criterion for task in tasks for criterion in task.acceptance)
+    assert any(
+        "frame-logic" in criterion and "evidence-graph" in criterion
+        for task in tasks
+        for criterion in task.acceptance
+    )
     assert any("TLA+" in task.title for task in tasks)
     assert any("Datalog" in task.title and "SecPAL" in task.title for task in tasks)
     assert any("Tamarin" in task.title and "ProVerif" in task.title for task in tasks)
@@ -645,6 +754,11 @@ def test_formal_planning_prover_matrix_program_is_additive_and_dependency_closed
     assert any("Codex" in task.title and "Leanstral" in task.title for task in tasks)
     assert any("JSON and DuckDB" in criterion for task in tasks for criterion in task.acceptance)
     assert any("shared CPU" in task.title for task in tasks)
+    assert any(
+        "ready-member slices" in criterion and "dependency enforcement" in criterion
+        for task in tasks
+        for criterion in task.acceptance
+    )
 
 
 def test_merge_watchdog_skips_aborted_historical_merge(tmp_path, monkeypatch) -> None:

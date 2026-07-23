@@ -2239,6 +2239,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                                 "FormalWorkPlan records actors, goals, subgoals, tasks, events, fluents, preconditions, effects, norms, temporal constraints, evidence requirements, and deterministic identities.",
                                 "A reviewed DCEC vocabulary models belief, knowledge, intention, obligation, permission, prohibition, delegation, and execution events without deriving formulas from free-form model text.",
                                 "A reviewed TDFOL vocabulary models dependency ordering, deadlines, liveness, safety, and goal satisfaction over finite supervisor traces.",
+                                "A versioned frame-logic projection derives bounded worlds, accessibility relations, and relevant evidence-graph neighborhoods without treating graph reachability as code proof.",
                                 "Plan consistency, plan conformance, and generated-code assurance are separate levels; no plan proof is promoted into a code proof.",
                             ),
                             validate("formal_planning_contracts"),
@@ -2252,8 +2253,6 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             "P0",
                             (
                                 module("formal_plan_compiler.py"),
-                                module("objective_graph.py"),
-                                module("code_evidence_graph.py"),
                                 test("formal_plan_compiler"),
                             ),
                             "Formal plans must be derived from canonical supervisor and AST records rather than reconstructed by an LLM inside its context window.",
@@ -2265,7 +2264,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             ),
                             validate("formal_plan_compiler"),
                             task_id="REF-276",
-                            depends_on=("REF-248", "REF-250", "REF-275"),
+                            depends_on=("REF-250", "REF-275"),
                         ),
                         _task(
                             "G12",
@@ -2274,7 +2273,6 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             "P0",
                             (
                                 module("formal_plan_validator.py"),
-                                module("formal_verification_provider.py"),
                                 test("formal_plan_validator"),
                             ),
                             "The supervisor should reject contradictory, unauthorized, impossible, or non-terminating plans before spending model tokens on implementation.",
@@ -2295,8 +2293,6 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             "P0",
                             (
                                 module("formal_plan_context.py"),
-                                module("proof_context.py"),
-                                module("plan_evaluator.py"),
                                 test("formal_plan_context"),
                             ),
                             "Language models should receive the verified slice of intended work, not rediscover task semantics and repository-wide dependencies in every prompt.",
@@ -2322,9 +2318,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             "Build an executable, self-testing prover capability matrix",
                             "P0",
                             (
-                                plan_path,
                                 module("prover_matrix_registry.py"),
-                                module("formal_verification_capabilities.py"),
                                 test("prover_matrix_registry"),
                             ),
                             "Source files, installers, and executable discovery do not establish that a prover can soundly check a supervisor obligation.",
@@ -2336,7 +2330,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             ),
                             validate("prover_matrix_registry"),
                             task_id="REF-279",
-                            depends_on=("REF-244", "REF-246"),
+                            depends_on=("REF-246",),
                         ),
                         _task(
                             "G12",
@@ -2366,7 +2360,6 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             "P0",
                             (
                                 module("multi_prover_router.py"),
-                                module("proof_scheduler.py"),
                                 test("multi_prover_router"),
                             ),
                             "Different supervisor claims require different semantics; one generic solver-success flag cannot verify them all.",
@@ -2378,7 +2371,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             ),
                             validate("multi_prover_router"),
                             task_id="REF-281",
-                            depends_on=("REF-253", "REF-255", "REF-280"),
+                            depends_on=("REF-255", "REF-280"),
                         ),
                         _task(
                             "G12",
@@ -2387,8 +2380,6 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             "P0",
                             (
                                 module("prover_evidence_store.py"),
-                                module("formal_verification_cache.py"),
-                                module("artifact_store.py"),
                                 test("prover_evidence_store"),
                             ),
                             "Multi-prover reuse must bind every semantic, model, bound, toolchain, and trust dimension and remain queryable without loading raw transcripts.",
@@ -2400,7 +2391,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             ),
                             validate("prover_evidence_store"),
                             task_id="REF-282",
-                            depends_on=("REF-250", "REF-254", "REF-260", "REF-279", "REF-281"),
+                            depends_on=("REF-260", "REF-281"),
                         ),
                     ],
                 },
@@ -2426,7 +2417,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             ),
                             validate("supervisor_state_model"),
                             task_id="REF-283",
-                            depends_on=("REF-276", "REF-277", "REF-279"),
+                            depends_on=("REF-277", "REF-279"),
                         ),
                         _task(
                             "G12",
@@ -2446,7 +2437,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             ),
                             validate("authorization_logic"),
                             task_id="REF-284",
-                            depends_on=("REF-275", "REF-277", "REF-279"),
+                            depends_on=("REF-277", "REF-279"),
                         ),
                         _task(
                             "G12",
@@ -2466,7 +2457,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             ),
                             validate("protocol_verification"),
                             task_id="REF-285",
-                            depends_on=("REF-264", "REF-279", "REF-284"),
+                            depends_on=("REF-264", "REF-284"),
                         ),
                         _task(
                             "G12",
@@ -2512,7 +2503,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             ),
                             validate("runtime_temporal_monitor"),
                             task_id="REF-287",
-                            depends_on=("REF-276", "REF-277", "REF-279"),
+                            depends_on=("REF-277", "REF-279"),
                         ),
                         _task(
                             "G12",
@@ -2521,7 +2512,6 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             "P0",
                             (
                                 module("formal_counterexamples.py"),
-                                module("code_evidence_graph.py"),
                                 test("formal_counterexamples"),
                             ),
                             "Models should receive compact actionable counterexamples instead of raw solver, model-checker, or runtime transcripts.",
@@ -2533,7 +2523,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             ),
                             validate("formal_counterexamples"),
                             task_id="REF-288",
-                            depends_on=("REF-250", "REF-256", "REF-280", "REF-283", "REF-287"),
+                            depends_on=("REF-256", "REF-280", "REF-283", "REF-287"),
                         ),
                         _task(
                             "G12",
@@ -2542,7 +2532,6 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             "P0",
                             (
                                 module("formal_replanner.py"),
-                                module("backlog_refinery.py"),
                                 test("formal_replanner"),
                             ),
                             "A failed formal plan should yield focused repair work instead of another repository-wide language-model analysis.",
@@ -2563,7 +2552,6 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             "P0",
                             (
                                 module("formal_plan_conformance.py"),
-                                module("goal_completion.py"),
                                 test("formal_plan_conformance"),
                             ),
                             "A goal should close only when intended transitions occurred and all required implementation, validation, and proof evidence remains fresh.",
@@ -2575,7 +2563,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             ),
                             validate("formal_plan_conformance"),
                             task_id="REF-290",
-                            depends_on=("REF-267", "REF-287", "REF-288", "REF-289"),
+                            depends_on=("REF-289",),
                         ),
                     ],
                 },
@@ -2590,14 +2578,13 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             "P0",
                             (
                                 module("multi_prover_resources.py"),
-                                module("resource_scheduler.py"),
-                                module("proof_scheduler.py"),
                                 test("multi_prover_resources"),
                             ),
                             "JVM model checkers, SMT solvers, ATPs, kernels, protocol tools, tests, and models must not create nested pools that oversubscribe the host.",
                             (
                                 "Resource classes cover translation, SMT, ATP, ITP kernels, JVM model checking, protocol verification, hyperproperty checking, runtime monitors, LLM inference, and artifact IO.",
                                 "One top-level lease accounts for child processes, threads, memory, disk, provider quota, and model concurrency across serial and bundle supervisors.",
+                                "Bundle admission launches dependency-closed ready-member slices so a later blocked member cannot idle earlier work, and mixed-readiness lanes retain task dependency enforcement.",
                                 "Timeout and cancellation terminate process groups, release capacity, and preserve bounded diagnostics and partial receipts.",
                                 "Portfolio width adapts to host pressure and critical-path value while deterministic cache hits bypass execution safely.",
                             ),
@@ -2612,8 +2599,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             "P0",
                             (
                                 test("formal_planning_adversarial"),
-                                module("formal_plan_validator.py"),
-                                module("multi_prover_router.py"),
+                                module("formal_planning_adversarial.py"),
                             ),
                             "The expanded planner must resist forged plans, unsound translations, stale evidence, malicious tool output, and cross-lane leakage.",
                             (
@@ -2624,7 +2610,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             ),
                             validate("formal_planning_adversarial"),
                             task_id="REF-292",
-                            depends_on=("REF-271", "REF-281", "REF-282", "REF-283", "REF-284", "REF-285", "REF-286", "REF-290", "REF-291"),
+                            depends_on=("REF-271", "REF-282", "REF-290", "REF-291"),
                         ),
                         _task(
                             "G12",
@@ -2644,7 +2630,7 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             ),
                             validate("proof_carrying_planner_e2e"),
                             task_id="REF-293",
-                            depends_on=("REF-268", "REF-282", "REF-289", "REF-290", "REF-291", "REF-292"),
+                            depends_on=("REF-292",),
                         ),
                         _task(
                             "G12",
@@ -2653,10 +2639,8 @@ def _formal_planning_goals() -> list[dict[str, Any]]:
                             "P1",
                             (
                                 module("formal_planning_metrics.py"),
-                                module("proof_metrics.py"),
-                                module("formal_verification_policy.py"),
+                                module("formal_planning_rollout.py"),
                                 test("formal_planning_benchmarks"),
-                                plan_path,
                             ),
                             "The broader prover matrix should expand only when it reduces model work and improves defect detection without unacceptable CPU or scheduling regressions.",
                             (
@@ -2835,7 +2819,9 @@ def _task_checkbox_index(task_id: str, fallback: int) -> int:
     return int(match.group(1)) if match else fallback
 
 
-def _append_missing_explicit_seed_tasks(path: Path, goals: list[dict[str, Any]]) -> bool:
+def _synchronize_explicit_task_blocks(path: Path, tasks: list[RefactorTask]) -> bool:
+    """Upsert explicit seed blocks while preserving their durable status."""
+
     if not path.exists():
         return False
 
@@ -2844,32 +2830,84 @@ def _append_missing_explicit_seed_tasks(path: Path, goals: list[dict[str, Any]])
         rf"^##\s+({re.escape(TASK_PREFIX)}\d+)\s+(.+?)\s*$",
         re.MULTILINE,
     )
-    existing_titles = {match.group(1): match.group(2) for match in header_pattern.finditer(text)}
-    additions: list[str] = []
-    for fallback, task in enumerate(flatten_tasks(goals), start=1):
-        if not task.task_id:
-            continue
-        existing_title = existing_titles.get(task.task_id)
-        if existing_title is not None:
-            if existing_title != task.title:
-                raise RuntimeError(
-                    f"Explicit seed id {task.task_id} already names {existing_title!r}, "
-                    f"not {task.title!r}"
-                )
-            continue
-        additions.append(
-            _task_block(
-                task,
-                task.task_id,
-                _task_checkbox_index(task.task_id, fallback),
-            )
-        )
-        existing_titles[task.task_id] = task.title
-
-    if not additions:
+    checkbox_pattern = re.compile(
+        rf"^\s*[-*]\s+\[([^\]])\]\s+Task checkbox-\d+:\s+"
+        rf"({re.escape(TASK_PREFIX)}\d+)\b"
+    )
+    explicit = {task.task_id: task for task in tasks if task.task_id}
+    if not explicit:
         return False
-    path.write_text(text.rstrip() + "\n\n" + "\n\n".join(additions) + "\n", encoding="utf-8")
+
+    lines = text.splitlines(keepends=True)
+    headers: list[tuple[int, str, str]] = []
+    for index, raw_line in enumerate(lines):
+        match = header_pattern.match(raw_line.rstrip("\r\n"))
+        if match:
+            headers.append((index, match.group(1), match.group(2).strip()))
+
+    starts: list[int] = []
+    for header_index, task_id, _title in headers:
+        start = header_index
+        candidate = header_index - 1
+        if candidate >= 0 and not lines[candidate].strip():
+            candidate -= 1
+        if candidate >= 0:
+            checkbox = checkbox_pattern.match(lines[candidate].rstrip("\r\n"))
+            if checkbox and checkbox.group(2) == task_id:
+                start = candidate
+        starts.append(start)
+
+    output = list(lines[: starts[0]]) if starts else list(lines)
+    seen: set[str] = set()
+    for position, ((header_index, task_id, title), start) in enumerate(zip(headers, starts)):
+        end = starts[position + 1] if position + 1 < len(starts) else len(lines)
+        task = explicit.get(task_id)
+        if task is None:
+            output.extend(lines[start:end])
+            continue
+        if title != task.title:
+            raise RuntimeError(
+                f"Explicit seed id {task_id} already names {title!r}, not {task.title!r}"
+            )
+
+        existing_block = "".join(lines[start:end])
+        checkbox = checkbox_pattern.match(lines[start].rstrip("\r\n"))
+        checkbox_mark = checkbox.group(1) if checkbox else " "
+        status_match = re.search(r"(?m)^- Status:\s*(\S+)\s*$", existing_block)
+        status = status_match.group(1) if status_match else "todo"
+        rendered = _task_block(
+            task,
+            task_id,
+            _task_checkbox_index(task_id, position + 1),
+        )
+        rendered = rendered.replace("- [ ] Task", f"- [{checkbox_mark}] Task", 1)
+        rendered = rendered.replace("- Status: todo", f"- Status: {status}", 1)
+        output.append(rendered.rstrip() + "\n\n")
+        seen.add(task_id)
+
+    additions = [
+        _task_block(
+            task,
+            task.task_id,
+            _task_checkbox_index(task.task_id, fallback),
+        )
+        for fallback, task in enumerate(tasks, start=1)
+        if task.task_id and task.task_id not in seen
+    ]
+    if additions:
+        if output and "".join(output).strip():
+            output.append("\n")
+        output.append("\n\n".join(additions) + "\n")
+
+    rendered_text = "".join(output).rstrip() + "\n"
+    if rendered_text == text:
+        return False
+    path.write_text(rendered_text, encoding="utf-8")
     return True
+
+
+def _append_missing_explicit_seed_tasks(path: Path, goals: list[dict[str, Any]]) -> bool:
+    return _synchronize_explicit_task_blocks(path, flatten_tasks(goals))
 
 
 def _safe_bundle_key(value: str) -> str:
@@ -3039,19 +3077,15 @@ def write_seed_bundle_index(
         safe_key = _safe_bundle_key(bundle_key)
         shard_path = BUNDLE_DIR / f"{safe_key}.todo.md"
         if bundle_key not in excluded:
-            block = _task_block(task, task_id, _task_checkbox_index(task_id, task_index))
-            if shard_path.exists():
-                shard_text = shard_path.read_text(encoding="utf-8", errors="replace")
-            else:
-                shard_text = (
+            if not shard_path.exists():
+                shard_path.write_text(
                     f"# Objective Bundle: {bundle_key}\n\n"
                     f"Source todo: {TODO_PATH.relative_to(PROJECT_ROOT)}\n"
                     "Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.\n"
-                    "Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.\n"
+                    "Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.\n",
+                    encoding="utf-8",
                 )
-            if f"## {task_id} {task.title}" not in shard_text:
-                shard_text = shard_text.rstrip() + "\n\n" + block + "\n"
-                shard_path.write_text(shard_text, encoding="utf-8")
+            _synchronize_explicit_task_blocks(shard_path, [task])
 
         info = bundles.setdefault(bundle_key, {})
         info.update(
