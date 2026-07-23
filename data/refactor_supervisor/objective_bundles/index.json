@@ -23283,7 +23283,7 @@
     "REF-360"
   ],
   "excluded_bundle_keys": [],
-  "generated_at": "2026-07-23T20:16:54Z",
+  "generated_at": "2026-07-23T20:17:42Z",
   "query_store": {
     "artifact_kind": "bundle_planning_index",
     "catalog_table": "artifact_catalog",

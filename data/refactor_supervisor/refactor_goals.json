@@ -1,6 +1,6 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
-  "generated_at": "2026-07-23T15:30:03Z",
+  "generated_at": "2026-07-23T20:17:54Z",
   "goals": [
     {
       "id": "G1",
@@ -19,10 +19,10 @@
               "files": [
                 "mediator/mediator.py",
                 "applications/complaint_workspace.py",
+                "mediator/claim_support_hooks.py",
                 "tests/test_claim_support_review_playwright_smoke.py",
-                "scripts/synthesize_hacc_complaint.py",
                 "tests/test_review_api.py",
-                "complaint_phases/denoiser.py"
+                "scripts/synthesize_hacc_complaint.py"
               ],
               "goal_id": "G1",
               "objective": "Refactor complaint-generator safely and incrementally.",
@@ -79,16 +79,16 @@
               "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
               "depends_on": [],
               "files": [
+                "scripts/build_legal_corpus_index.py",
                 "tests/conftest.py",
                 "tests/mcp/unit/test_mcplusplus_v38_session83.py",
                 "tests/test_adversarial_session_intake_prompts.py",
+                "tests/test_batch3_ambiguity_contradiction_workflow.py",
                 "tests/test_batch_233_metrics.py",
                 "tests/test_batch_234_metrics.py",
                 "tests/test_batch_238_time_series_metrics.py",
                 "tests/test_batch_239_anomaly_metrics.py",
-                "tests/test_batch_243_critic_explain_score.py",
-                "tests/test_batch_243_critic_explainscor e.py",
-                "tests/test_contextual_entity_disambiguation.py"
+                "tests/test_batch_243_critic_explain_score.py"
               ],
               "goal_id": "G1",
               "objective": "Refactor complaint-generator safely and incrementally.",
@@ -2658,7 +2658,7 @@
               "rationale": "Formal-looking artifacts are a new attack surface and must be unable to forge assurance, poison caches, leak witnesses, or bypass merge policy.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g11:g11.s8:add adversarial tests for every proof trust boundary",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G11.S8",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-271",
@@ -2691,7 +2691,7 @@
               "rationale": "The complete task, AST, proof, validation, merge, evidence, and reopen lifecycle must work under concurrent lanes and restart.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g11:g11.s8:exercise an end-to-end parallel proof-aware implementation workflow",
-              "status": "needed",
+              "status": "blocked",
               "subgoal_id": "G11.S8",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-272",
@@ -2724,7 +2724,7 @@
               "rationale": "Operators need to know whether proof work is advisory or blocking and why a task, merge, or goal advanced.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g11:g11.s8:expose shadow, canary, enforcement, and override diagnostics",
-              "status": "needed",
+              "status": "blocked",
               "subgoal_id": "G11.S8",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-273",
@@ -2756,7 +2756,7 @@
               "rationale": "Enforcement should expand only when proof evidence reduces model work without unacceptable host or implementation throughput regressions.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g11:g11.s8:benchmark context reduction, cache reuse, and cpu proof throughput",
-              "status": "needed",
+              "status": "blocked",
               "subgoal_id": "G11.S8",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-274",
@@ -3062,7 +3062,7 @@
               "rationale": "Leases, retries, merges, refill, cancellation, and resource scheduling are concurrent state machines suited to bounded model checking.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g12:g12.s3:model-check supervisor state machines with tla+, tlc, and apalache",
-              "status": "in-progress",
+              "status": "complete",
               "subgoal_id": "G12.S3",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-283",
@@ -3093,7 +3093,7 @@
               "rationale": "Claims, leases, merge authority, proof promotion, and overrides need explicit delegation and revocation semantics.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g12:g12.s3:formalize task authority and delegation with datalog and secpal-style policy",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G12.S3",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-284",
@@ -3124,7 +3124,7 @@
               "rationale": "Supervisor coordination and evidence exchange have protocol properties that unit tests and state invariants alone do not cover.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g12:g12.s3:verify claim, fencing, receipt, and attestation protocols with tamarin and proverif",
-              "status": "needed",
+              "status": "blocked",
               "subgoal_id": "G12.S3",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-285",
@@ -3193,7 +3193,7 @@
               "rationale": "Offline plans and proofs need a bounded runtime conformance layer for actual daemon, lane, proof, validation, and merge events.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g12:g12.s4:generalize runtime mtl monitoring to supervisor event traces",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G12.S4",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-287",
@@ -3226,7 +3226,7 @@
               "rationale": "Models should receive compact actionable counterexamples instead of raw solver, model-checker, or runtime transcripts.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g12:g12.s4:normalize proof failures and traces into a counterexample knowledge graph",
-              "status": "needed",
+              "status": "blocked",
               "subgoal_id": "G12.S4",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-288",
@@ -3258,7 +3258,7 @@
               "rationale": "A failed formal plan should yield focused repair work instead of another repository-wide language-model analysis.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g12:g12.s4:generate bounded counterexample-guided plan repairs",
-              "status": "needed",
+              "status": "blocked",
               "subgoal_id": "G12.S4",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-289",
@@ -3288,7 +3288,7 @@
               "rationale": "A goal should close only when intended transitions occurred and all required implementation, validation, and proof evidence remains fresh.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g12:g12.s4:bind plan conformance and formal evidence into goal completion",
-              "status": "needed",
+              "status": "blocked",
               "subgoal_id": "G12.S4",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-290",
@@ -3330,7 +3330,7 @@
               "rationale": "JVM model checkers, SMT solvers, ATPs, kernels, protocol tools, tests, and models must not create nested pools that oversubscribe the host.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g12:g12.s5:admit every prover family through one shared cpu and process budget",
-              "status": "needed",
+              "status": "blocked",
               "subgoal_id": "G12.S5",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-291",
@@ -3363,7 +3363,7 @@
               "rationale": "The expanded planner must resist forged plans, unsound translations, stale evidence, malicious tool output, and cross-lane leakage.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g12:g12.s5:adversarially test formal plans and every prover-matrix trust boundary",
-              "status": "needed",
+              "status": "blocked",
               "subgoal_id": "G12.S5",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-292",
@@ -3393,7 +3393,7 @@
               "rationale": "Formal planning, bounded model context, implementation, verification, runtime monitoring, and replanning must work as one restartable workflow.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g12:g12.s5:exercise an end-to-end proof-carrying planning and implementation workflow",
-              "status": "needed",
+              "status": "blocked",
               "subgoal_id": "G12.S5",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-293",
@@ -3426,7 +3426,7 @@
               "rationale": "The broader prover matrix should expand only when it reduces model work and improves defect detection without unacceptable CPU or scheduling regressions.",
               "schema": "complaint_generator.refactor_supervisor.task.v1",
               "stable_key": "g12:g12.s5:benchmark and gate formal-planning rollout by assurance and throughput",
-              "status": "needed",
+              "status": "blocked",
               "subgoal_id": "G12.S5",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-294",
@@ -3528,104 +3528,104 @@
   "scan": {
     "largest_python_files": [
       {
-        "lines": 10591,
+        "lines": 13236,
         "path": "mediator/mediator.py"
       },
       {
-        "lines": 8227,
+        "lines": 10095,
         "path": "applications/complaint_workspace.py"
       },
       {
-        "lines": 7440,
+        "lines": 10046,
+        "path": "mediator/claim_support_hooks.py"
+      },
+      {
+        "lines": 7564,
         "path": "tests/test_claim_support_review_playwright_smoke.py"
+      },
+      {
+        "lines": 6974,
+        "path": "tests/test_review_api.py"
       },
       {
         "lines": 6935,
         "path": "scripts/synthesize_hacc_complaint.py"
       },
       {
-        "lines": 5874,
-        "path": "tests/test_review_api.py"
-      },
-      {
-        "lines": 5694,
+        "lines": 6262,
         "path": "complaint_phases/denoiser.py"
       },
       {
-        "lines": 5676,
+        "lines": 5679,
         "path": "applications/dashboard_ui.py"
       },
       {
-        "lines": 4976,
-        "path": "mediator/claim_support_hooks.py"
-      },
-      {
-        "lines": 4412,
-        "path": "tests/test_document_pipeline.py"
-      },
-      {
-        "lines": 4297,
+        "lines": 5546,
         "path": "tests/test_claim_support_hooks.py"
       },
       {
-        "lines": 4066,
-        "path": "tests/test_complaint_generator_tools.py"
+        "lines": 4848,
+        "path": "tests/test_document_pipeline.py"
       },
       {
-        "lines": 3956,
+        "lines": 4517,
         "path": "tests/test_mediator_three_phase.py"
       },
       {
-        "lines": 3464,
+        "lines": 4069,
+        "path": "tests/test_complaint_generator_tools.py"
+      },
+      {
+        "lines": 3915,
+        "path": "complaint_phases/intake_case_file.py"
+      },
+      {
+        "lines": 3765,
         "path": "tests/test_adversarial_harness.py"
       },
       {
-        "lines": 3136,
-        "path": "complaint_phases/intake_case_file.py"
+        "lines": 3634,
+        "path": "mediator/legal_authority_hooks.py"
+      },
+      {
+        "lines": 3482,
+        "path": "tests/test_mediator.py"
       },
       {
         "lines": 3134,
         "path": "complaint_phases/dependency_graph.py"
       },
       {
-        "lines": 2939,
-        "path": "tests/test_mediator.py"
-      },
-      {
-        "lines": 2918,
-        "path": "mediator/legal_authority_hooks.py"
-      },
-      {
         "lines": 2899,
         "path": "mediator/formal_document.py"
+      },
+      {
+        "lines": 2838,
+        "path": "mediator/evidence_hooks.py"
+      },
+      {
+        "lines": 2576,
+        "path": "tests/test_formal_document_pipeline.py"
+      },
+      {
+        "lines": 2556,
+        "path": "integrations/ipfs_datasets/logic.py"
       },
       {
         "lines": 2518,
         "path": "complaint_phases/knowledge_graph.py"
       },
       {
-        "lines": 2383,
-        "path": "tests/test_formal_document_pipeline.py"
-      },
-      {
-        "lines": 2374,
-        "path": "mediator/evidence_hooks.py"
-      },
-      {
-        "lines": 2319,
+        "lines": 2515,
         "path": "tests/test_web_evidence_hooks.py"
+      },
+      {
+        "lines": 2300,
+        "path": "tests/test_legal_authority_hooks.py"
       },
       {
         "lines": 2298,
         "path": "applications/ui_review.py"
-      },
-      {
-        "lines": 2190,
-        "path": "tests/test_complaint_phases.py"
-      },
-      {
-        "lines": 2127,
-        "path": "tests/test_synthesize_hacc_complaint.py"
       }
     ],
     "packaging": {
@@ -3633,14 +3633,14 @@
       "pyproject": true,
       "pytest_ini": true
     },
-    "python_file_count": 488,
-    "python_total_lines": 255987,
-    "scanned_at": "2026-07-23T15:29:03Z",
+    "python_file_count": 518,
+    "python_total_lines": 292043,
+    "scanned_at": "2026-07-23T20:17:15Z",
     "signals": {
-      "broad_exception_count": 337,
-      "direct_ipfs_import_count": 209,
+      "broad_exception_count": 414,
+      "direct_ipfs_import_count": 208,
       "direct_ipfs_imports": [
-        "applications/dashboard_ui.py:904",
+        "applications/dashboard_ui.py:905",
         "complaint_generator/agentic_evidence_download.py:10",
         "complaint_generator/data_migration.py:13",
         "complaint_generator/email_agentic_search.py:5",
@@ -3742,7 +3742,6 @@
         "tests/test_codex_cli_jsonl_parsing.py:22",
         "tests/test_codex_cli_jsonl_parsing.py:42",
         "tests/test_codex_cli_jsonl_parsing.py:66",
-        "tests/test_complaint_generator_tools.py:12",
         "tests/test_consistency_validation_suite.py:10",
         "tests/test_contextual_entity_disambiguation.py:14",
         "tests/test_docket_workspace_surface.py:7",
@@ -3839,16 +3838,19 @@
         "tests/unit_tests/optimizers/test_benchmark_utils.py:12",
         "tests/unit_tests/optimizers/test_circuit_breaker.py:8",
         "tests/unit_tests/optimizers/test_circuit_breaker_integration.py:7",
-        "tests/unit_tests/optimizers/test_circuit_breaker_integration.py:11"
+        "tests/unit_tests/optimizers/test_circuit_breaker_integration.py:11",
+        "tests/unit_tests/optimizers/test_circuit_breaker_integration.py:319"
       ],
-      "silent_pass_count": 73,
-      "sys_path_mutation_count": 33,
+      "silent_pass_count": 100,
+      "sys_path_mutation_count": 37,
       "sys_path_mutations": [
+        "scripts/build_legal_corpus_index.py:362",
         "tests/conftest.py:241",
         "tests/conftest.py:249",
         "tests/conftest.py:269",
         "tests/mcp/unit/test_mcplusplus_v38_session83.py:510",
         "tests/test_adversarial_session_intake_prompts.py:7",
+        "tests/test_batch3_ambiguity_contradiction_workflow.py:19",
         "tests/test_batch_233_metrics.py:18",
         "tests/test_batch_234_metrics.py:18",
         "tests/test_batch_238_time_series_metrics.py:24",
@@ -3869,9 +3871,11 @@
         "tests/test_logic_integrations_import_quiet.py:13",
         "tests/test_logic_public_api_contract.py:13",
         "tests/test_logic_zkp_import_quiet.py:13",
+        "tests/test_m3_graph_snapshot_support_paths.py:20",
         "tests/test_mediator_three_phase.py:8",
         "tests/test_ontology_critic_explain_score.py:8",
         "tests/test_ref_130_ipfs_loader_failure_boundary.py:76",
+        "tests/test_score_improve_proof_history.py:20",
         "tests/test_search_hooks.py:13",
         "tests/test_symbolicai_logic_dependency.py:12",
         "tests/unit/optimizers/graphrag/test_batch_229_config_caching.py:19",
@@ -3884,7 +3888,7 @@
         "mediator/__init__.py:1"
       ]
     },
-    "test_file_count": 308
+    "test_file_count": 327
   },
   "schema": "complaint_generator.refactor_supervisor.goals.v1",
   "source_supervisor_module": "ipfs_accelerate_py.agent_supervisor",
@@ -3902,15 +3906,15 @@
         "failed": 0,
         "failed_work_items": 0,
         "queued": 55,
-        "queued_work_items": 15,
+        "queued_work_items": 0,
         "running": 0,
         "running_work_items": 0
       },
       "todo": {
-        "blocked": 0,
-        "complete": 214,
-        "in_progress": 1,
-        "needed": 14
+        "blocked": 13,
+        "complete": 270,
+        "in_progress": 0,
+        "needed": 0
       }
     },
     "goal_count": 12,
@@ -3919,40 +3923,45 @@
       "skipped": true
     },
     "queue_refill": {
-      "available_bundle_count": 4,
-      "available_work_items": 15,
+      "available_work_items": 0,
       "configured_floor": 24,
       "enabled": true,
       "floor_satisfied": false,
       "floor_unit": "active_taskboard_work_items",
-      "queued_work_items_after": 15,
-      "queued_work_items_before": 15,
-      "reason": "fewer unique active generated work items are available than the configured floor",
-      "rejected_bundle_count": 0,
+      "queued_work_items_after": 0,
+      "queued_work_items_before": 0,
+      "reason": "no active taskboard work",
       "submitted_bundle_count": 0,
-      "submitted_queue_ids": [],
       "submitted_task_ids": []
     },
     "status_projection": {
-      "blocked_count": 0,
-      "completed_count": 214,
-      "task_count": 229,
+      "blocked_count": 13,
+      "completed_count": 270,
+      "task_count": 283,
       "updated": {
-        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g12-g12-s3.todo.md": [
-          "REF-283"
-        ],
         "/home/barberb/complaint-generator/data/refactor_supervisor/refactor_todo.md": [
-          "REF-283"
+          "REF-272",
+          "REF-273",
+          "REF-274",
+          "REF-285",
+          "REF-288",
+          "REF-289",
+          "REF-290",
+          "REF-291",
+          "REF-292",
+          "REF-293",
+          "REF-294",
+          "REF-312"
         ]
       },
-      "updated_file_count": 2
+      "updated_file_count": 1
     },
     "subgoal_count": 34,
-    "synchronized_at": "2026-07-23T15:30:03Z",
+    "synchronized_at": "2026-07-23T20:17:54Z",
     "task_count": 101
   },
   "taskboard": {
-    "task_count": 229,
+    "task_count": 283,
     "tasks": [
       {
         "checkbox_id": 1,
@@ -5114,25 +5123,25 @@
       },
       {
         "checkbox_id": 271,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-271",
         "title": "Add adversarial tests for every proof trust boundary"
       },
       {
         "checkbox_id": 272,
-        "status": "needed",
+        "status": "blocked",
         "task_id": "REF-272",
         "title": "Exercise an end-to-end parallel proof-aware implementation workflow"
       },
       {
         "checkbox_id": 273,
-        "status": "needed",
+        "status": "blocked",
         "task_id": "REF-273",
         "title": "Expose shadow, canary, enforcement, and override diagnostics"
       },
       {
         "checkbox_id": 274,
-        "status": "needed",
+        "status": "blocked",
         "task_id": "REF-274",
         "title": "Benchmark context reduction, cache reuse, and CPU proof throughput"
       },
@@ -5186,19 +5195,19 @@
       },
       {
         "checkbox_id": 283,
-        "status": "in-progress",
+        "status": "complete",
         "task_id": "REF-283",
         "title": "Model-check supervisor state machines with TLA+, TLC, and Apalache"
       },
       {
         "checkbox_id": 284,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-284",
         "title": "Formalize task authority and delegation with Datalog and SecPAL-style policy"
       },
       {
         "checkbox_id": 285,
-        "status": "needed",
+        "status": "blocked",
         "task_id": "REF-285",
         "title": "Verify claim, fencing, receipt, and attestation protocols with Tamarin and ProVerif"
       },
@@ -5210,49 +5219,49 @@
       },
       {
         "checkbox_id": 287,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-287",
         "title": "Generalize runtime MTL monitoring to supervisor event traces"
       },
       {
         "checkbox_id": 288,
-        "status": "needed",
+        "status": "blocked",
         "task_id": "REF-288",
         "title": "Normalize proof failures and traces into a counterexample knowledge graph"
       },
       {
         "checkbox_id": 289,
-        "status": "needed",
+        "status": "blocked",
         "task_id": "REF-289",
         "title": "Generate bounded counterexample-guided plan repairs"
       },
       {
         "checkbox_id": 290,
-        "status": "needed",
+        "status": "blocked",
         "task_id": "REF-290",
         "title": "Bind plan conformance and formal evidence into goal completion"
       },
       {
         "checkbox_id": 291,
-        "status": "needed",
+        "status": "blocked",
         "task_id": "REF-291",
         "title": "Admit every prover family through one shared CPU and process budget"
       },
       {
         "checkbox_id": 292,
-        "status": "needed",
+        "status": "blocked",
         "task_id": "REF-292",
         "title": "Adversarially test formal plans and every prover-matrix trust boundary"
       },
       {
         "checkbox_id": 293,
-        "status": "needed",
+        "status": "blocked",
         "task_id": "REF-293",
         "title": "Exercise an end-to-end proof-carrying planning and implementation workflow"
       },
       {
         "checkbox_id": 294,
-        "status": "needed",
+        "status": "blocked",
         "task_id": "REF-294",
         "title": "Benchmark and gate formal-planning rollout by assurance and throughput"
       },
@@ -5327,6 +5336,330 @@
         "status": "complete",
         "task_id": "REF-306",
         "title": "Review swallowed exception path in tests/test_website_cohesion_playwright.py:407"
+      },
+      {
+        "checkbox_id": 307,
+        "status": "complete",
+        "task_id": "REF-307",
+        "title": "Close objective gap: Establish proof contracts, capabilities, and trust policy"
+      },
+      {
+        "checkbox_id": 308,
+        "status": "complete",
+        "task_id": "REF-308",
+        "title": "Close objective gap: Compile AST changes into obligations and bounded graph context"
+      },
+      {
+        "checkbox_id": 309,
+        "status": "complete",
+        "task_id": "REF-309",
+        "title": "Close objective gap: Integrate Hammer, kernel reconstruction, and trusted caching"
+      },
+      {
+        "checkbox_id": 310,
+        "status": "complete",
+        "task_id": "REF-310",
+        "title": "Close objective gap: Schedule proof work under shared CPU budgets"
+      },
+      {
+        "checkbox_id": 311,
+        "status": "complete",
+        "task_id": "REF-311",
+        "title": "Close objective gap: Enforce proof-aware merge and goal completion"
+      },
+      {
+        "checkbox_id": 312,
+        "status": "blocked",
+        "task_id": "REF-312",
+        "title": "Close objective gap: Distinguish every refill and analysis outcome"
+      },
+      {
+        "checkbox_id": 313,
+        "status": "complete",
+        "task_id": "REF-313",
+        "title": "Close objective gap: Establish canonical coordination and merge flow"
+      },
+      {
+        "checkbox_id": 314,
+        "status": "complete",
+        "task_id": "REF-314",
+        "title": "Close objective gap: Plan from dependencies, conflicts, and objective value"
+      },
+      {
+        "checkbox_id": 315,
+        "status": "complete",
+        "task_id": "REF-315",
+        "title": "Close objective gap: Adapt execution capacity and validation cost"
+      },
+      {
+        "checkbox_id": 316,
+        "status": "complete",
+        "task_id": "REF-316",
+        "title": "Close objective gap: Close the scheduler feedback and lifecycle loop"
+      },
+      {
+        "checkbox_id": 317,
+        "status": "complete",
+        "task_id": "REF-317",
+        "title": "Close objective gap: Normalize IPFS datasets adapter payloads"
+      },
+      {
+        "checkbox_id": 318,
+        "status": "complete",
+        "task_id": "REF-318",
+        "title": "Close objective gap: Clarify graph, GraphRAG, and logic adapter boundaries"
+      },
+      {
+        "checkbox_id": 319,
+        "status": "complete",
+        "task_id": "REF-319",
+        "title": "Close objective gap: Stabilize repository boundaries"
+      },
+      {
+        "checkbox_id": 320,
+        "status": "complete",
+        "task_id": "REF-320",
+        "title": "Close objective gap: Decompose oversized orchestration modules"
+      },
+      {
+        "checkbox_id": 321,
+        "status": "complete",
+        "task_id": "REF-321",
+        "title": "Close objective gap: Prepare incremental implementation slices"
+      },
+      {
+        "checkbox_id": 322,
+        "status": "complete",
+        "task_id": "REF-322",
+        "title": "Close objective gap: Map package ownership and runtime entrypoints"
+      },
+      {
+        "checkbox_id": 323,
+        "status": "complete",
+        "task_id": "REF-323",
+        "title": "Close objective gap: Remove ad hoc import path behavior from production surfaces"
+      },
+      {
+        "checkbox_id": 324,
+        "status": "complete",
+        "task_id": "REF-324",
+        "title": "Close objective gap: Reduce application surface coupling"
+      },
+      {
+        "checkbox_id": 325,
+        "status": "complete",
+        "task_id": "REF-325",
+        "title": "Close objective gap: Make agent-supervisor proof-aware and context-efficient"
+      },
+      {
+        "checkbox_id": 326,
+        "status": "complete",
+        "task_id": "REF-326",
+        "title": "Close objective gap: Establish proof contracts, capabilities, and trust policy"
+      },
+      {
+        "checkbox_id": 327,
+        "status": "complete",
+        "task_id": "REF-327",
+        "title": "Close objective gap: Compile AST changes into obligations and bounded graph context"
+      },
+      {
+        "checkbox_id": 328,
+        "status": "complete",
+        "task_id": "REF-328",
+        "title": "Close objective gap: Integrate Hammer, kernel reconstruction, and trusted caching"
+      },
+      {
+        "checkbox_id": 329,
+        "status": "complete",
+        "task_id": "REF-329",
+        "title": "Close objective gap: Schedule proof work under shared CPU budgets"
+      },
+      {
+        "checkbox_id": 330,
+        "status": "complete",
+        "task_id": "REF-330",
+        "title": "Close objective gap: Enforce proof-aware merge and goal completion"
+      },
+      {
+        "checkbox_id": 331,
+        "status": "complete",
+        "task_id": "REF-331",
+        "title": "Close objective gap: Remove ad hoc import path behavior from production surfaces"
+      },
+      {
+        "checkbox_id": 332,
+        "status": "blocked",
+        "task_id": "REF-332",
+        "title": "Close objective gap: Convert existing roadmaps into executable slices"
+      },
+      {
+        "checkbox_id": 333,
+        "status": "complete",
+        "task_id": "REF-333",
+        "title": "Close objective gap: Pay down error-handling and observability debt"
+      },
+      {
+        "checkbox_id": 334,
+        "status": "complete",
+        "task_id": "REF-334",
+        "title": "Close objective gap: Rationalize frontend and review surfaces"
+      },
+      {
+        "checkbox_id": 335,
+        "status": "complete",
+        "task_id": "REF-335",
+        "title": "Close objective gap: Create focused test lanes for refactor work"
+      },
+      {
+        "checkbox_id": 336,
+        "status": "complete",
+        "task_id": "REF-336",
+        "title": "Close objective gap: Replace silent failures with typed outcomes"
+      },
+      {
+        "checkbox_id": 337,
+        "status": "complete",
+        "task_id": "REF-337",
+        "title": "Close objective gap: Make agent-supervisor proof-aware and context-efficient"
+      },
+      {
+        "checkbox_id": 338,
+        "status": "complete",
+        "task_id": "REF-338",
+        "title": "Close objective gap: Establish proof contracts, capabilities, and trust policy"
+      },
+      {
+        "checkbox_id": 339,
+        "status": "complete",
+        "task_id": "REF-339",
+        "title": "Close objective gap: Compile AST changes into obligations and bounded graph context"
+      },
+      {
+        "checkbox_id": 340,
+        "status": "complete",
+        "task_id": "REF-340",
+        "title": "Close objective gap: Integrate Hammer, kernel reconstruction, and trusted caching"
+      },
+      {
+        "checkbox_id": 341,
+        "status": "complete",
+        "task_id": "REF-341",
+        "title": "Close objective gap: Schedule proof work under shared CPU budgets"
+      },
+      {
+        "checkbox_id": 342,
+        "status": "complete",
+        "task_id": "REF-342",
+        "title": "Close objective gap: Enforce proof-aware merge and goal completion"
+      },
+      {
+        "checkbox_id": 343,
+        "status": "complete",
+        "task_id": "REF-343",
+        "title": "Close objective gap: Make agent-supervisor proof-aware and context-efficient"
+      },
+      {
+        "checkbox_id": 344,
+        "status": "complete",
+        "task_id": "REF-344",
+        "title": "Close objective gap: Establish proof contracts, capabilities, and trust policy"
+      },
+      {
+        "checkbox_id": 345,
+        "status": "complete",
+        "task_id": "REF-345",
+        "title": "Close objective gap: Compile AST changes into obligations and bounded graph context"
+      },
+      {
+        "checkbox_id": 346,
+        "status": "complete",
+        "task_id": "REF-346",
+        "title": "Close objective gap: Integrate Hammer, kernel reconstruction, and trusted caching"
+      },
+      {
+        "checkbox_id": 347,
+        "status": "complete",
+        "task_id": "REF-347",
+        "title": "Close objective gap: Schedule proof work under shared CPU budgets"
+      },
+      {
+        "checkbox_id": 348,
+        "status": "complete",
+        "task_id": "REF-348",
+        "title": "Close objective gap: Enforce proof-aware merge and goal completion"
+      },
+      {
+        "checkbox_id": 349,
+        "status": "complete",
+        "task_id": "REF-349",
+        "title": "Close objective gap: Make agent-supervisor proof-aware and context-efficient"
+      },
+      {
+        "checkbox_id": 350,
+        "status": "complete",
+        "task_id": "REF-350",
+        "title": "Close objective gap: Establish proof contracts, capabilities, and trust policy"
+      },
+      {
+        "checkbox_id": 351,
+        "status": "complete",
+        "task_id": "REF-351",
+        "title": "Close objective gap: Compile AST changes into obligations and bounded graph context"
+      },
+      {
+        "checkbox_id": 352,
+        "status": "complete",
+        "task_id": "REF-352",
+        "title": "Close objective gap: Integrate Hammer, kernel reconstruction, and trusted caching"
+      },
+      {
+        "checkbox_id": 353,
+        "status": "complete",
+        "task_id": "REF-353",
+        "title": "Close objective gap: Schedule proof work under shared CPU budgets"
+      },
+      {
+        "checkbox_id": 354,
+        "status": "complete",
+        "task_id": "REF-354",
+        "title": "Close objective gap: Enforce proof-aware merge and goal completion"
+      },
+      {
+        "checkbox_id": 355,
+        "status": "complete",
+        "task_id": "REF-355",
+        "title": "Close objective gap: Make agent-supervisor proof-aware and context-efficient"
+      },
+      {
+        "checkbox_id": 356,
+        "status": "complete",
+        "task_id": "REF-356",
+        "title": "Close objective gap: Establish proof contracts, capabilities, and trust policy"
+      },
+      {
+        "checkbox_id": 357,
+        "status": "complete",
+        "task_id": "REF-357",
+        "title": "Close objective gap: Compile AST changes into obligations and bounded graph context"
+      },
+      {
+        "checkbox_id": 358,
+        "status": "complete",
+        "task_id": "REF-358",
+        "title": "Close objective gap: Integrate Hammer, kernel reconstruction, and trusted caching"
+      },
+      {
+        "checkbox_id": 359,
+        "status": "complete",
+        "task_id": "REF-359",
+        "title": "Close objective gap: Schedule proof work under shared CPU budgets"
+      },
+      {
+        "checkbox_id": 360,
+        "status": "complete",
+        "task_id": "REF-360",
+        "title": "Close objective gap: Enforce proof-aware merge and goal completion"
       }
     ]
   },

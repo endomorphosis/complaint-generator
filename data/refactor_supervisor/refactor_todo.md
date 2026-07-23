@@ -5092,7 +5092,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-272 Exercise an end-to-end parallel proof-aware implementation workflow
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -5113,7 +5113,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-273 Expose shadow, canary, enforcement, and override diagnostics
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -5134,7 +5134,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-274 Benchmark context reduction, cache reuse, and CPU proof throughput
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P1
 - Track: G11
@@ -5365,7 +5365,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-285 Verify claim, fencing, receipt, and attestation protocols with Tamarin and ProVerif
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5428,7 +5428,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-288 Normalize proof failures and traces into a counterexample knowledge graph
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5449,7 +5449,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-289 Generate bounded counterexample-guided plan repairs
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5470,7 +5470,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-290 Bind plan conformance and formal evidence into goal completion
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5491,7 +5491,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-291 Admit every prover family through one shared CPU and process budget
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5512,7 +5512,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-292 Adversarially test formal plans and every prover-matrix trust boundary
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5533,7 +5533,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-293 Exercise an end-to-end proof-carrying planning and implementation workflow
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5554,7 +5554,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-294 Benchmark and gate formal-planning rollout by assurance and throughput
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P1
 - Track: G12
@@ -6165,7 +6165,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-312 Close objective gap: Distinguish every refill and analysis outcome
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: ops
