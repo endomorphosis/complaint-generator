@@ -5945,7 +5945,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-307 Close objective gap: Establish proof contracts, capabilities, and trust policy
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
