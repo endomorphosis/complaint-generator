@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import logging
 import os
 import re
 import shlex
@@ -24,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+
+LOGGER = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ACCELERATE_REPO = PROJECT_ROOT / "ipfs_datasets_py" / "ipfs_accelerate_py"
@@ -4005,8 +4008,28 @@ def run_merge_resolver_watchdog(*, interval_s: float, timeout_seconds: float, on
         try:
             if MERGE_RESOLVER_PID_PATH.exists() and MERGE_RESOLVER_PID_PATH.read_text(encoding="utf-8").strip() == str(os.getpid()):
                 MERGE_RESOLVER_PID_PATH.unlink()
-        except Exception:
-            pass
+        except OSError as exc:
+            cleanup_error = {
+                "path": str(MERGE_RESOLVER_PID_PATH),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            }
+            last["pid_cleanup_error"] = cleanup_error
+            LOGGER.error(
+                "merge resolver watchdog could not remove its PID file %s: %s: %s",
+                MERGE_RESOLVER_PID_PATH,
+                type(exc).__name__,
+                exc,
+            )
+            try:
+                _atomic_write_json(MERGE_RESOLVER_STATUS_PATH, last)
+            except OSError as status_exc:
+                LOGGER.error(
+                    "merge resolver watchdog could not persist its PID cleanup error to %s: %s: %s",
+                    MERGE_RESOLVER_STATUS_PATH,
+                    type(status_exc).__name__,
+                    status_exc,
+                )
     return last
 
 
