@@ -496,8 +496,16 @@ Rate relevance from 0.0 to 1.0 and briefly explain why."""
                     validation['relevance_score'] = float(scores[0])
                     validation['recommendations'].append(response.split('\n')[0])
         except Exception as e:
-            # If LLM not available or errors, use default score
-            pass
+            # Relevance assessment is optional, so retain the deterministic
+            # source-based score while making the degraded path observable.
+            self.mediator.log(
+                'web_evidence_relevance_assessment_error',
+                error=str(e),
+                error_type=type(e).__name__,
+                source_type=str(evidence_item.get('source_type') or ''),
+                url=str(evidence_item.get('url') or ''),
+                fallback_relevance_score=validation['relevance_score'],
+            )
         
         return validation
 
