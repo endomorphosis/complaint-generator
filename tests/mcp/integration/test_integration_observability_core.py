@@ -92,13 +92,22 @@ def decision_tree():
 
 @pytest.fixture
 def observability():
-    """Initialize observability components."""
-    return {
-        "metrics": get_prometheus_collector(),
-        "tracer": get_otel_tracer(),
+    """Initialize isolated observability state for each test."""
+    metrics = get_prometheus_collector()
+    metrics.reset_all()
+
+    circuit_breakers = {
         "cb_query": get_circuit_breaker("query_optimizer"),
         "cb_analysis": get_circuit_breaker("complaint_analyzer"),
         "cb_decision": get_circuit_breaker("decision_tree"),
+    }
+    for circuit_breaker in circuit_breakers.values():
+        circuit_breaker.reset()
+
+    return {
+        "metrics": metrics,
+        "tracer": get_otel_tracer(),
+        **circuit_breakers,
     }
 
 
@@ -312,17 +321,19 @@ class TestMultiComponentPipeline:
         decision_tree.should_fail = True
         
         analysis_start = time.time()
-        try:
-            analysis = cb_analysis.call(complaint_analyzer.analyze, "Test complaint")
-            analysis_elapsed = time.time() - analysis_start
-            metrics.record_circuit_breaker_call("complaint_analyzer", analysis_elapsed, success=True)
-        except:
-            pass
+        analysis = cb_analysis.call(complaint_analyzer.analyze, "Test complaint")
+        analysis_elapsed = time.time() - analysis_start
+        metrics.record_circuit_breaker_call(
+            "complaint_analyzer", analysis_elapsed, success=True
+        )
         
         # Decision will fail
         decision_start = time.time()
         try:
-            cb_decision.call(decision_tree.decide, {"type": "billing"})
+            cb_decision.call(
+                decision_tree.decide,
+                {"type": analysis["complaint_type"]},
+            )
             decision_elapsed = time.time() - decision_start
             metrics.record_circuit_breaker_call("decision_tree", decision_elapsed, success=True)
         except Exception:
