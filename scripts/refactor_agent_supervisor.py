@@ -3675,19 +3675,30 @@ def _project_task_statuses(path: Path, statuses: dict[str, str]) -> list[str]:
     return sorted(updated)
 
 
-def synchronize_taskboard_statuses() -> dict[str, Any]:
+def synchronize_taskboard_statuses(
+    *,
+    include_primary: bool = True,
+    protected_bundle_paths: set[Path] | None = None,
+) -> dict[str, Any]:
     statuses = _durable_task_statuses()
     canonical_statuses = _durable_canonical_task_statuses(statuses)
+    protected_paths = {
+        path.resolve()
+        for path in (protected_bundle_paths or set())
+    }
     source_tasks_by_id: dict[str, list[Any]] = {}
     if TODO_PATH.exists():
         for task in _upstream_portal_task_parser()(TODO_PATH, TASK_HEADER_PREFIX):
             source_tasks_by_id.setdefault(task.task_id, []).append(task)
     updated: dict[str, list[str]] = {}
-    primary_updates = _project_task_statuses(TODO_PATH, statuses)
-    if primary_updates:
-        updated[str(TODO_PATH)] = primary_updates
+    if include_primary:
+        primary_updates = _project_task_statuses(TODO_PATH, statuses)
+        if primary_updates:
+            updated[str(TODO_PATH)] = primary_updates
     if BUNDLE_DIR.exists():
         for path in sorted(BUNDLE_DIR.glob("*.todo.md")):
+            if path.resolve() in protected_paths:
+                continue
             task_updates = _project_task_statuses(
                 path,
                 _statuses_for_canonical_tasks(
@@ -3813,21 +3824,37 @@ def reconcile_task_projection_artifacts(*, skip_while_active: bool = True) -> di
         try:
             manifest = _upstream_artifact_store().read_artifact_fields(
                 BUNDLE_LANE_MANIFEST,
-                ("running_count",),
+                ("running_count", "lanes"),
             )
         except (OSError, RuntimeError, TypeError, ValueError):
             manifest = {}
     parallel_running = int(manifest.get("running_count") or 0)
     if skip_while_active and (active_phase or parallel_running):
         statuses = _durable_task_statuses()
+        protected_bundle_paths: set[Path] = set()
+        for lane in manifest.get("lanes", []) or []:
+            if not isinstance(lane, dict):
+                continue
+            todo_path = str(lane.get("todo_path") or "").strip()
+            if not todo_path:
+                continue
+            path = Path(todo_path)
+            protected_bundle_paths.add(
+                path if path.is_absolute() else PROJECT_ROOT / path
+            )
+        bundle_shards = synchronize_taskboard_statuses(
+            include_primary=False,
+            protected_bundle_paths=protected_bundle_paths,
+        )
         bundle_index = _project_bundle_index_statuses(statuses)
         return {
-            "updated": bool(bundle_index["updated"]),
+            "updated": bool(bundle_shards["updated_file_count"] or bundle_index["updated"]),
             "reason": "active_projection_reconciled",
             "active_task_id": active_task_id,
             "active_phase": active_phase,
             "parallel_running_count": parallel_running,
             "taskboard": {"updated": False, "reason": "active_implementation"},
+            "bundle_shards": bundle_shards,
             "goals": {"updated": False, "reason": "active_implementation"},
             "bundle_index": bundle_index,
         }

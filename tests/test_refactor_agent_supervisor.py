@@ -1324,7 +1324,7 @@ def test_projection_reconciliation_queries_manifest_running_count(tmp_path, monk
         @staticmethod
         def read_artifact_fields(path, fields):
             calls.append((path, fields))
-            return {"running_count": 1}
+            return {"running_count": 1, "lanes": []}
 
     monkeypatch.setattr(supervisor, "_upstream_artifact_store", lambda: ArtifactStore())
 
@@ -1334,7 +1334,7 @@ def test_projection_reconciliation_queries_manifest_running_count(tmp_path, monk
     assert result["updated"] is False
     assert result["parallel_running_count"] == 1
     assert result["bundle_index"]["reason"] == "index_missing"
-    assert calls == [(supervisor.BUNDLE_LANE_MANIFEST, ("running_count",))]
+    assert calls == [(supervisor.BUNDLE_LANE_MANIFEST, ("running_count", "lanes"))]
 
 
 def test_active_projection_updates_bundle_index_without_rewriting_taskboards(
@@ -1371,6 +1371,11 @@ def test_active_projection_updates_bundle_index_without_rewriting_taskboards(
         encoding="utf-8",
     )
     index_path = supervisor.BUNDLE_DIR / "index.json"
+    shard_path = supervisor.BUNDLE_DIR / "g1-s1.todo.md"
+    shard_path.write_text(
+        supervisor.TODO_PATH.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     index_path.write_text(
         json.dumps(
             {
@@ -1378,6 +1383,7 @@ def test_active_projection_updates_bundle_index_without_rewriting_taskboards(
                 "bundles": {
                     "g1/s1": {
                         "bundle_key": "g1/s1",
+                        "shard_path": str(shard_path),
                         "tasks": [
                             {"task_id": "REF-001", "status": "todo"},
                             {"task_id": "REF-002", "status": "todo"},
@@ -1398,6 +1404,10 @@ def test_active_projection_updates_bundle_index_without_rewriting_taskboards(
     assert index["bundles"]["g1/s1"]["tasks"][0]["status"] == "in_progress"
     assert index["bundles"]["g1/s1"]["tasks"][1]["status"] == "blocked"
     assert "- Status: todo" in supervisor.TODO_PATH.read_text(encoding="utf-8")
+    shard_text = shard_path.read_text(encoding="utf-8")
+    assert "- Status: in_progress" in shard_text
+    assert "- Status: blocked" in shard_text
+    assert result["bundle_shards"]["updated_file_count"] == 1
     assert index_path.with_suffix(".duckdb").exists()
 
 
