@@ -1406,6 +1406,7 @@ def build_goals(scan: dict[str, Any]) -> list[dict[str, Any]]:
                 },
             ],
         },
+        *_formal_verification_goals(),
     ]
 
 
@@ -1436,6 +1437,749 @@ def _task(
         task_id,
         clean_dependencies,
     )
+
+
+def _formal_verification_goals() -> list[dict[str, Any]]:
+    """Return the proof-aware supervisor implementation program.
+
+    The goal is kept in one helper because its tasks form an independently
+    reviewable dependency graph and intentionally live in the nested
+    ``ipfs_accelerate_py`` repository.
+    """
+
+    module_root = (
+        "ipfs_datasets_py/ipfs_accelerate_py/"
+        "ipfs_accelerate_py/agent_supervisor"
+    )
+    test_root = "ipfs_datasets_py/ipfs_accelerate_py/test/api"
+    plan_path = (
+        "ipfs_datasets_py/ipfs_accelerate_py/docs/architecture/"
+        "AGENT_SUPERVISOR_FORMAL_VERIFICATION_PLAN.md"
+    )
+
+    def module(name: str) -> str:
+        return f"{module_root}/{name}"
+
+    def test(name: str) -> str:
+        return f"{test_root}/test_agent_supervisor_{name}.py"
+
+    def validate(name: str) -> tuple[str, ...]:
+        return (
+            "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py "
+            f"python -m pytest {test(name)} -q",
+        )
+
+    return [
+        {
+            "id": "G11",
+            "title": "Make agent-supervisor proof-aware and context-efficient",
+            "priority": "P0",
+            "subgoals": [
+                {
+                    "id": "G11.S1",
+                    "title": "Establish proof contracts, capabilities, and trust policy",
+                    "tasks": [
+                        _task(
+                            "G11",
+                            "G11.S1",
+                            "Probe formal-logic providers, toolchains, and optional dependency health",
+                            "P0",
+                            (
+                                plan_path,
+                                module("formal_verification_capabilities.py"),
+                                test("formal_verification_capabilities"),
+                            ),
+                            "The supervisor needs a truthful runtime capability matrix before it can route or require proof work.",
+                            (
+                                "A versioned capability report covers Hammer, TDFOL, external provers, Lean, Leanstral, frame logic, knowledge graphs, and ZKP backends.",
+                                "Provider, executable, package, model, circuit, and optional dependency health are reported separately.",
+                                "Missing spaCy, model weights, Python bindings, or prover executables produce explicit degraded or unavailable reasons without breaking supervisor import.",
+                                "Capability probes are bounded, cacheable, and never count availability as proof success.",
+                            ),
+                            validate("formal_verification_capabilities"),
+                            task_id="REF-244",
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S1",
+                            "Define canonical proof obligations, plans, receipts, and assurance levels",
+                            "P0",
+                            (
+                                module("formal_verification_contracts.py"),
+                                test("formal_verification_contracts"),
+                            ),
+                            "Proof-aware scheduling needs one versioned contract and a sound trust lattice shared by providers, caches, merge gates, and goal evidence.",
+                            (
+                                "CodeProofObligation, ProofPlan, ProofAttempt, ProofReceipt, and assurance enums have deterministic JSON encodings and content identities.",
+                                "Receipts bind repository trees, AST scopes, premises, translators, solvers, kernels, toolchains, policy, and resource budgets.",
+                                "Authoritative assurance is derived from evidence and cannot be asserted directly by a provider.",
+                                "LLM output, ATP or SMT candidates, stale cache entries, and simulated ZKP cannot become kernel-verified or attested.",
+                            ),
+                            validate("formal_verification_contracts"),
+                            task_id="REF-245",
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S1",
+                            "Introduce an optional isolated proof-provider protocol",
+                            "P0",
+                            (
+                                module("formal_verification_provider.py"),
+                                module("formal_verification_capabilities.py"),
+                                test("formal_verification_provider"),
+                            ),
+                            "A mandatory import from the acceleration submodule into its parent datasets package would create a brittle package and submodule cycle.",
+                            (
+                                "A versioned provider protocol supports capability, translate, prove, reconstruct, verify, and attest operations.",
+                                "Providers can be discovered lazily in process or invoked through a bounded subprocess JSON protocol.",
+                                "Timeout, cancellation, resource, network, and malformed-response failures are explicit and fail closed.",
+                                "The supervisor imports and runs with no ipfs_datasets_py proof provider installed.",
+                            ),
+                            validate("formal_verification_provider"),
+                            task_id="REF-246",
+                            depends_on=("REF-244", "REF-245"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S1",
+                            "Define risk-selected proof and rollout policy",
+                            "P0",
+                            (
+                                module("formal_verification_policy.py"),
+                                test("formal_verification_policy"),
+                            ),
+                            "Formal verification should protect modeled high-risk invariants without blocking unrelated or unsupported Python changes.",
+                            (
+                                "Policy maps changed paths, AST scopes, risk, and invariant classes to required assurance and fallback validation.",
+                                "Disabled, shadow, canary, and enforcement modes have explicit promotion and override behavior.",
+                                "Unsupported, unavailable, timed-out, and inconclusive results cannot silently satisfy an enforcement gate.",
+                                "Overrides require bounded scope, actor, reason, expiration, and a durable receipt.",
+                            ),
+                            validate("formal_verification_policy"),
+                            task_id="REF-247",
+                            depends_on=("REF-245",),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G11.S2",
+                    "title": "Compile AST changes into obligations and bounded graph context",
+                    "tasks": [
+                        _task(
+                            "G11",
+                            "G11.S2",
+                            "Compile candidate diffs into typed AST proof scopes",
+                            "P0",
+                            (
+                                module("code_proof_obligations.py"),
+                                module("conflict_graph.py"),
+                                test("code_proof_scopes"),
+                            ),
+                            "Proof planning must start from deterministic changed symbols and contracts rather than sending repository-wide source or AST records to a model.",
+                            (
+                                "Python diffs produce qualified symbols, imports, calls, state transitions, interfaces, source hashes, and changed-path scopes.",
+                                "Renames, deletes, generated files, syntax failures, and non-Python changes have explicit conservative handling.",
+                                "Scopes reuse existing AST and conflict-graph records by blob identity.",
+                                "Equivalent cold and warm scans produce the same canonical scope identities.",
+                            ),
+                            validate("code_proof_scopes"),
+                            task_id="REF-248",
+                            depends_on=("REF-245",),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S2",
+                            "Build a reviewed code-invariant obligation template registry",
+                            "P0",
+                            (
+                                module("proof_obligation_templates.py"),
+                                module("code_proof_obligations.py"),
+                                test("proof_obligation_templates"),
+                            ),
+                            "Arbitrary Python cannot be made formally verified by translating free-form model claims; enforcement needs reviewed templates with explicit semantics.",
+                            (
+                                "Initial templates cover legal state transitions, lease uniqueness and fencing, DAG acyclicity, merge idempotence, cache-key completeness, evidence freshness, projection equivalence, and unsupported-proof fail-closed behavior.",
+                                "Every template declares a Python reference predicate, canonical statement, supported backends, assumptions, mutation cases, and fallback tests.",
+                                "Template versions and semantic hashes participate in obligation and cache identity.",
+                                "Unknown or ambiguous code shapes remain unsupported instead of selecting a similar template heuristically.",
+                            ),
+                            validate("proof_obligation_templates"),
+                            task_id="REF-249",
+                            depends_on=("REF-247", "REF-248"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S2",
+                            "Materialize a deterministic code and proof evidence graph in JSON and DuckDB",
+                            "P0",
+                            (
+                                module("code_evidence_graph.py"),
+                                module("artifact_store.py"),
+                                test("code_evidence_graph"),
+                            ),
+                            "Goals, tasks, symbols, obligations, attempts, receipts, validations, and merges need a query plane that does not require parsing a full graph into a model context.",
+                            (
+                                "The graph uses deterministic nodes and provenance edges derived from AST, task, validation, merge, and proof records.",
+                                "Paired JSON and DuckDB artifacts expose indexed task, tree, symbol, obligation, assurance, freshness, and dependency queries.",
+                                "JSON and DuckDB projections round-trip to equivalent canonical graph records.",
+                                "LLM or GraphRAG enrichment cannot create authoritative proof, merge, coverage, or completion edges.",
+                            ),
+                            validate("code_evidence_graph"),
+                            task_id="REF-250",
+                            depends_on=("REF-245", "REF-248"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S2",
+                            "Index proof scopes and invalidate stale dependent evidence incrementally",
+                            "P0",
+                            (
+                                module("proof_scope_index.py"),
+                                module("dataset_store.py"),
+                                test("proof_scope_index"),
+                            ),
+                            "Proof reuse is useful only when every changed semantic input invalidates the affected obligations and receipts.",
+                            (
+                                "Scope indexes map files, qualified symbols, interfaces, assumptions, templates, toolchains, and policies to dependent obligations and receipts.",
+                                "Blob reuse avoids reparsing unchanged scopes while deletes and renames invalidate stale records.",
+                                "Invalidation is transitive across proof-plan dependencies and records a bounded reason chain.",
+                                "Incremental and exhaustive rebuilds produce equivalent active evidence sets.",
+                            ),
+                            validate("proof_scope_index"),
+                            task_id="REF-251",
+                            depends_on=("REF-248", "REF-250"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S2",
+                            "Generate bounded proof context capsules for Codex and Leanstral",
+                            "P0",
+                            (
+                                module("proof_context.py"),
+                                module("artifact_store.py"),
+                                test("proof_context"),
+                            ),
+                            "Models should receive only task-relevant invariants, trusted prior evidence, counterexamples, and source excerpts.",
+                            (
+                                "Context queries select exact task, symbol, dependency, obligation, receipt, and contradiction neighborhoods.",
+                                "Row, byte, token, graph-hop, source-excerpt, and proof-transcript limits are enforced before prompt assembly.",
+                                "Capsules distinguish trusted facts, untrusted suggestions, unsupported semantics, and required fallback checks.",
+                                "Repository-wide AST records, full graphs, hidden witnesses, and unrelated transcripts never enter a capsule.",
+                            ),
+                            validate("proof_context"),
+                            task_id="REF-252",
+                            depends_on=("REF-249", "REF-250", "REF-251"),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G11.S3",
+                    "title": "Integrate Hammer, kernel reconstruction, and trusted caching",
+                    "tasks": [
+                        _task(
+                            "G11",
+                            "G11.S3",
+                            "Adapt code obligations to the ipfs_datasets_py Hammer portfolio",
+                            "P0",
+                            (
+                                module("ipfs_datasets_logic_provider.py"),
+                                module("formal_verification_provider.py"),
+                                test("ipfs_datasets_logic_provider"),
+                            ),
+                            "The mature Hammer portfolio should be consumed through the provider boundary rather than copied into the supervisor.",
+                            (
+                                "Supported obligations translate deterministically into Hammer requests with explicit premises and environment locks.",
+                                "Solver allowlists, timeouts, CPU, memory, network denial, and maximum premise counts flow from supervisor policy.",
+                                "Portfolio attempts and candidate proofs preserve upstream receipt provenance.",
+                                "Unsupported translation families return a typed unsupported result and configured fallback checks.",
+                            ),
+                            validate("ipfs_datasets_logic_provider"),
+                            task_id="REF-253",
+                            depends_on=("REF-246", "REF-249"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S3",
+                            "Add trust-aware proof caching and single-flight execution",
+                            "P0",
+                            (
+                                module("formal_verification_cache.py"),
+                                module("ipfs_datasets_logic_provider.py"),
+                                test("formal_verification_cache"),
+                            ),
+                            "Parallel lanes must reuse sound results without executing the same expensive obligation or trusting a stale or weaker cache entry.",
+                            (
+                                "Cache keys bind obligation, premises, translator, solver, kernel, toolchain, theorem registry, policy, resource budget, and candidate tree.",
+                                "Only results meeting the requested assurance and freshness can satisfy a lookup.",
+                                "A cross-thread and cross-process single-flight lease deduplicates active proof work.",
+                                "Poisoned, malformed, stale, partial, solver-only, and simulated-attestation cache entries are rejected with reason codes.",
+                            ),
+                            validate("formal_verification_cache"),
+                            task_id="REF-254",
+                            depends_on=("REF-245", "REF-253"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S3",
+                            "Enforce independent kernel reconstruction and verdict derivation",
+                            "P0",
+                            (
+                                module("kernel_verification.py"),
+                                module("formal_verification_contracts.py"),
+                                test("kernel_verification"),
+                            ),
+                            "A solver candidate or LLM proof draft is not formal verification until an allowed target kernel accepts the exact reconstructed obligation.",
+                            (
+                                "Lean, Coq, and Isabelle reconstruction records are mapped without weakening upstream trust semantics.",
+                                "Kernel unavailability, timeout, mismatch, forbidden declarations, sorry or admit, and changed theorem statements fail closed.",
+                                "The authoritative verdict is derived from reconstruction evidence and cannot be upgraded by provider status text.",
+                                "Negative and corrupt proof fixtures never produce kernel-verified receipts.",
+                            ),
+                            validate("kernel_verification"),
+                            task_id="REF-255",
+                            depends_on=("REF-245", "REF-253"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S3",
+                            "Route counterexamples and unsupported obligations into focused validation",
+                            "P0",
+                            (
+                                module("proof_fallbacks.py"),
+                                module("validation_commands.py"),
+                                test("proof_fallbacks"),
+                            ),
+                            "Disproved, unsupported, or inconclusive obligations should reduce model search and trigger actionable checks instead of becoming generic failures.",
+                            (
+                                "Counterexamples and unsat cores are normalized into bounded task diagnostics and regression fixtures.",
+                                "Unsupported obligations map to declared focused tests, static checks, or manual-review requirements.",
+                                "Shadow mode can continue through fallback validation while enforcement mode honors required assurance.",
+                                "Repeated equivalent failures deduplicate by obligation, tree, and counterexample identity.",
+                            ),
+                            validate("proof_fallbacks"),
+                            task_id="REF-256",
+                            depends_on=("REF-247", "REF-249", "REF-255"),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G11.S4",
+                    "title": "Schedule proof work under shared CPU budgets",
+                    "tasks": [
+                        _task(
+                            "G11",
+                            "G11.S4",
+                            "Execute proof-plan DAGs with bounded parallelism and cancellation",
+                            "P0",
+                            (
+                                module("proof_scheduler.py"),
+                                module("formal_verification_contracts.py"),
+                                test("proof_scheduler"),
+                            ),
+                            "Independent obligations should run concurrently, but proof dependencies and conclusive portfolio results must bound unnecessary work.",
+                            (
+                                "The scheduler executes ready proof-plan nodes in dependency order and exposes critical-path and downstream-unlock priority.",
+                                "Independent translator, solver, kernel, validation, and artifact nodes can overlap within configured limits.",
+                                "Conclusive results cancel redundant portfolio attempts and propagate blocked or unsupported dependencies explicitly.",
+                                "Restarts recover from durable plan, lease, attempt, and receipt state without duplicate authoritative receipts.",
+                            ),
+                            validate("proof_scheduler"),
+                            task_id="REF-257",
+                            depends_on=("REF-252", "REF-253", "REF-254", "REF-255"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S4",
+                            "Unify proof, validation, model, and artifact resource admission",
+                            "P0",
+                            (
+                                module("resource_scheduler.py"),
+                                module("proof_scheduler.py"),
+                                test("proof_resource_scheduler"),
+                            ),
+                            "Nested solver, kernel, test, and model pools can otherwise oversubscribe CPU and memory while each believes it is within its own limit.",
+                            (
+                                "Resource classes distinguish translation, solver, kernel, validation, model-draft, and artifact work.",
+                                "One supervisor-level lease budget is propagated into child portfolio and kernel limits.",
+                                "CPU, process, memory, disk, provider quota, context, token, and latency backpressure remain authoritative.",
+                                "Model concurrency is accounted separately from CPU proof concurrency and idle capacity is reclaimable.",
+                            ),
+                            validate("proof_resource_scheduler"),
+                            task_id="REF-258",
+                            depends_on=("REF-244", "REF-257"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S4",
+                            "Integrate staged proof checks with the validation scheduler",
+                            "P0",
+                            (
+                                module("validation_commands.py"),
+                                module("validation_scheduler.py"),
+                                module("proof_scheduler.py"),
+                                test("proof_validation_scheduler"),
+                            ),
+                            "Proof checks and tests need one impact-selected, cached, fail-fast pipeline before merge.",
+                            (
+                                "Cheap deterministic checks precede translation, solver candidates, kernel reconstruction, focused tests, and broad tests.",
+                                "Independent checks run in parallel under the shared resource budget.",
+                                "Impact selection explains every included, omitted, escalated, and fallback check.",
+                                "Validation reports retain separate deterministic, solver, kernel, test, and attestation verdicts.",
+                            ),
+                            validate("proof_validation_scheduler"),
+                            task_id="REF-259",
+                            depends_on=("REF-256", "REF-257", "REF-258"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S4",
+                            "Persist proof scheduler metrics and queryable receipts",
+                            "P0",
+                            (
+                                module("proof_metrics.py"),
+                                module("artifact_store.py"),
+                                module("scheduler_metrics.py"),
+                                test("proof_metrics"),
+                            ),
+                            "Operators and planning policy need proof throughput, trust, cache, context, and resource measurements without loading raw event logs.",
+                            (
+                                "JSON and DuckDB tables expose obligations, attempts, receipts, dependencies, cache outcomes, resource samples, and assurance counts.",
+                                "Metrics include queue, solver, kernel, model, validation, merge, cancellation, and cache latency.",
+                                "Every metric is keyed by canonical goal, subgoal, task, tree, provider, template, and resource class.",
+                                "Queryable aggregates do not include hidden witnesses or unbounded proof transcripts.",
+                            ),
+                            validate("proof_metrics"),
+                            task_id="REF-260",
+                            depends_on=("REF-250", "REF-254", "REF-257"),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G11.S5",
+                    "title": "Use Leanstral as a kernel-checked shadow assistant",
+                    "tasks": [
+                        _task(
+                            "G11",
+                            "G11.S5",
+                            "Expose Leanstral through a capability-isolated llm_router provider",
+                            "P1",
+                            (
+                                module("leanstral_proof_provider.py"),
+                                module("formal_verification_capabilities.py"),
+                                test("leanstral_proof_provider"),
+                            ),
+                            "Leanstral can draft useful Lean proof text, but its legal-modal implementation has optional model and spaCy dependencies that cannot become supervisor startup requirements.",
+                            (
+                                "Leanstral inference is invoked through llm_router with explicit provider, model, timeout, and token budgets.",
+                                "Missing spaCy, model service, codec, or Leanstral dependencies produce degraded capability rather than import failure.",
+                                "Model output is always marked unverified and cannot mutate canonical source or obligations.",
+                                "Inference runs in the model resource class, separate from local kernel checking.",
+                            ),
+                            validate("leanstral_proof_provider"),
+                            task_id="REF-261",
+                            depends_on=("REF-244", "REF-246"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S5",
+                            "Generate fixed-theorem Leanstral prompts from proof context capsules",
+                            "P1",
+                            (
+                                module("leanstral_proof_provider.py"),
+                                module("proof_context.py"),
+                                test("leanstral_proof_context"),
+                            ),
+                            "Leanstral should solve a verifier-generated theorem with bounded premises instead of rediscovering repository structure in its context window.",
+                            (
+                                "Prompts contain a fixed theorem identity, allowed premises, trusted prior receipts, compact failures, and output schema.",
+                                "The model may propose proof text or decomposition but cannot change assumptions, conclusion, template, or source scope.",
+                                "Prompt and response sizes obey context-capsule and token budgets.",
+                                "Equivalent tasks reuse untrusted draft artifacts without treating them as checked evidence.",
+                            ),
+                            validate("leanstral_proof_context"),
+                            task_id="REF-262",
+                            depends_on=("REF-252", "REF-261"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S5",
+                            "Kernel-check Leanstral drafts and constrain patch proposals",
+                            "P0",
+                            (
+                                module("leanstral_proof_provider.py"),
+                                module("kernel_verification.py"),
+                                test("leanstral_proof_gate"),
+                            ),
+                            "Leanstral output is useful only after deterministic schema, theorem-integrity, source-scope, patch, and local kernel checks.",
+                            (
+                                "Forbidden imports, axioms, unsafe declarations, sorry, admit, theorem substitution, and source-copy attacks are rejected.",
+                                "Accepted proof text passes the same independent kernel reconstruction path as non-LLM candidates.",
+                                "Patch proposals are restricted to task-declared paths and must pass git apply check plus configured validation.",
+                                "Model and kernel artifacts retain separate provenance and assurance.",
+                            ),
+                            validate("leanstral_proof_gate"),
+                            task_id="REF-263",
+                            depends_on=("REF-255", "REF-262"),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G11.S6",
+                    "title": "Attest trusted receipts with production-safe ZKP",
+                    "tasks": [
+                        _task(
+                            "G11",
+                            "G11.S6",
+                            "Define ZKP receipt-attestation statements and trust semantics",
+                            "P1",
+                            (
+                                module("proof_attestation.py"),
+                                module("formal_verification_contracts.py"),
+                                test("proof_attestation_contracts"),
+                            ),
+                            "A ZKP can bind a trusted proof receipt or protect private premises, but it does not independently prove arbitrary Python correctness.",
+                            (
+                                "The public statement binds tree, obligation, policy, kernel, receipt, circuit, backend, and verification-key identities.",
+                                "Attestation is available only for an existing kernel-verified receipt.",
+                                "Simulated ZKP is labeled non-authoritative and cannot satisfy production or completion gates.",
+                                "Hidden witness fields are excluded from logs, context capsules, caches, and public artifacts.",
+                            ),
+                            validate("proof_attestation_contracts"),
+                            task_id="REF-264",
+                            depends_on=("REF-245",),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S6",
+                            "Gate cryptographic backends on health, circuit, key, and no-leak evidence",
+                            "P1",
+                            (
+                                module("proof_attestation.py"),
+                                module("formal_verification_capabilities.py"),
+                                test("proof_attestation_backends"),
+                            ),
+                            "ProveKit or Groth16 must fail closed when binaries, circuits, verification keys, schemas, or witness protections are unavailable or stale.",
+                            (
+                                "Backend health distinguishes simulated, configured, available, verified, degraded, and unavailable states.",
+                                "Circuit, public-input schema, verification-key, and backend versions are pinned in policy and receipt identity.",
+                                "Golden, negative, stale-key, malformed-proof, and witness no-leak cases gate production eligibility.",
+                                "A cryptographic failure cannot fall back to simulated success.",
+                            ),
+                            validate("proof_attestation_backends"),
+                            task_id="REF-265",
+                            depends_on=("REF-244", "REF-264"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S6",
+                            "Persist optional ZKP envelopes beside trusted proof receipts",
+                            "P1",
+                            (
+                                module("proof_attestation.py"),
+                                module("formal_verification_cache.py"),
+                                module("artifact_store.py"),
+                                test("proof_attestation_store"),
+                            ),
+                            "Verified envelopes should be queryable and optionally content-addressed without changing the underlying proof verdict or exposing witnesses.",
+                            (
+                                "Attestation envelopes preserve a reference to the immutable kernel receipt and public-input digest.",
+                                "Cache and optional IPFS records bind backend, circuit, key, policy, and expiration.",
+                                "Verifier results are reproducible from public artifacts and fail when any bound identity changes.",
+                                "Attestation loss or expiration leaves kernel assurance intact but removes attested assurance.",
+                            ),
+                            validate("proof_attestation_store"),
+                            task_id="REF-266",
+                            depends_on=("REF-254", "REF-255", "REF-265"),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G11.S7",
+                    "title": "Enforce proof-aware merge and goal completion",
+                    "tasks": [
+                        _task(
+                            "G11",
+                            "G11.S7",
+                            "Map trusted proof receipts into goal completion evidence",
+                            "P0",
+                            (
+                                module("goal_completion.py"),
+                                module("formal_verification_contracts.py"),
+                                test("proof_goal_completion"),
+                            ),
+                            "A successful implementation or test receipt should not satisfy a proof-required acceptance criterion without fresh trusted proof evidence.",
+                            (
+                                "CompletionEvidence can reference obligation, proof receipt, assurance, tree, freshness, and provenance identities.",
+                                "Required assurance is evaluated independently from validation success and task status.",
+                                "Parent goals aggregate child proof requirements without hiding unsupported, inconclusive, stale, or contradicted descendants.",
+                                "Legacy evidence remains readable but cannot be optimistically upgraded.",
+                            ),
+                            validate("proof_goal_completion"),
+                            task_id="REF-267",
+                            depends_on=("REF-245", "REF-255", "REF-260"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S7",
+                            "Apply risk-selected proof gates before merge promotion",
+                            "P0",
+                            (
+                                module("merge_train.py"),
+                                module("formal_verification_policy.py"),
+                                module("todo_daemon/implementation_daemon.py"),
+                                test("proof_merge_gate"),
+                            ),
+                            "Protected supervisor invariants need a durable promotion decision after implementation and before the merge train advances the candidate.",
+                            (
+                                "Changed scopes select proof requirements, fallback checks, and rollout mode deterministically.",
+                                "Shadow records outcomes, canary blocks configured paths, and enforcement fails closed for missing required assurance.",
+                                "The merge receipt identifies the exact proof plan, receipts, validations, policy, tree, and any operator override.",
+                                "Retries reuse valid cache evidence and do not weaken policy after a timeout or provider failure.",
+                            ),
+                            validate("proof_merge_gate"),
+                            task_id="REF-268",
+                            depends_on=("REF-247", "REF-259", "REF-267"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S7",
+                            "Invalidate proof evidence and reopen goals after semantic change",
+                            "P0",
+                            (
+                                module("goal_completion.py"),
+                                module("objective_task_janitor.py"),
+                                module("proof_scope_index.py"),
+                                test("proof_invalidation"),
+                            ),
+                            "A changed symbol, premise, template, toolchain, policy, or contradiction must revoke affected proof coverage and schedule bounded replacement work.",
+                            (
+                                "Transitive invalidation records the changed input, affected obligations, receipts, criteria, goals, and source tree.",
+                                "Affected provisional or verified goals reopen deterministically while unrelated goals remain stable.",
+                                "Repeated identical invalidations are idempotent and historical receipts remain auditable.",
+                                "Replacement tasks retain dependency and conflict edges to the invalidated scope.",
+                            ),
+                            validate("proof_invalidation"),
+                            task_id="REF-269",
+                            depends_on=("REF-251", "REF-267"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S7",
+                            "Make planning proof-aware without expanding model context",
+                            "P0",
+                            (
+                                module("objective_graph.py"),
+                                module("plan_evaluator.py"),
+                                module("proof_context.py"),
+                                test("proof_aware_planning"),
+                            ),
+                            "The planner should prioritize proof-critical work, reuse trusted evidence, and generate bounded repair tasks from unsupported or contradicted obligations.",
+                            (
+                                "Plan candidates declare obligation impact, required assurance, proof cost, cache likelihood, dependencies, and expected evidence delta.",
+                                "Priority accounts for proof critical path, downstream unlock value, risk, freshness, and available resource classes.",
+                                "The router receives only a bounded proof context capsule and rejected alternatives retain rationale.",
+                                "Unsupported or failed obligations generate finite template, test, premise, or manual-review work with semantic deduplication.",
+                            ),
+                            validate("proof_aware_planning"),
+                            task_id="REF-270",
+                            depends_on=("REF-252", "REF-257", "REF-267"),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G11.S8",
+                    "title": "Validate rollout security, context savings, and throughput",
+                    "tasks": [
+                        _task(
+                            "G11",
+                            "G11.S8",
+                            "Add adversarial tests for every proof trust boundary",
+                            "P0",
+                            (
+                                test("proof_adversarial"),
+                                module("formal_verification_contracts.py"),
+                                module("formal_verification_cache.py"),
+                            ),
+                            "Formal-looking artifacts are a new attack surface and must be unable to forge assurance, poison caches, leak witnesses, or bypass merge policy.",
+                            (
+                                "Tests cover forged verified status, solver-only success, stale trees, changed premises, cache poisoning, malformed receipts, and toolchain drift.",
+                                "Tests reject sorry or admit, theorem substitution, malicious prover output, simulated ZKP promotion, stale verification keys, and hidden-witness leakage.",
+                                "Timeout, cancellation, crash, restart, and duplicate single-flight cases preserve fail-closed verdicts.",
+                                "Every rejected artifact emits a bounded actionable reason without exposing secrets.",
+                            ),
+                            validate("proof_adversarial"),
+                            task_id="REF-271",
+                            depends_on=("REF-263", "REF-266", "REF-268", "REF-269"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S8",
+                            "Exercise an end-to-end parallel proof-aware implementation workflow",
+                            "P0",
+                            (
+                                test("proof_workflow_e2e"),
+                                module("proof_scheduler.py"),
+                                module("todo_daemon/implementation_daemon.py"),
+                            ),
+                            "The complete task, AST, proof, validation, merge, evidence, and reopen lifecycle must work under concurrent lanes and restart.",
+                            (
+                                "Fixtures cover cache hit, proof success, counterexample, unsupported fallback, kernel rejection, provider outage, and stale evidence.",
+                                "Independent obligations and implementation lanes run concurrently without duplicate leases, receipts, merges, or goal transitions.",
+                                "Shared resource limits remain respected across solver, kernel, test, model, and artifact work.",
+                                "Restart preserves proof-plan dependencies, single-flight ownership, receipt lineage, and truthful operator state.",
+                            ),
+                            validate("proof_workflow_e2e"),
+                            task_id="REF-272",
+                            depends_on=("REF-260", "REF-270", "REF-271"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S8",
+                            "Expose shadow, canary, enforcement, and override diagnostics",
+                            "P0",
+                            (
+                                module("formal_verification_policy.py"),
+                                module("scheduler_metrics.py"),
+                                module("todo_daemon/implementation_supervisor.py"),
+                                test("proof_rollout"),
+                            ),
+                            "Operators need to know whether proof work is advisory or blocking and why a task, merge, or goal advanced.",
+                            (
+                                "Status and query artifacts show rollout mode, protected scopes, capability health, active plans, assurance, failures, fallbacks, and overrides.",
+                                "Canary expansion and rollback are configuration changes with durable policy identity.",
+                                "Overrides are visible, expiring, scope-bounded, and never rewrite the underlying proof verdict.",
+                                "A provider outage cannot silently switch an enforcement scope to shadow mode.",
+                            ),
+                            validate("proof_rollout"),
+                            task_id="REF-273",
+                            depends_on=("REF-268", "REF-272"),
+                        ),
+                        _task(
+                            "G11",
+                            "G11.S8",
+                            "Benchmark context reduction, cache reuse, and CPU proof throughput",
+                            "P1",
+                            (
+                                module("proof_metrics.py"),
+                                test("proof_benchmarks"),
+                                plan_path,
+                            ),
+                            "Enforcement should expand only when proof evidence reduces model work without unacceptable host or implementation throughput regressions.",
+                            (
+                                "Benchmarks compare raw repository context with bounded proof capsules by bytes, tokens, retrieval precision, and accepted-task cost.",
+                                "Cold and warm runs report translation, solver, kernel, cache, model, validation, and merge latency plus CPU and memory use.",
+                                "Parallel runs detect nested oversubscription and quantify cancellation and single-flight savings.",
+                                "Documented thresholds gate rollout expansion and identify unsupported or low-value obligation templates.",
+                            ),
+                            validate("proof_benchmarks"),
+                            task_id="REF-274",
+                            depends_on=("REF-260", "REF-272"),
+                        ),
+                    ],
+                },
+            ],
+        },
+    ]
 
 
 def _paths_from_locations(locations: list[str]) -> list[str]:
