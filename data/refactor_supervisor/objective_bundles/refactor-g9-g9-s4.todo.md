@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-44: REF-044 Publish authoritative throughput metrics and scheduler state
+- [x] Task checkbox-44: REF-044 Publish authoritative throughput metrics and scheduler state
 
 ## REF-044 Publish authoritative throughput metrics and scheduler state
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G9
@@ -25,11 +25,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-044-publishauthoritativethroughputmetricsandschedule
 - Acceptance: One event-derived snapshot reports ready, active, idle, blocked, validation, merge, and resolver phases.; Metrics include queue wait, implementation and validation duration, merge wait, conflict and retry rate, completions, tokens, and cost.; Every metric is keyed by canonical goal, subgoal, task, lane, and provider identity.; Scheduler decisions consume the same snapshot exposed to operators.
 
-- [ ] Task checkbox-45: REF-045 Make AST scans and implementation workspaces incremental and reusable
+- [x] Task checkbox-45: REF-045 Make AST scans and implementation workspaces incremental and reusable
 
 ## REF-045 Make AST scans and implementation workspaces incremental and reusable
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P2
 - Track: G9
