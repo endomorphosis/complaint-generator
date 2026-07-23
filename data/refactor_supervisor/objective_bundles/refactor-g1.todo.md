@@ -131,7 +131,7 @@ Conflict policy: keep edits inside this bundle when possible; use the LLM merge 
 
 ## REF-319 Close objective gap: Stabilize repository boundaries
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
