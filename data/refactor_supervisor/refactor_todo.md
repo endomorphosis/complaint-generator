@@ -4641,17 +4641,17 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S2
 - Missing evidence: Goals, tasks, symbols, obligations, attempts, receipts, validations, and merges need a query plane that does not require parsing a full graph into a model context.
-- AST symbols: BUNDLE_INDEX_KIND, SCHEDULER_MANIFEST_KIND, QUERY_SCHEMA, MAX_QUERY_ROWS, _IDENTIFIER, _READ_ONLY_SQL, QueryArtifactPaths, query_artifact_paths, _duckdb_module, _json_text, _json_value, _as_int, _as_bool, _as_float, _string_values, _atomic_write_text, _artifact_kind, _query_descriptor, _common_schema, _bundle_schema, _manifest_schema, _top_level_fields, _graph_mapping, _mapping_items, _populate_bundle_tables, _populate_manifest_tables, _table_descriptions, _write_duckdb, write_queryable_artifact, write_bundle_index_artifact
+- AST symbols: CODE_EVIDENCE_GRAPH_SCHEMA, CODE_EVIDENCE_NODE_SCHEMA, CODE_EVIDENCE_EDGE_SCHEMA, EvidenceGraphValidationError, EvidenceNodeKind, EvidenceEdgeKind, EvidenceProvenance, ENRICHMENT_EDGE_KINDS, UNTRUSTED_PROVENANCE, _canonical_value, canonical_json, _identity, _record, _text, _strings, _enum, EvidenceNode, ProvenanceEdge, CodeEvidenceGraph, CodeEvidenceNode, CodeEvidenceEdge, EvidenceGraph, _GraphBuilder, _record_key, _task_id, _tree_id, _successful, _freshness, _add_tree, _ingest_tasks
 - Merge key: refactor/g11/g11-s2
 - Candidate kind: seed
 - Todo vector key: ref-250-materializeadeterministiccodeandproofevidencegra
 - Acceptance: The graph uses deterministic nodes and provenance edges derived from AST, task, validation, merge, and proof records.; Paired JSON and DuckDB artifacts expose indexed task, tree, symbol, obligation, assurance, freshness, and dependency queries.; JSON and DuckDB projections round-trip to equivalent canonical graph records.; LLM or GraphRAG enrichment cannot create authoritative proof, merge, coverage, or completion edges.
 
-- [ ] Task checkbox-251: REF-251 Index proof scopes and invalidate stale dependent evidence incrementally
+- [x] Task checkbox-251: REF-251 Index proof scopes and invalidate stale dependent evidence incrementally
 
 ## REF-251 Index proof scopes and invalidate stale dependent evidence incrementally
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -4683,7 +4683,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S2
 - Missing evidence: Models should receive only task-relevant invariants, trusted prior evidence, counterexamples, and source excerpts.
-- AST symbols: BUNDLE_INDEX_KIND, SCHEDULER_MANIFEST_KIND, QUERY_SCHEMA, MAX_QUERY_ROWS, _IDENTIFIER, _READ_ONLY_SQL, QueryArtifactPaths, query_artifact_paths, _duckdb_module, _json_text, _json_value, _as_int, _as_bool, _as_float, _string_values, _atomic_write_text, _artifact_kind, _query_descriptor, _common_schema, _bundle_schema, _manifest_schema, _top_level_fields, _graph_mapping, _mapping_items, _populate_bundle_tables, _populate_manifest_tables, _table_descriptions, _write_duckdb, write_queryable_artifact, write_bundle_index_artifact
+- AST symbols: BUNDLE_INDEX_KIND, SCHEDULER_MANIFEST_KIND, CODE_EVIDENCE_GRAPH_KIND, EVIDENCE_GRAPH_KIND, QUERY_SCHEMA, MAX_QUERY_ROWS, _IDENTIFIER, _READ_ONLY_SQL, QueryArtifactPaths, query_artifact_paths, _duckdb_module, _json_text, _json_value, _as_int, _as_bool, _as_float, _string_values, _atomic_write_text, _artifact_kind, _query_descriptor, _common_schema, _bundle_schema, _manifest_schema, _code_evidence_graph_schema, _top_level_fields, _graph_mapping, _mapping_items, _populate_bundle_tables, _populate_manifest_tables, _populate_code_evidence_graph_tables
 - Merge key: refactor/g11/g11-s2
 - Candidate kind: seed
 - Todo vector key: ref-252-generateboundedproofcontextcapsulesforcodexandle
@@ -4851,7 +4851,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S4
 - Missing evidence: Operators and planning policy need proof throughput, trust, cache, context, and resource measurements without loading raw event logs.
-- AST symbols: BUNDLE_INDEX_KIND, SCHEDULER_MANIFEST_KIND, QUERY_SCHEMA, MAX_QUERY_ROWS, _IDENTIFIER, _READ_ONLY_SQL, QueryArtifactPaths, query_artifact_paths, _duckdb_module, _json_text, _json_value, _as_int, _as_bool, _as_float, _string_values, _atomic_write_text, _artifact_kind, _query_descriptor, _common_schema, _bundle_schema, _manifest_schema, _top_level_fields, _graph_mapping, _mapping_items, _populate_bundle_tables, _populate_manifest_tables, _table_descriptions, _write_duckdb, write_queryable_artifact, write_bundle_index_artifact
+- AST symbols: BUNDLE_INDEX_KIND, SCHEDULER_MANIFEST_KIND, CODE_EVIDENCE_GRAPH_KIND, EVIDENCE_GRAPH_KIND, QUERY_SCHEMA, MAX_QUERY_ROWS, _IDENTIFIER, _READ_ONLY_SQL, QueryArtifactPaths, query_artifact_paths, _duckdb_module, _json_text, _json_value, _as_int, _as_bool, _as_float, _string_values, _atomic_write_text, _artifact_kind, _query_descriptor, _common_schema, _bundle_schema, _manifest_schema, _code_evidence_graph_schema, _top_level_fields, _graph_mapping, _mapping_items, _populate_bundle_tables, _populate_manifest_tables, _populate_code_evidence_graph_tables
 - Merge key: refactor/g11/g11-s4
 - Candidate kind: seed
 - Todo vector key: ref-260-persistproofschedulermetricsandqueryablereceipts
