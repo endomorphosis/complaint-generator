@@ -1,7 +1,8 @@
+import importlib
 import os
 import re
 import sys
-import importlib.util
+import warnings
 
 import pytest
 
@@ -134,6 +135,28 @@ def _select_ipfs_dataset_root(repo_root: str) -> str:
     return fallback
 
 
+def _preload_ipfs_datasets_package(expected_init: str) -> None:
+    """Preload the vendored package, reporting only unavailable imports.
+
+    Preloading is a compatibility aid for collection, so an unavailable optional
+    import should not prevent unrelated tests from running.  Other exceptions
+    indicate a broken package initializer and must remain visible.
+    """
+
+    importlib.invalidate_caches()
+    try:
+        import ipfs_datasets_py  # noqa: F401
+    except ImportError as exc:
+        warnings.warn(
+            (
+                "Could not preload the vendored ipfs_datasets_py package from "
+                f"{expected_init}: {type(exc).__name__}: {exc}"
+            ),
+            pytest.PytestConfigWarning,
+            stacklevel=2,
+        )
+
+
 def pytest_addoption(parser):
     if importlib.util.find_spec("pytest_asyncio") is None:
         parser.addini(
@@ -215,13 +238,7 @@ def pytest_configure() -> None:
     # Best-effort: import the real package now that sys.path is set, so tests can safely
     # do `from ipfs_datasets_py import llm_router` during collection.
     if os.path.isfile(expected_init):
-        try:
-            import importlib
-
-            importlib.invalidate_caches()
-            import ipfs_datasets_py  # noqa: F401
-        except Exception:
-            pass
+        _preload_ipfs_datasets_package(expected_init)
 
 
 def pytest_collection_modifyitems(config, items):
