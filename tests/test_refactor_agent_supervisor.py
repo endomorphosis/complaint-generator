@@ -634,7 +634,35 @@ def test_formal_planning_prover_matrix_program_is_additive_and_dependency_closed
         any(path.startswith("ipfs_datasets_py/ipfs_accelerate_py/") for path in task.files)
         for task in tasks
     )
-    assert {"REF-275", "REF-279"} <= {task.task_id for task in tasks}
+    declared_paths = [path for task in tasks for path in task.files]
+    assert len(declared_paths) == len(set(declared_paths))
+    g11_paths = {
+        path
+        for task in supervisor.flatten_tasks(
+            [next(item for item in goals if item["id"] == "G11")]
+        )
+        for path in task.files
+    }
+    assert not g11_paths.intersection(declared_paths)
+
+    g12_task_ids = {task.task_id for task in tasks}
+    remaining = {
+        task.task_id: {item for item in task.depends_on if item in g12_task_ids}
+        for task in tasks
+    }
+    completed: set[str] = set()
+    while remaining:
+        ready = sorted(
+            task_id
+            for task_id, dependencies in remaining.items()
+            if dependencies <= completed
+        )
+        assert ready, f"cycle in G12 task dependencies: {remaining}"
+        for task_id in ready:
+            completed.add(task_id)
+            remaining.pop(task_id)
+
+    assert {"REF-275", "REF-279"} <= g12_task_ids
     assert any("DCEC" in criterion for task in tasks for criterion in task.acceptance)
     assert any("TDFOL" in criterion for task in tasks for criterion in task.acceptance)
     assert any("TLA+" in task.title for task in tasks)
