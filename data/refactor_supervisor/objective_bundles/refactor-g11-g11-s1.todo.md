@@ -46,11 +46,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-245-definecanonicalproofobligationsplansreceiptsanda
 - Acceptance: CodeProofObligation, ProofPlan, ProofAttempt, ProofReceipt, and assurance enums have deterministic JSON encodings and content identities.; Receipts bind repository trees, AST scopes, premises, translators, solvers, kernels, toolchains, policy, and resource budgets.; Authoritative assurance is derived from evidence and cannot be asserted directly by a provider.; LLM output, ATP or SMT candidates, stale cache entries, and simulated ZKP cannot become kernel-verified or attested.
 
-- [ ] Task checkbox-246: REF-246 Introduce an optional isolated proof-provider protocol
+- [x] Task checkbox-246: REF-246 Introduce an optional isolated proof-provider protocol
 
 ## REF-246 Introduce an optional isolated proof-provider protocol
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
