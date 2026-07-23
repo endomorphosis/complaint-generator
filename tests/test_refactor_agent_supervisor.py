@@ -1749,6 +1749,10 @@ def test_start_daemon_passes_managed_submodule_path_once(tmp_path, monkeypatch) 
     assert command[command.index("--worktree-submodule-path") + 1] == (
         "ipfs_datasets_py/ipfs_accelerate_py"
     )
+    assert command.count("--external-reservation-manifest-path") == 1
+    assert command[command.index("--external-reservation-manifest-path") + 1] == str(
+        supervisor.BUNDLE_LANE_MANIFEST
+    )
     assert command.count("--generated-dirty-path") == 1
     assert command[command.index("--generated-dirty-path") + 1] == str(
         supervisor.TASKBOARD_DOC_PATH

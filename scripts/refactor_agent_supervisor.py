@@ -4652,6 +4652,8 @@ def start_daemon(args: argparse.Namespace) -> dict[str, Any]:
         TASK_PREFIX,
         "--state-prefix",
         "complaint_generator_refactor",
+        "--external-reservation-manifest-path",
+        str(BUNDLE_LANE_MANIFEST),
         "--implement",
         "--implementation-timeout",
         str(float(args.implementation_timeout)),
