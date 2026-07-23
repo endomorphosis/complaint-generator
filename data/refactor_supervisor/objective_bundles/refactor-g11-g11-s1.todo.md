@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-244: REF-244 Probe formal-logic providers, toolchains, and optional dependency health
+- [x] Task checkbox-244: REF-244 Probe formal-logic providers, toolchains, and optional dependency health
 
 ## REF-244 Probe formal-logic providers, toolchains, and optional dependency health
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -67,11 +67,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-246-introduceanoptionalisolatedproof-providerprotoco
 - Acceptance: A versioned provider protocol supports capability, translate, prove, reconstruct, verify, and attest operations.; Providers can be discovered lazily in process or invoked through a bounded subprocess JSON protocol.; Timeout, cancellation, resource, network, and malformed-response failures are explicit and fail closed.; The supervisor imports and runs with no ipfs_datasets_py proof provider installed.
 
-- [ ] Task checkbox-247: REF-247 Define risk-selected proof and rollout policy
+- [x] Task checkbox-247: REF-247 Define risk-selected proof and rollout policy
 
 ## REF-247 Define risk-selected proof and rollout policy
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
