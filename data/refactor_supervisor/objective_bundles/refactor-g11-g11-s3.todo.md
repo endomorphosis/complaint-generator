@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-253: REF-253 Adapt code obligations to the ipfs_datasets_py Hammer portfolio
+- [x] Task checkbox-253: REF-253 Adapt code obligations to the ipfs_datasets_py Hammer portfolio
 
 ## REF-253 Adapt code obligations to the ipfs_datasets_py Hammer portfolio
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
