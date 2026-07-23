@@ -1315,6 +1315,8 @@ def test_projection_reconciliation_updates_all_query_and_planning_artifacts(
 
 def test_projection_reconciliation_queries_manifest_running_count(tmp_path, monkeypatch) -> None:
     _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
+    supervisor.BUNDLE_DIR.mkdir()
     supervisor.BUNDLE_LANE_MANIFEST.write_text("not loaded directly", encoding="utf-8")
     calls = []
 
@@ -1328,9 +1330,64 @@ def test_projection_reconciliation_queries_manifest_running_count(tmp_path, monk
 
     result = supervisor.reconcile_task_projection_artifacts()
 
-    assert result["reason"] == "active_implementation"
+    assert result["reason"] == "active_projection_reconciled"
+    assert result["updated"] is False
     assert result["parallel_running_count"] == 1
+    assert result["bundle_index"]["reason"] == "index_missing"
     assert calls == [(supervisor.BUNDLE_LANE_MANIFEST, ("running_count",))]
+
+
+def test_active_projection_updates_bundle_index_without_rewriting_taskboards(
+    tmp_path, monkeypatch
+) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
+    supervisor.BUNDLE_DIR.mkdir()
+    supervisor.TODO_PATH.write_text(
+        """- [ ] Task checkbox-1: REF-001 Active implementation
+
+## REF-001 Active implementation
+
+- Status: todo
+""",
+        encoding="utf-8",
+    )
+    supervisor.TASK_STATE_PATH.write_text(
+        json.dumps(
+            {
+                "implementation_in_progress": True,
+                "active_task_id": "REF-001",
+                "active_phase": "implementing",
+            }
+        ),
+        encoding="utf-8",
+    )
+    index_path = supervisor.BUNDLE_DIR / "index.json"
+    index_path.write_text(
+        json.dumps(
+            {
+                "source_todo": str(supervisor.TODO_PATH),
+                "bundles": {
+                    "g1/s1": {
+                        "bundle_key": "g1/s1",
+                        "tasks": [{"task_id": "REF-001", "status": "todo"}],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = supervisor.reconcile_task_projection_artifacts()
+
+    assert result["reason"] == "active_projection_reconciled"
+    assert result["updated"] is True
+    assert result["bundle_index"]["updated_task_ids"] == ["REF-001"]
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index["bundles"]["g1/s1"]["tasks"][0]["status"] == "in_progress"
+    assert "- Status: todo" in supervisor.TODO_PATH.read_text(encoding="utf-8")
+    assert index_path.with_suffix(".duckdb").exists()
 
 
 def test_seed_bundle_index_carries_durable_member_status(tmp_path, monkeypatch) -> None:

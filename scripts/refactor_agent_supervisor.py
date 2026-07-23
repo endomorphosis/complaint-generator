@@ -3523,6 +3523,13 @@ def _durable_task_statuses() -> dict[str, str]:
         statuses.setdefault(str(task_id), "blocked")
     for task_id in state.get("completed_task_ids", []) or []:
         statuses[str(task_id)] = "completed"
+    active_task_id = str(state.get("active_task_id") or "").strip()
+    if (
+        active_task_id
+        and (state.get("implementation_in_progress") or state.get("active_phase"))
+        and statuses.get(active_task_id) != "completed"
+    ):
+        statuses[active_task_id] = "in_progress"
     try:
         receipts = _upstream_bundle_completion_receipt_loader()(BUNDLE_LANE_ROOT)
     except (ImportError, OSError, TypeError, ValueError):
@@ -3574,8 +3581,26 @@ def _durable_canonical_task_statuses(statuses: dict[str, str]) -> dict[str, str]
     return canonical_statuses
 
 
-def _statuses_for_canonical_tasks(path: Path, canonical_statuses: dict[str, str]) -> dict[str, str]:
-    if not path.exists() or not canonical_statuses:
+def _task_projection_signature(task: Any) -> tuple[Any, ...]:
+    metadata = getattr(task, "metadata", {})
+    return (
+        str(getattr(task, "title", "") or "").strip().lower(),
+        tuple(sorted(str(item) for item in (getattr(task, "depends_on", []) or []))),
+        tuple(sorted(str(item) for item in (getattr(task, "outputs", []) or []))),
+        tuple(sorted(str(item) for item in (getattr(task, "validation", []) or []))),
+        str(getattr(task, "acceptance", "") or "").strip(),
+        str(metadata.get("dedupe key") or "") if isinstance(metadata, dict) else "",
+    )
+
+
+def _statuses_for_canonical_tasks(
+    path: Path,
+    canonical_statuses: dict[str, str],
+    *,
+    direct_statuses: dict[str, str] | None = None,
+    source_tasks_by_id: dict[str, list[Any]] | None = None,
+) -> dict[str, str]:
+    if not path.exists() or not (canonical_statuses or direct_statuses):
         return {}
     parse_task_file = _upstream_portal_task_parser()
     tasks_by_id: dict[str, list[Any]] = {}
@@ -3590,6 +3615,19 @@ def _statuses_for_canonical_tasks(path: Path, canonical_statuses: dict[str, str]
         }
         if len(matched) == 1 and "" not in matched:
             statuses[task_id] = matched.pop()
+            continue
+        source_tasks = (source_tasks_by_id or {}).get(task_id, [])
+        if (
+            direct_statuses
+            and task_id in direct_statuses
+            and len(tasks) == 1
+            and len(source_tasks) == 1
+            and _task_projection_signature(tasks[0])
+            == _task_projection_signature(source_tasks[0])
+        ):
+            # Board namespaces intentionally alter canonical CIDs. A unique
+            # task ID plus the same semantic signature is a safe fallback.
+            statuses[task_id] = direct_statuses[task_id]
     return statuses
 
 
@@ -3638,6 +3676,10 @@ def _project_task_statuses(path: Path, statuses: dict[str, str]) -> list[str]:
 def synchronize_taskboard_statuses() -> dict[str, Any]:
     statuses = _durable_task_statuses()
     canonical_statuses = _durable_canonical_task_statuses(statuses)
+    source_tasks_by_id: dict[str, list[Any]] = {}
+    if TODO_PATH.exists():
+        for task in _upstream_portal_task_parser()(TODO_PATH, TASK_HEADER_PREFIX):
+            source_tasks_by_id.setdefault(task.task_id, []).append(task)
     updated: dict[str, list[str]] = {}
     primary_updates = _project_task_statuses(TODO_PATH, statuses)
     if primary_updates:
@@ -3646,7 +3688,12 @@ def synchronize_taskboard_statuses() -> dict[str, Any]:
         for path in sorted(BUNDLE_DIR.glob("*.todo.md")):
             task_updates = _project_task_statuses(
                 path,
-                _statuses_for_canonical_tasks(path, canonical_statuses),
+                _statuses_for_canonical_tasks(
+                    path,
+                    canonical_statuses,
+                    direct_statuses=statuses,
+                    source_tasks_by_id=source_tasks_by_id,
+                ),
             )
             if task_updates:
                 updated[str(path)] = task_updates
@@ -3770,12 +3817,17 @@ def reconcile_task_projection_artifacts(*, skip_while_active: bool = True) -> di
             manifest = {}
     parallel_running = int(manifest.get("running_count") or 0)
     if skip_while_active and (active_phase or parallel_running):
+        statuses = _durable_task_statuses()
+        bundle_index = _project_bundle_index_statuses(statuses)
         return {
-            "updated": False,
-            "reason": "active_implementation",
+            "updated": bool(bundle_index["updated"]),
+            "reason": "active_projection_reconciled",
             "active_task_id": active_task_id,
             "active_phase": active_phase,
             "parallel_running_count": parallel_running,
+            "taskboard": {"updated": False, "reason": "active_implementation"},
+            "goals": {"updated": False, "reason": "active_implementation"},
+            "bundle_index": bundle_index,
         }
 
     taskboard = synchronize_taskboard_statuses()
