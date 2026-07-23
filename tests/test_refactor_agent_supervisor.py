@@ -1685,6 +1685,10 @@ def test_start_parallel_detaches_scheduler_and_uses_requested_poll_interval(tmp_
     assert isinstance(command, list)
     assert command[:3] == [sys.executable, "-m", "ipfs_accelerate_py.agent_supervisor.bundle_supervisor"]
     assert command[command.index("--poll-interval") + 1] == "37.0"
+    assert command.count("--external-task-state-path") == 1
+    assert command[command.index("--external-task-state-path") + 1] == str(
+        supervisor.TASK_STATE_PATH
+    )
     assert command.count("--worktree-submodule-path") == 1
     assert command[command.index("--worktree-submodule-path") + 1] == "ipfs_datasets_py/ipfs_accelerate_py"
     assert command.count("--generated-dirty-path") == 1

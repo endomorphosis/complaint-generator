@@ -4786,6 +4786,8 @@ def run_parallel_bundle_supervisor(args: argparse.Namespace, *, start: bool) -> 
         str(BUNDLE_LANE_ROOT / "logs"),
         "--manifest-path",
         str(BUNDLE_LANE_MANIFEST),
+        "--external-task-state-path",
+        str(TASK_STATE_PATH),
         "--task-prefix",
         TASK_PREFIX,
         "--max-lanes",
