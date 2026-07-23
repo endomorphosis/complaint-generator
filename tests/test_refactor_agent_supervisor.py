@@ -613,6 +613,40 @@ def test_formal_verification_program_is_persistent_parallel_and_dependency_close
     assert any("shared resource" in criterion for task in tasks for criterion in task.acceptance)
 
 
+def test_formal_planning_prover_matrix_program_is_additive_and_dependency_closed() -> None:
+    goals = supervisor.build_goals({"signals": {}})
+    goal = next(goal for goal in goals if goal["id"] == "G12")
+    tasks = supervisor.flatten_tasks([goal])
+    all_task_ids = {task.task_id for task in supervisor.flatten_tasks(goals)}
+
+    assert [subgoal["id"] for subgoal in goal["subgoals"]] == [
+        "G12.S1",
+        "G12.S2",
+        "G12.S3",
+        "G12.S4",
+        "G12.S5",
+    ]
+    assert [task.task_id for task in tasks] == [
+        f"REF-{number}" for number in range(275, 295)
+    ]
+    assert all(set(task.depends_on) <= all_task_ids for task in tasks)
+    assert all(
+        any(path.startswith("ipfs_datasets_py/ipfs_accelerate_py/") for path in task.files)
+        for task in tasks
+    )
+    assert {"REF-275", "REF-279"} <= {task.task_id for task in tasks}
+    assert any("DCEC" in criterion for task in tasks for criterion in task.acceptance)
+    assert any("TDFOL" in criterion for task in tasks for criterion in task.acceptance)
+    assert any("TLA+" in task.title for task in tasks)
+    assert any("Datalog" in task.title and "SecPAL" in task.title for task in tasks)
+    assert any("Tamarin" in task.title and "ProVerif" in task.title for task in tasks)
+    assert any("hyperproperties" in task.title for task in tasks)
+    assert any("runtime MTL" in task.title for task in tasks)
+    assert any("Codex" in task.title and "Leanstral" in task.title for task in tasks)
+    assert any("JSON and DuckDB" in criterion for task in tasks for criterion in task.acceptance)
+    assert any("shared CPU" in task.title for task in tasks)
+
+
 def test_merge_watchdog_skips_aborted_historical_merge(tmp_path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

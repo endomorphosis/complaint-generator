@@ -1407,6 +1407,7 @@ def build_goals(scan: dict[str, Any]) -> list[dict[str, Any]]:
             ],
         },
         *_formal_verification_goals(),
+        *_formal_planning_goals(),
     ]
 
 
@@ -2174,6 +2175,499 @@ def _formal_verification_goals() -> list[dict[str, Any]]:
                             validate("proof_benchmarks"),
                             task_id="REF-274",
                             depends_on=("REF-260", "REF-272"),
+                        ),
+                    ],
+                },
+            ],
+        },
+    ]
+
+
+def _formal_planning_goals() -> list[dict[str, Any]]:
+    """Extend proof-aware execution with formally checked work planning.
+
+    G12 depends on the contracts and execution primitives in G11, but remains a
+    separate goal so active G11 task identities and bundle ownership stay
+    stable while the broader prover-matrix program is appended.
+    """
+
+    module_root = (
+        "ipfs_datasets_py/ipfs_accelerate_py/"
+        "ipfs_accelerate_py/agent_supervisor"
+    )
+    test_root = "ipfs_datasets_py/ipfs_accelerate_py/test/api"
+    plan_path = (
+        "ipfs_datasets_py/ipfs_accelerate_py/docs/architecture/"
+        "AGENT_SUPERVISOR_FORMAL_PLANNING_PROVER_MATRIX_PLAN.md"
+    )
+
+    def module(name: str) -> str:
+        return f"{module_root}/{name}"
+
+    def test(name: str) -> str:
+        return f"{test_root}/test_agent_supervisor_{name}.py"
+
+    def validate(name: str) -> tuple[str, ...]:
+        return (
+            "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py "
+            f"python -m pytest {test(name)} -q",
+        )
+
+    return [
+        {
+            "id": "G12",
+            "title": "Formally plan supervisor work across the prover matrix",
+            "priority": "P0",
+            "subgoals": [
+                {
+                    "id": "G12.S1",
+                    "title": "Represent and verify intended work with DCEC and TDFOL",
+                    "tasks": [
+                        _task(
+                            "G12",
+                            "G12.S1",
+                            "Define a canonical formal work-plan contract and logic vocabulary",
+                            "P0",
+                            (
+                                plan_path,
+                                module("formal_planning_contracts.py"),
+                                module("formal_logic_vocabulary.py"),
+                                test("formal_planning_contracts"),
+                            ),
+                            "The supervisor needs a deterministic semantic model of intended work before a language model is asked to implement it.",
+                            (
+                                "FormalWorkPlan records actors, goals, subgoals, tasks, events, fluents, preconditions, effects, norms, temporal constraints, evidence requirements, and deterministic identities.",
+                                "A reviewed DCEC vocabulary models belief, knowledge, intention, obligation, permission, prohibition, delegation, and execution events without deriving formulas from free-form model text.",
+                                "A reviewed TDFOL vocabulary models dependency ordering, deadlines, liveness, safety, and goal satisfaction over finite supervisor traces.",
+                                "Plan consistency, plan conformance, and generated-code assurance are separate levels; no plan proof is promoted into a code proof.",
+                            ),
+                            validate("formal_planning_contracts"),
+                            task_id="REF-275",
+                            depends_on=("REF-245",),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S1",
+                            "Compile objective, taskboard, AST, and policy records into formal plans",
+                            "P0",
+                            (
+                                module("formal_plan_compiler.py"),
+                                module("objective_graph.py"),
+                                module("code_evidence_graph.py"),
+                                test("formal_plan_compiler"),
+                            ),
+                            "Formal plans must be derived from canonical supervisor and AST records rather than reconstructed by an LLM inside its context window.",
+                            (
+                                "The compiler maps goals, task dependencies, leases, resource needs, changed AST scopes, acceptance criteria, and proof policy into canonical plan predicates and events.",
+                                "Compilation preserves task, goal, tree, symbol, policy, and evidence CIDs and records every abstraction or unsupported field.",
+                                "Equivalent JSON and DuckDB inputs produce the same plan identity and graph projection.",
+                                "Syntax failures, cycles, ambiguous effects, and missing semantics produce explicit unsupported or invalid plan results.",
+                            ),
+                            validate("formal_plan_compiler"),
+                            task_id="REF-276",
+                            depends_on=("REF-248", "REF-250", "REF-275"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S1",
+                            "Check formal plans for temporal, deontic, and dependency consistency",
+                            "P0",
+                            (
+                                module("formal_plan_validator.py"),
+                                module("formal_verification_provider.py"),
+                                test("formal_plan_validator"),
+                            ),
+                            "The supervisor should reject contradictory, unauthorized, impossible, or non-terminating plans before spending model tokens on implementation.",
+                            (
+                                "Bounded DCEC and TDFOL checks cover dependency readiness, actor authority, unique leases, fencing, required evidence, legal transitions, eventual terminal outcomes, and forbidden merge states.",
+                                "Contradictions, countermodels, unsupported operators, timeout, and incomplete search remain distinct outcomes.",
+                                "Native DCEC or TDFOL success is plan-check evidence only unless the exact obligation is reconstructed by an accepted kernel or model checker.",
+                                "Validation is deterministic, resource bounded, cancellable, and records all assumptions and finite bounds.",
+                            ),
+                            validate("formal_plan_validator"),
+                            task_id="REF-277",
+                            depends_on=("REF-247", "REF-276"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S1",
+                            "Give Codex and Leanstral proof-carrying formal plan capsules",
+                            "P0",
+                            (
+                                module("formal_plan_context.py"),
+                                module("proof_context.py"),
+                                module("plan_evaluator.py"),
+                                test("formal_plan_context"),
+                            ),
+                            "Language models should receive the verified slice of intended work, not rediscover task semantics and repository-wide dependencies in every prompt.",
+                            (
+                                "Capsules contain the selected task transition, assumptions, required preconditions and effects, relevant AST symbols, trusted evidence, counterexamples, allowed paths, tests, and unresolved obligations.",
+                                "Graph queries enforce row, hop, byte, token, and source-excerpt limits before model invocation.",
+                                "Model responses bind the plan and task CIDs and cannot alter the theorem, acceptance policy, or authoritative evidence.",
+                                "Measurements compare capsule size and implementation outcomes against the existing unbounded planning prompt.",
+                            ),
+                            validate("formal_plan_context"),
+                            task_id="REF-278",
+                            depends_on=("REF-252", "REF-277"),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G12.S2",
+                    "title": "Make the full prover matrix executable and trust-aware",
+                    "tasks": [
+                        _task(
+                            "G12",
+                            "G12.S2",
+                            "Build an executable, self-testing prover capability matrix",
+                            "P0",
+                            (
+                                plan_path,
+                                module("prover_matrix_registry.py"),
+                                module("formal_verification_capabilities.py"),
+                                test("prover_matrix_registry"),
+                            ),
+                            "Source files, installers, and executable discovery do not establish that a prover can soundly check a supervisor obligation.",
+                            (
+                                "The registry covers Z3, CVC5, TLA+/TLC, Apalache, Datalog/SecPAL, Tamarin, ProVerif, HyperLTL/AutoHyper/MCHyper, Lean, Coq, runtime MTL, DCEC, TDFOL, Hammer, Vampire, E, Isabelle, ShadowProver, Leanstral, and ZKP backends.",
+                                "Each entry distinguishes absent, discovered, versioned, smoke-tested, translation-conformant, reconstruction-capable, and authoritative-for states.",
+                                "Bounded self-tests bind executable, package, model, translator, semantic profile, and fixture identities.",
+                                "The repository prover matrix is projected into queryable JSON and DuckDB without treating documentation claims as runtime evidence.",
+                            ),
+                            validate("prover_matrix_registry"),
+                            task_id="REF-279",
+                            depends_on=("REF-244", "REF-246"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S2",
+                            "Conformance-test and quarantine logic translations and legacy prover paths",
+                            "P0",
+                            (
+                                module("prover_conformance.py"),
+                                module("logic_translation_validation.py"),
+                                test("prover_conformance"),
+                            ),
+                            "A solver is only as sound as the translation and semantic abstraction used to invoke it.",
+                            (
+                                "Translation contracts label exact, equisatisfiable, bounded abstraction, conservative approximation, and heuristic mappings and define permitted assurance for each.",
+                                "Round-trip, differential, metamorphic, mutation, and negative fixtures cover AST, DCEC, TDFOL, FOL, TPTP, SMT-LIB, TLA+, protocol, and hyperproperty forms.",
+                                "Known CEC deontic API drift and timing-sensitive cache tests keep affected paths degraded until semantic conformance fixtures pass.",
+                                "Dropped agents, times, quantifiers, modal operators, bounds, or premises are detected and cannot silently promote a result.",
+                            ),
+                            validate("prover_conformance"),
+                            task_id="REF-280",
+                            depends_on=("REF-275", "REF-279"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S2",
+                            "Route obligations through property-specific multi-prover portfolios",
+                            "P0",
+                            (
+                                module("multi_prover_router.py"),
+                                module("proof_scheduler.py"),
+                                test("multi_prover_router"),
+                            ),
+                            "Different supervisor claims require different semantics; one generic solver-success flag cannot verify them all.",
+                            (
+                                "Routing selects SMT for finite constraints, TLA tools for state machines, Datalog/SecPAL for authorization, Tamarin/ProVerif for protocols, HyperLTL tools for hyperproperties, runtime MTL for traces, and Lean/Coq/Isabelle for kernel checking.",
+                                "DCEC and TDFOL provide typed planning and temporal-deontic reasoning while Hammer coordinates premise selection, ATP/SMT candidates, and kernel reconstruction.",
+                                "Disagreement, unknown, unsupported, timeout, and malformed output fail closed according to property policy and retain every attempt.",
+                                "Conclusive counterexamples cancel redundant attempts while successful solver candidates still require the configured reconstruction or model-checking authority.",
+                            ),
+                            validate("multi_prover_router"),
+                            task_id="REF-281",
+                            depends_on=("REF-253", "REF-255", "REF-280"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S2",
+                            "Persist conformance-bound prover receipts, caches, and matrix projections",
+                            "P0",
+                            (
+                                module("prover_evidence_store.py"),
+                                module("formal_verification_cache.py"),
+                                module("artifact_store.py"),
+                                test("prover_evidence_store"),
+                            ),
+                            "Multi-prover reuse must bind every semantic, model, bound, toolchain, and trust dimension and remain queryable without loading raw transcripts.",
+                            (
+                                "Receipt and cache identities include property class, normalized model, translator profile, assumptions, finite bounds, prover and kernel versions, policy, tree, and conformance fixture set.",
+                                "Stale, lower-assurance, model-only, or non-conformant results cannot satisfy a stronger request.",
+                                "JSON and DuckDB projections expose capabilities, attempts, disagreements, counterexamples, assurance, freshness, and invalidation lineage.",
+                                "Single-flight ownership deduplicates equivalent heavy prover requests across serial and parallel supervisors.",
+                            ),
+                            validate("prover_evidence_store"),
+                            task_id="REF-282",
+                            depends_on=("REF-250", "REF-254", "REF-260", "REF-279", "REF-281"),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G12.S3",
+                    "title": "Verify scheduler state, authority, protocols, and information flow",
+                    "tasks": [
+                        _task(
+                            "G12",
+                            "G12.S3",
+                            "Model-check supervisor state machines with TLA+, TLC, and Apalache",
+                            "P0",
+                            (
+                                module("supervisor_state_model.py"),
+                                test("supervisor_state_model"),
+                            ),
+                            "Leases, retries, merges, refill, cancellation, and resource scheduling are concurrent state machines suited to bounded model checking.",
+                            (
+                                "A deterministic generator emits a finite TLA+ model from the supervisor transition schema rather than a domain-specific hard-coded workflow.",
+                                "Safety covers unique acceptance, fencing, dependency order, idempotent merge, capacity, and evidence gates; liveness covers bounded progress and terminal outcomes.",
+                                "TLC and Apalache execution receipts record exact model, configuration, bounds, versions, output, and counterexample traces.",
+                                "Bounded model-check success is labeled by its explored bounds and is never described as an unbounded proof.",
+                            ),
+                            validate("supervisor_state_model"),
+                            task_id="REF-283",
+                            depends_on=("REF-276", "REF-277", "REF-279"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S3",
+                            "Formalize task authority and delegation with Datalog and SecPAL-style policy",
+                            "P0",
+                            (
+                                module("authorization_logic.py"),
+                                test("authorization_logic"),
+                            ),
+                            "Claims, leases, merge authority, proof promotion, and overrides need explicit delegation and revocation semantics.",
+                            (
+                                "Rules model principals, capabilities, delegation depth, lease scope, fencing epoch, proof authority, override scope, expiration, and revocation.",
+                                "The reference evaluator and any external Datalog or SecPAL lane agree on positive, negative, revocation, confused-deputy, and stale-lease fixtures.",
+                                "Missing engines remain unsupported while deterministic policy checks continue in shadow mode.",
+                                "Authorization evidence can permit an action but cannot establish generated-code correctness.",
+                            ),
+                            validate("authorization_logic"),
+                            task_id="REF-284",
+                            depends_on=("REF-275", "REF-277", "REF-279"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S3",
+                            "Verify claim, fencing, receipt, and attestation protocols with Tamarin and ProVerif",
+                            "P0",
+                            (
+                                module("protocol_verification.py"),
+                                test("protocol_verification"),
+                            ),
+                            "Supervisor coordination and evidence exchange have protocol properties that unit tests and state invariants alone do not cover.",
+                            (
+                                "Versioned models cover claimant authentication, lease grants, fencing freshness, replay resistance, receipt binding, merge authorization, and optional attestation exchange.",
+                                "Tamarin and ProVerif lanes expose secrecy, authenticity, correspondence, and replay queries with exact model and toolchain receipts.",
+                                "Attack traces become canonical counterexamples and model abstractions are documented per query.",
+                                "Executable presence or installer success cannot satisfy protocol verification without a passing end-to-end model fixture.",
+                            ),
+                            validate("protocol_verification"),
+                            task_id="REF-285",
+                            depends_on=("REF-264", "REF-279", "REF-284"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S3",
+                            "Check cross-lane information-flow hyperproperties",
+                            "P0",
+                            (
+                                module("hyperproperty_verification.py"),
+                                test("hyperproperty_verification"),
+                            ),
+                            "Single-trace checks cannot establish that secrets, witnesses, or unrelated lane data do not affect observable prompts, logs, or artifacts.",
+                            (
+                                "Hyperproperty models cover prompt isolation, worktree isolation, log redaction, provider routing, ZKP witness noninterference, and cross-task cache separation.",
+                                "HyperLTL, AutoHyper, and MCHyper adapters are capability-gated and report unavailable until executable conformance fixtures pass.",
+                                "Bounded self-composition tests provide non-authoritative fallback evidence when no hyperproperty engine is available.",
+                                "Counterexample hypertraces are redacted, minimized, and bound to the exact observation policy.",
+                            ),
+                            validate("hyperproperty_verification"),
+                            task_id="REF-286",
+                            depends_on=("REF-252", "REF-265", "REF-279"),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G12.S4",
+                    "title": "Monitor execution and replan from formal counterexamples",
+                    "tasks": [
+                        _task(
+                            "G12",
+                            "G12.S4",
+                            "Generalize runtime MTL monitoring to supervisor event traces",
+                            "P0",
+                            (
+                                module("runtime_temporal_monitor.py"),
+                                test("runtime_temporal_monitor"),
+                            ),
+                            "Offline plans and proofs need a bounded runtime conformance layer for actual daemon, lane, proof, validation, and merge events.",
+                            (
+                                "Versioned temporal properties cover event ordering, lease expiration, no action after revocation or cancellation, proof-before-merge, bounded retry, eventual terminal status, and resource-release deadlines.",
+                                "The monitor handles rotated logs, restart epochs, duplicate events, missing timestamps, and bounded out-of-order windows explicitly.",
+                                "Violations emit durable counterexamples and reopen affected work; absence of observed violations is not promoted into a proof.",
+                                "Streaming state is bounded and partitioned by task, lane, tree, and policy identity.",
+                            ),
+                            validate("runtime_temporal_monitor"),
+                            task_id="REF-287",
+                            depends_on=("REF-276", "REF-277", "REF-279"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S4",
+                            "Normalize proof failures and traces into a counterexample knowledge graph",
+                            "P0",
+                            (
+                                module("formal_counterexamples.py"),
+                                module("code_evidence_graph.py"),
+                                test("formal_counterexamples"),
+                            ),
+                            "Models should receive compact actionable counterexamples instead of raw solver, model-checker, or runtime transcripts.",
+                            (
+                                "A canonical IR represents SMT models and unsat cores, DCEC or TDFOL contradictions, TLA traces, protocol attacks, hypertraces, kernel errors, and runtime MTL violations.",
+                                "Graph edges bind each counterexample to plans, tasks, AST scopes, assumptions, obligations, providers, receipts, and invalidated evidence.",
+                                "Minimization, semantic deduplication, redaction, and byte limits run before persistence or prompt assembly.",
+                                "Hidden witnesses, credentials, unrelated source, and unbounded prover output never enter a context capsule.",
+                            ),
+                            validate("formal_counterexamples"),
+                            task_id="REF-288",
+                            depends_on=("REF-250", "REF-256", "REF-280", "REF-283", "REF-287"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S4",
+                            "Generate bounded counterexample-guided plan repairs",
+                            "P0",
+                            (
+                                module("formal_replanner.py"),
+                                module("backlog_refinery.py"),
+                                test("formal_replanner"),
+                            ),
+                            "A failed formal plan should yield focused repair work instead of another repository-wide language-model analysis.",
+                            (
+                                "Typed repair rules can add missing dependencies, split effects, tighten authority, add tests or proof templates, change resource bounds, or request scoped human review.",
+                                "Every candidate repair is recompiled and rechecked against the original goal and counterexample before taskboard admission.",
+                                "Semantic identities, retry budgets, refinement depth, and progress measures prevent duplicate or infinite repair generation.",
+                                "Codex receives only the selected repair transition and bounded counterexample capsule.",
+                            ),
+                            validate("formal_replanner"),
+                            task_id="REF-289",
+                            depends_on=("REF-270", "REF-278", "REF-288"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S4",
+                            "Bind plan conformance and formal evidence into goal completion",
+                            "P0",
+                            (
+                                module("formal_plan_conformance.py"),
+                                module("goal_completion.py"),
+                                test("formal_plan_conformance"),
+                            ),
+                            "A goal should close only when intended transitions occurred and all required implementation, validation, and proof evidence remains fresh.",
+                            (
+                                "Conformance compares canonical execution events with the accepted plan and distinguishes skipped, reordered, unauthorized, failed, overridden, and superseded transitions.",
+                                "Plan consistency alone never verifies code; completion policy independently requires configured code, test, kernel, model-check, protocol, and runtime evidence.",
+                                "Plan, policy, AST, premise, or counterexample changes invalidate affected conformance and reopen the goal.",
+                                "Restart and replay reproduce the same conformance verdict from JSON or DuckDB evidence.",
+                            ),
+                            validate("formal_plan_conformance"),
+                            task_id="REF-290",
+                            depends_on=("REF-267", "REF-287", "REF-288", "REF-289"),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G12.S5",
+                    "title": "Scale formal planning safely under parallel execution",
+                    "tasks": [
+                        _task(
+                            "G12",
+                            "G12.S5",
+                            "Admit every prover family through one shared CPU and process budget",
+                            "P0",
+                            (
+                                module("multi_prover_resources.py"),
+                                module("resource_scheduler.py"),
+                                module("proof_scheduler.py"),
+                                test("multi_prover_resources"),
+                            ),
+                            "JVM model checkers, SMT solvers, ATPs, kernels, protocol tools, tests, and models must not create nested pools that oversubscribe the host.",
+                            (
+                                "Resource classes cover translation, SMT, ATP, ITP kernels, JVM model checking, protocol verification, hyperproperty checking, runtime monitors, LLM inference, and artifact IO.",
+                                "One top-level lease accounts for child processes, threads, memory, disk, provider quota, and model concurrency across serial and bundle supervisors.",
+                                "Timeout and cancellation terminate process groups, release capacity, and preserve bounded diagnostics and partial receipts.",
+                                "Portfolio width adapts to host pressure and critical-path value while deterministic cache hits bypass execution safely.",
+                            ),
+                            validate("multi_prover_resources"),
+                            task_id="REF-291",
+                            depends_on=("REF-258", "REF-281", "REF-283", "REF-285", "REF-286", "REF-287"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S5",
+                            "Adversarially test formal plans and every prover-matrix trust boundary",
+                            "P0",
+                            (
+                                test("formal_planning_adversarial"),
+                                module("formal_plan_validator.py"),
+                                module("multi_prover_router.py"),
+                            ),
+                            "The expanded planner must resist forged plans, unsound translations, stale evidence, malicious tool output, and cross-lane leakage.",
+                            (
+                                "Tests mutate actor authority, temporal bounds, task dependencies, formulas, models, premises, tool versions, cache keys, receipts, traces, and assurance labels.",
+                                "Fixtures cover unavailable tools, fake executable versions, solver disagreement, incomplete exploration, protocol false positives, hypertrace leakage, and monitor gaps.",
+                                "No path promotes model text, native heuristic proofs, bounded results without bounds, simulated ZKP, or stale cache entries beyond policy.",
+                                "Parallel crash, cancellation, restart, and duplicate claims preserve single-flight and fail-closed behavior.",
+                            ),
+                            validate("formal_planning_adversarial"),
+                            task_id="REF-292",
+                            depends_on=("REF-271", "REF-281", "REF-282", "REF-283", "REF-284", "REF-285", "REF-286", "REF-290", "REF-291"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S5",
+                            "Exercise an end-to-end proof-carrying planning and implementation workflow",
+                            "P0",
+                            (
+                                module("proof_carrying_planner.py"),
+                                test("proof_carrying_planner_e2e"),
+                            ),
+                            "Formal planning, bounded model context, implementation, verification, runtime monitoring, and replanning must work as one restartable workflow.",
+                            (
+                                "The workflow compiles and verifies a plan, dispatches independent Codex tasks, verifies changed scopes, merges accepted work, monitors execution, and repairs a seeded counterexample.",
+                                "It exercises Hammer reconstruction, Lean or Coq checking, Leanstral shadow proposals, optional ZKP attestation, matrix-specific lanes, and test fallbacks without conflating assurance.",
+                                "Independent plan and proof nodes execute concurrently while conflict, dependency, and shared-resource constraints remain authoritative.",
+                                "All decisions are reproducible from paired JSON and DuckDB artifacts after restart.",
+                            ),
+                            validate("proof_carrying_planner_e2e"),
+                            task_id="REF-293",
+                            depends_on=("REF-268", "REF-282", "REF-289", "REF-290", "REF-291", "REF-292"),
+                        ),
+                        _task(
+                            "G12",
+                            "G12.S5",
+                            "Benchmark and gate formal-planning rollout by assurance and throughput",
+                            "P1",
+                            (
+                                module("formal_planning_metrics.py"),
+                                module("proof_metrics.py"),
+                                module("formal_verification_policy.py"),
+                                test("formal_planning_benchmarks"),
+                                plan_path,
+                            ),
+                            "The broader prover matrix should expand only when it reduces model work and improves defect detection without unacceptable CPU or scheduling regressions.",
+                            (
+                                "Cold and warm benchmarks measure context tokens, plan defects found before LLM dispatch, proof support, counterexample quality, cache reuse, queue latency, CPU saturation, memory, and accepted-task throughput.",
+                                "Metrics separate property class, translator profile, prover, kernel, finite bound, rollout mode, task risk, and authoritative assurance.",
+                                "Shadow, canary, and enforcement thresholds are explicit; unavailable or low-value lanes remain advisory and operator overrides remain durable and scoped.",
+                                "Operator projections expose the executable matrix, degraded reasons, active formal plans, unmet obligations, trace violations, and rollout decisions without raw context dumps.",
+                            ),
+                            validate("formal_planning_benchmarks"),
+                            task_id="REF-294",
+                            depends_on=("REF-273", "REF-274", "REF-293"),
                         ),
                     ],
                 },
