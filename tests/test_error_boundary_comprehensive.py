@@ -340,20 +340,18 @@ class TestInvariantMaintenance:
             assert isinstance(result["entities"], list)
     
     def test_relationships_always_list(self):
-        """Relationships field always remains a list."""
+        """Relationships remains a list for every supported edge-case input."""
         context = OntologyGenerationContext(
             data_source="test", data_type="text", domain="general"
         )
         generator = OntologyGenerator()
         
-        invalid_inputs = ["", "!@#", "   "]
+        edge_case_inputs = ["", "!@#", "   "]
         
-        for text in invalid_inputs:
-            try:
-                result = generator.generate_ontology(text, context)
-                assert isinstance(result["relationships"], list)
-            except Exception:
-                pass
+        for text in edge_case_inputs:
+            result = generator.generate_ontology(text, context)
+            assert isinstance(result, dict)
+            assert isinstance(result["relationships"], list)
     
     def test_no_corrupt_output(self):
         """Output never becomes corrupted."""
