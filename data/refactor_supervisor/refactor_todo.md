@@ -4857,11 +4857,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-260-persistproofschedulermetricsandqueryablereceipts
 - Acceptance: JSON and DuckDB tables expose obligations, attempts, receipts, dependencies, cache outcomes, resource samples, and assurance counts.; Metrics include queue, solver, kernel, model, validation, merge, cancellation, and cache latency.; Every metric is keyed by canonical goal, subgoal, task, tree, provider, template, and resource class.; Queryable aggregates do not include hidden witnesses or unbounded proof transcripts.
 
-- [ ] Task checkbox-261: REF-261 Expose Leanstral through a capability-isolated llm_router provider
+- [x] Task checkbox-261: REF-261 Expose Leanstral through a capability-isolated llm_router provider
 
 ## REF-261 Expose Leanstral through a capability-isolated llm_router provider
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G11
