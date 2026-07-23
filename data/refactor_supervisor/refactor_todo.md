@@ -4773,11 +4773,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-256-routecounterexamplesandunsupportedobligationsint
 - Acceptance: Counterexamples and unsat cores are normalized into bounded task diagnostics and regression fixtures.; Unsupported obligations map to declared focused tests, static checks, or manual-review requirements.; Shadow mode can continue through fallback validation while enforcement mode honors required assurance.; Repeated equivalent failures deduplicate by obligation, tree, and counterexample identity.
 
-- [ ] Task checkbox-257: REF-257 Execute proof-plan DAGs with bounded parallelism and cancellation
+- [x] Task checkbox-257: REF-257 Execute proof-plan DAGs with bounded parallelism and cancellation
 
 ## REF-257 Execute proof-plan DAGs with bounded parallelism and cancellation
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
