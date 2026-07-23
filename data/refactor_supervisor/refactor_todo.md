@@ -4899,11 +4899,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-262-generatefixed-theoremleanstralpromptsfromproofco
 - Acceptance: Prompts contain a fixed theorem identity, allowed premises, trusted prior receipts, compact failures, and output schema.; The model may propose proof text or decomposition but cannot change assumptions, conclusion, template, or source scope.; Prompt and response sizes obey context-capsule and token budgets.; Equivalent tasks reuse untrusted draft artifacts without treating them as checked evidence.
 
-- [ ] Task checkbox-263: REF-263 Kernel-check Leanstral drafts and constrain patch proposals
+- [x] Task checkbox-263: REF-263 Kernel-check Leanstral drafts and constrain patch proposals
 
 ## REF-263 Kernel-check Leanstral drafts and constrain patch proposals
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -5756,3 +5756,189 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Goal registration: dynamic
 - Todo vector key: 82bd9c822ff85844
 - Acceptance: Codebase scan filed this finding from tests/test_error_boundary_comprehensive.py:159. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-300-codebase-scan-82bd9c822ff8.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-301 Review swallowed exception path in tests/test_error_boundary_comprehensive.py:341
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: quality
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, tests/test_error_boundary_comprehensive.py
+- Validation: python3 -m py_compile tests/test_error_boundary_comprehensive.py
+- Bundle: codebase/quality/tests-test_error_boundary_comprehensive
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-quality-tests-test_error_boundary_comprehensive.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/quality
+- Graph depth: 1
+- Parallel lane: codebase/quality/tests-test_error_boundary_comprehensive
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: tests/test_error_boundary_comprehensive.py
+- AST symbols: fail first extraction, fail_first_extraction, ipfs datasets py optimizers graphrag ontology generator, ipfs datasets py optimizers graphrag ontology generator ontologygenerationcontext, ipfs datasets py optimizers graphrag ontology generator ontologygenerator, ipfs_datasets_py.optimizers.graphrag.ontology_generator, ipfs_datasets_py.optimizers.graphrag.ontology_generator.ontologygenerationcontext, ipfs_datasets_py.optimizers.graphrag.ontology_generator.ontologygenerator, pytest, test concurrent context usage, test control characters, test deeply nested relationships, test degradation with corrupted input, test degradation with invalid domain, test domain case sensitivity, test empty text handling, test entities always list, test maximum entity count, test metadata contains info, test mixed script input, test multiple sequential errors, test no corrupt output, test null bytes in text, test numeric text input, test rapid sequential processing, test recovery after error, test relationships always list, test result has valid structure, test single character input, test single word input, test special characters only, test special chars in source, test unicode text input, test unknown domain, test very long input, test whitespace only handling, test_concurrent_context_usage, test_control_characters, test_deeply_nested_relationships, test_degradation_with_corrupted_input, test_degradation_with_invalid_domain, test_domain_case_sensitivity, test_empty_text_handling, test_entities_always_list, test_maximum_entity_count, test_metadata_contains_info, test_mixed_script_input, test_multiple_sequential_errors, test_no_corrupt_output, test_null_bytes_in_text, test_numeric_text_input, test_rapid_sequential_processing, test_recovery_after_error, test_relationships_always_list, test_result_has_valid_structure, test_single_character_input, test_single_word_input, test_special_characters_only, test_special_chars_in_source, test_unicode_text_input, test_unknown_domain, test_very_long_input, test_whitespace_only_handling, testboundaryconditions, testboundaryconditions test deeply nested relationships, testboundaryconditions test maximum entity count, testboundaryconditions test single character input, testboundaryconditions test single word input, testboundaryconditions.test_deeply_nested_relationships, testboundaryconditions.test_maximum_entity_count, testboundaryconditions.test_single_character_input, testboundaryconditions.test_single_word_input, testdatatypevalidation, testdatatypevalidation test control characters, testdatatypevalidation test mixed script input, testdatatypevalidation test numeric text input, testdatatypevalidation test unicode text input, testdatatypevalidation.test_control_characters, testdatatypevalidation.test_mixed_script_input, testdatatypevalidation.test_numeric_text_input
+- AST symbol scope: file
+- Goal id: codebase/quality/tests-test_error_boundary_comprehensive
+- Missing evidence: Review swallowed exception path in tests/test_error_boundary_comprehensive.py:341
+- Merge key: codebase/quality/tests-test_error_boundary_comprehensive
+- Merge family: tests/test_error_boundary_comprehensive.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: a988f6f70a4fc4e0
+- Acceptance: Codebase scan filed this finding from tests/test_error_boundary_comprehensive.py:341. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-301-codebase-scan-a988f6f70a4f.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-302 Review swallowed exception path in tests/test_error_boundary_comprehensive.py:357
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: quality
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, tests/test_error_boundary_comprehensive.py
+- Validation: python3 -m py_compile tests/test_error_boundary_comprehensive.py
+- Bundle: codebase/quality/tests-test_error_boundary_comprehensive
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-quality-tests-test_error_boundary_comprehensive.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/quality
+- Graph depth: 1
+- Parallel lane: codebase/quality/tests-test_error_boundary_comprehensive
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: tests/test_error_boundary_comprehensive.py
+- AST symbols: fail first extraction, fail_first_extraction, ipfs datasets py optimizers graphrag ontology generator, ipfs datasets py optimizers graphrag ontology generator ontologygenerationcontext, ipfs datasets py optimizers graphrag ontology generator ontologygenerator, ipfs_datasets_py.optimizers.graphrag.ontology_generator, ipfs_datasets_py.optimizers.graphrag.ontology_generator.ontologygenerationcontext, ipfs_datasets_py.optimizers.graphrag.ontology_generator.ontologygenerator, pytest, test concurrent context usage, test control characters, test deeply nested relationships, test degradation with corrupted input, test degradation with invalid domain, test domain case sensitivity, test empty text handling, test entities always list, test maximum entity count, test metadata contains info, test mixed script input, test multiple sequential errors, test no corrupt output, test null bytes in text, test numeric text input, test rapid sequential processing, test recovery after error, test relationships always list, test result has valid structure, test single character input, test single word input, test special characters only, test special chars in source, test unicode text input, test unknown domain, test very long input, test whitespace only handling, test_concurrent_context_usage, test_control_characters, test_deeply_nested_relationships, test_degradation_with_corrupted_input, test_degradation_with_invalid_domain, test_domain_case_sensitivity, test_empty_text_handling, test_entities_always_list, test_maximum_entity_count, test_metadata_contains_info, test_mixed_script_input, test_multiple_sequential_errors, test_no_corrupt_output, test_null_bytes_in_text, test_numeric_text_input, test_rapid_sequential_processing, test_recovery_after_error, test_relationships_always_list, test_result_has_valid_structure, test_single_character_input, test_single_word_input, test_special_characters_only, test_special_chars_in_source, test_unicode_text_input, test_unknown_domain, test_very_long_input, test_whitespace_only_handling, testboundaryconditions, testboundaryconditions test deeply nested relationships, testboundaryconditions test maximum entity count, testboundaryconditions test single character input, testboundaryconditions test single word input, testboundaryconditions.test_deeply_nested_relationships, testboundaryconditions.test_maximum_entity_count, testboundaryconditions.test_single_character_input, testboundaryconditions.test_single_word_input, testdatatypevalidation, testdatatypevalidation test control characters, testdatatypevalidation test mixed script input, testdatatypevalidation test numeric text input, testdatatypevalidation test unicode text input, testdatatypevalidation.test_control_characters, testdatatypevalidation.test_mixed_script_input, testdatatypevalidation.test_numeric_text_input
+- AST symbol scope: file
+- Goal id: codebase/quality/tests-test_error_boundary_comprehensive
+- Missing evidence: Review swallowed exception path in tests/test_error_boundary_comprehensive.py:357
+- Merge key: codebase/quality/tests-test_error_boundary_comprehensive
+- Merge family: tests/test_error_boundary_comprehensive.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 210a7a9f4f81d3a8
+- Acceptance: Codebase scan filed this finding from tests/test_error_boundary_comprehensive.py:357. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-302-codebase-scan-210a7a9f4f81.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-303 Review swallowed exception path in tests/test_error_boundary_comprehensive.py:408
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: quality
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, tests/test_error_boundary_comprehensive.py
+- Validation: python3 -m py_compile tests/test_error_boundary_comprehensive.py
+- Bundle: codebase/quality/tests-test_error_boundary_comprehensive
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-quality-tests-test_error_boundary_comprehensive.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/quality
+- Graph depth: 1
+- Parallel lane: codebase/quality/tests-test_error_boundary_comprehensive
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: tests/test_error_boundary_comprehensive.py
+- AST symbols: fail first extraction, fail_first_extraction, ipfs datasets py optimizers graphrag ontology generator, ipfs datasets py optimizers graphrag ontology generator ontologygenerationcontext, ipfs datasets py optimizers graphrag ontology generator ontologygenerator, ipfs_datasets_py.optimizers.graphrag.ontology_generator, ipfs_datasets_py.optimizers.graphrag.ontology_generator.ontologygenerationcontext, ipfs_datasets_py.optimizers.graphrag.ontology_generator.ontologygenerator, pytest, test concurrent context usage, test control characters, test deeply nested relationships, test degradation with corrupted input, test degradation with invalid domain, test domain case sensitivity, test empty text handling, test entities always list, test maximum entity count, test metadata contains info, test mixed script input, test multiple sequential errors, test no corrupt output, test null bytes in text, test numeric text input, test rapid sequential processing, test recovery after error, test relationships always list, test result has valid structure, test single character input, test single word input, test special characters only, test special chars in source, test unicode text input, test unknown domain, test very long input, test whitespace only handling, test_concurrent_context_usage, test_control_characters, test_deeply_nested_relationships, test_degradation_with_corrupted_input, test_degradation_with_invalid_domain, test_domain_case_sensitivity, test_empty_text_handling, test_entities_always_list, test_maximum_entity_count, test_metadata_contains_info, test_mixed_script_input, test_multiple_sequential_errors, test_no_corrupt_output, test_null_bytes_in_text, test_numeric_text_input, test_rapid_sequential_processing, test_recovery_after_error, test_relationships_always_list, test_result_has_valid_structure, test_single_character_input, test_single_word_input, test_special_characters_only, test_special_chars_in_source, test_unicode_text_input, test_unknown_domain, test_very_long_input, test_whitespace_only_handling, testboundaryconditions, testboundaryconditions test deeply nested relationships, testboundaryconditions test maximum entity count, testboundaryconditions test single character input, testboundaryconditions test single word input, testboundaryconditions.test_deeply_nested_relationships, testboundaryconditions.test_maximum_entity_count, testboundaryconditions.test_single_character_input, testboundaryconditions.test_single_word_input, testdatatypevalidation, testdatatypevalidation test control characters, testdatatypevalidation test mixed script input, testdatatypevalidation test numeric text input, testdatatypevalidation test unicode text input, testdatatypevalidation.test_control_characters, testdatatypevalidation.test_mixed_script_input, testdatatypevalidation.test_numeric_text_input
+- AST symbol scope: file
+- Goal id: codebase/quality/tests-test_error_boundary_comprehensive
+- Missing evidence: Review swallowed exception path in tests/test_error_boundary_comprehensive.py:408
+- Merge key: codebase/quality/tests-test_error_boundary_comprehensive
+- Merge family: tests/test_error_boundary_comprehensive.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 8330728218c4de91
+- Acceptance: Codebase scan filed this finding from tests/test_error_boundary_comprehensive.py:408. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-303-codebase-scan-8330728218c4.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-304 Review swallowed exception path in tests/test_llm_router_circuit_breaker.py:115
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: quality
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, tests/test_llm_router_circuit_breaker.py
+- Validation: python3 -m py_compile tests/test_llm_router_circuit_breaker.py
+- Bundle: codebase/quality/tests-test_llm_router_circuit_breaker
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-quality-tests-test_llm_router_circuit_breaker.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/quality
+- Graph depth: 1
+- Parallel lane: codebase/quality/tests-test_llm_router_circuit_breaker
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: tests/test_llm_router_circuit_breaker.py
+- AST symbols: backend with breaker, backend without breaker, backend_with_breaker, backend_without_breaker, backends llm router backend, backends llm router backend llmrouterbackend, backends.llm_router_backend, backends.llm_router_backend.llmrouterbackend, mock generate text, mock_generate_text, pytest, test circuit breaker can be disabled, test circuit breaker state when disabled, test circuit closes after successful half open call, test circuit opens after failure threshold, test circuit transitions to half open after timeout, test manual reset works, test open circuit rejects calls, test reset when disabled is safe, test retryable errors respect circuit breaker, test stats tracking, test successful call keeps circuit closed, test_circuit_breaker_can_be_disabled, test_circuit_breaker_state_when_disabled, test_circuit_closes_after_successful_half_open_call, test_circuit_opens_after_failure_threshold, test_circuit_transitions_to_half_open_after_timeout, test_manual_reset_works, test_open_circuit_rejects_calls, test_reset_when_disabled_is_safe, test_retryable_errors_respect_circuit_breaker, test_stats_tracking, test_successful_call_keeps_circuit_closed, testllmroutercircuitbreaker, testllmroutercircuitbreaker backend with breaker, testllmroutercircuitbreaker backend without breaker, testllmroutercircuitbreaker mock generate text, testllmroutercircuitbreaker test circuit breaker can be disabled, testllmroutercircuitbreaker test circuit breaker state when disabled, testllmroutercircuitbreaker test circuit closes after successful half open call, testllmroutercircuitbreaker test circuit opens after failure threshold, testllmroutercircuitbreaker test circuit transitions to half open after timeout, testllmroutercircuitbreaker test manual reset works, testllmroutercircuitbreaker test open circuit rejects calls, testllmroutercircuitbreaker test reset when disabled is safe, testllmroutercircuitbreaker test retryable errors respect circuit breaker, testllmroutercircuitbreaker test stats tracking, testllmroutercircuitbreaker test successful call keeps circuit closed, testllmroutercircuitbreaker.backend_with_breaker, testllmroutercircuitbreaker.backend_without_breaker, testllmroutercircuitbreaker.mock_generate_text, testllmroutercircuitbreaker.test_circuit_breaker_can_be_disabled, testllmroutercircuitbreaker.test_circuit_breaker_state_when_disabled, testllmroutercircuitbreaker.test_circuit_closes_after_successful_half_open_call, testllmroutercircuitbreaker.test_circuit_opens_after_failure_threshold, testllmroutercircuitbreaker.test_circuit_transitions_to_half_open_after_timeout, testllmroutercircuitbreaker.test_manual_reset_works, testllmroutercircuitbreaker.test_open_circuit_rejects_calls, testllmroutercircuitbreaker.test_reset_when_disabled_is_safe, testllmroutercircuitbreaker.test_retryable_errors_respect_circuit_breaker, testllmroutercircuitbreaker.test_stats_tracking, testllmroutercircuitbreaker.test_successful_call_keeps_circuit_closed, time, unittest mock, unittest mock magicmock, unittest mock patch, unittest.mock, unittest.mock.magicmock, unittest.mock.patch
+- AST symbol scope: file
+- Goal id: codebase/quality/tests-test_llm_router_circuit_breaker
+- Missing evidence: Review swallowed exception path in tests/test_llm_router_circuit_breaker.py:115
+- Merge key: codebase/quality/tests-test_llm_router_circuit_breaker
+- Merge family: tests/test_llm_router_circuit_breaker.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 3166acdf30e7fc8b
+- Acceptance: Codebase scan filed this finding from tests/test_llm_router_circuit_breaker.py:115. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-304-codebase-scan-3166acdf30e7.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-305 Review swallowed exception path in tests/test_property_based_extraction_testing.py:222
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: quality
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, tests/test_property_based_extraction_testing.py
+- Validation: python3 -m py_compile tests/test_property_based_extraction_testing.py
+- Bundle: codebase/quality/tests-test_property_based_extraction_testing
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-quality-tests-test_property_based_extraction_testing.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/quality
+- Graph depth: 1
+- Parallel lane: codebase/quality/tests-test_property_based_extraction_testing
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: tests/test_property_based_extraction_testing.py
+- AST symbols: hypothesis, hypothesis assume, hypothesis given, hypothesis settings, hypothesis strategies, hypothesis.assume, hypothesis.given, hypothesis.settings, hypothesis.strategies, ipfs datasets py optimizers graphrag ontology generator, ipfs datasets py optimizers graphrag ontology generator ontologygenerationcontext, ipfs datasets py optimizers graphrag ontology generator ontologygenerator, ipfs_datasets_py.optimizers.graphrag.ontology_generator, ipfs_datasets_py.optimizers.graphrag.ontology_generator.ontologygenerationcontext, ipfs_datasets_py.optimizers.graphrag.ontology_generator.ontologygenerator, pytest, test any text generates ontology, test confidence scores in valid range, test domain parameter accepted, test entities are list or empty, test entity structure consistency, test extraction idempotent, test handles special characters, test long text handling, test mixed content handling, test numeric content handling, test ontology has required fields, test relationship structure consistency, test relationships are list or empty, test repetitive content handling, test short text handling, test whitespace handling, test_any_text_generates_ontology, test_confidence_scores_in_valid_range, test_domain_parameter_accepted, test_entities_are_list_or_empty, test_entity_structure_consistency, test_extraction_idempotent, test_handles_special_characters, test_long_text_handling, test_mixed_content_handling, test_numeric_content_handling, test_ontology_has_required_fields, test_relationship_structure_consistency, test_relationships_are_list_or_empty, test_repetitive_content_handling, test_short_text_handling, test_whitespace_handling, testpropertybasedconfidencescores, testpropertybasedconfidencescores test confidence scores in valid range, testpropertybasedconfidencescores.test_confidence_scores_in_valid_range, testpropertybaseddomainhandling, testpropertybaseddomainhandling test domain parameter accepted, testpropertybaseddomainhandling.test_domain_parameter_accepted, testpropertybasedentitystructure, testpropertybasedentitystructure test entity structure consistency, testpropertybasedentitystructure.test_entity_structure_consistency, testpropertybasedidempotence, testpropertybasedidempotence test extraction idempotent, testpropertybasedidempotence.test_extraction_idempotent, testpropertybasedlongcontent, testpropertybasedlongcontent test long text handling, testpropertybasedlongcontent.test_long_text_handling, testpropertybasedmixedcontent, testpropertybasedmixedcontent test mixed content handling, testpropertybasedmixedcontent.test_mixed_content_handling, testpropertybasednumericcontent, testpropertybasednumericcontent test numeric content handling, testpropertybasednumericcontent.test_numeric_content_handling, testpropertybasedrelationshipstructure, testpropertybasedrelationshipstructure test relationship structure consistency, testpropertybasedrelationshipstructure.test_relationship_structure_consistency, testpropertybasedrepetitivecontent, testpropertybasedrepetitivecontent test repetitive content handling, testpropertybasedrepetitivecontent.test_repetitive_content_handling, testpropertybasedshortcontent, testpropertybasedshortcontent test short text handling, testpropertybasedshortcontent.test_short_text_handling, testpropertybasedspecialcharacters, testpropertybasedspecialcharacters test handles special characters
+- AST symbol scope: file
+- Goal id: codebase/quality/tests-test_property_based_extraction_testing
+- Missing evidence: Review swallowed exception path in tests/test_property_based_extraction_testing.py:222
+- Merge key: codebase/quality/tests-test_property_based_extraction_testing
+- Merge family: tests/test_property_based_extraction_testing.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: c80276b2e2641159
+- Acceptance: Codebase scan filed this finding from tests/test_property_based_extraction_testing.py:222. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-305-codebase-scan-c80276b2e264.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-306 Review swallowed exception path in tests/test_website_cohesion_playwright.py:407
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: quality
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, tests/test_website_cohesion_playwright.py
+- Validation: python3 -m py_compile tests/test_website_cohesion_playwright.py
+- Bundle: codebase/quality/tests-test_website_cohesion_playwright
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-quality-tests-test_website_cohesion_playwright.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/quality
+- Graph depth: 1
+- Parallel lane: codebase/quality/tests-test_website_cohesion_playwright
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: tests/test_website_cohesion_playwright.py
+- AST symbols: __init__, _artifact_dir, _assert_surface_layout, _build_document_payload, _build_fixture_app, _capture_screenshot, _create_account_and_open_chat, _create_account_from_root_iframe, _fixtureprofilestore, _fixtureprofilestore.__init__, _fixtureprofilestore._matches_hashed_credentials, _fixtureprofilestore._matches_raw_credentials, _fixtureprofilestore.append_chat_message, _fixtureprofilestore.create_profile, _fixtureprofilestore.load_profile, _launch_fixture_site, _load_static_asset, _load_template, _matches_hashed_credentials, _matches_raw_credentials, _serve_app, _wait_for_surface, _write_export_artifact_metadata, append chat message, append_chat_message, applications complaint workspace, applications complaint workspace api, applications complaint workspace api attach complaint workspace routes, applications complaint workspace complaintworkspaceservice, applications document api, applications document api attach document routes, applications document ui, applications document ui attach document ui routes, applications review api, applications review api attach claim support review routes, applications review ui, applications review ui attach claim support review ui routes, applications review ui attach review health routes, applications.complaint_workspace, applications.complaint_workspace.complaintworkspaceservice, applications.complaint_workspace_api, applications.complaint_workspace_api.attach_complaint_workspace_routes, applications.document_api, applications.document_api.attach_document_routes, applications.document_ui, applications.document_ui.attach_document_ui_routes, applications.review_api, applications.review_api.attach_claim_support_review_routes, applications.review_ui, applications.review_ui.attach_claim_support_review_ui_routes, applications.review_ui.attach_review_health_routes, artifact dir, assert surface layout, build document payload, build fixture app, capture screenshot, chat fallback, chat page, chat socket, chat_fallback, chat_page, chat_socket, contextlib, contextlib contextmanager, contextlib.contextmanager, cookies page, cookies_page, create account and open chat, create account from root iframe, create profile, create_profile, fixtureprofilestore, fixtureprofilestore append chat message, fixtureprofilestore create profile, fixtureprofilestore init, fixtureprofilestore load profile, fixtureprofilestore matches hashed credentials, fixtureprofilestore matches raw credentials, home page, home_page
+- AST symbol scope: file
+- Goal id: codebase/quality/tests-test_website_cohesion_playwright
+- Missing evidence: Review swallowed exception path in tests/test_website_cohesion_playwright.py:407
+- Merge key: codebase/quality/tests-test_website_cohesion_playwright
+- Merge family: tests/test_website_cohesion_playwright.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 08605ffbd8d9b23a
+- Acceptance: Codebase scan filed this finding from tests/test_website_cohesion_playwright.py:407. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-306-codebase-scan-08605ffbd8d9.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
