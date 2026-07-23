@@ -4599,7 +4599,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S2
 - Missing evidence: Proof planning must start from deterministic changed symbols and contracts rather than sending repository-wide source or AST records to a model.
-- AST symbols: PROOF_SCOPE_SCHEMA, PROOF_SCOPE_SET_SCHEMA, DiffChangeKind, ProofScopeKind, ProofScopeType, CandidateChangeKind, _sha256_source, _enum_change_kind, CandidateDiffEntry, CodeProofScope, ASTProofScope, TypedASTProofScope, ProofScopeCompilationStats, CodeProofScopeSet, CompiledProofScopes, ProofScopeSet, ProofScopeCompilation, CandidateFileDiff, _module_name, _qualify, _split_owner, _record_matches_source, _candidate_records, _facts_for_record, _coerce_entries, parse_unified_diff, _git, _git_source, collect_git_candidate_diff, compile_candidate_proof_scopes
+- AST symbols: PROOF_SCOPE_SCHEMA, PROOF_SCOPE_SET_SCHEMA, CODE_OBLIGATION_REQUEST_SCHEMA, CODE_OBLIGATION_CACHE_KEY_SCHEMA, DiffChangeKind, ProofScopeKind, ProofScopeType, CandidateChangeKind, _sha256_source, _enum_change_kind, CandidateDiffEntry, CodeProofScope, ASTProofScope, TypedASTProofScope, ProofScopeCompilationStats, CodeProofScopeSet, CompiledProofScopes, ProofScopeSet, ProofScopeCompilation, CandidateFileDiff, CodeObligationRequest, CodeProofObligationRequest, ProofObligationRequest, _selected_obligation_scopes, materialize_code_proof_obligation, build_code_proof_obligation, obligation_cache_identity, code_proof_obligation_cache_identity, build_obligation_cache_key, _module_name
 - Merge key: refactor/g11/g11-s2
 - Candidate kind: seed
 - Todo vector key: ref-248-compilecandidatediffsintotypedastproofscopes
@@ -4620,17 +4620,17 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S2
 - Missing evidence: Arbitrary Python cannot be made formally verified by translating free-form model claims; enforcement needs reviewed templates with explicit semantics.
-- AST symbols: PROOF_SCOPE_SCHEMA, PROOF_SCOPE_SET_SCHEMA, DiffChangeKind, ProofScopeKind, ProofScopeType, CandidateChangeKind, _sha256_source, _enum_change_kind, CandidateDiffEntry, CodeProofScope, ASTProofScope, TypedASTProofScope, ProofScopeCompilationStats, CodeProofScopeSet, CompiledProofScopes, ProofScopeSet, ProofScopeCompilation, CandidateFileDiff, _module_name, _qualify, _split_owner, _record_matches_source, _candidate_records, _facts_for_record, _coerce_entries, parse_unified_diff, _git, _git_source, collect_git_candidate_diff, compile_candidate_proof_scopes
+- AST symbols: PROOF_OBLIGATION_TEMPLATE_SCHEMA, PROOF_OBLIGATION_TEMPLATE_REGISTRY_SCHEMA, TEMPLATE_REGISTRY_VERSION, TemplateValidationError, UnsupportedProofTemplateError, AmbiguousProofTemplateError, TemplateSelectionStatus, ReviewedCodeShape, ReferencePredicate, _strings, _strict_mapping, _predicate_semantics, _mapping_rows, legal_state_transition, lease_uniqueness_and_fencing, dag_is_acyclic, merge_is_idempotent, cache_key_is_complete, evidence_is_fresh, projection_is_equivalent, unsupported_proof_fails_closed, TemplateMutationCase, MutationCase, ProofObligationTemplate, ObligationTemplate, CodeProofObligationTemplate, TemplateSelection, ProofObligationTemplateRegistry, TemplateRegistry, _case
 - Merge key: refactor/g11/g11-s2
 - Candidate kind: seed
 - Todo vector key: ref-249-buildareviewedcode-invariantobligationtemplatere
 - Acceptance: Initial templates cover legal state transitions, lease uniqueness and fencing, DAG acyclicity, merge idempotence, cache-key completeness, evidence freshness, projection equivalence, and unsupported-proof fail-closed behavior.; Every template declares a Python reference predicate, canonical statement, supported backends, assumptions, mutation cases, and fallback tests.; Template versions and semantic hashes participate in obligation and cache identity.; Unknown or ambiguous code shapes remain unsupported instead of selecting a similar template heuristically.
 
-- [ ] Task checkbox-250: REF-250 Materialize a deterministic code and proof evidence graph in JSON and DuckDB
+- [~] Task checkbox-250: REF-250 Materialize a deterministic code and proof evidence graph in JSON and DuckDB
 
 ## REF-250 Materialize a deterministic code and proof evidence graph in JSON and DuckDB
 
-- Status: todo
+- Status: in_progress
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -5697,7 +5697,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-299 Review swallowed exception path in tests/test_error_boundary_comprehensive.py:139
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
@@ -5728,7 +5728,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-300 Review swallowed exception path in tests/test_error_boundary_comprehensive.py:159
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
