@@ -3821,7 +3821,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-222 Review swallowed exception path in mediator/integrations/graph_tools.py:236
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
