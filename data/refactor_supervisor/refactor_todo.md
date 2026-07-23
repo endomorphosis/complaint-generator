@@ -4007,7 +4007,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-228 Review swallowed exception path in scripts/refactor_agent_supervisor.py:4008
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -4038,7 +4038,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-229 Review swallowed exception path in scripts/run_claim_support_review_regression.py:75
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
