@@ -67,11 +67,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-255-enforceindependentkernelreconstructionandverdict
 - Acceptance: Lean, Coq, and Isabelle reconstruction records are mapped without weakening upstream trust semantics.; Kernel unavailability, timeout, mismatch, forbidden declarations, sorry or admit, and changed theorem statements fail closed.; The authoritative verdict is derived from reconstruction evidence and cannot be upgraded by provider status text.; Negative and corrupt proof fixtures never produce kernel-verified receipts.
 
-- [ ] Task checkbox-256: REF-256 Route counterexamples and unsupported obligations into focused validation
+- [x] Task checkbox-256: REF-256 Route counterexamples and unsupported obligations into focused validation
 
 ## REF-256 Route counterexamples and unsupported obligations into focused validation
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
