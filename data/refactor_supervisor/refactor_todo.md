@@ -4731,11 +4731,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-254-addtrust-awareproofcachingandsingle-flightexecut
 - Acceptance: Cache keys bind obligation, premises, translator, solver, kernel, toolchain, theorem registry, policy, resource budget, and candidate tree.; Only results meeting the requested assurance and freshness can satisfy a lookup.; A cross-thread and cross-process single-flight lease deduplicates active proof work.; Poisoned, malformed, stale, partial, solver-only, and simulated-attestation cache entries are rejected with reason codes.
 
-- [ ] Task checkbox-255: REF-255 Enforce independent kernel reconstruction and verdict derivation
+- [x] Task checkbox-255: REF-255 Enforce independent kernel reconstruction and verdict derivation
 
 ## REF-255 Enforce independent kernel reconstruction and verdict derivation
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
