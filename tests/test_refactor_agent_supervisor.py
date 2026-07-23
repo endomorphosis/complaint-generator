@@ -581,6 +581,38 @@ def test_goal_management_integrity_program_is_persistent_and_dependency_closed()
     assert any("automatically reopen" in task.title for task in tasks)
 
 
+def test_formal_verification_program_is_persistent_parallel_and_dependency_closed() -> None:
+    goals = supervisor.build_goals({"signals": {}})
+    goal = next(goal for goal in goals if goal["id"] == "G11")
+    tasks = supervisor.flatten_tasks([goal])
+
+    assert [subgoal["id"] for subgoal in goal["subgoals"]] == [
+        "G11.S1",
+        "G11.S2",
+        "G11.S3",
+        "G11.S4",
+        "G11.S5",
+        "G11.S6",
+        "G11.S7",
+        "G11.S8",
+    ]
+    assert [task.task_id for task in tasks] == [
+        f"REF-{number}" for number in range(244, 275)
+    ]
+    task_ids = {task.task_id for task in tasks}
+    assert all(set(task.depends_on) <= task_ids for task in tasks)
+    assert all(
+        any(path.startswith("ipfs_datasets_py/ipfs_accelerate_py/") for path in task.files)
+        for task in tasks
+    )
+    assert sum(not task.depends_on for task in tasks) >= 2
+    assert any("Hammer portfolio" in task.title for task in tasks)
+    assert any("Leanstral" in task.title for task in tasks)
+    assert any("ZKP" in task.title for task in tasks)
+    assert any("DuckDB" in criterion for task in tasks for criterion in task.acceptance)
+    assert any("shared resource" in criterion for task in tasks for criterion in task.acceptance)
+
+
 def test_merge_watchdog_skips_aborted_historical_merge(tmp_path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
