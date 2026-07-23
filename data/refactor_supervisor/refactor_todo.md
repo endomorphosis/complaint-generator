@@ -4836,11 +4836,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-259-integratestagedproofcheckswiththevalidationsched
 - Acceptance: Cheap deterministic checks precede translation, solver candidates, kernel reconstruction, focused tests, and broad tests.; Independent checks run in parallel under the shared resource budget.; Impact selection explains every included, omitted, escalated, and fallback check.; Validation reports retain separate deterministic, solver, kernel, test, and attestation verdicts.
 
-- [ ] Task checkbox-260: REF-260 Persist proof scheduler metrics and queryable receipts
+- [x] Task checkbox-260: REF-260 Persist proof scheduler metrics and queryable receipts
 
 ## REF-260 Persist proof scheduler metrics and queryable receipts
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
