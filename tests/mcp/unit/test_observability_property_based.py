@@ -197,25 +197,32 @@ class TestCircuitBreakerPropertyBased:
         consecutive failures.
         """
         cb = get_circuit_breaker(f"test_cb_{threshold}")
+        # Hypothesis may exercise the same threshold more than once while
+        # shrinking, so each example must start from a closed, metric-free
+        # breaker even though the registry returns named singletons.
+        cb.reset()
         cb.failure_threshold = threshold
         
         def failing_service():
-            raise Exception("Synthetic failure")
+            raise RuntimeError("Synthetic failure")
         
-        # Trigger failures
-        opened = False
-        for i in range(threshold + 10):
-            try:
+        # The threshold-producing call still propagates the service failure,
+        # while transitioning the breaker to OPEN.
+        for expected_failure_count in range(1, threshold + 1):
+            with pytest.raises(RuntimeError, match="Synthetic failure"):
                 cb.call(failing_service)
-            except CircuitBreakerOpenError:
-                opened = True
-                break
-            except Exception:
-                pass
-        
-        # Should have opened around threshold
-        assert opened, f"Circuit didn't open after {threshold} failures"
-        assert cb.metrics.failure_count >= threshold, "Failure count doesn't match"
+
+            metrics = cb.metrics
+            assert metrics.failure_count == expected_failure_count
+            expected_state = "open" if expected_failure_count == threshold else "closed"
+            assert cb.state.value == expected_state
+
+        # Once open, the next call must be rejected without invoking or
+        # recording another failure from the protected service.
+        with pytest.raises(CircuitBreakerOpenError, match="is OPEN"):
+            cb.call(failing_service)
+
+        assert cb.metrics.failure_count == threshold
     
     @given(st.lists(success_flags, min_size=5, max_size=50))
     @settings(max_examples=50)
