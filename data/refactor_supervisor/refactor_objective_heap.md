@@ -76,7 +76,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P0
 - Bundle: refactor/g3/g3-s1
 - Goal: Normalize IPFS datasets adapter payloads
-- Evidence: integrations/ipfs_datasets/capabilities.py, integrations/ipfs_datasets/loader.py, All adapter groups report stable keys., Missing optional extras produce actionable reasons., python -m pytest tests/test_ipfs_adapter_layer.py -q, integrations/ipfs_datasets/documents.py, mediator/evidence_hooks.py, Evidence, authority, and web ingestion can call one parse contract., Fallback mode preserves current behavior., python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q
+- Evidence: integrations/ipfs_datasets/capabilities.py, integrations/ipfs_datasets/loader.py, All adapter groups report stable keys., Missing optional extras produce actionable reasons., python -m pytest tests/test_ipfs_adapter_layer.py -q, integrations/ipfs_datasets/documents.py, integrations/ipfs_datasets/provenance.py, mediator/evidence_hooks.py, mediator/legal_authority_hooks.py, mediator/web_evidence_hooks.py, tests/test_document_ingestion_contract.py, tests/test_web_evidence_hooks.py, Evidence, authority, and web ingestion can call one parse contract., Fallback mode preserves current behavior., python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q, data/refactor_supervisor/discovery/2026-07-23-ref-317-objective-validation-repair.md, objective validation repair
 - Validation: python -m pytest tests/test_ipfs_adapter_layer.py -q; python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q
 
 ## G3.S2 Clarify graph, GraphRAG, and logic adapter boundaries
