@@ -99,7 +99,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-300 Review swallowed exception path in tests/test_error_boundary_comprehensive.py:159
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P1
 - Track: quality
