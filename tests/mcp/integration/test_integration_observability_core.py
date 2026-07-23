@@ -544,19 +544,13 @@ class TestMetricCorrelation:
         for i in range(50):
             # Analysis call
             start = time.time()
-            try:
-                cb_analysis.call(complaint_analyzer.analyze, f"Test {i}")
-            except:
-                pass
+            cb_analysis.call(complaint_analyzer.analyze, f"Test {i}")
             elapsed = time.time() - start
             metrics.record_circuit_breaker_call("complaint_analyzer", elapsed, success=True)
             
             # Decision call
             start = time.time()
-            try:
-                cb_decision.call(decision_tree.decide, {"test": i})
-            except:
-                pass
+            cb_decision.call(decision_tree.decide, {"test": i})
             elapsed = time.time() - start
             metrics.record_circuit_breaker_call("decision_tree", elapsed, success=True)
         
