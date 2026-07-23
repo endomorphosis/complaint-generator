@@ -4162,7 +4162,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-233 Review swallowed exception path in tests/mcp/integration/test_integration_observability_core.py:319
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
@@ -4224,7 +4224,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-235 Review swallowed exception path in tests/mcp/integration/test_integration_observability_core.py:512
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
@@ -4286,7 +4286,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-237 Review swallowed exception path in tests/mcp/unit/conftest.py:15
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
