@@ -73,12 +73,10 @@ class TestInvalidInputHandling:
         generator = OntologyGenerator()
         
         text = "data\x00with\x00nulls"
-        try:
-            result = generator.generate_ontology(text, context)
-            assert result is not None
-        except Exception:
-            # Null bytes might cause issues, but shouldn't crash unpredictably
-            pass
+        result = generator.generate_ontology(text, context)
+
+        assert isinstance(result, dict)
+        assert all(key in result for key in ("entities", "relationships", "metadata"))
 
 
 class TestInvalidContextHandling:
