@@ -1261,8 +1261,17 @@ Return only the search terms, one per line."""
                 try:
                     web_results = self.search_web_archives(domain, query=query, max_results=3)
                     results['web_archives'].extend(web_results)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # Archive domains are independent, so preserve results from
+                    # healthy domains while making the degraded search visible.
+                    self.mediator.log(
+                        'legal_authority_search_error',
+                        search_type='web_archive',
+                        domain=domain,
+                        query=query,
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
         
         total_found = sum(len(v) for v in results.values())
         self.mediator.log('legal_authority_search_all',
