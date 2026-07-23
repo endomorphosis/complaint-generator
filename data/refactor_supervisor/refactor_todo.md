@@ -6749,7 +6749,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-325 Close objective gap: Make agent-supervisor proof-aware and context-efficient
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
