@@ -4794,11 +4794,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-257-executeproof-plandagswithboundedparallelismandca
 - Acceptance: The scheduler executes ready proof-plan nodes in dependency order and exposes critical-path and downstream-unlock priority.; Independent translator, solver, kernel, validation, and artifact nodes can overlap within configured limits.; Conclusive results cancel redundant portfolio attempts and propagate blocked or unsupported dependencies explicitly.; Restarts recover from durable plan, lease, attempt, and receipt state without duplicate authoritative receipts.
 
-- [ ] Task checkbox-258: REF-258 Unify proof, validation, model, and artifact resource admission
+- [x] Task checkbox-258: REF-258 Unify proof, validation, model, and artifact resource admission
 
 ## REF-258 Unify proof, validation, model, and artifact resource admission
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
