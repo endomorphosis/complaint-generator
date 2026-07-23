@@ -385,23 +385,21 @@ class TestPipelineInputValidationAndSanitization:
     """Tests for input validation and sanitization."""
 
     def test_pipeline_with_null_bytes_in_text(self):
-        """Test pipeline robustness to null bytes in input."""
-        pipeline = OntologyPipeline(domain='legal')
+        """Test that embedded null bytes do not prevent text processing."""
+        pipeline = OntologyPipeline(domain='legal', use_llm=False)
 
-        # Text with null bytes (shouldn't occur but be defensive)
+        # The rule-based pipeline accepts arbitrary Python text, including NUL.
         text = 'John Doe\x00filed suit'
 
-        try:
-            result = pipeline.run(
-                data=text,
-                data_source='test',
-                data_type='text',
-                refine=False
-            )
-            assert result is not None
-        except Exception:
-            # Some frameworks reject null bytes, which is reasonable
-            pass
+        result = pipeline.run(
+            data=text,
+            data_source='test',
+            data_type='text',
+            refine=False
+        )
+
+        assert result is not None
+        assert result.ontology is not None
 
     def test_pipeline_with_control_characters(self):
         """Test pipeline with control characters in input."""
