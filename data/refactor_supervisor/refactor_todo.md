@@ -6088,7 +6088,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-310 Close objective gap: Schedule proof work under shared CPU budgets
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
