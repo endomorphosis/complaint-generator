@@ -5151,11 +5151,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-274-benchmarkcontextreductioncachereuseandcpuproofth
 - Acceptance: Benchmarks compare raw repository context with bounded proof capsules by bytes, tokens, retrieval precision, and accepted-task cost.; Cold and warm runs report translation, solver, kernel, cache, model, validation, and merge latency plus CPU and memory use.; Parallel runs detect nested oversubscription and quantify cancellation and single-flight savings.; Documented thresholds gate rollout expansion and identify unsupported or low-value obligation templates.
 
-- [ ] Task checkbox-275: REF-275 Define a canonical formal work-plan contract and logic vocabulary
+- [x] Task checkbox-275: REF-275 Define a canonical formal work-plan contract and logic vocabulary
 
 ## REF-275 Define a canonical formal work-plan contract and logic vocabulary
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
