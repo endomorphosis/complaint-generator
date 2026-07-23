@@ -386,7 +386,7 @@ class TestGracefulDegradation:
         assert "entities" in result
     
     def test_degradation_with_corrupted_input(self):
-        """Degrade gracefully with corrupted input."""
+        """Return a valid ontology for every supported corrupted-text input."""
         context = OntologyGenerationContext(
             data_source="test", data_type="text", domain="general"
         )
@@ -400,11 +400,14 @@ class TestGracefulDegradation:
         ]
         
         for text in corrupted_texts:
-            try:
-                result = generator.generate_ontology(text, context)
-                assert result is not None
-            except Exception:
-                pass
+            result = generator.generate_ontology(text, context)
+            assert isinstance(result, dict)
+            assert all(
+                key in result for key in ("entities", "relationships", "metadata")
+            )
+            assert isinstance(result["entities"], list)
+            assert isinstance(result["relationships"], list)
+            assert isinstance(result["metadata"], dict)
 
 
 class TestErrorMessages:
