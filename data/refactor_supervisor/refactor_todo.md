@@ -4962,11 +4962,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-265-gatecryptographicbackendsonhealthcircuitkeyandno
 - Acceptance: Backend health distinguishes simulated, configured, available, verified, degraded, and unavailable states.; Circuit, public-input schema, verification-key, and backend versions are pinned in policy and receipt identity.; Golden, negative, stale-key, malformed-proof, and witness no-leak cases gate production eligibility.; A cryptographic failure cannot fall back to simulated success.
 
-- [ ] Task checkbox-266: REF-266 Persist optional ZKP envelopes beside trusted proof receipts
+- [x] Task checkbox-266: REF-266 Persist optional ZKP envelopes beside trusted proof receipts
 
 ## REF-266 Persist optional ZKP envelopes beside trusted proof receipts
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G11
