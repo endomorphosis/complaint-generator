@@ -37,7 +37,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-232 Review swallowed exception path in tests/conftest.py:289
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
