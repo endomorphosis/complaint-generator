@@ -123,22 +123,32 @@ class TestInvalidContextHandling:
 class TestRecoveryFromErrors:
     """Test recovery from various error conditions."""
     
-    def test_recovery_after_error(self):
-        """Ensure generator recovers after processing invalid input."""
+    def test_recovery_after_error(self, monkeypatch):
+        """Ensure generator remains usable after an extraction failure."""
         context = OntologyGenerationContext(
             data_source="test", data_type="text", domain="general"
         )
         generator = OntologyGenerator()
-        
-        # Try invalid input
-        try:
-            result1 = generator.generate_ontology("", context)
-        except Exception:
-            pass
-        
-        # Should still work on valid input
-        result2 = generator.generate_ontology("valid test", context)
-        assert result2 is not None
+        original_extract_entities = generator.extract_entities
+        extraction_attempts = 0
+
+        def fail_first_extraction(data, extraction_context):
+            nonlocal extraction_attempts
+            extraction_attempts += 1
+            if extraction_attempts == 1:
+                raise RuntimeError("synthetic extraction failure")
+            return original_extract_entities(data, extraction_context)
+
+        monkeypatch.setattr(generator, "extract_entities", fail_first_extraction)
+
+        with pytest.raises(RuntimeError, match="synthetic extraction failure"):
+            generator.generate_ontology("trigger extraction failure", context)
+
+        result = generator.generate_ontology("valid test", context)
+
+        assert extraction_attempts == 2
+        assert isinstance(result, dict)
+        assert all(key in result for key in ("entities", "relationships", "metadata"))
     
     def test_multiple_sequential_errors(self):
         """Handle multiple sequential errors gracefully."""
