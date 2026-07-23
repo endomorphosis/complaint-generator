@@ -107,6 +107,39 @@ def _strip_reserved_example_urls(text: str) -> str:
     return _RESERVED_EXAMPLE_URL_RE.sub("reserved-example-url", text)
 
 
+def _classify_test_file(path: str) -> tuple[bool, bool, bool]:
+    """Return the automatic LLM, network, and heavy classifications for a test.
+
+    A collected test file should normally remain readable.  If it becomes
+    unavailable between discovery and classification, gate it behind every
+    opt-in rather than accidentally running a potentially external or expensive
+    test.  Only filesystem errors are recoverable here; classifier defects must
+    remain visible during collection.
+    """
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as source_file:
+            text = source_file.read().lower()
+    except OSError as exc:
+        warnings.warn(
+            (
+                f"Could not read test file {path!r} for automatic gating; "
+                "requiring LLM, network, and heavy test opt-ins: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+            pytest.PytestCollectionWarning,
+            stacklevel=2,
+        )
+        return True, True, True
+
+    network_text = _strip_reserved_example_urls(text)
+    return (
+        any(keyword in text for keyword in _LLM_KEYWORDS),
+        any(keyword in network_text for keyword in _NETWORK_KEYWORDS),
+        any(keyword in text for keyword in _HEAVY_KEYWORDS),
+    )
+
+
 def _candidate_ipfs_dataset_roots(repo_root: str) -> list[str]:
     """Return local or supervisor-parent ipfs_datasets_py checkouts."""
 
@@ -254,10 +287,6 @@ def pytest_collection_modifyitems(config, items):
         if cached is not None:
             return cached
 
-        is_llm = False
-        is_network = False
-        is_heavy = False
-        
         # Exclude specific test files from auto-detection
         # (files containing "llm" in code but not actually requiring LLM features)
         if (
@@ -278,18 +307,8 @@ def pytest_collection_modifyitems(config, items):
         ):
             file_cache[path] = (False, False, False)
             return file_cache[path]
-        
-        try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                text = f.read().lower()
-            network_text = _strip_reserved_example_urls(text)
-            is_llm = any(k in text for k in _LLM_KEYWORDS)
-            is_network = any(k in network_text for k in _NETWORK_KEYWORDS)
-            is_heavy = any(k in text for k in _HEAVY_KEYWORDS)
-        except Exception:
-            pass
 
-        file_cache[path] = (is_llm, is_network, is_heavy)
+        file_cache[path] = _classify_test_file(path)
         return file_cache[path]
 
     skip_llm = pytest.mark.skip(reason="Skipped by default (LLM). Use --run-llm or RUN_LLM_TESTS=1")
