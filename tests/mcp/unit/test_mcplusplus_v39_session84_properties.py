@@ -404,6 +404,7 @@ class TestAdvancedProperties:
     """Tests for stretch goal properties (stretch goals for Session 84+)."""
     
     @example([])
+    @example([True])
     @given(st.lists(st.booleans(), max_size=50))
     @settings(max_examples=5)
     def test_empty_and_edge_case_sequences(self, sequence):
@@ -417,10 +418,10 @@ class TestAdvancedProperties:
             # Single item sequence
             if len(sequence) == 1:
                 cb = LLMCircuitBreaker(failure_threshold=10)
-                try:
-                    cb.call(lambda: "ok")
-                except Exception:
-                    pass
+                result = cb.call(lambda: "ok")
                 
                 metrics = cb.metrics
+                assert result == "ok"
                 assert metrics.total_calls == 1
+                assert metrics.success_count == 1
+                assert metrics.failure_count == 0
