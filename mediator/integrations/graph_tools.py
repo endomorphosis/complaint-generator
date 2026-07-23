@@ -194,6 +194,7 @@ class GraphAwareRetrievalReranker:
         terms: List[str] = []
 
         try:
+            knowledge_graph_terms: List[str] = []
             kg = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "knowledge_graph")
             if kg is not None and hasattr(kg, "get_entities_by_type"):
                 for entity_type in ("claim", "fact", "organization"):
@@ -201,13 +202,18 @@ class GraphAwareRetrievalReranker:
                     for entity in entities:
                         name = str(getattr(entity, "name", "") or "")
                         if name:
-                            terms.append(name)
+                            knowledge_graph_terms.append(name)
                         attrs = getattr(entity, "attributes", {}) or {}
                         for value in attrs.values():
                             if isinstance(value, str):
-                                terms.append(value)
+                                knowledge_graph_terms.append(value)
+            terms.extend(knowledge_graph_terms)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to extract knowledge-graph retrieval terms; "
+                "continuing with other graph sources",
+                exc_info=True,
+            )
 
         try:
             dg = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
