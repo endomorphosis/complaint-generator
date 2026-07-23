@@ -4815,11 +4815,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-258-unifyproofvalidationmodelandartifactresourceadmi
 - Acceptance: Resource classes distinguish translation, solver, kernel, validation, model-draft, and artifact work.; One supervisor-level lease budget is propagated into child portfolio and kernel limits.; CPU, process, memory, disk, provider quota, context, token, and latency backpressure remain authoritative.; Model concurrency is accounted separately from CPU proof concurrency and idle capacity is reclaimable.
 
-- [ ] Task checkbox-259: REF-259 Integrate staged proof checks with the validation scheduler
+- [x] Task checkbox-259: REF-259 Integrate staged proof checks with the validation scheduler
 
 ## REF-259 Integrate staged proof checks with the validation scheduler
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
