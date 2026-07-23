@@ -6,7 +6,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-239 Review swallowed exception path in tests/mcp/unit/test_mcplusplus_v39_session84_properties.py:198
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
