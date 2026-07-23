@@ -740,7 +740,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G9.S1
 - Missing evidence: The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work.
-- AST symbols: logger, _MANIFEST_REFERENCED_BUNDLE_FIELDS, _MANIFEST_MEMBER_TASK_FIELDS, _MANIFEST_PROFILE_G_REFERENCE_FIELDS, bundle_member_completion_receipts, BundleLaneSpec, _compact_bundle_manifest_payload, _compact_task_manifest_payload, _lane_manifest_payload, _lane_database_payload, RunningBundleLane, resolve_repo_path, lane_state_prefix, _schedule_int, _schedule_bool, _string_list, _lane_schedule_key, _mapping_list, _first_nonempty, _resource_lane_fields, _TERMINAL_CONFLICT_TASK_STATUSES, _live_bundle_conflict_members, _bundle_conflict_task, _excluded_bundle_keys, _conflict_graph_inputs, _graph_payload, _bundle_conflict_annotations, implementation_supervisor_command, plan_bundle_lanes, launch_bundle_lanes
+- AST symbols: logger, _MANIFEST_REFERENCED_BUNDLE_FIELDS, _MANIFEST_MEMBER_TASK_FIELDS, _MANIFEST_PROFILE_G_REFERENCE_FIELDS, bundle_member_completion_receipts, BundleLaneSpec, _compact_bundle_manifest_payload, _compact_task_manifest_payload, _lane_manifest_payload, _lane_database_payload, RunningBundleLane, resolve_repo_path, lane_state_prefix, _schedule_int, _schedule_bool, _string_list, _lane_schedule_key, _mapping_list, _execution_slice_members, _first_nonempty, _resource_lane_fields, _TERMINAL_CONFLICT_TASK_STATUSES, _live_bundle_conflict_members, _bundle_conflict_task, _excluded_bundle_keys, _conflict_graph_inputs, _graph_payload, _bundle_conflict_annotations, implementation_supervisor_command, plan_bundle_lanes
 - Merge key: refactor/g9/g9-s1
 - Candidate kind: seed
 - Todo vector key: ref-037-replacestaticbundlelaunchwithadynamicleasedworke
@@ -803,7 +803,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G9.S2
 - Missing evidence: The current conflict domain uses one path root and lightweight semantic similarity, which misses multi-file and symbol overlap.
-- AST symbols: CONFLICT_RECEIPT_STATUSES, _payload, _sources, _items, _field_items, normalize_repo_path, _normalized_paths, _normalized_terms, _gitmodule_paths, _under, _looks_generated, ConflictSurface, _python_symbols, build_conflict_surface, _merge_duplicate_surfaces, _pair_key, ConflictWeightHistory, ConflictEdge, LaneAssignment, LaneDecision, TaskConflictGraph, ConflictGraph, SurfaceEvidenceEdge, SurfaceEvidenceComparison, SurfaceContradiction, SurfaceContradictionReport, _comparison_values, compare_surface_evidence, _strong_evidence_records, detect_surface_contradictions
+- AST symbols: CONFLICT_RECEIPT_STATUSES, AST_BLOB_RECORD_SCHEMA_VERSION, _source_sha256, _ast_expression_name, _ast_render, _ast_signature, ASTBlobRecord, build_python_ast_blob_record, coerce_ast_blob_record, index_ast_blob_records, _payload, _sources, _items, _field_items, normalize_repo_path, _normalized_paths, _normalized_terms, _gitmodule_paths, _under, _looks_generated, ConflictSurface, _python_symbols, build_conflict_surface, _merge_duplicate_surfaces, _pair_key, ConflictWeightHistory, ConflictEdge, LaneAssignment, LaneDecision, TaskConflictGraph
 - Merge key: refactor/g9/g9-s2
 - Candidate kind: seed
 - Todo vector key: ref-040-buildanastandchanged-pathconflictgraphforlanecol
@@ -4584,11 +4584,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-247-definerisk-selectedproofandrolloutpolicy
 - Acceptance: Policy maps changed paths, AST scopes, risk, and invariant classes to required assurance and fallback validation.; Disabled, shadow, canary, and enforcement modes have explicit promotion and override behavior.; Unsupported, unavailable, timed-out, and inconclusive results cannot silently satisfy an enforcement gate.; Overrides require bounded scope, actor, reason, expiration, and a durable receipt.
 
-- [ ] Task checkbox-248: REF-248 Compile candidate diffs into typed AST proof scopes
+- [!] Task checkbox-248: REF-248 Compile candidate diffs into typed AST proof scopes
 
 ## REF-248 Compile candidate diffs into typed AST proof scopes
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -4599,7 +4599,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S2
 - Missing evidence: Proof planning must start from deterministic changed symbols and contracts rather than sending repository-wide source or AST records to a model.
-- AST symbols: CONFLICT_RECEIPT_STATUSES, _payload, _sources, _items, _field_items, normalize_repo_path, _normalized_paths, _normalized_terms, _gitmodule_paths, _under, _looks_generated, ConflictSurface, _python_symbols, build_conflict_surface, _merge_duplicate_surfaces, _pair_key, ConflictWeightHistory, ConflictEdge, LaneAssignment, LaneDecision, TaskConflictGraph, ConflictGraph, SurfaceEvidenceEdge, SurfaceEvidenceComparison, SurfaceContradiction, SurfaceContradictionReport, _comparison_values, compare_surface_evidence, _strong_evidence_records, detect_surface_contradictions
+- AST symbols: PROOF_SCOPE_SCHEMA, PROOF_SCOPE_SET_SCHEMA, DiffChangeKind, ProofScopeKind, ProofScopeType, CandidateChangeKind, _sha256_source, _enum_change_kind, CandidateDiffEntry, CodeProofScope, ASTProofScope, TypedASTProofScope, ProofScopeCompilationStats, CodeProofScopeSet, CompiledProofScopes, ProofScopeSet, ProofScopeCompilation, CandidateFileDiff, _module_name, _qualify, _split_owner, _record_matches_source, _candidate_records, _facts_for_record, _coerce_entries, parse_unified_diff, _git, _git_source, collect_git_candidate_diff, compile_candidate_proof_scopes
 - Merge key: refactor/g11/g11-s2
 - Candidate kind: seed
 - Todo vector key: ref-248-compilecandidatediffsintotypedastproofscopes
@@ -4620,7 +4620,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S2
 - Missing evidence: Arbitrary Python cannot be made formally verified by translating free-form model claims; enforcement needs reviewed templates with explicit semantics.
-- AST symbols: 
+- AST symbols: PROOF_SCOPE_SCHEMA, PROOF_SCOPE_SET_SCHEMA, DiffChangeKind, ProofScopeKind, ProofScopeType, CandidateChangeKind, _sha256_source, _enum_change_kind, CandidateDiffEntry, CodeProofScope, ASTProofScope, TypedASTProofScope, ProofScopeCompilationStats, CodeProofScopeSet, CompiledProofScopes, ProofScopeSet, ProofScopeCompilation, CandidateFileDiff, _module_name, _qualify, _split_owner, _record_matches_source, _candidate_records, _facts_for_record, _coerce_entries, parse_unified_diff, _git, _git_source, collect_git_candidate_diff, compile_candidate_proof_scopes
 - Merge key: refactor/g11/g11-s2
 - Candidate kind: seed
 - Todo vector key: ref-249-buildareviewedcode-invariantobligationtemplatere
@@ -4872,7 +4872,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S5
 - Missing evidence: Leanstral can draft useful Lean proof text, but its legal-modal implementation has optional model and spaCy dependencies that cannot become supervisor startup requirements.
-- AST symbols: FORMAL_VERIFICATION_CAPABILITY_SCHEMA_VERSION, FORMAL_VERIFICATION_CAPABILITY_REPORT_VERSION, PROOF_PROVIDER_CAPABILITY_SCHEMA_VERSION, DEFAULT_CAPABILITY_CACHE_TTL_SECONDS, DEFAULT_CAPABILITY_PROBE_TIMEOUT_SECONDS, DEFAULT_CAPABILITY_PROBE_MAX_CHECKS, CapabilityHealth, CapabilityDimension, ProofProviderOperation, ProofProviderIsolation, _PROVIDER_OPERATION_ORDER, ProofProviderCapability, ProviderCapabilities, _DIMENSION_ORDER, CapabilityHealthCheck, FormalVerificationProviderCapability, FormalVerificationCapabilityReport, FormalVerificationProbeConfig, PackageFinder, ExecutableFinder, DistributionVersionFinder, _find_spec_without_import, FormalVerificationCapabilityProbe, _DEFAULT_PROBE, probe_formal_verification_capabilities, clear_formal_verification_capability_cache, __all__, AVAILABLE, DEGRADED, UNAVAILABLE
+- AST symbols: _ROUTER_ALIASES, _CANONICAL_MUTATION_KEYS, LLMGenerate, _nonempty_text, _positive_integer, _json_mapping, _identifiers, LeanstralResourceIsolation, LeanstralProofProviderConfig, LeanstralProviderConfig, LeanstralProofDraft, _default_llm_generate, LeanstralProofProvider, create_leanstral_proof_provider, __all__, result, __post_init__, to_dict, model_resource_class, kernel_resource_class, assurance, verified, authoritative, generate, provider_id, provider_version, protocol_version, __init__, capabilities, capability
 - Merge key: refactor/g11/g11-s5
 - Candidate kind: seed
 - Todo vector key: ref-261-exposeleanstralthroughacapability-isolatedllm-ro
@@ -4893,7 +4893,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S5
 - Missing evidence: Leanstral should solve a verifier-generated theorem with bounded premises instead of rediscovering repository structure in its context window.
-- AST symbols: 
+- AST symbols: _ROUTER_ALIASES, _CANONICAL_MUTATION_KEYS, LLMGenerate, _nonempty_text, _positive_integer, _json_mapping, _identifiers, LeanstralResourceIsolation, LeanstralProofProviderConfig, LeanstralProviderConfig, LeanstralProofDraft, _default_llm_generate, LeanstralProofProvider, create_leanstral_proof_provider, __all__, result, __post_init__, to_dict, model_resource_class, kernel_resource_class, assurance, verified, authoritative, generate, provider_id, provider_version, protocol_version, __init__, capabilities, capability
 - Merge key: refactor/g11/g11-s5
 - Candidate kind: seed
 - Todo vector key: ref-262-generatefixed-theoremleanstralpromptsfromproofco
@@ -4914,7 +4914,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S5
 - Missing evidence: Leanstral output is useful only after deterministic schema, theorem-integrity, source-scope, patch, and local kernel checks.
-- AST symbols: 
+- AST symbols: _ROUTER_ALIASES, _CANONICAL_MUTATION_KEYS, LLMGenerate, _nonempty_text, _positive_integer, _json_mapping, _identifiers, LeanstralResourceIsolation, LeanstralProofProviderConfig, LeanstralProviderConfig, LeanstralProofDraft, _default_llm_generate, LeanstralProofProvider, create_leanstral_proof_provider, __all__, result, __post_init__, to_dict, model_resource_class, kernel_resource_class, assurance, verified, authoritative, generate, provider_id, provider_version, protocol_version, __init__, capabilities, capability
 - Merge key: refactor/g11/g11-s5
 - Candidate kind: seed
 - Todo vector key: ref-263-kernel-checkleanstraldraftsandconstrainpatchprop
@@ -4935,17 +4935,17 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S6
 - Missing evidence: A ZKP can bind a trusted proof receipt or protect private premises, but it does not independently prove arbitrary Python correctness.
-- AST symbols: CONTRACT_VERSION, SCHEMA_VERSION, CODE_PROOF_OBLIGATION_SCHEMA, PROOF_PLAN_SCHEMA, PROOF_PLAN_STEP_SCHEMA, PROOF_ATTEMPT_SCHEMA, PROOF_RECEIPT_SCHEMA, PROOF_EVIDENCE_SCHEMA, RESOURCE_BUDGET_SCHEMA, ASSURANCE_ASSESSMENT_SCHEMA, ContractValidationError, AssuranceLevel, RequiredAssuranceLevel, AuthoritativeAssuranceLevel, ProofAssuranceLevel, ProofStage, AttemptStatus, ProofVerdict, EvidenceKind, ProofEvidenceKind, EvidenceAuthority, EvidenceVerdict, EvidenceFreshness, TEnum, _enum, _canonical_value, canonical_json_bytes, canonical_json, content_identity, _text
+- AST symbols: PROOF_ATTESTATION_CONTRACT_VERSION, PROOF_ATTESTATION_STATEMENT_SCHEMA, PROOF_ATTESTATION_ENVELOPE_SCHEMA, PROOF_ATTESTATION_VERIFICATION_SCHEMA, ZKP_RECEIPT_ATTESTATION_STATEMENT_SCHEMA, ZKP_RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ZKP_RECEIPT_ATTESTATION_VERIFICATION_SCHEMA, RECEIPT_ATTESTATION_STATEMENT_SCHEMA, RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ATTESTATION_VERIFICATION_SCHEMA, AttestationValidationError, WitnessDisclosureError, AttestationBackendMode, ZKPBackendMode, AttestationTrust, AttestationGate, AttestationVerificationVerdict, AttestationMode, _bool, _statement, _backend_id_is_explicitly_simulated, ReceiptAttestationStatement, ZKPReceiptAttestationStatement, ProofAttestationStatement, T, PrivateAttestationWitness, ReceiptAttestationWitness, ZKPWitness, ReceiptAttestationRequest, ZKPReceiptAttestationRequest
 - Merge key: refactor/g11/g11-s6
 - Candidate kind: seed
 - Todo vector key: ref-264-definezkpreceipt-attestationstatementsandtrustse
 - Acceptance: The public statement binds tree, obligation, policy, kernel, receipt, circuit, backend, and verification-key identities.; Attestation is available only for an existing kernel-verified receipt.; Simulated ZKP is labeled non-authoritative and cannot satisfy production or completion gates.; Hidden witness fields are excluded from logs, context capsules, caches, and public artifacts.
 
-- [ ] Task checkbox-265: REF-265 Gate cryptographic backends on health, circuit, key, and no-leak evidence
+- [x] Task checkbox-265: REF-265 Gate cryptographic backends on health, circuit, key, and no-leak evidence
 
 ## REF-265 Gate cryptographic backends on health, circuit, key, and no-leak evidence
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G11
@@ -4956,7 +4956,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S6
 - Missing evidence: ProveKit or Groth16 must fail closed when binaries, circuits, verification keys, schemas, or witness protections are unavailable or stale.
-- AST symbols: FORMAL_VERIFICATION_CAPABILITY_SCHEMA_VERSION, FORMAL_VERIFICATION_CAPABILITY_REPORT_VERSION, PROOF_PROVIDER_CAPABILITY_SCHEMA_VERSION, DEFAULT_CAPABILITY_CACHE_TTL_SECONDS, DEFAULT_CAPABILITY_PROBE_TIMEOUT_SECONDS, DEFAULT_CAPABILITY_PROBE_MAX_CHECKS, CapabilityHealth, CapabilityDimension, ProofProviderOperation, ProofProviderIsolation, _PROVIDER_OPERATION_ORDER, ProofProviderCapability, ProviderCapabilities, _DIMENSION_ORDER, CapabilityHealthCheck, FormalVerificationProviderCapability, FormalVerificationCapabilityReport, FormalVerificationProbeConfig, PackageFinder, ExecutableFinder, DistributionVersionFinder, _find_spec_without_import, FormalVerificationCapabilityProbe, _DEFAULT_PROBE, probe_formal_verification_capabilities, clear_formal_verification_capability_cache, __all__, AVAILABLE, DEGRADED, UNAVAILABLE
+- AST symbols: PROOF_ATTESTATION_CONTRACT_VERSION, PROOF_ATTESTATION_STATEMENT_SCHEMA, PROOF_ATTESTATION_ENVELOPE_SCHEMA, PROOF_ATTESTATION_VERIFICATION_SCHEMA, ZKP_RECEIPT_ATTESTATION_STATEMENT_SCHEMA, ZKP_RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ZKP_RECEIPT_ATTESTATION_VERIFICATION_SCHEMA, RECEIPT_ATTESTATION_STATEMENT_SCHEMA, RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ATTESTATION_VERIFICATION_SCHEMA, AttestationValidationError, WitnessDisclosureError, AttestationBackendMode, ZKPBackendMode, AttestationTrust, AttestationGate, AttestationVerificationVerdict, AttestationMode, _bool, _statement, _backend_id_is_explicitly_simulated, ReceiptAttestationStatement, ZKPReceiptAttestationStatement, ProofAttestationStatement, T, PrivateAttestationWitness, ReceiptAttestationWitness, ZKPWitness, ReceiptAttestationRequest, ZKPReceiptAttestationRequest
 - Merge key: refactor/g11/g11-s6
 - Candidate kind: seed
 - Todo vector key: ref-265-gatecryptographicbackendsonhealthcircuitkeyandno
@@ -4977,7 +4977,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S6
 - Missing evidence: Verified envelopes should be queryable and optionally content-addressed without changing the underlying proof verdict or exposing witnesses.
-- AST symbols: BUNDLE_INDEX_KIND, SCHEDULER_MANIFEST_KIND, QUERY_SCHEMA, MAX_QUERY_ROWS, _IDENTIFIER, _READ_ONLY_SQL, QueryArtifactPaths, query_artifact_paths, _duckdb_module, _json_text, _json_value, _as_int, _as_bool, _as_float, _string_values, _atomic_write_text, _artifact_kind, _query_descriptor, _common_schema, _bundle_schema, _manifest_schema, _top_level_fields, _graph_mapping, _mapping_items, _populate_bundle_tables, _populate_manifest_tables, _table_descriptions, _write_duckdb, write_queryable_artifact, write_bundle_index_artifact
+- AST symbols: PROOF_ATTESTATION_CONTRACT_VERSION, PROOF_ATTESTATION_STATEMENT_SCHEMA, PROOF_ATTESTATION_ENVELOPE_SCHEMA, PROOF_ATTESTATION_VERIFICATION_SCHEMA, ZKP_RECEIPT_ATTESTATION_STATEMENT_SCHEMA, ZKP_RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ZKP_RECEIPT_ATTESTATION_VERIFICATION_SCHEMA, RECEIPT_ATTESTATION_STATEMENT_SCHEMA, RECEIPT_ATTESTATION_ENVELOPE_SCHEMA, ATTESTATION_VERIFICATION_SCHEMA, AttestationValidationError, WitnessDisclosureError, AttestationBackendMode, ZKPBackendMode, AttestationTrust, AttestationGate, AttestationVerificationVerdict, AttestationMode, _bool, _statement, _backend_id_is_explicitly_simulated, ReceiptAttestationStatement, ZKPReceiptAttestationStatement, ProofAttestationStatement, T, PrivateAttestationWitness, ReceiptAttestationWitness, ZKPWitness, ReceiptAttestationRequest, ZKPReceiptAttestationRequest
 - Merge key: refactor/g11/g11-s6
 - Candidate kind: seed
 - Todo vector key: ref-266-persistoptionalzkpenvelopesbesidetrustedproofrec
@@ -5166,7 +5166,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G12.S1
 - Missing evidence: The supervisor needs a deterministic semantic model of intended work before a language model is asked to implement it.
-- AST symbols: 
+- AST symbols: FORMAL_PLANNING_CONTRACT_VERSION, PLANNING_CONTRACT_VERSION, SCHEMA_VERSION, FORMAL_WORK_PLAN_SCHEMA, ACTOR_SCHEMA, GOAL_SCHEMA, SUBGOAL_SCHEMA, PLAN_TASK_SCHEMA, PLAN_EVENT_SCHEMA, FLUENT_SCHEMA, PRECONDITION_SCHEMA, EFFECT_SCHEMA, NORM_SCHEMA, TEMPORAL_CONSTRAINT_SCHEMA, EVIDENCE_REQUIREMENT_SCHEMA, PLAN_ASSURANCE_SCHEMA, FormalPlanningValidationError, ActorKind, EventKind, FluentValueType, EffectOperation, NormKind, TemporalConstraintKind, EvidenceRequirementKind, PlanConsistencyLevel, PlanConformanceLevel, T, E, _strings, _optional_int
 - Merge key: refactor/g12/g12-s1
 - Candidate kind: seed
 - Todo vector key: ref-275-defineacanonicalformalwork-plancontractandlogicv
@@ -5250,7 +5250,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G12.S2
 - Missing evidence: Source files, installers, and executable discovery do not establish that a prover can soundly check a supervisor obligation.
-- AST symbols: 
+- AST symbols: PROVER_MATRIX_SCHEMA_VERSION, PROVER_SELF_TEST_SCHEMA_VERSION, PROVER_MATRIX_DUCKDB_SCHEMA_VERSION, PROVER_MATRIX_REPORT_VERSION, DEFAULT_SELF_TEST_TIMEOUT_SECONDS, DEFAULT_MATRIX_TIMEOUT_SECONDS, DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_MAX_IDENTITY_FILE_BYTES, DEFAULT_MAX_SELF_TESTS, DEFAULT_DOCUMENTATION_MATRIX, ProverState, SelfTestStatus, IdentityKind, _canonical_json, _identity, _utc_timestamp, _strict_json_mapping, _nonempty_tuple, BoundIdentity, SelfTestBinding, ProverFixture, ProverDefinition, CommandRequest, CommandResult, CommandRunner, PackageFinder, VersionFinder, ExecutableFinder, ProverSelfTestReceipt, DocumentationClaim
 - Merge key: refactor/g12/g12-s2
 - Candidate kind: seed
 - Todo vector key: ref-279-buildanexecutableself-testingprovercapabilitymat
@@ -5271,7 +5271,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G12.S2
 - Missing evidence: A solver is only as sound as the translation and semantic abstraction used to invoke it.
-- AST symbols: 
+- AST symbols: PROVER_CONFORMANCE_VERSION, CONFORMANCE_FIXTURE_SCHEMA, CONFORMANCE_FIXTURE_SET_SCHEMA, CONFORMANCE_CASE_SCHEMA, CONFORMANCE_REPORT_SCHEMA, CONFORMANCE_GATE_SCHEMA, DEFAULT_MAX_CONFORMANCE_CASES, DEFAULT_CONFORMANCE_TIMEOUT_SECONDS, ConformanceTestKind, ConformanceMethod, ConformanceStatus, RouteHealth, QuarantineReason, _enum, _text, _strings, _strict_mapping, _timestamp, _digest, _schema, _claimed_identity, ConformanceFixture, ConformanceFixtureSet, ConformanceObservation, ConformanceCaseResult, ConformanceReport, FixtureRunner, ConformanceRunConfig, ProverConformanceRunner, QuarantineRule
 - Merge key: refactor/g12/g12-s2
 - Candidate kind: seed
 - Todo vector key: ref-280-conformance-testandquarantinelogictranslationsan
