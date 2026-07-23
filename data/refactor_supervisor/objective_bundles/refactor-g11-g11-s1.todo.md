@@ -19,7 +19,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S1
 - Missing evidence: The supervisor needs a truthful runtime capability matrix before it can route or require proof work.
-- AST symbols: 
+- AST symbols: FORMAL_VERIFICATION_CAPABILITY_SCHEMA_VERSION, FORMAL_VERIFICATION_CAPABILITY_REPORT_VERSION, DEFAULT_CAPABILITY_CACHE_TTL_SECONDS, DEFAULT_CAPABILITY_PROBE_TIMEOUT_SECONDS, DEFAULT_CAPABILITY_PROBE_MAX_CHECKS, CapabilityHealth, CapabilityDimension, _DIMENSION_ORDER, CapabilityHealthCheck, FormalVerificationProviderCapability, FormalVerificationCapabilityReport, FormalVerificationProbeConfig, PackageFinder, ExecutableFinder, DistributionVersionFinder, _find_spec_without_import, FormalVerificationCapabilityProbe, _DEFAULT_PROBE, probe_formal_verification_capabilities, clear_formal_verification_capability_cache, __all__, AVAILABLE, DEGRADED, UNAVAILABLE, DISABLED, PROVIDER, EXECUTABLE, PACKAGE, MODEL, CIRCUIT
 - Merge key: refactor/g11/g11-s1
 - Candidate kind: seed
 - Todo vector key: ref-244-probeformal-logicproviderstoolchainsandoptionald
@@ -40,7 +40,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S1
 - Missing evidence: Proof-aware scheduling needs one versioned contract and a sound trust lattice shared by providers, caches, merge gates, and goal evidence.
-- AST symbols: 
+- AST symbols: CONTRACT_VERSION, SCHEMA_VERSION, CODE_PROOF_OBLIGATION_SCHEMA, PROOF_PLAN_SCHEMA, PROOF_PLAN_STEP_SCHEMA, PROOF_ATTEMPT_SCHEMA, PROOF_RECEIPT_SCHEMA, PROOF_EVIDENCE_SCHEMA, RESOURCE_BUDGET_SCHEMA, ASSURANCE_ASSESSMENT_SCHEMA, ContractValidationError, AssuranceLevel, RequiredAssuranceLevel, AuthoritativeAssuranceLevel, ProofAssuranceLevel, ProofStage, AttemptStatus, ProofVerdict, EvidenceKind, ProofEvidenceKind, EvidenceAuthority, EvidenceVerdict, EvidenceFreshness, TEnum, _enum, _canonical_value, canonical_json_bytes, canonical_json, content_identity, _text
 - Merge key: refactor/g11/g11-s1
 - Candidate kind: seed
 - Todo vector key: ref-245-definecanonicalproofobligationsplansreceiptsanda
@@ -61,7 +61,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S1
 - Missing evidence: A mandatory import from the acceleration submodule into its parent datasets package would create a brittle package and submodule cycle.
-- AST symbols: 
+- AST symbols: FORMAL_VERIFICATION_CAPABILITY_SCHEMA_VERSION, FORMAL_VERIFICATION_CAPABILITY_REPORT_VERSION, DEFAULT_CAPABILITY_CACHE_TTL_SECONDS, DEFAULT_CAPABILITY_PROBE_TIMEOUT_SECONDS, DEFAULT_CAPABILITY_PROBE_MAX_CHECKS, CapabilityHealth, CapabilityDimension, _DIMENSION_ORDER, CapabilityHealthCheck, FormalVerificationProviderCapability, FormalVerificationCapabilityReport, FormalVerificationProbeConfig, PackageFinder, ExecutableFinder, DistributionVersionFinder, _find_spec_without_import, FormalVerificationCapabilityProbe, _DEFAULT_PROBE, probe_formal_verification_capabilities, clear_formal_verification_capability_cache, __all__, AVAILABLE, DEGRADED, UNAVAILABLE, DISABLED, PROVIDER, EXECUTABLE, PACKAGE, MODEL, CIRCUIT
 - Merge key: refactor/g11/g11-s1
 - Candidate kind: seed
 - Todo vector key: ref-246-introduceanoptionalisolatedproof-providerprotoco
@@ -82,7 +82,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G11.S1
 - Missing evidence: Formal verification should protect modeled high-risk invariants without blocking unrelated or unsupported Python changes.
-- AST symbols: 
+- AST symbols: POLICY_VERSION, SCHEMA_VERSION, CHANGED_SCOPE_SCHEMA, PROOF_POLICY_RULE_SCHEMA, PROOF_REQUIREMENT_SCHEMA, POLICY_SELECTION_SCHEMA, FORMAL_VERIFICATION_POLICY_SCHEMA, PROOF_OUTCOME_SCHEMA, VALIDATION_OUTCOME_SCHEMA, OVERRIDE_RECEIPT_SCHEMA, ROLLOUT_TRANSITION_RECEIPT_SCHEMA, REQUIREMENT_GATE_RESULT_SCHEMA, POLICY_GATE_DECISION_SCHEMA, MAX_SCOPE_ITEMS, MAX_OVERRIDE_LIFETIME_SECONDS, DEFAULT_MAX_OVERRIDE_SECONDS, PolicyValidationError, RiskLevel, InvariantClass, RolloutMode, ProofResultStatus, _enum, _text, _strings, _mapping, _integer, _normalize_git_path, _normalize_path_pattern, _path_matches, _timestamp
 - Merge key: refactor/g11/g11-s1
 - Candidate kind: seed
 - Todo vector key: ref-247-definerisk-selectedproofandrolloutpolicy
