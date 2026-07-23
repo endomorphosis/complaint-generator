@@ -27,6 +27,7 @@ from ipfs_datasets_py.logic.security.llm_circuit_breaker import (
 )
 
 from ipfs_datasets_py.logic.observability.structured_logging import (
+    JSONLogFormatter,
     LogContext,
     get_logger,
     EventType,
@@ -262,42 +263,38 @@ class TestStructuredLoggingProperties:
     @settings(max_examples=50)
     def test_json_output_always_parses(self, log_message):
         """Property: All JSON log entries parse successfully."""
-        import json
+        import logging
         import tempfile
         from pathlib import Path
-        
-        # Create temporary log file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False) as f:
-            temp_log = f.name
-        
-        try:
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_log = Path(temp_dir) / "structured.log"
             logger = get_logger("test", handlers=[])
-            
+
             # Add handler that writes to temp file
-            import logging
             handler = logging.FileHandler(temp_log)
-            from ipfs_datasets_py.logic.observability.structured_logging import JSONLogFormatter
-            handler.setFormatter(JSONLogFormatter())
-            logger.addHandler(handler)
-            
-            # Log message
-            logger.info(log_message)
-            handler.flush()
-            
-            # Parse and verify
-            entries = parse_json_log_file(Path(temp_log))
-            
-            # All entries must parse successfully
-            assert len(entries) > 0, "No log entries found"
-            assert all(isinstance(e, dict) for e in entries), \
-                "Some entries did not parse as dictionaries"
-        finally:
-            # Cleanup
-            import os
             try:
-                os.unlink(temp_log)
-            except:
-                pass
+                handler.setFormatter(JSONLogFormatter())
+                logger.addHandler(handler)
+
+                # Log message
+                logger.info(log_message)
+                handler.flush()
+
+                # Parse and verify
+                entries = parse_json_log_file(temp_log)
+
+                # All entries must parse successfully
+                assert len(entries) > 0, "No log entries found"
+                assert all(isinstance(e, dict) for e in entries), \
+                    "Some entries did not parse as dictionaries"
+            finally:
+                # A named logger survives across Hypothesis examples. Detach and
+                # close its per-example file handler before deleting the directory.
+                try:
+                    logger.removeHandler(handler)
+                finally:
+                    handler.close()
     
     @given(st.sampled_from([e.value for e in EventType]))
     @settings(max_examples=30)
