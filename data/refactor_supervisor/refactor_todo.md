@@ -5382,11 +5382,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-285-verifyclaimfencingreceiptandattestationprotocols
 - Acceptance: Versioned models cover claimant authentication, lease grants, fencing freshness, replay resistance, receipt binding, merge authorization, and optional attestation exchange.; Tamarin and ProVerif lanes expose secrecy, authenticity, correspondence, and replay queries with exact model and toolchain receipts.; Attack traces become canonical counterexamples and model abstractions are documented per query.; Executable presence or installer success cannot satisfy protocol verification without a passing end-to-end model fixture.
 
-- [ ] Task checkbox-286: REF-286 Check cross-lane information-flow hyperproperties
+- [x] Task checkbox-286: REF-286 Check cross-lane information-flow hyperproperties
 
 ## REF-286 Check cross-lane information-flow hyperproperties
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
