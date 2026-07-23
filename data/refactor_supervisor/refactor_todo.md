@@ -4668,11 +4668,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-251-indexproofscopesandinvalidatestaledependentevide
 - Acceptance: Scope indexes map files, qualified symbols, interfaces, assumptions, templates, toolchains, and policies to dependent obligations and receipts.; Blob reuse avoids reparsing unchanged scopes while deletes and renames invalidate stale records.; Invalidation is transitive across proof-plan dependencies and records a bounded reason chain.; Incremental and exhaustive rebuilds produce equivalent active evidence sets.
 
-- [ ] Task checkbox-252: REF-252 Generate bounded proof context capsules for Codex and Leanstral
+- [x] Task checkbox-252: REF-252 Generate bounded proof context capsules for Codex and Leanstral
 
 ## REF-252 Generate bounded proof context capsules for Codex and Leanstral
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
