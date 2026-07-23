@@ -4626,11 +4626,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-249-buildareviewedcode-invariantobligationtemplatere
 - Acceptance: Initial templates cover legal state transitions, lease uniqueness and fencing, DAG acyclicity, merge idempotence, cache-key completeness, evidence freshness, projection equivalence, and unsupported-proof fail-closed behavior.; Every template declares a Python reference predicate, canonical statement, supported backends, assumptions, mutation cases, and fallback tests.; Template versions and semantic hashes participate in obligation and cache identity.; Unknown or ambiguous code shapes remain unsupported instead of selecting a similar template heuristically.
 
-- [~] Task checkbox-250: REF-250 Materialize a deterministic code and proof evidence graph in JSON and DuckDB
+- [x] Task checkbox-250: REF-250 Materialize a deterministic code and proof evidence graph in JSON and DuckDB
 
 ## REF-250 Materialize a deterministic code and proof evidence graph in JSON and DuckDB
 
-- Status: in_progress
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
