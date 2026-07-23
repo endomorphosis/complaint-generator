@@ -3520,7 +3520,9 @@ def _durable_task_statuses() -> dict[str, str]:
             statuses[task.task_id] = _canonical_projection_status(task.status)
     state = _load_json_object(TASK_STATE_PATH)
     for task_id in state.get("blocked_task_ids", []) or []:
-        statuses.setdefault(str(task_id), "blocked")
+        task_id = str(task_id)
+        if statuses.get(task_id) != "completed":
+            statuses[task_id] = "blocked"
     for task_id in state.get("completed_task_ids", []) or []:
         statuses[str(task_id)] = "completed"
     active_task_id = str(state.get("active_task_id") or "").strip()

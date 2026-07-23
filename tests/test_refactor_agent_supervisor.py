@@ -1350,6 +1350,12 @@ def test_active_projection_updates_bundle_index_without_rewriting_taskboards(
 ## REF-001 Active implementation
 
 - Status: todo
+
+- [ ] Task checkbox-2: REF-002 Durably blocked implementation
+
+## REF-002 Durably blocked implementation
+
+- Status: todo
 """,
         encoding="utf-8",
     )
@@ -1359,6 +1365,7 @@ def test_active_projection_updates_bundle_index_without_rewriting_taskboards(
                 "implementation_in_progress": True,
                 "active_task_id": "REF-001",
                 "active_phase": "implementing",
+                "blocked_task_ids": ["REF-002"],
             }
         ),
         encoding="utf-8",
@@ -1371,7 +1378,10 @@ def test_active_projection_updates_bundle_index_without_rewriting_taskboards(
                 "bundles": {
                     "g1/s1": {
                         "bundle_key": "g1/s1",
-                        "tasks": [{"task_id": "REF-001", "status": "todo"}],
+                        "tasks": [
+                            {"task_id": "REF-001", "status": "todo"},
+                            {"task_id": "REF-002", "status": "todo"},
+                        ],
                     }
                 },
             }
@@ -1383,9 +1393,10 @@ def test_active_projection_updates_bundle_index_without_rewriting_taskboards(
 
     assert result["reason"] == "active_projection_reconciled"
     assert result["updated"] is True
-    assert result["bundle_index"]["updated_task_ids"] == ["REF-001"]
+    assert result["bundle_index"]["updated_task_ids"] == ["REF-001", "REF-002"]
     index = json.loads(index_path.read_text(encoding="utf-8"))
     assert index["bundles"]["g1/s1"]["tasks"][0]["status"] == "in_progress"
+    assert index["bundles"]["g1/s1"]["tasks"][1]["status"] == "blocked"
     assert "- Status: todo" in supervisor.TODO_PATH.read_text(encoding="utf-8")
     assert index_path.with_suffix(".duckdb").exists()
 
