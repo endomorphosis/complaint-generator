@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-271: REF-271 Add adversarial tests for every proof trust boundary
+- [x] Task checkbox-271: REF-271 Add adversarial tests for every proof trust boundary
 
 ## REF-271 Add adversarial tests for every proof trust boundary
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
