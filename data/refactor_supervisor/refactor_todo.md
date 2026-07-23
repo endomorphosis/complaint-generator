@@ -6265,7 +6265,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-314 Close objective gap: Plan from dependencies, conflicts, and objective value
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
