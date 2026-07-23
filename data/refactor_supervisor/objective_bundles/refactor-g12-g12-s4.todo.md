@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-287: REF-287 Generalize runtime MTL monitoring to supervisor event traces
+- [x] Task checkbox-287: REF-287 Generalize runtime MTL monitoring to supervisor event traces
 
 ## REF-287 Generalize runtime MTL monitoring to supervisor event traces
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
