@@ -5004,11 +5004,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-267-maptrustedproofreceiptsintogoalcompletionevidenc
 - Acceptance: CompletionEvidence can reference obligation, proof receipt, assurance, tree, freshness, and provenance identities.; Required assurance is evaluated independently from validation success and task status.; Parent goals aggregate child proof requirements without hiding unsupported, inconclusive, stale, or contradicted descendants.; Legacy evidence remains readable but cannot be optimistically upgraded.
 
-- [ ] Task checkbox-268: REF-268 Apply risk-selected proof gates before merge promotion
+- [x] Task checkbox-268: REF-268 Apply risk-selected proof gates before merge promotion
 
 ## REF-268 Apply risk-selected proof gates before merge promotion
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
