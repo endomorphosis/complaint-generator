@@ -5914,7 +5914,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-306 Review swallowed exception path in tests/test_website_cohesion_playwright.py:407
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
