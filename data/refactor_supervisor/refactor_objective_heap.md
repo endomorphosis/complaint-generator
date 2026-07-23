@@ -98,7 +98,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P0
 - Bundle: refactor/g2/g2-s2
 - Goal: Reduce application surface coupling
-- Evidence: applications/complaint_workspace.py, One handler group is isolated., Routes keep the same response shape., python -m pytest tests/test_review_api.py -q, applications/dashboard_ui.py, playwright/server.js, Fixture builders are named and reusable., Playwright smoke tests remain stable., python -m pytest tests/test_claim_support_review_playwright_smoke.py -q
+- Evidence: applications/complaint_workspace.py, One handler group is isolated., Routes keep the same response shape., python -m pytest tests/test_review_api.py -q, applications/dashboard_ui.py, playwright/server.js, Fixture builders are named and reusable., Playwright smoke tests remain stable., python -m pytest tests/test_claim_support_review_playwright_smoke.py -q, data/refactor_supervisor/discovery/2026-07-23-ref-324-objective-validation-repair.md, objective validation repair
 - Validation: python -m pytest tests/test_review_api.py -q; python -m pytest tests/test_claim_support_review_playwright_smoke.py -q
 - Goal completion schema version: 1
 - Completion confidence: 0.166667
