@@ -6,7 +6,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-305 Review swallowed exception path in tests/test_property_based_extraction_testing.py:222
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
