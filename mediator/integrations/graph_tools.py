@@ -216,6 +216,7 @@ class GraphAwareRetrievalReranker:
             )
 
         try:
+            dependency_graph_terms: List[str] = []
             dg = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
             if dg is not None and hasattr(dg, "get_nodes_by_type"):
                 claim_nodes = dg.get_nodes_by_type(NodeType.CLAIM) or []
@@ -223,11 +224,16 @@ class GraphAwareRetrievalReranker:
                     node_name = str(getattr(node, "name", "") or "")
                     node_description = str(getattr(node, "description", "") or "")
                     if node_name:
-                        terms.append(node_name)
+                        dependency_graph_terms.append(node_name)
                     if node_description:
-                        terms.append(node_description)
+                        dependency_graph_terms.append(node_description)
+            terms.extend(dependency_graph_terms)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to extract dependency-graph retrieval terms; "
+                "continuing without dependency-graph terms",
+                exc_info=True,
+            )
 
         try:
             legal_graph = phase_manager.get_phase_data(ComplaintPhase.FORMALIZATION, "legal_graph")
