@@ -5604,7 +5604,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-296 Replace placeholder runtime path in tests/test_batch_265_path_validation_security.py:302
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
@@ -5635,7 +5635,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-297 Review swallowed exception path in tests/test_error_boundary_comprehensive.py:79
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
@@ -5666,7 +5666,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-298 Review swallowed exception path in tests/test_error_boundary_comprehensive.py:109
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
