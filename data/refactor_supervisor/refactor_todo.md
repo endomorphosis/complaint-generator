@@ -4878,11 +4878,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-261-exposeleanstralthroughacapability-isolatedllm-ro
 - Acceptance: Leanstral inference is invoked through llm_router with explicit provider, model, timeout, and token budgets.; Missing spaCy, model service, codec, or Leanstral dependencies produce degraded capability rather than import failure.; Model output is always marked unverified and cannot mutate canonical source or obligations.; Inference runs in the model resource class, separate from local kernel checking.
 
-- [ ] Task checkbox-262: REF-262 Generate fixed-theorem Leanstral prompts from proof context capsules
+- [x] Task checkbox-262: REF-262 Generate fixed-theorem Leanstral prompts from proof context capsules
 
 ## REF-262 Generate fixed-theorem Leanstral prompts from proof context capsules
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G11
