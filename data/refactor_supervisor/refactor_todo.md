@@ -5298,11 +5298,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-281-routeobligationsthroughproperty-specificmulti-pr
 - Acceptance: Routing selects SMT for finite constraints, TLA tools for state machines, Datalog/SecPAL for authorization, Tamarin/ProVerif for protocols, HyperLTL tools for hyperproperties, runtime MTL for traces, and Lean/Coq/Isabelle for kernel checking.; DCEC and TDFOL provide typed planning and temporal-deontic reasoning while Hammer coordinates premise selection, ATP/SMT candidates, and kernel reconstruction.; Disagreement, unknown, unsupported, timeout, and malformed output fail closed according to property policy and retain every attempt.; Conclusive counterexamples cancel redundant attempts while successful solver candidates still require the configured reconstruction or model-checking authority.
 
-- [ ] Task checkbox-282: REF-282 Persist conformance-bound prover receipts, caches, and matrix projections
+- [x] Task checkbox-282: REF-282 Persist conformance-bound prover receipts, caches, and matrix projections
 
 ## REF-282 Persist conformance-bound prover receipts, caches, and matrix projections
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
