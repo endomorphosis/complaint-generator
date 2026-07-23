@@ -4920,11 +4920,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-263-kernel-checkleanstraldraftsandconstrainpatchprop
 - Acceptance: Forbidden imports, axioms, unsafe declarations, sorry, admit, theorem substitution, and source-copy attacks are rejected.; Accepted proof text passes the same independent kernel reconstruction path as non-LLM candidates.; Patch proposals are restricted to task-declared paths and must pass git apply check plus configured validation.; Model and kernel artifacts retain separate provenance and assurance.
 
-- [ ] Task checkbox-264: REF-264 Define ZKP receipt-attestation statements and trust semantics
+- [x] Task checkbox-264: REF-264 Define ZKP receipt-attestation statements and trust semantics
 
 ## REF-264 Define ZKP receipt-attestation statements and trust semantics
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G11
