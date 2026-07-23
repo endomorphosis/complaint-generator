@@ -86,7 +86,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P0
 - Bundle: refactor/g3/g3-s2
 - Goal: Clarify graph, GraphRAG, and logic adapter boundaries
-- Evidence: integrations/ipfs_datasets/graphs.py, complaint_phases/knowledge_graph.py, Interfaces specify persistence, query, and provenance fields., Fallback graph behavior remains covered., python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q, integrations/ipfs_datasets/logic.py, lib/formal_logic, Logic status distinguishes unavailable, degraded, and implemented., Callers do not branch on fragile strings., python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q
+- Evidence: integrations/ipfs_datasets/graphs.py, complaint_phases/knowledge_graph.py, integrations/ipfs_datasets/graphrag.py, Interfaces specify persistence, query, and provenance fields., Fallback graph behavior remains covered., python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q, integrations/ipfs_datasets/logic.py, lib/formal_logic, tests/test_logic_capability_contract.py, Logic status distinguishes unavailable, degraded, and implemented., Callers do not branch on fragile strings., python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q, data/refactor_supervisor/discovery/2026-07-23-ref-318-objective-validation-repair.md, objective validation repair
 - Validation: python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q; python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q
 
 ## G4 Improve validation speed and confidence
