@@ -5092,7 +5092,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-272 Exercise an end-to-end parallel proof-aware implementation workflow
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -5113,7 +5113,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-273 Expose shadow, canary, enforcement, and override diagnostics
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -5134,7 +5134,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-274 Benchmark context reduction, cache reuse, and CPU proof throughput
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P1
 - Track: G11
@@ -5365,7 +5365,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-285 Verify claim, fencing, receipt, and attestation protocols with Tamarin and ProVerif
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5428,7 +5428,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-288 Normalize proof failures and traces into a counterexample knowledge graph
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5449,7 +5449,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-289 Generate bounded counterexample-guided plan repairs
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5470,7 +5470,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-290 Bind plan conformance and formal evidence into goal completion
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5491,7 +5491,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-291 Admit every prover family through one shared CPU and process budget
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5512,7 +5512,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-292 Adversarially test formal plans and every prover-matrix trust boundary
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5533,7 +5533,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-293 Exercise an end-to-end proof-carrying planning and implementation workflow
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5554,7 +5554,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-294 Benchmark and gate formal-planning rollout by assurance and throughput
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P1
 - Track: G12
@@ -6165,7 +6165,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-312 Close objective gap: Distinguish every refill and analysis outcome
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -6206,7 +6206,6 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Candidate kind: validation_gate
 - Todo vector key: a0f2f0d5d6cc792c
 - Acceptance: Objective scan filed this gap for G10.S1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-312-objective-gap-fdd16e8b8df5.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap. This task is part of goal_packet/ops/ipfs_datasets_py/25391dc0e27e; implement a complete, cohesive change that fully advances the packet goals (G10.S1, G10.S3, G10.S4) and covers all the shared packet evidence in one comprehensive pass. Refine the objective heap if the gap needs smaller child goals.
-- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
 
 ## REF-313 Close objective gap: Establish canonical coordination and merge flow
 
