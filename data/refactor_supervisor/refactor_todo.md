@@ -5025,11 +5025,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-268-applyrisk-selectedproofgatesbeforemergepromotion
 - Acceptance: Changed scopes select proof requirements, fallback checks, and rollout mode deterministically.; Shadow records outcomes, canary blocks configured paths, and enforcement fails closed for missing required assurance.; The merge receipt identifies the exact proof plan, receipts, validations, policy, tree, and any operator override.; Retries reuse valid cache evidence and do not weaken policy after a timeout or provider failure.
 
-- [ ] Task checkbox-269: REF-269 Invalidate proof evidence and reopen goals after semantic change
+- [x] Task checkbox-269: REF-269 Invalidate proof evidence and reopen goals after semantic change
 
 ## REF-269 Invalidate proof evidence and reopen goals after semantic change
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
