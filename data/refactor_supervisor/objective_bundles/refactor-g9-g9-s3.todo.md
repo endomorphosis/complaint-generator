@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-42: REF-042 Schedule lanes from live resources and llm_router provider capacity
+- [x] Task checkbox-42: REF-042 Schedule lanes from live resources and llm_router provider capacity
 
 ## REF-042 Schedule lanes from live resources and llm_router provider capacity
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G9
@@ -25,11 +25,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-042-schedulelanesfromliveresourcesandllm-routerprovi
 - Acceptance: Heartbeats report measured CPU, memory, disk, active phase, and available worker capacity.; Scheduler honors llm_router health, quota, latency, context, and token-budget constraints.; Concurrency scales within configured limits and applies backpressure before provider or host exhaustion.; Idle lanes advertise zero occupied capacity and can be reassigned.
 
-- [ ] Task checkbox-43: REF-043 Add impact-selected cached and parallel validation stages
+- [x] Task checkbox-43: REF-043 Add impact-selected cached and parallel validation stages
 
 ## REF-043 Add impact-selected cached and parallel validation stages
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G9
