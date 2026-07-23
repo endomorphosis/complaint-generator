@@ -7101,7 +7101,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-333 Close objective gap: Pay down error-handling and observability debt
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
