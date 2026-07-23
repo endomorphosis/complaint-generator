@@ -4983,11 +4983,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-266-persistoptionalzkpenvelopesbesidetrustedproofrec
 - Acceptance: Attestation envelopes preserve a reference to the immutable kernel receipt and public-input digest.; Cache and optional IPFS records bind backend, circuit, key, policy, and expiration.; Verifier results are reproducible from public artifacts and fail when any bound identity changes.; Attestation loss or expiration leaves kernel assurance intact but removes attested assurance.
 
-- [ ] Task checkbox-267: REF-267 Map trusted proof receipts into goal completion evidence
+- [x] Task checkbox-267: REF-267 Map trusted proof receipts into goal completion evidence
 
 ## REF-267 Map trusted proof receipts into goal completion evidence
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
