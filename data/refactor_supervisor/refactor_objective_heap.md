@@ -268,7 +268,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P1
 - Bundle: refactor/g6/g6-s1
 - Goal: Replace silent failures with typed outcomes
-- Evidence: mediator/mediator.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/search.py, Top production broad-exception clusters are documented., At least one cluster returns a typed degraded result., python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q, applications/ui_review.py, complaint_generator/ui_optimizer_daemon.py, mediator/state.py, Intentional ignores are named., Unexpected failures leave diagnostic breadcrumbs., python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q
+- Evidence: mediator/mediator.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/search.py, Top production broad-exception clusters are documented., At least one cluster returns a typed degraded result., python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q, applications/ui_review.py, complaint_generator/ui_optimizer_daemon.py, mediator/state.py, Intentional ignores are named., Unexpected failures leave diagnostic breadcrumbs., python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q, data/refactor_supervisor/discovery/2026-07-23-ref-336-objective-validation-repair.md, objective validation repair
 - Validation: python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q; python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q
 - Goal completion schema version: 1
 - Completion confidence: 0.166667
