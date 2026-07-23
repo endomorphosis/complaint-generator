@@ -5046,11 +5046,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-269-invalidateproofevidenceandreopengoalsaftersemant
 - Acceptance: Transitive invalidation records the changed input, affected obligations, receipts, criteria, goals, and source tree.; Affected provisional or verified goals reopen deterministically while unrelated goals remain stable.; Repeated identical invalidations are idempotent and historical receipts remain auditable.; Replacement tasks retain dependency and conflict edges to the invalidated scope.
 
-- [ ] Task checkbox-270: REF-270 Make planning proof-aware without expanding model context
+- [x] Task checkbox-270: REF-270 Make planning proof-aware without expanding model context
 
 ## REF-270 Make planning proof-aware without expanding model context
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
