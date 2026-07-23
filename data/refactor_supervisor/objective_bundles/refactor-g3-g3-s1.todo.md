@@ -25,7 +25,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-009-standardizecapabilitystatusanddegraded-reasonpay
 - Acceptance: All adapter groups report stable keys.; Missing optional extras produce actionable reasons.
 
-- [ ] Task checkbox-10: REF-010 Promote document parsing into a shared ingestion contract
+- [x] Task checkbox-10: REF-010 Promote document parsing into a shared ingestion contract
 
 ## REF-010 Promote document parsing into a shared ingestion contract
 

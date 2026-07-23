@@ -6,7 +6,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-230 Review swallowed exception path in test_pipeline_error_recovery.py:402
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality

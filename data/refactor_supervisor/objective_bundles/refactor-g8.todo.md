@@ -167,7 +167,7 @@ Conflict policy: keep edits inside this bundle when possible; use the LLM merge 
 
 ## REF-321 Close objective gap: Prepare incremental implementation slices
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops

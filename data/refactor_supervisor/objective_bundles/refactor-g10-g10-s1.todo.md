@@ -19,13 +19,13 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G10.S1
 - Missing evidence: Refill callbacks currently collapse skipped, deduplicated, exhausted, failed, and timed-out scans into the same empty collection.
-- AST symbols: logger, DEFAULT_CODEBASE_SCAN_MIN_OPEN_TASKS, DEFAULT_CODEBASE_SCAN_MAX_FINDINGS, DEFAULT_CODEBASE_SCAN_COOLDOWN_SECONDS, DEFAULT_OBJECTIVE_SCAN_MIN_OPEN_TASKS, DEFAULT_OBJECTIVE_SCAN_MAX_FINDINGS, DEFAULT_OBJECTIVE_SCAN_COOLDOWN_SECONDS, DEFAULT_VALIDATION_RETRY_BUDGET, DEFAULT_MERGE_RETRY_BUDGET, DEFAULT_IMPLEMENTATION_RETRY_BUDGET, DEFAULT_STALE_GIT_LOCK_SECONDS, DEFAULT_GENERATED_DIRTY_HARD_PATH_CAP, DEFAULT_GENERATED_DIRTY_MAX_DELETE_PATHS, DEFAULT_GENERATED_DIRTY_ALLOW_DELETIONS, DEFAULT_DEPENDENCY_GUARDRAIL_MAX_FINDINGS, DEFAULT_RECONCILIATION_GUARDRAIL_MAX_FINDINGS, DEFAULT_TASK_ID_PREFIX, DEFAULT_TASK_HEADER_PREFIX, CODEBASE_SCAN_MAX_FILE_BYTES, CODEBASE_SCAN_SUFFIXES, CODEBASE_SCAN_SKIP_PARTS, CODEBASE_SCAN_SKIP_PREFIXES, ANNOTATION_FOLLOWUP_RE, CodebaseFinding, utc_now, task_id_prefix, task_header_prefix, split_csv, task_ids_from_todo_text, task_block_is_present
+- AST symbols: REFILL_SCAN_RESULT_SCHEMA_VERSION, SCHEMA_VERSION, CONTRACT_VERSION, SCAN_RECEIPT_SCHEMA, SCAN_RECEIPT_PROJECTION_SCHEMA_VERSION, SCAN_RECEIPT_PROJECTION_SCHEMA, DEFAULT_SCAN_FRESHNESS_SECONDS, EXHAUSTION_QUORUM_SCHEMA_VERSION, EXHAUSTION_QUORUM_SCHEMA, _positive_env_int, DEFAULT_EXHAUSTION_QUORUM_SIZE, DEFAULT_EXHAUSTION_QUORUM, _HEALTHY_REASONS, _SKIPPED_REASONS, T, ScanTerminalReason, ScanMode, ScanSkipReason, _PARSER_FAILURE_REASONS, MAX_REPRESENTATIVE_PATHS_PER_REASON, _count, ScanCoverageCounts, CandidateAccounting, ScanReasonSummary, ScanDetailsArtifact, ScanAccounting, _utc_now, _utc_datetime, _nonempty, _json_value
 - Merge key: refactor/g10/g10-s1
 - Candidate kind: seed
 - Todo vector key: ref-200-defineatypedrefillscanresultandterminalreasontax
 - Acceptance: A versioned result contract distinguishes generated, exhausted, duplicate-only, threshold-satisfied, cooldown, disabled, partial, failed, and timed-out outcomes.; The contract records scan mode, analyzer version, repository and tree identity, start and finish timestamps, and whether the result is safe for completion reasoning.; Legacy list-returning callbacks remain supported through an explicit compatibility adapter rather than implicit truthiness.; No empty result is interpreted as goal completion without a typed terminal reason.
 
-- [ ] Task checkbox-201: REF-201 Instrument scan inventory, parser coverage, exclusions, and candidate accounting
+- [x] Task checkbox-201: REF-201 Instrument scan inventory, parser coverage, exclusions, and candidate accounting
 
 ## REF-201 Instrument scan inventory, parser coverage, exclusions, and candidate accounting
 
@@ -40,13 +40,13 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G10.S1
 - Missing evidence: A zero novel-finding count is not diagnosable without knowing what the analyzer discovered, parsed, skipped, rejected, or failed to inspect.
-- AST symbols: logger, DEFAULT_CODEBASE_SCAN_MIN_OPEN_TASKS, DEFAULT_CODEBASE_SCAN_MAX_FINDINGS, DEFAULT_CODEBASE_SCAN_COOLDOWN_SECONDS, DEFAULT_OBJECTIVE_SCAN_MIN_OPEN_TASKS, DEFAULT_OBJECTIVE_SCAN_MAX_FINDINGS, DEFAULT_OBJECTIVE_SCAN_COOLDOWN_SECONDS, DEFAULT_VALIDATION_RETRY_BUDGET, DEFAULT_MERGE_RETRY_BUDGET, DEFAULT_IMPLEMENTATION_RETRY_BUDGET, DEFAULT_STALE_GIT_LOCK_SECONDS, DEFAULT_GENERATED_DIRTY_HARD_PATH_CAP, DEFAULT_GENERATED_DIRTY_MAX_DELETE_PATHS, DEFAULT_GENERATED_DIRTY_ALLOW_DELETIONS, DEFAULT_DEPENDENCY_GUARDRAIL_MAX_FINDINGS, DEFAULT_RECONCILIATION_GUARDRAIL_MAX_FINDINGS, DEFAULT_TASK_ID_PREFIX, DEFAULT_TASK_HEADER_PREFIX, CODEBASE_SCAN_MAX_FILE_BYTES, CODEBASE_SCAN_SUFFIXES, CODEBASE_SCAN_SKIP_PARTS, CODEBASE_SCAN_SKIP_PREFIXES, ANNOTATION_FOLLOWUP_RE, CodebaseFinding, utc_now, task_id_prefix, task_header_prefix, split_csv, task_ids_from_todo_text, task_block_is_present
+- AST symbols: REFILL_SCAN_RESULT_SCHEMA_VERSION, SCHEMA_VERSION, CONTRACT_VERSION, SCAN_RECEIPT_SCHEMA, SCAN_RECEIPT_PROJECTION_SCHEMA_VERSION, SCAN_RECEIPT_PROJECTION_SCHEMA, DEFAULT_SCAN_FRESHNESS_SECONDS, EXHAUSTION_QUORUM_SCHEMA_VERSION, EXHAUSTION_QUORUM_SCHEMA, _positive_env_int, DEFAULT_EXHAUSTION_QUORUM_SIZE, DEFAULT_EXHAUSTION_QUORUM, _HEALTHY_REASONS, _SKIPPED_REASONS, T, ScanTerminalReason, ScanMode, ScanSkipReason, _PARSER_FAILURE_REASONS, MAX_REPRESENTATIVE_PATHS_PER_REASON, _count, ScanCoverageCounts, CandidateAccounting, ScanReasonSummary, ScanDetailsArtifact, ScanAccounting, _utc_now, _utc_datetime, _nonempty, _json_value
 - Merge key: refactor/g10/g10-s1
 - Candidate kind: seed
 - Todo vector key: ref-201-instrumentscaninventoryparsercoverageexclusionsa
 - Acceptance: Receipts count git roots, tracked files, eligible files, parsed files, cache hits, excluded files, parser failures, raw candidates, seen candidates, deduplicated candidates, and appended tasks.; Every skipped file and parser failure has a bounded reason code plus representative paths, with full details available as a durable artifact.; Candidate accounting balances from raw detection through filtering and task materialization.; Incremental and exhaustive scans report equivalent coverage dimensions.
 
-- [ ] Task checkbox-202: REF-202 Persist scan receipts in events, strategy state, status, and scheduler metrics
+- [x] Task checkbox-202: REF-202 Persist scan receipts in events, strategy state, status, and scheduler metrics
 
 ## REF-202 Persist scan receipts in events, strategy state, status, and scheduler metrics
 
@@ -61,7 +61,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G10.S1
 - Missing evidence: Operators and schedulers currently see only refill counts, so they cannot distinguish healthy exhaustion from an analyzer failure.
-- AST symbols: _EVENT_LOG_MAX_BYTES_ENV, _DEFAULT_EVENT_LOG_MAX_BYTES, _EVENT_LOG_RETAIN_RECENT_ENV, _DEFAULT_EVENT_LOG_RETAIN_RECENT, utc_now, unique_backup_path, repair_jsonl_event_log, read_jsonl_events, event_log_sources, read_jsonl_event_sources, append_jsonl_event, rotate_event_log_if_needed, stamp, quarantine_path, index, timestamp_key, event, max_bytes, retain_recent, total_count, archive_events, retained_events, archive_path, suffix, candidate, backup_path, lines, line, path, source_repair
+- AST symbols: REFILL_SCAN_RESULT_SCHEMA_VERSION, SCHEMA_VERSION, CONTRACT_VERSION, SCAN_RECEIPT_SCHEMA, SCAN_RECEIPT_PROJECTION_SCHEMA_VERSION, SCAN_RECEIPT_PROJECTION_SCHEMA, DEFAULT_SCAN_FRESHNESS_SECONDS, EXHAUSTION_QUORUM_SCHEMA_VERSION, EXHAUSTION_QUORUM_SCHEMA, _positive_env_int, DEFAULT_EXHAUSTION_QUORUM_SIZE, DEFAULT_EXHAUSTION_QUORUM, _HEALTHY_REASONS, _SKIPPED_REASONS, T, ScanTerminalReason, ScanMode, ScanSkipReason, _PARSER_FAILURE_REASONS, MAX_REPRESENTATIVE_PATHS_PER_REASON, _count, ScanCoverageCounts, CandidateAccounting, ScanReasonSummary, ScanDetailsArtifact, ScanAccounting, _utc_now, _utc_datetime, _nonempty, _json_value
 - Merge key: refactor/g10/g10-s1
 - Candidate kind: seed
 - Todo vector key: ref-202-persistscanreceiptsineventsstrategystatestatusan

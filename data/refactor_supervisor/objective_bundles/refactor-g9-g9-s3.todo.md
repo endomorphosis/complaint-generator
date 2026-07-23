@@ -19,7 +19,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G9.S3
 - Missing evidence: Resource class, capability fit, and lane capacity are currently static even when workers are idle or providers are rate-limited.
-- AST symbols: logger, BundleLaneSpec, resolve_repo_path, lane_state_prefix, implementation_supervisor_command, plan_bundle_lanes, launch_bundle_lanes, check_lane_health, write_bundle_lane_manifest, default_state_root, build_arg_parser, run_bundle_supervisor, main, to_dict, path, command, payload, parser, implement_group, repo_root, state_root, worktree_root, log_dir, manifest_path, bundle_index_path, lanes, started, args, bundle_key, safe_key
+- AST symbols: UNKNOWN_LIMIT, ProofResourceClass, PROOF_RESOURCE_CLASSES, LEGACY_RESOURCE_CLASSES, DEFAULT_RESOURCE_CLASSES, _RESOURCE_CLASS_ALIASES, normalize_resource_class, resource_pool, _integer, _boolean, _first, _strings, _mapping, HostResourceSnapshot, sample_host_resources, ProviderCapacity, normalize_provider_capacity, normalize_provider_capacities, LaneResourceRequirements, ChildResourceLimits, ResourceLeaseBudget, SupervisorResourceLeaseBudget, ResourcePolicy, AdmissionDecision, ResourceScheduleSnapshot, _ProviderReservation, ResourceAdmissionLease, ResourceScheduler, __all__, TRANSLATION
 - Merge key: refactor/g9/g9-s3
 - Candidate kind: seed
 - Todo vector key: ref-042-schedulelanesfromliveresourcesandllm-routerprovi
@@ -40,7 +40,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G9.S3
 - Missing evidence: Validation commands currently run serially without changed-file impact selection or reusable baseline results.
-- AST symbols: split_validation_commands, text, in_single_quote, in_double_quote, escaped, flush, command, REPO_ROOT, logger, TASK_HEADER_PREFIX, DEFAULT_TRACKS, PRIORITY_ORDER, DEFAULT_IMPLEMENTATION_TIMEOUT_SECONDS, LLM_MERGE_RESOLVER_COMMAND_ENV, LLM_MERGE_RESOLVER_TIMEOUT_ENV, DAEMON_MERGE_RECONCILIATION_MAX_ENV, DEFAULT_DAEMON_MERGE_RECONCILIATION_MAX, DAEMON_MERGED_WORKTREE_CLEANUP_MAX_ENV, DEFAULT_DAEMON_MERGED_WORKTREE_CLEANUP_MAX, DAEMON_HOOK_TIMEOUT_ENV, DEFAULT_DAEMON_HOOK_TIMEOUT_SECONDS, MERGE_RECONCILIATION_MAX_AGE_ENV, DEFAULT_MERGE_RECONCILIATION_MAX_AGE_SECONDS, UNSUPPORTED_TYPESCRIPT_VALIDATION_FLAGS, RECENT_NO_CHANGE_COOLDOWN_SECONDS, NO_CHANGE_SELECTION_PENALTY, UNRESOLVED_MERGE_SELECTION_PENALTY, TRANSIENT_MERGE_LOCK_REASONS, TRANSIENT_MERGE_RETRY_BUDGET_WHEN_DISABLED, IMPLEMENTATION_TASK_CLAIM_LOCK_KIND
+- AST symbols: INLINE_CODE_COMMAND_RE, ValidationStage, ValidationVerdictKind, ValidationDecisionKind, ValidationRequirementKind, ValidationCommand, DeclaredValidation, ValidationSelectionItem, ValidationSelection, _CHEAP_PATTERNS, _TEST_RUNNER_RE, _ENV_ASSIGNMENT_RE, _GLOBAL_IMPACT_NAMES, _DEPENDENCY_SUFFIXES, _DECLARATION_PREFIXES, normalize_validation_command_text, split_validation_commands, _shell_tokens, _normalize_path, _looks_like_impact_path, infer_validation_impact_paths, classify_validation_command, parse_validation_declaration, build_declared_validations, build_focused_validation_commands, build_validation_commands, is_global_impact_change, _path_related, select_validation_commands, ValidationCommandSpec
 - Merge key: refactor/g9/g9-s3
 - Candidate kind: seed
 - Todo vector key: ref-043-addimpact-selectedcachedandparallelvalidationsta

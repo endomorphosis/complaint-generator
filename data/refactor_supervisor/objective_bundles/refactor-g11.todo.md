@@ -50,7 +50,7 @@ Conflict policy: keep edits inside this bundle when possible; use the LLM merge 
 
 ## REF-337 Close objective gap: Make agent-supervisor proof-aware and context-efficient
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -94,7 +94,7 @@ Conflict policy: keep edits inside this bundle when possible; use the LLM merge 
 
 ## REF-343 Close objective gap: Make agent-supervisor proof-aware and context-efficient
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -138,7 +138,7 @@ Conflict policy: keep edits inside this bundle when possible; use the LLM merge 
 
 ## REF-349 Close objective gap: Make agent-supervisor proof-aware and context-efficient
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -182,7 +182,7 @@ Conflict policy: keep edits inside this bundle when possible; use the LLM merge 
 
 ## REF-355 Close objective gap: Make agent-supervisor proof-aware and context-efficient
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops

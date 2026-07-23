@@ -4,7 +4,7 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-7: REF-007 Extract complaint workspace request handlers from UI state helpers
+- [x] Task checkbox-7: REF-007 Extract complaint workspace request handlers from UI state helpers
 
 ## REF-007 Extract complaint workspace request handlers from UI state helpers
 
@@ -25,7 +25,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-007-extractcomplaintworkspacerequesthandlersfromuist
 - Acceptance: One handler group is isolated.; Routes keep the same response shape.
 
-- [ ] Task checkbox-8: REF-008 Separate dashboard fixture data from live route logic
+- [x] Task checkbox-8: REF-008 Separate dashboard fixture data from live route logic
 
 ## REF-008 Separate dashboard fixture data from live route logic
 
@@ -45,29 +45,3 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Candidate kind: seed
 - Todo vector key: ref-008-separatedashboardfixturedatafromliveroutelogic
 - Acceptance: Fixture builders are named and reusable.; Playwright smoke tests remain stable.
-
-## REF-009 Resolve dirty main checkout blocking 1 worktree merges
-
-- Status: completed
-- Completion: manual
-- Priority: P1
-- Track: ops
-- Fingerprint: 89e54cb4964c0910e621c0db59ba0e40a5677749
-- Dedupe key: reconciliation_guardrail:main_checkout_dirty
-- Depends on:
-- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s2/discovery, data/refactor_supervisor/objective_bundles/refactor-g2-g2-s2.todo.md
-- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s2/discovery/2026-07-21-ref-009-reconciliation-89e54cb4964c.md
-- Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s2/discovery/2026-07-21-ref-009-reconciliation-89e54cb4964c.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
-
-## REF-010 Resolve 1 preflight-conflicting backlogged worktree merges
-
-- Status: completed
-- Completion: manual
-- Priority: P1
-- Track: ops
-- Fingerprint: ec3af14efd7f38b1f92335058e4be95abcd839c8
-- Dedupe key: reconciliation_guardrail:preflight_merge_conflict
-- Depends on:
-- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s2/discovery, data/refactor_supervisor/objective_bundles/refactor-g2-g2-s2.todo.md
-- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s2/discovery/2026-07-21-ref-010-reconciliation-ec3af14efd7f.md
-- Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by preflight_merge_conflict. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s2/discovery/2026-07-21-ref-010-reconciliation-ec3af14efd7f.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.

@@ -19,7 +19,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G10.S3
 - Missing evidence: The objective graph currently treats completed task statuses as sufficient even when completion evidence and validation receipts are absent.
-- AST symbols: DEFAULT_ULTIMATE_GOAL, DEFAULT_ROOT_EVIDENCE, DEFAULT_GOAL_PREFIX, DEFAULT_TRACKING_DOCUMENT_TITLE, DEFAULT_ROOT_GOAL_TITLE, OPEN_TASK_STATUSES_FOR_GOAL_COMPLETION, TASK_GOAL_METADATA_KEYS, ObjectiveTrackingResult, ObjectiveCompletionResult, RepositoryComponent, fibonacci_number, fibonacci_priority, infer_goal_prefix, next_goal_id, render_goal_block, rewrite_goal_fields, completion_evidence_summary, open_goal_ids_from_todo_board, open_goal_ids_from_todo_boards, run_goal_validation, reconcile_objective_goal_completion, ensure_objective_tracking_document, COMPONENT_SCAN_SKIP_DIRS, COMPONENT_MANIFEST_NAMES, INTERFACE_DESCRIPTOR_SUFFIXES, _unique_paths, discover_gitmodule_paths, discover_gitlink_paths, discover_submodule_paths, _component_relative_path
+- AST symbols: GOAL_COMPLETION_SCHEMA_VERSION, GOAL_COMPLETION_MIGRATION_SCHEMA_VERSION, DEFAULT_EVIDENCE_FRESHNESS_SECONDS, DEFAULT_CLOCK_SKEW_SECONDS, GoalState, _GOAL_STATE_ALIASES, LEGACY_COMPLETED_GOAL_STATES, is_legacy_completed_goal_state, normalize_goal_state, legal_goal_transitions, is_terminal_goal_state, is_schedulable_goal_state, IllegalGoalTransitionError, IllegalGoalTransition, _utc_datetime, _now, _criterion_key, _json_value, _canonical_json, _stable_fingerprint, _string_tuple, _mapping_tuple, _ASSURANCE_ALIASES, _assurance_level, _proof_verdict, _proof_freshness, CONTRADICTION_KINDS, ContradictionEvidence, _PROOF_INVALIDATION_EVENT_FIELDS, _proof_invalidation_mapping
 - Merge key: refactor/g10/g10-s3
 - Candidate kind: seed
 - Todo vector key: ref-206-defineanevidence-backedgoallifecycleandcompletio
@@ -40,7 +40,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G10.S3
 - Missing evidence: Goal completion cannot be assessed when acceptance criteria are not mapped to implementation surfaces and proof-producing validations.
-- AST symbols: DEFAULT_EMBEDDING_DIMENSIONS, DEFAULT_EMBEDDING_MIN_SCORE, DEFAULT_BUNDLE_CLUSTER_MIN_SCORE, DEFAULT_OBJECTIVE_TASK_SUMMARY_PREFIX, parse_python_ast_quietly, DEFAULT_DISCOVERY_OUTPUT_PATH, DEFAULT_SURPLUS_FINDINGS_PER_GOAL, DEFAULT_SURPLUS_MIN_TERMS_PER_TODO, DEFAULT_SCAN_OVERSAMPLE_MULTIPLIER, DEFAULT_TASK_PREFIX, DEFAULT_AST_DATASET_MAX_CHARS, AST_DATASET_RECORD_SCHEMA_VERSION, LAUNCH_PLAYWRIGHT_VALIDATION_COMMAND, LAUNCH_PLAYWRIGHT_VALIDATION_MARKERS, LAUNCH_PLAYWRIGHT_VALIDATION_GATE_EVIDENCE, SCAN_SUFFIXES, SKIP_DIRS, ObjectiveGoal, ObjectiveFinding, ObjectiveTaskRecord, ObjectiveHeapRecord, DEPENDENCY_EDGE_KINDS, SUCCESSFUL_MERGE_RECEIPT_STATUSES, DependencyEdge, TaskDependencyNode, DependencyRepairEvidence, TaskScheduleRecord, TaskDependencyGraph, TaskDependencyDAG, TaskPlanningGraph
+- AST symbols: GOAL_COVERAGE_SCHEMA_VERSION, UNMAPPED_GOAL_ID, DEFAULT_FINDING_MIN_SCORE, DEFAULT_EVIDENCE_MAX_AGE_SECONDS, MISSING_ACCEPTANCE_CRITERION, CoverageSurface, _payload, _nested_sources, _items, _field_items, _first, _canonical, _stable_id, _normalized, _tokens, _similarity, _utc, _bool, _freshness_bool, _status_value, _coverage_payload, _scheduled_for_goal, _actionable_finding, _SURFACE_FIELDS, detect_goal_coverage_contradictions, discover_goal_contradictions, CoverageEdge, ValidationReceiptCoverage, AcceptanceCoverage, FindingAssignment
 - Merge key: refactor/g10/g10-s3
 - Candidate kind: seed
 - Todo vector key: ref-207-buildgoal-to-taskcodeastacceptanceandvalidationc
@@ -61,17 +61,17 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G10.S3
 - Missing evidence: Goal reconciliation must require proof of the stated objective rather than infer success from a drained or deduplicated task list.
-- AST symbols: logger, _plan_value_dict, objective_record_plan_context, _evaluated_branch_dict, plan_objective_records, persist_objective_plan_evaluations, default_repo_root, default_objective_path, default_todo_path, default_state_root, split_csv, parse_goal_completion_todo_boards, discovery_fingerprints, build_arg_parser, run_objective_daemon, main, to_dict, finding, validation, validation_commands, predicted_files, predicted_symbols, branch, branch_payload, branch_id, scores, rationales, wrapped_score, wrapped_rationale, payload
+- AST symbols: GOAL_COMPLETION_SCHEMA_VERSION, GOAL_COMPLETION_MIGRATION_SCHEMA_VERSION, DEFAULT_EVIDENCE_FRESHNESS_SECONDS, DEFAULT_CLOCK_SKEW_SECONDS, GoalState, _GOAL_STATE_ALIASES, LEGACY_COMPLETED_GOAL_STATES, is_legacy_completed_goal_state, normalize_goal_state, legal_goal_transitions, is_terminal_goal_state, is_schedulable_goal_state, IllegalGoalTransitionError, IllegalGoalTransition, _utc_datetime, _now, _criterion_key, _json_value, _canonical_json, _stable_fingerprint, _string_tuple, _mapping_tuple, _ASSURANCE_ALIASES, _assurance_level, _proof_verdict, _proof_freshness, CONTRADICTION_KINDS, ContradictionEvidence, _PROOF_INVALIDATION_EVENT_FIELDS, _proof_invalidation_mapping
 - Merge key: refactor/g10/g10-s3
 - Candidate kind: seed
 - Todo vector key: ref-208-enforceacompletiongateusingvalidationcoveragehea
 - Acceptance: Verified completion requires all mandatory acceptance criteria covered, required validations successful, evidence fresh, analyzer healthy, and configured exhaustion quorum satisfied.; Partial, skipped, failed, timed-out, duplicate-only, or unsupported analysis cannot satisfy the gate.; The gate emits machine-readable pass and fail reasons plus the exact evidence set it evaluated.; Parent goals aggregate child proof without hiding an inconclusive or reopened descendant.
 
-- [ ] Task checkbox-209: REF-209 Detect contradictory evidence and automatically reopen affected goals
+- [x] Task checkbox-209: REF-209 Detect contradictory evidence and automatically reopen affected goals
 
 ## REF-209 Detect contradictory evidence and automatically reopen affected goals
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
@@ -82,7 +82,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G10.S3
 - Missing evidence: A completed goal currently remains completed even when a later codebase scan creates directly relevant work or validation regresses.
-- AST symbols: ACTIVE_GOAL_STATUSES, OPEN_TASK_STATUSES, JANITOR_RECEIPT_SCHEMA, LAUNCH_PLAYWRIGHT_VALIDATION_GATE_EVIDENCE, LAUNCH_PLAYWRIGHT_VALIDATION_COMMAND, LAUNCH_PLAYWRIGHT_VALIDATION_MARKERS, DEFAULT_MISSION_TERMS, GOAL_METADATA_KEYS, CODEBASE_SCAN_BACKLOG_TITLE_PREFIXES, CODEBASE_SCAN_BACKLOG_MARKERS, WORKTREE_CLEANUP_BACKLOG_MARKERS, GUARDRAIL_REPAIR_MARKERS, DYNAMIC_GOAL_REGISTRATION_VALUES, COMPLETED_TASK_STATUSES, JANITOR_BLOCKED_REASON_MARKER, ObjectiveTaskJanitorReceipt, _unique, _split_terms, _task_goal_ids, _task_haystack, _goal_haystack, _goal_requires_launch_playwright_gate, _matches_any_term, _is_generated_objective_task, _is_guardrail_repair_task, _is_codebase_scan_backlog_task, _is_mission_critical_codebase_scan_task, _is_worktree_cleanup_backlog_task, _critical_goal_ids, _janitor_owned_task_ids
+- AST symbols: GOAL_COMPLETION_SCHEMA_VERSION, GOAL_COMPLETION_MIGRATION_SCHEMA_VERSION, DEFAULT_EVIDENCE_FRESHNESS_SECONDS, DEFAULT_CLOCK_SKEW_SECONDS, GoalState, _GOAL_STATE_ALIASES, LEGACY_COMPLETED_GOAL_STATES, is_legacy_completed_goal_state, normalize_goal_state, legal_goal_transitions, is_terminal_goal_state, is_schedulable_goal_state, IllegalGoalTransitionError, IllegalGoalTransition, _utc_datetime, _now, _criterion_key, _json_value, _canonical_json, _stable_fingerprint, _string_tuple, _mapping_tuple, _ASSURANCE_ALIASES, _assurance_level, _proof_verdict, _proof_freshness, CONTRADICTION_KINDS, ContradictionEvidence, _PROOF_INVALIDATION_EVENT_FIELDS, _proof_invalidation_mapping
 - Merge key: refactor/g10/g10-s3
 - Candidate kind: seed
 - Todo vector key: ref-209-detectcontradictoryevidenceandautomaticallyreope

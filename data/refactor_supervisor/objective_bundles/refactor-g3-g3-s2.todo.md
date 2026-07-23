@@ -25,7 +25,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-011-definegraphpersistenceandqueryinterfacesbeforemo
 - Acceptance: Interfaces specify persistence, query, and provenance fields.; Fallback graph behavior remains covered.
 
-- [ ] Task checkbox-12: REF-012 Turn not_implemented logic paths into explicit capability-gated contracts
+- [x] Task checkbox-12: REF-012 Turn not_implemented logic paths into explicit capability-gated contracts
 
 ## REF-012 Turn not_implemented logic paths into explicit capability-gated contracts
 
@@ -45,28 +45,3 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Candidate kind: seed
 - Todo vector key: ref-012-turnnot-implementedlogicpathsintoexplicitcapabil
 - Acceptance: Logic status distinguishes unavailable, degraded, and implemented.; Callers do not branch on fragile strings.
-
-## REF-013 Resolve dirty main checkout blocking 1 worktree merges
-
-- Status: completed
-- Completion: manual
-- Priority: P1
-- Track: ops
-- Fingerprint: cc1e5dd33337df0314b663f8b3c8d9296a322fec
-- Dedupe key: reconciliation_guardrail:main_checkout_dirty
-- Depends on:
-- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g3-g3-s2/discovery, data/refactor_supervisor/objective_bundles/refactor-g3-g3-s2.todo.md
-- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g3-g3-s2/discovery/2026-07-22-ref-013-reconciliation-cc1e5dd33337.md
-- Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g3-g3-s2/discovery/2026-07-22-ref-013-reconciliation-cc1e5dd33337.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
-
-## REF-014 Resolve validation retry-budget failure for REF-012
-
-- Status: completed
-- Completion: manual
-- Priority: P1
-- Track: ops
-- Depends on: 
-- Outputs: integrations/ipfs_datasets/logic.py, lib/formal_logic, data/refactor_supervisor/bundle_lanes/refactor-g3-g3-s2/discovery
-- Validation: python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q
-- Acceptance: Retry-budget guardrail filed this from repeated validation failures in REF-012. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g3-g3-s2/discovery/2026-07-22-ref-014-ref-012-retry-budget.md to fix the validation blocker, then mark this repair task completed so the supervisor can release REF-012 from strategy blocked_tasks.
-- Repair result: Dependency revision `7b39c55930e54c696bba48039dfffd0244ec2ab3` provides the writable SymbolicAI import bootstrap and real IPLD component imports; the blocked REF-012 capability-contract changes were recovered from rescue commit `99e1c244c199263c65a4ef1194a9a38898e325f0`, and the required dependency lane passes with 2 tests. The next supervisor maintenance pass can release REF-012 from strategy `blocked_tasks`.

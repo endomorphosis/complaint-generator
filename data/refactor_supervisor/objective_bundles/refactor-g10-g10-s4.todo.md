@@ -19,7 +19,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G10.S4
 - Missing evidence: Uncovered acceptance criteria and inconclusive analysis should become reviewable, dependency-linked work instead of silently draining the board.
-- AST symbols: DEFAULT_EMBEDDING_DIMENSIONS, DEFAULT_EMBEDDING_MIN_SCORE, DEFAULT_BUNDLE_CLUSTER_MIN_SCORE, DEFAULT_OBJECTIVE_TASK_SUMMARY_PREFIX, parse_python_ast_quietly, DEFAULT_DISCOVERY_OUTPUT_PATH, DEFAULT_SURPLUS_FINDINGS_PER_GOAL, DEFAULT_SURPLUS_MIN_TERMS_PER_TODO, DEFAULT_SCAN_OVERSAMPLE_MULTIPLIER, DEFAULT_TASK_PREFIX, DEFAULT_AST_DATASET_MAX_CHARS, AST_DATASET_RECORD_SCHEMA_VERSION, LAUNCH_PLAYWRIGHT_VALIDATION_COMMAND, LAUNCH_PLAYWRIGHT_VALIDATION_MARKERS, LAUNCH_PLAYWRIGHT_VALIDATION_GATE_EVIDENCE, SCAN_SUFFIXES, SKIP_DIRS, ObjectiveGoal, ObjectiveFinding, ObjectiveTaskRecord, ObjectiveHeapRecord, DEPENDENCY_EDGE_KINDS, SUCCESSFUL_MERGE_RECEIPT_STATUSES, DependencyEdge, TaskDependencyNode, DependencyRepairEvidence, TaskScheduleRecord, TaskDependencyGraph, TaskDependencyDAG, TaskPlanningGraph
+- AST symbols: GOAL_COVERAGE_SCHEMA_VERSION, UNMAPPED_GOAL_ID, DEFAULT_FINDING_MIN_SCORE, DEFAULT_EVIDENCE_MAX_AGE_SECONDS, MISSING_ACCEPTANCE_CRITERION, CoverageSurface, _payload, _nested_sources, _items, _field_items, _first, _canonical, _stable_id, _normalized, _tokens, _similarity, _utc, _bool, _freshness_bool, _status_value, _coverage_payload, _scheduled_for_goal, _actionable_finding, _SURFACE_FIELDS, detect_goal_coverage_contradictions, discover_goal_contradictions, CoverageEdge, ValidationReceiptCoverage, AcceptanceCoverage, FindingAssignment
 - Merge key: refactor/g10/g10-s4
 - Candidate kind: seed
 - Todo vector key: ref-210-generateboundedgoalssubgoalsandtasksfromuncovere
@@ -40,17 +40,17 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G10.S4
 - Missing evidence: Existing completed goals need a safe migration path and operators need to see confidence and missing proof without reading raw event logs.
-- AST symbols: DEFAULT_ULTIMATE_GOAL, DEFAULT_ROOT_EVIDENCE, DEFAULT_GOAL_PREFIX, DEFAULT_TRACKING_DOCUMENT_TITLE, DEFAULT_ROOT_GOAL_TITLE, OPEN_TASK_STATUSES_FOR_GOAL_COMPLETION, TASK_GOAL_METADATA_KEYS, ObjectiveTrackingResult, ObjectiveCompletionResult, RepositoryComponent, fibonacci_number, fibonacci_priority, infer_goal_prefix, next_goal_id, render_goal_block, rewrite_goal_fields, completion_evidence_summary, open_goal_ids_from_todo_board, open_goal_ids_from_todo_boards, run_goal_validation, reconcile_objective_goal_completion, ensure_objective_tracking_document, COMPONENT_SCAN_SKIP_DIRS, COMPONENT_MANIFEST_NAMES, INTERFACE_DESCRIPTOR_SUFFIXES, _unique_paths, discover_gitmodule_paths, discover_gitlink_paths, discover_submodule_paths, _component_relative_path
+- AST symbols: GOAL_COMPLETION_SCHEMA_VERSION, GOAL_COMPLETION_MIGRATION_SCHEMA_VERSION, DEFAULT_EVIDENCE_FRESHNESS_SECONDS, DEFAULT_CLOCK_SKEW_SECONDS, GoalState, _GOAL_STATE_ALIASES, LEGACY_COMPLETED_GOAL_STATES, is_legacy_completed_goal_state, normalize_goal_state, legal_goal_transitions, is_terminal_goal_state, is_schedulable_goal_state, IllegalGoalTransitionError, IllegalGoalTransition, _utc_datetime, _now, _criterion_key, _json_value, _canonical_json, _stable_fingerprint, _string_tuple, _mapping_tuple, _ASSURANCE_ALIASES, _assurance_level, _proof_verdict, _proof_freshness, CONTRADICTION_KINDS, ContradictionEvidence, _PROOF_INVALIDATION_EVENT_FIELDS, _proof_invalidation_mapping
 - Merge key: refactor/g10/g10-s4
 - Candidate kind: seed
 - Todo vector key: ref-211-migrateexistinggoalsandexposetrustworthycompleti
 - Acceptance: Legacy completed goals migrate idempotently to provisional or verified state based on available evidence, never by optimistic default.; Status and manifest projections show lifecycle state, confidence, uncovered criteria, stale evidence, analyzer health, exhaustion quorum, and reopen reasons.; Schema versioning and compatibility readers preserve existing boards, events, and automation during rollout.; The migration can be previewed and resumed safely after interruption.
 
-- [ ] Task checkbox-212: REF-212 Add end-to-end regression tests for truthful goal completion and autonomous refill
+- [x] Task checkbox-212: REF-212 Add end-to-end regression tests for truthful goal completion and autonomous refill
 
 ## REF-212 Add end-to-end regression tests for truthful goal completion and autonomous refill
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
@@ -61,7 +61,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G10.S4
 - Missing evidence: The completion and refill contract needs system-level regression coverage across restart, concurrency, stale evidence, analyzer failure, and contradiction scenarios.
-- AST symbols: _git, _seed_repo, _git_dir, test_commit_generated_dirty_outputs_commits_nested_repo_and_parent_gitlink, test_commit_generated_dirty_outputs_repairs_recursive_clean_gitlinks, test_commit_generated_dirty_outputs_repairs_stale_nested_index_lock, test_commit_generated_dirty_outputs_defers_during_merge, test_namespace_recorder_factories_bind_standard_paths, test_configured_backlog_recorder_bundle_delegates_to_runtime_factories, _write_todo, test_backlog_refinery_appends_missing_task_blocks_in_order, test_backlog_refinery_codebase_scan_refills_low_backlog, test_codebase_scan_writes_file_local_ast_bundle, test_codebase_scan_synchronizes_fingerprints_across_strategy_files, test_codebase_scan_retires_later_duplicate_vector_tasks, test_codebase_scan_reserves_ids_from_discovery_artifacts, test_backlog_refinery_annotation_scan_ignores_literal_status_strings, test_backlog_refinery_codebase_scan_skips_vanished_git_roots, test_backlog_refinery_repairs_invalid_strategy_file, test_backlog_refinery_iter_jsonl_quarantines_malformed_events, test_backlog_refinery_dependency_guardrail_adds_ready_repair_task, test_backlog_refinery_dependency_guardrail_detects_dependency_cycle, test_backlog_refinery_dependency_guardrail_detects_duplicate_task_ids, test_backlog_refinery_releases_completed_guardrail_block, test_backlog_refinery_releases_completed_and_duplicate_stale_strategy_blocks, test_backlog_refinery_releases_historical_completed_retry_repairs, test_backlog_refinery_releases_orphaned_block_without_repair_path, test_backlog_refinery_releases_recursive_retry_repair_block, test_backlog_refinery_retires_ready_recursive_retry_repair_task, test_backlog_refinery_releases_stale_dependency_guardrail_after_metadata_repaired
+- AST symbols: CRITERION, _git, _seed_repository, _completion_gate, _evidence, test_stale_fingerprints_cannot_complete_goal_and_reopened_goal_refills_board, test_restart_after_legacy_migration_preserves_lineage_quorum_and_operator_truth, completed, repo, source, objective_path, todo_path, binding, members, discovery_dir, bundle_dir, state_dir, strategy_path, events_path, initial_findings, stale_fingerprint, duplicate_only, projection, now, identity, gate, completion, contradiction, reopening, generated
 - Merge key: refactor/g10/g10-s4
 - Candidate kind: seed
 - Todo vector key: ref-212-addend-to-endregressiontestsfortruthfulgoalcompl

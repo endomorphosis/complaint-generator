@@ -42,7 +42,7 @@ Conflict policy: keep edits inside this bundle when possible; use the LLM merge 
 
 ## REF-066 Close objective gap: Harden adapter contracts and degraded mode
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops

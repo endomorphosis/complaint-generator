@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-283: REF-283 Model-check supervisor state machines with TLA+, TLC, and Apalache
+- [x] Task checkbox-283: REF-283 Model-check supervisor state machines with TLA+, TLC, and Apalache
 
 ## REF-283 Model-check supervisor state machines with TLA+, TLC, and Apalache
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -19,17 +19,17 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G12.S3
 - Missing evidence: Leases, retries, merges, refill, cancellation, and resource scheduling are concurrent state machines suited to bounded model checking.
-- AST symbols: 
+- AST symbols: _NO_AGENT, _RESERVED_IDENTIFIERS, _TLC_SUCCESS_MARKERS, _APALACHE_SUCCESS_MARKERS, _COUNTEREXAMPLE_MARKERS, ModelValidationError, ModelCheckerTool, ModelCheckStatus, _strict_mapping, _strings, _positive_int, _boolean, _sha256_text, _utc_timestamp, _enum_value, TransitionRule, SupervisorTransitionSchema, ModelCheckBounds, _tla_string, _tla_set, _tla_function, _model_name, GeneratedSupervisorStateModel, SupervisorStateModelGenerator, CounterexampleState, CounterexampleTrace, ModelCheckerExecutionConfig, ModelCheckReceipt, CommandRunner, ExecutableFinder
 - Merge key: refactor/g12/g12-s3
 - Candidate kind: seed
 - Todo vector key: ref-283-model-checksupervisorstatemachineswithtlatlcanda
 - Acceptance: A deterministic generator emits a finite TLA+ model from the supervisor transition schema rather than a domain-specific hard-coded workflow.; Safety covers unique acceptance, fencing, dependency order, idempotent merge, capacity, and evidence gates; liveness covers bounded progress and terminal outcomes.; TLC and Apalache execution receipts record exact model, configuration, bounds, versions, output, and counterexample traces.; Bounded model-check success is labeled by its explored bounds and is never described as an unbounded proof.
 
-- [ ] Task checkbox-284: REF-284 Formalize task authority and delegation with Datalog and SecPAL-style policy
+- [x] Task checkbox-284: REF-284 Formalize task authority and delegation with Datalog and SecPAL-style policy
 
 ## REF-284 Formalize task authority and delegation with Datalog and SecPAL-style policy
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -40,17 +40,17 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Bundle strategy: goal/subgoal bundle with AST-symbol locality
 - Goal id: G12.S3
 - Missing evidence: Claims, leases, merge authority, proof promotion, and overrides need explicit delegation and revocation semantics.
-- AST symbols: 
+- AST symbols: AuthorizationValidationError, Capability, AuthorizationCapability, AuthorizationVerdict, DenialReason, GeneratedCodeCorrectness, AuthorizationEngine, PolicyEngine, EngineSupportStatus, ConformanceStatus, LaneStatus, _text, _strings, _ordered_strings, _nonnegative, _optional_nonnegative, _enum, _schema, _identity, _normalized_path, _normalize_scopes, _scope_contains, _path_contains, _item_covered, _scope_subset, Principal, _principal_id, AuthorizationGrant, PolicyGrant, DelegationGrant
 - Merge key: refactor/g12/g12-s3
 - Candidate kind: seed
 - Todo vector key: ref-284-formalizetaskauthorityanddelegationwithdatalogan
 - Acceptance: Rules model principals, capabilities, delegation depth, lease scope, fencing epoch, proof authority, override scope, expiration, and revocation.; The reference evaluator and any external Datalog or SecPAL lane agree on positive, negative, revocation, confused-deputy, and stale-lease fixtures.; Missing engines remain unsupported while deterministic policy checks continue in shadow mode.; Authorization evidence can permit an action but cannot establish generated-code correctness.
 
-- [ ] Task checkbox-285: REF-285 Verify claim, fencing, receipt, and attestation protocols with Tamarin and ProVerif
+- [!] Task checkbox-285: REF-285 Verify claim, fencing, receipt, and attestation protocols with Tamarin and ProVerif
 
 ## REF-285 Verify claim, fencing, receipt, and attestation protocols with Tamarin and ProVerif
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12

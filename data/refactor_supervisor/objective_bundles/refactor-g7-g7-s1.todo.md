@@ -4,7 +4,7 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-21: REF-021 Move review payload normalization behind explicit DTO helpers
+- [x] Task checkbox-21: REF-021 Move review payload normalization behind explicit DTO helpers
 
 ## REF-021 Move review payload normalization behind explicit DTO helpers
 
@@ -25,7 +25,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-021-movereviewpayloadnormalizationbehindexplicitdtoh
 - Acceptance: DTO helpers cover coverage, follow-up, and support-path summaries.; Route response snapshots stay stable.
 
-- [ ] Task checkbox-22: REF-022 Create fixture builders for Playwright review and dashboard smoke tests
+- [x] Task checkbox-22: REF-022 Create fixture builders for Playwright review and dashboard smoke tests
 
 ## REF-022 Create fixture builders for Playwright review and dashboard smoke tests
 

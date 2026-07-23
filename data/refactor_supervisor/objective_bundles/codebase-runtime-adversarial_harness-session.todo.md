@@ -93,7 +93,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-088 Review swallowed exception path in adversarial_harness/session.py:4284
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -123,7 +123,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-089 Review swallowed exception path in adversarial_harness/session.py:4409
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -153,7 +153,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-090 Review swallowed exception path in adversarial_harness/session.py:4416
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
