@@ -3942,3 +3942,189 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Goal registration: dynamic
 - Todo vector key: 1cc8e01bb3ed16d4
 - Acceptance: Codebase scan filed this finding from mediator/legal_authority_hooks.py:2612. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-225-codebase-scan-1cc8e01bb3ed.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-226 Review swallowed exception path in mediator/web_evidence_hooks.py:498
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, mediator/web_evidence_hooks.py
+- Validation: python3 -m py_compile mediator/web_evidence_hooks.py
+- Bundle: codebase/runtime/mediator-web_evidence_hooks
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-mediator-web_evidence_hooks.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/mediator-web_evidence_hooks
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: mediator/web_evidence_hooks.py
+- AST symbols: __init__, _accumulate_parse_detail, _add, _aggregate_graph_support_metrics, _build_evidence_context, _build_support_bundle, _build_web_evidence_filename, _build_web_evidence_lineage_context, _build_web_evidence_parse_metadata, _build_web_evidence_payload, _callable_is_mocked, _empty_storage_summary, _enrich_storage_result_parse_contract, _extract_parse_detail, _generate_search_keywords, _get_search_hook, _init_search_tools, _normalize_results, _seed_daemon_tactics, _store_evidence_items, _summarize_claim_coverage_claim, _summarize_follow_up_execution_claim, _summarize_follow_up_plan_claim, accumulate parse detail, add, aggregate graph support metrics, build evidence context, build support bundle, build web evidence filename, build web evidence lineage context, build web evidence parse metadata, build web evidence payload, callable is mocked, claim support review, claim support review build confirmed intake summary handoff metadata, claim support review summarize claim reasoning review, claim support review summarize claim support snapshot lifecycle, claim support review summarize follow up execution claim, claim support review summarize follow up history claim, claim support review summarize follow up plan claim, claim_support_review, claim_support_review._build_confirmed_intake_summary_handoff_metadata, claim_support_review._summarize_follow_up_execution_claim, claim_support_review._summarize_follow_up_plan_claim, claim_support_review.summarize_claim_reasoning_review, claim_support_review.summarize_claim_support_snapshot_lifecycle, claim_support_review.summarize_follow_up_history_claim, complaint phases, complaint phases complaintphase, complaint_phases, complaint_phases.complaintphase, datetime, datetime datetime, datetime.datetime, discover and store evidence, discover evidence for case, discover_and_store_evidence, discover_evidence_for_case, empty storage summary, enrich storage result parse contract, extract parse detail, generate search keywords, get capability registry, get search hook, get_capability_registry, init, init search tools, integrations, integrations graphawareretrievalreranker, integrations integrationfeatureflags, integrations ipfs datasets documents, integrations ipfs datasets documents detect document input format, integrations ipfs datasets provenance, integrations ipfs datasets provenance build document parse contract, integrations ipfs datasets provenance enrich document parse, integrations ipfs datasets scraper daemon, integrations ipfs datasets scraper daemon scraperdaemon, integrations ipfs datasets scraper daemon scraperdaemonconfig, integrations ipfs datasets scraper daemon scrapertactic, integrations ipfs datasets search
+- AST symbol scope: file
+- Goal id: codebase/runtime/mediator-web_evidence_hooks
+- Missing evidence: Review swallowed exception path in mediator/web_evidence_hooks.py:498
+- Merge key: codebase/runtime/mediator-web_evidence_hooks
+- Merge family: mediator/web_evidence_hooks.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 1296d7ba66dc00cc
+- Acceptance: Codebase scan filed this finding from mediator/web_evidence_hooks.py:498. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-226-codebase-scan-1296d7ba66dc.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-227 Review swallowed exception path in scripts/refactor_agent_supervisor.py:3241
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, scripts/refactor_agent_supervisor.py
+- Validation: python3 -m py_compile scripts/refactor_agent_supervisor.py
+- Bundle: codebase/runtime/scripts-refactor_agent_supervisor
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-scripts-refactor_agent_supervisor.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/scripts-refactor_agent_supervisor
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: scripts/refactor_agent_supervisor.py
+- AST symbols: __future__, __future__.annotations, _active_todo_task_ids, _append_missing_explicit_seed_tasks, _atomic_write_json, _canonical_projection_status, _collect_counts, _compact_string_list, _durable_canonical_task_statuses, _durable_task_statuses, _ensure_accelerate_import_path, _ensure_text, _goal_evidence, _heartbeat_age_seconds, _implementation_activity_snapshot, _iter_py_files, _json_goal_tree, _load_json_object, _merge_goal_tree_extensions, _paths_from_locations, _payload_strings, _pid_alive, _priority_sort_key, _project_bundle_index_statuses, _project_goal_tree_statuses, _project_task_statuses, _prune_seed_bundle_shard, _queue_counts, _queue_payload_contract, _queued_task_summaries, _read_ipfs_p0_cross_links, _read_text, _release_watchdog_checkout_lock, _render_objective_heap, _render_seed_todo, _resolved_seed_task_ids, _safe_bundle_key, _scan_summary, _seed_status_summary, _status_artifacts, _status_counts, _status_last_error, _status_scan_summary, _statuses_for_canonical_tasks, _stop, _task, _task_ast_symbols, _task_block, _task_checkbox_index, _task_ids_from_queue_payload, _task_queue_class, _taskboard_snapshot, _taskboard_status_by_id, _todo_counts, _todo_task_header_count, _try_acquire_watchdog_checkout_lock, _upstream_artifact_store, _upstream_backlog_runner, _upstream_bundle_completion_receipt_loader, _upstream_bundle_payload_builder, _upstream_bundle_runner, _upstream_objective_runner, _upstream_portal_task_parser, _upstream_task_board_helpers, _validate_ipfs_p0_cross_link_goals, _validate_task_payload_fields, _write_status, _write_taskboard_doc, active bundle keys, active todo task ids, active_bundle_keys, add parallel args, add_parallel_args, append missing explicit seed tasks, argparse, ast, atomic write json, build goals, build parser, build_goals
+- AST symbol scope: file
+- Goal id: codebase/runtime/scripts-refactor_agent_supervisor
+- Missing evidence: Review swallowed exception path in scripts/refactor_agent_supervisor.py:3241
+- Merge key: codebase/runtime/scripts-refactor_agent_supervisor
+- Merge family: scripts/refactor_agent_supervisor.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 968d225514093e82
+- Acceptance: Codebase scan filed this finding from scripts/refactor_agent_supervisor.py:3241. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-227-codebase-scan-968d22551409.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-228 Review swallowed exception path in scripts/refactor_agent_supervisor.py:4008
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, scripts/refactor_agent_supervisor.py
+- Validation: python3 -m py_compile scripts/refactor_agent_supervisor.py
+- Bundle: codebase/runtime/scripts-refactor_agent_supervisor
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-scripts-refactor_agent_supervisor.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/scripts-refactor_agent_supervisor
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: scripts/refactor_agent_supervisor.py
+- AST symbols: __future__, __future__.annotations, _active_todo_task_ids, _append_missing_explicit_seed_tasks, _atomic_write_json, _canonical_projection_status, _collect_counts, _compact_string_list, _durable_canonical_task_statuses, _durable_task_statuses, _ensure_accelerate_import_path, _ensure_text, _goal_evidence, _heartbeat_age_seconds, _implementation_activity_snapshot, _iter_py_files, _json_goal_tree, _load_json_object, _merge_goal_tree_extensions, _paths_from_locations, _payload_strings, _pid_alive, _priority_sort_key, _project_bundle_index_statuses, _project_goal_tree_statuses, _project_task_statuses, _prune_seed_bundle_shard, _queue_counts, _queue_payload_contract, _queued_task_summaries, _read_ipfs_p0_cross_links, _read_text, _release_watchdog_checkout_lock, _render_objective_heap, _render_seed_todo, _resolved_seed_task_ids, _safe_bundle_key, _scan_summary, _seed_status_summary, _status_artifacts, _status_counts, _status_last_error, _status_scan_summary, _statuses_for_canonical_tasks, _stop, _task, _task_ast_symbols, _task_block, _task_checkbox_index, _task_ids_from_queue_payload, _task_queue_class, _taskboard_snapshot, _taskboard_status_by_id, _todo_counts, _todo_task_header_count, _try_acquire_watchdog_checkout_lock, _upstream_artifact_store, _upstream_backlog_runner, _upstream_bundle_completion_receipt_loader, _upstream_bundle_payload_builder, _upstream_bundle_runner, _upstream_objective_runner, _upstream_portal_task_parser, _upstream_task_board_helpers, _validate_ipfs_p0_cross_link_goals, _validate_task_payload_fields, _write_status, _write_taskboard_doc, active bundle keys, active todo task ids, active_bundle_keys, add parallel args, add_parallel_args, append missing explicit seed tasks, argparse, ast, atomic write json, build goals, build parser, build_goals
+- AST symbol scope: file
+- Goal id: codebase/runtime/scripts-refactor_agent_supervisor
+- Missing evidence: Review swallowed exception path in scripts/refactor_agent_supervisor.py:4008
+- Merge key: codebase/runtime/scripts-refactor_agent_supervisor
+- Merge family: scripts/refactor_agent_supervisor.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: bdd4ee0fdbaf63f6
+- Acceptance: Codebase scan filed this finding from scripts/refactor_agent_supervisor.py:4008. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-228-codebase-scan-bdd4ee0fdbaf.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-229 Review swallowed exception path in scripts/run_claim_support_review_regression.py:75
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, scripts/run_claim_support_review_regression.py
+- Validation: python3 -m py_compile scripts/run_claim_support_review_regression.py
+- Bundle: codebase/runtime/scripts-run_claim_support_review_regression
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-scripts-run_claim_support_review_regression.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/scripts-run_claim_support_review_regression
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: scripts/run_claim_support_review_regression.py
+- AST symbols: __future__, __future__.annotations, argparse, build playwright command, build pytest command, build run environment, build_playwright_command, build_pytest_command, build_run_environment, create parser, create_parser, future, future annotations, main, os, pathlib, pathlib path, pathlib.path, playwright chromium available, playwright sync api, playwright sync api sync playwright, playwright.sync_api, playwright.sync_api.sync_playwright, playwright_chromium_available, resolve test targets, resolve_test_targets, subprocess, sys, typing, typing optional, typing sequence, typing.optional, typing.sequence
+- AST symbol scope: file
+- Goal id: codebase/runtime/scripts-run_claim_support_review_regression
+- Missing evidence: Review swallowed exception path in scripts/run_claim_support_review_regression.py:75
+- Merge key: codebase/runtime/scripts-run_claim_support_review_regression
+- Merge family: scripts/run_claim_support_review_regression.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 75935cbef32fb160
+- Acceptance: Codebase scan filed this finding from scripts/run_claim_support_review_regression.py:75. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-229-codebase-scan-75935cbef32f.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-230 Review swallowed exception path in test_pipeline_error_recovery.py:402
+
+- Status: completed
+- Completion: manual
+- Priority: P1
+- Track: quality
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, test_pipeline_error_recovery.py
+- Validation: python3 -m py_compile test_pipeline_error_recovery.py
+- Bundle: codebase/quality/test_pipeline_error_recovery
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-quality-test_pipeline_error_recovery.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/quality
+- Graph depth: 1
+- Parallel lane: codebase/quality/test_pipeline_error_recovery
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: test_pipeline_error_recovery.py
+- AST symbols: ipfs datasets py optimizers graphrag ontology pipeline, ipfs datasets py optimizers graphrag ontology pipeline ontologypipeline, ipfs_datasets_py.optimizers.graphrag.ontology_pipeline, ipfs_datasets_py.optimizers.graphrag.ontology_pipeline.ontologypipeline, pytest, sys, test pipeline ontology valid after error recovery, test pipeline refinement count accurate, test pipeline refinement disabled, test pipeline refinement iteration limit, test pipeline refinement with difficult input, test pipeline result structure always valid, test pipeline with ambiguous entity text, test pipeline with brief input, test pipeline with circular references in text, test pipeline with control characters, test pipeline with custom extraction config, test pipeline with default domain, test pipeline with default parameters, test pipeline with difficult extraction, test pipeline with empty text, test pipeline with extremely long entity name, test pipeline with large text, test pipeline with low confidence threshold, test pipeline with many refinement rounds, test pipeline with mediator active, test pipeline with minimal input, test pipeline with minimal ontology, test pipeline with minimal relationships, test pipeline with nested quotations, test pipeline with none data, test pipeline with null bytes in text, test pipeline with repetitive entities, test pipeline with special characters, test pipeline with unicode text, test pipeline with valid input no crash, test pipeline with very long text, test pipeline with whitespace only, test pipeline without critic, test pipeline without llm backend, test pipeline without mediator, test_pipeline_ontology_valid_after_error_recovery, test_pipeline_refinement_count_accurate, test_pipeline_refinement_disabled, test_pipeline_refinement_iteration_limit, test_pipeline_refinement_with_difficult_input, test_pipeline_result_structure_always_valid, test_pipeline_with_ambiguous_entity_text, test_pipeline_with_brief_input, test_pipeline_with_circular_references_in_text, test_pipeline_with_control_characters, test_pipeline_with_custom_extraction_config, test_pipeline_with_default_domain, test_pipeline_with_default_parameters, test_pipeline_with_difficult_extraction, test_pipeline_with_empty_text, test_pipeline_with_extremely_long_entity_name, test_pipeline_with_large_text, test_pipeline_with_low_confidence_threshold, test_pipeline_with_many_refinement_rounds, test_pipeline_with_mediator_active, test_pipeline_with_minimal_input, test_pipeline_with_minimal_ontology, test_pipeline_with_minimal_relationships, test_pipeline_with_nested_quotations, test_pipeline_with_none_data, test_pipeline_with_null_bytes_in_text, test_pipeline_with_repetitive_entities, test_pipeline_with_special_characters, test_pipeline_with_unicode_text, test_pipeline_with_valid_input_no_crash, test_pipeline_with_very_long_text, test_pipeline_with_whitespace_only, test_pipeline_without_critic, test_pipeline_without_llm_backend, test_pipeline_without_mediator, testpipelineerrorrecoverybasics, testpipelineerrorrecoverybasics test pipeline with custom extraction config, testpipelineerrorrecoverybasics test pipeline with default domain, testpipelineerrorrecoverybasics test pipeline with empty text
+- AST symbol scope: file
+- Goal id: codebase/quality/test_pipeline_error_recovery
+- Missing evidence: Review swallowed exception path in test_pipeline_error_recovery.py:402
+- Merge key: codebase/quality/test_pipeline_error_recovery
+- Merge family: test_pipeline_error_recovery.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: e61544625f39fd6f
+- Acceptance: Codebase scan filed this finding from test_pipeline_error_recovery.py:402. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-230-codebase-scan-e61544625f39.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-231 Review swallowed exception path in tests/conftest.py:223
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: quality
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, tests/conftest.py
+- Validation: python3 -m py_compile tests/conftest.py
+- Bundle: codebase/quality/tests-conftest
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-quality-tests-conftest.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/quality
+- Graph depth: 1
+- Parallel lane: codebase/quality/tests-conftest
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: tests/conftest.py
+- AST symbols: _candidate_ipfs_dataset_roots, _classify_file, _select_ipfs_dataset_root, _strip_reserved_example_urls, _truthy_env, candidate ipfs dataset roots, classify file, importlib, importlib util, importlib.util, ipfs datasets py, ipfs_datasets_py, os, pytest, pytest addoption, pytest collection modifyitems, pytest configure, pytest ignore collect, pytest_addoption, pytest_collection_modifyitems, pytest_configure, pytest_ignore_collect, re, select ipfs dataset root, strip reserved example urls, sys, truthy env
+- AST symbol scope: file
+- Goal id: codebase/quality/tests-conftest
+- Missing evidence: Review swallowed exception path in tests/conftest.py:223
+- Merge key: codebase/quality/tests-conftest
+- Merge family: tests/conftest.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: dbed215317024db3
+- Acceptance: Codebase scan filed this finding from tests/conftest.py:223. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-231-codebase-scan-dbed21531702.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
