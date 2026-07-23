@@ -3756,3 +3756,189 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Goal registration: dynamic
 - Todo vector key: 35764e29494443fb
 - Acceptance: Codebase scan filed this finding from mediator/integrations/graph_tools.py:187. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-219-codebase-scan-35764e294944.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-220 Review swallowed exception path in mediator/integrations/graph_tools.py:209
+
+- Status: completed
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, mediator/integrations/graph_tools.py
+- Validation: python3 -m py_compile mediator/integrations/graph_tools.py
+- Bundle: codebase/runtime/mediator-integrations-graph_tools
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-mediator-integrations-graph_tools.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/mediator-integrations-graph_tools
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: mediator/integrations/graph_tools.py
+- AST symbols: _extract_readiness_context, _make_id, _tokenize, augment normalized records, augment_normalized_records, build evidence payloads, build_evidence_payloads, complaint phases, complaint phases complaintphase, complaint phases nodetype, complaint_phases, complaint_phases.complaintphase, complaint_phases.nodetype, extract graph terms, extract readiness context, extract_graph_terms, graphawareretrievalreranker, graphawareretrievalreranker augment normalized records, graphawareretrievalreranker extract graph terms, graphawareretrievalreranker extract readiness context, graphawareretrievalreranker should apply canary, graphawareretrievalreranker tokenize, graphawareretrievalreranker._extract_readiness_context, graphawareretrievalreranker._tokenize, graphawareretrievalreranker.augment_normalized_records, graphawareretrievalreranker.extract_graph_terms, graphawareretrievalreranker.should_apply_canary, graphretrievalaugmentor, graphretrievalaugmentor build evidence payloads, graphretrievalaugmentor make id, graphretrievalaugmentor._make_id, graphretrievalaugmentor.build_evidence_payloads, hashlib, logging, make id, re, should apply canary, should_apply_canary, time, tokenize, typing, typing any, typing dict, typing list, typing set, typing.any, typing.dict, typing.list, typing.set
+- AST symbol scope: file
+- Goal id: codebase/runtime/mediator-integrations-graph_tools
+- Missing evidence: Review swallowed exception path in mediator/integrations/graph_tools.py:209
+- Merge key: codebase/runtime/mediator-integrations-graph_tools
+- Merge family: mediator/integrations/graph_tools.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 3781a2e00c210959
+- Acceptance: Codebase scan filed this finding from mediator/integrations/graph_tools.py:209. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-220-codebase-scan-3781a2e00c21.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-221 Review swallowed exception path in mediator/integrations/graph_tools.py:223
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, mediator/integrations/graph_tools.py
+- Validation: python3 -m py_compile mediator/integrations/graph_tools.py
+- Bundle: codebase/runtime/mediator-integrations-graph_tools
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-mediator-integrations-graph_tools.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/mediator-integrations-graph_tools
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: mediator/integrations/graph_tools.py
+- AST symbols: _extract_readiness_context, _make_id, _tokenize, augment normalized records, augment_normalized_records, build evidence payloads, build_evidence_payloads, complaint phases, complaint phases complaintphase, complaint phases nodetype, complaint_phases, complaint_phases.complaintphase, complaint_phases.nodetype, extract graph terms, extract readiness context, extract_graph_terms, graphawareretrievalreranker, graphawareretrievalreranker augment normalized records, graphawareretrievalreranker extract graph terms, graphawareretrievalreranker extract readiness context, graphawareretrievalreranker should apply canary, graphawareretrievalreranker tokenize, graphawareretrievalreranker._extract_readiness_context, graphawareretrievalreranker._tokenize, graphawareretrievalreranker.augment_normalized_records, graphawareretrievalreranker.extract_graph_terms, graphawareretrievalreranker.should_apply_canary, graphretrievalaugmentor, graphretrievalaugmentor build evidence payloads, graphretrievalaugmentor make id, graphretrievalaugmentor._make_id, graphretrievalaugmentor.build_evidence_payloads, hashlib, logging, make id, re, should apply canary, should_apply_canary, time, tokenize, typing, typing any, typing dict, typing list, typing set, typing.any, typing.dict, typing.list, typing.set
+- AST symbol scope: file
+- Goal id: codebase/runtime/mediator-integrations-graph_tools
+- Missing evidence: Review swallowed exception path in mediator/integrations/graph_tools.py:223
+- Merge key: codebase/runtime/mediator-integrations-graph_tools
+- Merge family: mediator/integrations/graph_tools.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 2986b4a153d97f2c
+- Acceptance: Codebase scan filed this finding from mediator/integrations/graph_tools.py:223. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-221-codebase-scan-2986b4a153d9.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-222 Review swallowed exception path in mediator/integrations/graph_tools.py:236
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, mediator/integrations/graph_tools.py
+- Validation: python3 -m py_compile mediator/integrations/graph_tools.py
+- Bundle: codebase/runtime/mediator-integrations-graph_tools
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-mediator-integrations-graph_tools.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/mediator-integrations-graph_tools
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: mediator/integrations/graph_tools.py
+- AST symbols: _extract_readiness_context, _make_id, _tokenize, augment normalized records, augment_normalized_records, build evidence payloads, build_evidence_payloads, complaint phases, complaint phases complaintphase, complaint phases nodetype, complaint_phases, complaint_phases.complaintphase, complaint_phases.nodetype, extract graph terms, extract readiness context, extract_graph_terms, graphawareretrievalreranker, graphawareretrievalreranker augment normalized records, graphawareretrievalreranker extract graph terms, graphawareretrievalreranker extract readiness context, graphawareretrievalreranker should apply canary, graphawareretrievalreranker tokenize, graphawareretrievalreranker._extract_readiness_context, graphawareretrievalreranker._tokenize, graphawareretrievalreranker.augment_normalized_records, graphawareretrievalreranker.extract_graph_terms, graphawareretrievalreranker.should_apply_canary, graphretrievalaugmentor, graphretrievalaugmentor build evidence payloads, graphretrievalaugmentor make id, graphretrievalaugmentor._make_id, graphretrievalaugmentor.build_evidence_payloads, hashlib, logging, make id, re, should apply canary, should_apply_canary, time, tokenize, typing, typing any, typing dict, typing list, typing set, typing.any, typing.dict, typing.list, typing.set
+- AST symbol scope: file
+- Goal id: codebase/runtime/mediator-integrations-graph_tools
+- Missing evidence: Review swallowed exception path in mediator/integrations/graph_tools.py:236
+- Merge key: codebase/runtime/mediator-integrations-graph_tools
+- Merge family: mediator/integrations/graph_tools.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 04c62dea806c9d61
+- Acceptance: Codebase scan filed this finding from mediator/integrations/graph_tools.py:236. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-222-codebase-scan-04c62dea806c.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-223 Review swallowed exception path in mediator/legal_authority_hooks.py:1264
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, mediator/legal_authority_hooks.py
+- Validation: python3 -m py_compile mediator/legal_authority_hooks.py
+- Bundle: codebase/runtime/mediator-legal_authority_hooks
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-mediator-legal_authority_hooks.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/mediator-legal_authority_hooks
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: mediator/legal_authority_hooks.py
+- AST symbols: __init__, _attach_treatment_payloads, _authority_record_from_row, _build_authority_provenance_metadata, _build_rule_candidate_summary, _build_treatment_records, _build_treatment_summary, _check_availability, _check_duckdb_availability, _classify_rule_candidate_type, _clone_provenance_record, _collect_search_diagnostics, _dedupe_authority_rows, _extract_authority_graph, _extract_cfr_sections, _extract_rule_candidates, _filter_regulation_results, _find_existing_authority_record, _generate_authority_recommendations, _generate_search_terms, _get_authority_rule_candidates, _get_authority_treatments, _get_default_db_path, _http_get_json, _http_get_text, _init_web_archiving, _initialize_schema, _log_hf_coverage_warning, _merge_handoff_into_provenance_record, _normalize_authority_fact_row, _normalize_courtlistener_result, _normalize_ecfr_result, _normalize_search_programs, _parse_authority_text, _prepare_duckdb_path, _query_terms, _resolve_artifact_identity, _resolve_claim_element, _rule_candidate_confidence, _search_agency_guidance_fallback, _search_courtlistener_fallback, _search_ecfr_fallback, _search_federal_statutes_fallback, _search_oregon_statutes_fallback, _split_rule_candidate_sentences, _store_authority_chunks, _store_authority_facts, _store_authority_graph, _store_authority_rule_candidates, _store_authority_treatments, _strip_html, _text_overlap_score, add authorities bulk, add authority, add_authorities_bulk, add_authority, analyze authorities for claim, analyze_authorities_for_claim, attach treatment payloads, authority record from row, build authority provenance metadata, build rule candidate summary, build search programs, build treatment records, build treatment summary, build_search_programs, check availability, check duckdb availability, claim support review, claim support review merge intake summary handoff metadata, claim_support_review, claim_support_review._merge_intake_summary_handoff_metadata, classify rule candidate type, clone provenance record, collect search diagnostics, datetime, datetime datetime, datetime.datetime, dedupe authority rows, duckdb
+- AST symbol scope: file
+- Goal id: codebase/runtime/mediator-legal_authority_hooks
+- Missing evidence: Review swallowed exception path in mediator/legal_authority_hooks.py:1264
+- Merge key: codebase/runtime/mediator-legal_authority_hooks
+- Merge family: mediator/legal_authority_hooks.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 6e8c1ae9d9783384
+- Acceptance: Codebase scan filed this finding from mediator/legal_authority_hooks.py:1264. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-223-codebase-scan-6e8c1ae9d978.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-224 Review swallowed exception path in mediator/legal_authority_hooks.py:1318
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, mediator/legal_authority_hooks.py
+- Validation: python3 -m py_compile mediator/legal_authority_hooks.py
+- Bundle: codebase/runtime/mediator-legal_authority_hooks
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-mediator-legal_authority_hooks.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/mediator-legal_authority_hooks
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: mediator/legal_authority_hooks.py
+- AST symbols: __init__, _attach_treatment_payloads, _authority_record_from_row, _build_authority_provenance_metadata, _build_rule_candidate_summary, _build_treatment_records, _build_treatment_summary, _check_availability, _check_duckdb_availability, _classify_rule_candidate_type, _clone_provenance_record, _collect_search_diagnostics, _dedupe_authority_rows, _extract_authority_graph, _extract_cfr_sections, _extract_rule_candidates, _filter_regulation_results, _find_existing_authority_record, _generate_authority_recommendations, _generate_search_terms, _get_authority_rule_candidates, _get_authority_treatments, _get_default_db_path, _http_get_json, _http_get_text, _init_web_archiving, _initialize_schema, _log_hf_coverage_warning, _merge_handoff_into_provenance_record, _normalize_authority_fact_row, _normalize_courtlistener_result, _normalize_ecfr_result, _normalize_search_programs, _parse_authority_text, _prepare_duckdb_path, _query_terms, _resolve_artifact_identity, _resolve_claim_element, _rule_candidate_confidence, _search_agency_guidance_fallback, _search_courtlistener_fallback, _search_ecfr_fallback, _search_federal_statutes_fallback, _search_oregon_statutes_fallback, _split_rule_candidate_sentences, _store_authority_chunks, _store_authority_facts, _store_authority_graph, _store_authority_rule_candidates, _store_authority_treatments, _strip_html, _text_overlap_score, add authorities bulk, add authority, add_authorities_bulk, add_authority, analyze authorities for claim, analyze_authorities_for_claim, attach treatment payloads, authority record from row, build authority provenance metadata, build rule candidate summary, build search programs, build treatment records, build treatment summary, build_search_programs, check availability, check duckdb availability, claim support review, claim support review merge intake summary handoff metadata, claim_support_review, claim_support_review._merge_intake_summary_handoff_metadata, classify rule candidate type, clone provenance record, collect search diagnostics, datetime, datetime datetime, datetime.datetime, dedupe authority rows, duckdb
+- AST symbol scope: file
+- Goal id: codebase/runtime/mediator-legal_authority_hooks
+- Missing evidence: Review swallowed exception path in mediator/legal_authority_hooks.py:1318
+- Merge key: codebase/runtime/mediator-legal_authority_hooks
+- Merge family: mediator/legal_authority_hooks.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 64f50cf3d4f3eeb8
+- Acceptance: Codebase scan filed this finding from mediator/legal_authority_hooks.py:1318. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-224-codebase-scan-64f50cf3d4f3.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-225 Review swallowed exception path in mediator/legal_authority_hooks.py:2612
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, mediator/legal_authority_hooks.py
+- Validation: python3 -m py_compile mediator/legal_authority_hooks.py
+- Bundle: codebase/runtime/mediator-legal_authority_hooks
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-mediator-legal_authority_hooks.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/mediator-legal_authority_hooks
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: mediator/legal_authority_hooks.py
+- AST symbols: __init__, _attach_treatment_payloads, _authority_record_from_row, _build_authority_provenance_metadata, _build_rule_candidate_summary, _build_treatment_records, _build_treatment_summary, _check_availability, _check_duckdb_availability, _classify_rule_candidate_type, _clone_provenance_record, _collect_search_diagnostics, _dedupe_authority_rows, _extract_authority_graph, _extract_cfr_sections, _extract_rule_candidates, _filter_regulation_results, _find_existing_authority_record, _generate_authority_recommendations, _generate_search_terms, _get_authority_rule_candidates, _get_authority_treatments, _get_default_db_path, _http_get_json, _http_get_text, _init_web_archiving, _initialize_schema, _log_hf_coverage_warning, _merge_handoff_into_provenance_record, _normalize_authority_fact_row, _normalize_courtlistener_result, _normalize_ecfr_result, _normalize_search_programs, _parse_authority_text, _prepare_duckdb_path, _query_terms, _resolve_artifact_identity, _resolve_claim_element, _rule_candidate_confidence, _search_agency_guidance_fallback, _search_courtlistener_fallback, _search_ecfr_fallback, _search_federal_statutes_fallback, _search_oregon_statutes_fallback, _split_rule_candidate_sentences, _store_authority_chunks, _store_authority_facts, _store_authority_graph, _store_authority_rule_candidates, _store_authority_treatments, _strip_html, _text_overlap_score, add authorities bulk, add authority, add_authorities_bulk, add_authority, analyze authorities for claim, analyze_authorities_for_claim, attach treatment payloads, authority record from row, build authority provenance metadata, build rule candidate summary, build search programs, build treatment records, build treatment summary, build_search_programs, check availability, check duckdb availability, claim support review, claim support review merge intake summary handoff metadata, claim_support_review, claim_support_review._merge_intake_summary_handoff_metadata, classify rule candidate type, clone provenance record, collect search diagnostics, datetime, datetime datetime, datetime.datetime, dedupe authority rows, duckdb
+- AST symbol scope: file
+- Goal id: codebase/runtime/mediator-legal_authority_hooks
+- Missing evidence: Review swallowed exception path in mediator/legal_authority_hooks.py:2612
+- Merge key: codebase/runtime/mediator-legal_authority_hooks
+- Merge family: mediator/legal_authority_hooks.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 1cc8e01bb3ed16d4
+- Acceptance: Codebase scan filed this finding from mediator/legal_authority_hooks.py:2612. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-225-codebase-scan-1cc8e01bb3ed.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
