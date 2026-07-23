@@ -5092,7 +5092,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-272 Exercise an end-to-end parallel proof-aware implementation workflow
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -5111,9 +5111,10 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 - [ ] Task checkbox-273: REF-273 Expose shadow, canary, enforcement, and override diagnostics
 
+- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
 ## REF-273 Expose shadow, canary, enforcement, and override diagnostics
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -5132,9 +5133,10 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 - [ ] Task checkbox-274: REF-274 Benchmark context reduction, cache reuse, and CPU proof throughput
 
+- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
 ## REF-274 Benchmark context reduction, cache reuse, and CPU proof throughput
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P1
 - Track: G11
@@ -5153,6 +5155,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 - [x] Task checkbox-275: REF-275 Define a canonical formal work-plan contract and logic vocabulary
 
+- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
 ## REF-275 Define a canonical formal work-plan contract and logic vocabulary
 
 - Status: completed
@@ -5365,7 +5368,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-285 Verify claim, fencing, receipt, and attestation protocols with Tamarin and ProVerif
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5384,6 +5387,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 - [x] Task checkbox-286: REF-286 Check cross-lane information-flow hyperproperties
 
+- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
 ## REF-286 Check cross-lane information-flow hyperproperties
 
 - Status: completed
@@ -5428,7 +5432,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-288 Normalize proof failures and traces into a counterexample knowledge graph
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5447,9 +5451,10 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 - [ ] Task checkbox-289: REF-289 Generate bounded counterexample-guided plan repairs
 
+- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
 ## REF-289 Generate bounded counterexample-guided plan repairs
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5468,9 +5473,10 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 - [ ] Task checkbox-290: REF-290 Bind plan conformance and formal evidence into goal completion
 
+- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
 ## REF-290 Bind plan conformance and formal evidence into goal completion
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5489,9 +5495,10 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 - [ ] Task checkbox-291: REF-291 Admit every prover family through one shared CPU and process budget
 
+- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
 ## REF-291 Admit every prover family through one shared CPU and process budget
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5510,9 +5517,10 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 - [ ] Task checkbox-292: REF-292 Adversarially test formal plans and every prover-matrix trust boundary
 
+- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
 ## REF-292 Adversarially test formal plans and every prover-matrix trust boundary
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5531,9 +5539,10 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 - [ ] Task checkbox-293: REF-293 Exercise an end-to-end proof-carrying planning and implementation workflow
 
+- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
 ## REF-293 Exercise an end-to-end proof-carrying planning and implementation workflow
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: G12
@@ -5552,9 +5561,10 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 - [ ] Task checkbox-294: REF-294 Benchmark and gate formal-planning rollout by assurance and throughput
 
+- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
 ## REF-294 Benchmark and gate formal-planning rollout by assurance and throughput
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P1
 - Track: G12
@@ -5571,6 +5581,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-294-benchmarkandgateformal-planningrolloutbyassuranc
 - Acceptance: Cold and warm benchmarks measure context tokens, plan defects found before LLM dispatch, proof support, counterexample quality, cache reuse, queue latency, CPU saturation, memory, and accepted-task throughput.; Metrics separate property class, translator profile, prover, kernel, finite bound, rollout mode, task risk, and authoritative assurance.; Shadow, canary, and enforcement thresholds are explicit; unavailable or low-value lanes remain advisory and operator overrides remain durable and scoped.; Operator projections expose the executable matrix, degraded reasons, active formal plans, unmet obligations, trace violations, and rollout decisions without raw context dumps.
 
+- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
 ## REF-295 Review swallowed exception path in tests/mcp/unit/test_observability_property_based.py:251
 
 - Status: completed
@@ -6033,7 +6044,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-309 Close objective gap: Integrate Hammer, kernel reconstruction, and trusted caching
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -6165,7 +6176,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-312 Close objective gap: Distinguish every refill and analysis outcome
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -6206,3 +6217,268 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Candidate kind: validation_gate
 - Todo vector key: a0f2f0d5d6cc792c
 - Acceptance: Objective scan filed this gap for G10.S1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-312-objective-gap-fdd16e8b8df5.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap. This task is part of goal_packet/ops/ipfs_datasets_py/25391dc0e27e; implement a complete, cohesive change that fully advances the packet goals (G10.S1, G10.S3, G10.S4) and covers all the shared packet evidence in one comprehensive pass. Refine the objective heap if the gap needs smaller child goals.
+- Blocked reason: Retired by objective-task janitor during launch steering because orphaned_goal_reference.
+
+## REF-313 Close objective gap: Establish canonical coordination and merge flow
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q; PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q; PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q
+- Bundle: refactor/g9/g9-s1
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g9-g9-s1.todo.md
+- Bundle strategy: explicit
+- Graph parents: G9
+- Graph depth: 1
+- Parallel lane: refactor/g9/g9-s1
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/persistent_task_queue.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py, Every task has a stable canonical key or CID independent of board path and display id., Legacy markdown tasks migrate idempotently with board namespace provenance., Branches, events, retries, cooldowns, leases, and receipts carry canonical identity., Refill cannot create a second active task for the same canonical work item., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py, A persistent scheduler discovers new and refilled tasks without restart., Workers claim ready tasks, release drained or blocked leases, and steal conflict-safe work., Lane count remains within configured capacity and no task executes under two accepted leases., The manifest is an authoritative live projection rather than a launch-time snapshot., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py, All implementation lanes enqueue merge candidates instead of racing the target checkout., The train deduplicates by canonical task and commit, rebases on the latest target, and preserves priority plus age fairness., One conflict fingerprint invokes at most one active resolver attempt., Bounded failures enter quarantine with a durable receipt instead of a polling retry loop., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G9.S1
+- Canonical task key: task/v1/85abefd816d717d93abc988a655912d8a7a20fda7c7b0195664f2c11da82ac29
+- Canonical task CID: baguqeeraqwv67waw24l5sov4tcfgkwis3ct2ed62pr5qdflgj4wbdwucvquq
+- Missing evidence: objective validation repair
+- Embedding query: Establish canonical coordination and merge flow
+- AST query: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/persistent_task_queue.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py, Every task has a stable canonical key or CID independent of board path and display id., Legacy markdown tasks migrate idempotently with board namespace provenance., Branches, events, retries, cooldowns, leases, and receipts carry canonical identity., Refill cannot create a second active task for the same canonical work item., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py, A persistent scheduler discovers new and refilled tasks without restart., Workers claim ready tasks, release drained or blocked leases, and steal conflict-safe work., Lane count remains within configured capacity and no task executes under two accepted leases., The manifest is an authoritative live projection rather than a launch-time snapshot., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py, All implementation lanes enqueue merge candidates instead of racing the target checkout., The train deduplicates by canonical task and commit, rebases on the latest target, and preserves priority plus age fairness., One conflict fingerprint invokes at most one active resolver attempt., Bounded failures enter quarantine with a durable receipt instead of a polling retry loop., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q
+- Surplus group: objective/G9.S1
+- Merge key: a225a5aae9962519
+- Merge family: goal_packet/ops/ipfs_datasets_py/c20825ca2cad
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair; goal_subgoal_packet
+- Goal packet: goal_packet/ops/ipfs_datasets_py/c20825ca2cad
+- Goal packet role: packet_anchor
+- Goal packet goals: G9.S1, G9.S2, G9.S3, G9.S4
+- Goal packet task count: 4
+- Goal packet work item count: 4
+- Candidate kind: validation_gate
+- Todo vector key: de6b4676e018ecd7
+- Acceptance: Objective scan filed this gap for G9.S1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-313-objective-gap-f92bbf64160c.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap. This task is part of goal_packet/ops/ipfs_datasets_py/c20825ca2cad; implement a complete, cohesive change that fully advances the packet goals (G9.S1, G9.S2, G9.S3, G9.S4) and covers all the shared packet evidence in one comprehensive pass. Refine the objective heap if the gap needs smaller child goals.
+
+## REF-314 Close objective gap: Plan from dependencies, conflicts, and objective value
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q; PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q; PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q
+- Bundle: refactor/g9/g9-s2
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g9-g9-s2.todo.md
+- Bundle strategy: explicit
+- Graph parents: G9
+- Graph depth: 1
+- Parallel lane: refactor/g9/g9-s2
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py, Goal, import, interface, output-input, migration, and validation prerequisites become explicit DAG edges with provenance., Only tasks whose prerequisite merge receipts succeeded are claimable., Priority includes critical-path length, slack, downstream unlock value, age, and configured objective priority., Cycles and missing dependencies produce bounded repair evidence rather than deadlock., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py, Conflict surfaces include all predicted files, AST symbols, interfaces, submodules, and generated artifacts., Lane planning colors the conflict graph so overlapping tasks do not run concurrently unless explicitly allowed., Actual branch diffs and conflict receipts update future conflict weights., Planner output explains every co-location or separation decision., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py, Each eligible subgoal can produce multiple schema-validated plan branches through llm_router., Candidates declare predicted files and symbols, dependencies, validation proof, cost, risk, and expected objective delta., A deterministic evaluator selects a branch and retains rejected alternatives plus rationale., Router failure falls back to deterministic planning without blocking ready work., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G9.S2
+- Canonical task key: task/v1/cb36817ed3f6145d7a9acca89961329062918a577085d1c636ca5e3e2489c994
+- Canonical task CID: baguqeerazm3ic7wt6ykf26u2zsujsyjssbrjdcsxocc5drrwzjpd4jejzgka
+- Missing evidence: objective validation repair
+- Embedding query: Plan from dependencies, conflicts, and objective value
+- AST query: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py, Goal, import, interface, output-input, migration, and validation prerequisites become explicit DAG edges with provenance., Only tasks whose prerequisite merge receipts succeeded are claimable., Priority includes critical-path length, slack, downstream unlock value, age, and configured objective priority., Cycles and missing dependencies produce bounded repair evidence rather than deadlock., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py, Conflict surfaces include all predicted files, AST symbols, interfaces, submodules, and generated artifacts., Lane planning colors the conflict graph so overlapping tasks do not run concurrently unless explicitly allowed., Actual branch diffs and conflict receipts update future conflict weights., Planner output explains every co-location or separation decision., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py, Each eligible subgoal can produce multiple schema-validated plan branches through llm_router., Candidates declare predicted files and symbols, dependencies, validation proof, cost, risk, and expected objective delta., A deterministic evaluator selects a branch and retains rejected alternatives plus rationale., Router failure falls back to deterministic planning without blocking ready work., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q
+- Surplus group: objective/G9.S2
+- Merge key: cf42c01cca68f418
+- Merge family: goal_packet/ops/ipfs_datasets_py/c20825ca2cad
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair; goal_subgoal_packet
+- Goal packet: goal_packet/ops/ipfs_datasets_py/c20825ca2cad
+- Goal packet role: packet_member
+- Goal packet goals: G9.S1, G9.S2, G9.S3, G9.S4
+- Goal packet task count: 4
+- Goal packet work item count: 4
+- Candidate kind: validation_gate
+- Todo vector key: 444dacc3555e282d
+- Acceptance: Objective scan filed this gap for G9.S2. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-314-objective-gap-de16e332ec42.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap. This task is part of goal_packet/ops/ipfs_datasets_py/c20825ca2cad; implement a complete, cohesive change that fully advances the packet goals (G9.S1, G9.S2, G9.S3, G9.S4) and covers all the shared packet evidence in one comprehensive pass. Refine the objective heap if the gap needs smaller child goals.
+
+## REF-315 Close objective gap: Adapt execution capacity and validation cost
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q; PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q
+- Bundle: refactor/g9/g9-s3
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g9-g9-s3.todo.md
+- Bundle strategy: explicit
+- Graph parents: G9
+- Graph depth: 1
+- Parallel lane: refactor/g9/g9-s3
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py, Heartbeats report measured CPU, memory, disk, active phase, and available worker capacity., Scheduler honors llm_router health, quota, latency, context, and token-budget constraints., Concurrency scales within configured limits and applies backpressure before provider or host exhaustion., Idle lanes advertise zero occupied capacity and can be reassigned., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py, Cheap deterministic checks run before expensive tests and fail fast., Independent validations run in parallel under a bounded resource budget., Cache keys include target commit, command, relevant environment, and dependency state., Impact selection is conservative, explainable, and escalates to broader validation before merge completion., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G9.S3
+- Canonical task key: task/v1/088f5e64c6ad42a38ecee5ab7f2dbf14fcb016a0013e67a520c52941b86e1b5f
+- Canonical task CID: baguqeerabchv4zggvvbkhdwo4wvx6ln7ct6lafvaae7gpjjayuuudododnpq
+- Missing evidence: objective validation repair
+- Embedding query: Adapt execution capacity and validation cost
+- AST query: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py, Heartbeats report measured CPU, memory, disk, active phase, and available worker capacity., Scheduler honors llm_router health, quota, latency, context, and token-budget constraints., Concurrency scales within configured limits and applies backpressure before provider or host exhaustion., Idle lanes advertise zero occupied capacity and can be reassigned., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py, Cheap deterministic checks run before expensive tests and fail fast., Independent validations run in parallel under a bounded resource budget., Cache keys include target commit, command, relevant environment, and dependency state., Impact selection is conservative, explainable, and escalates to broader validation before merge completion., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q
+- Surplus group: objective/G9.S3
+- Merge key: 953a24fb86d6de67
+- Merge family: goal_packet/ops/ipfs_datasets_py/c20825ca2cad
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair; goal_subgoal_packet
+- Goal packet: goal_packet/ops/ipfs_datasets_py/c20825ca2cad
+- Goal packet role: packet_member
+- Goal packet goals: G9.S1, G9.S2, G9.S3, G9.S4
+- Goal packet task count: 4
+- Goal packet work item count: 4
+- Candidate kind: validation_gate
+- Todo vector key: 91e5b542aeb9ace2
+- Acceptance: Objective scan filed this gap for G9.S3. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-315-objective-gap-8a879779a3eb.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap. This task is part of goal_packet/ops/ipfs_datasets_py/c20825ca2cad; implement a complete, cohesive change that fully advances the packet goals (G9.S1, G9.S2, G9.S3, G9.S4) and covers all the shared packet evidence in one comprehensive pass. Refine the objective heap if the gap needs smaller child goals.
+
+## REF-316 Close objective gap: Close the scheduler feedback and lifecycle loop
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q; PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q
+- Bundle: refactor/g9/g9-s4
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g9-g9-s4.todo.md
+- Bundle strategy: explicit
+- Graph parents: G9
+- Graph depth: 1
+- Parallel lane: refactor/g9/g9-s4
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py, One event-derived snapshot reports ready, active, idle, blocked, validation, merge, and resolver phases., Metrics include queue wait, implementation and validation duration, merge wait, conflict and retry rate, completions, tokens, and cost., Every metric is keyed by canonical goal, subgoal, task, lane, and provider identity., Scheduler decisions consume the same snapshot exposed to operators., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py, AST and evidence records are reused by blob hash and only changed files are reparsed., Deleted and renamed files invalidate stale evidence deterministically., Clean worktrees and dependency setups can be pooled without sharing task-local mutations., Cold and warm paths produce equivalent plans and validation results with measured warm-path savings., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G9.S4
+- Canonical task key: task/v1/802e447d40cade8eccac219a4ec108215f88fc8a2ed4674f048e160b8f36ccdd
+- Canonical task CID: baguqeeraqaxei7kazlpi5tfmegne5qiiefpyr7ekf3kgotyerylaxdzwztoq
+- Missing evidence: objective validation repair
+- Embedding query: Close the scheduler feedback and lifecycle loop
+- AST query: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py, One event-derived snapshot reports ready, active, idle, blocked, validation, merge, and resolver phases., Metrics include queue wait, implementation and validation duration, merge wait, conflict and retry rate, completions, tokens, and cost., Every metric is keyed by canonical goal, subgoal, task, lane, and provider identity., Scheduler decisions consume the same snapshot exposed to operators., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py, AST and evidence records are reused by blob hash and only changed files are reparsed., Deleted and renamed files invalidate stale evidence deterministically., Clean worktrees and dependency setups can be pooled without sharing task-local mutations., Cold and warm paths produce equivalent plans and validation results with measured warm-path savings., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q
+- Surplus group: objective/G9.S4
+- Merge key: fc6affbc4a9135ba
+- Merge family: goal_packet/ops/ipfs_datasets_py/c20825ca2cad
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair; goal_subgoal_packet
+- Goal packet: goal_packet/ops/ipfs_datasets_py/c20825ca2cad
+- Goal packet role: packet_member
+- Goal packet goals: G9.S1, G9.S2, G9.S3, G9.S4
+- Goal packet task count: 4
+- Goal packet work item count: 4
+- Candidate kind: validation_gate
+- Todo vector key: 899283a75b3fc5a8
+- Acceptance: Objective scan filed this gap for G9.S4. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-316-objective-gap-06d230235392.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap. This task is part of goal_packet/ops/ipfs_datasets_py/c20825ca2cad; implement a complete, cohesive change that fully advances the packet goals (G9.S1, G9.S2, G9.S3, G9.S4) and covers all the shared packet evidence in one comprehensive pass. Refine the objective heap if the gap needs smaller child goals.
+
+## REF-317 Close objective gap: Normalize IPFS datasets adapter payloads
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest tests/test_ipfs_adapter_layer.py -q; python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q
+- Bundle: refactor/g3/g3-s1
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g3-g3-s1.todo.md
+- Bundle strategy: explicit
+- Graph parents: G3
+- Graph depth: 1
+- Parallel lane: refactor/g3/g3-s1
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: integrations/ipfs_datasets/capabilities.py, integrations/ipfs_datasets/loader.py, All adapter groups report stable keys., Missing optional extras produce actionable reasons., python -m pytest tests/test_ipfs_adapter_layer.py -q, integrations/ipfs_datasets/documents.py, mediator/evidence_hooks.py, Evidence, authority, and web ingestion can call one parse contract., Fallback mode preserves current behavior., python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G3.S1
+- Canonical task key: task/v1/ac7b23ab143188b49e69a19a9f07a9d69b40b1e2ed058779c72654ad7738b1ec
+- Canonical task CID: baguqeeravr5shkyuggeljhtjugnj6b5j22nubmpc5ucyo6ohezkk25zywhwa
+- Missing evidence: objective validation repair
+- Embedding query: Normalize IPFS datasets adapter payloads
+- AST query: integrations/ipfs_datasets/capabilities.py, integrations/ipfs_datasets/loader.py, All adapter groups report stable keys., Missing optional extras produce actionable reasons., python -m pytest tests/test_ipfs_adapter_layer.py -q, integrations/ipfs_datasets/documents.py, mediator/evidence_hooks.py, Evidence, authority, and web ingestion can call one parse contract., Fallback mode preserves current behavior., python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q
+- Surplus group: objective/G3.S1
+- Merge key: eac2ce316d299bc1
+- Merge family: goal_packet/ops/integrations/de7d9d2f5784
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair; goal_subgoal_packet
+- Goal packet: goal_packet/ops/integrations/de7d9d2f5784
+- Goal packet role: packet_anchor
+- Goal packet goals: G3.S1, G3.S2
+- Goal packet task count: 2
+- Goal packet work item count: 2
+- Candidate kind: validation_gate
+- Todo vector key: 49f830b461162392
+- Acceptance: Objective scan filed this gap for G3.S1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-317-objective-gap-5b5d1a6e63c3.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap. This task is part of goal_packet/ops/integrations/de7d9d2f5784; implement a complete, cohesive change that fully advances the packet goals (G3.S1, G3.S2) and covers all the shared packet evidence in one comprehensive pass. Refine the objective heap if the gap needs smaller child goals.
+
+## REF-318 Close objective gap: Clarify graph, GraphRAG, and logic adapter boundaries
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q; python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q
+- Bundle: refactor/g3/g3-s2
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g3-g3-s2.todo.md
+- Bundle strategy: explicit
+- Graph parents: G3
+- Graph depth: 1
+- Parallel lane: refactor/g3/g3-s2
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: integrations/ipfs_datasets/graphs.py, complaint_phases/knowledge_graph.py, Interfaces specify persistence, query, and provenance fields., Fallback graph behavior remains covered., python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q, integrations/ipfs_datasets/logic.py, lib/formal_logic, Logic status distinguishes unavailable, degraded, and implemented., Callers do not branch on fragile strings., python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G3.S2
+- Canonical task key: task/v1/8046f064d00a75963a1da2737bb7028008434a74abffc350e44731cdf92c6929
+- Canonical task CID: baguqeeraqbdpazgqbj2zmoq5ujzxxnycqaeegstuvp74guhei4y436jmneuq
+- Missing evidence: objective validation repair
+- Embedding query: Clarify graph, GraphRAG, and logic adapter boundaries
+- AST query: integrations/ipfs_datasets/graphs.py, complaint_phases/knowledge_graph.py, Interfaces specify persistence, query, and provenance fields., Fallback graph behavior remains covered., python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q, integrations/ipfs_datasets/logic.py, lib/formal_logic, Logic status distinguishes unavailable, degraded, and implemented., Callers do not branch on fragile strings., python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q
+- Surplus group: objective/G3.S2
+- Merge key: 52cd2ebe40218635
+- Merge family: goal_packet/ops/integrations/de7d9d2f5784
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair; goal_subgoal_packet
+- Goal packet: goal_packet/ops/integrations/de7d9d2f5784
+- Goal packet role: packet_member
+- Goal packet goals: G3.S1, G3.S2
+- Goal packet task count: 2
+- Goal packet work item count: 2
+- Candidate kind: validation_gate
+- Todo vector key: 338da6f3156a11b3
+- Acceptance: Objective scan filed this gap for G3.S2. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-318-objective-gap-f617305438ae.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap. This task is part of goal_packet/ops/integrations/de7d9d2f5784; implement a complete, cohesive change that fully advances the packet goals (G3.S1, G3.S2) and covers all the shared packet evidence in one comprehensive pass. Refine the objective heap if the gap needs smaller child goals.
