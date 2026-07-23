@@ -6793,7 +6793,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-326 Close objective gap: Establish proof contracts, capabilities, and trust policy
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -6837,7 +6837,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-327 Close objective gap: Compile AST changes into obligations and bounded graph context
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -6881,7 +6881,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-328 Close objective gap: Integrate Hammer, kernel reconstruction, and trusted caching
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -6925,7 +6925,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-329 Close objective gap: Schedule proof work under shared CPU budgets
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -6969,7 +6969,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-330 Close objective gap: Enforce proof-aware merge and goal completion
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
