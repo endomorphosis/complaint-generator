@@ -6132,7 +6132,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-311 Close objective gap: Enforce proof-aware merge and goal completion
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
@@ -6482,3 +6482,267 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Candidate kind: validation_gate
 - Todo vector key: 338da6f3156a11b3
 - Acceptance: Objective scan filed this gap for G3.S2. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-318-objective-gap-f617305438ae.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap. This task is part of goal_packet/ops/integrations/de7d9d2f5784; implement a complete, cohesive change that fully advances the packet goals (G3.S1, G3.S2) and covers all the shared packet evidence in one comprehensive pass. Refine the objective heap if the gap needs smaller child goals.
+
+## REF-319 Close objective gap: Stabilize repository boundaries
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest --collect-only -q
+- Bundle: refactor/g1
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g1.todo.md
+- Bundle strategy: explicit
+- Graph parents: none
+- Graph depth: 0
+- Parallel lane: refactor/g1
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, pyproject.toml, scripts/graphrag_email_manifest.py, scripts/import_gmail_evidence.py, scripts/import_local_eml_directory.py, applications/dashboard_ui.py, complaint_generator/agentic_evidence_download.py, complaint_generator/data_migration.py, data/refactor_supervisor/discovery/2026-07-22-ref-057-objective-validation-repair.md, objective validation repair
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G1
+- Canonical task key: task/v1/63f8a12ab8f6f70661ea087a02dc1b7a95cdcd4d0ba225f0d7989ef3170d8e44
+- Canonical task CID: baguqeeramp4kckvy633qmypkbb5afxa3pkk43tknborcl4gxtcppgfynrzca
+- Missing evidence: objective validation repair
+- Embedding query: Stabilize repository boundaries
+- AST query: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, docs/ARCHITECTURE.md, pyproject.toml, scripts/graphrag_email_manifest.py, scripts/import_gmail_evidence.py, scripts/import_local_eml_directory.py, applications/dashboard_ui.py, complaint_generator/agentic_evidence_download.py, complaint_generator/data_migration.py, data/refactor_supervisor/discovery/2026-07-22-ref-057-objective-validation-repair.md, objective validation repair
+- Surplus group: objective/G1
+- Merge key: 9c3d2b35296e9add
+- Merge family: objective/G1
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: 5bcc4ed60686d81a
+- Acceptance: Objective scan filed this gap for G1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-319-objective-gap-08d9b0956fd6.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-320 Close objective gap: Decompose oversized orchestration modules
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest --collect-only -q
+- Bundle: refactor/g2
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g2.todo.md
+- Bundle strategy: explicit
+- Graph parents: none
+- Graph depth: 0
+- Parallel lane: refactor/g2
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, mediator/__init__.py, mediator/claim_support_hooks.py, applications/complaint_workspace.py, applications/dashboard_ui.py, playwright/server.js
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G2
+- Canonical task key: task/v1/3b42a1c4efdfe552a2d1b443b7f11b9a00404792fa8f344348b885e9e6cdded7
+- Canonical task CID: baguqeerahnbkdrhp37svfiwrwrb3p4i3tiaear4s7khtiq2ixcc6tzwn33lq
+- Missing evidence: objective validation repair
+- Embedding query: Decompose oversized orchestration modules
+- AST query: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, mediator/__init__.py, mediator/claim_support_hooks.py, applications/complaint_workspace.py, applications/dashboard_ui.py, playwright/server.js
+- Surplus group: objective/G2
+- Merge key: 711e65b47b204d01
+- Merge family: objective/G2
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: ce8c3a3f03eb4308
+- Acceptance: Objective scan filed this gap for G2. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-320-objective-gap-eac2cf021fa2.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-321 Close objective gap: Prepare incremental implementation slices
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest --collect-only -q
+- Bundle: refactor/g8
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g8.todo.md
+- Bundle strategy: explicit
+- Graph parents: none
+- Graph depth: 0
+- Parallel lane: refactor/g8
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md, data/refactor_supervisor/refactor_goals.json, scripts/refactor_agent_supervisor.py, tests/test_refactor_agent_supervisor.py
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G8
+- Canonical task key: task/v1/86f2184f96844164f721836c9a87d1f35ecb0e622c026c8007e7fa19254518e1
+- Canonical task CID: baguqeeraq3zbqt4wqrawj5zbqnwjvb6r6npmwdtcfqbgzaah475bsjkfddqq
+- Missing evidence: objective validation repair
+- Embedding query: Prepare incremental implementation slices
+- AST query: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, data/refactor_supervisor/refactor_goals.json, scripts/refactor_agent_supervisor.py, tests/test_refactor_agent_supervisor.py
+- Surplus group: objective/G8
+- Merge key: 73c2c19911fd953e
+- Merge family: objective/G8
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: bf05e040a4792343
+- Acceptance: Objective scan filed this gap for G8. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-321-objective-gap-8237ed56b27c.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-322 Close objective gap: Map package ownership and runtime entrypoints
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest tests/test_package_imports.py -q
+- Bundle: refactor/g1/g1-s1
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g1-g1-s1.todo.md
+- Bundle strategy: explicit
+- Graph parents: G1
+- Graph depth: 1
+- Parallel lane: refactor/g1/g1-s1
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, scripts/synthesize_hacc_complaint.py, tests/test_review_api.py, complaint_phases/denoiser.py, A short module ownership map exists., Entrypoints are grouped by CLI, web, mediator, and workflow role., python -m pytest tests/test_package_imports.py -q, docs/ARCHITECTURE.md, pyproject.toml, Architecture docs identify allowed imports., New work has a simple rule for where shared code belongs.
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G1.S1
+- Canonical task key: task/v1/cba035a6013e2ca56c7624d03ca454d9965b4c9fbc75e3c2186b835478bdb080
+- Canonical task CID: baguqeerazoqdljqbhywkk3dwetidzjcu3glfwte7xr26hqqynobvi6f5wcaa
+- Missing evidence: objective validation repair
+- Embedding query: Map package ownership and runtime entrypoints
+- AST query: mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, scripts/synthesize_hacc_complaint.py, tests/test_review_api.py, complaint_phases/denoiser.py, A short module ownership map exists., Entrypoints are grouped by CLI, web, mediator, and workflow role., python -m pytest tests/test_package_imports.py -q, docs/ARCHITECTURE.md, pyproject.toml, Architecture docs identify allowed imports., New work has a simple rule for where shared code belongs., python -m pytest tests/test_package_imports.py -q
+- Surplus group: objective/G1.S1
+- Merge key: 4003ea72cdc5444e
+- Merge family: objective/G1.S1
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: 9ca9d1d1566fc3e7
+- Acceptance: Objective scan filed this gap for G1.S1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-322-objective-gap-f307b3b05fa3.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-323 Close objective gap: Remove ad hoc import path behavior from production surfaces
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest tests/test_package_imports.py -q; python -m pytest tests/test_ipfs_adapter_layer.py -q
+- Bundle: refactor/g1/g1-s2
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g1-g1-s2.todo.md
+- Bundle strategy: explicit
+- Graph parents: G1
+- Graph depth: 1
+- Parallel lane: refactor/g1/g1-s2
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: scripts/graphrag_email_manifest.py, scripts/import_gmail_evidence.py, scripts/import_local_eml_directory.py, scripts/master_case_email.py, scripts/process_hacc_pdfs_to_kg.py, scripts/run_gmail_duckdb_pipeline.py, scripts/run_hacc_adversarial_report.py, scripts/run_hacc_grounded_pipeline.py, scripts/run_hacc_preset_matrix.py, No production entrypoint mutates sys.path for normal imports., Explicit exceptions are isolated to scripts/tests., python -m pytest tests/test_package_imports.py -q, applications/dashboard_ui.py, complaint_generator/agentic_evidence_download.py, complaint_generator/data_migration.py, complaint_generator/email_agentic_search.py, complaint_generator/email_authority_enrichment.py, complaint_generator/email_credentials.py, complaint_generator/email_graphrag.py, complaint_generator/email_import.py, complaint_generator/email_oauth.py, complaint_generator/email_pipeline.py, complaint_generator/email_seed_planner.py, complaint_generator/email_timeline_handoff.py, complaint_generator/evidence_relevance.py, integrations/ipfs_datasets/llm.py, Production direct imports are replaced or documented., Degraded mode still imports cleanly., python -m pytest tests/test_ipfs_adapter_layer.py -q, data/refactor_supervisor/discovery/2026-07-22-ref-070-objective-validation-repair.md, objective validation repair
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G1.S2
+- Canonical task key: task/v1/ad23811d9d14aedb7013be18cb8208f23af01bb88f24e7b8d47b41d7c18ec810
+- Canonical task CID: baguqeeravurychm5csxnw4atxymmxaqi6i5pag5yr4sopogupna5pqmozaia
+- Missing evidence: objective validation repair
+- Embedding query: Remove ad hoc import path behavior from production surfaces
+- AST query: scripts/graphrag_email_manifest.py, scripts/import_gmail_evidence.py, scripts/import_local_eml_directory.py, scripts/master_case_email.py, scripts/process_hacc_pdfs_to_kg.py, scripts/run_gmail_duckdb_pipeline.py, scripts/run_hacc_adversarial_report.py, scripts/run_hacc_grounded_pipeline.py, scripts/run_hacc_preset_matrix.py, No production entrypoint mutates sys.path for normal imports., Explicit exceptions are isolated to scripts/tests., python -m pytest tests/test_package_imports.py -q, applications/dashboard_ui.py, complaint_generator/agentic_evidence_download.py, complaint_generator/data_migration.py, complaint_generator/email_agentic_search.py, complaint_generator/email_authority_enrichment.py, complaint_generator/email_credentials.py, complaint_generator/email_graphrag.py, complaint_generator/email_import.py, complaint_generator/email_oauth.py, complaint_generator/email_pipeline.py, complaint_generator/email_seed_planner.py, complaint_generator/email_timeline_handoff.py, complaint_generator/evidence_relevance.py, integrations/ipfs_datasets/llm.py, Production direct imports are replaced or documented., Degraded mode still imports cleanly., python -m pytest tests/test_ipfs_adapter_layer.py -q, data/refactor_supervisor/discovery/2026-07-22-ref-070-objective-validation-repair.md, objective validation repair
+- Surplus group: objective/G1.S2
+- Merge key: b74aae0dd2672d61
+- Merge family: objective/G1.S2
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: 80d513659b600256
+- Acceptance: Objective scan filed this gap for G1.S2. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-323-objective-gap-514368960e0e.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-324 Close objective gap: Reduce application surface coupling
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest tests/test_review_api.py -q; python -m pytest tests/test_claim_support_review_playwright_smoke.py -q
+- Bundle: refactor/g2/g2-s2
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g2-g2-s2.todo.md
+- Bundle strategy: explicit
+- Graph parents: G2
+- Graph depth: 1
+- Parallel lane: refactor/g2/g2-s2
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: applications/complaint_workspace.py, One handler group is isolated., Routes keep the same response shape., python -m pytest tests/test_review_api.py -q, applications/dashboard_ui.py, playwright/server.js, Fixture builders are named and reusable., Playwright smoke tests remain stable., python -m pytest tests/test_claim_support_review_playwright_smoke.py -q
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G2.S2
+- Canonical task key: task/v1/527f6123ce167318d998b69aa82bee9900d16877b80e38cc4ac68d52b56a85d4
+- Canonical task CID: baguqeerakj7wci6oczzrrwmyw2nkqk7oteanc2dxxahdrtcky2gvfnlkqxka
+- Missing evidence: objective validation repair
+- Embedding query: Reduce application surface coupling
+- AST query: applications/complaint_workspace.py, One handler group is isolated., Routes keep the same response shape., python -m pytest tests/test_review_api.py -q, applications/dashboard_ui.py, playwright/server.js, Fixture builders are named and reusable., Playwright smoke tests remain stable., python -m pytest tests/test_claim_support_review_playwright_smoke.py -q
+- Surplus group: objective/G2.S2
+- Merge key: ae5019ce8c73e7a2
+- Merge family: objective/G2.S2
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: 5d35aa067d5417a1
+- Acceptance: Objective scan filed this gap for G2.S2. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-23-ref-324-objective-gap-d2eeaaabba53.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
