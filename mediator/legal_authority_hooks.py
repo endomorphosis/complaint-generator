@@ -1316,7 +1316,9 @@ class LegalAuthorityStorageHook:
 
         DuckDB errors if the file exists but is not a valid DuckDB database.
         Tests often pass a NamedTemporaryFile() path which is an empty file.
-        Delete empty files so DuckDB can initialize the database.
+        Delete empty files so DuckDB can initialize the database. Filesystem
+        preparation remains best-effort because ``_initialize_schema`` owns
+        the connection error path, but failures are logged for diagnosis.
         """
         try:
             path = Path(self.db_path)
@@ -1324,8 +1326,13 @@ class LegalAuthorityStorageHook:
                 path.parent.mkdir(parents=True, exist_ok=True)
             if path.exists() and path.is_file() and path.stat().st_size == 0:
                 path.unlink()
-        except Exception:
-            pass
+        except OSError as exc:
+            self.mediator.log(
+                'legal_authority_db_path_prepare_error',
+                db_path=self.db_path,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
     
     def _get_default_db_path(self) -> str:
         """Get default DuckDB database path."""
