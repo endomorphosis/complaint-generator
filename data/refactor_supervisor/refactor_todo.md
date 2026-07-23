@@ -4710,11 +4710,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-253-adaptcodeobligationstotheipfs-datasets-pyhammerp
 - Acceptance: Supported obligations translate deterministically into Hammer requests with explicit premises and environment locks.; Solver allowlists, timeouts, CPU, memory, network denial, and maximum premise counts flow from supervisor policy.; Portfolio attempts and candidate proofs preserve upstream receipt provenance.; Unsupported translation families return a typed unsupported result and configured fallback checks.
 
-- [ ] Task checkbox-254: REF-254 Add trust-aware proof caching and single-flight execution
+- [x] Task checkbox-254: REF-254 Add trust-aware proof caching and single-flight execution
 
 ## REF-254 Add trust-aware proof caching and single-flight execution
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
