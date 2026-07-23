@@ -1648,7 +1648,7 @@ def test_start_parallel_detaches_scheduler_and_uses_requested_poll_interval(tmp_
     monkeypatch.setattr(supervisor, "ACCELERATE_REPO", tmp_path / "ipfs_accelerate_py")
     monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
     monkeypatch.setattr(supervisor, "BUNDLE_LANE_ROOT", tmp_path / "bundle-lanes")
-    monkeypatch.setattr(supervisor, "BUNDLE_COORDINATION_PATH", tmp_path / "coordination.sqlite3")
+    monkeypatch.setattr(supervisor, "BUNDLE_COORDINATION_PATH", tmp_path / "coordination.duckdb")
     monkeypatch.setattr(supervisor, "active_bundle_keys", lambda: set())
     monkeypatch.setattr(
         supervisor,
@@ -1695,6 +1695,10 @@ def test_start_parallel_detaches_scheduler_and_uses_requested_poll_interval(tmp_
     assert command[command.index("--generated-dirty-path") + 1] == str(
         supervisor.TASKBOARD_DOC_PATH
     )
+    assert command[command.index("--coordination-path") + 1] == str(
+        supervisor.BUNDLE_COORDINATION_PATH
+    )
+    assert supervisor.BUNDLE_COORDINATION_PATH.suffix == ".duckdb"
     assert command[-1] == "--start"
     assert captured["kwargs"]["start_new_session"] is True
     assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
