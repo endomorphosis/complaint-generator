@@ -5067,11 +5067,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-270-makeplanningproof-awarewithoutexpandingmodelcont
 - Acceptance: Plan candidates declare obligation impact, required assurance, proof cost, cache likelihood, dependencies, and expected evidence delta.; Priority accounts for proof critical path, downstream unlock value, risk, freshness, and available resource classes.; The router receives only a bounded proof context capsule and rejected alternatives retain rationale.; Unsupported or failed obligations generate finite template, test, premise, or manual-review work with semantic deduplication.
 
-- [ ] Task checkbox-271: REF-271 Add adversarial tests for every proof trust boundary
+- [x] Task checkbox-271: REF-271 Add adversarial tests for every proof trust boundary
 
 ## REF-271 Add adversarial tests for every proof trust boundary
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G11
@@ -5403,11 +5403,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-286-checkcross-laneinformation-flowhyperproperties
 - Acceptance: Hyperproperty models cover prompt isolation, worktree isolation, log redaction, provider routing, ZKP witness noninterference, and cross-task cache separation.; HyperLTL, AutoHyper, and MCHyper adapters are capability-gated and report unavailable until executable conformance fixtures pass.; Bounded self-composition tests provide non-authoritative fallback evidence when no hyperproperty engine is available.; Counterexample hypertraces are redacted, minimized, and bound to the exact observation policy.
 
-- [ ] Task checkbox-287: REF-287 Generalize runtime MTL monitoring to supervisor event traces
+- [x] Task checkbox-287: REF-287 Generalize runtime MTL monitoring to supervisor event traces
 
 ## REF-287 Generalize runtime MTL monitoring to supervisor event traces
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G12
