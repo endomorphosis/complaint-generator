@@ -6,7 +6,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-243 Review swallowed exception path in tests/mcp/unit/test_observability_property_based.py:213
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: quality
