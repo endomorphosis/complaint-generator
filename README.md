@@ -46,7 +46,6 @@ Comprehensive support for:
 - Criminal Defense, Tax Law
 - Intellectual Property, Environmental Law
 - Probate & Estate
-- **DEI Policy Analysis** (Special focus)
 
 Each type includes 390+ domain keywords, 90+ legal patterns, and automated decision trees.
 
