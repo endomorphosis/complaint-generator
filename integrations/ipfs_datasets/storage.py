@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .loader import import_attr_optional
+from .loader import get_repo_paths, import_attr_optional
 from .types import with_adapter_metadata
 
 
@@ -128,7 +128,10 @@ def ensure_ipfs_backend(*, prefer_local_fallback: bool = False, cache_dir: str |
 
 
 def _repo_local_ipfs_kit_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "ipfs_datasets_py" / "ipfs_kit_py"
+    kit_repo = get_repo_paths().ipfs_kit_repo
+    if kit_repo is not None:
+        return kit_repo
+    return Path(__file__).resolve().parents[2] / "external" / "ipfs_kit_py"
 
 
 def _discover_repo_local_kubo_cmd() -> str:

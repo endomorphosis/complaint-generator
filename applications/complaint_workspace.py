@@ -229,9 +229,16 @@ except ModuleNotFoundError:
     anyio = _AnyioFallback()
 
 
+def _prefer_checkout(repo_root: Path, name: str) -> Path:
+    external = repo_root / "external" / name
+    if external.exists():
+        return external
+    return repo_root / name
+
+
 def _ensure_local_ipfs_datasets_path() -> None:
     repo_root = Path(__file__).resolve().parent.parent
-    candidate = repo_root / "ipfs_datasets_py"
+    candidate = _prefer_checkout(repo_root, "ipfs_datasets_py")
     candidate_text = str(candidate)
     if candidate.is_dir() and candidate_text not in sys.path:
         sys.path.insert(0, candidate_text)
@@ -5707,8 +5714,8 @@ class ComplaintWorkspaceService:
     @classmethod
     def _build_mike_submodule_inventory(cls) -> Dict[str, Any]:
         repo_root = cls._repo_root()
-        mike_root = repo_root / "mike"
-        ipfs_root = repo_root / "ipfs_datasets_py"
+        mike_root = _prefer_checkout(repo_root, "mike")
+        ipfs_root = _prefer_checkout(repo_root, "ipfs_datasets_py")
         mike_frontend_package = cls._safe_read_json_file(mike_root / "frontend" / "package.json")
         mike_backend_package = cls._safe_read_json_file(mike_root / "backend" / "package.json")
         ipfs_pyproject = cls._safe_read_toml_file(cls._ipfs_project_file(ipfs_root))
@@ -5783,10 +5790,12 @@ class ComplaintWorkspaceService:
     @classmethod
     def _build_mike_compatibility_target_matrix(cls) -> Dict[str, Any]:
         repo_root = cls._repo_root()
+        mike_root = _prefer_checkout(repo_root, "mike")
+        ipfs_root = _prefer_checkout(repo_root, "ipfs_datasets_py")
         complaint_pyproject = cls._safe_read_toml_file(repo_root / "pyproject.toml")
-        mike_frontend_package = cls._safe_read_json_file(repo_root / "mike" / "frontend" / "package.json")
-        mike_backend_package = cls._safe_read_json_file(repo_root / "mike" / "backend" / "package.json")
-        ipfs_pyproject = cls._safe_read_toml_file(cls._ipfs_project_file(repo_root / "ipfs_datasets_py"))
+        mike_frontend_package = cls._safe_read_json_file(mike_root / "frontend" / "package.json")
+        mike_backend_package = cls._safe_read_json_file(mike_root / "backend" / "package.json")
+        ipfs_pyproject = cls._safe_read_toml_file(cls._ipfs_project_file(ipfs_root))
         complaint_project = dict(complaint_pyproject.get("project") or {})
         ipfs_project = dict(ipfs_pyproject.get("project") or {})
         return {
@@ -5808,12 +5817,10 @@ class ComplaintWorkspaceService:
                 "workspace_source_of_truth": "complaint_generator_session_state",
             },
             "submodule_shas": {
-                "mike_commit": cls._safe_read_git_ref(repo_root / "mike", "HEAD"),
-                "mike_origin_main_commit": cls._safe_read_git_ref(repo_root / "mike", "origin/main"),
-                "ipfs_datasets_py_commit": cls._safe_read_git_ref(repo_root / "ipfs_datasets_py", "HEAD"),
-                "ipfs_datasets_py_origin_main_commit": cls._safe_read_git_ref(
-                    repo_root / "ipfs_datasets_py", "origin/main"
-                ),
+                "mike_commit": cls._safe_read_git_ref(mike_root, "HEAD"),
+                "mike_origin_main_commit": cls._safe_read_git_ref(mike_root, "origin/main"),
+                "ipfs_datasets_py_commit": cls._safe_read_git_ref(ipfs_root, "HEAD"),
+                "ipfs_datasets_py_origin_main_commit": cls._safe_read_git_ref(ipfs_root, "origin/main"),
             },
             "config_expectations": {
                 "complaint_mike_base_url_env": "COMPLAINT_MIKE_BASE_URL",

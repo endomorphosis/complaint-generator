@@ -16,6 +16,15 @@ class RepoPaths:
     repo_root: Path
     ipfs_datasets_repo: Path
     ipfs_accelerate_repo: Path
+    ipfs_kit_repo: Path | None = None
+    mike_repo: Path | None = None
+
+
+def _first_present(candidates: tuple[Path, ...]) -> Path:
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 
 @dataclass(frozen=True)
@@ -32,12 +41,37 @@ class ImportFailure:
 @lru_cache(maxsize=1)
 def get_repo_paths() -> RepoPaths:
     repo_root = Path(__file__).resolve().parents[2]
-    ipfs_datasets_repo = repo_root / "ipfs_datasets_py"
-    ipfs_accelerate_repo = ipfs_datasets_repo / "ipfs_accelerate_py"
+    external = repo_root / "external"
+    ipfs_datasets_repo = _first_present(
+        (
+            external / "ipfs_datasets_py",
+            repo_root / "ipfs_datasets_py",
+        )
+    )
+    ipfs_accelerate_repo = _first_present(
+        (
+            external / "ipfs_accelerate_py",
+            ipfs_datasets_repo / "ipfs_accelerate_py",
+        )
+    )
+    ipfs_kit_repo = _first_present(
+        (
+            external / "ipfs_kit_py",
+            ipfs_datasets_repo / "ipfs_kit_py",
+        )
+    )
+    mike_repo = _first_present(
+        (
+            external / "mike",
+            repo_root / "mike",
+        )
+    )
     return RepoPaths(
         repo_root=repo_root,
         ipfs_datasets_repo=ipfs_datasets_repo,
         ipfs_accelerate_repo=ipfs_accelerate_repo,
+        ipfs_kit_repo=ipfs_kit_repo,
+        mike_repo=mike_repo,
     )
 
 

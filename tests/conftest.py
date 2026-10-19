@@ -101,7 +101,9 @@ def pytest_configure() -> None:
     """Ensure the ipfs_datasets_py submodule package is importable in tests."""
 
     repo_root = os.path.dirname(os.path.dirname(__file__))
-    submodule_root = os.path.join(repo_root, "ipfs_datasets_py")
+    external_datasets = os.path.join(repo_root, "external", "ipfs_datasets_py")
+    legacy_datasets = os.path.join(repo_root, "ipfs_datasets_py")
+    submodule_root = external_datasets if os.path.isdir(external_datasets) else legacy_datasets
     if os.path.isdir(submodule_root) and submodule_root not in sys.path:
         sys.path.insert(0, submodule_root)
 
@@ -128,8 +130,10 @@ def pytest_configure() -> None:
                 if name == "ipfs_datasets_py" or name.startswith("ipfs_datasets_py."):
                     sys.modules.pop(name, None)
 
-    # Vendored dependency layout: ipfs_accelerate_py/ipfs_accelerate_py/
-    accelerate_repo_root = os.path.join(submodule_root, "ipfs_accelerate_py")
+    # Sibling checkout under external/, with the older nested layout as a fallback.
+    external_accelerate = os.path.join(repo_root, "external", "ipfs_accelerate_py")
+    nested_accelerate = os.path.join(submodule_root, "ipfs_accelerate_py")
+    accelerate_repo_root = external_accelerate if os.path.isdir(external_accelerate) else nested_accelerate
     if os.path.isdir(accelerate_repo_root) and accelerate_repo_root not in sys.path:
         sys.path.insert(0, accelerate_repo_root)
 
