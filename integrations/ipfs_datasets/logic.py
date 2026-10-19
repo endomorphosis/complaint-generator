@@ -18,6 +18,10 @@ _logic_module, _logic_error = import_module_optional("ipfs_datasets_py.logic")
 _fol_module, _fol_error = import_module_optional("ipfs_datasets_py.logic.fol")
 _deontic_module, _deontic_error = import_module_optional("ipfs_datasets_py.logic.deontic")
 _tdfol_module, _tdfol_error = import_module_optional("ipfs_datasets_py.logic.TDFOL")
+_integration_module, _integration_error = import_module_optional("ipfs_datasets_py.logic.integration")
+_external_provers_module, _external_provers_error = import_module_optional(
+    "ipfs_datasets_py.logic.external_provers"
+)
 _z3_module, _z3_error = import_module_optional(
     "ipfs_datasets_py.logic.external_provers.smt.z3_prover_bridge"
 )
@@ -35,15 +39,37 @@ if _reasoner_module is None:
 
 LOGIC_AVAILABLE = any(
     value is not None
-    for value in (_logic_module, _fol_module, _deontic_module, _tdfol_module)
+    for value in (
+        _logic_module,
+        _fol_module,
+        _deontic_module,
+        _tdfol_module,
+        _integration_module,
+        _external_provers_module,
+    )
 )
-LOGIC_ERROR = _logic_error or _fol_error or _deontic_error or _tdfol_error or _z3_error
+LOGIC_ERROR = (
+    _logic_error
+    or _fol_error
+    or _deontic_error
+    or _tdfol_error
+    or _integration_error
+    or _external_provers_error
+    or _z3_error
+)
 Z3_AVAILABLE = _z3_module is not None or _local_z3_module is not None
 REASONER_BRIDGE_AVAILABLE = _reasoner_module is not None
 REASONER_BRIDGE_ERROR = _reasoner_error
 REASONER_BRIDGE_PATH = getattr(_reasoner_module, "__name__", "") if _reasoner_module is not None else ""
 LOCAL_FORMAL_LOGIC_AVAILABLE = True
 LOCAL_FORMAL_LOGIC_PATH = "lib.formal_logic"
+
+
+def _selected_logic_path(*candidates: tuple[Any, str], fallback: str = "local") -> str:
+    for module, path in candidates:
+        if module is not None:
+            return path
+    return fallback
 
 # Maximum byte length of a Z3 Boolean variable atom name (avoids identifier
 # overflow for long formula strings submitted to the local z3-solver fallback).
@@ -1169,6 +1195,7 @@ def text_to_fol(text: str) -> Dict[str, Any]:
                     extra_metadata={
                         "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
                         "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+                        "logic_path": "logic.fol" if _fol_module is not None else "local",
                     },
                 )
         except Exception:
@@ -1190,6 +1217,7 @@ def text_to_fol(text: str) -> Dict[str, Any]:
         extra_metadata={
             "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
             "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+            "logic_path": "logic.fol" if _fol_module is not None else "local",
         },
     )
 
@@ -1292,6 +1320,7 @@ def legal_text_to_deontic(text: str) -> Dict[str, Any]:
         extra_metadata={
             "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
             "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+            "logic_path": "logic.deontic" if _deontic_module is not None else "local",
         },
     )
 
@@ -1401,6 +1430,13 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
             "proof_bundles": deepcopy(proof_bundles),
             "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
             "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+            "logic_path": _selected_logic_path(
+                (_integration_module, "logic.integration"),
+                (_external_provers_module, "logic.external_provers"),
+                (_tdfol_module, "logic.TDFOL"),
+                (_fol_module, "logic.fol"),
+                (_deontic_module, "logic.deontic"),
+            ),
             "reasoner_bridge_available": REASONER_BRIDGE_AVAILABLE,
             "theorem_export_version": theorem_export.get("export_version") or "",
         },

@@ -280,6 +280,13 @@ MIKE_CITATION_KEY_FIELD_PRECEDENCE: tuple[str, ...] = ("citation_id", "id", "sou
 MIKE_STATUS_CONTRACT_VERSION = "complaint-mike-status-v4"
 MIKE_HANDOFF_CONTRACT_VERSION = "complaint-mike-handoff-v4"
 MIKE_SYNC_CONTRACT_VERSION = "complaint-mike-sync-v4"
+DEFAULT_COMPLAINT_MCP_CONNECTOR_URL = "http://localhost:8000/api/complaint-workspace/mcp/rpc"
+MIKE_MCP_CONNECTOR_TOOLS: tuple[str, ...] = (
+    "complaint.generate_grounded_text",
+    "complaint.search_corpus",
+    "complaint.get_handoff",
+    "complaint.sync_draft",
+)
 MAX_MIKE_HANDOFF_PARAGRAPHS = 80
 MAX_MIKE_WEAK_LINKS_DISPLAY = 3
 VALID_MIKE_STRUCTURED_DELTA_OPS: Set[str] = {"insert", "delete", "replace", "edit", "move"}
@@ -5345,9 +5352,11 @@ class ComplaintWorkspaceService:
         uid_window_size: Optional[int] = None,
     ) -> Dict[str, Any]:
         async def _run_import() -> Dict[str, Any]:
-            from ipfs_datasets_py.processors.legal_data.email_import import import_gmail_evidence
+            from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
-            return await import_gmail_evidence(
+            import_gmail_evidence_upstream = load_legal_symbol("import_gmail_evidence", module="email_import")
+
+            return await import_gmail_evidence_upstream(
                 addresses=addresses,
                 collect_all_messages=collect_all_messages,
                 user_id=str(user_id or DEFAULT_USER_ID),
@@ -5409,9 +5418,11 @@ class ComplaintWorkspaceService:
         bm25_search_limit: int = 20,
     ) -> Dict[str, Any]:
         async def _run_pipeline() -> Dict[str, Any]:
-            from ipfs_datasets_py.processors.legal_data.email_pipeline import run_gmail_duckdb_pipeline
+            from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
-            return await run_gmail_duckdb_pipeline(
+            run_gmail_duckdb_pipeline_upstream = load_legal_symbol("run_gmail_duckdb_pipeline", module="email_pipeline")
+
+            return await run_gmail_duckdb_pipeline_upstream(
                 user_id=str(user_id or DEFAULT_USER_ID),
                 addresses=addresses,
                 collect_all_messages=collect_all_messages,
@@ -5454,9 +5465,11 @@ class ComplaintWorkspaceService:
         bm25_k1: float = 1.2,
         bm25_b: float = 0.75,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data.email_pipeline import search_email_duckdb_corpus
+        from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
-        return search_email_duckdb_corpus(
+        search_email_duckdb_corpus_upstream = load_legal_symbol("search_email_duckdb_corpus", module="email_pipeline")
+
+        return search_email_duckdb_corpus_upstream(
             index_path=index_path,
             query=query,
             limit=limit,
@@ -5624,6 +5637,33 @@ class ComplaintWorkspaceService:
         candidate = str(override or os.getenv("COMPLAINT_MIKE_GROUNDING_MODE") or DEFAULT_MIKE_GROUNDING_MODE).strip().lower()
         return candidate or DEFAULT_MIKE_GROUNDING_MODE
 
+    @staticmethod
+    def _mike_connector_url() -> str:
+        configured = str(os.getenv("COMPLAINT_MCP_CONNECTOR_URL") or "").strip()
+        return configured or DEFAULT_COMPLAINT_MCP_CONNECTOR_URL
+
+    @staticmethod
+    def _mike_connector_setup_text(router_available: bool) -> str:
+        connector_url = ComplaintWorkspaceService._mike_connector_url()
+        if router_available:
+            availability = (
+                "Register this complaint-generator MCP connector in Mike. "
+                "Grounded drafting calls complaint.generate_grounded_text. "
+                "The accelerate routers are available. "
+                "The mike_llm_patch stamp is compatibility-only and does not intercept Mike LLM calls."
+            )
+        else:
+            availability = (
+                "The MCP connector and accelerate routers are unavailable. "
+                "Register the connector URL when the accelerate checkout can be imported. "
+                "The mike_llm_patch stamp is compatibility-only and does not intercept Mike LLM calls."
+            )
+        return f"{availability} Connector URL: {connector_url}."
+
+    @staticmethod
+    def _document_version_content_sha256(title: str, body: str) -> str:
+        return hashlib.sha256((str(title or "") + str(body or "")).encode("utf-8")).hexdigest()
+
     @classmethod
     def _build_mike_router_policy_snapshot(cls) -> Dict[str, Any]:
         status = _llm_router_status_snapshot()
@@ -5716,6 +5756,8 @@ class ComplaintWorkspaceService:
         repo_root = cls._repo_root()
         mike_root = _prefer_checkout(repo_root, "mike")
         ipfs_root = _prefer_checkout(repo_root, "ipfs_datasets_py")
+        accelerate_root = _prefer_checkout(repo_root, "ipfs_accelerate_py")
+        kit_root = _prefer_checkout(repo_root, "ipfs_kit_py")
         mike_frontend_package = cls._safe_read_json_file(mike_root / "frontend" / "package.json")
         mike_backend_package = cls._safe_read_json_file(mike_root / "backend" / "package.json")
         ipfs_pyproject = cls._safe_read_toml_file(cls._ipfs_project_file(ipfs_root))
@@ -5733,11 +5775,17 @@ class ComplaintWorkspaceService:
             "backend/src/routes/caseLaw.ts",
             "backend/src/lib/mcp/client.ts",
         ]
-        existing_editor_modules = [path for path in editor_modules if (mike_root / path).exists()]
+        existing_editor_modules = [path for path in editor_modules if (mike_root / path).is_file()]
+        editor_module_inventory = [
+            {"path": path, "path_found": (mike_root / path).is_file()}
+            for path in editor_modules
+        ]
         return {
             "strategy": {
-                "mike": "pinned_submodule",
-                "ipfs_datasets_py": "pinned_submodule",
+                "mike": "external/mike@origin/main",
+                "ipfs_datasets_py": "external/ipfs_datasets_py@origin/main",
+                "ipfs_accelerate_py": "external/ipfs_accelerate_py@origin/main",
+                "ipfs_kit_py": "external/ipfs_kit_py@origin/main",
                 "workspace_adapters": "promote_stable_contracts_inside_complaint_generator",
                 "editor_assets_decoupled_from_legal_processors": True,
             },
@@ -5751,6 +5799,7 @@ class ComplaintWorkspaceService:
                 "frontend_dependencies": sorted(dict(mike_frontend_package.get("dependencies") or {}).keys())[:20],
                 "backend_dependencies": sorted(dict(mike_backend_package.get("dependencies") or {}).keys())[:20],
                 "editor_modules": existing_editor_modules,
+                "editor_module_inventory": editor_module_inventory,
                 "editor_module_count": len(existing_editor_modules),
                 "skill_assets": deepcopy(skill_asset_manifest.get("assets") or []),
                 "skill_asset_count": int(skill_asset_manifest.get("asset_count") or 0),
@@ -5779,10 +5828,26 @@ class ComplaintWorkspaceService:
                     "re-run_strict_grounding_tests",
                 ],
             },
+            "ipfs_accelerate_py": {
+                "available": accelerate_root.is_dir() and (accelerate_root / "README.md").exists(),
+                "root": str(accelerate_root),
+                "commit": cls._safe_read_git_ref(accelerate_root, "HEAD"),
+                "origin_main_commit": cls._safe_read_git_ref(accelerate_root, "origin/main"),
+            },
+            "ipfs_kit_py": {
+                "available": kit_root.is_dir() and (kit_root / "README.md").exists(),
+                "root": str(kit_root),
+                "commit": cls._safe_read_git_ref(kit_root, "HEAD"),
+                "origin_main_commit": cls._safe_read_git_ref(kit_root, "origin/main"),
+            },
             "workspace_adapter_boundary": {
                 "router_adapter": "integrations/ipfs_datasets/llm.py",
                 "legal_adapter": "integrations/ipfs_datasets/legal.py",
                 "logic_adapter": "integrations/ipfs_datasets/logic.py",
+                "storage_adapter": "integrations/ipfs_datasets/storage.py",
+                "graph_adapter": "integrations/ipfs_datasets/graphs.py",
+                "multimedia_adapter": "integrations/ipfs_datasets/multimedia.py",
+                "accelerate_router_facade": "integrations/ipfs_accelerate/routers.py",
                 "workspace_contract_owner": "applications/complaint_workspace.py",
             },
         }
@@ -5792,6 +5857,8 @@ class ComplaintWorkspaceService:
         repo_root = cls._repo_root()
         mike_root = _prefer_checkout(repo_root, "mike")
         ipfs_root = _prefer_checkout(repo_root, "ipfs_datasets_py")
+        accelerate_root = _prefer_checkout(repo_root, "ipfs_accelerate_py")
+        kit_root = _prefer_checkout(repo_root, "ipfs_kit_py")
         complaint_pyproject = cls._safe_read_toml_file(repo_root / "pyproject.toml")
         mike_frontend_package = cls._safe_read_json_file(mike_root / "frontend" / "package.json")
         mike_backend_package = cls._safe_read_json_file(mike_root / "backend" / "package.json")
@@ -5821,10 +5888,15 @@ class ComplaintWorkspaceService:
                 "mike_origin_main_commit": cls._safe_read_git_ref(mike_root, "origin/main"),
                 "ipfs_datasets_py_commit": cls._safe_read_git_ref(ipfs_root, "HEAD"),
                 "ipfs_datasets_py_origin_main_commit": cls._safe_read_git_ref(ipfs_root, "origin/main"),
+                "ipfs_accelerate_py_commit": cls._safe_read_git_ref(accelerate_root, "HEAD"),
+                "ipfs_accelerate_py_origin_main_commit": cls._safe_read_git_ref(accelerate_root, "origin/main"),
+                "ipfs_kit_py_commit": cls._safe_read_git_ref(kit_root, "HEAD"),
+                "ipfs_kit_py_origin_main_commit": cls._safe_read_git_ref(kit_root, "origin/main"),
             },
             "config_expectations": {
                 "complaint_mike_base_url_env": "COMPLAINT_MIKE_BASE_URL",
                 "complaint_mike_grounding_mode_env": "COMPLAINT_MIKE_GROUNDING_MODE",
+                "complaint_mcp_connector_url_env": "COMPLAINT_MCP_CONNECTOR_URL",
                 "workspace_router_provider_env": "COMPLAINT_LLM_PROVIDER",
                 "workspace_router_model_env": "COMPLAINT_LLM_MODEL",
             },
@@ -6834,8 +6906,25 @@ class ComplaintWorkspaceService:
                 "must_route_generation_through_workspace_llm_router": True,
             },
         }
-        # Apply the Mike LLM router patch so every handoff carries the patched
-        # router reference and enforcement metadata.
+        from integrations.ipfs_datasets import llm as complaint_llm
+
+        router_available = bool(getattr(complaint_llm, "LLM_ROUTER_AVAILABLE", False))
+        draft_title = str(draft_payload.get("title") or "")
+        draft_body = str(draft_payload.get("body") or "")
+        handoff_payload["mike_document"] = {
+            "title": draft_title,
+            "body": draft_body,
+            "citations": list(draft_payload.get("citation_links") or []),
+            "content_sha256": self._document_version_content_sha256(draft_title, draft_body),
+        }
+        handoff_payload["mike_integration"] = {
+            "transport": "mcp_connector",
+            "connector_url": self._mike_connector_url(),
+            "tools": list(MIKE_MCP_CONNECTOR_TOOLS),
+            "setup_instructions": self._mike_connector_setup_text(router_available),
+            "llm_router_available": router_available,
+        }
+        # The payload stamp stays for one release. Mike calls the MCP connector.
         try:
             from integrations.mike.llm_patch import apply_mike_llm_router_patch
             apply_mike_llm_router_patch(handoff_payload)
@@ -7082,7 +7171,12 @@ class ComplaintWorkspaceService:
             "redline_delta_count": int(((normalized_sync_provenance.get("redline_metadata") or {}).get("structured_delta_count")) or 0),
             "sync_integrity_hash": sync_integrity_hash,
             "sync_integrity_hash_mode": sync_integrity_hash_mode,
+            "document_version_content_sha256": self._document_version_content_sha256(
+                str(draft.get("title") or ""),
+                str(draft.get("body") or ""),
+            ),
         }
+        draft["sync_metadata"]["document_version_content_sha256"] = sync_record["document_version_content_sha256"]
         sync_history.insert(0, sync_record)
         mike_integration["last_sync"] = sync_record
         mike_integration["sync_history"] = sync_history[:25]
@@ -7123,6 +7217,7 @@ class ComplaintWorkspaceService:
             "questions": session["questions"],
             "next_question": session["next_question"],
             "case_synopsis": session["case_synopsis"],
+            "document_version_content_sha256": sync_record["document_version_content_sha256"],
         }
 
     def get_mike_integration_status(self, user_id: Optional[str]) -> Dict[str, Any]:
@@ -7736,10 +7831,10 @@ class ComplaintWorkspaceService:
         if normalized_type in {"single", "single_parquet", "parquet"}:
             return self._load_workspace_single_parquet_payload(resolved_path)
 
-        from ipfs_datasets_py.processors.legal_data import (
-            WorkspaceDatasetBuilder,
-            load_packaged_workspace_dataset,
-        )
+        from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+        WorkspaceDatasetBuilder = load_legal_symbol("WorkspaceDatasetBuilder")
+        load_packaged_workspace_dataset = load_legal_symbol("load_packaged_workspace_dataset")
 
         if normalized_type == "packaged":
             dataset = load_packaged_workspace_dataset(resolved_path)
@@ -8321,8 +8416,9 @@ class ComplaintWorkspaceService:
         if normalized_type in {"single", "single_parquet", "parquet"}:
             summary = self._summarize_workspace_dataset_payload(filtered_payload)
         else:
-            from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
+            from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
+            summarize_workspace_dataset = load_legal_symbol("summarize_workspace_dataset")
             summary = dict(summarize_workspace_dataset(filtered_payload))
         return {
             "input_path": resolved_path,
@@ -8825,8 +8921,9 @@ class ComplaintWorkspaceService:
         if normalized_type in {"single", "single_parquet", "parquet"}:
             summary = self._summarize_workspace_dataset_payload(dataset_payload)
         else:
-            from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
+            from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
+            summarize_workspace_dataset = load_legal_symbol("summarize_workspace_dataset")
             summary = dict(summarize_workspace_dataset(dataset_payload))
         knowledge_graph = dict(dataset_payload.get("knowledge_graph") or {})
         entities = [dict(item) for item in list(knowledge_graph.get("entities") or []) if isinstance(item, dict)]
@@ -8962,11 +9059,11 @@ class ComplaintWorkspaceService:
             )
             summary = self._summarize_workspace_dataset_payload(filtered_payload)
         else:
-            from ipfs_datasets_py.processors.legal_data import (
-                search_workspace_dataset_bm25,
-                search_workspace_dataset_vector,
-                summarize_workspace_dataset,
-            )
+            from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+            search_workspace_dataset_bm25 = load_legal_symbol("search_workspace_dataset_bm25")
+            search_workspace_dataset_vector = load_legal_symbol("search_workspace_dataset_vector")
+            summarize_workspace_dataset = load_legal_symbol("summarize_workspace_dataset")
 
             if normalized_backend == "bm25":
                 results = search_workspace_dataset_bm25(filtered_payload, query, top_k=int(top_k or 10))
@@ -9012,10 +9109,10 @@ class ComplaintWorkspaceService:
                 top_k=int(top_k or 10),
             )
         else:
-            from ipfs_datasets_py.processors.legal_data import (
-                search_docket_dataset_bm25,
-                search_docket_dataset_vector,
-            )
+            from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+            search_docket_dataset_bm25 = load_legal_symbol("search_docket_dataset_bm25")
+            search_docket_dataset_vector = load_legal_symbol("search_docket_dataset_vector")
 
             if normalized_backend == "bm25":
                 results = search_docket_dataset_bm25(dataset_payload, query, top_k=int(top_k or 10))
@@ -9128,7 +9225,11 @@ class ComplaintWorkspaceService:
         chain_until_satisfied: bool = True,
         attach_refreshed_packets: bool = False,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import execute_packaged_docket_proof_revalidation_queue
+        from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+        execute_packaged_docket_proof_revalidation_queue = load_legal_symbol(
+            "execute_packaged_docket_proof_revalidation_queue"
+        )
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
         execution = execute_packaged_docket_proof_revalidation_queue(
@@ -9159,7 +9260,11 @@ class ComplaintWorkspaceService:
         execution_top_k: int = 10,
         chain_until_satisfied: bool = True,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import persist_packaged_docket_proof_revalidation_queue
+        from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+        persist_packaged_docket_proof_revalidation_queue = load_legal_symbol(
+            "persist_packaged_docket_proof_revalidation_queue"
+        )
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
         resolved_output_dir = str(Path(str(output_dir)).expanduser().resolve())
@@ -9180,6 +9285,54 @@ class ComplaintWorkspaceService:
             "output_dir": resolved_output_dir,
             "source": "complaint_workspace_packaged_proof_revalidation_queue_persist",
         }
+
+    def generate_grounded_text(
+        self,
+        user_id: Optional[str],
+        *,
+        prompt: str,
+        provider: Optional[str] = None,
+        model_name: Optional[str] = None,
+        grounding_mode: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.llm import generate_text_with_metadata
+
+        resolved_grounding_mode = self._resolve_mike_grounding_mode(grounding_mode or "legal_corpus_only")
+        generated = generate_text_with_metadata(
+            f"[grounding_mode={resolved_grounding_mode}]\n{prompt}",
+            provider=provider,
+            model_name=model_name,
+        )
+        return {
+            "user_id": str(user_id or DEFAULT_USER_ID),
+            "grounding_mode": resolved_grounding_mode,
+            "text": str(generated.get("text") or "") if isinstance(generated, dict) else "",
+            "generation": generated,
+        }
+
+    def search_corpus(self, *, query: str, max_results: int = 5) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.search import search_multi_engine_web
+
+        try:
+            results = search_multi_engine_web(str(query or ""), max_results=int(max_results or 5))
+        except Exception as exc:
+            return {
+                "status": "degraded",
+                "query": str(query or ""),
+                "results": [],
+                "error": str(exc),
+            }
+        return {
+            "status": "available",
+            "query": str(query or ""),
+            "results": list(results or []),
+        }
+
+    def get_handoff(self, user_id: Optional[str], **kwargs: Any) -> Dict[str, Any]:
+        return self.build_mike_handoff(user_id, **kwargs)
+
+    def sync_draft(self, user_id: Optional[str], **kwargs: Any) -> Dict[str, Any]:
+        return self.sync_mike_final_draft(user_id, **kwargs)
 
     def list_mcp_tools(self) -> Dict[str, Any]:
         return {
@@ -9214,6 +9367,10 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.build_mike_handoff", "description": "Build a Mike editor handoff payload with prefilled complaint draft, review state, and evidence context."},
                 {"name": "complaint.get_mike_integration_status", "description": "Return Mike handoff/sync status, correlation IDs, and recommended next integration action."},
                 {"name": "complaint.sync_mike_final_draft", "description": "Sync an edited draft from Mike back into the complaint workspace and persist the merged draft state."},
+                {"name": "complaint.generate_grounded_text", "description": "Generate grounded complaint text through the accelerate llm_router under the legal corpus grounding mode."},
+                {"name": "complaint.search_corpus", "description": "Search the complaint corpus through the datasets search adapter."},
+                {"name": "complaint.get_handoff", "description": "Build the Mike handoff payload, including the MCP connector contract."},
+                {"name": "complaint.sync_draft", "description": "Sync a Mike document version back into the complaint workspace and return document_version_content_sha256."},
                 {"name": "complaint.get_draft_proof_report", "description": "Run the draft-logic pipeline on the current complaint draft and return the full DraftProofReport with proof status, contradictions, corpus coverage, and deontic norms."},
                 {"name": "complaint.render_draft_proof_report", "description": "Run the draft-logic pipeline on the current draft and render a human-readable Markdown proof report."},
                 {"name": "complaint.pin_draft_proof_report", "description": "Run the draft-logic pipeline, then pin the DraftProofReport and its Lean 4 / Coq theorem exports to IPFS for immutable provenance."},
@@ -9485,6 +9642,51 @@ class ComplaintWorkspaceService:
             if isinstance(requested_relief, str):
                 requested_relief = _split_lines(requested_relief)
             return self.sync_mike_final_draft(
+                args.get("user_id"),
+                body=args.get("body"),
+                title=args.get("title"),
+                requested_relief=requested_relief,
+                handoff_id=args.get("handoff_id"),
+                project_id=args.get("project_id"),
+                workspace_id=args.get("workspace_id"),
+                mike_document_id=args.get("mike_document_id"),
+                citation_links=args.get("citation_links"),
+                redline_summary=args.get("redline_summary"),
+                source_updated_at=args.get("source_updated_at"),
+                structured_deltas=args.get("structured_deltas"),
+                editor_metadata=args.get("editor_metadata"),
+                grounding_mode=args.get("grounding_mode"),
+                assertion_annotations=args.get("assertion_annotations"),
+                authority_links=args.get("authority_links"),
+                sync_provenance=args.get("sync_provenance"),
+            )
+        if tool_name == "complaint.generate_grounded_text":
+            return self.generate_grounded_text(
+                args.get("user_id"),
+                prompt=str(args.get("prompt") or ""),
+                provider=args.get("provider"),
+                model_name=args.get("model_name") or args.get("model"),
+                grounding_mode=args.get("grounding_mode"),
+            )
+        if tool_name == "complaint.search_corpus":
+            return self.search_corpus(
+                query=str(args.get("query") or ""),
+                max_results=int(args.get("max_results") or 5),
+            )
+        if tool_name == "complaint.get_handoff":
+            return self.get_handoff(
+                args.get("user_id"),
+                mike_base_url=args.get("mike_base_url"),
+                project_id=args.get("project_id"),
+                workspace_id=args.get("workspace_id"),
+                generate_draft_if_missing=bool(args.get("generate_draft_if_missing", True)),
+                grounding_mode=args.get("grounding_mode"),
+            )
+        if tool_name == "complaint.sync_draft":
+            requested_relief = args.get("requested_relief")
+            if isinstance(requested_relief, str):
+                requested_relief = _split_lines(requested_relief)
+            return self.sync_draft(
                 args.get("user_id"),
                 body=args.get("body"),
                 title=args.get("title"),

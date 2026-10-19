@@ -1,30 +1,16 @@
-"""Mike LLM router monkey-patch.
+"""Compatibility stamp for Mike handoff payloads.
 
-The Mike editor is a TypeScript application whose backend (``backend/src/lib/llm/``)
-routes generation through whichever LLM provider it resolves at request time.
-The workspace **owns** the router policy; Mike is an editing surface only.
+Mike remains the editor. This module does not rewrite Mike TypeScript and does
+not intercept ``backend/src/lib/llm/index.ts``. The stamp records that grounded
+drafting belongs to the complaint-generator MCP connector
+(``mike_integration.transport = "mcp_connector"``). Mike's own LLM may still
+run UI chores.
 
-This module provides:
-
-1. ``apply_mike_llm_router_patch(handoff_payload)`` — mutates a handoff payload
-   dict in-place so that every field that governs Mike's generation strategy
-   points back to the workspace ``llm_router``.  The patch is entirely additive:
-   it does not remove existing keys.
-
-2. A JSON descriptor (``MIKE_LLM_PATCH_DESCRIPTOR``) that can be embedded in
-   the handoff payload to give the Mike frontend a machine-readable record of
-   which patch was applied and when.
-
-The actual enforcement on the TypeScript side is done via the MCP client
-boundary (``backend/src/lib/mcp/client.ts``):  Mike calls the workspace MCP
-server for generation tasks, and the workspace MCP server always routes through
-``generate_text_with_metadata``.  This Python-side patch strengthens the same
-invariant by:
-
-* Marking every ``narrow_adapter_boundary`` flag as True.
-* Recording ``patched_by`` / ``patched_at`` metadata.
-* Setting ``must_route_generation_through_workspace_llm_router`` in the
-  ``non_negotiable_constraints`` block.
+``apply_mike_llm_router_patch`` keeps ``mike-llm-router-patch-v1`` so older
+handoff readers still see the centralized-policy flags. New callers should use
+the connector tools ``complaint.generate_grounded_text``,
+``complaint.search_corpus``, ``complaint.get_handoff``, and
+``complaint.sync_draft``.
 """
 
 from __future__ import annotations
@@ -43,6 +29,8 @@ MIKE_LLM_PATCH_VERSION = "mike-llm-router-patch-v1"
 MIKE_LLM_PATCH_DESCRIPTOR: Dict[str, Any] = {
     "patch_version": MIKE_LLM_PATCH_VERSION,
     "patch_module": "integrations.mike.llm_patch",
+    "compatibility_only": True,
+    "transport": "mcp_connector",
     "enforcement_boundary": "workspace_mcp_server",
     "generation_adapter": "integrations.ipfs_datasets.llm.generate_text_with_metadata",
     "router_owned_by": "complaint_generator",

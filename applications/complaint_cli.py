@@ -262,12 +262,12 @@ def import_gmail_evidence_command(
 ) -> None:
     import anyio
 
-    from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
-    from ipfs_datasets_py.processors.legal_data.email_corpus import (
-        build_email_duckdb_artifacts,
-        search_email_graphrag_duckdb,
-    )
-    from ipfs_datasets_py.processors.legal_data.email_import import import_gmail_evidence
+    from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+    resolve_gmail_credentials = load_legal_symbol("resolve_gmail_credentials", module="email_auth")
+    build_email_duckdb_artifacts = load_legal_symbol("build_email_duckdb_artifacts", module="email_corpus")
+    search_email_graphrag_duckdb = load_legal_symbol("search_email_graphrag_duckdb", module="email_corpus")
+    import_gmail_evidence = load_legal_symbol("import_gmail_evidence", module="email_import")
 
     parser = argparse.ArgumentParser(prog="complaint-workspace import-gmail-evidence")
     if not collect_all_messages and not list(address or []):
@@ -407,8 +407,10 @@ def run_gmail_duckdb_pipeline_command(
 ) -> None:
     import anyio
 
-    from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
-    from ipfs_datasets_py.processors.legal_data.email_pipeline import run_gmail_duckdb_pipeline
+    from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+    resolve_gmail_credentials = load_legal_symbol("resolve_gmail_credentials", module="email_auth")
+    run_gmail_duckdb_pipeline = load_legal_symbol("run_gmail_duckdb_pipeline", module="email_pipeline")
 
     parser = argparse.ArgumentParser(prog="complaint-workspace run-gmail-duckdb-pipeline")
     if not collect_all_messages and not list(address or []):
@@ -476,7 +478,9 @@ def search_email_duckdb_command(
     bm25_k1: float = typer.Option(1.2, "--bm25-k1"),
     bm25_b: float = typer.Option(0.75, "--bm25-b"),
 ) -> None:
-    from ipfs_datasets_py.processors.legal_data.email_pipeline import search_email_duckdb_corpus
+    from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+    search_email_duckdb_corpus = load_legal_symbol("search_email_duckdb_corpus", module="email_pipeline")
 
     _print(
         search_email_duckdb_corpus(

@@ -235,7 +235,247 @@ def _runtime_backend_probe() -> dict[str, Any]:
     }
 
 
-def store_bytes(data: bytes, *, pin_content: bool = True) -> dict[str, Any]:
+def translate_kit_operation_result(result: Any, *, backend_name: str = "kit") -> dict[str, Any]:
+    """Map a kit OperationResult, or a dict/string from IPFSSimpleAPI, onto the storage dict."""
+
+    data = None
+    if isinstance(result, (bytes, bytearray)):
+        return {
+            "cid": "",
+            "status": "available",
+            "backend_name": backend_name,
+            "data": bytes(result),
+            "error": "",
+        }
+    if isinstance(result, str) and result:
+        return {"cid": result, "status": "available", "backend_name": backend_name, "data": None, "error": ""}
+
+    if isinstance(result, dict):
+        success = result.get("success")
+        cid = str(result.get("cid") or result.get("resulting_content_cid") or result.get("Hash") or "")
+        error = result.get("error")
+        data = result.get("data")
+        state = str(result.get("state") or result.get("status") or "")
+    else:
+        success = getattr(result, "success", None)
+        cid = str(getattr(result, "resulting_content_cid", "") or getattr(result, "cid", "") or "")
+        error = getattr(result, "error", None)
+        data = getattr(result, "data", None)
+        state = str(getattr(result, "state", "") or "")
+
+    if success is False or state.lower() in {"error", "failed", "failure"}:
+        return {
+            "cid": cid,
+            "status": "error",
+            "backend_name": backend_name,
+            "data": data,
+            "error": str(error or "kit operation failed"),
+        }
+    if success is True or cid or isinstance(data, (bytes, bytearray)):
+        return {"cid": cid, "status": "available", "backend_name": backend_name, "data": data, "error": ""}
+    return {
+        "cid": cid,
+        "status": "error",
+        "backend_name": backend_name,
+        "data": data,
+        "error": str(error or "kit operation did not return a cid"),
+    }
+
+
+def _kit_enabled() -> bool:
+    return os.environ.get("COMPLAINT_GENERATOR_ENABLE_IPFS_KIT", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_optional_kit_backend() -> Any:
+    """Return an IPFSSimpleAPI only when kit storage is explicitly enabled.
+
+    CanonicalStorageService is an execute() protocol and does not expose
+    add_bytes/cat/pin. IPFSSimpleAPI construction can start a node, so the
+    default path keeps the datasets router and the local cache.
+    """
+
+    if not _kit_enabled():
+        return None
+    from .loader import ensure_import_paths
+
+    ensure_import_paths("ipfs_kit_py")
+    simple_api, _error = import_attr_optional("ipfs_kit_py", "IPFSSimpleAPI")
+    canonical, _canonical_error = import_attr_optional("ipfs_kit_py", "CanonicalStorageService")
+    if canonical is not None and all(callable(getattr(canonical, name, None)) for name in ("add_bytes", "cat", "pin")):
+        try:
+            return canonical()
+        except Exception:
+            pass
+    if simple_api is None:
+        return None
+    try:
+        return simple_api()
+    except Exception:
+        return None
+
+
+def _storage_error_type() -> type[BaseException]:
+    error_type, _error = import_attr_optional("ipfs_kit_py", "StorageError")
+    if isinstance(error_type, type) and issubclass(error_type, BaseException):
+        return error_type
+    return Exception
+
+
+def _invoke_byte_backend(backend: Any, action: str, payload: Any, *, pin_content: bool = True) -> Any:
+    if action == "add":
+        if callable(getattr(backend, "add_bytes", None)):
+            return backend.add_bytes(payload, pin=pin_content)
+        if callable(getattr(backend, "add", None)):
+            return backend.add(payload, pin=pin_content)
+    if action == "cat" and callable(getattr(backend, "cat", None)):
+        return backend.cat(payload)
+    if action == "pin" and callable(getattr(backend, "pin", None)):
+        return backend.pin(payload)
+    raise RuntimeError(f"storage backend does not implement {action}")
+
+
+def _result_from_backend_call(raw: Any, *, backend_name: str, fallback_cid: str = "") -> dict[str, Any]:
+    if isinstance(raw, str) and raw:
+        return {"cid": raw, "status": "available", "backend_name": backend_name, "data": None, "error": ""}
+    if isinstance(raw, (bytes, bytearray)):
+        return {"cid": fallback_cid, "status": "available", "backend_name": backend_name, "data": bytes(raw), "error": ""}
+    translated = translate_kit_operation_result(raw, backend_name=backend_name)
+    if not translated.get("cid") and fallback_cid:
+        translated["cid"] = fallback_cid
+    return translated
+
+
+def _finish_storage_call(
+    translated: dict[str, Any],
+    *,
+    operation: str,
+    size: int = 0,
+    pinned: bool | None = None,
+    cid: str = "",
+) -> dict[str, Any]:
+    status = str(translated.get("status") or "error")
+    payload: dict[str, Any] = {
+        "status": status,
+        "cid": str(translated.get("cid") or cid or ""),
+        "backend_name": str(translated.get("backend_name") or ""),
+        "error": str(translated.get("error") or ""),
+    }
+    if operation == "store_bytes":
+        payload["size"] = size
+        payload["pinned"] = bool(pinned)
+    elif operation == "retrieve_bytes":
+        data = translated.get("data")
+        payload["data"] = bytes(data) if isinstance(data, (bytes, bytearray)) else b""
+        payload["size"] = len(payload["data"])
+    elif operation == "pin_cid":
+        payload["pinned"] = status == "available"
+        payload["result"] = translated.get("data")
+    return with_adapter_metadata(
+        payload,
+        operation=operation,
+        backend_available=status == "available",
+        degraded_reason=payload["error"] or None,
+        implementation_status="available" if status == "available" else "degraded",
+        extra_metadata={"backend_name": payload["backend_name"]},
+    )
+
+
+def _store_with_object(backend: Any, data: bytes, *, pin_content: bool, backend_name: str) -> dict[str, Any]:
+    raw = _invoke_byte_backend(backend, "add", data, pin_content=pin_content)
+    translated = _result_from_backend_call(raw, backend_name=backend_name)
+    if translated["status"] != "available":
+        raise RuntimeError(translated["error"] or "kit add failed")
+    return _finish_storage_call(translated, operation="store_bytes", size=len(data), pinned=pin_content)
+
+
+def _retrieve_with_object(backend: Any, cid: str, *, backend_name: str) -> dict[str, Any]:
+    raw = _invoke_byte_backend(backend, "cat", cid)
+    translated = _result_from_backend_call(raw, backend_name=backend_name, fallback_cid=cid)
+    if translated["status"] != "available":
+        raise RuntimeError(translated["error"] or "kit cat failed")
+    return _finish_storage_call(translated, operation="retrieve_bytes", cid=cid)
+
+
+def _pin_with_object(backend: Any, cid: str, *, backend_name: str) -> dict[str, Any]:
+    raw = _invoke_byte_backend(backend, "pin", cid)
+    translated = _result_from_backend_call(raw if raw is not None else {"success": True, "cid": cid}, backend_name=backend_name, fallback_cid=cid)
+    if translated["status"] != "available":
+        raise RuntimeError(translated["error"] or "kit pin failed")
+    return _finish_storage_call(translated, operation="pin_cid", cid=cid)
+
+
+def _local_cache_store(data: bytes, *, pin_content: bool, reason: str) -> dict[str, Any]:
+    cid = LocalCacheIPFSBackend().add_bytes(data, pin=pin_content)
+    return _finish_storage_call(
+        {"cid": cid, "status": "degraded", "backend_name": "local_cache", "error": reason},
+        operation="store_bytes",
+        size=len(data),
+        pinned=pin_content,
+    )
+
+
+def _local_cache_retrieve(cid: str, *, reason: str) -> dict[str, Any]:
+    try:
+        payload = LocalCacheIPFSBackend().cat(cid)
+    except Exception as exc:
+        return _finish_storage_call(
+            {"cid": cid, "status": "error", "backend_name": "local_cache", "error": str(exc), "data": b""},
+            operation="retrieve_bytes",
+            cid=cid,
+        )
+    return _finish_storage_call(
+        {"cid": cid, "status": "degraded", "backend_name": "local_cache", "error": reason, "data": payload},
+        operation="retrieve_bytes",
+        cid=cid,
+    )
+
+
+def _local_cache_pin(cid: str, *, reason: str) -> dict[str, Any]:
+    try:
+        LocalCacheIPFSBackend().pin(cid)
+    except Exception as exc:
+        return _finish_storage_call(
+            {"cid": cid, "status": "error", "backend_name": "local_cache", "error": str(exc)},
+            operation="pin_cid",
+            cid=cid,
+        )
+    return _finish_storage_call(
+        {"cid": cid, "status": "degraded", "backend_name": "local_cache", "error": reason, "data": {"pinned": True}},
+        operation="pin_cid",
+        cid=cid,
+    )
+
+
+def store_bytes(
+    data: bytes,
+    *,
+    pin_content: bool = True,
+    backend: Any = None,
+    backend_name: str | None = None,
+) -> dict[str, Any]:
+    if backend is not None:
+        try:
+            return _store_with_object(backend, data, pin_content=pin_content, backend_name=backend_name or "kit")
+        except Exception as exc:
+            return _finish_storage_call(
+                {"cid": "", "status": "error", "backend_name": backend_name or "kit", "error": str(exc)},
+                operation="store_bytes",
+                size=len(data),
+                pinned=pin_content,
+            )
+
+    kit_backend = _load_optional_kit_backend()
+    if kit_backend is not None:
+        try:
+            return _store_with_object(kit_backend, data, pin_content=pin_content, backend_name="kit")
+        except _storage_error_type():
+            pass
+        except Exception:
+            pass
+
+    if add_bytes is None:
+        return _local_cache_store(data, pin_content=pin_content, reason=str(IPFS_ERROR or "ipfs router unavailable"))
+
     probe = _runtime_backend_probe()
     if add_bytes is None or probe["status"] != "available":
         return with_adapter_metadata(
@@ -274,14 +514,33 @@ def store_bytes(data: bytes, *, pin_content: bool = True) -> dict[str, Any]:
             "cid": cid,
             "size": len(data),
             "pinned": bool(pin_content),
+            "backend_name": str(probe.get("backend_name") or "datasets_router"),
         },
         operation="store_bytes",
         backend_available=True,
         implementation_status="available",
+        extra_metadata={"backend_name": str(probe.get("backend_name") or "datasets_router")},
     )
 
 
-def retrieve_bytes(cid: str) -> dict[str, Any]:
+def retrieve_bytes(cid: str, *, backend: Any = None, backend_name: str | None = None) -> dict[str, Any]:
+    if backend is not None:
+        try:
+            return _retrieve_with_object(backend, cid, backend_name=backend_name or "kit")
+        except Exception as exc:
+            return _finish_storage_call(
+                {"cid": cid, "status": "error", "backend_name": backend_name or "kit", "error": str(exc), "data": b""},
+                operation="retrieve_bytes",
+                cid=cid,
+            )
+    kit_backend = _load_optional_kit_backend()
+    if kit_backend is not None:
+        try:
+            return _retrieve_with_object(kit_backend, cid, backend_name="kit")
+        except Exception:
+            pass
+    if cat is None:
+        return _local_cache_retrieve(cid, reason=str(IPFS_ERROR or "ipfs router unavailable"))
     probe = _runtime_backend_probe()
     if cat is None or probe["status"] != "available":
         return with_adapter_metadata(
@@ -321,14 +580,33 @@ def retrieve_bytes(cid: str) -> dict[str, Any]:
             "cid": cid,
             "data": bytes(payload),
             "size": len(payload),
+            "backend_name": str(probe.get("backend_name") or "datasets_router"),
         },
         operation="retrieve_bytes",
         backend_available=True,
         implementation_status="available",
+        extra_metadata={"backend_name": str(probe.get("backend_name") or "datasets_router")},
     )
 
 
-def pin_cid(cid: str) -> dict[str, Any]:
+def pin_cid(cid: str, *, backend: Any = None, backend_name: str | None = None) -> dict[str, Any]:
+    if backend is not None:
+        try:
+            return _pin_with_object(backend, cid, backend_name=backend_name or "kit")
+        except Exception as exc:
+            return _finish_storage_call(
+                {"cid": cid, "status": "error", "backend_name": backend_name or "kit", "error": str(exc)},
+                operation="pin_cid",
+                cid=cid,
+            )
+    kit_backend = _load_optional_kit_backend()
+    if kit_backend is not None:
+        try:
+            return _pin_with_object(kit_backend, cid, backend_name="kit")
+        except Exception:
+            pass
+    if pin is None:
+        return _local_cache_pin(cid, reason=str(IPFS_ERROR or "ipfs router unavailable"))
     probe = _runtime_backend_probe()
     if pin is None or probe["status"] != "available":
         return with_adapter_metadata(
@@ -367,10 +645,12 @@ def pin_cid(cid: str) -> dict[str, Any]:
             "cid": cid,
             "pinned": True,
             "result": result,
+            "backend_name": str(probe.get("backend_name") or "datasets_router"),
         },
         operation="pin_cid",
         backend_available=True,
         implementation_status="available",
+        extra_metadata={"backend_name": str(probe.get("backend_name") or "datasets_router")},
     )
 
 
@@ -378,13 +658,17 @@ def storage_backend_status() -> dict[str, Any]:
     probe = _runtime_backend_probe()
     backend = probe["backend"]
     backend_name = str(probe["backend_name"] or "")
+    payload: dict[str, Any] = {
+        "status": probe["status"],
+        "backend_name": backend_name,
+        "backend_present": backend is not None,
+        "error": probe["reason"] or "",
+    }
+    if _kit_enabled():
+        payload["kit_backend"] = "ipfs_kit_py"
+        payload["kit_gate"] = "COMPLAINT_GENERATOR_ENABLE_IPFS_KIT"
     return with_adapter_metadata(
-        {
-            "status": probe["status"],
-            "backend_name": backend_name,
-            "backend_present": backend is not None,
-            "error": probe["reason"] or "",
-        },
+        payload,
         operation="storage_backend_status",
         backend_available=probe["status"] == "available",
         degraded_reason=probe["reason"] or (IPFS_ERROR if not IPFS_AVAILABLE else None),
@@ -405,6 +689,7 @@ __all__ = [
     "retrieve_bytes",
     "pin_cid",
     "storage_backend_status",
+    "translate_kit_operation_result",
     "IPFS_AVAILABLE",
     "IPFS_ERROR",
 ]

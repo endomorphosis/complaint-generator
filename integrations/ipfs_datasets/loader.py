@@ -85,6 +85,8 @@ def _package_dir_for_root(package_root: str) -> Path | None:
         return paths.ipfs_datasets_repo / "ipfs_datasets_py"
     if package_root == "ipfs_accelerate_py":
         return paths.ipfs_accelerate_repo / "ipfs_accelerate_py"
+    if package_root == "ipfs_kit_py" and paths.ipfs_kit_repo is not None:
+        return paths.ipfs_kit_repo / "ipfs_kit_py"
     return None
 
 
@@ -140,13 +142,19 @@ def ensure_import_paths(module_name: str = "", missing_module_name: str = "") ->
     ):
         candidate_paths.append(paths.ipfs_accelerate_repo)
 
+    if _matches_package_root(module_name, "ipfs_kit_py") or _matches_package_root(
+        missing_module_name, "ipfs_kit_py"
+    ):
+        if paths.ipfs_kit_repo is not None:
+            candidate_paths.append(paths.ipfs_kit_repo)
+
     for path in candidate_paths:
         if path.exists():
             path_str = str(path)
             if path_str not in sys.path:
                 sys.path.insert(0, path_str)
 
-    for package_root in ("ipfs_datasets_py", "ipfs_accelerate_py"):
+    for package_root in ("ipfs_datasets_py", "ipfs_accelerate_py", "ipfs_kit_py"):
         if _matches_package_root(module_name, package_root) or _matches_package_root(missing_module_name, package_root):
             _prime_repo_package(package_root)
     return paths
@@ -156,7 +164,7 @@ def _should_retry_with_repo_paths(module_name: str, error: ModuleNotFoundError) 
     missing_module_name = str(getattr(error, "name", "") or "")
     return any(
         _matches_package_root(value, package_root)
-        for package_root in ("ipfs_datasets_py", "ipfs_accelerate_py")
+        for package_root in ("ipfs_datasets_py", "ipfs_accelerate_py", "ipfs_kit_py")
         for value in (module_name, missing_module_name)
         if value
     )
