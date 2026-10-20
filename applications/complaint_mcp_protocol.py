@@ -7,6 +7,17 @@ from .complaint_workspace import ComplaintWorkspaceService
 
 
 JSONRPC_VERSION = "2.0"
+MCP_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18")
+DEFAULT_MCP_PROTOCOL_VERSION = "2025-06-18"
+
+
+def negotiated_protocol_version(params: Any) -> str:
+    """Echo a Mike-supported MCP version, or the default when the client omits one."""
+
+    requested = params.get("protocolVersion") if isinstance(params, dict) else None
+    if isinstance(requested, str) and requested in MCP_PROTOCOL_VERSIONS:
+        return requested
+    return DEFAULT_MCP_PROTOCOL_VERSION
 
 _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
     "complaint.create_identity": {
@@ -672,7 +683,7 @@ def handle_jsonrpc_message(
         return _success(
             request_id,
             {
-                "protocolVersion": "2026-03-22",
+                "protocolVersion": negotiated_protocol_version(params),
                 "serverInfo": {
                     "name": "complaint-workspace-mcp",
                     "version": "1.0.0",

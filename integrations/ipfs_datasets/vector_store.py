@@ -320,7 +320,7 @@ def create_vector_index(
     document_list = _normalize_documents(documents)
     resolved_index_name = index_name or "vector_index"
 
-    if np is None or embed_texts_batched is None:
+    if embed_texts_batched is None:
         return with_adapter_metadata(
             {
                 "status": "unavailable",
@@ -332,6 +332,16 @@ def create_vector_index(
             degraded_reason=VECTOR_STORE_ERROR,
             implementation_status="unavailable",
         )
+
+    if output_dir and np is None:
+        unavailable = _numpy_required_error("create_vector_index")
+        unavailable.update(
+            {
+                "index_name": resolved_index_name,
+                "document_count": len(document_list),
+            }
+        )
+        return unavailable
 
     if not document_list:
         return with_adapter_metadata(
@@ -379,15 +389,6 @@ def create_vector_index(
         "model_name": model_name or "",
     }
     if output_dir:
-        if np is None:
-            unavailable = _numpy_required_error("create_vector_index")
-            unavailable.update(
-                {
-                    "index_name": resolved_index_name,
-                    "document_count": len(document_list),
-                }
-            )
-            return unavailable
         payload["files"] = _write_index_payload(
             output_dir=Path(output_dir),
             index_name=resolved_index_name,
@@ -416,7 +417,7 @@ def search_vector_index(
     model_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     resolved_index_name = index_name or "vector_index"
-    if np is None or embed_texts_batched is None:
+    if embed_texts_batched is None:
         return with_adapter_metadata(
             {
                 "status": "unavailable",

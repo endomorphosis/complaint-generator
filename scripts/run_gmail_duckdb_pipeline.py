@@ -11,9 +11,12 @@ import anyio
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
-from ipfs_datasets_py.processors.legal_data.email_workspace import (
-    run_gmail_workspace_duckdb_pipeline as run_gmail_duckdb_pipeline,
+from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+resolve_gmail_credentials = load_legal_symbol("resolve_gmail_credentials", module="email_auth")
+run_gmail_duckdb_pipeline = load_legal_symbol(
+    "run_gmail_workspace_duckdb_pipeline",
+    module="email_workspace",
 )
 
 

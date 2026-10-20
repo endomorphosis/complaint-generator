@@ -42,6 +42,19 @@ def test_kit_import_stays_inside_the_storage_adapter():
     assert offenders == []
 
 
+def test_operator_scripts_stay_on_the_legal_adapter():
+    offenders = []
+    for path in (ROOT / "scripts").glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        if "ipfs_datasets_py.processors.legal_data" in text:
+            offenders.append(path.name)
+    assert offenders == []
+    workspace_api = (ROOT / "applications" / "complaint_workspace_api.py").read_text(encoding="utf-8")
+    assert "evidence_acquisition" not in workspace_api
+    assert "draft_repair" not in workspace_api
+    assert "graph_refresh" not in workspace_api
+
+
 def test_mike_stamp_does_not_rewrite_the_mike_checkout():
     patch = (ADAPTERS / "mike" / "llm_patch.py").read_text(encoding="utf-8")
     assert "mike-llm-router-patch-v1" in patch

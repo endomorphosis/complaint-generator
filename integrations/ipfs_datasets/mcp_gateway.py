@@ -32,7 +32,22 @@ def execute_gateway_tool(
     tool_name: str,
     payload: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    result = _complaint_workspace.call_mcp_tool(tool_name, payload or {})
+    try:
+        result = _complaint_workspace.call_mcp_tool(tool_name, payload or {})
+    except Exception as exc:
+        return with_adapter_metadata(
+            {
+                "status": "unavailable",
+                "tool_name": tool_name,
+                "payload": payload or {},
+                "error": str(exc),
+                "result": {},
+            },
+            operation="execute_gateway_tool",
+            backend_available=False,
+            degraded_reason=str(exc),
+            implementation_status="unavailable",
+        )
     return with_adapter_metadata(
         {
             "status": "available",

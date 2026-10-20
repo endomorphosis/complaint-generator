@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import tempfile
 from datetime import datetime
@@ -863,9 +864,18 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
         return workspace.call_mcp_tool(request.tool_name, request.arguments)
 
     @router.post("/api/complaint-workspace/mcp/rpc")
-    async def call_jsonrpc(request: JsonRpcRequest) -> Dict[str, Any]:
+    async def call_jsonrpc(request: JsonRpcRequest, http_request: Request) -> Response:
+        token = os.environ.get("COMPLAINT_MCP_AUTH_TOKEN", "").strip()
+        if token:
+            authorization = http_request.headers.get("authorization", "")
+            if authorization != f"Bearer {token}":
+                raise HTTPException(status_code=401, detail="MCP bearer token required")
         response = handle_jsonrpc_message(workspace, request.model_dump())
-        return response or {"jsonrpc": "2.0", "id": request.id, "result": None}
+        body = response or {"jsonrpc": "2.0", "id": request.id, "result": None}
+        return Response(
+            content=json.dumps(body),
+            media_type="application/json",
+        )
 
     return router
 

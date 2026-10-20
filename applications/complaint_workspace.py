@@ -5645,20 +5645,28 @@ class ComplaintWorkspaceService:
     @staticmethod
     def _mike_connector_setup_text(router_available: bool) -> str:
         connector_url = ComplaintWorkspaceService._mike_connector_url()
+        registration = (
+            "Mike registers this connector with Streamable HTTP on a public https URL. "
+            "http://localhost and private addresses are rejected by Mike. "
+            "Path: /api/complaint-workspace/mcp/rpc. "
+            "Tools: complaint.generate_grounded_text, complaint.search_corpus, "
+            "complaint.get_handoff, complaint.sync_draft. "
+            "Set COMPLAINT_MCP_AUTH_TOKEN and put the same bearer token in the Mike connector auth config. "
+            "The mike-llm-router-patch-v1 stamp is compatibility-only and does not intercept Mike LLM calls. "
+            f"Connector URL: {connector_url}."
+        )
         if router_available:
             availability = (
                 "Register this complaint-generator MCP connector in Mike. "
                 "Grounded drafting calls complaint.generate_grounded_text. "
                 "The accelerate routers are available. "
-                "The mike_llm_patch stamp is compatibility-only and does not intercept Mike LLM calls."
             )
         else:
             availability = (
                 "The MCP connector and accelerate routers are unavailable. "
                 "Register the connector URL when the accelerate checkout can be imported. "
-                "The mike_llm_patch stamp is compatibility-only and does not intercept Mike LLM calls."
             )
-        return f"{availability} Connector URL: {connector_url}."
+        return f"{availability}{registration}"
 
     @staticmethod
     def _document_version_content_sha256(title: str, body: str) -> str:
