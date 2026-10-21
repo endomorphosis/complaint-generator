@@ -447,7 +447,40 @@
     "native_sealed_validation": true,
     "passed": 3,
     "skipped": 0,
-    "task_completed": false,
-    "native_admission_pending": true
+    "task_completed": true,
+    "native_admission_pending": false
+  },
+  "actual_interrupted_claim_recovery": {
+    "path": "/tmp/complaint-tui01-native-reconciliation-20261021-gpyubmqw/interrupted_claim_recovery.json",
+    "sha256": "e010afac7d57c5c33b7cbacb4eaea76c7c8c16bd615f2a2bea92a66bb46d4e47",
+    "reconciled": true,
+    "lifetime_consumed_attempts": 4,
+    "attempt_refunded": false,
+    "completion_authority": false,
+    "provider_callback_settled": false
+  },
+  "native_tui_baseline_completion": {
+    "path": "/tmp/complaint-tui01-native-reconciliation-20261021-gpyubmqw/final_receipt.json",
+    "sha256": "ae23e244cf21e193a802d7d23fab3345a5ac777d0d2bff039380bb6435ca1264",
+    "native_reconciliation": {
+      "path": "/tmp/complaint-tui01-native-reconciliation-20261021-gpyubmqw/native_reconciliation.json",
+      "sha256": "7ac0c2d1258f1b1dbe6f53bb7badcfd406bf60062029bd730cb46df6e6e12b72"
+    },
+    "independent_junit": {
+      "path": "/tmp/complaint-tui01-native-reconciliation-20261021-gpyubmqw/independent_required_cases.xml",
+      "sha256": "1b56aabf1c663150553e83a7c09c3155c8579a77ddbaf0d10f9516dc3609f1d4"
+    },
+    "candidate": "c5d2e56ab5568453dba15218f50bb8ff78836e49",
+    "task_id": "CIMP-TUI-01",
+    "canonical_task_cid": "baguqeeraxq775q25gtjritvqbbfcnryzpodeib3cn6dayanky4hrvo6the7q",
+    "completion_commit": "bd224bcf444d25f0bbec8eb32d0875a95be3095a",
+    "passed": 3,
+    "skipped": 0,
+    "spent_attempts_preserved": 4,
+    "provider_dispatched_for_adoption": false,
+    "attempt_consumed_for_adoption": false,
+    "completed_tasks": 1,
+    "total_tasks": 58,
+    "pending_tasks": 57
   }
 }
