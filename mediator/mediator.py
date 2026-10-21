@@ -6607,7 +6607,9 @@ class Mediator:
 		"""
 		self.log('three_phase_start', private_text_logged=False)
 		
-		# Phase 1: Build initial knowledge and dependency graphs
+		# Phase 1: Build initial knowledge and dependency graphs.
+		# Verified legal requirements are bound before any element question is asked.
+		construction_sequence = []
 		kg = self.kg_builder.build_from_text(initial_complaint_text)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph', kg)
 		
@@ -6621,12 +6623,32 @@ class Mediator:
 			}
 			for e in claim_entities
 		]
-		
-		# Build dependency graph
-		dg = self.dg_builder.build_from_claims(claims)
 		intake_case_file = self._initialize_intake_case_file(kg, initial_complaint_text)
+		verified_legal_requirements = self._collect_verified_legal_requirements(claims, intake_case_file)
+		construction_sequence.append('verified_legal_requirements')
+		self.phase_manager.update_phase_data(
+			ComplaintPhase.INTAKE,
+			'verified_legal_requirements',
+			verified_legal_requirements,
+		)
+		
+		# Build dependency graph from retrieved requirements. An empty retrieval
+		# records a legal-context/source gap and does not invent heuristic law.
+		dg = self.dg_builder.build_from_claims(
+			claims,
+			verified_legal_requirements,
+			require_verified_legal_sources=True,
+		)
+		construction_sequence.append('dependency_graph')
 		dg = self.dg_builder.sync_intake_timeline_to_graph(dg, intake_case_file)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'dependency_graph', dg)
+		self.phase_manager.record_verified_dependency_refresh(dg, {
+			'stage': 'initial_verified_requirements',
+			'affected_node_ids': [],
+			'preserved_node_ids': list(getattr(dg, 'nodes', {}) or {}),
+			'recomputed_dependencies': [],
+			'legal_source_gap_count': len((getattr(dg, 'metadata', {}) or {}).get('legal_source_gaps') or []),
+		})
 		self._update_intake_contradiction_state(dg)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', intake_case_file)
 		
@@ -6660,8 +6682,16 @@ class Mediator:
 			intake_case_file=intake_case_file,
 		)
 		questions = self._intake_question_proposals(questions, source_text=initial_complaint_text)
+		construction_sequence.append('element_questions')
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'question_candidates', question_candidates)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'current_questions', questions)
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_construction_sequence', list(construction_sequence))
+		gap_types = [
+			gap.get('type') for gap in kg_gaps if isinstance(gap, dict) and gap.get('type')
+		]
+		if (getattr(dg, 'metadata', {}) or {}).get('legal_source_gaps'):
+			gap_types.append('legal_context_source_gap')
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_gap_types', gap_types)
 		
 		# Calculate initial noise level
 		noise = self.denoiser.calculate_noise_level(kg, dg)
@@ -8404,6 +8434,19 @@ class Mediator:
 		)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', intake_case_file)
 		dg = self.dg_builder.sync_intake_timeline_to_graph(dg, intake_case_file)
+		question_type = str((question or {}).get('type') or '').strip().lower()
+		clarification_keys = {
+			'timeline': ['timeline', 'decision_timeline', 'notice', 'hearing'],
+			'responsible_party': ['actor', 'responsible_party', 'decision_timeline'],
+			'clarification': ['clarification'],
+			'contradiction': ['contradiction'],
+		}.get(question_type, [])
+		if clarification_keys and dg is not None:
+			refresh_report = self.dg_builder.refresh_affected_dependencies(dg, {
+				'fact_change': True,
+				'clarification_keys': clarification_keys,
+			})
+			self.phase_manager.record_verified_dependency_refresh(dg, refresh_report)
 		
 		# Generate next questions
 		max_questions = 5
@@ -13276,14 +13319,77 @@ class Mediator:
 		context = refresh_explicit_legal_context(intake_case_file if isinstance(intake_case_file, dict) else {})
 		return list(context.get("questions") or [])
 
+	def _collect_verified_legal_requirements(self, claims, intake_case_file):
+		"""Group retrieved requirements that pass the verified-source gate, keyed by claim type."""
+		from complaint_phases.intake_claim_registry import normalize_claim_type
+
+		claim_types = []
+		for claim in claims or []:
+			if isinstance(claim, dict):
+				claim_types.append(str(claim.get('type') or 'unknown'))
+		grouped = {claim_type: [] for claim_type in claim_types}
+		candidates = []
+		state_value = getattr(self.state, 'verified_legal_requirements', None)
+		state_data = getattr(self.state, 'data', None)
+		if state_value is None and isinstance(state_data, dict):
+			state_value = state_data.get('verified_legal_requirements')
+		case_value = intake_case_file.get('verified_legal_requirements') if isinstance(intake_case_file, dict) else None
+		for source in (state_value, case_value):
+			if isinstance(source, dict):
+				for claim_type, items in source.items():
+					if not isinstance(items, list):
+						continue
+					for item in items:
+						if isinstance(item, dict):
+							copied = dict(item)
+							copied.setdefault('claim_type', claim_type)
+							candidates.append(copied)
+			elif isinstance(source, list):
+				candidates.extend(dict(item) for item in source if isinstance(item, dict))
+		for requirement in candidates:
+			if not self.dg_builder._is_verified_legal_requirement(requirement):
+				continue
+			target = str(requirement.get('claim_type') or requirement.get('type') or '')
+			target_norm = normalize_claim_type(target) or target.strip().lower()
+			for claim_type in claim_types:
+				claim_norm = normalize_claim_type(claim_type) or claim_type.strip().lower()
+				if claim_type == target or (target_norm and claim_norm == target_norm):
+					grouped[claim_type].append(requirement)
+		return grouped
+
+	def refresh_verified_legal_dependencies(self, change):
+		"""Recompute intake dependencies affected by a factual, jurisdiction, date, or rule change."""
+		dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
+		if dg is None:
+			return {'affected_node_ids': [], 'preserved_node_ids': [], 'recomputed_dependencies': []}
+		report = self.dg_builder.refresh_affected_dependencies(dg, change if isinstance(change, dict) else {})
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'dependency_graph', dg)
+		return self.phase_manager.record_verified_dependency_refresh(dg, report)
+
 	def apply_explicit_legal_context(self, intake_case_file, **updates):
 		"""Store explicit legal context and invalidate dependent rule and proof state."""
 		from complaint_phases.intake_case_file import apply_explicit_legal_context
 
-		return apply_explicit_legal_context(
+		updated = apply_explicit_legal_context(
 			intake_case_file if isinstance(intake_case_file, dict) else {},
 			**updates,
 		)
+		date_roles = [
+			role for role in updates
+			if role in {
+				'event_date', 'event_dates', 'applicable_law_date',
+				'filing_reference_date', 'corpus_retrieval_date',
+			}
+		]
+		change = {}
+		if 'jurisdiction' in updates:
+			change['jurisdiction_changed'] = True
+		if date_roles:
+			change['date_changed'] = True
+			change['date_roles'] = date_roles
+		if change and self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph') is not None:
+			self.refresh_verified_legal_dependencies(change)
+		return updated
 	
 	def _generate_statement_of_claim(self, kg, dg):
 		"""Generate short statement of claim."""
