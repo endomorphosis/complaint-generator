@@ -788,11 +788,11 @@
     "completed": 6,
     "pending": 52,
     "total": 58,
-    "state": "stopped_ready_for_ordinary_restart",
-    "observed_at": "2026-10-21T08:59:40.016993+00:00",
+    "state": "stopped_ready_for_capacity_bound_start",
+    "observed_at": "2026-10-21T09:24:31.564458+00:00",
     "release_qualified": false,
     "continue_until_all58_completed": true,
-    "source": "Actual native merged completion events/taskboard; source maintenance and administrative abandonment add no completions."
+    "source": "Actual native taskboard and stopped full-payload receipt; capacity/source changes add no completions."
   },
   "pending_task_runtime_guidance": {
     "receipt": "/tmp/complaint-pending-guidance-install-20261021-63nbl1nl/receipt.json",
@@ -975,17 +975,6 @@
       ]
     }
   ],
-  "combined_current_source_validation": {
-    "receipt": "/tmp/complaint-current-app-runner-bound-20261021-eteshnpj/receipt.json",
-    "sha256": "9ac99595be123d99c4cd99926c81f31bd07d6c69907caa7a42d0ad06ce66aa57",
-    "passed": 368,
-    "skipped": 0,
-    "sealed_python": true,
-    "source_commit": "9c4c6d17487840cbe2caf85f37f370689d127e39",
-    "native_commit": "7a685e29f663d7a4a9820cffb8f6b51c45a13d45",
-    "provider_dispatched": false,
-    "scope": "Current observed Grok routing, private policy, legal context, case file, graph provenance/support, adapter compatibility and first-party supervisor runner."
-  },
   "future_worker_execution_profile": {
     "receipt": "/tmp/complaint-budget64-profile-qualification-20261021.json",
     "sha256": "ed83f1ffbf54069f8d61a658b0efc976d25166b8ffe9af9a955b0deabf5676d5",
@@ -1601,5 +1590,81 @@
     "claim_and_original_quarantine_retained": true,
     "native_status": "blocked",
     "remaining_work": "Qualify and apply exact generated-projection classification and native administrative abandonment; then restart same epoch through ordinary admission."
+  },
+  "application_validation_before_capacity_fix": {
+    "receipt": "/tmp/complaint-current-app-runner-bound-20261021-eteshnpj/receipt.json",
+    "sha256": "9ac99595be123d99c4cd99926c81f31bd07d6c69907caa7a42d0ad06ce66aa57",
+    "passed": 368,
+    "skipped": 0,
+    "sealed_python": true,
+    "source_commit": "9c4c6d17487840cbe2caf85f37f370689d127e39",
+    "native_commit": "7a685e29f663d7a4a9820cffb8f6b51c45a13d45",
+    "provider_dispatched": false,
+    "scope": "Current observed Grok routing, private policy, legal context, case file, graph provenance/support, adapter compatibility and first-party supervisor runner."
+  },
+  "external_worktree_root_capacity_validation": {
+    "receipt": "/tmp/complaint-privacy-external-worktree-root-final-20261021-bx9dk_oh/bound_source_receipt.json",
+    "sha256": "40049678b7ea049b4a499365ce2d5032eab02525fe377a072dfeb8838110f292",
+    "source_commit": "7804ee9a756f1058e462f15272e3fc8b7d688de1",
+    "passed": 197,
+    "skipped": 0,
+    "sealed_python": true,
+    "groups": {
+      "tests.test_improvement_container_shutdown": 44,
+      "tests.test_improvement_plan_contract": 52,
+      "tests.test_improvement_recovery_epoch": 16,
+      "tests.test_improvement_runner": 85
+    },
+    "native_source_unchanged": "7a685e29f663d7a4a9820cffb8f6b51c45a13d45",
+    "limits": [
+      "Tracked blob byte check assumes uncompressed file contents and excludes filesystem overhead/generated files; unknown local size is explicitly reported.",
+      "Existing Git object stores are unchanged; optional future missing-object fetches still use their existing stores.",
+      "Only future workspaces use the explicit root; no old history/claims/worktrees are moved or deleted."
+    ],
+    "source_installation": {
+      "receipt": "/tmp/complaint-capacity-root-source-installation-20261021-m8iqcfg4/receipt.json",
+      "sha256": "0cb0abbc4f7c03e27abea1b16e5d692451516b201cecaea00604ac0ad9b484f5"
+    },
+    "actual_doctor": {
+      "receipt": "/tmp/complaint-external-worktree-root-doctor-20261021-ywagn6dh/receipt.json",
+      "sha256": "a8d39a56286427e03693795ef3f43b59a5227bbd9f65b9c4cb64818e703a142f"
+    }
+  },
+  "capacity_incident_stop": {
+    "receipt": "/tmp/complaint-capacity-stop-evidence-20261021-b0m36puz/receipt.json",
+    "sha256": "aab775a7f6fb667951ff3aebe7e527fdb61eb648f501dae120e0210b4472c43e",
+    "native_readonly_audit": {
+      "receipt": "/tmp/complaint_priv002_disk_full_stop_readonly_20261021.json",
+      "sha256": "9892d1e5f63d2adcaf6e773d1aacc1018c69c628ebd4a984b824c1afdeb2d42f"
+    },
+    "native_preimage": {
+      "receipt": "/tmp/complaint-capacity-native-preimage-20261021-3y35cvej/receipt.json",
+      "sha256": "0f87d42bd0da323aa45e6ecc90694c1e6bc77b37590ae0a200bbff86d2b8a7f6"
+    },
+    "new_attempt_consumed": false,
+    "priv002_spent": 1,
+    "tui01_spent": 4,
+    "active_claims_cleared_by_public_stop": true,
+    "original_workspaces_moved": false
+  },
+  "configured_future_worktree_root": {
+    "path": "/storage/barberb/changuard/.complaint-generator-worktrees-20261021",
+    "doctor_status": "ready",
+    "capacity": {
+      "filesystem_path": "/storage/barberb/changuard/.complaint-generator-worktrees-20261021",
+      "free_bytes": 655979970560,
+      "minimum_cold_checkout_bytes": 4986403699,
+      "sufficient": true,
+      "reason": "local_pinned_tracked_blob_lower_bound",
+      "includes_filesystem_overhead": false,
+      "assumes_uncompressed_file_content": true
+    },
+    "root_binding_claimed_by_start_yet": false,
+    "existing_state_epoch_and_history_unchanged": true,
+    "only_future_checkouts_use_new_root": true
+  },
+  "operator_control_plane_context_diagnosis": {
+    "receipt": "/tmp/complaint_settlement_environment_diagnosis_20261021.json",
+    "sha256": "5c0932c964b76df57b76a575a245ea55224b7f1bff1e5a4b5a0d513fdd5c8992"
   }
 }
