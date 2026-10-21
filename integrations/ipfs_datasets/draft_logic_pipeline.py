@@ -510,7 +510,7 @@ def pin_proof_report_to_ipfs(
             return {
                 "cid": _fallback_id(data),
                 "pinned": False,
-                "stored_local": True,
+                "stored_local": False,
                 "uploaded": False,
                 "verified": False,
                 "replicated": False,
@@ -525,7 +525,7 @@ def pin_proof_report_to_ipfs(
             return {
                 "cid": _fallback_id(data),
                 "pinned": False,
-                "stored_local": True,
+                "stored_local": False,
                 "uploaded": False,
                 "verified": False,
                 "replicated": False,
@@ -563,11 +563,11 @@ def pin_proof_report_to_ipfs(
             return {
                 "cid": _fallback_id(data),
                 "pinned": False,
-                "stored_local": True,
-                "uploaded": False,
-                "verified": False,
-                "replicated": False,
-                "deferred": bool(result.get("deferred") or result.get("status") in {"unavailable", "deferred", "error"}),
+                "stored_local": result.get("stored_local") is True,
+                "uploaded": result.get("uploaded") is True and not local_only,
+                "verified": result.get("verified") is True,
+                "replicated": result.get("replicated") is True,
+                "deferred": True,
                 "network_durable": False,
                 "backend": "local_content_hash",
                 "error": str((pin_result or result).get("error") or result.get("error") or ""),
@@ -575,6 +575,9 @@ def pin_proof_report_to_ipfs(
                 "receipt": {
                     **dict(result.get("receipt") or {}),
                     "cid_kind": "sha256_fallback",
+                    "storage_cid": cid,
+                    "storage_backend": result.get("backend_name") or "",
+                    "storage_status": result.get("status") or "error",
                     "pin": None if pin_result is None else {
                         "status": pin_result.get("status"),
                         "pinned": False if pin_result.get("pinned") is not True else True,
@@ -618,7 +621,7 @@ def pin_proof_report_to_ipfs(
         "stored_local": bool(report_pin["stored_local"]),
         "uploaded": bool(report_pin["uploaded"]),
         "verified": bool(report_pin["verified"]),
-        "replicated": False,
+        "replicated": bool(report_pin["replicated"]),
         "deferred": bool(report_pin["deferred"]),
         "network_durable": bool(report_pin["network_durable"]),
         "verification": report_pin["verification"],

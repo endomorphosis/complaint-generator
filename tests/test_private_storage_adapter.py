@@ -70,6 +70,8 @@ def _store(backend, **overrides):
         key_id=KEY_ID,
         backend=backend,
         pin_content=overrides.get("pin_content", True),
+        journal=overrides.get("journal"),
+        replicate=overrides.get("replicate"),
     )
 
 
@@ -117,3 +119,21 @@ def test_unpinned_store_is_distinct_from_verified_pin():
     assert unpinned["verified"] is True and unpinned["pinned"] is False
     assert pinned["verified"] is True and pinned["pinned"] is True
     assert unpinned["stored_local"] is False and pinned["stored_local"] is False
+
+
+@pytest.mark.parametrize("failure", [
+    {"success": False}, {"success": "false"}, {"status": "rejected"},
+    {"error": "read failed"}, {"success": True, "error": "read failed"},
+])
+def test_rejected_matching_ciphertext_does_not_journal_or_replicate(failure):
+    class RejectedReadback(_HermeticBytes):
+        def cat(self, cid):
+            return {**failure, "cid": cid, "data": self.blobs[cid]}
+
+    journal = []
+    replicas = []
+    with pytest.raises(PrivateStorageError) as caught:
+        _store(RejectedReadback(), journal=journal.append, replicate=replicas.append)
+    assert caught.value.code == "readback_mismatch"
+    assert journal == []
+    assert replicas == []

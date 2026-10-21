@@ -18,6 +18,17 @@ from integrations.ipfs_datasets.draft_logic_pipeline import (
 from integrations.ipfs_datasets.legal import constrain_assertions_to_corpus
 
 
+@pytest.fixture(autouse=True)
+def hermetic_proof_storage(monkeypatch, tmp_path):
+    """Exercise local fallback without accessing a host daemon or cache."""
+    from integrations.ipfs_datasets import storage
+    monkeypatch.setenv("COMPLAINT_GENERATOR_IPFS_CACHE_DIR", str(tmp_path / "proof-cache"))
+    monkeypatch.delenv("COMPLAINT_GENERATOR_ENABLE_IPFS_KIT", raising=False)
+    monkeypatch.setattr(storage, "_load_optional_kit_backend", lambda: None)
+    for name in ("add_bytes", "cat", "pin"):
+        monkeypatch.setattr(storage, name, None)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -296,6 +307,11 @@ class TestPinProofReportToIPFS:
         assert result["network_durable"] is False
         assert result["report_cid"].startswith("sha256:")
         assert result["backend"] == "local_content_hash"
+        assert result["stored_local"] is False
+        assert result["uploaded"] is True
+        assert result["verified"] is True
+        assert result["deferred"] is True
+        assert result["receipt"]["storage_cid"] == "bafyrealnetworkcid"
 
     def test_report_cid_fallback_starts_with_sha256(self):
         # When the IPFS backend raises, the local sha256 fallback is used.
@@ -306,6 +322,29 @@ class TestPinProofReportToIPFS:
             result = pin_proof_report_to_ipfs(_minimal_report())
         # The sha256: prefix fallback should still produce a non-empty CID.
         assert result["report_cid"].startswith("sha256:")
+        assert result["stored_local"] is False
+        assert result["uploaded"] is False
+        assert result["verified"] is False
+
+    @pytest.mark.parametrize("storage_result", [5, {"status": "unavailable", "cid": "", "error": "offline"}])
+    def test_hash_only_fallback_does_not_claim_a_persisted_artifact(self, storage_result):
+        with patch("integrations.ipfs_datasets.storage.store_bytes", return_value=storage_result):
+            result = pin_proof_report_to_ipfs(_minimal_report())
+        assert result["report_cid"].startswith("sha256:")
+        assert result["stored_local"] is False
+        assert result["uploaded"] is False
+        assert result["pinned"] is False
+        assert result["verified"] is False
+        assert result["deferred"] is True
+
+    def test_real_local_cache_is_distinct_from_an_unstored_hash(self):
+        result = pin_proof_report_to_ipfs(_minimal_report())
+        assert result["stored_local"] is True
+        assert result["verified"] is True
+        assert result["uploaded"] is False
+        assert result["pinned"] is False
+        assert result["network_durable"] is False
+        assert result["receipt"]["storage_cid"]
 
     def test_deterministic_cid_for_same_content(self):
         # Each call produces its own timestamp so envelope bytes differ.
@@ -386,9 +425,10 @@ class TestConstrainAssertionsVectorPass:
         with patch(
             "integrations.ipfs_datasets.vector_store.embed_texts_batched",
             return_value=[[1.0, 0.0, 0.0, 0.0]],  # cosine-similar to first record
-        ):
+        ), patch("integrations.ipfs_datasets.legal.search_state_laws", return_value=[]):
             result = constrain_assertions_to_corpus(
                 assertions,
+                state="OR",
                 legal_vector_index_dir=str(index_dir),
             )
 
