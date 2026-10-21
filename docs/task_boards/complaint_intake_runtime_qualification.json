@@ -1,6 +1,6 @@
 {
   "schema_version": "complaint-generator/intake-runtime-qualification@1",
-  "native_supervisor_commit": "c442675c5d639000fd25ebf2b74314c7e18d408e",
+  "native_supervisor_commit": "731b6680cdae0e36bcbea450d0bab7c76db0479f",
   "provider": {
     "router": "ipfs_accelerate_py.llm_router",
     "provider": "grok_cli",
@@ -785,14 +785,14 @@
     }
   },
   "current_campaign_progress": {
-    "completed": 5,
-    "pending": 53,
+    "completed": 6,
+    "pending": 52,
     "total": 58,
-    "state": "stopped_for_qualified_source_maintenance",
-    "observed_at": "2026-10-21T06:41:43.451117+00:00",
-    "source": "Actual native merged completion events and taskboard; corrections do not add completions.",
+    "state": "stopped_for_source_bound_incident_classification",
+    "observed_at": "2026-10-21T08:02:19.248992+00:00",
     "release_qualified": false,
-    "continue_until_all58_completed": true
+    "continue_until_all58_completed": true,
+    "source": "Actual native merged completion events and taskboard; source fixes add no completions."
   },
   "pending_task_runtime_guidance": {
     "receipt": "/tmp/complaint-pending-guidance-install-20261021-63nbl1nl/receipt.json",
@@ -976,14 +976,15 @@
     }
   ],
   "combined_current_source_validation": {
-    "receipt": "/tmp/complaint-privacy-intake-current-corrected-source-20261021-2y2qnz4g/receipt.json",
-    "sha256": "1e4af956fed53af76dadbadfaf7b4210cb3408967957a00dac4340d10e197ed2",
-    "passed": 262,
+    "receipt": "/tmp/complaint-privacy-observed-router-and-intake-current-20261021-9e60p3wu/receipt.json",
+    "sha256": "4120e745de82bdaa22dd1857197169f13d629b4def8d1bfe0ae512b03bd78863",
+    "passed": 301,
     "skipped": 0,
     "sealed_python": true,
     "provider_dispatched": false,
-    "current_source_commit": "067e14e28179c725f2cbec5d5ee2c23a04f7b15a",
-    "scope": "Current integrated private-policy, explicit legal context, intake case file, graph provenance, graph support and adapter compatibility suites."
+    "current_source_commit": "763c0002d3557575c474abb807b0e47ec9b34fc9",
+    "native_source_commit": "731b6680cdae0e36bcbea450d0bab7c76db0479f",
+    "scope": "Current integrated observed Grok router, privacy policy, legal context, intake case file, graph provenance/support and adapter compatibility."
   },
   "future_worker_execution_profile": {
     "receipt": "/tmp/complaint-budget64-profile-qualification-20261021.json",
@@ -1136,11 +1137,93 @@
         "workspace_containers_absent": true
       },
       "provider_attempt_refunded": false
+    },
+    {
+      "receipt": "/tmp/complaint-route01-native-finish-20261021.json",
+      "sha256": "cc52a1c78fb4c9a500ce293622034ec4e5a6f13ce73ac65823b2b0f4b104ce3b",
+      "task_id": "CIMP-ROUTE-01",
+      "task_cid": "baguqeeraxs75jyohqc6z3e6hlmqvesbxkm6kqfqjjwd3ep5urg5e27mg753q",
+      "attempt": 1,
+      "event_id": "sha256:071c9925bd71d83f401c959f21ba230e04ba61ae84f6a35d23114983f0abf52d",
+      "sequence": 195,
+      "finished_at": "2026-10-21T06:58:22.262075+00:00",
+      "native_pipeline_returncode": 0,
+      "candidate_commit": "95b56439a22812a4014e24b1c7e6272f5ecfde53",
+      "integration_commit": "c18e8392a9da8c823179551f67fa065a02e382d8",
+      "merge_request_id": "1792565898780737458-3094754-3938d4bf5d94",
+      "native_merged": true,
+      "native_queued": false,
+      "validation_passed": true,
+      "validation_returncode": 0,
+      "provider_attempt_refunded": false
     }
   ],
   "current_plan_id": "baguqeerazpmdxshp56ijft7f6agjywb5u6hflpwl565jyhadvuvwy4y2lpzq",
   "all53_pending_task_budget_advice_installation": {
     "receipt": "/tmp/complaint-remaining-runtime-advice-20261021-svckbvkc/receipt.json",
     "sha256": "1c8b5511ed861c5ef109d11a9c13735938c282ec79c41cd9e24e9c9f720c876f"
-  }
+  },
+  "route01_independent_correction": {
+    "receipt": "/tmp/complaint_route01_correction_qualification_20261021.json",
+    "sha256": "3c0cd32d92db7d33fc84dbf626549d7bec44a8ae04522ee9cc3cf02848aeb5b0",
+    "installation": {
+      "receipt": "/tmp/complaint-route01-corrective-installation-20261021-57yb9plo/receipt.json",
+      "sha256": "c41e34f876e76bcb9a64deda9de3eaf2aee88de3b54ab10efa3c7fad1383a4d6"
+    },
+    "required_plus_private_passed": 61,
+    "compatibility_passed": 15,
+    "skipped": 0
+  },
+  "grok_invocation_observation": {
+    "receipt": "/tmp/complaint_grok_invocation_observation_qualification_20261021.json",
+    "sha256": "0a862d59405c0f6f384bbef75ae6f360336ef53ed57ce5149063aeefe7755b9c",
+    "installation": {
+      "receipt": "/tmp/complaint-grok-observation-installation-20261021-3tm03r87/receipt.json",
+      "sha256": "3fd10daea19f142e375439c7507fc18d2d378fae984bbf83d0950c73e5d1bd25"
+    },
+    "native_passed": 187,
+    "application_plus_private_passed": 69,
+    "skipped": 0,
+    "live_canary_run": false,
+    "evidence_scope": "Current native process/terminal model identity; no authenticated server or billing authority."
+  },
+  "preparing_recovery_fence": {
+    "receipt": "/tmp/complaint_preparing_fence_qualification_20261021.json",
+    "sha256": "7390cb9e7f03be42d986747b9d493b0e91cd2cda3c98e6e20a068b055bb1094a",
+    "installation": {
+      "receipt": "/tmp/complaint-preparing-fence-installation-20261021-he_d9ev0/receipt.json",
+      "sha256": "ec9ab6219f70a13f4e25bd1a9d15c6c0dff45b8420919138d67514957aab0c1f"
+    },
+    "current_source_focused_passed": 47,
+    "current_source_legacy_autonomous_passed": 43,
+    "skipped": 0,
+    "surrounding_passed_before_final_repaired_flag_correction": 85,
+    "automatic_container_rescue": false,
+    "current_incident_adjudicated": false
+  },
+  "followup_runtime_advice_installation": {
+    "receipt": "/tmp/complaint-followup-runtime-advice-20261021-c7e19u05/receipt.json",
+    "sha256": "420ec777348bdb24cc5ac66167154cb8ff098104ee6ff50c3d7801579d8c9558"
+  },
+  "completed_scratch_retirement": {
+    "receipt": "/tmp/complaint-retired-scratch-evidence-20261021-thlq8y9z/receipt.json",
+    "sha256": "bf0e39e5e844353f8c5342055ef395bb51cd5d6cb4411cc0cc0b9cc4be6cf4c0"
+  },
+  "selected_only_tui02_reconciliation": {
+    "receipt": "/tmp/complaint-selected-tui02-reconciliation-20261021-wh13o3p6/receipt.json",
+    "sha256": "f3563f4c999480653b1a5004b4590cb618ca5bc9ed59a957023f2eb00747aa89",
+    "selected_only_cleared": true,
+    "attempt_consumed": false,
+    "priv002_adjudicated": false
+  },
+  "current_open_incident": {
+    "task_id": "CIMP-PRIV-002",
+    "spent_attempt": 1,
+    "provider_outcome": "unknown",
+    "attempt_refunded": false,
+    "claim_and_original_quarantine_retained": true,
+    "native_status": "blocked",
+    "remaining_work": "Qualify and apply exact generated-projection classification and native administrative abandonment; then restart same epoch through ordinary admission."
+  },
+  "historical_live_canary_scope": "Earlier live route/token and private-runner receipts remain historical evidence; no current observation-API live canary is claimed."
 }
