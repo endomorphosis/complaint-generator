@@ -7,7 +7,7 @@ which puts the accelerate checkout on ``sys.path`` before importing.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 from integrations.ipfs_datasets.loader import ensure_import_paths, import_attr_optional, import_failure_message
 
@@ -104,6 +104,165 @@ def load_multimodal_generate() -> tuple[Any | None, Any]:
     return _load_symbol("ipfs_accelerate_py.multimodal_router", "generate_multimodal")
 
 
+INFERENCE_OWNER = "ipfs_accelerate_py.llm_router"
+PINNED_GROK_PROVIDER = "grok_cli"
+PINNED_GROK_MODEL = "grok-4.7"
+PINNED_GROK_CANARY_PROMPT = "GROK47_CANARY_OK"
+PINNED_GROK_CANARY_MAX_TOKENS = 16
+# Aliases the native router would otherwise accept. They are refused here so
+# a caller cannot slide onto Codex, xAI HTTP, or another Grok CLI spelling.
+UNPINNED_GROK_PROVIDER_ALIASES = frozenset(
+    {
+        "grok",
+        "grok-cli",
+        "xai",
+        "xai_cli",
+        "xai-cli",
+        "xai_api",
+        "xai-api",
+        "xai_grok",
+        "grok_api",
+        "grok-api",
+        "grok_build",
+        "grok-build",
+        "grok_build_cli",
+        "grok-build-cli",
+    }
+)
+
+
+def pinned_grok47_dispatch_kwargs() -> dict[str, Any]:
+    """Exact native-router kwargs for the pinned Grok 4.7 route.
+
+    ``allow_cross_provider_fallback=False`` also disables the native
+    default-model retry. Neither flag may be turned back on by callers.
+    """
+
+    return {
+        "provider": PINNED_GROK_PROVIDER,
+        "model_name": PINNED_GROK_MODEL,
+        "allow_local_fallback": False,
+        "allow_cross_provider_fallback": False,
+    }
+
+
+def pinned_grok47_canary_kwargs() -> dict[str, Any]:
+    """Bounded no-tool canary. The prompt is a public synthetic token."""
+
+    return {
+        **pinned_grok47_dispatch_kwargs(),
+        "max_tokens": PINNED_GROK_CANARY_MAX_TOKENS,
+        "temperature": 0,
+        "grok_max_turns": 1,
+    }
+
+
+def unpinned_grok_route_reason(provider: str | None, model_name: str | None) -> str:
+    """Return a fixed refusal when the call is not the exact pinned route.
+
+    The reason does not echo the supplied provider, model, or prompt.
+    """
+
+    raw_provider = str(provider or "").strip()
+    raw_model = str(model_name or "").strip()
+    if not raw_provider and not raw_model:
+        return ""
+    if raw_provider == PINNED_GROK_PROVIDER and raw_model == PINNED_GROK_MODEL:
+        return ""
+    alias = raw_provider.lower() in UNPINNED_GROK_PROVIDER_ALIASES
+    grok_family = raw_provider == PINNED_GROK_PROVIDER or alias or raw_provider.lower().startswith("grok")
+    if grok_family or (raw_model.lower().startswith("grok") and raw_provider != PINNED_GROK_PROVIDER):
+        return (
+            "Grok route unavailable: refusing an unpinned provider or model. "
+            "The only admitted route is provider=grok_cli and model_name=grok-4.7. "
+            "No Codex, model alias, other Grok version, or secondary cloud was contacted."
+        )
+    return ""
+
+
+def vetted_route_observation(
+    trace: Any,
+    *,
+    requested_provider: str,
+    requested_model: str,
+) -> dict[str, Any]:
+    """Copy only router-selection identity. Never a live-canary claim.
+
+    Response-cache hits populate the same thread-local trace. That proves
+    which route the router selected, not that a provider was contacted and
+    not the wire model reported by ``end.modelUsage``.
+    """
+
+    observed_provider = ""
+    observed_model = ""
+    if isinstance(trace, Mapping):
+        provider_value = trace.get("effective_provider_name")
+        model_value = trace.get("effective_model_name")
+        if isinstance(provider_value, str):
+            observed_provider = provider_value.strip()
+        if isinstance(model_value, str):
+            observed_model = model_value.strip()
+    if not observed_provider or not observed_model:
+        observation = "unverified"
+        evidence_class = "absent"
+    elif observed_provider != requested_provider or observed_model != requested_model:
+        observation = "mismatched"
+        evidence_class = "router_selection"
+    else:
+        observation = "verified"
+        evidence_class = "router_selection"
+    return {
+        "requested_provider_name": requested_provider,
+        "requested_model_name": requested_model,
+        "observed_provider_name": observed_provider,
+        "observed_model_name": observed_model,
+        "route_observation": observation,
+        "route_evidence_class": evidence_class,
+        "live_canary": False,
+        "provider_reported_model": "",
+    }
+
+
+def provider_reported_model_from_usage(payload: Any) -> str:
+    """Read a single model id from ``end.modelUsage`` keys. Ignore values."""
+
+    usage = payload
+    if isinstance(payload, Mapping):
+        end = payload.get("end")
+        if isinstance(end, Mapping) and "modelUsage" in end:
+            usage = end.get("modelUsage")
+        elif "modelUsage" in payload:
+            usage = payload.get("modelUsage")
+    if not isinstance(usage, Mapping) or len(usage) != 1:
+        return ""
+    model_name = str(next(iter(usage.keys()))).strip()
+    if not model_name or len(model_name) > 128 or any(char.isspace() for char in model_name):
+        return ""
+    return model_name
+
+
+def interpret_canary_dispatch(result: Any) -> dict[str, Any]:
+    """Separate a synthetic live dispatch from cache hits and injected text.
+
+    A string, a router trace, or a response-cache hit is never a live canary.
+    ``provider_reported_model`` is set only for an explicit live dispatch.
+    """
+
+    cache_hit = False
+    dispatch = ""
+    if isinstance(result, Mapping):
+        cache_hit = bool(result.get("response_cache_hit") or result.get("cache_hit"))
+        dispatch = str(result.get("dispatch") or "").strip().lower()
+    reported = "" if cache_hit else provider_reported_model_from_usage(result)
+    live = dispatch == "live" and not cache_hit and bool(reported)
+    return {
+        "live_canary": live,
+        "provider_reported_model": reported if live else "",
+        "response_cache_hit": cache_hit,
+        "canary_dispatch": dispatch if dispatch in {"live", "injected", "cache"} else "",
+    }
+
+
 def router_symbol_status(loader_name: str) -> dict[str, Any]:
     """Return availability for one accelerate router without raising."""
 
@@ -129,6 +288,18 @@ __all__ = [
     "load_llm_symbols",
     "load_multimodal_generate",
     "load_multimodal_symbols",
+    "INFERENCE_OWNER",
+    "PINNED_GROK_CANARY_MAX_TOKENS",
+    "PINNED_GROK_CANARY_PROMPT",
+    "PINNED_GROK_MODEL",
+    "PINNED_GROK_PROVIDER",
+    "UNPINNED_GROK_PROVIDER_ALIASES",
+    "interpret_canary_dispatch",
     "normalize_accelerate_provider",
+    "pinned_grok47_canary_kwargs",
+    "pinned_grok47_dispatch_kwargs",
+    "provider_reported_model_from_usage",
     "router_symbol_status",
+    "unpinned_grok_route_reason",
+    "vetted_route_observation",
 ]
