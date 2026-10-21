@@ -724,3 +724,55 @@ def test_consumed_scheduler_recomputes_advisory_after_real_dependency_revision(t
     assert advisory["tasks"][first["id"]]["reason"] in {"stale_source_hash", "legal_data_version_changed"}
     assert advisory["native_scheduling_enforced"] is False and advisory["completion_authority"] is False
     assert json.loads((state / "evidence/readiness.json").read_text()) == advisory
+
+
+def test_real_sealed_pytest_bootstrap_survives_declared_pythonpath_export(tmp_path):
+    import hashlib
+    import os
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native_source
+    from ipfs_accelerate_py.agent_supervisor.validation.validation_runtime import validation_environment_for_runner
+    from integrations.ipfs_accelerate.improvement_runner import measure_behavioral_command
+
+    _write_output(tmp_path, "CIMP-OPS-04")
+    _, executor, env = _gate(tmp_path, _task(), _observation(tmp_path), _return_measurement=True)
+    # Real phase-plugin source, copied intact into the synthetic checkout. This
+    # matches native validation's current worktree package, not a plugin fake.
+    package = tmp_path / "integrations/ipfs_accelerate"
+    package.mkdir(parents=True)
+    (package.parent / "__init__.py").write_text("")
+    (package / "__init__.py").write_text("")
+    phase_source = Path(__file__).resolve().parents[1] / "integrations/ipfs_accelerate/improvement_plan.py"
+    phase = package / "improvement_plan.py"
+    phase.write_bytes(phase_source.read_bytes())
+    declared = tmp_path / "external/ipfs_datasets_py"
+    decoy = declared / "ipfs_accelerate_py"
+    decoy.mkdir(parents=True)
+    (decoy / "__init__.py").write_text("raise RuntimeError('untrusted_native_bootstrap')\n")
+    native_root = Path(native_source.__file__).resolve().parents[3]
+    seal = native_root / "ipfs_accelerate_py/testing/pytest_ast_seal.py"
+    test = tmp_path / "tests/test_improvement_evidence_gate.py"
+    test.write_text("from pathlib import Path\n"
+        "import integrations.ipfs_accelerate.improvement_plan as phase\n"
+        "import ipfs_accelerate_py.testing.pytest_ast_seal as seal\n"
+        "def test_actual_plugin_origins():\n"
+        f" assert Path(phase.__file__).resolve() == Path({str(phase)!r})\n"
+        f" assert Path(seal.__file__).resolve() == Path({str(seal)!r})\n")
+    # Reproduce the actual native scheduler's approved package-only environment
+    # and the normalized task command's overwriting relative export.
+    env["PYTHONPATH"] = str(Path(pytest.__file__).resolve().parents[1])
+    env = validation_environment_for_runner(env, executor)
+    command = "export PYTHONPATH=external/ipfs_datasets_py && " + COMMAND
+    observed = measure_behavioral_command(tmp_path, tmp_path / "bootstrap-runs", _task(), command,
+        runner=executor, environment=env, timeout_seconds=45, declared_command=COMMAND,
+        context={"require_child_guard": True, "pytest_guard_plugin": "complaint_fixture_guard"})
+    measured = observed["host_measurement"]
+    assert measured["reason"] == ""
+    assert measured["required_nodeids"] == ["tests/test_improvement_evidence_gate.py::test_actual_plugin_origins"]
+    assert measured["cases"] == [{"nodeid": measured["required_nodeids"][0], "outcome": "passed"}]
+    assert measured["source_unchanged"] is True
+    assert all(result["validation_python_launcher"]["sealed"] is True for result in measured["results"])
+    assert measured["imported_sources"][str(seal)] == hashlib.sha256(seal.read_bytes()).hexdigest()
+    assert measured["imported_sources"][str(phase)] == hashlib.sha256(phase_source.read_bytes()).hexdigest()
+    assert all(result["original_command"] == command for result in measured["results"])
+    assert all("-p complaint_fixture_guard" in result["executed_command"] for result in measured["results"])
+    assert observed["completion_authority"] is False if "completion_authority" in observed else measured["completion_authority"] is False
