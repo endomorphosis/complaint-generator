@@ -7903,16 +7903,115 @@ class Mediator:
 		# Canonical alias so callers can reference timeline issues under the stable key `timeline_issues`
 		intake_case_file['timeline_issues'] = temporal_issue_registry
 
+	def _sync_factual_activity_to_case_file(self, intake_case_file: Dict[str, Any], knowledge_graph) -> Dict[str, Any]:
+		"""Drop superseded and retracted facts from the effective case view and stale support."""
+		if not isinstance(intake_case_file, dict) or knowledge_graph is None:
+			return intake_case_file
+		ledger = knowledge_graph.factual_ledger() if hasattr(knowledge_graph, "factual_ledger") else {}
+		states = ledger.get("assertion_states") if isinstance(ledger, dict) else {}
+		revisions = ledger.get("revisions") if isinstance(ledger, dict) else None
+		if not states and not revisions:
+			return intake_case_file
+		inactive_ids = set()
+		conflict_ids = set()
+		if isinstance(states, dict):
+			for state in states.values():
+				if not isinstance(state, dict):
+					continue
+				entity_id = str(state.get("entity_id") or "")
+				status = str(state.get("status") or "")
+				if not entity_id:
+					continue
+				if status in {"superseded", "retracted"}:
+					inactive_ids.add(entity_id)
+				elif status == "conflict":
+					conflict_ids.add(entity_id)
+		historical = [
+			dict(item) for item in (intake_case_file.get("historical_canonical_facts") or [])
+			if isinstance(item, dict)
+		]
+		seen_historical = {str(item.get("fact_id") or "") for item in historical}
+		effective_facts = []
+		for fact in intake_case_file.get("canonical_facts") or []:
+			if not isinstance(fact, dict):
+				continue
+			fact_id = str(fact.get("fact_id") or "")
+			if fact_id in inactive_ids:
+				archived = dict(fact)
+				archived["activity_status"] = "superseded" if fact_id not in {
+					str(state.get("entity_id") or "")
+					for state in (states.values() if isinstance(states, dict) else [])
+					if isinstance(state, dict) and str(state.get("status") or "") == "retracted"
+				} else "retracted"
+				if any(
+					isinstance(state, dict)
+					and str(state.get("entity_id") or "") == fact_id
+					and str(state.get("status") or "") == "retracted"
+					for state in (states.values() if isinstance(states, dict) else [])
+				):
+					archived["activity_status"] = "retracted"
+				else:
+					archived["activity_status"] = "superseded"
+				archived["effective"] = False
+				if fact_id not in seen_historical:
+					historical.append(archived)
+					seen_historical.add(fact_id)
+				continue
+			current = dict(fact)
+			if fact_id in conflict_ids:
+				current["activity_status"] = "conflict"
+				current["effective_support"] = False
+			effective_facts.append(current)
+		intake_case_file["canonical_facts"] = effective_facts
+		intake_case_file["historical_canonical_facts"] = historical
+		support_links = []
+		relationships = getattr(knowledge_graph, "relationships", {}) or {}
+		for relationship in relationships.values():
+			source_id = str(getattr(relationship, "source_id", "") or "")
+			target_id = str(getattr(relationship, "target_id", "") or "")
+			attributes = getattr(relationship, "attributes", {}) or {}
+			invalidated = (
+				attributes.get("activity_status") == "invalidated"
+				or source_id in inactive_ids
+				or target_id in inactive_ids
+				or source_id in conflict_ids
+				or target_id in conflict_ids
+			)
+			support_links.append({
+				"relationship_id": getattr(relationship, "id", ""),
+				"source_id": source_id,
+				"target_id": target_id,
+				"relation_type": getattr(relationship, "relation_type", ""),
+				"activity_status": "invalidated" if invalidated else "active",
+				"effective": not invalidated,
+			})
+		intake_case_file["support_links"] = support_links
+		for collection_name in ("candidate_claims", "canonical_facts"):
+			for record in intake_case_file.get(collection_name) or []:
+				if not isinstance(record, dict):
+					continue
+				for key in ("satisfied_requirements", "satisfied_fact_bundle", "resolved_gaps"):
+					values = record.get(key)
+					if isinstance(values, list):
+						record[key] = [item for item in values if str(item) not in inactive_ids]
+		intake_case_file["reopened_questions"] = list(ledger.get("reopened_questions") or []) if isinstance(ledger, dict) else []
+		return intake_case_file
+
 	def _apply_intake_answer_to_case_file(
 		self,
 		question: Dict[str, Any],
 		answer: str,
 		intake_case_file: Dict[str, Any],
 		knowledge_graph,
+		*,
+		factual_action: Optional[str] = None,
 	) -> Dict[str, Any]:
 		"""Update the structured intake case file from a denoising answer."""
 		if not isinstance(intake_case_file, dict):
 			intake_case_file = {}
+		if factual_action:
+			refreshed = refresh_intake_case_file(intake_case_file, knowledge_graph, append_snapshot=True)
+			return self._sync_factual_activity_to_case_file(refreshed, knowledge_graph)
 		normalized_answer = self._normalize_intake_text(answer)
 		if not normalized_answer:
 			return intake_case_file
@@ -8185,9 +8284,22 @@ class Mediator:
 
 		self._apply_claim_ambiguity_flags(intake_case_file)
 
-		return refresh_intake_case_file(intake_case_file, knowledge_graph, append_snapshot=True)
+		return self._sync_factual_activity_to_case_file(
+			refresh_intake_case_file(intake_case_file, knowledge_graph, append_snapshot=True),
+			knowledge_graph,
+		)
 	
-	def process_denoising_answer(self, question: Dict[str, Any], answer: str) -> Dict[str, Any]:
+	def process_denoising_answer(
+		self,
+		question: Dict[str, Any],
+		answer: str,
+		answer_event_id: Optional[str] = None,
+		source_context: Optional[Dict[str, Any]] = None,
+		factual_action: Optional[str] = None,
+		supersedes_stable_id: Optional[str] = None,
+		retracts_stable_id: Optional[str] = None,
+		contradicts_stable_id: Optional[str] = None,
+	) -> Dict[str, Any]:
 		"""
 		Process an answer to a denoising question in Phase 1.
 		
@@ -8200,12 +8312,43 @@ class Mediator:
 		"""
 		kg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph')
 		dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
+		from complaint_phases.knowledge_graph import answer_event_payload
+		event_payload = answer_event_payload(
+			question=question,
+			answer=answer,
+			source_context=source_context,
+			factual_action=factual_action,
+			supersedes_stable_id=supersedes_stable_id,
+			retracts_stable_id=retracts_stable_id,
+			contradicts_stable_id=contradicts_stable_id,
+		)
+		if answer_event_id and kg is not None and hasattr(kg, "begin_answer_event"):
+			prior = kg.begin_answer_event(answer_event_id, event_payload)
+			if prior is not None and prior.get("mediator_result") is not None:
+				return prior["mediator_result"]
 		
 		# Process the answer
-		updates = self.denoiser.process_answer(question, answer, kg, dg)
+		updates = self.denoiser.process_answer(
+			question,
+			answer,
+			kg,
+			dg,
+			answer_event_id=answer_event_id,
+			source_context=source_context,
+			factual_action=factual_action,
+			supersedes_stable_id=supersedes_stable_id,
+			retracts_stable_id=retracts_stable_id,
+			contradicts_stable_id=contradicts_stable_id,
+		)
 		self._update_intake_contradiction_state(dg)
 		intake_case_file = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intake_case_file') or {}
-		intake_case_file = self._apply_intake_answer_to_case_file(question, answer, intake_case_file, kg)
+		intake_case_file = self._apply_intake_answer_to_case_file(
+			question,
+			answer,
+			intake_case_file,
+			kg,
+			factual_action=factual_action,
+		)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', intake_case_file)
 		dg = self.dg_builder.sync_intake_timeline_to_graph(dg, intake_case_file)
 		
@@ -8242,6 +8385,13 @@ class Mediator:
 			max_questions=max_questions,
 			intake_case_file=intake_case_file,
 		)
+		if kg is not None and hasattr(kg, "factual_ledger"):
+			reopened = list(kg.factual_ledger().get("reopened_questions") or [])
+			if reopened:
+				questions = reopened + [
+					question_item for question_item in questions
+					if question_item not in reopened
+				]
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'question_candidates', question_candidates)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'current_questions', questions)
 		
@@ -8297,7 +8447,13 @@ class Mediator:
 		if self.phase_manager.is_phase_complete(ComplaintPhase.INTAKE):
 			result['ready_for_evidence_phase'] = True
 			result['message'] = 'Initial intake complete. Ready to gather evidence.'
-		
+		if answer_event_id and kg is not None and hasattr(kg, "finish_answer_event"):
+			kg.finish_answer_event(
+				answer_event_id,
+				event_payload,
+				denoiser_updates=dict(updates) if isinstance(updates, dict) else updates,
+				mediator_result=result,
+			)
 		return result
 
 	def _collect_intake_contradictions(self, dependency_graph) -> Dict[str, Any]:
@@ -13086,7 +13242,9 @@ class Mediator:
 	def _generate_factual_allegations(self, kg):
 		"""Generate factual allegations from knowledge graph."""
 		allegations = []
-		for i, entity in enumerate(kg.entities.values(), 1):
+		facts = (kg.effective_fact_entities() if hasattr(kg, 'effective_fact_entities')
+			else [entity for entity in kg.entities.values() if entity.type == 'fact'])
+		for i, entity in enumerate(facts, 1):
 			if entity.type == 'fact':
 				allegations.append(f"{i}. {entity.name}")
 		return allegations if allegations else ["Facts to be provided."]
