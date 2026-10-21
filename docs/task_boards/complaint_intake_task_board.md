@@ -789,7 +789,7 @@ Implementation instructions:
 
 ## CIMP-PRIV-004 Implement explicit user key ownership, unlock and recovery options
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.privacy
