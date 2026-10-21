@@ -885,21 +885,152 @@ def _read_native_state(repo_root: Path, state_path: Path, *, timeout_seconds: fl
             child.join(timeout=1)
 
 
-def _provider_event_evidence(path: Path, *, task_id: str, started_at: float) -> dict[str, Any] | None:
-    for line in reversed(_tail(path, lines=40, maximum=64_000)):
+_PROVIDER_START_TYPES = {"implementation_provider_started", "provider_runner_started", "provider_runner_birth"}
+_VALIDATION_EVENT_TYPES = {"validation_started", "validation_command_started", "validation_activity"}
+_INTERVIEW_PHASES = {"waiting_for_user", "waiting_user", "awaiting_user", "manual_hold", "paused", "cancelled", "canceled"}
+_COOLDOWN_NAME = "recovery_cooldown.json"
+
+
+def _event_timestamp(event: Mapping[str, Any]) -> float | None:
+    try:
+        timestamp = datetime.fromisoformat(str(event.get("timestamp", "")).replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        return timestamp.timestamp()
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _attempt_binding(native_state: Mapping[str, Any]) -> dict[str, Any]:
+    attempt = native_state.get("active_attempt")
+    if attempt in (None, "", 0, "0"):
+        attempt = None
+    elif isinstance(attempt, bool) or not isinstance(attempt, int):
+        try:
+            attempt = int(attempt)
+        except (TypeError, ValueError):
+            attempt = None
+    log_path = native_state.get("active_log_path")
+    return {
+        "task_id": str(native_state.get("active_task_id") or native_state.get("last_implementation_task_id") or ""),
+        "task_cid": str(native_state.get("active_task_cid") or native_state.get("last_implementation_task_cid") or ""),
+        "attempt": attempt,
+        "worktree": str(native_state.get("active_worktree_path") or native_state.get("last_implementation_worktree_path") or ""),
+        "log_prefix": str(log_path) if isinstance(log_path, str) else "",
+        "attempt_started_at": native_state.get("active_task_started_at") or native_state.get("last_implementation_started_at"),
+    }
+
+
+def _event_matches_attempt(event: Mapping[str, Any], binding: Mapping[str, Any], *, started_at: float,
+                           require_log: bool) -> bool:
+    """Bind one frame to this attempt. Task id alone never qualifies."""
+    observed = _event_timestamp(event)
+    if observed is None or observed < started_at:
+        return False
+    if binding.get("attempt_started_at"):
+        started = _event_timestamp({"timestamp": binding.get("attempt_started_at")})
+        if started is None or observed + 1.0 < started:
+            return False
+    task_id = binding.get("task_id") or ""
+    if not task_id or event.get("task_id") != task_id:
+        return False
+    event_cid = event.get("canonical_task_cid") or event.get("task_cid")
+    claim_cid = binding.get("task_cid") or ""
+    if claim_cid:
+        if event_cid != claim_cid:
+            return False
+    elif event_cid:
+        return False
+    event_attempt = event.get("attempt")
+    claim_attempt = binding.get("attempt")
+    if claim_attempt:
+        if event_attempt != claim_attempt:
+            return False
+    elif event_attempt not in (None, ""):
+        return False
+    event_worktree = event.get("worktree_path") or event.get("worktree")
+    claim_worktree = binding.get("worktree") or ""
+    if claim_worktree:
+        if event_worktree != claim_worktree:
+            return False
+    elif event_worktree:
+        return False
+    event_log = event.get("log_path") or event.get("log_prefix")
+    claim_log = binding.get("log_prefix") or ""
+    if claim_log and require_log:
+        if not isinstance(event_log, str) or not (event_log == claim_log or event_log.startswith(claim_log)):
+            return False
+    elif event_log and claim_log and not (isinstance(event_log, str) and (event_log == claim_log or event_log.startswith(claim_log))):
+        return False
+    elif event_log and not claim_log:
+        return False
+    invocation = event.get("invocation_started_at") or event.get("owned_invocation_started_at")
+    if invocation is not None:
+        invoked = _event_timestamp({"timestamp": invocation})
+        if invoked is None or invoked < started_at:
+            return False
+    return True
+
+
+def _grok_frame(event: Mapping[str, Any]) -> bool:
+    model = str(event.get("model") or event.get("provider_model") or "")
+    provider = str(event.get("provider") or "")
+    if "grok" not in model.lower() and provider not in {"grok", "grok_cli"}:
+        return False
+    if event.get("type") in {"grok_usage", "grok_tool_call", "grok_tool_frame", "provider_usage", "provider_tool_frame"}:
+        return True
+    return any(event.get(key) for key in ("usage", "tool_calls", "tool_frames", "tool_frame"))
+
+
+def _matching_event(path: Path, binding: Mapping[str, Any], *, started_at: float, kind: str) -> dict[str, Any] | None:
+    for line in reversed(_tail(path, lines=80, maximum=256_000)):
         try:
             event = json.loads(line)
-            timestamp = datetime.fromisoformat(str(event.get("timestamp", "")).replace("Z", "+00:00"))
-            if timestamp.tzinfo is None:
-                timestamp = timestamp.replace(tzinfo=timezone.utc)
-            if timestamp.timestamp() < started_at or event.get("task_id") != task_id:
-                continue
-            if event.get("type") in {"implementation_provider_started", "provider_runner_started", "provider_runner_birth"}:
-                return {"type": event["type"], "timestamp": event["timestamp"], "task_id": task_id,
-                        "source": "native_daemon_events", "completion_authority": False}
-        except (ValueError, TypeError, AttributeError):
+        except (ValueError, TypeError):
             continue
+        if not isinstance(event, dict):
+            continue
+        provider_start = event.get("type") in _PROVIDER_START_TYPES
+        validation = event.get("type") in _VALIDATION_EVENT_TYPES
+        grok = _grok_frame(event)
+        if kind == "provider" and not (provider_start or grok):
+            continue
+        if kind == "validation" and not validation:
+            continue
+        if not _event_matches_attempt(event, binding, started_at=started_at, require_log=provider_start or validation):
+            continue
+        evidence_kind = "grok_frame" if grok and not provider_start else str(event.get("type"))
+        return {"type": evidence_kind, "timestamp": event.get("timestamp"), "task_id": binding.get("task_id"),
+                "task_cid": binding.get("task_cid") or None, "attempt": binding.get("attempt"),
+                "source": "native_daemon_events", "completion_authority": False}
     return None
+
+
+def _provider_event_evidence(path: Path, *, task_id: str, started_at: float,
+                             binding: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    resolved = dict(binding or {})
+    resolved.setdefault("task_id", task_id)
+    return _matching_event(path, resolved, started_at=started_at, kind="provider")
+
+
+def _validation_event_evidence(path: Path, binding: Mapping[str, Any], *, started_at: float) -> dict[str, Any] | None:
+    return _matching_event(path, binding, started_at=started_at, kind="validation")
+
+
+def _owner_liveness(birth: Any) -> str:
+    if not isinstance(birth, dict) or not birth.get("pid"):
+        return "missing"
+    try:
+        current = process_identity(int(birth["pid"]))
+    except (OSError, ValueError, TypeError):
+        return "unknown"
+    if not isinstance(current, dict):
+        return "dead"
+    if current.get("unknown") or current.get("start_ticks") is None or current.get("boot_id") is None:
+        return "unknown"
+    if any(current.get(key) != birth.get(key) for key in ("start_ticks", "boot_id")):
+        return "pid_reuse"
+    return "alive"
 
 
 def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
@@ -928,9 +1059,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         since_start = max(0.0, now - float(record.get("started_at", now)))
     except (TypeError, ValueError):
         since_start = 0.0
-    intentional_wait = str(native_state.get("active_phase", "")).lower() in {
-        "waiting_for_user", "waiting_user", "awaiting_user", "manual_hold", "paused",
-    }
+    phase = str(native_state.get("active_phase", "")).lower()
+    intentional_wait = phase in _INTERVIEW_PHASES or bool(native_state.get("manual_hold") or native_state.get("manual_cancellation"))
     if state_source["source"] == "native_control_plane":
         row_ages = [age for key in ("heartbeat_at", "last_progress_at")
                     if (age := _timestamp_age(native_state.get(key), now)) is not None]
@@ -975,8 +1105,15 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     last_started_age = _timestamp_age(native_state.get("last_implementation_started_at"), now)
     claim_verified = owned and current_state and bool(native_state.get("active_task_id") or
         (last_started_age is not None and last_started_age <= since_start))
-    provider_evidence = _provider_event_evidence(events_path, task_id=str(native_state.get("active_task_id") or native_state.get("last_implementation_task_id") or ""),
-                                               started_at=now - since_start) if claim_verified else None
+    binding = _attempt_binding(native_state)
+    invocation_start = now - since_start
+    provider_evidence = _provider_event_evidence(
+        events_path, task_id=binding["task_id"], started_at=invocation_start, binding=binding,
+    ) if claim_verified else None
+    validation_evidence = _validation_event_evidence(events_path, binding, started_at=invocation_start) if claim_verified else None
+    worker_liveness = _owner_liveness(native_state.get("owner_process_birth"))
+    if worker_liveness == "missing":
+        worker_liveness = "alive" if daemon_alive else ("absent" if not owned else "unknown")
     shutdown = _read_json(state_dir / "container_shutdown.json")
     full_launch = record.get("schema_version") == "complaint-improvement-launcher@1"
     try:
@@ -1026,7 +1163,12 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "stalled"
     elif active:
         hard_expired = attempt_age is not None and attempt_age > TIMEOUT_SECONDS
-        health = "stalled" if hard_expired or (active_age is not None and active_age > STALL_SECONDS) else "active"
+        log_stale = active_age is not None and active_age > STALL_SECONDS
+        silent_window = attempt_age is not None and attempt_age > STALL_SECONDS
+        in_validation = phase.startswith("valid")
+        # Fresh generic log lines and a live PID are not provider or validation progress.
+        silent = silent_window and (validation_evidence is None if in_validation else provider_evidence is None)
+        health = "stalled" if hard_expired or log_stale or silent else "active"
     elif selected:
         health = "no_progress" if (attempt_age if attempt_age is not None else since_start) > STALL_SECONDS else "selected"
     elif not current_state and since_start > STARTUP_SECONDS:
@@ -1044,10 +1186,32 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "running"
     if worktree_error is not None:
         health = "identity_mismatch" if owned else "stop_incomplete"
-    keys = ("heartbeat_at", "last_progress_at", "active_task_id", "active_task_started_at", "active_phase", "active_phase_detail",
-            "implementation_in_progress", "active_attempt", "last_implementation_returncode",
-            "recommended_task_id", "ready_task_ids", "selectable_ready_task_ids", "blocked_task_ids", "selection_idle_reason")
-    return {"status": health, "owned_process_alive": owned,
+    keys = ("heartbeat_at", "last_progress_at", "active_task_id", "active_task_cid", "active_task_started_at", "active_phase", "active_phase_detail",
+            "implementation_in_progress", "active_attempt", "active_worktree_path", "active_log_path", "owner_process_birth",
+            "last_implementation_returncode", "implementation_attempts", "implementation_attempts_by_cid",
+            "recommended_task_id", "ready_task_ids", "selectable_ready_task_ids", "blocked_task_ids", "selection_idle_reason",
+            "manual_hold", "manual_cancellation", "capacity_quarantine", "protected_incident", "dependency_status",
+            "claim_task_cid", "claim_attempt", "proof_task_cid", "proof_stale", "stale_proof")
+    interview_state = None
+    if phase in {"waiting_for_user", "waiting_user", "awaiting_user"}:
+        interview_state = "awaiting_user"
+    elif phase == "manual_hold" or native_state.get("manual_hold") or (not active and board.get("manual_hold_task_ids")):
+        interview_state = "manual_hold"
+    elif phase == "paused":
+        interview_state = "paused"
+    elif phase in {"cancelled", "canceled"} or native_state.get("manual_cancellation"):
+        interview_state = "cancelled"
+    heartbeat_fresh = heartbeat_age is not None and heartbeat_age <= 120
+    identity_ok = worker_liveness == "alive" and health not in {"identity_mismatch", "heartbeat_identity_mismatch", "state_error"}
+    activity_ok = (not active) or bool(provider_evidence or validation_evidence) or not (
+        attempt_age is not None and attempt_age > STALL_SECONDS
+    )
+    healthy = bool(identity_ok and heartbeat_fresh and activity_ok and health in {
+        "active", "running", "maintenance", "waiting_for_user", "selected", "complete",
+    })
+    return {"status": health, "healthy": healthy, "owned_process_alive": owned,
+            "worker_liveness": worker_liveness,
+            "application_interview_state": interview_state,
             "pid": identity.get("pid"), "state_dir": str(state_dir),
             "worktree_root": str(selected_root) if selected_root is not None else None,
             "worktree_root_binding": root_binding, "worktree_root_error": worktree_error,
@@ -1065,10 +1229,218 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
             "board": board, "events_tail": _tail(events_path), "supervisor_events_tail": _tail(supervisor_events),
             "launcher_log_tail": _tail(state_dir / "launcher.log"),
             "claim_progress_verified": claim_verified,
+            "runner_progress_verified": bool(claim_verified and heartbeat_fresh and worker_liveness == "alive"),
             "provider_execution_verified": bool(owned and provider_evidence),
+            "provider_progress_verified": bool(owned and provider_evidence),
             "provider_execution_evidence": provider_evidence,
+            "validation_activity_verified": bool(owned and validation_evidence),
+            "validation_activity_evidence": validation_evidence,
             "progress_verified": bool(owned and provider_evidence),
             "completion_authority": False}
+
+
+def _refusal(reason: str, observed: Mapping[str, Any], **extra: Any) -> dict[str, Any]:
+    """Recovery refusal keeps counters, evidence and holds exactly as observed."""
+    return {"recovery": "blocked", "eligible": False, "reconciled": False, "reason": reason,
+            "status": observed.get("status"), "healthy": observed.get("healthy"),
+            "worker_liveness": observed.get("worker_liveness"),
+            "application_interview_state": observed.get("application_interview_state"),
+            "diagnostics": extra.get("diagnostics") or [reason],
+            "observed_attempts": (observed.get("native_state") or {}).get("implementation_attempts"),
+            "observed_attempts_by_cid": (observed.get("native_state") or {}).get("implementation_attempts_by_cid"),
+            "selection_performed": False, "paid_dispatch": False, "attempt_refunded": False,
+            "completion_authority": False, "counters_preserved": True, "progress_preserved": True,
+            "manual_holds_preserved": True, "provider_execution_evidence": observed.get("provider_execution_evidence"),
+            "validation_activity_evidence": observed.get("validation_activity_evidence"),
+            **{key: value for key, value in extra.items() if key != "diagnostics"}}
+
+
+def _arm_cooldown(state_dir: Path, reason: str, observed: Mapping[str, Any], *, now: float, scope: str,
+                  diagnostics: list[Any] | None = None) -> dict[str, Any]:
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.supervisor_runtime import RestartPolicy
+    path = state_dir / _COOLDOWN_NAME
+    previous = _read_json(path)
+    if previous.get("until") and float(previous.get("until") or 0) > now and previous.get("reason") == reason:
+        return _refusal(reason, observed, recovery="cooldown", cooldown_until=previous["until"],
+                        cooldown_seconds=previous.get("cooldown_seconds"), cooldown_scope=scope,
+                        diagnostics=list(previous.get("diagnostics") or [reason]),
+                        spinning_prevented=True)
+    policy = RestartPolicy()
+    try:
+        object.__setattr__(policy, "_consecutive_failures", int(previous.get("attempts") or 0))
+    except (TypeError, ValueError):
+        object.__setattr__(policy, "_consecutive_failures", 0)
+    delay = min(policy.delay_for_status("blocked"), policy.max_backoff_seconds)
+    diagnostics = [reason, f"cooldown_seconds={delay}", f"scope={scope}",
+                   "progress_and_attempt_counters_retained", *(diagnostics or [])]
+    payload = {"reason": reason, "scope": scope, "attempts": int(policy._consecutive_failures),
+               "cooldown_seconds": delay, "until": now + delay, "diagnostics": diagnostics,
+               "progress_preserved": True, "attempt_refunded": False, "completion_authority": False}
+    _atomic_json(path, payload)
+    return _refusal(reason, observed, recovery="cooldown", cooldown_until=payload["until"],
+                    cooldown_seconds=delay, cooldown_scope=scope, diagnostics=diagnostics,
+                    spinning_prevented=True)
+
+
+def _fence_owned_tree(record: Mapping[str, Any]) -> dict[str, Any]:
+    identity = record.get("identity") if isinstance(record.get("identity"), dict) else None
+    if not identity:
+        return {"fenced": False, "remaining_pids": [], "reason": "no_launcher_identity"}
+    children = _descendants(identity)
+    if owns_process(record):
+        _signal_birth(identity, signal.SIGTERM)
+    for child in reversed(children):
+        _signal_birth(child, signal.SIGTERM)
+    if owns_process(record):
+        _signal_birth(identity, signal.SIGKILL)
+    for child in reversed(children):
+        _signal_birth(child, signal.SIGKILL)
+    remaining = []
+    for item in [identity, *children]:
+        current = process_identity(item.get("pid"))
+        if current and current.get("start_ticks") == item.get("start_ticks") and current.get("boot_id") == item.get("boot_id"):
+            remaining.append(item.get("pid"))
+    return {"fenced": not remaining, "remaining_pids": remaining, "signalled": bool(children) or owns_process(record)}
+
+
+def _open_recovery_daemon(repo_root: Path, state_dir: Path, record: Mapping[str, Any]):
+    """Open the campaign's native daemon for quiesced reconciliation only."""
+    _, native = _native_modules(repo_root)
+    configured = record.get("native_daemon") if isinstance(record.get("native_daemon"), dict) else {}
+    todo = Path(str(configured.get("todo_path") or record.get("board_path") or ""))
+    if not todo.is_file():
+        raise ValueError("recovery daemon requires the recorded task board")
+    state_path = Path(str(configured.get("state_path") or state_dir / f"{STATE_PREFIX}_task_state.json"))
+    strategy_path = Path(str(configured.get("strategy_path") or state_dir / f"{STATE_PREFIX}_strategy.json"))
+    events_path = Path(str(configured.get("events_path") or state_dir / f"{STATE_PREFIX}_events.jsonl"))
+    worktree = configured.get("worktree_root") or record.get("worktree_root")
+    protected = configured.get("implementation_protected_paths") or ()
+    return native.PortalImplementationDaemon(
+        todo_path=todo, state_path=state_path, strategy_path=strategy_path, events_path=events_path,
+        repo_root=repo_root, implement=True, task_header_prefix=TASK_PREFIX,
+        implementation_command=str(configured.get("implementation_command") or "false"),
+        use_ephemeral_worktree=True,
+        worktree_root=Path(str(worktree)) if worktree else state_dir / "worktrees",
+        implementation_protected_paths=tuple(protected) if isinstance(protected, (list, tuple)) else (),
+        max_task_attempts=3, merge_queue_dir=state_dir / "merge-queue",
+    )
+
+
+def _claim_proof_conflict(native_state: Mapping[str, Any]) -> str | None:
+    claim_cid = native_state.get("claim_task_cid") or native_state.get("proof_task_cid")
+    active_cid = native_state.get("active_task_cid")
+    if claim_cid and active_cid and claim_cid != active_cid:
+        return "stale_cid"
+    claim_attempt = native_state.get("claim_attempt")
+    active_attempt = native_state.get("active_attempt")
+    if claim_attempt not in (None, "") and active_attempt not in (None, "", 0) and claim_attempt != active_attempt:
+        return "stale_attempt_proof"
+    if native_state.get("proof_stale") or native_state.get("stale_proof"):
+        return "stale_proof"
+    return None
+
+
+def recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None) -> dict[str, Any]:
+    """Fence a proven-dead ordinary attempt and reconcile it through native APIs.
+
+    A live PID, stale heartbeat, or missing birth is not permission to refund an
+    attempt, reset a cap, release quarantine, fabricate an interview answer, or
+    dispatch another paid provider call. Lock contention and a temporarily
+    unavailable dependency wait on a capped cooldown.
+    """
+    observed = status(repo_root, spec_path, state_dir)
+    moment = time.time() if now is None else now
+    native_state = observed.get("native_state") if isinstance(observed.get("native_state"), dict) else {}
+    errors = observed.get("native_read_errors") or {}
+    if errors:
+        if any(str(value) in {"native_state_read_timeout", "BlockingIOError", "TimeoutError"} for value in errors.values()):
+            return _arm_cooldown(state_dir, "lock_contention", observed, now=moment, scope="runner")
+        return _refusal("observation_error", observed, diagnostics=[f"{key}:{value}" for key, value in errors.items()])
+    interview = observed.get("application_interview_state")
+    if interview:
+        return _refusal(f"interview_or_manual_{interview}", observed)
+    if native_state.get("manual_hold") or native_state.get("manual_cancellation"):
+        return _refusal("manual_hold", observed)
+    if native_state.get("capacity_quarantine") or str(native_state.get("active_phase") or "").lower() == "capacity_quarantine":
+        return _refusal("capacity_quarantine", observed)
+    if native_state.get("protected_incident") or str(native_state.get("active_phase") or "").lower() == "protected_incident":
+        return _refusal("protected_incident", observed)
+    conflict = _claim_proof_conflict(native_state)
+    if conflict:
+        return _refusal(conflict, observed)
+    dependency = str(native_state.get("dependency_status") or "").lower()
+    if dependency in {"unavailable", "temporary_unavailable", "degraded"}:
+        return _arm_cooldown(state_dir, "dependency_unavailable", observed, now=moment, scope="runner")
+    liveness = _owner_liveness(native_state.get("owner_process_birth"))
+    if liveness == "missing":
+        liveness = observed.get("worker_liveness") or "missing"
+    phase = str(native_state.get("active_phase") or "").lower()
+    active = bool(native_state.get("implementation_in_progress"))
+    if liveness in {"alive", "pid_reuse", "unknown"}:
+        if liveness != "alive":
+            return _refusal(liveness, observed)
+        if observed.get("status") in {"stalled", "no_progress", "daemon_failed"}:
+            scope = "validation" if phase.startswith("valid") else "provider" if active else "runner"
+            if phase.startswith("complet"):
+                scope = "completion"
+            reason = "validation_stall" if scope == "validation" else "silent_provider" if scope == "provider" else "log_or_heartbeat_stall"
+            return _arm_cooldown(state_dir, reason, observed, now=moment, scope=scope)
+        return _refusal("worker_alive", observed)
+    record = _read_json(state_dir / "launcher.json")
+    idle = not active and not native_state.get("active_task_id") and not native_state.get("active_task_cid")
+    if liveness != "dead":
+        if not (liveness in {"absent", "missing"} and idle and not owns_process(record)
+                and isinstance(record.get("native_daemon"), dict)):
+            return _refusal("unknown_owner" if liveness != "dead" else "nothing_to_reconcile", observed,
+                            recovery="blocked" if liveness not in {"absent", "missing"} or not idle else "not_required")
+    elif idle and not isinstance(record.get("native_daemon"), dict):
+        return _refusal("nothing_to_reconcile", observed, recovery="not_required")
+    try:
+        with _lock(state_dir, "recovery.lock", blocking=False):
+            fence = _fence_owned_tree(record)
+            if not fence["fenced"]:
+                return _refusal("process_fence_incomplete", observed, diagnostics=fence["remaining_pids"], fence=fence)
+            from .improvement_shutdown import close_campaign_containers
+            containers = close_campaign_containers(state_dir, record, parent_quiesced=True)
+            if containers.get("applicable") and not containers.get("quiesced"):
+                return _arm_cooldown(state_dir, "container_fence_incomplete", observed, now=moment, scope="runner")
+            daemon = _open_recovery_daemon(repo_root, state_dir, record)
+            attempt_result = daemon.reconcile_quiesced_active_attempt()
+            claim_result = None
+            blocked = bool(attempt_result.get("blocked"))
+            reason = str(attempt_result.get("reason") or "")
+            terminal_claim_ok = (not blocked) or reason == "task_claim_reconciliation_blocked"
+            unsafe = reason in {
+                "implementation_worker_still_active", "implementation_lock_owner_still_active",
+                "protected_path_reconciliation_blocked", "worktree_lifecycle_reconciliation_blocked",
+                "implementation_lock_malformed",
+            }
+            if terminal_claim_ok and not unsafe:
+                claim_result = daemon.reconcile_quiesced_implementation_task_claim()
+            reconciled = bool(attempt_result.get("reconciled")) or (
+                isinstance(claim_result, dict) and bool(claim_result.get("reconciled")) and not claim_result.get("blocked")
+            )
+            if not reconciled:
+                return _refusal(reason or "native_reconciliation_blocked", observed,
+                                diagnostics=[reason or "native_reconciliation_blocked"],
+                                attempt_reconciliation=attempt_result, claim_reconciliation=claim_result,
+                                fence=fence, container_shutdown=containers)
+            return {"recovery": "reconciled", "eligible": True, "reconciled": True,
+                    "reason": reason or "quiesced_active_attempt_reconciled", "status": observed.get("status"),
+                    "healthy": False, "worker_liveness": "dead",
+                    "application_interview_state": None,
+                    "diagnostics": [reason or "quiesced_active_attempt_reconciled"],
+                    "attempt_reconciliation": attempt_result, "claim_reconciliation": claim_result,
+                    "fence": fence, "container_shutdown": containers,
+                    "selection_performed": False, "paid_dispatch": False, "attempt_refunded": False,
+                    "completion_authority": False, "counters_preserved": True, "progress_preserved": True,
+                    "manual_holds_preserved": True, "provider_execution_evidence": observed.get("provider_execution_evidence"),
+                    "validation_activity_evidence": observed.get("validation_activity_evidence")}
+    except BlockingIOError:
+        return _arm_cooldown(state_dir, "lock_contention", observed, now=moment, scope="runner")
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _arm_cooldown(state_dir, "dependency_unavailable", observed, now=moment, scope="runner",
+                             diagnostics=[type(exc).__name__, str(exc)[:500]])
 
 
 def _signal_birth(identity: Mapping[str, Any], signum: int) -> bool:
