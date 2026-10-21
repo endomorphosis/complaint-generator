@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import asdict, dataclass, field
+import json
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 
@@ -97,6 +98,12 @@ def source_byte_hash(source_text: str) -> str:
     return hashlib.sha256(source_text.encode("utf-8")).hexdigest()
 
 
+def _user_assertion_stable_id(**fields: Any) -> str:
+    """Bind complete source coordinates without delimiter or prefix collisions."""
+    encoded = json.dumps(fields, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    return "assertion:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 @dataclass(frozen=True)
 class SourceSpanLookup:
     """Result of an exact byte-span lookup. Ambiguous matches stay unresolved."""
@@ -169,6 +176,9 @@ class UserAssertionEnvelope:
     source_span_end: Optional[int] = None
     source_span_text: str = ""
     source_hash: str = ""
+    # Private original source permits independent hash/span checks on replay.
+    # Encryption and retention are handled by the private workspace store.
+    source_text: str = ""
     assertion_status: str = ""
     extractor_version: str = ""
     stable_id: str = ""
@@ -179,18 +189,43 @@ class UserAssertionEnvelope:
     confidence: Optional[float] = None
     legal_hit: bool = False
     role: str = ""
+    subject_key: str = ""
     deficiencies: Tuple[str, ...] = ()
 
     @property
     def source_identity(self) -> str:
+        kind = self.source_kind if self.source_kind in USER_SOURCE_KINDS else self.requested_source_kind
+        if kind == "user_uploaded_document":
+            return self.document_id or self.source_id
+        if kind == "user_statement":
+            return self.message_id or self.source_id
         return self.message_id or self.document_id or self.source_id
+
+    def computed_stable_id(self) -> str:
+        return _user_assertion_stable_id(
+            contract_version=self.contract_version, record_type=self.record_type, source_kind=self.source_kind,
+            requested_source_kind=self.requested_source_kind,
+            assertion_status=self.assertion_status, source_id=self.source_id, message_id=self.message_id,
+            document_id=self.document_id, start=self.source_span_start, end=self.source_span_end,
+            source_hash=self.source_hash, extractor_version=self.extractor_version,
+            role=self.role, subject_key=self.subject_key, jurisdiction=self.jurisdiction,
+            actor=self.actor, name=self.name, event_date=self.event_date,
+        )
 
     @property
     def is_asserted_user_fact(self) -> bool:
+        coordinates_valid = (
+            isinstance(self.source_text, str)
+            and self.source_text != ""
+            and self.source_hash == source_byte_hash(self.source_text)
+            and _slice_source_bytes(self.source_text, self.source_span_start, self.source_span_end)
+                == (self.source_span_text, "")
+        )
         return (
             self.contract_version == USER_ASSERTION_CONTRACT_VERSION
             and self.record_type == USER_ASSERTION_RECORD_TYPE
             and self.source_kind in USER_SOURCE_KINDS
+            and self.requested_source_kind == self.source_kind
             and self.assertion_status == ASSERTED_USER_STATUS
             and bool(self.source_identity)
             and isinstance(self.source_span_start, int)
@@ -203,6 +238,8 @@ class UserAssertionEnvelope:
             and bool(self.source_hash)
             and bool(self.extractor_version)
             and bool(self.stable_id)
+            and coordinates_valid
+            and self.stable_id == self.computed_stable_id()
             and not self.deficiencies
         )
 
@@ -240,8 +277,8 @@ def user_assertion_from_mapping(payload: Optional[Mapping[str, Any]]) -> UserAss
         parsed_confidence = None
     else:
         parsed_confidence = float(confidence)
-    return UserAssertionEnvelope(
-        contract_version=_clean_supplied_text(data.get("contract_version")) or USER_ASSERTION_CONTRACT_VERSION,
+    envelope = UserAssertionEnvelope(
+        contract_version=_clean_supplied_text(data.get("contract_version")),
         record_type=_clean_supplied_text(data.get("record_type")),
         source_kind=_clean_supplied_text(data.get("source_kind")),
         requested_source_kind=_clean_supplied_text(data.get("requested_source_kind")),
@@ -252,6 +289,7 @@ def user_assertion_from_mapping(payload: Optional[Mapping[str, Any]]) -> UserAss
         source_span_end=end if isinstance(end, int) and not isinstance(end, bool) else None,
         source_span_text="" if span_text is None else str(span_text),
         source_hash=_clean_supplied_text(data.get("source_hash")),
+        source_text=data.get("source_text") if isinstance(data.get("source_text"), str) else "",
         assertion_status=_clean_supplied_text(data.get("assertion_status")),
         extractor_version=_clean_supplied_text(data.get("extractor_version")),
         stable_id=_clean_supplied_text(data.get("stable_id")),
@@ -262,8 +300,14 @@ def user_assertion_from_mapping(payload: Optional[Mapping[str, Any]]) -> UserAss
         confidence=parsed_confidence,
         legal_hit=bool(data.get("legal_hit", False)),
         role=_clean_supplied_text(data.get("role")),
+        subject_key=_clean_supplied_text(data.get("subject_key")),
         deficiencies=tuple(str(item) for item in deficiency_values if str(item).strip()),
     )
+    if envelope.assertion_status == ASSERTED_USER_STATUS and not envelope.is_asserted_user_fact:
+        envelope = replace(envelope, record_type="unverified_candidate", source_kind="unverified",
+            assertion_status=UNVERIFIED_ASSERTION_STATUS,
+            deficiencies=tuple(sorted(set(envelope.deficiencies) | {"serialized_source_proof_invalid"})))
+    return envelope
 
 
 def build_user_assertion_envelope(
@@ -340,6 +384,11 @@ def build_user_assertion_envelope(
     identity_document_id = _clean_supplied_text(document_id)
     if not (identity_message_id or identity_document_id or identity_source_id):
         deficiencies.add("missing_source_identity")
+    primary_identity = identity_document_id if requested_kind == "user_uploaded_document" else identity_message_id
+    if requested_kind in USER_SOURCE_KINDS and not (primary_identity or identity_source_id):
+        deficiencies.add("missing_typed_source_identity")
+    if primary_identity and identity_source_id and primary_identity != identity_source_id:
+        deficiencies.add("conflicting_source_identity")
     if not requested_kind:
         deficiencies.add("missing_user_source_kind")
     elif requested_kind not in USER_SOURCE_KINDS:
@@ -397,21 +446,7 @@ def build_user_assertion_envelope(
             )
         final_deficiencies = tuple(sorted(deficiencies))
 
-    stable_identity = _stable_identifier(
-        "assertion",
-        USER_ASSERTION_CONTRACT_VERSION,
-        final_record_type,
-        final_kind,
-        final_status,
-        identity_message_id or identity_document_id or identity_source_id,
-        "" if not isinstance(span_start, int) else str(span_start),
-        "" if not isinstance(span_end, int) else str(span_end),
-        effective_hash,
-        effective_extractor,
-        _clean_supplied_text(role),
-        _clean_supplied_text(subject_key),
-    )
-    return UserAssertionEnvelope(
+    envelope = UserAssertionEnvelope(
         contract_version=USER_ASSERTION_CONTRACT_VERSION,
         record_type=final_record_type,
         source_kind=final_kind,
@@ -423,9 +458,9 @@ def build_user_assertion_envelope(
         source_span_end=span_end if isinstance(span_end, int) and not isinstance(span_end, bool) else None,
         source_span_text=sliced_text,
         source_hash=effective_hash,
+        source_text=source_text if isinstance(source_text, str) else "",
         assertion_status=final_status,
         extractor_version=effective_extractor,
-        stable_id=stable_identity,
         jurisdiction=supplied_jurisdiction,
         actor=supplied_actor,
         name=supplied_name,
@@ -433,8 +468,10 @@ def build_user_assertion_envelope(
         confidence=stored_confidence,
         legal_hit=bool(legal_hit),
         role=_clean_supplied_text(role),
+        subject_key=_clean_supplied_text(subject_key),
         deficiencies=final_deficiencies,
     )
+    return replace(envelope, stable_id=envelope.computed_stable_id())
 
 
 @dataclass(frozen=True)

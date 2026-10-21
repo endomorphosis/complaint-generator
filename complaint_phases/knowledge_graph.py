@@ -11,7 +11,7 @@ import math
 import re
 import os
 from typing import TYPE_CHECKING, Dict, List, Optional, Any, Mapping, Sequence, Set, Tuple
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace
 from datetime import datetime, UTC
 
 from integrations.ipfs_datasets.types import (
@@ -49,6 +49,22 @@ def _merge_provenance(*records: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
                 merged[key] = {**dict(merged[key]), **dict(value)}
             else:
                 merged[str(key)] = value
+    # Retain separate source assertions when a legacy graph ID is reused.
+    # This is lineage retention; correction/supersession policy is separate.
+    assertions = {}
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        candidates = list(record.get("user_assertions") or [])
+        candidates.append(record.get("user_assertion"))
+        for candidate in candidates:
+            if not isinstance(candidate, Mapping):
+                continue
+            assertion = user_assertion_from_mapping(candidate)
+            if assertion.is_asserted_user_fact:
+                assertions[assertion.stable_id] = assertion.as_dict()
+    if assertions:
+        merged["user_assertions"] = [assertions[key] for key in sorted(assertions)]
     return merged
 
 
@@ -281,6 +297,12 @@ def envelope_for_extracted_record(
             span_text = sliced.decode("utf-8")
         except UnicodeDecodeError:
             span_text = ""
+    if not record.get("relation_type"):
+        entity_type = _clean_context_text(record.get("type") or record.get("entity_type"))
+        supported_text = record.get("name") if entity_type in {"person", "organization", "location", "date"} else attributes.get("description") or record.get("name") or ""
+        if (not isinstance(supported_text, str) or not supported_text.strip()
+                or " ".join(supported_text.split()) != " ".join(span_text.split())):
+            extra.append("unsupported_extracted_content")
     forced_type = _record_type_for_extraction(record)
     relation_type = _clean_context_text(record.get("relation_type") or "")
     if relation_type and _clean_context_text(record.get("origin") or "").lower() in {"heuristic", "model", "llm"}:
@@ -407,6 +429,32 @@ def assertion_from_provenance(provenance: Optional[Mapping[str, Any]]) -> Option
     return user_assertion_from_mapping(payload)
 
 
+def _validated_graph_provenance(provenance, *, record_type="", name="", attributes=None,
+                                source="", relationship=False):
+    """Revalidate both serialized proof and the graph record it describes."""
+    result = dict(provenance) if isinstance(provenance, Mapping) else {}
+    raw = result.get("user_assertion")
+    if not isinstance(raw, Mapping):
+        return result
+    envelope = user_assertion_from_mapping(raw)
+    attrs = attributes if isinstance(attributes, Mapping) else {}
+    classification = _record_type_for_extraction({"type": record_type, "name": name,
+        "attributes": attrs, "origin": "model" if source in {"model", "inference", "llm"} else ""})
+    if source in {"legal", "law"}:
+        classification = "legal_text"
+    if classification and envelope.record_type != classification:
+        envelope = replace(envelope, record_type=classification, source_kind=classification,
+            assertion_status="legal_text" if classification == "legal_text" else "suggestion",
+            deficiencies=tuple(sorted(set(envelope.deficiencies) | {"non_user_graph_classification"})))
+    if envelope.is_asserted_user_fact and not relationship:
+        text = name if record_type in {"person", "organization", "location", "date"} else attrs.get("description") or name
+        if not isinstance(text, str) or " ".join(text.split()) != " ".join(envelope.source_span_text.split()):
+            envelope = replace(envelope, record_type="unverified_candidate", source_kind="unverified",
+                assertion_status="unverified", deficiencies=("unsupported_extracted_content",))
+    result["user_assertion"] = envelope.as_dict()
+    return result
+
+
 @dataclass
 class Entity:
     """Represents an entity in the knowledge graph."""
@@ -417,9 +465,16 @@ class Entity:
     confidence: float = 1.0
     source: str = "complaint"  # complaint, evidence, inference
     provenance: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.provenance = _validated_graph_provenance(self.provenance, record_type=self.type,
+            name=self.name, attributes=self.attributes, source=self.source)
     
     def to_dict(self) -> dict:
-        return asdict(self)
+        payload = asdict(self)
+        payload["provenance"] = _validated_graph_provenance(self.provenance, record_type=self.type,
+            name=self.name, attributes=self.attributes, source=self.source)
+        return payload
 
 
 @dataclass
@@ -433,9 +488,16 @@ class Relationship:
     confidence: float = 1.0
     source: str = "complaint"
     provenance: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.provenance = _validated_graph_provenance(self.provenance, record_type=self.relation_type,
+            attributes=self.attributes, source=self.source, relationship=True)
     
     def to_dict(self) -> dict:
-        return asdict(self)
+        payload = asdict(self)
+        payload["provenance"] = _validated_graph_provenance(self.provenance, record_type=self.relation_type,
+            attributes=self.attributes, source=self.source, relationship=True)
+        return payload
 
 
 class KnowledgeGraph:
@@ -875,6 +937,9 @@ class KnowledgeGraph:
         for rel in other_graph.relationships.values():
             if rel.id not in self.relationships:
                 self.add_relationship(rel)
+            else:
+                existing = self.relationships[rel.id]
+                existing.provenance = _merge_provenance(existing.provenance, rel.provenance)
 
         self.metadata['provenance'] = _merge_provenance(
             self.provenance,
@@ -1647,6 +1712,13 @@ class KnowledgeGraphBuilder:
                 context_deficiencies=context_deficiencies,
                 role=relation_type,
             )
+            if envelope.is_asserted_user_fact and any(
+                not (assertion_from_provenance(graph.entities[endpoint].provenance)
+                     and assertion_from_provenance(graph.entities[endpoint].provenance).is_asserted_user_fact)
+                for endpoint in (source_endpoint, target_endpoint)
+            ):
+                envelope = replace(envelope, record_type="unverified_candidate", source_kind="unverified",
+                    assertion_status="unverified", deficiencies=("unverified_relationship_endpoint",))
             raw_extractor = rel_data.get("provenance") if isinstance(rel_data.get("provenance"), Mapping) else {}
             provenance_payload = {"user_assertion": envelope.as_dict()}
             carried_extractor = _merge_provenance(preserved_extractor, raw_extractor)

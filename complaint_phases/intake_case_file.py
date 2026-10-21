@@ -5,6 +5,7 @@ Helpers for building and summarizing the structured intake case file.
 from __future__ import annotations
 
 import calendar
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from itertools import combinations
 import re
@@ -2596,7 +2597,7 @@ def _user_assertion_payload(provenance: Any) -> Optional[Dict[str, Any]]:
     return user_assertion_from_mapping(payload).as_dict()
 
 
-def _project_user_assertion(provenance: Any, *, legacy_ref: str) -> Dict[str, Any]:
+def _project_user_assertion(provenance: Any, *, legacy_ref: str, expected_text: Optional[str] = None) -> Dict[str, Any]:
     """Project an assertion envelope. Records without one keep the legacy case-file shape."""
     envelope_payload = _user_assertion_payload(provenance)
     if envelope_payload is None:
@@ -2604,9 +2605,14 @@ def _project_user_assertion(provenance: Any, *, legacy_ref: str) -> Dict[str, An
             "source_kind": "knowledge_graph_entity",
             "source_ref": legacy_ref,
             "status": "accepted",
+            "assertion_status": "unverified",
             "source_span_refs": [],
         }
     envelope = user_assertion_from_mapping(envelope_payload)
+    if (expected_text is not None and envelope.is_asserted_user_fact
+            and " ".join(expected_text.split()) != " ".join(envelope.source_span_text.split())):
+        envelope = replace(envelope, record_type="unverified_candidate", source_kind="unverified",
+            assertion_status="unverified", deficiencies=("unsupported_extracted_content",))
     identity = envelope.source_identity
     source_kind = envelope.source_kind if envelope.is_asserted_user_fact else (envelope.record_type or envelope.source_kind or "unverified")
     if envelope.is_asserted_user_fact:
@@ -2616,7 +2622,7 @@ def _project_user_assertion(provenance: Any, *, legacy_ref: str) -> Dict[str, An
     elif envelope.record_type in {"model_suggestion", "inferred_claim_label"}:
         status = "suggestion"
     else:
-        status = envelope.assertion_status or "unverified"
+        status = "unverified"
     span_refs: List[Dict[str, Any]] = []
     if envelope.source_span_start is not None and envelope.source_span_end is not None:
         span_refs.append(
@@ -2651,6 +2657,9 @@ def _project_user_assertion(provenance: Any, *, legacy_ref: str) -> Dict[str, An
         },
         "source_span_refs": span_refs,
         "user_assertion": envelope.as_dict(),
+        "source_assertions": [user_assertion_from_mapping(item).as_dict()
+            for item in (provenance.get("user_assertions") or [])
+            if isinstance(item, Mapping) and user_assertion_from_mapping(item).is_asserted_user_fact],
         "record_type": envelope.record_type,
         "contract_version": envelope.contract_version,
         "jurisdiction": envelope.jurisdiction,
@@ -2670,7 +2679,8 @@ def build_canonical_facts(knowledge_graph) -> List[Dict[str, Any]]:
         fact_text = _normalize_text(entity.attributes.get("description") or entity.name)
         if not fact_text:
             continue
-        provenance_projection = _project_user_assertion(getattr(entity, "provenance", {}), legacy_ref=entity.id)
+        provenance_projection = _project_user_assertion(getattr(entity, "provenance", {}), legacy_ref=entity.id,
+                                                       expected_text=fact_text)
         existing_span_refs = _coerce_provenance_refs(entity.attributes.get("source_span_refs"))
         provenance_projection["source_span_refs"] = _coerce_provenance_refs(
             existing_span_refs + list(provenance_projection.get("source_span_refs") or [])
@@ -2733,12 +2743,12 @@ def build_canonical_fact_edges(knowledge_graph) -> List[Dict[str, Any]]:
         )
         edges.append(
             {
+                **projection,
                 "relationship_id": getattr(relationship, "id", ""),
                 "source_id": getattr(relationship, "source_id", ""),
                 "target_id": getattr(relationship, "target_id", ""),
                 "relation_type": getattr(relationship, "relation_type", ""),
                 "confidence": getattr(relationship, "confidence", None),
-                **projection,
             }
         )
     return edges
@@ -2764,6 +2774,10 @@ def restore_entity_from_canonical_fact(fact: Mapping[str, Any]):
     provenance: Dict[str, Any] = {}
     if assertion:
         provenance["user_assertion"] = dict(assertion)
+    history = record.get("source_assertions")
+    if isinstance(history, list):
+        provenance["user_assertions"] = [user_assertion_from_mapping(item).as_dict()
+            for item in history if isinstance(item, Mapping) and user_assertion_from_mapping(item).is_asserted_user_fact]
     confidence = record.get("confidence")
     return Entity(
         id=str(record.get("fact_id") or record.get("stable_id") or ""),

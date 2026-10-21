@@ -1,5 +1,8 @@
 """Provenance contract for user assertions, suggestions, and legal text."""
 
+from copy import deepcopy
+import pytest
+
 from complaint_phases.intake_case_file import (
     build_canonical_fact_edges,
     build_canonical_facts,
@@ -566,3 +569,113 @@ def test_extractor_version_defaults_and_envelope_serialization_round_trip():
     )
     assert accepted_status.is_asserted_user_fact is False
     assert accepted_status.assertion_status != "asserted"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("source_hash", "0" * 64),
+    ("stable_id", "assertion:made-up"),
+    ("source_span_end", 100_000),
+    ("source_span_text", "An invented event"),
+    ("source_id", "a-different-source"),
+    ("source_kind", "user_uploaded_document"),
+    ("contract_version", ""),
+])
+def test_serialized_assertion_revalidates_hash_span_and_identity(field, value):
+    envelope = build_user_assertion_envelope(
+        source_text=STATEMENT, source_kind="user_statement", source_id=MESSAGE_ID,
+        message_id=MESSAGE_ID, assertion_status="asserted", extractor_version=EXTRACTOR_VERSION,
+        source_span={"start": 0, "end": len(STATEMENT.encode()), "text": STATEMENT},
+        role="fact", subject_key="fact|serialized-integrity",
+    )
+    payload = deepcopy(envelope.as_dict())
+    payload[field] = value
+    restored = user_assertion_from_mapping(payload)
+    assert not restored.is_asserted_user_fact
+    graph = KnowledgeGraph()
+    graph.add_entity(Entity(id="tampered", type="fact", name=STATEMENT,
+        attributes={"description": STATEMENT}, provenance={"user_assertion": payload}))
+    projected = build_canonical_facts(graph)[0]
+    assert projected["assertion_status"] != "asserted"
+
+
+@pytest.mark.parametrize("entity_type,name,description", [
+    ("person", "Invented Person", ""),
+    ("date", "January 1, 1900", ""),
+    ("fact", "Unsupported event", "Someone admitted liability yesterday."),
+])
+def test_a_real_span_does_not_support_an_invented_extracted_value(entity_type, name, description):
+    graph = KnowledgeGraphBuilder().build_from_text(STATEMENT, source_context=_statement_context(),
+        extracted_entities=[{"type": entity_type, "name": name,
+            "attributes": {"description": description} if description else {},
+            "source_span": {"start": 0, "end": len(STATEMENT.encode()), "text": STATEMENT}}])
+    entity = next(item for item in graph.entities.values() if item.name == name)
+    assert not user_assertion_from_mapping(entity.provenance["user_assertion"]).is_asserted_user_fact
+
+
+def test_stable_document_identity_distinguishes_attachments_to_same_message():
+    def assertion(document_id):
+        return build_user_assertion_envelope(source_text=STATEMENT,
+            source_kind="user_uploaded_document", source_id=document_id, document_id=document_id,
+            message_id="parent-message", assertion_status="asserted", extractor_version=EXTRACTOR_VERSION,
+            source_span={"start": 0, "end": len(STATEMENT.encode()), "text": STATEMENT}, role="fact", subject_key="same")
+    first, second = assertion("doc-first"), assertion("doc-second")
+    assert first.is_asserted_user_fact and second.is_asserted_user_fact
+    assert first.source_identity == "doc-first"
+    assert second.source_identity == "doc-second"
+    assert first.stable_id != second.stable_id
+
+
+def test_legacy_temporal_acceptance_is_explicitly_not_user_assertion_admission():
+    graph = KnowledgeGraph()
+    graph.add_entity(Entity(id="legacy", type="fact", name=STATEMENT))
+    fact = build_canonical_facts(graph)[0]
+    assert fact["validation_status"] == "accepted"
+    assert fact["assertion_status"] == "unverified"
+    assert not user_assertion_from_mapping(fact.get("user_assertion")).is_asserted_user_fact
+
+
+@pytest.mark.parametrize("entity_type,source", [("claim", "complaint"), ("fact", "model"), ("fact", "legal")])
+def test_graph_adapter_cannot_launder_non_user_classification(entity_type, source):
+    envelope = build_user_assertion_envelope(source_text=STATEMENT,
+        source_kind="user_statement", message_id=MESSAGE_ID, assertion_status="asserted",
+        source_span={"start": 0, "end": len(STATEMENT.encode()), "text": STATEMENT}, role="fact", subject_key="same")
+    entity = Entity(id="reclassified", type=entity_type, name=STATEMENT,
+        source=source, provenance={"user_assertion": envelope.as_dict()})
+    assert not user_assertion_from_mapping(entity.provenance["user_assertion"]).is_asserted_user_fact
+    round_trip = graph_entity_to_entity(entity_to_graph_entity(entity))
+    assert not user_assertion_from_mapping(round_trip.provenance["user_assertion"]).is_asserted_user_fact
+
+
+def test_changed_record_text_cannot_reuse_a_valid_source_envelope():
+    envelope = build_user_assertion_envelope(source_text=STATEMENT,
+        source_kind="user_statement", message_id=MESSAGE_ID, assertion_status="asserted",
+        source_span={"start": 0, "end": len(STATEMENT.encode()), "text": STATEMENT}, role="fact", subject_key="same")
+    entity = Entity(id="changed", type="fact", name=STATEMENT,
+        provenance={"user_assertion": envelope.as_dict()})
+    graph = KnowledgeGraph()
+    graph.add_entity(entity)
+    entity.attributes["description"] = "A different actor confessed yesterday."
+    assert not user_assertion_from_mapping(entity.to_dict()["provenance"]["user_assertion"]).is_asserted_user_fact
+    assert build_canonical_facts(graph)[0]["assertion_status"] == "unverified"
+
+
+def test_merge_retains_distinct_valid_user_source_assertions():
+    first = KnowledgeGraphBuilder().build_from_text(STATEMENT,
+        source_context=_statement_context(message_id="msg-first", source_id="msg-first"))
+    second = KnowledgeGraphBuilder().build_from_text(STATEMENT,
+        source_context=_statement_context(message_id="msg-second", source_id="msg-second"))
+    first.merge_with(second)
+    identities = set()
+    for entity in first.get_entities_by_type("fact"):
+        records = list(entity.provenance.get("user_assertions") or [])
+        records.append(entity.provenance.get("user_assertion") or {})
+        for record in records:
+            envelope = user_assertion_from_mapping(record)
+            if envelope.is_asserted_user_fact:
+                identities.add(envelope.source_identity)
+    assert identities == {"msg-first", "msg-second"}
+    for fact in build_canonical_facts(first):
+        restored = restore_entity_from_canonical_fact(fact)
+        histories = [user_assertion_from_mapping(item).source_identity
+                     for item in restored.provenance.get("user_assertions", [])]
+        assert set(histories) == {"msg-first", "msg-second"}
