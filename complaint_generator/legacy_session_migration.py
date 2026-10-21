@@ -1234,3 +1234,471 @@ def migrate_legacy_session(
         "migration_manifest": migration_manifest,
         "imported_paths": imported_paths,
     }
+
+
+# ---------------------------------------------------------------------------
+# Versioned private migration (CIMP-DUR-002)
+# The legacy snapshot above remains an explicit plaintext export. It is not
+# invoked by the encrypted migration path.
+# ---------------------------------------------------------------------------
+
+import hashlib
+import stat as _stat
+
+PRIVATE_MIGRATION_SCHEMA = "complaint-private-migration/v1"
+PRIVATE_MIGRATION_VERSION = 1
+_MANIFEST_NAME = "private_migration_manifest.json"
+_PUBLIC_ENTRY_FIELDS = (
+    "artifact_ref",
+    "ciphertext_name",
+    "ciphertext_sha256",
+    "readback",
+    "status",
+)
+
+
+class PrivateMigrationError(RuntimeError):
+    def __init__(self, code: str, message: str = "") -> None:
+        super().__init__(message or code)
+        self.code = code
+
+
+class PrivateMigrationInterrupted(PrivateMigrationError):
+    def __init__(self, partial: Dict[str, Any]) -> None:
+        super().__init__("interrupted", "migration interrupted before the next artifact commit")
+        self.partial = partial
+
+
+def _opaque_ref(tenant_id: str, case_id: str, kind: str, revision: str) -> str:
+    material = "\0".join((tenant_id, case_id, kind, revision)).encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _read_manifest(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {
+            "schema": PRIVATE_MIGRATION_SCHEMA,
+            "schema_version": PRIVATE_MIGRATION_VERSION,
+            "entries": [],
+            "complete": False,
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise PrivateMigrationError("malformed_manifest", str(exc)) from exc
+    if not isinstance(payload, dict) or payload.get("schema") != PRIVATE_MIGRATION_SCHEMA:
+        raise PrivateMigrationError("malformed_manifest")
+    if not isinstance(payload.get("entries"), list):
+        raise PrivateMigrationError("malformed_manifest")
+    return payload
+
+
+def _write_manifest(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def _owner_record_matches(artifact: Dict[str, Any]) -> bool:
+    record = artifact.get("owner_record")
+    if not isinstance(record, dict):
+        return False
+    owner = record.get("owner")
+    case_id = record.get("case_id")
+    if not isinstance(owner, str) or not isinstance(case_id, str) or not owner or not case_id:
+        return False
+    if owner != artifact.get("tenant_id") or case_id != artifact.get("case_id"):
+        return False
+    access = artifact.get("access")
+    principal = getattr(access, "principal_id", None)
+    access_case = getattr(access, "case_id", None)
+    if principal != owner or access_case != case_id:
+        return False
+    return True
+
+
+def _artifact_bytes(artifact: Dict[str, Any]) -> bytes:
+    if "payload" in artifact:
+        payload = artifact["payload"]
+        if isinstance(payload, str):
+            return payload.encode("utf-8")
+        return bytes(payload)
+    source = artifact.get("source_path")
+    if source is None:
+        raise PrivateMigrationError("missing_payload")
+    return Path(source).read_bytes()
+
+
+def _inode(path: Path) -> tuple[int, int, int]:
+    metadata = path.stat()
+    return metadata.st_dev, metadata.st_ino, metadata.st_nlink
+
+
+def _links_under(roots: List[Path], dev: int, ino: int) -> List[Path]:
+    found: List[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for candidate in root.rglob("*"):
+            if not candidate.is_file():
+                continue
+            try:
+                metadata = candidate.stat()
+            except OSError:
+                continue
+            if metadata.st_dev == dev and metadata.st_ino == ino:
+                found.append(candidate)
+    return found
+
+
+def _cleanup_sources(artifacts: List[Dict[str, Any]], snapshot_roots: List[Path]) -> Dict[str, Any]:
+    """Delete every located hardlink and declared copy, or delete nothing.
+
+    A single pathname removal is not reported as erasure when another link
+    or declared copy remains outside the deletion set.
+    """
+
+    planned: List[Path] = []
+    blocked = False
+    for artifact in artifacts:
+        source = artifact.get("source_path")
+        if source is None:
+            continue
+        source_path = Path(source)
+        if not source_path.exists():
+            continue
+        dev, ino, nlink = _inode(source_path)
+        search_roots = [source_path.parent, *snapshot_roots]
+        located = _links_under(search_roots, dev, ino)
+        copies = [Path(item) for item in list(artifact.get("copy_paths") or [])]
+        for copy_path in copies:
+            if copy_path.exists() and copy_path not in located:
+                located.append(copy_path)
+        if nlink > len([item for item in located if _inode(item)[:2] == (dev, ino)]):
+            blocked = True
+            break
+        planned.extend(located)
+        planned.extend(copies)
+    if blocked:
+        return {"cleanup_performed": False, "cleanup_complete": False, "code": "external_hardlink"}
+    removed: List[str] = []
+    for path in planned:
+        if path.exists() or path.is_symlink():
+            path.unlink()
+            removed.append(path.name)
+    remaining = False
+    for artifact in artifacts:
+        source = artifact.get("source_path")
+        if source is not None and Path(source).exists():
+            remaining = True
+        for copy_path in list(artifact.get("copy_paths") or []):
+            if Path(copy_path).exists():
+                remaining = True
+    return {
+        "cleanup_performed": True,
+        "cleanup_complete": not remaining,
+        "removed_count": len(removed),
+    }
+
+
+def migrate_private_workspace(
+    *,
+    source_root: Path,
+    destination_root: Path,
+    artifacts: List[Dict[str, Any]],
+    snapshot_roots: List[Path] | None = None,
+    cleanup: bool = False,
+    fail_after_committed: int | None = None,
+) -> Dict[str, Any]:
+    """Migrate one artifact at a time. Commit the manifest only after readback.
+
+    ``source_root`` and ``destination_root`` are explicit. This function does
+    not call ``ensure_workspace_source_snapshot`` and does not hardlink a
+    complaint tree. Public manifest entries carry opaque refs, ciphertext
+    names, ciphertext digests, and measured readback state.
+    """
+
+    source_root = Path(source_root)
+    destination_root = Path(destination_root)
+    destination_root.mkdir(parents=True, exist_ok=True)
+    manifest_path = destination_root / _MANIFEST_NAME
+    original_sources: Dict[str, bytes] = {}
+    for artifact in artifacts:
+        source = artifact.get("source_path")
+        if source is not None and Path(source).exists():
+            original_sources[str(source)] = Path(source).read_bytes()
+    try:
+        manifest = _read_manifest(manifest_path)
+    except PrivateMigrationError:
+        for path, payload in original_sources.items():
+            if Path(path).read_bytes() != payload:
+                Path(path).write_bytes(payload)
+        raise
+    entries = {str(item.get("artifact_ref")): item for item in manifest["entries"] if isinstance(item, dict)}
+    committed = 0
+    from integrations.private_storage import (
+        PrivateArtifactIntegrityError,
+        PrivateKeyMaterialError,
+        open_private_artifact,
+        seal_private_artifact,
+    )
+    from integrations.private_storage import PrivateArtifactBinding
+
+    for artifact in artifacts:
+        if not _owner_record_matches(artifact):
+            artifact_result = {
+                "status": "owner_mismatch",
+                "processed": False,
+                "source_preserved": True,
+            }
+            manifest["rejected"] = list(manifest.get("rejected") or [])
+            manifest["rejected"].append({"status": "owner_mismatch"})
+            _write_manifest(manifest_path, manifest)
+            continue
+        kind = str(artifact["artifact_kind"])
+        revision = str(artifact["revision"])
+        tenant_id = str(artifact["tenant_id"])
+        case_id = str(artifact["case_id"])
+        ref = _opaque_ref(tenant_id, case_id, kind, revision)
+        existing = entries.get(ref)
+        ciphertext_name = ref + ".bin"
+        target = destination_root / ciphertext_name
+        if isinstance(existing, dict) and existing.get("readback") == "verified":
+            try:
+                blob = target.read_bytes()
+                if _sha256(blob) != str(existing.get("ciphertext_sha256") or ""):
+                    raise PrivateMigrationError("readback_mismatch")
+                binding = PrivateArtifactBinding(
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    artifact_kind=kind,
+                    revision=revision,
+                    principal_id=str(artifact.get("principal_id") or tenant_id),
+                )
+                opened = open_private_artifact(
+                    blob,
+                    binding=binding,
+                    key=artifact["key"],
+                    expected_key_id=str(artifact["key_id"]),
+                )
+                if opened != _artifact_bytes(artifact):
+                    raise PrivateMigrationError("readback_mismatch")
+            except Exception:
+                _restore_sources(original_sources)
+                return _finish_migration(
+                    manifest_path, manifest, committed=committed, total=len(artifacts),
+                    status="recoverable", cleanup=False, artifacts=artifacts,
+                    snapshot_roots=snapshot_roots or [], original_sources=original_sources,
+                    code="readback_failed",
+                )
+            committed += 1
+            continue
+        if target.exists() and (artifact.get("locked") or artifact.get("key") is None or artifact.get("reject_existing_destination")):
+            _restore_sources(original_sources)
+            return _finish_migration(
+                manifest_path, manifest, committed=committed, total=len(artifacts),
+                status="recoverable", cleanup=False, artifacts=artifacts,
+                snapshot_roots=snapshot_roots or [], original_sources=original_sources,
+                code="destination_preserved",
+            )
+        if artifact.get("locked") or artifact.get("key") is None:
+            return _finish_migration(
+                manifest_path, manifest, committed=committed, total=len(artifacts),
+                status="unlock_needed", cleanup=False, artifacts=artifacts,
+                snapshot_roots=snapshot_roots or [], original_sources=original_sources,
+            )
+        if fail_after_committed is not None and committed >= fail_after_committed:
+            partial = _finish_migration(
+                manifest_path, manifest, committed=committed, total=len(artifacts),
+                status="interrupted", cleanup=False, artifacts=artifacts,
+                snapshot_roots=snapshot_roots or [], original_sources=original_sources,
+            )
+            raise PrivateMigrationInterrupted(partial)
+        try:
+            payload = _artifact_bytes(artifact)
+        except Exception:
+            _restore_sources(original_sources)
+            return _finish_migration(
+                manifest_path, manifest, committed=committed, total=len(artifacts),
+                status="recoverable", cleanup=False, artifacts=artifacts,
+                snapshot_roots=snapshot_roots or [], original_sources=original_sources,
+                code="source_unreadable",
+            )
+        binding = PrivateArtifactBinding(
+            tenant_id=tenant_id,
+            case_id=case_id,
+            artifact_kind=kind,
+            revision=revision,
+            principal_id=str(artifact.get("principal_id") or tenant_id),
+        )
+        temporary = destination_root / (ciphertext_name + ".tmp")
+        if target.exists():
+            existing_bytes = target.read_bytes()
+            try:
+                opened_existing = open_private_artifact(
+                    existing_bytes,
+                    binding=binding,
+                    key=artifact["key"],
+                    expected_key_id=str(artifact["key_id"]),
+                )
+            except Exception:
+                _restore_sources(original_sources)
+                return _finish_migration(
+                    manifest_path, manifest, committed=committed, total=len(artifacts),
+                    status="recoverable", cleanup=False, artifacts=artifacts,
+                    snapshot_roots=snapshot_roots or [], original_sources=original_sources,
+                    code="destination_preserved",
+                )
+            if opened_existing != payload:
+                _restore_sources(original_sources)
+                return _finish_migration(
+                    manifest_path, manifest, committed=committed, total=len(artifacts),
+                    status="recoverable", cleanup=False, artifacts=artifacts,
+                    snapshot_roots=snapshot_roots or [], original_sources=original_sources,
+                    code="destination_preserved",
+                )
+            envelope = existing_bytes
+        else:
+            try:
+                envelope = seal_private_artifact(
+                    payload,
+                    binding=binding,
+                    key=artifact["key"],
+                    key_id=str(artifact["key_id"]),
+                )
+            except (PrivateArtifactIntegrityError, PrivateKeyMaterialError, OSError):
+                _restore_sources(original_sources)
+                return _finish_migration(
+                    manifest_path, manifest, committed=committed, total=len(artifacts),
+                    status="recoverable", cleanup=False, artifacts=artifacts,
+                    snapshot_roots=snapshot_roots or [], original_sources=original_sources,
+                    code="readback_failed",
+                )
+        try:
+            if not target.exists():
+                temporary.write_bytes(envelope)
+                readback = temporary.read_bytes()
+                if readback != envelope:
+                    raise PrivateMigrationError("readback_mismatch")
+                os.replace(temporary, target)
+            readback = target.read_bytes()
+            opened = open_private_artifact(
+                readback,
+                binding=binding,
+                key=artifact["key"],
+                expected_key_id=str(artifact["key_id"]),
+            )
+            if opened != payload or readback != envelope:
+                raise PrivateMigrationError("readback_mismatch")
+        except (PrivateMigrationError, PrivateArtifactIntegrityError, PrivateKeyMaterialError, OSError):
+            if temporary.exists():
+                temporary.unlink()
+            _restore_sources(original_sources)
+            return _finish_migration(
+                manifest_path, manifest, committed=committed, total=len(artifacts),
+                status="recoverable", cleanup=False, artifacts=artifacts,
+                snapshot_roots=snapshot_roots or [], original_sources=original_sources,
+                code="readback_failed",
+            )
+        entry = {
+            "artifact_ref": ref,
+            "ciphertext_name": ciphertext_name,
+            "ciphertext_sha256": _sha256(envelope),
+            "readback": "verified",
+            "status": "processed",
+        }
+        leaked = [field for field in entry if field not in _PUBLIC_ENTRY_FIELDS]
+        if leaked:
+            raise PrivateMigrationError("manifest_field")
+        entries[ref] = entry
+        manifest["entries"] = list(entries.values())
+        manifest["complete"] = len(manifest["entries"]) >= len([
+            item for item in artifacts if _owner_record_matches(item)
+        ])
+        _write_manifest(manifest_path, manifest)
+        committed += 1
+    verified = all(
+        isinstance(entries.get(_opaque_ref(
+            str(item["tenant_id"]), str(item["case_id"]), str(item["artifact_kind"]), str(item["revision"])
+        )), dict)
+        and entries[_opaque_ref(
+            str(item["tenant_id"]), str(item["case_id"]), str(item["artifact_kind"]), str(item["revision"])
+        )].get("readback") == "verified"
+        for item in artifacts
+        if _owner_record_matches(item)
+    )
+    return _finish_migration(
+        manifest_path, manifest, committed=committed, total=len(artifacts),
+        status="complete" if verified else "partial",
+        cleanup=bool(cleanup and verified),
+        artifacts=artifacts,
+        snapshot_roots=list(snapshot_roots or []),
+        original_sources=original_sources,
+    )
+
+
+def _restore_sources(original_sources: Dict[str, bytes]) -> None:
+    for path, payload in original_sources.items():
+        current = Path(path)
+        if not current.exists() or current.read_bytes() != payload:
+            current.write_bytes(payload)
+
+
+def _finish_migration(
+    manifest_path: Path,
+    manifest: Dict[str, Any],
+    *,
+    committed: int,
+    total: int,
+    status: str,
+    cleanup: bool,
+    artifacts: List[Dict[str, Any]],
+    snapshot_roots: List[Path],
+    original_sources: Dict[str, bytes],
+    code: str = "",
+) -> Dict[str, Any]:
+    verified_entries = [
+        item for item in list(manifest.get("entries") or [])
+        if isinstance(item, dict) and item.get("readback") == "verified"
+    ]
+    eligible = [item for item in artifacts if _owner_record_matches(item)]
+    complete = bool(eligible) and len(verified_entries) >= len(eligible) and status == "complete"
+    manifest["complete"] = complete
+    manifest["schema"] = PRIVATE_MIGRATION_SCHEMA
+    manifest["schema_version"] = PRIVATE_MIGRATION_VERSION
+    if manifest_path.exists() or manifest.get("entries"):
+        _write_manifest(manifest_path, manifest)
+    cleanup_result = {"cleanup_performed": False, "cleanup_complete": False}
+    if cleanup and complete:
+        cleanup_result = _cleanup_sources(eligible, snapshot_roots)
+    else:
+        _restore_sources(original_sources)
+    return {
+        "schema": PRIVATE_MIGRATION_SCHEMA,
+        "schema_version": PRIVATE_MIGRATION_VERSION,
+        "status": status,
+        "code": code,
+        "committed": committed,
+        "total": total,
+        "complete": complete,
+        "cleanup_available": complete and not cleanup_result.get("cleanup_performed"),
+        "cleanup_performed": bool(cleanup_result.get("cleanup_performed")),
+        "cleanup_complete": bool(cleanup_result.get("cleanup_complete")),
+        "cleanup_code": cleanup_result.get("code") or "",
+        "manifest_path": str(manifest_path),
+        "entries": list(manifest.get("entries") or []),
+        "source_bytes_preserved": _sources_match(original_sources) if not cleanup_result.get("cleanup_performed") else False,
+    }
+
+
+def _sources_match(original_sources: Dict[str, bytes]) -> bool:
+    for path, payload in original_sources.items():
+        current = Path(path)
+        if not current.exists() or current.read_bytes() != payload:
+            return False
+    return True

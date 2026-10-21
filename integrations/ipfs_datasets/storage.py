@@ -1062,12 +1062,43 @@ def pin_cid(cid: str, *, backend: Any = None, backend_name: str | None = None) -
     )
 
 
+AUTOMATIC_PRIVATE_ARTIFACT_KINDS = frozenset({
+    "session",
+    "answers",
+    "attachment",
+    "extracted-text",
+    "assertion-envelope",
+    "fact-graph",
+    "rule-evaluation",
+    "annotation",
+    "draft",
+    "proof-history",
+    "theorem-source",
+    "index",
+    "backup-manifest",
+})
+
+
 def store_private_artifact(*args: Any, **kwargs: Any) -> dict[str, Any]:
     """Encrypt a private artifact, then delegate ciphertext to the public backend."""
 
     from integrations.private_storage import store_private_artifact as _store_private_artifact
 
     return _store_private_artifact(*args, **kwargs)
+
+
+def store_automatic_private_artifact(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Route an automatic workspace artifact through the private repository first.
+
+    Public legal-source corpora stay on ``store_bytes``. Kinds in
+    ``AUTOMATIC_PRIVATE_ARTIFACT_KINDS`` are sealed before any hash, cache,
+    pin, index, or backup. Plaintext is never written as a fallback.
+    """
+
+    kind = str(kwargs.get("artifact_kind") or "")
+    if kind not in AUTOMATIC_PRIVATE_ARTIFACT_KINDS:
+        raise ValueError(f"unsupported automatic private artifact kind: {kind}")
+    return store_private_artifact(*args, **kwargs)
 
 
 def retrieve_private_artifact(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -1111,6 +1142,8 @@ __all__ = [
     "ensure_ipfs_backend",
     "store_bytes",
     "store_private_artifact",
+    "store_automatic_private_artifact",
+    "AUTOMATIC_PRIVATE_ARTIFACT_KINDS",
     "retrieve_bytes",
     "retrieve_private_artifact",
     "pin_cid",

@@ -1306,6 +1306,105 @@ def query_graph_support(
     return payload
 
 
+def persist_private_graph_snapshot(
+    graph_payload: Dict[str, Any],
+    private_context: Mapping[str, Any],
+    *,
+    graph_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Seal a case graph. Do not write a plaintext catalog or client index.
+
+    Private graph indexing is unsupported. Callers get an authenticated
+    ciphertext snapshot, or an explicit locked/unavailable result with no
+    durable plaintext mutation.
+    """
+
+    if not isinstance(graph_payload, Mapping):
+        raise TypeError("graph_payload must be a mapping")
+    if not isinstance(private_context, Mapping):
+        raise TypeError("private_context must be a mapping")
+    locked = bool(private_context.get("locked"))
+    if locked or private_context.get("key") is None:
+        return {
+            "status": "unlock_needed",
+            "persisted": False,
+            "private_artifact": True,
+            "private_indexing": "unsupported",
+            "plaintext_catalog": False,
+            "graph_id": str(graph_id or graph_payload.get("graph_id") or ""),
+            "overwrites_existing": False,
+        }
+    body = json.dumps(dict(graph_payload), sort_keys=True, default=str).encode("utf-8")
+    from integrations.ipfs_datasets.storage import store_automatic_private_artifact
+
+    try:
+        receipt = store_automatic_private_artifact(
+            body,
+            access=private_context["access"],
+            tenant_id=str(private_context["tenant_id"]),
+            case_id=str(private_context["case_id"]),
+            artifact_kind="fact-graph",
+            revision=str(private_context.get("revision") or "fact-graph-1"),
+            principal_id=str(private_context.get("principal_id") or private_context["tenant_id"]),
+            key=private_context.get("key"),
+            key_id=private_context.get("key_id"),
+            backend=private_context.get("backend"),
+            backend_name=private_context.get("backend_name"),
+            pin_content=bool(private_context.get("pin_content", True)),
+        )
+    except Exception as exc:
+        return {
+            "status": "recoverable",
+            "persisted": False,
+            "private_artifact": True,
+            "private_indexing": "unsupported",
+            "plaintext_catalog": False,
+            "error": type(exc).__name__,
+            "code": str(getattr(exc, "code", "") or "private_graph_failed"),
+            "overwrites_existing": False,
+        }
+    destination = private_context.get("destination_dir")
+    if destination:
+        dest_root = Path(destination)
+        dest_root.mkdir(parents=True, exist_ok=True)
+        name = str(receipt.get("cid") or "fact-graph")
+        safe = "".join(ch if ch.isalnum() else "-" for ch in name)[:80] or "fact-graph"
+        target = dest_root / f"{safe}.bin"
+        # Ciphertext only. The receipt CID is an address of the envelope.
+        from integrations.ipfs_datasets.storage import retrieve_bytes
+
+        loaded = retrieve_bytes(
+            str(receipt.get("cid") or ""),
+            backend=private_context.get("backend"),
+            backend_name=private_context.get("backend_name"),
+        )
+        blob = loaded.get("data")
+        if not isinstance(blob, (bytes, bytearray)):
+            return {
+                "status": "recoverable",
+                "persisted": False,
+                "private_artifact": True,
+                "private_indexing": "unsupported",
+                "plaintext_catalog": False,
+                "code": "readback_mismatch",
+                "overwrites_existing": False,
+            }
+        target.write_bytes(bytes(blob))
+    return {
+        "status": "stored-private",
+        "persisted": True,
+        "private_artifact": True,
+        "private_indexing": "unsupported",
+        "plaintext_catalog": False,
+        "plaintext_index": False,
+        "graph_id": str(graph_id or ""),
+        "cid": receipt.get("cid"),
+        "verified": True,
+        "receipt": receipt,
+        "overwrites_existing": False,
+    }
+
+
 def persist_graph_snapshot(
     graph_payload: Dict[str, Any],
     *,
@@ -1316,7 +1415,10 @@ def persist_graph_snapshot(
     persistence_metadata: Optional[Dict[str, Any]] = None,
     provenance: Optional[Mapping[str, Any]] = None,
     persistence: Optional[GraphPersistence] = None,
+    private_context: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
+    if private_context is not None:
+        return persist_private_graph_snapshot(graph_payload, private_context, graph_id=graph_id)
     if not isinstance(graph_payload, Mapping):
         raise TypeError("graph_payload must be a mapping")
 
