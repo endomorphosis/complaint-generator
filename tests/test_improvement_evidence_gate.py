@@ -134,7 +134,8 @@ def pytest_sessionfinish(session, exitstatus):
         source_env.pop("IPFS_ACCELERATE_AGENT_VALIDATION_PYTHON", None)
         env = build_validation_environment(source_env)
         roots = [tmp_path.resolve(), Path(__file__).resolve().parents[1],
-                 Path(native_source.__file__).resolve().parents[3]]
+                 Path(native_source.__file__).resolve().parents[3],
+                 Path(pytest.__file__).resolve().parents[1]]
         roots += [Path(p).resolve() for p in env.get("PYTHONPATH", "").split(os.pathsep)
                   if p and Path(p).is_absolute() and Path(p).is_dir()]
         env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(map(str, roots)))
