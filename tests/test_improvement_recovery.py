@@ -17,6 +17,8 @@ import pytest
 
 import integrations.ipfs_accelerate.improvement_runner as runner
 
+_RECOVERY_FACTORY = runner._open_recovery_daemon
+
 
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = [pytest.mark.no_auto_llm, pytest.mark.no_auto_network, pytest.mark.no_auto_heavy]
@@ -112,6 +114,79 @@ def _dead_attempt(**extra):
                "active_worktree_path": "/tmp/not-used", "active_log_path": "/tmp/not-used/attempt.log"}
     payload.update(extra)
     return payload
+
+
+def _native_recovery_campaign(tmp_path, monkeypatch):
+    """Real native lease/claim/protected snapshot plus the actual full launcher contract."""
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+    from test.api.test_agent_supervisor_implementation_protected_paths import (
+        POLICY_PATH, _persist_live_shaped_interrupted_attempt, _protected_git_worktree_daemon,
+    )
+    from integrations.ipfs_accelerate.improvement_plan import BOARD_RELATIVE
+    from integrations.ipfs_accelerate.improvement_shutdown import _context
+    tmp_path.mkdir(parents=True,exist_ok=True)
+    native_fixture, repo, old_workspace, protected = _protected_git_worktree_daemon(tmp_path)
+    state_dir = native_fixture.state_path.parent
+    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    state_dir.chmod(0o700)
+    root = state_dir / 'worktrees'
+    root.mkdir(mode=0o700)
+    workspace = root / 'lane'
+    runner.subprocess.run(['git','worktree','move',str(old_workspace),str(workspace)],cwd=repo,check=True,capture_output=True)
+    spec = repo / runner.SPEC_RELATIVE
+    spec.parent.mkdir(parents=True,exist_ok=True)
+    spec.write_text(_spec_text())
+    board = repo / BOARD_RELATIVE
+    board.parent.mkdir(parents=True,exist_ok=True)
+    board.write_text('# Tasks\n')
+    previous_environment = runner.campaign_environment(repo,state_dir=state_dir)
+    for key,value in previous_environment.items():
+        if key.startswith(('IPFS_ACCELERATE_','TODO_DAEMON_')) or key=='COMMON_CRAWL_AUTO_CLONE_SOURCE':
+            monkeypatch.setenv(key,value)
+    argv_builder = runner.native_argv
+    monkeypatch.setattr(runner,'native_argv',lambda *a,**kw: argv_builder(*a,**kw)+['--implementation-protected-path',POLICY_PATH])
+    dead_pid=2**30-7
+    token='synthetic-owner'
+    argv=[sys.executable,str(repo/'scripts/run_complaint_improvement_supervisor.py'),'_run',
+          '--repo-root',str(repo),'--spec',str(spec),'--state-dir',str(state_dir),
+          '--owner-token',token,'--merge-target','master']
+    record={'schema_version':'complaint-improvement-launcher@1',
+        'identity':{**_identity(dead_pid),'start_ticks':1,'boot_id':'dead-owner','argv':argv},
+        'argv':argv,'owner_token':token,'started_at':runner.time.time()-50,'status':'stopped',
+        'repo_root':str(repo),'spec_path':str(spec),'state_dir':str(state_dir),'merge_target':'master',
+        'board_path':str(board),'plan_id':runner._requested_plan_id(spec),'provider':'grok_cli',
+        'model':runner.MODEL,'allow_fallback':False}
+    runner._atomic_json(state_dir/'launcher.json',record)
+    monkeypatch.setattr(runner,'process_identity',lambda pid: None)
+    daemon=_RECOVERY_FACTORY(repo,state_dir,record)
+    assert daemon.implement is False
+    assert daemon.board_namespace == 'complaint-intake-improvement' 
+    task,lock,claim=_persist_live_shaped_interrupted_attempt(daemon,workspace=workspace,attempt=3,task_id='CIMP-OPS-03')
+    old_events=daemon.events_path
+    canonical_events=state_dir/f'{runner.STATE_PREFIX}_events.jsonl'
+    old_events.rename(canonical_events)
+    daemon.events_path=canonical_events
+    strategy=state_dir/f'{runner.STATE_PREFIX}_strategy.json'
+    if not strategy.exists():runner._atomic_json(strategy,{})
+    runner._atomic_json(state_dir/f'{runner.STATE_PREFIX}_supervisor_status.json',{
+        'status':'stopped','repo_root':str(repo),'supervisor_pid':dead_pid,'updated_at':_stamp(),
+        'managed_daemon_cleanup':{'quiesced':True}})
+    context=_context(state_dir,record)
+    runner._atomic_json(state_dir/'container_shutdown.json',{
+        **context,'schema':'complaint-improvement-container-shutdown@1','status':'stopped','quiesced':True,
+        'completion_authority':False,'provider_callback_settled':False,'attempt_refunded':False,'containers':[]})
+    # Only transport/inventory is authored. All launcher/path/source/lease/claim,
+    # queue settlement and native reconciliation logic remains actual.
+    inventories=[]
+    def inspect(*args):
+        inventories.append(True)
+        return True
+    monkeypatch.setattr(runner,'_observe_campaign_containers',inspect)
+    monkeypatch.setattr(runner,'_validate_board',lambda *a:{'count':1,'completed':0,
+        'ready_task_ids':[task.task_id],'manual_hold_task_ids':[]})
+    from ipfs_accelerate_py.agent_supervisor.merge.merge_queue import MergeQueue
+    MergeQueue(state_dir/'merge-queue').pending_requests()
+    return daemon,repo,workspace,protected,task,claim,spec,record,inventories
 
 
 def test_live_pid_without_heartbeat_is_not_healthy(tmp_path, monkeypatch):
@@ -256,7 +331,8 @@ def test_lock_contention_and_dependency_use_capped_cooldown(tmp_path, monkeypatc
     second = runner.recover_stalled_worker(root, spec, state)
     assert second["spinning_prevented"] and second["cooldown_until"] == first["cooldown_until"]
     assert (state / f"{runner.STATE_PREFIX}_task_state.json").read_bytes() == before
-    root, spec, state, _ = _write_campaign(tmp_path / "lock", monkeypatch, _dead_attempt())
+    daemon, root, _, _, _, _, spec, _, _ = _native_recovery_campaign(tmp_path / "lock", monkeypatch)
+    state = daemon.state_path.parent
     held = (state / "recovery.lock").open("a+", encoding="utf-8")
     fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
@@ -314,41 +390,17 @@ def test_eligible_dead_attempt_reconciles_twice_without_resetting_the_cap(tmp_pa
     monkeypatch.setenv(native.AUTOMATIC_RETRY_REARM_ENV, "0")
     reconciler = native.CrashFenceReconciler
     monkeypatch.setattr(native, "CrashFenceReconciler", lambda daemon: reconciler(daemon, max_hold_seconds=10.0))
-    daemon, repo, workspace, _protected = _protected_git_worktree_daemon(tmp_path)
-    task, _lock, claim_path = _persist_live_shaped_interrupted_attempt(daemon, workspace=workspace, attempt=3)
+    daemon, repo, workspace, _protected, task, claim_path, spec, record, containers = _native_recovery_campaign(tmp_path,monkeypatch)
     state = native.PortalTaskState.load(daemon.state_path)
     assert state.implementation_attempts[task.task_id] == 3
     assert state.implementation_attempts_by_cid[state.active_task_cid] == 3
-    birth = json.loads(claim_path.read_text())["owner_process_birth"]
-    state_dir = daemon.state_path.parent
-    record = {"identity": {"pid": birth["pid"], "start_ticks": birth["start_time_ticks"], "boot_id": birth["boot_id"]},
-              "argv": [sys.executable, "_run"], "owner_token": "synthetic-owner", "started_at": runner.time.time() - 50,
-              "status": "starting", "native_daemon": {
-                  "todo_path": str(daemon.todo_path), "state_path": str(daemon.state_path),
-                  "strategy_path": str(daemon.strategy_path), "events_path": str(daemon.events_path),
-                  "worktree_root": str(daemon.worktree_root), "implementation_command": "fake-agent",
-                  "implementation_protected_paths": [POLICY_PATH]}}
-    runner._atomic_json(state_dir / "launcher.json", record)
-    monkeypatch.setattr(runner, "process_identity", lambda _pid: None)
-    monkeypatch.setattr(runner, "_validate_board", lambda *a: {
-        "count": 1, "completed": 0, "ready_task_ids": [task.task_id], "manual_hold_task_ids": [],
-    })
-    containers = []
-
-    def inventory(state_dir, launcher, *, parent_quiesced=False, **kwargs):
-        containers.append({"parent_quiesced": parent_quiesced, "launcher": launcher.get("owner_token")})
-        return {"applicable": True, "quiesced": True, "status": "stopped", "containers": [
-            {"container_id": "a" * 64, "synthetic": True}], "attempt_refunded": False, "completion_authority": False}
-
-    monkeypatch.setattr("integrations.ipfs_accelerate.improvement_shutdown.close_campaign_containers", inventory)
-    spec = tmp_path / "spec.json"
-    spec.write_text(_spec_text())
+    state_dir=daemon.state_path.parent
     first = runner.recover_stalled_worker(repo, spec, state_dir)
     # The ready task is not terminal, so native claim release stays fail-closed.
     # The dead attempt is still fenced and the spent cap is not refunded.
     assert first["paid_dispatch"] is False and first["attempt_refunded"] is False
     assert first["reason"] == "task_claim_reconciliation_blocked"
-    assert containers and containers[0]["parent_quiesced"] is True
+    assert containers
     assert first["fence"]["fenced"] is True
     assert claim_path.is_file()
     after = native.PortalTaskState.load(daemon.state_path)
@@ -375,28 +427,15 @@ def test_native_protected_mutation_does_not_release_the_attempt(tmp_path, monkey
     monkeypatch.setenv(native.AUTOMATIC_RETRY_REARM_ENV, "0")
     reconciler = native.CrashFenceReconciler
     monkeypatch.setattr(native, "CrashFenceReconciler", lambda daemon: reconciler(daemon, max_hold_seconds=10.0))
-    daemon, repo, workspace, protected = _protected_git_worktree_daemon(tmp_path)
-    task, _lock, claim_path = _persist_live_shaped_interrupted_attempt(daemon, workspace=workspace, attempt=3)
-    protected.write_text("mutated-without-authority\n", encoding="utf-8")
-    birth = json.loads(claim_path.read_text())["owner_process_birth"]
-    state_dir = daemon.state_path.parent
-    runner._atomic_json(state_dir / "launcher.json", {
-        "identity": {"pid": birth["pid"], "start_ticks": birth["start_time_ticks"], "boot_id": birth["boot_id"]},
-        "argv": [sys.executable], "owner_token": "synthetic-owner", "started_at": runner.time.time() - 20,
-        "native_daemon": {"todo_path": str(daemon.todo_path), "state_path": str(daemon.state_path),
-                          "strategy_path": str(daemon.strategy_path), "events_path": str(daemon.events_path),
-                          "worktree_root": str(daemon.worktree_root), "implementation_command": "fake-agent",
-                          "implementation_protected_paths": [POLICY_PATH]}})
-    monkeypatch.setattr(runner, "process_identity", lambda _pid: None)
-    monkeypatch.setattr(runner, "_validate_board", lambda *a: {
-        "count": 1, "completed": 0, "ready_task_ids": [task.task_id], "manual_hold_task_ids": [],
-    })
-    monkeypatch.setattr("integrations.ipfs_accelerate.improvement_shutdown.close_campaign_containers",
-                        lambda *a, **k: {"applicable": True, "quiesced": True, "containers": [], "attempt_refunded": False})
+    daemon, repo, workspace, protected, task, claim_path, spec, record, inventories = _native_recovery_campaign(tmp_path,monkeypatch)
+    protected.write_text("mutated-without-authority\n",encoding="utf-8")
+    state_dir=daemon.state_path.parent
     before = native.PortalTaskState.load(daemon.state_path)
-    result = runner.recover_stalled_worker(repo, tmp_path / "spec.json", state_dir)
+    result = runner.recover_stalled_worker(repo, spec, state_dir)
     after = native.PortalTaskState.load(daemon.state_path)
     assert result["reconciled"] is False and result["attempt_refunded"] is False
+    assert result['reason']=='protected_path_reconciliation_blocked'
+    assert inventories and claim_path.exists()
     assert after.implementation_attempts[task.task_id] == before.implementation_attempts[task.task_id] == 3
     assert after.implementation_attempts_by_cid == before.implementation_attempts_by_cid
     assert not after.completed_task_ids

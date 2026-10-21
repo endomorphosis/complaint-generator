@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -911,7 +911,15 @@ def _attempt_binding(native_state: Mapping[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError):
             attempt = None
     log_path = native_state.get("active_log_path")
+    execution_start = None
+    if (native_state.get("active_task_id") and native_state.get("active_task_cid")
+            and native_state.get("last_implementation_task_id") == native_state.get("active_task_id")
+            and native_state.get("last_implementation_task_cid") == native_state.get("active_task_cid")
+            and native_state.get("last_implementation_log_path") == log_path
+            and native_state.get("last_implementation_worktree_path") == native_state.get("active_worktree_path")):
+        execution_start = native_state.get("last_implementation_started_at")
     return {
+        "execution_started_at": execution_start,
         "task_id": str(native_state.get("active_task_id") or native_state.get("last_implementation_task_id") or ""),
         "task_cid": str(native_state.get("active_task_cid") or native_state.get("last_implementation_task_cid") or ""),
         "attempt": attempt,
@@ -929,7 +937,7 @@ def _event_matches_attempt(event: Mapping[str, Any], binding: Mapping[str, Any],
         return False
     if binding.get("attempt_started_at"):
         started = _event_timestamp({"timestamp": binding.get("attempt_started_at")})
-        if started is None or observed + 1.0 < started:
+        if started is None or observed < started:
             return False
     task_id = binding.get("task_id") or ""
     if not task_id or event.get("task_id") != task_id:
@@ -958,9 +966,9 @@ def _event_matches_attempt(event: Mapping[str, Any], binding: Mapping[str, Any],
     event_log = event.get("log_path") or event.get("log_prefix")
     claim_log = binding.get("log_prefix") or ""
     if claim_log and require_log:
-        if not isinstance(event_log, str) or not (event_log == claim_log or event_log.startswith(claim_log)):
+        if not isinstance(event_log, str) or not (event_log == claim_log):
             return False
-    elif event_log and claim_log and not (isinstance(event_log, str) and (event_log == claim_log or event_log.startswith(claim_log))):
+    elif event_log and claim_log and not (isinstance(event_log, str) and (event_log == claim_log)):
         return False
     elif event_log and not claim_log:
         return False
@@ -1006,6 +1014,96 @@ def _matching_event(path: Path, binding: Mapping[str, Any], *, started_at: float
     return None
 
 
+def _owned_attempt_log_evidence(events_path: Path, state_dir: Path, binding: Mapping[str, Any],
+                                *, started_at: float, now: float) -> dict[str, Any] | None:
+    """Observe native Grok NDJSON through this exact attempt's start and log.
+
+    Frames do not contain task/CID/time fields. The native start event and
+    native text headers provide those bindings; frame contents grant no task
+    completion or recovery authority. File freshness is an observation only.
+    """
+    from .improvement_recovery import _owned_bytes
+    try:
+        log = Path(str(binding.get("log_prefix") or ""))
+        attempt_start = _event_timestamp({"timestamp": binding.get("execution_started_at")})
+        selection_start = _event_timestamp({"timestamp": binding.get("attempt_started_at")})
+        if (attempt_start is None or selection_start is None or attempt_start < selection_start or not log.is_absolute() or log.resolve(strict=True) != log
+                or not log.is_relative_to(state_dir.resolve()) or not binding.get("task_cid")
+                or type(binding.get("attempt")) is not int or binding["attempt"] <= 0):
+            return None
+        events = _owned_bytes(events_path, 32 * 1024 * 1024, legacy_group_write=True)
+        if not events.endswith(b"\n"):
+            return None
+        start = None
+        for line in reversed(events.splitlines()):
+            event = json.loads(line)
+            if not isinstance(event, dict):
+                return None
+            if event.get("type") == "implementation_started":
+                # A later attempt/selection cannot borrow an earlier log.
+                if not _event_matches_attempt(event, binding, started_at=started_at, require_log=True):
+                    return None
+                start = event
+                break
+            if (event.get("type") == "implementation_finished"
+                    and _event_matches_attempt(event, binding, started_at=started_at, require_log=False)):
+                return None
+        if (start is None or start.get("execution_mode") != "model-assisted"
+                or _event_timestamp(start) < attempt_start):
+            return None
+        before = log.lstat()
+        raw = _owned_bytes(log, 32 * 1024 * 1024)
+        after = log.lstat()
+        if (len(raw) != before.st_size or any(getattr(before, field) != getattr(after, field)
+                for field in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"))):
+            return None
+        if (before.st_mtime < attempt_start or now - before.st_mtime > STALL_SECONDS
+                or before.st_mtime > now + 2):
+            return None
+        lines = raw.splitlines()
+        headers = {}
+        for line in lines[:8]:
+            name, sep, value = line.partition(b": ")
+            if sep and name in {b"Task", b"Started", b"Workspace"}:
+                if name in headers:
+                    return None
+                headers[name] = value.decode("utf-8")
+        if (headers.get(b"Task", "").split(" ", 1)[0] != binding["task_id"]
+                or headers.get(b"Started") != binding.get("execution_started_at")
+                or headers.get(b"Workspace") != binding.get("worktree")):
+            return None
+        complete = raw[:raw.rfind(b"\n") + 1]
+        counts = Counter()
+        terminal = False
+        for line in complete.splitlines():
+            if not line.startswith(b"{"):
+                continue
+            try:
+                frame = json.loads(line)
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if not isinstance(frame, dict):
+                continue
+            kind = frame.get("type")
+            if type(kind) is not str:
+                continue
+            if kind == "usage" and isinstance(frame.get("usage"), dict):
+                counts["usage"] += 1
+            elif kind in {"tool_call", "tool_call_update"}:
+                counts[kind] += 1
+            elif kind in {"end", "error", "max_turns_reached"}:
+                terminal = True
+        if not counts:
+            return None
+        return {"type": "grok_frame", "source": "owned_attempt_log", "task_id": binding["task_id"],
+                "task_cid": binding["task_cid"], "attempt": binding["attempt"],
+                "log_path": str(log), "log_bytes": len(raw), "log_mtime_ns": before.st_mtime_ns,
+                "frame_counts": dict(counts), "provider_terminal_observed": terminal,
+                "progress_fresh": not terminal, "completion_authority": False}
+    except (OSError, ValueError, TypeError, KeyError, UnicodeDecodeError):
+        return None
+
+
 def _provider_event_evidence(path: Path, *, task_id: str, started_at: float,
                              binding: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
     resolved = dict(binding or {})
@@ -1028,7 +1126,8 @@ def _owner_liveness(birth: Any) -> str:
         return "dead"
     if current.get("unknown") or current.get("start_ticks") is None or current.get("boot_id") is None:
         return "unknown"
-    if any(current.get(key) != birth.get(key) for key in ("start_ticks", "boot_id")):
+    if (current.get("start_ticks") != birth.get("start_ticks", birth.get("start_time_ticks"))
+            or current.get("boot_id") != birth.get("boot_id")):
         return "pid_reuse"
     return "alive"
 
@@ -1110,6 +1209,10 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     provider_evidence = _provider_event_evidence(
         events_path, task_id=binding["task_id"], started_at=invocation_start, binding=binding,
     ) if claim_verified else None
+    if claim_verified:
+        log_evidence = _owned_attempt_log_evidence(events_path, state_dir, binding, started_at=invocation_start, now=now)
+        provider_evidence = log_evidence or provider_evidence
+    provider_progress = bool(provider_evidence and provider_evidence.get("progress_fresh", True))
     validation_evidence = _validation_event_evidence(events_path, binding, started_at=invocation_start) if claim_verified else None
     worker_liveness = _owner_liveness(native_state.get("owner_process_birth"))
     if worker_liveness == "missing":
@@ -1136,6 +1239,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     elif heartbeat_age is not None and heartbeat_owner != identity.get("pid"):
         health = "heartbeat_identity_mismatch"
     elif heartbeat_age is not None and heartbeat_age > 120:
+        health = "stalled"
+    elif active and attempt_age is not None and attempt_age > TIMEOUT_SECONDS:
         health = "stalled"
     elif heartbeat_age is not None and startup_maintenance:
         health = "starting"
@@ -1167,8 +1272,10 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         silent_window = attempt_age is not None and attempt_age > STALL_SECONDS
         in_validation = phase.startswith("valid")
         # Fresh generic log lines and a live PID are not provider or validation progress.
-        silent = silent_window and (validation_evidence is None if in_validation else provider_evidence is None)
-        health = "stalled" if hard_expired or log_stale or silent else "active"
+        silent = silent_window and (validation_evidence is None if in_validation else not provider_progress)
+        post_provider = bool(provider_evidence and provider_evidence.get("provider_terminal_observed"))
+        health = ("stalled" if hard_expired or log_stale else "post_provider" if post_provider
+                  else "stalled" if silent else "active")
     elif selected:
         health = "no_progress" if (attempt_age if attempt_age is not None else since_start) > STALL_SECONDS else "selected"
     elif not current_state and since_start > STARTUP_SECONDS:
@@ -1203,11 +1310,12 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         interview_state = "cancelled"
     heartbeat_fresh = heartbeat_age is not None and heartbeat_age <= 120
     identity_ok = worker_liveness == "alive" and health not in {"identity_mismatch", "heartbeat_identity_mismatch", "state_error"}
-    activity_ok = (not active) or bool(provider_evidence or validation_evidence) or not (
+    activity_ok = (not active) or bool(provider_progress or validation_evidence
+        or (provider_evidence and provider_evidence.get("provider_terminal_observed"))) or not (
         attempt_age is not None and attempt_age > STALL_SECONDS
     )
     healthy = bool(identity_ok and heartbeat_fresh and activity_ok and health in {
-        "active", "running", "maintenance", "waiting_for_user", "selected", "complete",
+        "active", "post_provider", "running", "maintenance", "waiting_for_user", "selected", "complete",
     })
     return {"status": health, "healthy": healthy, "owned_process_alive": owned,
             "worker_liveness": worker_liveness,
@@ -1231,11 +1339,11 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
             "claim_progress_verified": claim_verified,
             "runner_progress_verified": bool(claim_verified and heartbeat_fresh and worker_liveness == "alive"),
             "provider_execution_verified": bool(owned and provider_evidence),
-            "provider_progress_verified": bool(owned and provider_evidence),
+            "provider_progress_verified": bool(owned and provider_progress),
             "provider_execution_evidence": provider_evidence,
             "validation_activity_verified": bool(owned and validation_evidence),
             "validation_activity_evidence": validation_evidence,
-            "progress_verified": bool(owned and provider_evidence),
+            "progress_verified": bool(owned and provider_progress),
             "completion_authority": False}
 
 
@@ -1283,47 +1391,94 @@ def _arm_cooldown(state_dir: Path, reason: str, observed: Mapping[str, Any], *, 
 
 
 def _fence_owned_tree(record: Mapping[str, Any]) -> dict[str, Any]:
-    identity = record.get("identity") if isinstance(record.get("identity"), dict) else None
-    if not identity:
-        return {"fenced": False, "remaining_pids": [], "reason": "no_launcher_identity"}
-    children = _descendants(identity)
-    if owns_process(record):
-        _signal_birth(identity, signal.SIGTERM)
-    for child in reversed(children):
-        _signal_birth(child, signal.SIGTERM)
-    if owns_process(record):
-        _signal_birth(identity, signal.SIGKILL)
-    for child in reversed(children):
-        _signal_birth(child, signal.SIGKILL)
-    remaining = []
-    for item in [identity, *children]:
-        current = process_identity(item.get("pid"))
-        if current and current.get("start_ticks") == item.get("start_ticks") and current.get("boot_id") == item.get("boot_id"):
-            remaining.append(item.get("pid"))
-    return {"fenced": not remaining, "remaining_pids": remaining, "signalled": bool(children) or owns_process(record)}
+    """Observe closure only; a recovery request never signals a live parent."""
+    identity = record.get("identity")
+    if not isinstance(identity, dict) or _owner_liveness(identity) != "dead":
+        return {"fenced": False, "signalled": False, "remaining_pids": [], "reason": "launcher_not_dead"}
+    return {"fenced": True, "signalled": False, "remaining_pids": []}
 
 
-def _open_recovery_daemon(repo_root: Path, state_dir: Path, record: Mapping[str, Any]):
-    """Open the campaign's native daemon for quiesced reconciliation only."""
+def _recovery_config(repo_root: Path, state_dir: Path, record: Mapping[str, Any]):
+    """Derive the native paths/options from the first-party compiler only."""
+    supervisor, _ = _native_modules(repo_root)
+    selected_root, _ = recorded_worktree_root(record, state_dir)
+    args = native_argv(Path(record["board_path"]), state_dir, record["merge_target"], worktree_root=selected_root)
+    return supervisor.supervisor_config_from_args(supervisor.parse_args(args), repo_root=repo_root)
+
+
+def _open_recovery_daemon(repo_root: Path, state_dir: Path, record: Mapping[str, Any], *, merge_queue=None):
+    """Native quiesced reconciliation has no implementation/selection authority."""
     _, native = _native_modules(repo_root)
-    configured = record.get("native_daemon") if isinstance(record.get("native_daemon"), dict) else {}
-    todo = Path(str(configured.get("todo_path") or record.get("board_path") or ""))
-    if not todo.is_file():
-        raise ValueError("recovery daemon requires the recorded task board")
-    state_path = Path(str(configured.get("state_path") or state_dir / f"{STATE_PREFIX}_task_state.json"))
-    strategy_path = Path(str(configured.get("strategy_path") or state_dir / f"{STATE_PREFIX}_strategy.json"))
-    events_path = Path(str(configured.get("events_path") or state_dir / f"{STATE_PREFIX}_events.jsonl"))
-    worktree = configured.get("worktree_root") or record.get("worktree_root")
-    protected = configured.get("implementation_protected_paths") or ()
+    config = _recovery_config(repo_root, state_dir, record)
     return native.PortalImplementationDaemon(
-        todo_path=todo, state_path=state_path, strategy_path=strategy_path, events_path=events_path,
-        repo_root=repo_root, implement=True, task_header_prefix=TASK_PREFIX,
-        implementation_command=str(configured.get("implementation_command") or "false"),
-        use_ephemeral_worktree=True,
-        worktree_root=Path(str(worktree)) if worktree else state_dir / "worktrees",
-        implementation_protected_paths=tuple(protected) if isinstance(protected, (list, tuple)) else (),
-        max_task_attempts=3, merge_queue_dir=state_dir / "merge-queue",
+        todo_path=config.todo_path, state_path=config.state_path, strategy_path=config.strategy_path,
+        events_path=state_dir / f"{STATE_PREFIX}_events.jsonl", repo_root=repo_root,
+        task_header_prefix=config.task_prefix, board_namespace=config.board_namespace, implement=False,
+        implementation_command=config.implementation_command,
+        implementation_timeout=config.implementation_timeout, max_task_attempts=config.max_task_attempts,
+        use_ephemeral_worktree=False, worktree_root=config.worktree_root,
+        merge_target_branch=config.merge_target_branch, merge_queue_dir=config.merge_queue_dir,
+        merge_queue=merge_queue, worktree_submodule_paths=config.worktree_submodule_paths,
+        implementation_protected_paths=config.implementation_protected_paths,
+        objective_path=config.objective_path, objective_bundle_dir=config.objective_bundle_dir,
+        generated_status_paths=config.generated_dirty_repair_paths,
+        llm_merge_resolver_command=config.llm_merge_resolver_command,
+        llm_merge_resolver_timeout_seconds=config.llm_merge_resolver_timeout_seconds,
+        task_shard_count=config.task_shard_count, task_shard_index=config.task_shard_index,
+        strict_task_sharding=config.strict_task_sharding,
     )
+
+
+@contextmanager
+def _recovery_checkout_lease(repo_root: Path):
+    # Exclude merges/checkout mutation, while leaving the protected-path
+    # reconciler free to acquire and revalidate its own crash-fence lease.
+    from ipfs_accelerate_py.agent_supervisor.merge import checkout_lock as locks
+    path = locks.board_scoped_checkout_mutation_lock_path(repo_root, "complaint-intake-improvement")
+    metadata = locks.checkout_lock_metadata(kind="merge", repo_root=repo_root,
+        owner_script="", extra={"lease_id": secrets.token_hex(16), "operation": "quiesced_stalled_worker_reconciliation"})
+    lease, _, _, _ = locks.acquire_checkout_mutation_lease(path, metadata, owner_active=lambda _: True)
+    if lease is None:
+        raise BlockingIOError("native checkout mutation owner is present")
+    try:
+        yield
+    finally:
+        if not locks.release_checkout_mutation_lease(lease, require_exact_metadata=True):
+            raise RuntimeError("native recovery checkout lease changed; retained")
+
+
+def _recovery_preimage(repo_root: Path, state_dir: Path, record: Mapping[str, Any]) -> dict[str, Any]:
+    from .improvement_recovery import _owned_bytes
+    files = [state_dir / name for name in ("launcher.json", "container_shutdown.json",
+        f"{STATE_PREFIX}_supervisor_status.json", f"{STATE_PREFIX}_task_state.json",
+        f"{STATE_PREFIX}_strategy.json", f"{STATE_PREFIX}_events.jsonl")]
+    files += [Path(record["board_path"]), Path(record["spec_path"])]
+    result = {}
+    for path in files:
+        # Current native state is a control-plane row; a JSON mirror is optional.
+        if path.name == f"{STATE_PREFIX}_task_state.json" and not os.path.lexists(path):
+            result[str(path)] = None
+            continue
+        if path.resolve(strict=True) != path:
+            raise ValueError("recovery evidence path is aliased")
+        raw = _owned_bytes(path, 32 * 1024 * 1024, legacy_group_write=True)
+        info = path.lstat()
+        result[str(path)] = (info.st_dev, info.st_ino, info.st_mode, hashlib.sha256(raw).hexdigest())
+    payload, source = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
+    if payload.get("read_error") or source.get("source") == "unavailable":
+        raise ValueError("native recovery state observation unavailable")
+    result["native_payload"] = payload
+    result["native_source"] = source
+    authority = source.get("authority_path")
+    if authority:
+        path = Path(authority)
+        if not path.is_absolute() or path.resolve(strict=True) != path or not path.is_relative_to(state_dir):
+            raise ValueError("native state authority is outside this epoch")
+        raw = _owned_bytes(path, 128 * 1024 * 1024, legacy_group_write=True)
+        info = path.lstat()
+        result["native_authority"] = (str(path), info.st_dev, info.st_ino, info.st_mode,
+                                      hashlib.sha256(raw).hexdigest())
+    return result
 
 
 def _claim_proof_conflict(native_state: Mapping[str, Any]) -> str | None:
@@ -1340,7 +1495,7 @@ def _claim_proof_conflict(native_state: Mapping[str, Any]) -> str | None:
     return None
 
 
-def recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None) -> dict[str, Any]:
+def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None) -> dict[str, Any]:
     """Fence a proven-dead ordinary attempt and reconcile it through native APIs.
 
     A live PID, stale heartbeat, or missing birth is not permission to refund an
@@ -1387,24 +1542,79 @@ def recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *,
             return _arm_cooldown(state_dir, reason, observed, now=moment, scope=scope)
         return _refusal("worker_alive", observed)
     record = _read_json(state_dir / "launcher.json")
-    idle = not active and not native_state.get("active_task_id") and not native_state.get("active_task_cid")
-    if liveness != "dead":
-        if not (liveness in {"absent", "missing"} and idle and not owns_process(record)
-                and isinstance(record.get("native_daemon"), dict)):
-            return _refusal("unknown_owner" if liveness != "dead" else "nothing_to_reconcile", observed,
-                            recovery="blocked" if liveness not in {"absent", "missing"} or not idle else "not_required")
-    elif idle and not isinstance(record.get("native_daemon"), dict):
-        return _refusal("nothing_to_reconcile", observed, recovery="not_required")
+    if liveness != "dead" and not (liveness in {"absent", "missing"}
+            and not owns_process(record) and _full_launch_record(record)):
+        return _refusal("unknown_owner", observed)
     try:
-        with _lock(state_dir, "recovery.lock", blocking=False):
+        # Only a stopped, full campaign can enter the operator seam. A dead
+        # worker never grants authority over its still-live native supervisor.
+        from .improvement_shutdown import _context, _parent_closed
+        if not _campaign_tuple_matches(record, repo_root, spec_path, state_dir):
+            return _refusal("campaign_binding_unverified", observed)
+        context = _context(state_dir, record)
+        if context is None:
+            return _refusal("campaign_binding_unverified", observed)
+        _parent_closed(state_dir, record, context, False)
+        if _owner_liveness(record.get("identity")) != "dead":
+            return _refusal("launcher_not_dead", observed)
+        preimage = _recovery_preimage(repo_root, state_dir, record)
+        with ExitStack() as stack:
+            for name in ("recovery.lock", "launcher.lock", "runner.lock"):
+                stack.enter_context(_lock(state_dir, name, blocking=False))
+            if _recovery_preimage(repo_root, state_dir, record) != preimage:
+                return _refusal("recovery_preimage_changed", observed)
+            _parent_closed(state_dir, record, context, False)
+            stack.enter_context(_recovery_checkout_lease(repo_root))
+            # Even preparing an existing queue can touch its schema/import
+            # projection. Prove current process/container closure first.
+            _parent_closed(state_dir, record, context, False)
             fence = _fence_owned_tree(record)
-            if not fence["fenced"]:
-                return _refusal("process_fence_incomplete", observed, diagnostics=fence["remaining_pids"], fence=fence)
-            from .improvement_shutdown import close_campaign_containers
-            containers = close_campaign_containers(state_dir, record, parent_quiesced=True)
-            if containers.get("applicable") and not containers.get("quiesced"):
-                return _arm_cooldown(state_dir, "container_fence_incomplete", observed, now=moment, scope="runner")
-            daemon = _open_recovery_daemon(repo_root, state_dir, record)
+            containers = _read_json(state_dir / "container_shutdown.json")
+            selected_root, _ = recorded_worktree_root(record, state_dir)
+            if (not fence["fenced"] or not _shutdown_verified(record, containers, repo_root, state_dir)
+                    or not _observe_campaign_containers(repo_root, state_dir, selected_root, record, containers)):
+                return _refusal("container_or_process_closure_unverified", observed)
+            if _recovery_preimage(repo_root, state_dir, record) != preimage:
+                return _refusal("recovery_preimage_changed", observed)
+            from ipfs_accelerate_py.agent_supervisor.merge.merge_queue import (
+                MergeQueue, hold_merge_queue_settlement, read_merge_queue_settlement,
+            )
+            from ipfs_accelerate_py.agent_supervisor.merge.checkout_lock import checkout_repository_id
+            queue_args = {"target_repository_id": checkout_repository_id(repo_root),
+                          "target_branch": record["merge_target"], "lock_timeout_seconds": 0.01}
+            queue_before = read_merge_queue_settlement(state_dir / "merge-queue", **queue_args)
+            if not queue_before.get("settled"):
+                return _refusal("merge_queue_unsettled", observed)
+            # MergeQueue opens its own store during construction. Construct the
+            # genuine existing queue before retaining its writer guard, then
+            # inject that same instance into the non-implementing reconciler.
+            _parent_closed(state_dir, record, context, False)
+            queue_instance = MergeQueue(state_dir / "merge-queue")
+            if read_merge_queue_settlement(state_dir / "merge-queue", **queue_args) != queue_before:
+                return _refusal("merge_queue_changed_during_preparation", observed)
+            queue = stack.enter_context(hold_merge_queue_settlement(state_dir / "merge-queue",
+                target_repository_id=checkout_repository_id(repo_root), target_branch=record["merge_target"],
+                lock_timeout_seconds=0.01))
+            if not queue.get("settled"):
+                return _refusal("merge_queue_unsettled", observed)
+            _parent_closed(state_dir, record, context, False)
+            fence = _fence_owned_tree(record)
+            containers = _read_json(state_dir / "container_shutdown.json")
+            selected_root, _ = recorded_worktree_root(record, state_dir)
+            if (not fence["fenced"] or not _shutdown_verified(record, containers, repo_root, state_dir)
+                    or not _observe_campaign_containers(repo_root, state_dir, selected_root, record, containers)):
+                return _refusal("container_or_process_closure_unverified", observed)
+            if _recovery_preimage(repo_root, state_dir, record) != preimage:
+                return _refusal("recovery_preimage_changed", observed)
+            fresh = status(repo_root, spec_path, state_dir)
+            if (fresh.get("native_state") != observed.get("native_state")
+                    or fresh.get("application_interview_state") or fresh.get("native_read_errors")
+                    or _owner_liveness(fresh.get("native_state", {}).get("owner_process_birth")) not in {"dead", "missing"}):
+                return _refusal("recovery_observation_changed", fresh)
+            if _recovery_preimage(repo_root, state_dir, record) != preimage:
+                return _refusal("recovery_preimage_changed", observed)
+            _parent_closed(state_dir, record, context, False)
+            daemon = _open_recovery_daemon(repo_root, state_dir, record, merge_queue=queue_instance)
             attempt_result = daemon.reconcile_quiesced_active_attempt()
             claim_result = None
             blocked = bool(attempt_result.get("blocked"))
@@ -1417,6 +1627,15 @@ def recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *,
             }
             if terminal_claim_ok and not unsafe:
                 claim_result = daemon.reconcile_quiesced_implementation_task_claim()
+            after_state, _ = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
+            count_keys = ("implementation_attempts", "implementation_attempts_by_cid")
+            before_state = preimage["native_payload"]
+            if (after_state.get("read_error") or any(after_state.get(key) != before_state.get(key) for key in count_keys)
+                    or after_state.get("completed_task_ids") != before_state.get("completed_task_ids")):
+                return _refusal("native_accounting_or_completion_changed", observed,
+                    counters_preserved=False, progress_preserved=False,
+                    attempt_refunded=None, diagnostics=["native invariant observation changed; no rollback attempted"],
+                    attempt_reconciliation=attempt_result, claim_reconciliation=claim_result)
             reconciled = bool(attempt_result.get("reconciled")) or (
                 isinstance(claim_result, dict) and bool(claim_result.get("reconciled")) and not claim_result.get("blocked")
             )
@@ -1441,6 +1660,19 @@ def recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *,
     except (OSError, ValueError, RuntimeError) as exc:
         return _arm_cooldown(state_dir, "dependency_unavailable", observed, now=moment, scope="runner",
                              diagnostics=[type(exc).__name__, str(exc)[:500]])
+
+
+def recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None) -> dict[str, Any]:
+    """Explicit stopped-only operator seam; the native watchdog owns live work."""
+    previous = dict(os.environ)
+    try:
+        effective = campaign_environment(repo_root, state_dir=state_dir)
+        os.environ.clear()
+        os.environ.update(effective)
+        return _recover_stalled_worker(repo_root, spec_path, state_dir, now=now)
+    finally:
+        os.environ.clear()
+        os.environ.update(previous)
 
 
 def _signal_birth(identity: Mapping[str, Any], signum: int) -> bool:
@@ -1576,7 +1808,7 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare, run and observe the Grok-only complaint improvement campaign.")
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("prepare", "doctor", "start", "status", "stop", "_run"):
+    for command in ("prepare", "doctor", "start", "status", "recover", "stop", "_run"):
         child = commands.add_parser(command, help=argparse.SUPPRESS if command == "_run" else command)
         child.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
         child.add_argument("--spec", type=Path)
@@ -1602,7 +1834,7 @@ def main(argv: list[str] | None = None) -> int:
             result = stop(state)
         else:
             keywords = {"worktree_root": args.worktree_root} if getattr(args, "worktree_root", None) is not None else {}
-            result = {"prepare": prepare, "doctor": doctor, "start": start, "status": status}[args.command](root, spec, state, **keywords)
+            result = {"prepare": prepare, "doctor": doctor, "start": start, "status": status, "recover": recover_stalled_worker}[args.command](root, spec, state, **keywords)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 2 if result.get("status") in {"not_ready", "board_error", "state_error", "identity_mismatch", "stop_incomplete"} else 0
     except (OSError, ValueError, RuntimeError) as exc:
