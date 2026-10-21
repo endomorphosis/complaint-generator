@@ -19,6 +19,7 @@ import multiprocessing
 import os
 from pathlib import Path
 import platform
+import re
 import secrets
 import shutil
 import signal
@@ -1803,6 +1804,191 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
             repo_root=repo_root, logger=_LOGGER,
         )
     return 0
+
+
+def _evidence_root(state_dir: Path, task_id: str) -> Path:
+    if not isinstance(task_id, str) or re.fullmatch(r"CIMP-[A-Za-z0-9_.:-]+", task_id) is None:
+        raise ValueError("task evidence requires a stable CIMP identifier")
+    return state_dir / "evidence" / task_id
+
+
+def _task_outputs(task: Mapping[str, Any]) -> list[str]:
+    targets = task.get("targets", task.get("outputs"))
+    if not isinstance(targets, list) or not targets:
+        raise ValueError("task evidence requires declared outputs")
+    return [str(item) for item in targets]
+
+
+def _observed_artifacts(repo_root: Path, observation: Mapping[str, Any]) -> list[dict[str, Any]]:
+    from .improvement_plan import _hash_file, _safe_relative
+
+    raw = observation.get("artifacts", [])
+    if not isinstance(raw, list):
+        return [{"present": False, "sha256": "", "relative_path": ""}]
+    resolved = []
+    for item in raw:
+        relative = item.get("relative_path") if isinstance(item, dict) else item
+        path = _safe_relative(repo_root, relative)
+        record: dict[str, Any] = {
+            "relative_path": relative if isinstance(relative, str) else "",
+            "present": bool(path and path.is_file() and path.stat().st_size > 0),
+            "sha256": _hash_file(path) if path and path.is_file() and path.stat().st_size > 0 else "",
+        }
+        if isinstance(item, dict) and "sha256" in item:
+            record["claimed_sha256"] = item.get("sha256")
+        resolved.append(record)
+    return resolved
+
+
+def gate_task_completion(repo_root: Path, state_dir: Path, task: Mapping[str, Any],
+                         observation: Mapping[str, Any], *,
+                         facts: Mapping[str, Any] | None = None,
+                         model_policy: Mapping[str, Any] | None = None,
+                         legal_data_version: str = "",
+                         spec: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Persist one lane receipt and admit completion only for current local-node evidence."""
+
+    from .improvement_plan import COMPLETING_LANE, EVIDENCE_LANES, assess_behavioral_evidence, bind_sources, _digest
+
+    if not isinstance(legal_data_version, str):
+        raise ValueError("legal_data_version must be a string")
+    root = Path(repo_root).resolve()
+    state_dir = Path(state_dir).resolve()
+    binding = bind_sources(root, _task_outputs(task))
+    observed = dict(observation)
+    observed["artifacts"] = _observed_artifacts(root, observation)
+    receipt = assess_behavioral_evidence(task, observed, source_binding=binding, model_policy=model_policy)
+    receipt["facts_digest"] = _digest(dict(facts or {}))
+    receipt["legal_data_version"] = legal_data_version
+    receipt["implementation_digest"] = binding.get("digest") or ""
+    if receipt["completion"] and not legal_data_version.strip():
+        receipt["admitted"] = False
+        receipt["completion"] = False
+        receipt["repairable"] = True
+        receipt["reason"] = "missing_legal_data_version"
+    directory = _evidence_root(state_dir, str(task.get("id") or ""))
+    with _lock(state_dir, "evidence.lock"):
+        directory.mkdir(parents=True, exist_ok=True)
+        lane_name = receipt["lane"] if receipt["lane"] in EVIDENCE_LANES else "rejected"
+        _atomic_json(directory / f"{lane_name}.json", receipt)
+        if receipt["lane"] == COMPLETING_LANE:
+            _atomic_json(directory / "completion.json", receipt)
+    if spec is not None:
+        receipt["readiness"] = recompute_dependent_readiness(
+            root, state_dir, spec, facts=facts, model_policy=model_policy,
+            legal_data_version=legal_data_version or None,
+        )
+    return receipt
+
+
+def _invalidate(receipt: Mapping[str, Any], reason: str) -> dict[str, Any]:
+    updated = dict(receipt)
+    updated["admitted"] = False
+    updated["completion"] = False
+    updated["repairable"] = True
+    updated["reason"] = reason
+    return updated
+
+
+def recompute_dependent_readiness(repo_root: Path, state_dir: Path, spec: Mapping[str, Any], *,
+                                  facts: Mapping[str, Any] | None = None,
+                                  model_policy: Mapping[str, Any] | None = None,
+                                  legal_data_version: str | None = None) -> dict[str, Any]:
+    """Drop completion that no longer matches source, facts, model policy or legal data.
+
+    Dependents of a task whose evidence was rejected or invalidated are not ready.
+    The stored reason stays explicit and repairable.
+    """
+
+    from .improvement_plan import READINESS_SCHEMA, bind_sources, canonical_model_policy, _digest
+
+    if not isinstance(spec, dict) or not isinstance(spec.get("tasks"), list):
+        raise ValueError("readiness requires the reviewed task list")
+    root = Path(repo_root).resolve()
+    state_dir = Path(state_dir).resolve()
+    policy = canonical_model_policy() if model_policy is None else dict(model_policy)
+    facts_digest = None if facts is None else _digest(dict(facts))
+    tasks = spec["tasks"]
+    identifiers = [item.get("id") for item in tasks]
+    if any(not isinstance(item, str) for item in identifiers) or len(set(identifiers)) != len(identifiers):
+        raise ValueError("readiness requires unique task identifiers")
+    dependencies = {item["id"]: list(item.get("depends_on") or []) for item in tasks}
+    for task_id, upstream in dependencies.items():
+        if any(item not in dependencies or item == task_id for item in upstream):
+            raise ValueError(f"{task_id} has an unknown or self dependency")
+    visiting: set[str] = set()
+
+    def visit(task_id: str) -> None:
+        if task_id in visiting:
+            raise ValueError(f"task dependency cycle at {task_id}")
+        visiting.add(task_id)
+        for upstream in dependencies[task_id]:
+            if upstream in visiting and upstream not in order:
+                raise ValueError(f"task dependency cycle at {upstream}")
+            if upstream not in order:
+                visit(upstream)
+        visiting.remove(task_id)
+        order.append(task_id)
+
+    order: list[str] = []
+    for task_id in dependencies:
+        if task_id not in order:
+            visit(task_id)
+    by_id = {item["id"]: item for item in tasks}
+    reports: dict[str, Any] = {}
+    with _lock(state_dir, "evidence.lock"):
+        for task_id in order:
+            path = state_dir / "evidence" / task_id / "completion.json"
+            receipt = _read_json(path)
+            reason = ""
+            if not receipt or receipt.get("read_error"):
+                complete = False
+                reason = "missing_behavioral_evidence"
+            else:
+                fresh = bind_sources(root, _task_outputs(by_id[task_id]))
+                if (receipt.get("implementation_digest") != fresh.get("digest")
+                        or not fresh.get("digest")):
+                    reason = "stale_source_hash" if fresh.get("digest") or receipt.get("implementation_digest") else "missing_output"
+                    if fresh.get("missing") or fresh.get("empty"):
+                        reason = "missing_output"
+                elif receipt.get("model_policy") != policy:
+                    reason = "model_policy_changed"
+                elif legal_data_version is not None and receipt.get("legal_data_version") != legal_data_version:
+                    reason = "legal_data_version_changed"
+                elif facts_digest is not None and receipt.get("facts_digest") != facts_digest:
+                    reason = "corrected_facts"
+                elif receipt.get("completion") is not True or receipt.get("lane") != "local_node_integration":
+                    reason = str(receipt.get("reason") or "behavioral_evidence_rejected")
+                    complete = False
+                else:
+                    complete = True
+                if reason:
+                    complete = False
+                    receipt = _invalidate(receipt, reason)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    _atomic_json(path, receipt)
+            blocked = [item for item in dependencies[task_id] if not reports[item]["complete"]]
+            if complete and blocked:
+                complete = False
+                reason = "upstream_evidence_not_current"
+                if receipt:
+                    receipt = _invalidate(receipt, reason)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    _atomic_json(path, receipt)
+            reports[task_id] = {
+                "complete": complete,
+                "ready": not blocked,
+                "blocked_by": blocked,
+                "reason": "" if complete else reason,
+                "repairable": not complete,
+            }
+        document = {"schema_version": READINESS_SCHEMA, "tasks": reports,
+                    "model_policy": policy, "legal_data_version": legal_data_version,
+                    "facts_digest": facts_digest}
+        destination = state_dir / "evidence"
+        destination.mkdir(parents=True, exist_ok=True)
+        _atomic_json(destination / "readiness.json", document)
+    return document
 
 
 def main(argv: list[str] | None = None) -> int:
