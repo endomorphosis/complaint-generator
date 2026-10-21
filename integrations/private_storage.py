@@ -12,10 +12,15 @@ stored beside the ciphertext. Decrypt uses the caller-expected binding, so a
 whole authentic envelope from another case does not open under the caller's
 binding.
 
-Key material is injected. Unlock, recovery, and OS keyring persistence belong
-to PRIV004. This module does not mint a default key, write a raw ``.key`` file,
-or copy key bytes into the process environment. FILE, ENVIRONMENT, HSM, VAULT,
-and TPM key backends are intentionally unused.
+Artifact sealing takes an injected per-case data key. User ownership lives in
+``UserOwnedKeySession``: high-entropy master and data keys stay unwrapped only
+in an unlocked session. Disk receives authenticated wrapped keys plus salt,
+KDF, schema, and opaque key ids, under owner-only directory and file modes.
+Wrapping is a user passphrase or an explicitly supplied OS keyring. A missing
+or locked keyring is an actionable unlock state with a passphrase or recovery
+import path. It never writes a raw ``.key`` file, derives a key from
+machine-id, hostname, or a constant, or copies key bytes into the environment.
+FILE, ENVIRONMENT, HSM, VAULT, and TPM backends stay unused.
 
 Dependency contract (not a Kit package version):
 
@@ -38,8 +43,12 @@ tempfile, or fake encrypted-success path.
 
 from __future__ import annotations
 
+import base64
+import json
 import os
+import stat
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 SCHEMA_NAME = "private-artifact-aad"
@@ -666,6 +675,739 @@ def kit_memory_gcm_associated_data_probe(
     return report
 
 
+KEY_STORE_SCHEMA = "complaint-generator/private-key-store"
+KEY_STORE_VERSION = 1
+KEY_RECOVERY_SCHEMA = "complaint-generator/private-key-recovery"
+KEY_RECOVERY_VERSION = 1
+KEY_STORE_FILENAME = "keystore.json"
+MASTER_WRAP_AAD = b"complaint-generator/private-key/master-wrap@1\x00"
+DATA_WRAP_DOMAIN = b"complaint-generator/private-key/data-wrap@1\x00"
+RECOVERY_WRAP_DOMAIN = b"complaint-generator/private-key/recovery@1\x00"
+SCRYPT_N = 2 ** 14
+SCRYPT_R = 8
+SCRYPT_P = 1
+_KEYRING_SERVICE = "complaint-generator.private-keys"
+_RECEIPT_FIELDS = (
+    "status",
+    "code",
+    "protection",
+    "unlocked",
+    "actions",
+    "message",
+    "awaiting_user",
+    "worker_may_continue",
+    "worker_state",
+    "unlock_is_remote_consent",
+    "cloud_processing_enabled",
+    "overwrites_encrypted_state",
+    "raw_key_persisted",
+    "protection_downgrade",
+    "case_count",
+    "invented_key",
+    "privacy_bypassed",
+    "deliberate_export",
+    "automatic_backup",
+)
+
+
+class PrivateKeyLockedError(PrivateKeyMaterialError):
+    """Existing wrapped keys cannot be used or replaced until the user unlocks.
+
+    The coding supervisor is not asked to invent a key. Independent work can
+    continue while this state is waiting on the user.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        actions: Sequence[str],
+        protection: str | None = None,
+        code: str = "unlock_needed",
+    ) -> None:
+        super().__init__(code)
+        self.message = str(message)
+        self.actions = tuple(actions)
+        self.protection = protection
+        self.public_code = code
+
+    def public_state(self) -> dict[str, Any]:
+        return _public_key_state(
+            status="unlock_needed" if self.public_code == "unlock_needed" else "keyring_unavailable",
+            code=self.public_code,
+            protection=self.protection,
+            unlocked=False,
+            actions=self.actions,
+            message=self.message,
+            awaiting_user=True,
+        )
+
+
+def _public_key_state(
+    *,
+    status: str,
+    code: str,
+    protection: str | None,
+    unlocked: bool,
+    actions: Sequence[str],
+    message: str,
+    awaiting_user: bool,
+    case_count: int = 0,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "code": code,
+        "protection": protection,
+        "unlocked": unlocked,
+        "actions": list(actions),
+        "message": message,
+        "awaiting_user": awaiting_user,
+        "worker_may_continue": True,
+        "worker_state": "ready_for_independent_tasks",
+        "unlock_is_remote_consent": False,
+        "cloud_processing_enabled": False,
+        "overwrites_encrypted_state": False,
+        "raw_key_persisted": False,
+        "protection_downgrade": False,
+        "case_count": case_count,
+        "invented_key": False,
+        "privacy_bypassed": False,
+    }
+
+
+def task_key_receipt(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Fields safe for a task receipt. Passphrases and key bytes are omitted."""
+
+    receipt = {field: state[field] for field in _RECEIPT_FIELDS if field in state}
+    leaked = {"passphrase", "password", "master_key", "data_key", "wrapping_key", "salt", "ciphertext"}
+    if leaked.intersection(receipt):
+        raise PrivateKeyMaterialError("receipt_leak")
+    return receipt
+
+
+def _b64e(raw: bytes) -> str:
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _b64d(value: str) -> bytes:
+    if not isinstance(value, str) or not value:
+        raise PrivateArtifactIntegrityError("malformed")
+    try:
+        return base64.b64decode(value.encode("ascii"), validate=True)
+    except Exception as exc:
+        raise PrivateArtifactIntegrityError("malformed") from exc
+
+
+def _random_secret() -> bytes:
+    try:
+        material = os.urandom(DATA_KEY_BYTES)
+    except Exception as exc:
+        raise PrivateCryptoCapabilityError("secure random source unavailable") from exc
+    if not isinstance(material, bytes) or len(material) != DATA_KEY_BYTES or material == bytes(DATA_KEY_BYTES):
+        raise PrivateCryptoCapabilityError("secure random source failed")
+    return material
+
+
+def _opaque_key_id(prefix: str) -> str:
+    return prefix + os.urandom(16).hex()
+
+
+def _kdf_bytes(passphrase: str, salt: bytes) -> bytes:
+    if not isinstance(passphrase, str) or passphrase == "":
+        raise PrivateKeyMaterialError("passphrase_required")
+    if not isinstance(salt, bytes) or len(salt) < 16:
+        raise PrivateArtifactIntegrityError("malformed")
+    try:
+        from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+    except Exception as exc:
+        raise PrivateCryptoCapabilityError("scrypt is unavailable") from exc
+    try:
+        derived = Scrypt(salt=salt, length=DATA_KEY_BYTES, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P).derive(
+            passphrase.encode("utf-8")
+        )
+    except Exception as exc:
+        raise PrivateCryptoCapabilityError("scrypt failed") from exc
+    return _require_data_key(derived)
+
+
+def _wrap_secret(wrapping_key: bytes, plaintext: bytes, aad: bytes) -> dict[str, str]:
+    nonce = os.urandom(NONCE_BYTES)
+    ciphertext = _aesgcm_context(wrapping_key).encrypt(nonce, plaintext, aad)
+    return {"nonce": _b64e(nonce), "ciphertext": _b64e(ciphertext)}
+
+
+def _unwrap_secret(wrapping_key: bytes, wrapped: Mapping[str, Any], aad: bytes) -> bytes:
+    if not isinstance(wrapped, Mapping):
+        raise PrivateArtifactIntegrityError("malformed")
+    nonce = _b64d(str(wrapped.get("nonce") or ""))
+    ciphertext = _b64d(str(wrapped.get("ciphertext") or ""))
+    if len(nonce) != NONCE_BYTES or len(ciphertext) < TAG_BYTES:
+        raise PrivateArtifactIntegrityError("malformed")
+    try:
+        opened = _aesgcm_context(wrapping_key).decrypt(nonce, ciphertext, aad)
+    except Exception as exc:
+        raise PrivateArtifactIntegrityError("authentication_failed") from exc
+    return _require_data_key(opened)
+
+
+def _data_aad(tenant_id: str, case_id: str, key_id: str) -> bytes:
+    _require_label(tenant_id)
+    _require_label(case_id)
+    _require_key_id(key_id)
+    return DATA_WRAP_DOMAIN + tenant_id.encode("utf-8") + b"\x00" + case_id.encode("utf-8") + b"\x00" + key_id.encode("utf-8")
+
+
+def _recovery_aad(tenant_id: str, case_id: str, key_id: str) -> bytes:
+    return RECOVERY_WRAP_DOMAIN + _data_aad(tenant_id, case_id, key_id)
+
+
+def _kdf_metadata(salt: bytes) -> dict[str, Any]:
+    return {
+        "name": "scrypt",
+        "n": SCRYPT_N,
+        "r": SCRYPT_R,
+        "p": SCRYPT_P,
+        "length": DATA_KEY_BYTES,
+        "salt": _b64e(salt),
+    }
+
+
+def _reject_secret_path(path: Path) -> None:
+    name = path.name.lower()
+    if name.endswith(".key") or name in {"master.key", "data.key"}:
+        raise PrivateKeyMaterialError("raw_key_path")
+    lowered = {part.lower() for part in path.parts}
+    if "backups" in lowered or "backup" in lowered:
+        raise PrivateKeyMaterialError("recovery_is_not_a_backup")
+
+
+def _assert_owner_mode(path: Path, expected: int) -> None:
+    mode = stat.S_IMODE(path.stat().st_mode)
+    if mode != expected:
+        raise PrivateKeyMaterialError("permissions")
+
+
+def _write_private_bytes(path: Path, payload: bytes, *, protect_parent: bool) -> None:
+    _reject_secret_path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if protect_parent:
+        os.chmod(path.parent, 0o700)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        view = payload
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise PrivateStorageError("key store write failed", code="key_store_io")
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.chmod(path, 0o600)
+    if protect_parent:
+        _assert_owner_mode(path.parent, 0o700)
+    _assert_owner_mode(path, 0o600)
+
+
+def _read_private_bytes(path: Path) -> bytes:
+    _assert_owner_mode(path.parent, 0o700)
+    _assert_owner_mode(path, 0o600)
+    return path.read_bytes()
+
+
+class UserOwnedKeySession:
+    """Passphrase- or keyring-wrapped master key with per-case data keys.
+
+    Unwrapped keys exist only in this object. ``lock`` drops them. A fresh
+    process starts locked. Creating or importing over an existing store while
+    locked is refused.
+    """
+
+    def __init__(self, directory: str | Path) -> None:
+        self.directory = Path(directory)
+        _reject_secret_path(self.directory)
+        self.path = self.directory / KEY_STORE_FILENAME
+        self._document: dict[str, Any] | None = None
+        self._master: bytes | None = None
+        self._master_id: str | None = None
+        self._data_keys: dict[tuple[str, str], tuple[str, bytes]] = {}
+        if self.path.exists():
+            self._document = self._load_document()
+
+    @property
+    def unlocked(self) -> bool:
+        return self._master is not None
+
+    def public_state(self) -> dict[str, Any]:
+        document = self._document
+        if document is None:
+            return _public_key_state(
+                status="absent",
+                code="key_store_absent",
+                protection=None,
+                unlocked=False,
+                actions=("create_with_passphrase", "create_with_keyring", "recovery_import"),
+                message="No wrapped key store exists. Create one with a passphrase or an available keyring, or import recovery material.",
+                awaiting_user=True,
+            )
+        protection = str(document.get("protection") or "")
+        case_count = len(document.get("cases") or {})
+        if self.unlocked:
+            return _public_key_state(
+                status="unlocked",
+                code="unlocked",
+                protection=protection,
+                unlocked=True,
+                actions=("lock", "recovery_export"),
+                message="Keys are unwrapped in this session only.",
+                awaiting_user=False,
+                case_count=case_count,
+            )
+        actions = ["recovery_import"]
+        if protection == "passphrase":
+            actions.insert(0, "passphrase_unlock")
+        elif protection == "keyring":
+            actions.insert(0, "keyring_unlock")
+            actions.append("passphrase_or_recovery_instead_of_raw_file")
+        return _public_key_state(
+            status="unlock_needed",
+            code="unlock_needed",
+            protection=protection,
+            unlocked=False,
+            actions=actions,
+            message="Wrapped keys are locked. Unlock with the configured method or import a deliberate recovery export. No raw key file will be written.",
+            awaiting_user=True,
+            case_count=case_count,
+        )
+
+    def create(
+        self,
+        *,
+        protection: str,
+        passphrase: str | None = None,
+        keyring: Any = None,
+    ) -> dict[str, Any]:
+        if protection not in {"passphrase", "keyring"}:
+            raise PrivateKeyMaterialError("protection_mode")
+        if self.path.exists():
+            raise PrivateKeyLockedError(
+                "A wrapped key store already exists and will not be replaced.",
+                actions=self.public_state()["actions"],
+                protection=str((self._document or {}).get("protection") or protection),
+            )
+        master = _random_secret()
+        master_id = _opaque_key_id("m-")
+        if protection == "passphrase":
+            salt = os.urandom(16)
+            wrapped = _wrap_secret(_kdf_bytes(str(passphrase), salt), master, MASTER_WRAP_AAD)
+            document = self._new_document(
+                protection="passphrase",
+                master_id=master_id,
+                wrapped=wrapped,
+                kdf=_kdf_metadata(salt),
+            )
+        else:
+            adapter = _require_keyring(keyring)
+            wrapping = _random_secret()
+            account = _opaque_key_id("kr-")
+            try:
+                adapter.set_password(_KEYRING_SERVICE, account, _b64e(wrapping))
+            except Exception as exc:
+                raise PrivateKeyLockedError(
+                    "The OS keyring is unavailable or locked. Use a passphrase or import recovery material. A raw key file was not written.",
+                    actions=("create_with_passphrase", "recovery_import"),
+                    code="keyring_unavailable",
+                ) from exc
+            document = self._new_document(
+                protection="keyring",
+                master_id=master_id,
+                wrapped=_wrap_secret(wrapping, master, MASTER_WRAP_AAD),
+                kdf=None,
+                keyring_account=account,
+            )
+        self._write_document(document)
+        self._document = document
+        self._master = master
+        self._master_id = master_id
+        return self.public_state()
+
+    def unlock_passphrase(self, passphrase: str) -> dict[str, Any]:
+        document = self._require_document()
+        if document.get("protection") != "passphrase":
+            raise PrivateKeyLockedError(
+                "This store is not passphrase-wrapped. Retry the keyring or import a deliberate recovery export into a new store.",
+                actions=("keyring_unlock", "recovery_import"),
+                protection=str(document.get("protection") or ""),
+                code="keyring_unavailable" if document.get("protection") == "keyring" else "unlock_needed",
+            )
+        kdf = document.get("kdf")
+        if not isinstance(kdf, Mapping) or kdf.get("name") != "scrypt":
+            raise PrivateArtifactIntegrityError("malformed")
+        if int(kdf.get("n") or 0) != SCRYPT_N or int(kdf.get("r") or 0) != SCRYPT_R or int(kdf.get("p") or 0) != SCRYPT_P:
+            raise PrivateArtifactIntegrityError("malformed")
+        try:
+            master = _unwrap_secret(
+                _kdf_bytes(passphrase, _b64d(str(kdf.get("salt") or ""))),
+                document.get("wrapped_master") or {},
+                MASTER_WRAP_AAD,
+            )
+        except PrivateArtifactIntegrityError as exc:
+            self.lock()
+            raise PrivateArtifactIntegrityError(exc.reason) from None
+        self._install_master(document, master)
+        return self.public_state()
+
+    def unlock_keyring(self, keyring: Any = None) -> dict[str, Any]:
+        document = self._require_document()
+        if document.get("protection") != "keyring":
+            raise PrivateKeyLockedError(
+                "This store is passphrase-wrapped. A keyring unlock was not attempted and no raw key file was written.",
+                actions=("passphrase_unlock", "recovery_import"),
+                protection="passphrase",
+            )
+        adapter = keyring if keyring is not None else _optional_system_keyring()
+        if adapter is None:
+            raise PrivateKeyLockedError(
+                "No OS keyring is available. Unlock by importing a deliberate recovery export or creating a new passphrase-protected store. The existing store was not rewritten.",
+                actions=("recovery_import", "create_with_passphrase"),
+                protection="keyring",
+                code="keyring_unavailable",
+            )
+        account = str(document.get("keyring_account") or "")
+        try:
+            stored = adapter.get_password(_KEYRING_SERVICE, account)
+        except Exception as exc:
+            raise PrivateKeyLockedError(
+                "The OS keyring is locked. Enter a recovery export or retry the keyring. The wrapped store was not replaced with a raw key.",
+                actions=("recovery_import", "keyring_unlock"),
+                protection="keyring",
+            ) from exc
+        if not isinstance(stored, str) or stored == "":
+            raise PrivateKeyLockedError(
+                "The OS keyring did not return the wrapping key. Import recovery material or retry the keyring.",
+                actions=("recovery_import", "keyring_unlock"),
+                protection="keyring",
+            )
+        try:
+            wrapping = _b64d(stored)
+            master = _unwrap_secret(wrapping, document.get("wrapped_master") or {}, MASTER_WRAP_AAD)
+        except PrivateArtifactIntegrityError as exc:
+            self.lock()
+            raise PrivateArtifactIntegrityError(exc.reason) from None
+        self._install_master(document, master)
+        return self.public_state()
+
+    def lock(self) -> dict[str, Any]:
+        if self._master is not None:
+            self._master = bytes(DATA_KEY_BYTES)
+            self._master = None
+        self._data_keys.clear()
+        self._master_id = None
+        return self.public_state()
+
+    def ensure_data_key(self, tenant_id: str, case_id: str) -> str:
+        _require_label(tenant_id)
+        _require_label(case_id)
+        if not self.unlocked or self._master is None or self._document is None:
+            raise PrivateKeyLockedError(
+                "The case key is locked, so encrypted state was left unchanged.",
+                actions=self.public_state()["actions"],
+                protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
+            )
+        found = self._data_keys.get((tenant_id, case_id))
+        if found is not None:
+            return found[0]
+        key_id = _opaque_key_id("d-")
+        data_key = _random_secret()
+        cases = dict(self._document.get("cases") or {})
+        cases[f"{tenant_id}\n{case_id}"] = {
+            "tenant_id": tenant_id,
+            "case_id": case_id,
+            "data_key_id": key_id,
+            "wrapped_data_key": _wrap_secret(self._master, data_key, _data_aad(tenant_id, case_id, key_id)),
+        }
+        updated = dict(self._document)
+        updated["cases"] = cases
+        self._write_document(updated)
+        self._document = updated
+        self._data_keys[(tenant_id, case_id)] = (key_id, data_key)
+        return key_id
+
+    def provider(self) -> InjectedCaseKeyProvider:
+        if not self.unlocked:
+            raise PrivateKeyLockedError(
+                "Cannot build an in-memory key provider while locked.",
+                actions=self.public_state()["actions"],
+                protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
+            )
+        return InjectedCaseKeyProvider(dict(self._data_keys))
+
+    def export_recovery(self, tenant_id: str, case_id: str, recovery_passphrase: str, destination: str | Path | None = None) -> dict[str, Any]:
+        if not self.unlocked:
+            raise PrivateKeyLockedError(
+                "Recovery export requires an unlocked session. Nothing was written.",
+                actions=self.public_state()["actions"],
+                protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
+            )
+        key_id = self.ensure_data_key(tenant_id, case_id)
+        _key_id, data_key = self._data_keys[(tenant_id, case_id)]
+        salt = os.urandom(16)
+        payload = {
+            "schema": KEY_RECOVERY_SCHEMA,
+            "schema_version": KEY_RECOVERY_VERSION,
+            "deliberate_export": True,
+            "automatic_backup": False,
+            "tenant_id": tenant_id,
+            "case_id": case_id,
+            "data_key_id": key_id,
+            "kdf": _kdf_metadata(salt),
+            "wrapped_data_key": _wrap_secret(
+                _kdf_bytes(recovery_passphrase, salt),
+                data_key,
+                _recovery_aad(tenant_id, case_id, key_id),
+            ),
+        }
+        encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+        if destination is not None:
+            target = Path(destination)
+            _reject_secret_path(target)
+            if target.is_dir():
+                raise PrivateKeyMaterialError("recovery_destination")
+            _write_private_bytes(target, encoded, protect_parent=False)
+        return {
+            "deliberate_export": True,
+            "automatic_backup": False,
+            "tenant_id": tenant_id,
+            "case_id": case_id,
+            "data_key_id": key_id,
+            "bytes": encoded,
+            "unlock_is_remote_consent": False,
+        }
+
+    def import_recovery(
+        self,
+        payload: bytes | str | Mapping[str, Any],
+        *,
+        tenant_id: str,
+        case_id: str,
+        recovery_passphrase: str,
+        store_passphrase: str | None = None,
+    ) -> dict[str, Any]:
+        _require_label(tenant_id)
+        _require_label(case_id)
+        document_in = _parse_recovery(payload)
+        if document_in.get("automatic_backup") is not False or document_in.get("deliberate_export") is not True:
+            raise PrivateKeyMaterialError("recovery_not_deliberate")
+        declared_tenant = str(document_in.get("tenant_id") or "")
+        declared_case = str(document_in.get("case_id") or "")
+        if declared_tenant != tenant_id or declared_case != case_id:
+            raise PrivateArtifactBindingError("foreign_case")
+        key_id = str(document_in.get("data_key_id") or "")
+        kdf = document_in.get("kdf")
+        if not isinstance(kdf, Mapping):
+            raise PrivateArtifactIntegrityError("malformed")
+        data_key = _unwrap_secret(
+            _kdf_bytes(recovery_passphrase, _b64d(str(kdf.get("salt") or ""))),
+            document_in.get("wrapped_data_key") or {},
+            _recovery_aad(tenant_id, case_id, key_id),
+        )
+        if self.path.exists() and not self.unlocked:
+            raise PrivateKeyLockedError(
+                "The existing wrapped store is locked, so recovery import did not overwrite it.",
+                actions=self.public_state()["actions"],
+                protection=str((self._document or {}).get("protection") or ""),
+            )
+        if self._document is None:
+            chosen = store_passphrase if store_passphrase is not None else recovery_passphrase
+            self.create(protection="passphrase", passphrase=chosen)
+        assert self._master is not None and self._document is not None
+        cases = dict(self._document.get("cases") or {})
+        slot = f"{tenant_id}\n{case_id}"
+        current = cases.get(slot)
+        if isinstance(current, Mapping) and current.get("data_key_id") not in {None, key_id}:
+            raise PrivateKeyLockedError(
+                "This case already has a different data key. The existing wrapped key was kept.",
+                actions=("unlock", "recovery_export"),
+                protection=str(self._document.get("protection") or ""),
+            )
+        cases[slot] = {
+            "tenant_id": tenant_id,
+            "case_id": case_id,
+            "data_key_id": key_id,
+            "wrapped_data_key": _wrap_secret(self._master, data_key, _data_aad(tenant_id, case_id, key_id)),
+        }
+        updated = dict(self._document)
+        updated["cases"] = cases
+        self._write_document(updated)
+        self._document = updated
+        self._data_keys[(tenant_id, case_id)] = (key_id, data_key)
+        state = self.public_state()
+        state["imported"] = True
+        state["deliberate_export"] = True
+        state["automatic_backup"] = False
+        return state
+
+    def assert_no_raw_key_files(self) -> None:
+        if not self.directory.exists():
+            return
+        for path in self.directory.rglob("*"):
+            if path.is_file() and path.name.lower().endswith(".key"):
+                raise PrivateKeyMaterialError("raw_key_persisted")
+
+    def _require_document(self) -> dict[str, Any]:
+        if self._document is None:
+            raise PrivateKeyMaterialError("key_store_absent")
+        return self._document
+
+    def _install_master(self, document: Mapping[str, Any], master: bytes) -> None:
+        loaded: dict[tuple[str, str], tuple[str, bytes]] = {}
+        cases = document.get("cases") or {}
+        if not isinstance(cases, Mapping):
+            raise PrivateArtifactIntegrityError("malformed")
+        for item in cases.values():
+            if not isinstance(item, Mapping):
+                raise PrivateArtifactIntegrityError("malformed")
+            tenant = str(item.get("tenant_id") or "")
+            case = str(item.get("case_id") or "")
+            key_id = str(item.get("data_key_id") or "")
+            opened = _unwrap_secret(master, item.get("wrapped_data_key") or {}, _data_aad(tenant, case, key_id))
+            loaded[(tenant, case)] = (key_id, opened)
+        self._master = master
+        self._master_id = str(document.get("master_key_id") or "")
+        self._data_keys = loaded
+
+    def _new_document(
+        self,
+        *,
+        protection: str,
+        master_id: str,
+        wrapped: Mapping[str, str],
+        kdf: Mapping[str, Any] | None,
+        keyring_account: str | None = None,
+    ) -> dict[str, Any]:
+        document: dict[str, Any] = {
+            "schema": KEY_STORE_SCHEMA,
+            "schema_version": KEY_STORE_VERSION,
+            "protection": protection,
+            "algorithm": ALGORITHM_NAME,
+            "master_key_id": master_id,
+            "wrapped_master": dict(wrapped),
+            "cases": {},
+            "raw_key_persisted": False,
+        }
+        if kdf is not None:
+            document["kdf"] = dict(kdf)
+        if keyring_account is not None:
+            document["keyring_service"] = _KEYRING_SERVICE
+            document["keyring_account"] = keyring_account
+        return document
+
+    def _write_document(self, document: Mapping[str, Any]) -> None:
+        encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        self.directory.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.directory, 0o700)
+        temporary = self.directory / f".{KEY_STORE_FILENAME}.tmp"
+        _write_private_bytes(temporary, encoded, protect_parent=True)
+        os.replace(temporary, self.path)
+        os.chmod(self.path, 0o600)
+        _assert_owner_mode(self.path, 0o600)
+
+    def _load_document(self) -> dict[str, Any]:
+        raw = _read_private_bytes(self.path)
+        try:
+            document = json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            raise PrivateArtifactIntegrityError("malformed") from exc
+        if not isinstance(document, dict):
+            raise PrivateArtifactIntegrityError("malformed")
+        if document.get("schema") != KEY_STORE_SCHEMA or document.get("schema_version") != KEY_STORE_VERSION:
+            raise PrivateArtifactIntegrityError("unsupported_version")
+        if document.get("protection") not in {"passphrase", "keyring"}:
+            raise PrivateArtifactIntegrityError("malformed")
+        if document.get("raw_key_persisted") is not False:
+            raise PrivateKeyMaterialError("raw_key_persisted")
+        return document
+
+
+def _parse_recovery(payload: bytes | str | Mapping[str, Any]) -> Mapping[str, Any]:
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    if isinstance(payload, (bytes, bytearray)):
+        try:
+            parsed = json.loads(bytes(payload).decode("utf-8"))
+        except Exception as exc:
+            raise PrivateArtifactIntegrityError("malformed") from exc
+    elif isinstance(payload, Mapping):
+        parsed = dict(payload)
+    else:
+        raise PrivateArtifactIntegrityError("malformed")
+    if not isinstance(parsed, dict):
+        raise PrivateArtifactIntegrityError("malformed")
+    if parsed.get("schema") != KEY_RECOVERY_SCHEMA or parsed.get("schema_version") != KEY_RECOVERY_VERSION:
+        raise PrivateArtifactIntegrityError("unsupported_version")
+    return parsed
+
+
+def _require_keyring(keyring: Any) -> Any:
+    if keyring is None:
+        keyring = _optional_system_keyring()
+    if keyring is None or not hasattr(keyring, "set_password") or not hasattr(keyring, "get_password"):
+        raise PrivateKeyLockedError(
+            "The OS keyring is unavailable. Choose passphrase protection or import recovery material. No raw key file was written.",
+            actions=("create_with_passphrase", "recovery_import"),
+            code="keyring_unavailable",
+        )
+    return keyring
+
+
+def _optional_system_keyring() -> Any:
+    try:
+        import keyring
+    except Exception:
+        return None
+    if not hasattr(keyring, "get_password") or not hasattr(keyring, "set_password"):
+        return None
+    return keyring
+
+
+def read_unlock_passphrase(prompt: str = "Private key passphrase", *, getpass_fn: Callable[[str], str] | None = None) -> str:
+    """Read a passphrase without echoing it and without accepting argv values."""
+
+    import sys
+
+    for token in sys.argv:
+        if not token.startswith("-"):
+            continue
+        name = token.split("=", 1)[0].lower()
+        if name in {"--passphrase", "--password", "--master-key", "--data-key", "--wrapping-key"}:
+            raise PrivateKeyMaterialError("secret_in_argv")
+    reader = getpass_fn
+    if reader is None:
+        import getpass
+
+        reader = getpass.getpass
+    try:
+        value = reader(f"{prompt}: ")
+    except Exception as exc:
+        raise PrivateKeyMaterialError("passphrase_prompt_failed") from exc
+    if not isinstance(value, str) or value == "":
+        raise PrivateKeyMaterialError("passphrase_required")
+    return value
+
+
+def assert_store_isolated_from_exports(store_dir: str | Path, export_dir: str | Path) -> None:
+    """Refuse to keep a key store inside or next to an encrypted export directory."""
+
+    store = Path(store_dir).resolve()
+    export = Path(export_dir).resolve()
+    if store == export or store in export.parents or export in store.parents or store.parent == export:
+        raise PrivateKeyMaterialError("key_beside_export")
+
+
 __all__ = [
     "ALGORITHM_NAME",
     "DATA_KEY_BYTES",
@@ -694,4 +1436,11 @@ __all__ = [
     "retrieve_private_artifact",
     "seal_private_artifact",
     "store_private_artifact",
+    "KEY_STORE_SCHEMA",
+    "KEY_RECOVERY_SCHEMA",
+    "PrivateKeyLockedError",
+    "UserOwnedKeySession",
+    "assert_store_isolated_from_exports",
+    "read_unlock_passphrase",
+    "task_key_receipt",
 ]

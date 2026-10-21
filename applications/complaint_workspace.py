@@ -10581,6 +10581,191 @@ class ComplaintWorkspaceService:
             },
         }
 
+    def _private_key_directory(self) -> Path:
+        return self._session_dir / "private-keys"
+
+    def _private_key_session(self):
+        from integrations.private_storage import UserOwnedKeySession
+
+        session = getattr(self, "_user_owned_keys", None)
+        directory = self._private_key_directory()
+        if session is None or Path(session.directory) != directory:
+            session = UserOwnedKeySession(directory)
+            self._user_owned_keys = session
+        return session
+
+    def private_key_status(self) -> Dict[str, Any]:
+        """Report unlock state without minting keys or reading case plaintext."""
+
+        from integrations.private_storage import task_key_receipt
+
+        return task_key_receipt(self._private_key_session().public_state())
+
+    def initialize_private_keys(
+        self,
+        *,
+        protection: str,
+        passphrase: Optional[str] = None,
+        keyring: Any = None,
+    ) -> Dict[str, Any]:
+        """Create a wrapped store. Unlock does not change cloud consent."""
+
+        from integrations.private_storage import PrivateKeyLockedError, task_key_receipt
+
+        session = self._private_key_session()
+        try:
+            state = session.create(protection=protection, passphrase=passphrase, keyring=keyring)
+        except PrivateKeyLockedError as exc:
+            return task_key_receipt(exc.public_state())
+        self._user_owned_keys = session
+        return task_key_receipt(state)
+
+    def unlock_private_keys(
+        self,
+        *,
+        passphrase: Optional[str] = None,
+        keyring: Any = None,
+    ) -> Dict[str, Any]:
+        """Unwrap keys into session memory. This is not consent to send plaintext."""
+
+        from integrations.private_storage import (
+            PrivateArtifactIntegrityError,
+            PrivateKeyLockedError,
+            task_key_receipt,
+        )
+
+        session = self._private_key_session()
+        try:
+            if passphrase is not None:
+                state = session.unlock_passphrase(passphrase)
+            else:
+                state = session.unlock_keyring(keyring)
+        except PrivateKeyLockedError as exc:
+            return task_key_receipt(exc.public_state())
+        except PrivateArtifactIntegrityError:
+            state = session.public_state()
+            state["code"] = "authentication_failed"
+            state["message"] = "The wrapped key did not authenticate. Encrypted state was not overwritten."
+            state["awaiting_user"] = True
+            state["status"] = "unlock_needed"
+            return task_key_receipt(state)
+        self._user_owned_keys = session
+        return task_key_receipt(state)
+
+    def lock_private_keys(self) -> Dict[str, Any]:
+        from integrations.private_storage import task_key_receipt
+
+        return task_key_receipt(self._private_key_session().lock())
+
+    def export_private_key_recovery(
+        self,
+        *,
+        tenant_id: str,
+        case_id: str,
+        recovery_passphrase: str,
+        destination: str,
+    ) -> Dict[str, Any]:
+        """User-requested recovery export. Automatic case backups are a different path."""
+
+        from integrations.private_storage import PrivateKeyLockedError, task_key_receipt
+
+        session = self._private_key_session()
+        try:
+            exported = session.export_recovery(tenant_id, case_id, recovery_passphrase, destination)
+        except PrivateKeyLockedError as exc:
+            return task_key_receipt(exc.public_state())
+        state = session.public_state()
+        state["deliberate_export"] = True
+        state["automatic_backup"] = False
+        state["message"] = "Deliberate recovery export written. This is not an automatic case backup."
+        state["case_count"] = session.public_state()["case_count"]
+        if not exported.get("deliberate_export"):
+            raise PrivateKeyLockedError(
+                "Recovery export was not marked deliberate.",
+                actions=("recovery_export",),
+            )
+        return task_key_receipt(state)
+
+    def import_private_key_recovery(
+        self,
+        *,
+        tenant_id: str,
+        case_id: str,
+        recovery_passphrase: str,
+        payload: bytes,
+        store_passphrase: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from integrations.private_storage import (
+            PrivateArtifactBindingError,
+            PrivateArtifactIntegrityError,
+            PrivateKeyLockedError,
+            task_key_receipt,
+        )
+
+        session = self._private_key_session()
+        try:
+            state = session.import_recovery(
+                payload,
+                tenant_id=tenant_id,
+                case_id=case_id,
+                recovery_passphrase=recovery_passphrase,
+                store_passphrase=store_passphrase,
+            )
+        except PrivateKeyLockedError as exc:
+            return task_key_receipt(exc.public_state())
+        except PrivateArtifactBindingError:
+            state = session.public_state()
+            state["code"] = "foreign_case"
+            state["message"] = "Recovery material belongs to another case and was not imported."
+            state["status"] = "unlock_needed"
+            state["awaiting_user"] = True
+            return task_key_receipt(state)
+        except PrivateArtifactIntegrityError:
+            state = session.public_state()
+            state["code"] = "authentication_failed"
+            state["message"] = "Recovery material did not authenticate and was not imported."
+            state["status"] = "unlock_needed"
+            state["awaiting_user"] = True
+            return task_key_receipt(state)
+        self._user_owned_keys = session
+        return task_key_receipt(state)
+
+    def ensure_private_case_key(self, tenant_id: str, case_id: str) -> Dict[str, Any]:
+        """Mint or reload one case data key. The key id is opaque; bytes stay in memory."""
+
+        from integrations.private_storage import PrivateKeyLockedError, task_key_receipt
+
+        session = self._private_key_session()
+        try:
+            key_id = session.ensure_data_key(tenant_id, case_id)
+        except PrivateKeyLockedError as exc:
+            return task_key_receipt(exc.public_state())
+        state = session.public_state()
+        state["message"] = "Case data key is available in this unlocked session."
+        receipt = task_key_receipt(state)
+        receipt["data_key_id"] = key_id
+        return receipt
+
+    def private_key_provider(self):
+        """In-memory provider for PRIV003 sealing. Refuses to invent a locked key."""
+
+        return self._private_key_session().provider()
+
+    def continue_without_private_keys(self) -> Dict[str, Any]:
+        """Let a coding supervisor proceed without user keys or a privacy bypass."""
+
+        from integrations.private_storage import task_key_receipt
+
+        state = self._private_key_session().public_state()
+        if not state.get("unlocked"):
+            state["status"] = "awaiting_user"
+            state["awaiting_user"] = True
+        state["worker_state"] = "ready_for_independent_tasks"
+        state["invented_key"] = False
+        state["privacy_bypassed"] = False
+        state["message"] = "Private keys stay locked until the user unlocks them. Other coding work can continue."
+        return task_key_receipt(state)
+
     def generate_grounded_text(
         self,
         user_id: Optional[str],
