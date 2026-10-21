@@ -384,6 +384,55 @@ def test_status_observes_current_native_task_claim(campaign, monkeypatch):
     assert result["completion_authority"] is False
 
 
+@pytest.mark.parametrize("executing,expected", [(False, "selected"), (True, "active")])
+def test_status_never_uses_previous_attempt_log_for_new_claim(campaign, monkeypatch, executing, expected):
+    stamp = datetime.now(timezone.utc).isoformat()
+    root, spec, state, _ = _status_fixture(campaign, monkeypatch, native_state={
+        "active_task_id": "CIMP-TUI-01", "active_attempt": 0,
+        "active_phase": "", "active_task_started_at": stamp,
+        "implementation_in_progress": executing,
+    })
+    old_log = state / "attempt-1.log"
+    old_log.write_text("previous timed-out attempt\n")
+    old = runner.time.time() - runner.STALL_SECONDS - 120
+    os.utime(old_log, (old, old))
+    path = state / f"{runner.STATE_PREFIX}_task_state.json"
+    payload = json.loads(path.read_text())
+    payload["last_implementation_log_path"] = str(old_log)
+    runner._atomic_json(path, payload)
+    result = runner.status(root, spec, state)
+    assert result["status"] == expected
+    assert result["claim_progress_verified"] and not result["provider_execution_verified"]
+
+
+def test_status_bounds_selected_claim_without_worker(campaign, monkeypatch):
+    stamp = datetime.fromtimestamp(runner.time.time() - runner.STALL_SECONDS - 10, timezone.utc).isoformat()
+    root, spec, state, _ = _status_fixture(campaign, monkeypatch, native_state={
+        "active_task_id": "CIMP-TUI-01", "active_attempt": 0,
+        "active_phase": "", "active_task_started_at": stamp,
+        "implementation_in_progress": False,
+    })
+    assert runner.status(root, spec, state)["status"] == "no_progress"
+
+
+def test_status_still_detects_stale_current_execution_log(campaign, monkeypatch):
+    stamp = datetime.fromtimestamp(runner.time.time() - runner.STALL_SECONDS - 20, timezone.utc).isoformat()
+    root, spec, state, _ = _status_fixture(campaign, monkeypatch, native_state={
+        "active_task_id": "CIMP-TUI-01", "active_attempt": 2,
+        "active_phase": "implementing", "active_task_started_at": stamp,
+        "implementation_in_progress": True,
+    })
+    log = state / "attempt-2.log"
+    log.write_text("current stalled attempt\n")
+    old = runner.time.time() - runner.STALL_SECONDS - 10
+    os.utime(log, (old, old))
+    path = state / f"{runner.STATE_PREFIX}_task_state.json"
+    payload = json.loads(path.read_text())
+    payload["active_log_path"] = str(log)
+    runner._atomic_json(path, payload)
+    assert runner.status(root, spec, state)["status"] == "stalled"
+
+
 def test_status_reads_real_native_duckdb_row_without_json_mirror(campaign, monkeypatch):
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import portal_task_state_control_plane as plane
     root, spec, state, _ = _status_fixture(campaign, monkeypatch)

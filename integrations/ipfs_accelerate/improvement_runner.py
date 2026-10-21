@@ -543,16 +543,9 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         board = _validate_board(repo_root, repo_root / BOARD_RELATIVE, load_spec(spec_path))
     except Exception as exc:
         board = {"read_error": str(exc), "count": 0, "completed": 0, "ready_task_ids": [], "manual_hold_task_ids": []}
-    progress_paths = [events_path, supervisor_events]
-    log_name = native_state.get("active_log_path") or native_state.get("last_implementation_log_path")
-    # Status observes paths inside this isolated campaign only.
-    if isinstance(log_name, str) and log_name:
-        candidate = Path(log_name)
-        if candidate.resolve().is_relative_to(state_dir.resolve()):
-            progress_paths.append(candidate)
-    ages = [age for path in progress_paths if (age := _age(path, now)) is not None]
-    progress_age = min(ages) if ages else None
-    active = bool(native_state.get("implementation_in_progress") or native_state.get("active_task_id"))
+    # Native selection sets active_task_id before an attempt or worker exists.
+    # Only the execution flag identifies an active implementation/validation.
+    active = bool(native_state.get("implementation_in_progress"))
     try:
         since_start = max(0.0, now - float(record.get("started_at", now)))
     except (TypeError, ValueError):
@@ -568,6 +561,17 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         state_age = _age(state_path, now)
     current_state = state_age is not None and state_age <= since_start
     active = active and current_state
+    selected = current_state and bool(native_state.get("active_task_id")) and not active
+    progress_paths = [events_path, supervisor_events]
+    # A previous attempt's log is historical evidence, never this claim's
+    # progress clock. Observe only a current execution's explicitly active log.
+    log_name = native_state.get("active_log_path") if active else None
+    if isinstance(log_name, str) and log_name:
+        candidate = Path(log_name)
+        if candidate.resolve().is_relative_to(state_dir.resolve()):
+            progress_paths.append(candidate)
+    ages = [age for path in progress_paths if (age := _age(path, now)) is not None]
+    progress_age = min(ages) if ages else None
     # A previous run's task claim is never evidence this launch made progress.
     if heartbeat_age is not None and heartbeat_age > since_start:
         heartbeat_age = None
@@ -634,6 +638,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     elif active:
         hard_expired = attempt_age is not None and attempt_age > TIMEOUT_SECONDS
         health = "stalled" if hard_expired or (active_age is not None and active_age > STALL_SECONDS) else "active"
+    elif selected:
+        health = "no_progress" if attempt_age is not None and attempt_age > STALL_SECONDS else "selected"
     elif current_state and native_state.get("blocked_task_ids") and not native_state.get("selectable_ready_task_ids"):
         health = "blocked"
     elif not board["ready_task_ids"]:
