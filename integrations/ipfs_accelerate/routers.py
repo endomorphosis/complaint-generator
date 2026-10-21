@@ -109,6 +109,7 @@ PINNED_GROK_PROVIDER = "grok_cli"
 PINNED_GROK_MODEL = "grok-4.7"
 PINNED_GROK_CANARY_PROMPT = "GROK47_CANARY_OK"
 PINNED_GROK_CANARY_MAX_TOKENS = 16
+PINNED_GROK_CANARY_TIMEOUT_SECONDS = 60
 # Aliases the native router would otherwise accept. They are refused here so
 # a caller cannot slide onto Codex, xAI HTTP, or another Grok CLI spelling.
 UNPINNED_GROK_PROVIDER_ALIASES = frozenset(
@@ -154,6 +155,10 @@ def pinned_grok47_canary_kwargs() -> dict[str, Any]:
         "max_tokens": PINNED_GROK_CANARY_MAX_TOKENS,
         "temperature": 0,
         "grok_max_turns": 1,
+        "timeout": PINNED_GROK_CANARY_TIMEOUT_SECONDS,
+        "grok_cli_cmd": ["grok"],
+        "grok_tools": "",
+        "grok_disallowed_tools": "search_tool,use_tool",
     }
 
 
@@ -242,24 +247,23 @@ def provider_reported_model_from_usage(payload: Any) -> str:
 
 
 def interpret_canary_dispatch(result: Any) -> dict[str, Any]:
-    """Separate a synthetic live dispatch from cache hits and injected text.
+    """Project untrusted transport diagnostics without granting live authority.
 
-    A string, a router trace, or a response-cache hit is never a live canary.
-    ``provider_reported_model`` is set only for an explicit live dispatch.
+    Native ``generate_text`` returns text, not its final wire envelope. An
+    injected mapping can manufacture ``dispatch`` and ``end.modelUsage``;
+    neither establishes a provider call or a provider-reported model. A future
+    native evidence API needs invocation-bound provenance before either claim
+    can be published here.
     """
 
-    cache_hit = False
-    dispatch = ""
-    if isinstance(result, Mapping):
-        cache_hit = bool(result.get("response_cache_hit") or result.get("cache_hit"))
-        dispatch = str(result.get("dispatch") or "").strip().lower()
-    reported = "" if cache_hit else provider_reported_model_from_usage(result)
-    live = dispatch == "live" and not cache_hit and bool(reported)
+    cache_hit = isinstance(result, Mapping) and (
+        result.get("response_cache_hit") is True or result.get("cache_hit") is True
+    )
     return {
-        "live_canary": live,
-        "provider_reported_model": reported if live else "",
+        "live_canary": False,
+        "provider_reported_model": "",
         "response_cache_hit": cache_hit,
-        "canary_dispatch": dispatch if dispatch in {"live", "injected", "cache"} else "",
+        "canary_dispatch": "cache" if cache_hit else "unverified",
     }
 
 
@@ -291,6 +295,7 @@ __all__ = [
     "INFERENCE_OWNER",
     "PINNED_GROK_CANARY_MAX_TOKENS",
     "PINNED_GROK_CANARY_PROMPT",
+    "PINNED_GROK_CANARY_TIMEOUT_SECONDS",
     "PINNED_GROK_MODEL",
     "PINNED_GROK_PROVIDER",
     "UNPINNED_GROK_PROVIDER_ALIASES",

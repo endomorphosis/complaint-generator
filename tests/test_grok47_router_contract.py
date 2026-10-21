@@ -10,6 +10,8 @@ import hashlib
 import json
 import socket
 import subprocess
+from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +27,21 @@ from integrations.ipfs_accelerate.routers import (
 
 MARKER = "synthetic-prompt-marker-route01"
 TOKEN = "synthetic-secret-token-route01"
+
+
+@pytest.fixture(autouse=True)
+def offline_boundaries(monkeypatch, tmp_path):
+    """No deterministic test may open a socket or start a real CLI."""
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("external I/O is forbidden in router contract tests")
+    monkeypatch.setattr(socket, "socket", forbidden)
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("GROK_HOME", str(tmp_path / "synthetic-grok-home"))
+    for name in ("XAI_API_KEY", "ipfs_accelerate_py_XAI_API_KEY", "IPFS_ACCELERATE_PY_XAI_API_KEY",
+                 "IPFS_DATASETS_PY_XAI_API_KEY", "GROK_AUTH_PROVIDER_COMMAND"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _dumps(payload: dict) -> str:
@@ -318,7 +335,7 @@ def test_native_router_pins_model_without_fallback(monkeypatch):
     _assert_quiet(result)
 
 
-def test_opt_in_canary_records_wire_model_only_when_live(monkeypatch):
+def test_opt_in_canary_keeps_injected_wire_claims_unverified(monkeypatch):
     _ready(monkeypatch)
     seen = {}
 
@@ -341,9 +358,10 @@ def test_opt_in_canary_records_wire_model_only_when_live(monkeypatch):
     assert seen["max_tokens"] == 16
     assert seen["grok_max_turns"] == 1
     assert "tools" not in seen
-    assert receipt["status"] == "available"
-    assert receipt["live_canary"] is True
-    assert receipt["provider_reported_model"] == PINNED_GROK_MODEL
+    assert receipt["status"] == "unverified"
+    assert receipt["live_canary"] is False
+    assert receipt["provider_reported_model"] == ""
+    assert receipt["canary_transport"] == "injected"
     assert receipt["canary_token_matched"] is True
     assert receipt["static_capability_only"] is False
     _assert_quiet(receipt)
@@ -356,8 +374,9 @@ def test_opt_in_canary_records_wire_model_only_when_live(monkeypatch):
     assert injected_receipt["status"] == "unverified"
     assert injected_receipt["live_canary"] is False
     assert injected_receipt["provider_reported_model"] == ""
-    assert injected_receipt["route_observation"] == "verified"
-    assert injected_receipt["route_evidence_class"] == "router_selection"
+    assert injected_receipt["route_observation"] == "unverified"
+    assert injected_receipt["route_evidence_class"] == "absent"
+    assert injected_receipt["selected_provider_name"] == ""
 
     def cached(**_kwargs):
         return {
@@ -381,10 +400,10 @@ def test_opt_in_canary_records_wire_model_only_when_live(monkeypatch):
         }
 
     refused = llm.grok47_route_capability(include_canary=True, canary_transport=wrong_model)
-    assert refused["status"] == "unavailable"
+    assert refused["status"] == "unverified"
     assert refused["resumable"] is True
-    assert refused["live_canary"] is True
-    assert refused["provider_reported_model"] == "grok-4"
+    assert refused["live_canary"] is False
+    assert refused["provider_reported_model"] == ""
     assert refused["canary_token_matched"] is True
 
     def explode(**kwargs):
@@ -409,5 +428,145 @@ def test_disabled_canary_does_not_use_a_ready_transport(monkeypatch):
     assert receipt["canary_enabled"] is False
     assert receipt["live_canary"] is False
     assert receipt["static_capability_only"] is True
+    assert receipt["selected_provider_name"] == ""
+    assert receipt["selected_model_name"] == ""
+
+
+@pytest.mark.parametrize("reported", [PINNED_GROK_MODEL, "grok-4"])
+def test_untrusted_transport_cannot_self_attest_live_execution(monkeypatch, reported):
+    _ready(monkeypatch)
+    monkeypatch.setattr(llm, "generate_text", lambda **_kwargs: "unused")
+    monkeypatch.setattr(llm, "get_last_generation_trace", lambda: _trace())
+    receipt = llm.grok47_route_capability(include_canary=True, canary_transport=lambda **_kwargs: {
+        "text": PINNED_GROK_CANARY_PROMPT, "dispatch": "live",
+        "end": {"modelUsage": {reported: {"outputTokens": 1}}},
+    })
+    assert receipt["live_canary"] is False
+    assert receipt["provider_reported_model"] == ""
+    assert receipt["status"] == "unverified"
+
+
+def test_static_discovery_does_not_assert_a_selected_identity(monkeypatch):
+    _ready(monkeypatch)
+    monkeypatch.setattr(llm, "generate_text", lambda **_kwargs: "unused")
+    receipt = llm.grok47_route_capability()
+    assert receipt["requested_provider_name"] == PINNED_GROK_PROVIDER
+    assert receipt["requested_model_name"] == PINNED_GROK_MODEL
+    assert receipt["selected_provider_name"] == ""
+    assert receipt["selected_model_name"] == ""
+
+
+@pytest.mark.parametrize("stage", ["import", "preflight"])
+def test_unavailable_receipts_drop_partial_secret_diagnostics(monkeypatch, stage):
+    if stage == "import":
+        monkeypatch.setattr(llm, "generate_text", None)
+        monkeypatch.setattr(llm, "LLM_ROUTER_ERROR", "credential=" + TOKEN)
+    else:
+        monkeypatch.setattr(llm, "generate_text", lambda **_kwargs: "unused")
+        monkeypatch.setattr(llm, "_provider_preflight_error", lambda **_kwargs: "credential=" + TOKEN)
+    receipt = llm.generate_text_with_metadata(MARKER, provider=PINNED_GROK_PROVIDER, model_name=PINNED_GROK_MODEL)
+    assert receipt["status"] == "unavailable"
+    assert TOKEN not in _dumps(receipt)
+    if stage == "import":
+        status = llm.llm_router_status(perform_probe=False)
+        assert TOKEN not in _dumps(status)
+
+
+def test_canary_overrides_ambient_tools_and_bounds_timeout(monkeypatch):
+    _ready(monkeypatch)
+    seen = {}
+    monkeypatch.setenv("IPFS_ACCELERATE_PY_GROK_CLI_TOOLS", "run_terminal_cmd,read_file")
+    monkeypatch.setattr(llm, "generate_text", lambda **_kwargs: "unused")
+    receipt = llm.grok47_route_capability(include_canary=True, canary_transport=lambda **kwargs: (
+        seen.update(kwargs) or PINNED_GROK_CANARY_PROMPT))
+    assert seen.get("grok_tools") == ""
+    assert set(seen.get("grok_disallowed_tools", "").split(",")) >= {"search_tool", "use_tool"}
+    assert type(seen.get("timeout")) is int and 0 < seen["timeout"] <= 60
+    assert receipt["live_canary"] is False
+
+
+@pytest.mark.parametrize("opt_in", ["false", 1, None])
+def test_canary_requires_a_boolean_opt_in_before_any_discovery(monkeypatch, opt_in):
+    def forbidden():
+        raise AssertionError("discovery or dispatch before explicit opt-in validation")
+    monkeypatch.setattr(llm, "grok_cli_binary_present", forbidden)
+    monkeypatch.setattr(llm, "grok_cli_auth_present", forbidden)
+    with pytest.raises(ValueError, match="explicit boolean"):
+        llm.grok47_route_capability(include_canary=opt_in)
+
+
+def test_invalid_injected_transport_cannot_fall_through_to_native_dispatch(monkeypatch):
+    monkeypatch.setattr(llm, "generate_text", lambda **_kwargs: (_ for _ in ()).throw(AssertionError("native dispatch")))
+    with pytest.raises(ValueError, match="callable"):
+        llm.grok47_route_capability(include_canary=True, canary_transport=False)
+
+
+def test_native_canary_command_disables_tools_and_exposes_evidence_gap(monkeypatch):
+    import ipfs_accelerate_py.llm_router as router
+    calls = []
+    _ready(monkeypatch)
+    monkeypatch.setenv("IPFS_ACCELERATE_PY_GROK_CLI_TOOLS", "run_terminal_cmd,read_file")
+    monkeypatch.setenv("IPFS_ACCELERATE_PY_GROK_CLI_CMD", "grok --tools run_terminal_cmd --resume unsafe-session")
+    monkeypatch.setattr(router, "_cli_available", lambda _command: True)
+    @contextmanager
+    def sampling(environment, **_kwargs):
+        yield environment
+    monkeypatch.setattr(router, "_grok_zero_temperature_environment", sampling)
+    def execute(argv, **kwargs):
+        calls.append((argv, kwargs))
+        assert Path(argv[argv.index("--prompt-file") + 1]).read_text() == PINNED_GROK_CANARY_PROMPT
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"type": "end", "stopReason": "end_turn",
+            "text": PINNED_GROK_CANARY_PROMPT, "modelUsage": {PINNED_GROK_MODEL: {"outputTokens": 1}}}), stderr="")
+    monkeypatch.setattr(router.subprocess, "run", execute)
+    provider = router._get_grok_cli_provider()
+    monkeypatch.setattr(router, "get_default_router_deps", lambda: SimpleNamespace())
+    monkeypatch.setattr(router, "get_llm_provider", lambda name, **_kwargs: provider)
+    monkeypatch.setattr(router, "_response_cache_enabled", lambda: False)
+    monkeypatch.setattr(llm, "generate_text", router.generate_text)
+    monkeypatch.setattr(llm, "get_last_generation_trace", router.get_last_generation_trace)
+    receipt = llm.grok47_route_capability(include_canary=True)
+    assert len(calls) == 1
+    argv, options = calls[0]
+    assert argv[0] == "grok"
+    assert "--resume" not in argv
+    assert argv[argv.index("--tools") + 1] == ""
+    assert set(argv[argv.index("--disallowed-tools") + 1].split(",")) >= {"search_tool", "use_tool"}
+    assert argv[argv.index("--max-turns") + 1] == "1"
+    assert options["timeout"] == 60
+    assert receipt["status"] == "unverified"
+    assert receipt["route_observation"] == "verified"
     assert receipt["selected_provider_name"] == PINNED_GROK_PROVIDER
     assert receipt["selected_model_name"] == PINNED_GROK_MODEL
+    assert receipt["live_canary"] is False and receipt["provider_reported_model"] == ""
+    assert receipt["canary_token_matched"] is True
+    assert receipt["probe_performed"] is True
+    _assert_quiet(receipt)
+
+
+def test_public_native_grok_failure_never_retries_model_or_provider(monkeypatch):
+    import ipfs_accelerate_py.llm_router as router
+    calls = []
+    class Primary:
+        def generate(self, prompt, *, model_name=None, **kwargs):
+            calls.append(("grok_cli", model_name))
+            raise RuntimeError(TOKEN)
+    def get_provider(name, **_kwargs):
+        assert name == PINNED_GROK_PROVIDER
+        return Primary()
+    def optional():
+        calls.append(("fallback-discovery", ""))
+        raise AssertionError("provider fallback")
+    monkeypatch.setattr(router, "get_default_router_deps", lambda: SimpleNamespace())
+    monkeypatch.setattr(router, "get_llm_provider", get_provider)
+    monkeypatch.setattr(router, "_iter_unpinned_optional_providers", optional)
+    monkeypatch.setattr(router, "_response_cache_enabled", lambda: False)
+    monkeypatch.setattr(llm, "generate_text", router.generate_text)
+    result = llm.generate_text_with_metadata(MARKER, provider=PINNED_GROK_PROVIDER,
+        model_name=PINNED_GROK_MODEL, allow_local_fallback=True, allow_cross_provider_fallback=True)
+    assert calls == [(PINNED_GROK_PROVIDER, PINNED_GROK_MODEL)]
+    assert result["status"] == "unavailable" and result["error"] == "provider_exception"
+    _assert_quiet(result)
+    calls.clear()
+    with pytest.raises(RuntimeError, match="^provider_exception$"):
+        llm.generate_text_via_router(MARKER, provider=PINNED_GROK_PROVIDER, model_name=PINNED_GROK_MODEL)
+    assert calls == [(PINNED_GROK_PROVIDER, PINNED_GROK_MODEL)]
