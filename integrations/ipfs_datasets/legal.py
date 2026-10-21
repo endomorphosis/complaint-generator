@@ -1769,12 +1769,26 @@ def constrain_assertions_to_corpus(
 
         corpus_hits: List[Dict[str, Any]] = []
 
-        # Unresolved jurisdiction does not select federal or Oregon statute
-        # searches. A caller-supplied vector index can still ground the text.
-        statute_search = explicit_jurisdiction != UNKNOWN_LEGAL_CONTEXT
+        # Unresolved jurisdiction does not select federal or Oregon law.
+        if explicit_jurisdiction == UNKNOWN_LEGAL_CONTEXT:
+            details.append({
+                "assertion_id": assertion_id,
+                "text": text,
+                "grounded": False,
+                "applicability": UNKNOWN_LEGAL_CONTEXT,
+                "reason": "unresolved_legal_context",
+                "corpus_hits": [],
+            })
+            ungrounded.append({
+                **assertion,
+                "grounded": False,
+                "applicability": UNKNOWN_LEGAL_CONTEXT,
+                "corpus_hits": [],
+            })
+            continue
 
         # 1. Federal statutes only when federal jurisdiction was stated.
-        if statute_search and explicit_jurisdiction == "federal":
+        if explicit_jurisdiction == "federal":
             try:
                 hits = search_us_code(text, max_results=max_results_per_assertion)
                 corpus_hits.extend(hits or [])
@@ -1782,7 +1796,7 @@ def constrain_assertions_to_corpus(
                 pass
 
         # 2. Federal Register only for an explicit federal jurisdiction.
-        if statute_search and explicit_jurisdiction == "federal" and not corpus_hits:
+        if explicit_jurisdiction == "federal" and not corpus_hits:
             try:
                 hits = search_federal_register(text, max_results=max_results_per_assertion)
                 corpus_hits.extend(hits or [])
@@ -1790,7 +1804,7 @@ def constrain_assertions_to_corpus(
                 pass
 
         # 3. State laws only for an explicit state code.
-        if statute_search and not corpus_hits and explicit_jurisdiction not in {UNKNOWN_LEGAL_CONTEXT, "federal"}:
+        if not corpus_hits and explicit_jurisdiction not in {UNKNOWN_LEGAL_CONTEXT, "federal"}:
             try:
                 hits = search_state_laws(
                     text,
@@ -1821,17 +1835,11 @@ def constrain_assertions_to_corpus(
             "grounded": is_grounded,
             "corpus_hits": corpus_hits[:max_results_per_assertion],
         }
-        if not is_grounded and explicit_jurisdiction == UNKNOWN_LEGAL_CONTEXT:
-            detail["applicability"] = UNKNOWN_LEGAL_CONTEXT
-            detail["reason"] = "unresolved_legal_context"
         details.append(detail)
         if is_grounded:
             grounded.append({**assertion, "grounded": True, "corpus_hits": corpus_hits[:max_results_per_assertion]})
         else:
-            ungrounded_row = {**assertion, "grounded": False, "corpus_hits": []}
-            if explicit_jurisdiction == UNKNOWN_LEGAL_CONTEXT:
-                ungrounded_row["applicability"] = UNKNOWN_LEGAL_CONTEXT
-            ungrounded.append(ungrounded_row)
+            ungrounded.append({**assertion, "grounded": False, "corpus_hits": []})
 
     total = len(assertions or [])
     grounded_count = len(grounded)

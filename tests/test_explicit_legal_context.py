@@ -408,3 +408,76 @@ def test_regression_explicit_state_court_discovery_does_not_select_federal_law(m
     context = apply_legal_context_update(empty_legal_context(), {'jurisdiction': 'OR'})
     assert not select_requirement_applicability({'jurisdiction': 'OR'}, context)['selected']
     assert not select_requirement_applicability({'jurisdiction': 'federal'}, context)['selected']
+
+
+@pytest.mark.parametrize("jurisdiction", [None, "unknown", "ZZ"])
+@pytest.mark.parametrize("index_source", ["argument", "environment"])
+def test_unresolved_context_cannot_be_grounded_by_vector_candidates(
+    monkeypatch, jurisdiction, index_source,
+):
+    """Retrieval similarity cannot supply a missing legal jurisdiction."""
+    from integrations.ipfs_datasets import legal
+
+    calls = []
+    def statutes(*args, **kwargs):
+        calls.append("statutes")
+        return []
+    def vectors(*args, **kwargs):
+        calls.append("vectors")
+        return [{"citation": "Synthetic vector candidate", "jurisdiction": "OR"}]
+    for name in ("search_us_code", "search_federal_register", "search_state_laws"):
+        monkeypatch.setattr(legal, name, statutes)
+    monkeypatch.setattr(legal, "_search_legal_vector_index", vectors)
+    monkeypatch.delenv("COMPLAINT_LEGAL_VECTOR_INDEX_DIR", raising=False)
+    arguments = {"legal_vector_index_dir": "synthetic-vector-index"}
+    if index_source == "environment":
+        monkeypatch.setenv("COMPLAINT_LEGAL_VECTOR_INDEX_DIR", "synthetic-vector-index")
+        arguments = {}
+    assertion = {
+        "assertion_id": "synthetic-unresolved", "text": "Synthetic legal assertion.",
+        "grounded": True, "applicability": "selected", "source_message_id": "synthetic-source",
+    }
+    before = copy.deepcopy(assertion)
+    result = constrain_assertions_to_corpus([assertion], state=jurisdiction, **arguments)
+
+    assert calls == []
+    assert assertion == before
+    assert result["jurisdiction"] == "unknown"
+    assert result["context_status"] == "unknown"
+    assert result["selected_rule_applicability"] == "unknown"
+    assert result["grounded"] == []
+    assert result["grounded_count"] == 0
+    assert result["ungrounded_count"] == 1
+    assert result["details"] == [{
+        "assertion_id": "synthetic-unresolved", "text": assertion["text"],
+        "grounded": False, "applicability": "unknown",
+        "reason": "unresolved_legal_context", "corpus_hits": [],
+    }]
+    assert result["ungrounded"] == [{
+        **assertion, "grounded": False, "applicability": "unknown", "corpus_hits": [],
+    }]
+
+
+@pytest.mark.parametrize("jurisdiction", ["OR", "federal"])
+def test_explicit_context_vector_candidates_remain_retrieval_not_rule_selection(monkeypatch, jurisdiction):
+    from integrations.ipfs_datasets import legal
+
+    calls = []
+    def statutes(*args, **kwargs):
+        return []
+    def vectors(query, **kwargs):
+        calls.append((query, kwargs["index_dir"]))
+        return [{"citation": "Synthetic vector candidate", "jurisdiction": jurisdiction}]
+    for name in ("search_us_code", "search_federal_register", "search_state_laws"):
+        monkeypatch.setattr(legal, name, statutes)
+    monkeypatch.setattr(legal, "_search_legal_vector_index", vectors)
+    assertion = {"assertion_id": "synthetic-explicit", "text": "Synthetic legal assertion."}
+    result = constrain_assertions_to_corpus(
+        [assertion], state=jurisdiction, legal_vector_index_dir="synthetic-vector-index",
+    )
+    assert calls == [(assertion["text"], "synthetic-vector-index")]
+    assert result["grounded_count"] == 1
+    assert result["jurisdiction"] == jurisdiction
+    assert result["selected_rule_applicability"] == "unknown"
+    context = apply_legal_context_update(empty_legal_context(), {"jurisdiction": jurisdiction})
+    assert select_requirement_applicability({"jurisdiction": jurisdiction}, context)["selected"] is False
