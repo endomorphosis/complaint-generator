@@ -199,6 +199,15 @@
       "errors": 0,
       "skipped": 0,
       "scope": "Final plan projection, launch/stop/status ownership and Docker shutdown; all Docker effects in tests are faked."
+    },
+    {
+      "receipt": "/tmp/complaint-interrupted-claim-qualified.xml",
+      "sha256": "b5267421c95a9a3d6b2ec4ded51805bf9babb6d7c8f356e0cfe742f9b6cdc6af",
+      "tests": 29,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Pinned interrupted-task claim recovery: immutable forensic history, exact dead owner/lease, preserved lifetime accounting, manual holds and crash replay."
     }
   ],
   "implementation_tasks_completed_by_these_checks": 0,
@@ -374,7 +383,7 @@
     "receipt_sha256": "5c1febbc35754c2ba3223f3e85b4563a0b7c4e979d58b8269fae814122a188b9",
     "receipt_path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/recovery_epoch.json"
   },
-  "native_current_maintenance_commit": "85c2b0621063da4bd14093579e3c1c4ba2bb366e",
+  "native_current_maintenance_commit": "a83491becf7abc02071bef5ab590c2349ee30304",
   "monitored_recovery_maintenance": {
     "automatic_retry_rearm": false,
     "lifetime_spent_attempts": 4,
@@ -417,5 +426,28 @@
     "reason": "PTY smoke exceeded fixed15s before any transcript; investigation pending, deadline unchanged.",
     "native_merge_attempted": false,
     "task_completed": false
+  },
+  "actual_container_shutdown_qualification": {
+    "path": "/tmp/complaint_actual_docker_shutdown_qualification_receipt.json",
+    "sha256": "4faf263760d5ca6c93509ddfa9effdd9a5e3911dfe6944e2cfedeed3a7528b98",
+    "synthetic_only": true,
+    "checks_passed": 11,
+    "provider_invoked": false,
+    "owned_container_removed": true,
+    "foreign_container_preserved": true,
+    "task_completion_authority": false
+  },
+  "operator_repaired_candidate_qualification": {
+    "path": "/tmp/complaint-tui01-independent-20261021-07vbse3r/original_baseline_fix_receipt.json",
+    "sha256": "0dadd4e050e3433d4b4f0e81e23f342097a9c91f365a39b2425fff085bd0a4bb",
+    "candidate_commit": "c5d2e56ab5568453dba15218f50bb8ff78836e49",
+    "original_grok_candidate": "4c43bf2cd66c7dc76c35c6af890fbec2b64f26a4",
+    "operator_change": "Lazy import of optional UI-review dependencies during CLI startup.",
+    "original_grok_test_and_receipt_blobs_preserved": true,
+    "native_sealed_validation": true,
+    "passed": 3,
+    "skipped": 0,
+    "task_completed": false,
+    "native_admission_pending": true
   }
 }
