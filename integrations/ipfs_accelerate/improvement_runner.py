@@ -2090,7 +2090,7 @@ def _source_freeze(root: Path, extra=()):
     return {**value, "digest": _digest(value)}
 
 
-def _pytest_instrument(command, arguments):
+def _pytest_instrument(command, arguments, *, pythonpath=()):
     # Keep the original shell/environment prefix and original selectors. This
     # adapter supports one explicit pytest invocation, not arbitrary scripts.
     pattern = r"(?<![\w-])(?:python(?:3(?:\.\d+)*)?\s+-m\s+pytest|pytest)(?=\s|$)"
@@ -2099,7 +2099,14 @@ def _pytest_instrument(command, arguments):
         raise ValueError("unsupported_behavioral_command")
     end = matches[0].end()
     import shlex
-    return command[:end] + " " + shlex.join(arguments) + command[end:]
+    invocation = command[matches[0].start():end] + " " + shlex.join(arguments)
+    if pythonpath:
+        # A retained task prefix may export its own PYTHONPATH. Bind the owned
+        # plugin roots at the actual invocation, after that prefix, while
+        # retaining declared roots and the native sealed Python shell seam.
+        owned = os.pathsep.join(map(str, pythonpath))
+        invocation = "PYTHONPATH=" + shlex.quote(owned) + ':"${PYTHONPATH-}" ' + invocation
+    return command[:matches[0].start()] + invocation + command[end:]
 
 
 def _read_catalog(path, *, repo_root=None):
@@ -2161,7 +2168,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     import xml.etree.ElementTree as ET
     from types import SimpleNamespace
     from .improvement_plan import (_MeasuredEvidence, _MEASURED, _pin_measurement, _digest, _hash_file,
-                                   bind_sources, SEALED_ENVIRONMENT_POLICY)
+                                   bind_sources, SEALED_ENVIRONMENT_POLICY, _safe_relative)
     root, state_dir = Path(root).resolve(), Path(state_dir).resolve()
     state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     run = Path(tempfile.mkdtemp(prefix="measured-", dir=state_dir)); run.chmod(0o700)
@@ -2170,6 +2177,20 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     extra = _task_outputs(task)
     start = time.monotonic()
     original_command = command
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native_source
+    phase_relative = "integrations/ipfs_accelerate/improvement_plan.py"
+    candidate_phase = root / phase_relative
+    phase_source = (candidate_phase if candidate_phase.is_file() or candidate_phase.is_symlink()
+                    else Path(__file__).resolve().parents[2] / phase_relative)
+    phase_root = phase_source.parents[2]
+    phase_source = _safe_relative(phase_root, phase_relative)
+    if phase_source is None or not phase_source.is_file():
+        raise ValueError("validation_bootstrap_source_unavailable")
+    native_root = Path(native_source.__file__).resolve().parents[3]
+    bootstrap_roots = tuple(dict.fromkeys((root, phase_root, native_root)))
+    bootstrap_files = (phase_source, native_root / "ipfs_accelerate_py/__init__.py",
+                       native_root / "ipfs_accelerate_py/testing/pytest_ast_seal.py")
+    bootstrap_before = {str(path): _hash_file(path) for path in bootstrap_files}
     impacted = _impacted_behavioral_checks(root, (context or {}).get("changed_paths", ()))
     release_script = (task.get("id") == "CIMP-REL-03" and
         task.get("validation_commands") == ["python scripts/validate_complaint_intake.py --phase pre-admission"] and
@@ -2186,7 +2207,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                    "--complaint-evidence-path=" + str(manifest)]
         options += ["--collect-only"] if mode == "collect" else ["--junitxml=" + str(junit), "-o", "junit_family=xunit2"]
         options += [p for p in impacted if p not in command.split()]
-        instrumented = _pytest_instrument(command, options)
+        instrumented = _pytest_instrument(command, options, pythonpath=bootstrap_roots)
         export = "export IPFS_ACCELERATE_PYTEST_SEAL_DUCKDB=" + shlex.quote(str(catalog))
         # Never depend on ambient pytest injection or a shared/reused catalog.
         export += " PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTEST_ADDOPTS='' PYTEST_PLUGINS=''"
@@ -2282,15 +2303,19 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
         reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command"} else "host_measurement_unavailable"
     after = _source_freeze(root, extra)
-    if before != after:
+    bootstrap_after = {str(path): _hash_file(path) for path in bootstrap_files}
+    if before != after or bootstrap_before != bootstrap_after:
         reason = "stale_source_hash"
+    imported.update(bootstrap_before)
     from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
     measured = {"schema": "complaint-owned-behavioral-measurement@1", "reason": reason,
                 "trusted_executor": {"module": str(getattr(runner, "__module__", "")), "qualname": str(getattr(runner, "__qualname__", "")),
                     "canonical_native_identity": runner is PortalImplementationDaemon._validation_command_runner,
                     "boundary": "trusted host code; returned sealed marker alone does not authenticate arbitrary callbacks"},
                 "required_nodeids": required, "cases": cases, "source_before": before, "source_after": after,
-                "source_unchanged": before == after, "imported_sources": imported,
+                "source_unchanged": before == after and bootstrap_before == bootstrap_after, "imported_sources": imported,
+                "validation_bootstrap": {"pythonpath_roots": list(map(str, bootstrap_roots)),
+                                         "before": bootstrap_before, "after": bootstrap_after},
                 "task_contract_digest": _digest(contract), "results": results, "artifacts": artifacts,
                 "completion_authority": False, "run_path": str(run),
                 "lane_basis": "native_host_validation", "live_node_verified": False, "impacted_checks": impacted,
