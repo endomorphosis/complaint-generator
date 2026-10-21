@@ -1,6 +1,6 @@
 {
   "schema_version": "complaint-generator/intake-runtime-qualification@1",
-  "native_supervisor_commit": "7a685e29f663d7a4a9820cffb8f6b51c45a13d45",
+  "native_supervisor_commit": "b646cddfe895991f64afae2f2aef4c359ceaa9bf",
   "provider": {
     "router": "ipfs_accelerate_py.llm_router",
     "provider": "grok_cli",
@@ -283,7 +283,7 @@
     }
   ],
   "implementation_tasks_completed_by_these_checks": 0,
-  "scope": "Implementation remains underway:12 of58 native tasks completed,46 pending. Source qualification grants no completion or refund. Full release qualification remains pending.",
+  "scope": "Implementation remains underway:12 of58 native tasks completed,46 pending. Environment repair grants no completion, candidate adoption or retry refund.",
   "first_party_source_sha256": {
     "integrations/ipfs_accelerate/improvement_plan.py": "034a30d5f23e5dec606fa7ff09c3bd27921bcbab527bd1d8103b45beab8f9781",
     "integrations/ipfs_accelerate/improvement_runner.py": "a7048dd2e02769989fbf04ebfa6d580a3833e238d7ac5c611e9aab478afb3ea8",
@@ -788,11 +788,11 @@
     "completed": 12,
     "pending": 46,
     "total": 58,
-    "state": "stopped_ready_to_resume_after_qualified_dur002_tui02_corrections",
-    "observed_at": "2026-10-21T12:14:41.951476+00:00",
+    "state": "stopped_ready_to_resume_after_qualified_common_crawl_environment_repair",
+    "observed_at": "2026-10-21T13:09:33.171035+00:00",
     "release_qualified": false,
     "continue_until_all58_completed": true,
-    "source": "Actual native committed taskboard and exact DUR002/TUI02 validation/merge/finish events; cached last-pass projection remains11, source repairs grant no completion."
+    "source": "Unchanged committed taskboard and fresh stopped native projection12; FACT03 attempt1 failed78 before host validation, TUI03 preparing attempt0 quiesced."
   },
   "pending_task_runtime_guidance": {
     "receipt": "/tmp/complaint-pending-guidance-install-20261021-63nbl1nl/receipt.json",
@@ -2200,6 +2200,16 @@
       "release_qualified": false,
       "continue_until_all58_completed": true,
       "source": "Actual native committed taskboard and exact PRIV004/DUR001 validation/merge/finish events; cached last-pass projection remains9, source repairs grant no completion."
+    },
+    {
+      "completed": 12,
+      "pending": 46,
+      "total": 58,
+      "state": "stopped_ready_to_resume_after_qualified_dur002_tui02_corrections",
+      "observed_at": "2026-10-21T12:14:41.951476+00:00",
+      "release_qualified": false,
+      "continue_until_all58_completed": true,
+      "source": "Actual native committed taskboard and exact DUR002/TUI02 validation/merge/finish events; cached last-pass projection remains11, source repairs grant no completion."
     }
   ],
   "dur002_tui02_source_corrections_after_native_completion": {
@@ -2514,5 +2524,174 @@
     "cached_native_completed_count": 11,
     "actual_taskboard_completed_count": 12,
     "cached_projection_preserved_for_next_ordinary_pass": true
-  }
+  },
+  "common_crawl_dependency_environment_repair": {
+    "installation": {
+      "path": "/tmp/complaint-common-crawl-env-install-publish-20261021-fpiex56x/installed.json",
+      "sha256": "1319a029a0c8f561e1e6792c5e264d4b2074deb6306150bc37aa71a285b930bf"
+    },
+    "qualification": {
+      "path": "/tmp/complaint_common_crawl_environment_paired_qualification_20261021.json",
+      "sha256": "53a417c91265d6cf86e57093e0e3b538bcdfb7aa0e8d5420f32ca2e6d2cb6b3f"
+    },
+    "paired_prequalification": {
+      "path": "/tmp/complaint_common_crawl_environment_paired_prequalification_20261021.json",
+      "sha256": "5c60ac2daef8f29445332c7598b17a185b3de6227a5a8a7c7a8c778188785bbc"
+    },
+    "failed_native_attempt": {
+      "path": "/tmp/complaint-fact03-admission-failure-retained-20261021-r7czx5q6/receipt.json",
+      "sha256": "6059f18502987a88c44a752c8b70ed536491af0c6c42ab45754c6d41f1dfa03a"
+    },
+    "stopped_native_preimage": {
+      "path": "/tmp/complaint-fact03-admission-native-preimage-20261021-2cn57hm_/receipt.json",
+      "sha256": "9f5d4b60e13d39984de37dbfc652c093cfc5568bbaf4aa7c2089a981eaf7e90a"
+    },
+    "native_commit": "b646cddfe895991f64afae2f2aef4c359ceaa9bf",
+    "firstparty_commit": "a8109d94493906e3668f706a7b640db2def613cb",
+    "native_publication_ref": "refs/heads/codex/complaint-intake-grok-only-20261021",
+    "native_ref_commit": "b646cddfe895991f64afae2f2aef4c359ceaa9bf",
+    "runtime_revision_unchanged": "sha256:cce0c30aa68db00389e06bd352b5441ee10252d8ae917986bf49f3295d9e5a8a",
+    "authority_sources10_unchanged": {
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/current_incident_adjudication.py": {
+        "sha256": "e40f64adf8da98e08556a639e247b03f2369f51c3fe3cb43939afb1455be209c",
+        "git_blob_before": "717121f82b8a979ab384c1d441ca839fdf259630",
+        "git_blob_after": "717121f82b8a979ab384c1d441ca839fdf259630"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py": {
+        "sha256": "f5a2a70434fe9f294375f3a28a83afae76c5afeb1892dd54844eeba55ae9a0ed",
+        "git_blob_before": "2e97474b47ec1653c2c7ee993f797ddd53fe7507",
+        "git_blob_after": "2e97474b47ec1653c2c7ee993f797ddd53fe7507"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_supervisor.py": {
+        "sha256": "6ded241c546fbc813ea3d3d4462aa795df566ea492440241b6506f6d0e707ac7",
+        "git_blob_before": "e753376e9461d86145f2ea98f14a85a9e9d54a2c",
+        "git_blob_after": "e753376e9461d86145f2ea98f14a85a9e9d54a2c"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/portal_task_state_control_plane.py": {
+        "sha256": "183326a143f3bf2c597d26947edf66e0859619de30aebc4716bb5bb0f21a9dd7",
+        "git_blob_before": "e01d2dd14e8ca107f9bbfbca87adf56184a2dd90",
+        "git_blob_after": "e01d2dd14e8ca107f9bbfbca87adf56184a2dd90"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/supervisor_loop.py": {
+        "sha256": "350e33ddbf94649c23a2408fb14cd2539f3ddd014e01e0b2146cce2c700e5221",
+        "git_blob_before": "b8b142e970051d00ff588bc59bf00cc0237be6be",
+        "git_blob_after": "b8b142e970051d00ff588bc59bf00cc0237be6be"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/supervisor_runtime.py": {
+        "sha256": "71e3fe8ba91ae923ff8d547c4f407ff1af18ec164e741cee4835b0ae9ce19427",
+        "git_blob_before": "af6a19fb60e0890e5f771d6a6ac06d430b27726e",
+        "git_blob_after": "af6a19fb60e0890e5f771d6a6ac06d430b27726e"
+      },
+      "ipfs_accelerate_py/agent_supervisor/merge/worktree_lifecycle.py": {
+        "sha256": "b7f8508b4b4b50d5bc259c186b55c4c6f87e938d99689a913383a8a35130249f",
+        "git_blob_before": "3eddcaf0f95b8abbba3679df6cf8ecd677c01d57",
+        "git_blob_after": "3eddcaf0f95b8abbba3679df6cf8ecd677c01d57"
+      },
+      "ipfs_accelerate_py/agent_supervisor/merge/workspace_quarantine.py": {
+        "sha256": "5a470ee8265f8d7b18daa44d2f0075569aaca287ff194a046823d6f576860b03",
+        "git_blob_before": "9bd5a2aa75828e46b42d2826457d1ee16cf59ad0",
+        "git_blob_after": "9bd5a2aa75828e46b42d2826457d1ee16cf59ad0"
+      },
+      "ipfs_accelerate_py/agent_supervisor/rescue/supervisor_watchdog.py": {
+        "sha256": "bd3ea780d15a324f659e9116d3d2b3af7a656d9c5caabfa06a80548e5a1b4dc7",
+        "git_blob_before": "733e47d6215a51f897a42b99450f24689dd41921",
+        "git_blob_after": "733e47d6215a51f897a42b99450f24689dd41921"
+      },
+      "ipfs_accelerate_py/agent_supervisor/rescue/recovery_diagnostics.py": {
+        "sha256": "3a9f10aebcbb0271cbd9f993c1b8b9d21bcd5b78aa7bca5ad658aabf645f5f4d",
+        "git_blob_before": "1dda05f2477f64e13afbd7d88158de70fa20b8b6",
+        "git_blob_after": "1dda05f2477f64e13afbd7d88158de70fa20b8b6"
+      }
+    },
+    "selected_native_passed": 32,
+    "selected_firstparty_passed": 91,
+    "selected_tests_zero_skips_failures_errors": true,
+    "known_baseline_failures": {
+      "nodeids": [
+        "api/test_agent_supervisor_provider_command_environment.py::test_grok_runner_exposes_sealed_wrapper_and_contract_digest",
+        "api/test_agent_supervisor_provider_command_environment.py::test_provider_prompt_publishes_exact_validation_toolchain_identity",
+        "api/test_agent_supervisor_provider_command_environment.py::test_provider_prompt_rejects_unvalidated_container_inventory",
+        "api/test_agent_supervisor_provider_command_environment.py::test_provider_prompt_uses_scheduler_bound_authority_container",
+        "api/test_agent_supervisor_provider_command_environment.py::test_validation_consumes_same_digest_bound_formal_toolchain_manifest"
+      ],
+      "exact_same_failure_messages_on_7a": true,
+      "baseline_repo": "/storage/barberb/changuard/.complaint-generator-qualification-20261021/native-common-crawl-baseline-vhuumiye/repo",
+      "baseline_receipt": {
+        "path": "/tmp/complaint-common-crawl-native-20261021-hec8zk1w/receipt.json",
+        "sha256": "affbfd693387e18c133774a73ed66a99ef025e93c9fe33b2be8a6933f64ff30f"
+      },
+      "baseline_junit": {
+        "path": "/tmp/complaint-common-crawl-native-20261021-hec8zk1w/cases.xml",
+        "sha256": "c028a2abe194a74c8b5e53825da26dedf0b74ca44e573a6f6be149419d75c49d"
+      },
+      "baseline_phases": {
+        "path": "/tmp/complaint-common-crawl-native-20261021-hec8zk1w/phases.json",
+        "sha256": "3b096d25711f3df73e6c2206c1aae7c81a1b97255cac98187b1563c22d04495d"
+      },
+      "baseline_control": {
+        "path": "/tmp/complaint_common_crawl_environment_baseline_control_20261021.json",
+        "sha256": "b52af0eba035d8deca648e0b8c256dea425694c4a0ef442216972684c00268c6"
+      }
+    },
+    "retained_failed_qualifications": [
+      {
+        "path": "/tmp/complaint-common-crawl-native-20261021-2eiv83ie/receipt.json",
+        "sha256": "631956da3c33385c939351b645094e4ab04ea41ff4024ed3b0dc2e2e21d24956"
+      },
+      {
+        "path": "/tmp/complaint-common-crawl-native-20261021-56htdc72/receipt.json",
+        "sha256": "254b7e5d411e09e20f1fac03203b809fbbc958bf6005725fcd7b0adf5c88ed4e"
+      },
+      {
+        "path": "/tmp/complaint-common-crawl-native-20261021-07tezjay/receipt.json",
+        "sha256": "a0e0501345f99cbfbb6f12b857e33be8ebc513c76bc6e571de9e0cac6a16f53c"
+      },
+      {
+        "path": "/tmp/complaint-common-crawl-native-20261021-hec8zk1w/receipt.json",
+        "sha256": "affbfd693387e18c133774a73ed66a99ef025e93c9fe33b2be8a6933f64ff30f"
+      }
+    ],
+    "nonfetch_flag": {
+      "COMMON_CRAWL_AUTO_CLONE_SOURCE": "0"
+    },
+    "reason": "The prior FACT03 attempt retained a generated dataset Gitlink after observed checkout mutation. A separate local reproduction establishes that optional Common Crawl bootstrap can mutate pinned checkouts; the campaign and native provider/validation boundaries now preserve explicit nonfetch policy without asserting the exact prior invoking consumer.",
+    "source_scope": {
+      "native": [
+        "ipfs_accelerate_py/agent_supervisor/runtime/grok_cli_runner.py",
+        "ipfs_accelerate_py/agent_supervisor/runtime/provider_command_environment.py",
+        "ipfs_accelerate_py/agent_supervisor/validation/validation_runtime.py",
+        "test/api/test_common_crawl_dependency_environment.py"
+      ],
+      "firstparty": [
+        "integrations/ipfs_accelerate/improvement_runner.py",
+        "tests/test_improvement_dependency_environment.py"
+      ]
+    },
+    "native_provider_and_validation_projection_qualified": true,
+    "no_generic_preservation_B_installed": true,
+    "no_candidate_adoption_or_task_completion": true,
+    "spent_fact03_attempt_retained": 1,
+    "fact03_native_returncode": 78,
+    "fact03_host_validation_attempted": false,
+    "unstarted_tui03_quiesced_attempt": 0,
+    "board_completed": 12,
+    "board_pending": 46,
+    "cached_native_completed": 12,
+    "old_settlement_journal": {
+      "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/ordinary-incident-adjudications/901fc6a204914b365a769a688fca9175a1d4e0cbcb9399257fdd6cb32b126712.json",
+      "sha256": "c3f404c4a3a584ab31e540d86e5ba93223cc6d30d64b5e9ba573982864a32701"
+    },
+    "native_authority_state_taskboard_history_unchanged": true,
+    "provider_dispatched": false,
+    "completion_authority": false,
+    "attempt_refunded": false,
+    "release_qualified": false,
+    "limits": [
+      "Selected native32 and firstparty91 tests passed on current paired source; five independently reproduced legacy provider-test failures remain explicit compatibility limits.",
+      "Prior513 application qualification remains historical evidence on native7a, not a claimed rerun on this repair.",
+      "FACT03 candidate5226 and product correction644f are separate unadmitted evidence; this environment repair grants neither task completion nor retry refund.",
+      "Generic native preservation change B is deliberately not installed; authority/runtime revision and historical incident settlement remain unchanged."
+    ]
+  },
+  "current_native_supervisor_commit": "b646cddfe895991f64afae2f2aef4c359ceaa9bf"
 }
