@@ -2928,193 +2928,138 @@ class ComplaintWorkspaceService:
         self._default_access = access if access is not None else WorkspaceAccess.trusted_local()
         self._authorizer = authorizer or WorkspaceAuthorizer()
         self.request_handlers = ComplaintWorkspaceRequestHandlers(self)
-        self._private_keys: Dict[tuple, Dict[str, Any]] = {}
 
-    def bind_private_case_key(
-        self,
-        *,
-        tenant_id: str,
-        case_id: str,
-        principal_id: str,
-        key_id: str,
-        key: Optional[bytes],
-        locked: bool = False,
-    ) -> None:
-        """Hold an injected case key in memory. Locked clears usable material."""
+    def _private_artifact_context(self, user_id: str, case_id: Optional[str] = None, *, revision: str = "session-v1") -> Dict[str, Any]:
+        """Resolve current request admission and the live user-owned key session."""
+        from integrations.private_storage import PrivateArtifactBinding, PrivateKeyMaterialError
 
-        self._private_keys[(str(tenant_id), str(case_id))] = {
-            "tenant_id": str(tenant_id),
-            "case_id": str(case_id),
-            "principal_id": str(principal_id),
-            "key_id": str(key_id),
-            "key": None if locked or key is None else bytes(key),
-            "locked": bool(locked or key is None),
-        }
+        selected_case = str(case_id or _REQUEST_CASE.get() or self._effective_access().case_id or user_id)
+        resolved = self._check_access(user_id, ability="read", case_id=selected_case, record_case_id=selected_case)
+        self._require_private_case_key_access(resolved, selected_case, principal_id=resolved)
+        binding = PrivateArtifactBinding(tenant_id=resolved, case_id=selected_case, artifact_kind="session", revision="session-v1", principal_id=resolved)
+        try:
+            provider = self.private_key_provider()
+            provider.resolve(binding)
+        except PrivateKeyMaterialError:
+            raise WorkspacePersistenceError("Private workspace keys require unlock.", code="unlock_needed", public_status="unlock_needed") from None
+        access = self._effective_access()
+        if access.trust == "trusted_local" and not access.principal_id and not access.case_id:
+            access = WorkspaceAccess.trusted_local(resolved, selected_case)
+        return {"access": access, "tenant_id": resolved, "case_id": selected_case,
+                "principal_id": resolved, "key_provider": provider, "revision": revision}
 
-    def _private_key_for(self, user_id: str, case_id: str) -> Optional[Dict[str, Any]]:
-        return self._private_keys.get((str(user_id), str(case_id))) or self._private_keys.get((str(user_id), str(user_id)))
-
-    def _unreadable_session(self, user_id: str, public_status: str, code: str) -> Dict[str, Any]:
-        return {
-            "user_id": user_id,
-            "status": public_status,
-            "code": code,
-            "session_readable": False,
-            "missing_new_session": False,
-            "existing_unreadable": True,
-            "overwrites_encrypted_state": False,
-        }
-
-    def _private_binding_name(self, filename: str) -> str:
-        return filename + ".private-binding"
+    def _private_session_filename(self, user_id: str) -> str:
+        base = self._namespace_filename(user_id)
+        try:
+            self._read_bytes_nofollow(base + ".cgpe")
+        except FileNotFoundError:
+            return base
+        except OSError:
+            raise WorkspacePersistenceError("Private session storage is unavailable.", code="read_error", public_status="unavailable") from None
+        return base + ".cgpe"
 
     def _open_private_session_bytes(self, user_id: str, filename: str, raw: bytes) -> Dict[str, Any]:
-        from integrations.private_storage import (
-            PrivateArtifactBinding,
-            PrivateArtifactIntegrityError,
-            PrivateKeyMaterialError,
-            open_private_artifact,
-        )
+        from integrations.private_storage import PrivateArtifactBinding, PrivateArtifactIntegrityError, PrivateCryptoCapabilityError, PrivateStorageError, open_private_artifact
 
+        context = self._private_artifact_context(user_id)
+        binding = PrivateArtifactBinding(tenant_id=context["tenant_id"], case_id=context["case_id"], artifact_kind="session", revision="session-v1", principal_id=context["principal_id"])
         try:
-            binding_raw = self._read_bytes_nofollow(self._private_binding_name(filename))
-            binding_doc = json.loads(binding_raw.decode("utf-8"))
-        except Exception:
-            return self._unreadable_session(user_id, "recoverable", "binding_missing")
-        if not isinstance(binding_doc, dict):
-            return self._unreadable_session(user_id, "recoverable", "binding_missing")
-        principal = str(binding_doc.get("principal_id") or "")
-        case_id = str(binding_doc.get("case_id") or "")
-        tenant_id = str(binding_doc.get("tenant_id") or "")
-        if principal != user_id:
-            return self._unreadable_session(user_id, "unavailable", "owner_mismatch")
-        access = self._effective_access()
-        if access.principal_id and access.principal_id != principal:
-            return self._unreadable_session(user_id, "unavailable", "owner_mismatch")
-        if access.case_id and access.case_id != case_id:
-            return self._unreadable_session(user_id, "unavailable", "owner_mismatch")
-        material = self._private_key_for(tenant_id, case_id)
-        if material is None or material.get("locked") or material.get("key") is None:
-            return self._unreadable_session(user_id, "unlock_needed", "unlock_needed")
-        try:
-            binding = PrivateArtifactBinding(
-                tenant_id=tenant_id,
-                case_id=case_id,
-                artifact_kind=str(binding_doc.get("artifact_kind") or "session"),
-                revision=str(binding_doc.get("revision") or "session-v1"),
-                principal_id=principal,
-            )
-            opened = open_private_artifact(
-                raw,
-                binding=binding,
-                key=material["key"],
-                expected_key_id=str(material.get("key_id") or binding_doc.get("key_id") or ""),
-            )
-            payload = json.loads(opened.decode("utf-8"))
-        except (PrivateArtifactIntegrityError, PrivateKeyMaterialError, json.JSONDecodeError, UnicodeDecodeError):
-            return self._unreadable_session(user_id, "recoverable", "authentication_failed")
+            key_id, key = context["key_provider"].resolve(binding)
+            body = open_private_artifact(raw, binding=binding, key=key, expected_key_id=key_id)
+            payload = json.loads(body.decode("utf-8"))
+        except PrivateCryptoCapabilityError:
+            raise WorkspacePersistenceError("Private encryption is unavailable.", code="private_crypto_unavailable", public_status="unavailable") from None
+        except (PrivateStorageError, json.JSONDecodeError, UnicodeDecodeError):
+            raise WorkspacePersistenceError("Private session authentication failed; existing bytes were preserved.", code="authentication_failed", public_status="recoverable") from None
         if not isinstance(payload, dict):
-            return self._unreadable_session(user_id, "recoverable", "corrupt_session")
-        payload["status"] = "available"
-        payload["session_readable"] = True
-        payload["missing_new_session"] = False
-        payload["existing_unreadable"] = False
+            raise WorkspacePersistenceError("Private session is corrupt; existing bytes were preserved.", code="corrupt_session", public_status="recoverable")
+        self._prepare_loaded_state(payload, user_id)
+        payload.update(status="available", session_readable=True, missing_new_session=False, existing_unreadable=False, at_rest_protection="private_envelope")
         return payload
 
     def _save_private_state(self, state: Dict[str, Any], filename: str, existing_raw: Optional[bytes]) -> Dict[str, Any]:
-        from integrations.private_storage import PrivateArtifactBinding, seal_private_artifact
+        from integrations.private_storage import PrivateArtifactBinding, PrivateCryptoCapabilityError, PrivateStorageError, seal_private_artifact, open_private_artifact
 
-        user_id = str(state.get("user_id") or "")
+        user_id = str(state["user_id"])
         case_id = _state_case_id(state, user_id)
-        material = self._private_key_for(user_id, case_id)
-        if material is None or material.get("locked") or material.get("key") is None:
-            raise WorkspacePersistenceError("unlock required", code="unlock_needed", public_status="unlock_needed")
-        if existing_raw is not None and not existing_raw.startswith(b"CGPE"):
-            raise WorkspacePersistenceError("corrupt session preserved", code="corrupt_session", public_status="recoverable")
-        if existing_raw is not None and existing_raw.startswith(b"CGPE"):
-            probe = self._open_private_session_bytes(user_id, filename, existing_raw)
-            if probe.get("session_readable") is not True:
-                raise WorkspacePersistenceError(
-                    "existing session preserved",
-                    code=str(probe.get("code") or "unreadable"),
-                    public_status=str(probe.get("status") or "recoverable"),
-                )
-        binding_doc = {
-            "schema": 1,
-            "tenant_id": str(material["tenant_id"]),
-            "case_id": case_id,
-            "principal_id": str(material["principal_id"]),
-            "artifact_kind": "session",
-            "revision": "session-v1",
-            "key_id": str(material["key_id"]),
-        }
+        context = self._private_artifact_context(user_id, case_id)
+        if existing_raw is not None:
+            if not existing_raw.startswith(b"CGPE"):
+                try:
+                    legacy = json.loads(existing_raw.decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    raise WorkspacePersistenceError("Existing session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable") from None
+                if not isinstance(legacy, dict):
+                    raise WorkspacePersistenceError("Existing session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable")
+                self._prepare_loaded_state(legacy, user_id)
+                raise WorkspacePersistenceError("Legacy data requires explicit migration.", code="migration_required", public_status="recoverable")
+            self._open_private_session_bytes(user_id, filename, existing_raw)
+        binding = PrivateArtifactBinding(tenant_id=context["tenant_id"], case_id=case_id, artifact_kind="session", revision="session-v1", principal_id=context["principal_id"])
+        state["at_rest_protection"] = "private_envelope"
         body = json.dumps(state, sort_keys=True).encode("utf-8")
-        envelope = seal_private_artifact(
-            body,
-            binding=PrivateArtifactBinding(
-                tenant_id=str(material["tenant_id"]),
-                case_id=case_id,
-                artifact_kind="session",
-                revision="session-v1",
-                principal_id=str(material["principal_id"]),
-            ),
-            key=material["key"],
-            key_id=str(material["key_id"]),
-        )
         root_fd = self._open_session_directory()
-        temp_name = f".{filename}.{uuid.uuid4().hex}.tmp"
+        temporary = f".{filename}.{uuid.uuid4().hex}.tmp"
         try:
-            self._write_bytes_nofollow(temp_name, envelope, root_fd=root_fd)
-            os.replace(temp_name, filename, src_dir_fd=root_fd, dst_dir_fd=root_fd)
-            self._write_bytes_nofollow(
-                self._private_binding_name(filename),
-                json.dumps(binding_doc, sort_keys=True).encode("utf-8"),
-                root_fd=root_fd,
-            )
+            key_id, key = context["key_provider"].resolve(binding)
+            envelope = seal_private_artifact(body, binding=binding, key=key, key_id=key_id)
+            self._write_bytes_nofollow(temporary, envelope, root_fd=root_fd)
+            staged = self._read_bytes_nofollow(temporary)
+            if staged != envelope or open_private_artifact(staged, binding=binding, key=key, expected_key_id=key_id) != body:
+                raise WorkspacePersistenceError("Private session readback failed.", code="readback_mismatch", public_status="recoverable")
+            try:
+                current = self._read_bytes_nofollow(filename)
+            except FileNotFoundError:
+                current = None
+            if current != existing_raw:
+                raise WorkspacePersistenceError("The private session changed; retry from its current revision.", code="revision_conflict", public_status="recoverable")
+            if context["key_provider"].resolve(binding) != (key_id, key):
+                raise WorkspacePersistenceError("Private workspace keys require unlock.", code="unlock_needed", public_status="unlock_needed")
+            os.replace(temporary, filename, src_dir_fd=root_fd, dst_dir_fd=root_fd)
+        except PrivateCryptoCapabilityError:
+            raise WorkspacePersistenceError("Private encryption is unavailable.", code="private_crypto_unavailable", public_status="unavailable") from None
+        except PrivateStorageError:
+            raise WorkspacePersistenceError("Private session authentication failed.", code="authentication_failed", public_status="recoverable") from None
+        except OSError:
+            raise WorkspacePersistenceError("Private session storage is unavailable; existing bytes were preserved.", code="write_error", public_status="unavailable") from None
         finally:
             try:
-                os.unlink(temp_name, dir_fd=root_fd)
+                os.unlink(temporary, dir_fd=root_fd)
             except FileNotFoundError:
                 pass
             os.close(root_fd)
-        state["at_rest_protection"] = "private_envelope"
         return state
 
-    def ingest_memory_evidence(
-        self,
-        user_id: Optional[str],
-        *,
-        files: List[Dict[str, Any]],
-        claim_element_id: str = "causation",
-        kind: str = "document",
-        backend: Any = None,
-    ) -> Dict[str, Any]:
-        """Extract attachment text in memory and seal originals. No disk plaintext."""
+    def _private_local_backend(self):
+        from integrations.ipfs_datasets.storage import LocalCacheIPFSBackend
+        workspace = self
+        class OwnedCiphertextBackend(LocalCacheIPFSBackend):
+            measurement_label = "measured-local"
+            def __init__(self):
+                # All operations below use the admitted workspace descriptor.
+                # Do not initialize the global/home fallback cache.
+                pass
+            def add_bytes(self, data, pin=True):
+                blob = bytes(data)
+                cid = "bafy" + hashlib.sha256(blob).hexdigest()[:55]
+                workspace._write_bytes_nofollow("private-artifacts/" + cid, blob, create_parents=True)
+                return {"success": True, "cid": cid, "pinned": False}
+            def cat(self, cid):
+                if not re.fullmatch(r"bafy[0-9a-f]{55}", str(cid)):
+                    raise WorkspaceAuthorizationDenied()
+                return workspace._read_bytes_nofollow("private-artifacts/" + str(cid))
+            def pin(self, cid):
+                return {"success": True, "cid": cid, "pinned": False}
+        return OwnedCiphertextBackend()
 
-        state = self._load_state(str(user_id or ""))
-        if state.get("session_readable") is False:
-            return {
-                "status": state.get("status") or "unlock_needed",
-                "code": state.get("code") or "unlock_needed",
-                "written": False,
-                "extraction": "not_attempted",
-                "preserved_original": True,
-            }
-        case_id = _state_case_id(state, str(state.get("user_id") or user_id))
-        material = self._private_key_for(str(state.get("user_id") or ""), case_id)
-        if material is None or material.get("locked") or material.get("key") is None:
-            return {
-                "status": "unlock_needed",
-                "code": "unlock_needed",
-                "written": False,
-                "extraction": "not_attempted_locked",
-                "preserved_original": True,
-                "imported": [],
-            }
+    def ingest_memory_evidence(self, user_id: Optional[str], *, files: List[Dict[str, Any]], claim_element_id: str = "causation", kind: str = "document", backend: Any = None) -> Dict[str, Any]:
+        """Keep attachment processing in memory and store only authenticated envelopes."""
         from integrations.ipfs_datasets.storage import store_automatic_private_artifact
-
-        access = WorkspaceAccess.authenticated(str(material["principal_id"]), case_id=case_id)
-        imported: List[Dict[str, Any]] = []
+        from integrations.private_storage import PrivateStorageError
+        state = self._load_state(self._resolve_user_id(user_id))
+        owner = str(state["user_id"])
+        context = self._private_artifact_context(owner, _state_case_id(state, owner))
+        transport = backend if backend is not None else self._private_local_backend()
+        imported = []
         for index, item in enumerate(files, start=1):
             data = bytes(item.get("data") or b"")
             filename = str(item.get("filename") or f"upload-{index}")
@@ -3122,98 +3067,31 @@ class ComplaintWorkspaceService:
                 text = data.decode("utf-8")
                 extraction = {"status": "available", "method": "ephemeral-memory"}
             except UnicodeDecodeError:
-                text = ""
-                extraction = {
-                    "status": "limited",
-                    "code": "in_memory_extraction_unavailable",
-                    "method": "ephemeral-memory",
-                    "preserved_original": True,
-                }
-            attachment = store_automatic_private_artifact(
-                data,
-                access=access,
-                tenant_id=str(material["tenant_id"]),
-                case_id=case_id,
-                artifact_kind="attachment",
-                revision=f"attachment-{index}",
-                principal_id=str(material["principal_id"]),
-                key=material["key"],
-                key_id=str(material["key_id"]),
-                backend=backend,
-                pin_content=backend is not None,
-            )
-            extracted = store_automatic_private_artifact(
-                text.encode("utf-8"),
-                access=access,
-                tenant_id=str(material["tenant_id"]),
-                case_id=case_id,
-                artifact_kind="extracted-text",
-                revision=f"extracted-text-{index}",
-                principal_id=str(material["principal_id"]),
-                key=material["key"],
-                key_id=str(material["key_id"]),
-                backend=backend,
-                pin_content=backend is not None,
-            )
-            imported.append({
-                "filename": filename,
-                "extraction": extraction,
-                "attachment_cid": attachment.get("cid"),
-                "extracted_cid": extracted.get("cid"),
-                "effective_claim_element_id": claim_element_id,
-                "plaintext_disk": False,
-            })
+                text = None
+                extraction = {"status": "limited", "code": "in_memory_extraction_unavailable", "method": "ephemeral-memory", "preserved_original": True}
+            base = {**context, "backend": transport, "backend_name": "local_cache" if backend is None else "kit", "pin_content": backend is not None}
+            try:
+                attachment = store_automatic_private_artifact(data, artifact_kind="attachment", **{**base, "revision": f"attachment-{index}"})
+                extracted = store_automatic_private_artifact(text.encode("utf-8"), artifact_kind="extracted-text", **{**base, "revision": f"extracted-text-{index}"}) if text is not None else None
+            except PrivateStorageError:
+                raise WorkspacePersistenceError("Private evidence storage is unavailable.", code="artifact_unavailable", public_status="unavailable") from None
+            imported.append({"filename": filename, "extraction": extraction, "attachment_cid": attachment.get("cid"), "extracted_cid": (extracted or {}).get("cid"), "effective_claim_element_id": claim_element_id, "plaintext_disk": False})
             documents = state.setdefault("evidence", {"testimony": [], "documents": []}).setdefault("documents", [])
-            documents.append({
-                "id": f"documents-{len(documents) + 1}",
-                "kind": kind,
-                "claim_element_id": claim_element_id,
-                "title": filename,
-                "content_cid": extracted.get("cid"),
-                "attachment_cid": attachment.get("cid"),
-                "saved_at": _utc_now(),
-            })
+            documents.append({"id": f"documents-{len(documents)+1}", "kind": kind, "claim_element_id": claim_element_id, "title": filename, "content_cid": (extracted or {}).get("cid"), "attachment_cid": attachment.get("cid"), "extraction": extraction, "saved_at": _utc_now()})
         self._save_state(state)
-        return {
-            "status": "available",
-            "imported": imported,
-            "extraction_boundary": "ephemeral-memory",
-            "plaintext_disk": False,
-            "session": state,
-        }
+        return {"status": "available", "imported": imported, "extraction_boundary": "ephemeral-memory", "plaintext_disk": False, "session": state}
 
-    def persist_private_case_materials(
-        self,
-        user_id: str,
-        materials: Dict[str, bytes],
-        *,
-        case_id: Optional[str] = None,
-        backend: Any = None,
-    ) -> Dict[str, Any]:
-        """Seal each automatic private class before cache, pin, index, or backup."""
-
-        access_case = case_id or self._effective_access().case_id or user_id
-        material = self._private_key_for(user_id, str(access_case))
-        if material is None or material.get("locked") or material.get("key") is None:
-            return {"status": "unlock_needed", "written": False, "artifacts": {}}
+    def persist_private_case_materials(self, user_id: str, materials: Dict[str, bytes], *, case_id: Optional[str] = None, backend: Any = None) -> Dict[str, Any]:
         from integrations.ipfs_datasets.storage import store_automatic_private_artifact
-
-        access = WorkspaceAccess.authenticated(str(material["principal_id"]), case_id=str(access_case))
-        artifacts: Dict[str, Any] = {}
-        for kind, payload in materials.items():
-            artifacts[kind] = store_automatic_private_artifact(
-                bytes(payload),
-                access=access,
-                tenant_id=str(material["tenant_id"]),
-                case_id=str(access_case),
-                artifact_kind=str(kind),
-                revision=f"{kind}-1",
-                principal_id=str(material["principal_id"]),
-                key=material["key"],
-                key_id=str(material["key_id"]),
-                backend=backend,
-                pin_content=backend is not None,
-            )
+        from integrations.private_storage import PrivateStorageError
+        context = self._private_artifact_context(user_id, case_id)
+        transport = backend if backend is not None else self._private_local_backend()
+        artifacts = {}
+        try:
+            for kind, payload in materials.items():
+                artifacts[kind] = store_automatic_private_artifact(bytes(payload), artifact_kind=str(kind), **{**context, "revision": f"{kind}-1", "backend": transport, "backend_name": "local_cache" if backend is None else "kit", "pin_content": backend is not None})
+        except (PrivateStorageError, ValueError):
+            raise WorkspacePersistenceError("Private artifact storage is unavailable.", code="artifact_unavailable", public_status="unavailable") from None
         return {"status": "available", "written": True, "artifacts": artifacts, "plaintext_disk": False}
 
     def export_readable_filing(
@@ -3223,9 +3101,11 @@ class ComplaintWorkspaceService:
         destination: Path,
         protection: str,
         content: bytes,
+        case_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Write a user-chosen filing export. This does not create a hidden cache."""
-
+        """Write an explicit operator-chosen filing export."""
+        self._require_local_filesystem_access()
+        self._check_access(user_id, ability="write", case_id=case_id)
         if protection not in {"user_chosen_plaintext", "user_chosen_encrypted"}:
             raise WorkspacePersistenceError(
                 "protection state required",
@@ -3252,21 +3132,92 @@ class ComplaintWorkspaceService:
                 code="hidden_cache_rejected",
                 public_status="unavailable",
             )
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(bytes(content))
-        return {
-            "user_id": resolved_user,
-            "path": str(dest),
-            "protection": protection,
-            "automatic": False,
-            "hidden_cache": False,
-            "bytes": len(content),
-        }
+        from integrations.private_storage import PrivateArtifactBinding, PrivateStorageError, seal_private_artifact, open_private_artifact
+        payload = bytes(content)
+        if protection == "user_chosen_encrypted":
+            context = self._private_artifact_context(resolved_user, case_id)
+            binding = PrivateArtifactBinding(tenant_id=resolved_user, case_id=context["case_id"], artifact_kind="filing-export", revision="filing-export-v1", principal_id=resolved_user)
+            try:
+                key_id, key = context["key_provider"].resolve(binding)
+                payload = seal_private_artifact(payload, binding=binding, key=key, key_id=key_id)
+                if open_private_artifact(payload, binding=binding, key=key, expected_key_id=key_id) != bytes(content):
+                    raise WorkspacePersistenceError("Filing encryption readback failed.", code="readback_mismatch", public_status="recoverable")
+            except PrivateStorageError:
+                raise WorkspacePersistenceError("Private filing encryption is unavailable.", code="private_export_unavailable", public_status="unavailable") from None
+        temporary = None
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            parent = dest.parent.resolve(strict=True)
+            if parent != dest.parent.absolute() or parent.stat().st_uid != os.getuid():
+                raise WorkspaceAuthorizationDenied()
+            temporary = parent / (".filing-" + uuid.uuid4().hex + ".tmp")
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+            if temporary.read_bytes() != payload:
+                raise WorkspacePersistenceError("Filing readback failed.", code="readback_mismatch", public_status="recoverable")
+            os.replace(temporary, dest)
+        except OSError:
+            raise WorkspacePersistenceError("Filing output is unavailable.", code="write_error", public_status="unavailable") from None
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return {"user_id": resolved_user, "path": str(dest), "protection": protection, "automatic": False, "hidden_cache": False, "bytes": len(payload)}
 
     def migrate_legacy_private_artifacts(self, **kwargs: Any) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         from complaint_generator.legacy_session_migration import migrate_private_workspace
-
         return migrate_private_workspace(**kwargs)
+
+    def migrate_legacy_private_session(self, user_id: str) -> Dict[str, Any]:
+        """Explicitly migrate an owned JSON session, retaining its original bytes."""
+        from complaint_generator.legacy_session_migration import migrate_private_workspace
+        context = self._private_artifact_context(user_id)
+        private_name = self._namespace_filename(user_id) + ".cgpe"
+        try:
+            canonical = self._read_bytes_nofollow(private_name)
+        except FileNotFoundError:
+            canonical = None
+        if canonical is not None:
+            # An authenticated current successor outranks the retained legacy
+            # snapshot. Rerunning migration must never roll back newer answers.
+            self._open_private_session_bytes(user_id, private_name, canonical)
+            return {"status": "complete", "complete": True, "private_session_verified": True,
+                    "existing_private_preserved": True, "legacy_plaintext_retained": True,
+                    "source_bytes_preserved": True, "cleanup_performed": False}
+        source_name = self._namespace_filename(user_id)
+        try:
+            raw = self._read_bytes_nofollow(source_name)
+        except FileNotFoundError:
+            source_name = self._legacy_filename(user_id)
+            if self._legacy_owner_conflict(source_name, user_id):
+                raise WorkspaceAuthorizationDenied()
+            try:
+                raw = self._read_bytes_nofollow(source_name)
+            except FileNotFoundError:
+                raise WorkspacePersistenceError("No owned legacy session was found.", code="legacy_missing", public_status="recoverable") from None
+        if raw.startswith(b"CGPE"):
+            self._open_private_session_bytes(user_id, source_name, raw)
+            return {"status": "complete", "complete": True, "legacy_plaintext_retained": False}
+        try:
+            state = json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise WorkspacePersistenceError("Legacy session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable") from None
+        if not isinstance(state, dict):
+            raise WorkspacePersistenceError("Legacy session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable")
+        self._prepare_loaded_state(state, user_id)
+        artifact = {**context, "artifact_kind": "session", "revision": "session-v1", "source_path": self._session_dir / source_name, "owner_record": {"owner": user_id, "case_id": context["case_id"]}}
+        result = migrate_private_workspace(source_root=self._session_dir, destination_root=self._session_dir / "private-migrations", artifacts=[artifact])
+        if result.get("complete") is not True:
+            return result
+        private_name = self._namespace_filename(user_id) + ".cgpe"
+        try:
+            previous = self._read_bytes_nofollow(private_name)
+        except FileNotFoundError:
+            previous = None
+        self._save_private_state(state, private_name, previous)
+        return {**result, "legacy_plaintext_retained": True, "source_bytes_preserved": self._read_bytes_nofollow(source_name) == raw, "private_session_verified": True}
 
     def _effective_access(self) -> WorkspaceAccess:
         current = _REQUEST_ACCESS.get()
@@ -3536,21 +3487,94 @@ class ComplaintWorkspaceService:
             raise WorkspaceAuthorizationDenied()
         return f"private-files/p-{principal_namespace(resolved)}/c-{principal_namespace(case_id)}/{relative_name}"
 
-    def read_contained_workspace_file(self, user_id: Optional[str], relative_name: str) -> bytes:
-        relative = self._private_file_relative(user_id, relative_name, ability="read")
+    def _contained_file_binding(self, resolved: str, relative: str):
+        from integrations.private_storage import PrivateArtifactBinding
+        context = self._private_artifact_context(resolved)
+        binding = PrivateArtifactBinding(tenant_id=resolved, case_id=context["case_id"],
+            artifact_kind="contained-file", revision="file-" + hashlib.sha256(relative.encode("utf-8")).hexdigest(), principal_id=resolved)
+        return context, binding
+
+    def _open_private_file_parent(self, relative: str) -> tuple[int, str]:
+        # relative was admitted by _private_file_relative; keep every parent
+        # directory opened with no-follow through the final atomic publication.
+        parts = relative.split("/")
+        current = self._open_session_directory()
         try:
-            return self._read_bytes_nofollow(relative)
-        except OSError:
+            for part in parts[:-1]:
+                try:
+                    os.mkdir(part, mode=0o700, dir_fd=current)
+                except FileExistsError:
+                    pass
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current)
+                info = os.fstat(child)
+                if info.st_uid != os.getuid():
+                    os.close(child)
+                    raise WorkspaceAuthorizationDenied()
+                os.close(current)
+                current = child
+            return current, parts[-1]
+        except (OSError, WorkspaceAuthorizationDenied):
+            os.close(current)
             raise WorkspaceAuthorizationDenied() from None
 
-    def write_contained_workspace_file(self, user_id: Optional[str], relative_name: str, content: bytes) -> Dict[str, Any]:
-        resolved = self._check_access(user_id, ability="write")
-        relative = self._private_file_relative(resolved, relative_name, ability="write")
+    def read_contained_workspace_file(self, user_id: Optional[str], relative_name: str) -> bytes:
+        from integrations.private_storage import PrivateStorageError, open_private_artifact
+        resolved = self._check_access(user_id, ability="read")
+        relative = self._private_file_relative(resolved, relative_name, ability="read")
+        context, binding = self._contained_file_binding(resolved, relative)
         try:
-            self._write_bytes_nofollow(relative, bytes(content or b""), create_parents=True)
+            blob = self._read_bytes_nofollow(relative)
+            key_id, key = context["key_provider"].resolve(binding)
+            return open_private_artifact(blob, binding=binding, key=key, expected_key_id=key_id)
         except OSError:
             raise WorkspaceAuthorizationDenied() from None
-        return {"user_id": resolved, "relative_name": str(relative_name or ""), "written": True, "at_rest_protection": "plaintext_pending"}
+        except PrivateStorageError:
+            raise WorkspacePersistenceError("Private file authentication failed; existing bytes were preserved.", code="authentication_failed", public_status="recoverable") from None
+
+    def write_contained_workspace_file(self, user_id: Optional[str], relative_name: str, content: bytes) -> Dict[str, Any]:
+        from integrations.private_storage import PrivateStorageError, open_private_artifact, seal_private_artifact
+        resolved = self._check_access(user_id, ability="write")
+        relative = self._private_file_relative(resolved, relative_name, ability="write")
+        context, binding = self._contained_file_binding(resolved, relative)
+        parent_fd, filename = self._open_private_file_parent(relative)
+        temporary = ".private-file-" + uuid.uuid4().hex + ".tmp"
+        try:
+            key_id, key = context["key_provider"].resolve(binding)
+            try:
+                previous = self._read_bytes_nofollow(relative)
+            except FileNotFoundError:
+                previous = None
+            if previous is not None:
+                open_private_artifact(previous, binding=binding, key=key, expected_key_id=key_id)
+            body = bytes(content or b"")
+            envelope = seal_private_artifact(body, binding=binding, key=key, key_id=key_id)
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent_fd)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(envelope)
+                handle.flush()
+            stage = self._read_bytes_nofollow("/".join(relative.split("/")[:-1] + [temporary]))
+            if stage != envelope or open_private_artifact(stage, binding=binding, key=key, expected_key_id=key_id) != body:
+                raise WorkspacePersistenceError("Private file readback failed.", code="readback_mismatch", public_status="recoverable")
+            try:
+                current = self._read_bytes_nofollow(relative)
+            except FileNotFoundError:
+                current = None
+            if current != previous:
+                raise WorkspacePersistenceError("Private file changed; current bytes were preserved.", code="revision_conflict", public_status="recoverable")
+            if context["key_provider"].resolve(binding) != (key_id, key):
+                raise WorkspacePersistenceError("Private workspace keys require unlock.", code="unlock_needed", public_status="unlock_needed")
+            os.replace(temporary, filename, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        except OSError:
+            raise WorkspaceAuthorizationDenied() from None
+        except PrivateStorageError:
+            raise WorkspacePersistenceError("Private file authentication failed; existing bytes were preserved.", code="authentication_failed", public_status="recoverable") from None
+        finally:
+            try:
+                os.unlink(temporary, dir_fd=parent_fd)
+            except FileNotFoundError:
+                pass
+            os.close(parent_fd)
+        return {"user_id": resolved, "relative_name": str(relative_name or ""), "written": True, "at_rest_protection": "private_envelope"}
 
     def remember_private_reference(
         self,
@@ -3582,7 +3606,7 @@ class ComplaintWorkspaceService:
             "user_id": resolved,
             "case_id": record_case,
             "stored": True,
-            "at_rest_protection": "plaintext_pending",
+            "at_rest_protection": "private_envelope",
         }
 
     def resolve_private_reference(
@@ -3602,48 +3626,48 @@ class ComplaintWorkspaceService:
             "cid": None if cid is None else str(cid),
             "storage_key": None if storage_key is None else str(storage_key),
             "admitted": True,
-            "at_rest_protection": "plaintext_pending",
+            "at_rest_protection": "private_envelope",
         }
 
     def _load_state(self, user_id: str) -> Dict[str, Any]:
         resolved_user = self._check_access(user_id, ability="read")
-        filename = self._namespace_filename(resolved_user)
+        context = self._private_artifact_context(resolved_user)
+        filename = self._private_session_filename(resolved_user)
         try:
-            existing_raw = self._read_bytes_nofollow(filename)
+            raw = self._read_bytes_nofollow(filename)
         except FileNotFoundError:
-            existing_raw = None
+            raw = None
         except OSError:
-            return self._unreadable_session(resolved_user, "unavailable", "read_error")
-        loaded = None
-        if existing_raw is not None and existing_raw.startswith(b"CGPE"):
-            loaded = self._open_private_session_bytes(resolved_user, filename, existing_raw)
-            if loaded.get("session_readable") is not True:
-                return loaded
-        elif existing_raw is not None:
-            try:
-                json.loads(existing_raw.decode("utf-8"))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                return self._unreadable_session(resolved_user, "recoverable", "corrupt_session")
-            try:
-                loaded = self._load_owned_payload(resolved_user)
-            except WorkspaceAuthorizationDenied:
-                raise
-            except OSError:
-                return self._unreadable_session(resolved_user, "unavailable", "read_error")
-        if loaded is None:
+            raise WorkspacePersistenceError("Private session storage is unavailable.", code="read_error", public_status="unavailable") from None
+        if raw is not None:
+            if raw.startswith(b"CGPE"):
+                loaded = self._open_private_session_bytes(resolved_user, filename, raw)
+            else:
+                try:
+                    legacy = json.loads(raw.decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    raise WorkspacePersistenceError("Existing session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable") from None
+                if not isinstance(legacy, dict):
+                    raise WorkspacePersistenceError("Existing session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable")
+                self._prepare_loaded_state(legacy, resolved_user)
+                raise WorkspacePersistenceError("Legacy data requires explicit migration.", code="migration_required", public_status="recoverable")
+        else:
+            legacy = None
+            slug = self._legacy_filename(resolved_user)
+            if not self._legacy_owner_conflict(slug, resolved_user):
+                try:
+                    legacy = self._read_json_file(slug, strict=True)
+                except WorkspaceAuthorizationDenied:
+                    raise WorkspacePersistenceError("Existing legacy session is unreadable and was preserved.", code="corrupt_session", public_status="recoverable") from None
+            if isinstance(legacy, dict) and legacy.get("user_id") == resolved_user:
+                if not isinstance(legacy, dict):
+                    raise WorkspacePersistenceError("Existing session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable")
+                self._prepare_loaded_state(legacy, resolved_user)
+                raise WorkspacePersistenceError("Legacy data requires explicit migration.", code="migration_required", public_status="recoverable")
             loaded = _default_state(resolved_user)
-            access_case = self._effective_access().case_id
-            if access_case:
-                loaded["case_id"] = str(access_case)
-            loaded["missing_new_session"] = True
-            loaded["session_readable"] = True
-            loaded["status"] = "available"
-            record_case = _state_case_id(loaded, resolved_user)
-            self._check_access(resolved_user, ability="read", record_case_id=record_case)
-            expected_case = _REQUEST_CASE.get() or self._effective_access().case_id
-            if expected_case is not None and str(record_case) != str(expected_case):
-                raise WorkspaceAuthorizationDenied()
-            self._assert_bound_references(loaded, record_case)
+            loaded["case_id"] = context["case_id"]
+            loaded.update(missing_new_session=True, session_readable=True, status="available")
+            self._prepare_loaded_state(loaded, resolved_user)
         payload = loaded
         payload["claim_type"] = _normalize_claim_type(payload.get("claim_type"))
         payload.setdefault("case_synopsis", "")
@@ -3692,7 +3716,7 @@ class ComplaintWorkspaceService:
         record_case = _state_case_id(state, user_id)
         self._check_access(user_id, ability="write", record_case_id=record_case)
         _apply_effective_privacy_policy(state, user_id)
-        filename = self._namespace_filename(user_id)
+        filename = self._private_session_filename(user_id)
         try:
             existing_raw = self._read_bytes_nofollow(filename)
         except FileNotFoundError:
@@ -3708,27 +3732,7 @@ class ComplaintWorkspaceService:
                     code="corrupt_session",
                     public_status="recoverable",
                 ) from exc
-        material = self._private_key_for(user_id, record_case)
-        if material is not None or (existing_raw is not None and existing_raw.startswith(b"CGPE")):
-            return self._save_private_state(state, filename, existing_raw)
-        # A direct save must not overwrite a record with a foreign identity.
-        existing = self._read_json_file(filename, strict=True)
-        if existing is not None:
-            self._prepare_loaded_state(existing, user_id)
-            if _state_case_id(existing, user_id) != record_case:
-                raise WorkspaceAuthorizationDenied()
-        temp_name = f".{filename}.{uuid.uuid4().hex}.tmp"
-        root_fd = self._open_session_directory()
-        try:
-            self._write_bytes_nofollow(temp_name, json.dumps(state, indent=2, sort_keys=True).encode("utf-8"), root_fd=root_fd)
-            os.replace(temp_name, filename, src_dir_fd=root_fd, dst_dir_fd=root_fd)
-        finally:
-            try:
-                os.unlink(temp_name, dir_fd=root_fd)
-            except FileNotFoundError:
-                pass
-            os.close(root_fd)
-        return state
+        return self._save_private_state(state, filename, existing_raw)
 
     def _build_question_status(self, answers: Dict[str, Any]) -> List[Dict[str, Any]]:
         status = []
@@ -9246,12 +9250,13 @@ class ComplaintWorkspaceService:
         }
         try:
             from integrations.ipfs_datasets.draft_logic_pipeline import pin_proof_report_to_ipfs
-            pin_result = pin_proof_report_to_ipfs(
-                proof_report,
-                claim_id=claim_id or resolved_user_id,
-            )
-        except Exception as exc:
-            pin_result["error"] = str(exc)
+            context = self._private_artifact_context(resolved_user_id, revision="proof-1")
+            context.update(backend=self._private_local_backend(), backend_name="local_cache", pin_content=False)
+            pin_result = pin_proof_report_to_ipfs(proof_report, claim_id=claim_id or resolved_user_id, private_context=context)
+        except WorkspacePersistenceError:
+            raise
+        except Exception:
+            pin_result.update(status="unavailable", deferred=True, verified=False, error="private_proof_unavailable")
         return {
             "status": "ok",
             "user_id": resolved_user_id,
@@ -11096,7 +11101,7 @@ class ComplaintWorkspaceService:
             "requested_case_id": requested_case,
             "policy": policy,
             "load": load,
-            "at_rest_protection": "plaintext_pending",
+            "at_rest_protection": "private_envelope",
             "encryption_at_rest_blocks_remote_llm": False,
             "authenticates_tenant": False,
             "authorization_note": "user_id selects a workspace record. Tenant authorization is PRIV002, not this policy.",
@@ -11158,7 +11163,7 @@ class ComplaintWorkspaceService:
             "user_id": resolved_user_id,
             "case_id": _state_case_id(state, resolved_user_id),
             "reads_existing_private_paths": False,
-            "at_rest_protection": "plaintext_pending",
+            "at_rest_protection": "private_envelope",
             "encryption_at_rest_blocks_remote_llm": False,
             "authenticates_tenant": False,
             "private_claim_fact_graph": private_rows,
@@ -11455,7 +11460,7 @@ class ComplaintWorkspaceService:
             "grounding_mode": resolved_grounding_mode,
             "text": str(public_generation.get("text") or ""),
             "generation": public_generation,
-            "at_rest_protection": "plaintext_pending",
+            "at_rest_protection": "private_envelope",
         }
 
     def search_corpus(self, *, query: str, max_results: int = 5) -> Dict[str, Any]:
@@ -11579,7 +11584,7 @@ class ComplaintWorkspaceService:
             data = self.read_contained_workspace_file(args.get("user_id"), str(args.get("relative_name") or ""))
             return {
                 "content_b64": b64encode(data).decode("ascii"),
-                "at_rest_protection": "plaintext_pending",
+                "at_rest_protection": "private_envelope",
             }
         if tool_name == "complaint.write_contained_file":
             raw_content = args.get("content")
