@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -19,6 +20,7 @@ from .types import (
     GraphSupportMatch,
     GraphSupportResult,
     GraphSupportSummary,
+    locate_unique_byte_span,
     with_adapter_metadata,
 )
 
@@ -887,6 +889,353 @@ def _cluster_semantically_similar_results(results: List[Dict[str, Any]]) -> List
     return clusters
 
 
+_PRIVATE_EXTRACTOR_OPTIONS = {
+    "use_spacy": False,
+    "use_transformers": False,
+    "use_tracer": False,
+    "use_srl": False,
+}
+_PRIVATE_EXTRACTION_TEXT_LIMIT = 20000
+_PRIVATE_EXTRACTION_RESULT_LIMIT = 40
+_PRIVATE_EXTRACTION_TIMEOUT_SECONDS = 5.0
+_ASSERTABLE_UPSTREAM_TYPES = frozenset({"person", "organization", "date", "fact"})
+_PRIVATE_EXTRACTOR_MODULE = "ipfs_datasets_py.knowledge_graphs.extraction.extractor"
+
+
+def _load_private_extractor_class() -> tuple[Any, Optional[str]]:
+    """Capability is a successful class and method lookup, not a package flag."""
+    try:
+        from ipfs_datasets_py.knowledge_graphs.extraction.extractor import KnowledgeGraphExtractor
+    except Exception as exc:
+        return None, f"extractor_import_failed: {exc}"
+    method = getattr(KnowledgeGraphExtractor, "extract_knowledge_graph", None)
+    if not callable(method):
+        return None, "extractor_unavailable: extract_knowledge_graph missing"
+    return KnowledgeGraphExtractor, None
+
+
+def _bounded_call(fn: Any, timeout_seconds: float) -> tuple[Any, Optional[str]]:
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="private-kg")
+    future = executor.submit(fn)
+    try:
+        return future.result(timeout=timeout_seconds), None
+    except concurrent.futures.TimeoutError:
+        return None, "extractor_timeout"
+    except Exception as exc:
+        return None, f"extractor_error: {exc}"
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _mapping_or_empty(value: Any) -> Dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _upstream_records(graph: Any) -> tuple[List[Any], List[Any], Optional[str]]:
+    entities = getattr(graph, "entities", None)
+    relationships = getattr(graph, "relationships", None)
+    if isinstance(entities, Mapping):
+        entity_records = list(entities.values())
+    elif isinstance(entities, list):
+        entity_records = list(entities)
+    else:
+        return [], [], "extractor_invalid_result"
+    if isinstance(relationships, Mapping):
+        relationship_records = list(relationships.values())
+    elif isinstance(relationships, list):
+        relationship_records = list(relationships)
+    elif relationships is None:
+        relationship_records = []
+    else:
+        return [], [], "extractor_invalid_result"
+    return entity_records, relationship_records, None
+
+
+def _record_get(record: Any, *names: str) -> Any:
+    if isinstance(record, Mapping):
+        for name in names:
+            if name in record and record.get(name) not in (None, ""):
+                return record.get(name)
+        return None
+    for name in names:
+        value = getattr(record, name, None)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _endpoint_identity(endpoint: Any) -> str:
+    if endpoint is None:
+        return ""
+    if isinstance(endpoint, str):
+        return endpoint.strip()
+    if isinstance(endpoint, Mapping):
+        return str(endpoint.get("entity_id") or endpoint.get("id") or endpoint.get("name") or "").strip()
+    return str(getattr(endpoint, "entity_id", None) or getattr(endpoint, "name", None) or "").strip()
+
+
+def _caller_source_context(source_id: Optional[str], metadata: Mapping[str, Any]) -> Dict[str, Any]:
+    """Copy only explicit caller identity. Extractor labels are not authorization."""
+    context: Dict[str, Any] = {}
+    if source_id:
+        context["source_id"] = str(source_id)
+    for key in (
+        "source_kind",
+        "source_id",
+        "message_id",
+        "document_id",
+        "source_hash",
+        "assertion_status",
+        "extractor_version",
+        "jurisdiction",
+        "actor",
+        "name",
+        "event_date",
+    ):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            context[key] = value.strip()
+    return context
+
+
+def _normalize_upstream_entity(record: Any, index: int, source_text: str) -> Optional[Dict[str, Any]]:
+    name = str(_record_get(record, "name") or "").strip()
+    entity_type = str(_record_get(record, "entity_type", "type") or "").strip()
+    if not name or not entity_type:
+        return None
+    upstream_id = str(_record_get(record, "entity_id", "id") or "").strip()
+    properties = _mapping_or_empty(_record_get(record, "properties"))
+    extraction_method = _record_get(record, "extraction_method")
+    upstream_source = _record_get(record, "source_text")
+    confidence = _record_get(record, "confidence")
+    extractor_key = f"upstream-entity:{index}:{entity_type}:{name}"
+    attributes: Dict[str, Any] = {
+        "upstream_extraction": True,
+        "upstream_entity_id": upstream_id,
+        "properties": properties,
+    }
+    span_status = "missing_source_span"
+    if name and name != source_text and not (isinstance(upstream_source, str) and upstream_source == source_text and name == upstream_source):
+        lookup = locate_unique_byte_span(source_text, name)
+        if lookup.deficiency == "" and lookup.start is not None and lookup.end is not None:
+            span_status = "unique"
+            attributes["description"] = lookup.text
+            attributes["source_span"] = {"start": lookup.start, "end": lookup.end, "text": lookup.text, "unit": "byte"}
+        elif lookup.deficiency == "ambiguous_source_span":
+            span_status = "ambiguous_source_span"
+            attributes["description"] = name
+        else:
+            span_status = lookup.deficiency or "missing_source_span"
+    elif isinstance(upstream_source, str) and upstream_source == source_text:
+        span_status = "source_text_not_a_span"
+    attributes["span_status"] = span_status
+    origin = "heuristic" if span_status == "unique" and entity_type.lower() in _ASSERTABLE_UPSTREAM_TYPES else "model"
+    provenance = {
+        "extractor": "KnowledgeGraphExtractor",
+        "upstream_entity_id": upstream_id,
+        "extraction_method": "" if extraction_method is None else str(extraction_method),
+        "span_status": span_status,
+    }
+    payload: Dict[str, Any] = {
+        "name": name,
+        "type": entity_type,
+        "origin": origin,
+        "extractor_key": extractor_key,
+        "attributes": attributes,
+        "provenance": provenance,
+        "source_span": attributes.get("source_span"),
+    }
+    if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
+        payload["confidence"] = float(confidence)
+    return payload
+
+
+def _normalize_upstream_relationship(
+    record: Any,
+    index: int,
+    key_by_upstream_id: Mapping[str, str],
+) -> Optional[Dict[str, Any]]:
+    relation_type = str(_record_get(record, "relationship_type", "relation_type", "type") or "").strip()
+    if not relation_type:
+        return None
+    properties = _mapping_or_empty(_record_get(record, "properties"))
+    source_endpoint = _record_get(record, "source_entity", "source")
+    target_endpoint = _record_get(record, "target_entity", "target")
+    source_upstream = _endpoint_identity(source_endpoint) or str(properties.get("source_id") or _record_get(record, "source_id") or "").strip()
+    target_upstream = _endpoint_identity(target_endpoint) or str(properties.get("target_id") or _record_get(record, "target_id") or "").strip()
+    source_key = key_by_upstream_id.get(source_upstream, "")
+    target_key = key_by_upstream_id.get(target_upstream, "")
+    if not source_key or not target_key:
+        return None
+    extraction_method = _record_get(record, "extraction_method")
+    upstream_id = str(_record_get(record, "relationship_id", "id") or "").strip()
+    confidence = _record_get(record, "confidence")
+    payload: Dict[str, Any] = {
+        "type": relation_type,
+        "relation_type": relation_type,
+        "origin": "model",
+        "source_key": source_key,
+        "target_key": target_key,
+        "attributes": {
+            "upstream_extraction": True,
+            "upstream_relationship_id": upstream_id,
+            "properties": properties,
+            "inferred": True,
+        },
+        "provenance": {
+            "extractor": "KnowledgeGraphExtractor",
+            "upstream_relationship_id": upstream_id,
+            "extraction_method": "" if extraction_method is None else str(extraction_method),
+        },
+    }
+    if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
+        payload["confidence"] = float(confidence)
+    return payload
+
+
+def _project_upstream_graph(
+    text: str,
+    entity_records: List[Any],
+    relationship_records: List[Any],
+    caller_context: Mapping[str, Any],
+    extractor_provenance: Mapping[str, Any],
+) -> tuple[List[GraphEntity], List[GraphRelationship], List[str]]:
+    from complaint_phases.knowledge_graph import (
+        KnowledgeGraphBuilder,
+        entity_to_graph_entity,
+        relationship_to_graph_relationship,
+    )
+
+    normalized_entities: List[Dict[str, Any]] = []
+    key_by_upstream_id: Dict[str, str] = {}
+    diagnostics: List[str] = []
+    for index, record in enumerate(entity_records[:_PRIVATE_EXTRACTION_RESULT_LIMIT]):
+        normalized = _normalize_upstream_entity(record, index, text)
+        if normalized is None:
+            diagnostics.append("skipped_malformed_entity")
+            continue
+        normalized_entities.append(normalized)
+        upstream_id = str(normalized["provenance"].get("upstream_entity_id") or "")
+        if upstream_id:
+            key_by_upstream_id[upstream_id] = str(normalized["extractor_key"])
+        key_by_upstream_id[str(normalized["extractor_key"])] = str(normalized["extractor_key"])
+    if len(entity_records) > _PRIVATE_EXTRACTION_RESULT_LIMIT:
+        diagnostics.append("entity_result_bound")
+    normalized_relationships: List[Dict[str, Any]] = []
+    for index, record in enumerate(relationship_records[:_PRIVATE_EXTRACTION_RESULT_LIMIT]):
+        normalized = _normalize_upstream_relationship(record, index, key_by_upstream_id)
+        if normalized is None:
+            diagnostics.append("skipped_unbound_relationship")
+            continue
+        normalized_relationships.append(normalized)
+    if len(relationship_records) > _PRIVATE_EXTRACTION_RESULT_LIMIT:
+        diagnostics.append("relationship_result_bound")
+    if not normalized_entities and not normalized_relationships:
+        diagnostics.append("extractor_empty")
+    kind = str(caller_context.get("source_kind") or "")
+    identity = caller_context.get("document_id") if kind == "user_uploaded_document" else caller_context.get("message_id")
+    caller_authorized = (
+        kind in {"user_statement", "user_uploaded_document"}
+        and caller_context.get("assertion_status") == "asserted"
+        and bool(caller_context.get("extractor_version"))
+        and bool(caller_context.get("source_hash"))
+        and bool(identity or caller_context.get("source_id"))
+    )
+    if not caller_authorized:
+        diagnostics.append("caller_source_not_authorized")
+        for entity in normalized_entities:
+            entity["origin"] = "model"
+    built = KnowledgeGraphBuilder().build_from_text(
+        text,
+        source_context=caller_context,
+        extracted_entities=normalized_entities,
+        extracted_relationships=normalized_relationships,
+        extractor_provenance=dict(extractor_provenance),
+        include_local_heuristics=False,
+    )
+    entities = [
+        entity_to_graph_entity(entity)
+        for entity in built.entities.values()
+        if (entity.attributes or {}).get("upstream_extraction") is True
+    ]
+    relationships = [
+        relationship_to_graph_relationship(relationship)
+        for relationship in built.relationships.values()
+        if (relationship.attributes or {}).get("upstream_extraction") is True
+    ]
+    return entities, relationships, diagnostics
+
+
+def _run_private_extraction(
+    text: str,
+    caller_context: Mapping[str, Any],
+    timeout_seconds: float,
+) -> Dict[str, Any]:
+    extractor_cls, load_error = _load_private_extractor_class()
+    provenance = {
+        "extractor": "KnowledgeGraphExtractor",
+        "module": _PRIVATE_EXTRACTOR_MODULE,
+        "options": dict(_PRIVATE_EXTRACTOR_OPTIONS),
+        "method": "extract_knowledge_graph",
+    }
+    if extractor_cls is None:
+        return {
+            "status": "unavailable",
+            "diagnostic": load_error or "extractor_unavailable",
+            "entities": [],
+            "relationships": [],
+            "diagnostics": [load_error or "extractor_unavailable"],
+            "provenance": provenance,
+            "backend_available": False,
+        }
+    def _invoke() -> Any:
+        extractor = extractor_cls(**_PRIVATE_EXTRACTOR_OPTIONS)
+        return extractor.extract_knowledge_graph(text)
+
+    graph, call_error = _bounded_call(_invoke, timeout_seconds)
+    if call_error:
+        diagnostic = "extractor_timeout" if call_error == "extractor_timeout" else call_error
+        status = "degraded"
+        return {
+            "status": status,
+            "diagnostic": diagnostic,
+            "entities": [],
+            "relationships": [],
+            "diagnostics": [diagnostic],
+            "provenance": provenance,
+            "backend_available": False,
+        }
+    entity_records, relationship_records, invalid = _upstream_records(graph)
+    if invalid:
+        return {
+            "status": "degraded",
+            "diagnostic": invalid,
+            "entities": [],
+            "relationships": [],
+            "diagnostics": [invalid],
+            "provenance": provenance,
+            "backend_available": False,
+        }
+    entities, relationships, diagnostics = _project_upstream_graph(
+        text,
+        entity_records,
+        relationship_records,
+        caller_context,
+        provenance,
+    )
+    if not entities and not relationships and "extractor_empty" not in diagnostics:
+        diagnostics.append("extractor_empty")
+    return {
+        "status": "available",
+        "diagnostic": "",
+        "entities": entities,
+        "relationships": relationships,
+        "diagnostics": diagnostics,
+        "provenance": provenance,
+        "backend_available": True,
+    }
+
+
 def extract_graph_from_text(
     text: str,
     *,
@@ -954,79 +1303,166 @@ def extract_graph_from_text(
             )
         )
 
-    sentences = _split_sentences(text)
-    if not sentences and text.strip():
-        sentences = [text.strip()]
+    submitted = text if isinstance(text, str) else ""
+    timeout_raw = metadata.get("extraction_timeout_seconds", _PRIVATE_EXTRACTION_TIMEOUT_SECONDS)
+    try:
+        timeout_seconds = float(timeout_raw)
+    except (TypeError, ValueError):
+        timeout_seconds = _PRIVATE_EXTRACTION_TIMEOUT_SECONDS
+    timeout_seconds = min(max(timeout_seconds, 0.01), _PRIVATE_EXTRACTION_TIMEOUT_SECONDS)
+    private_extraction: Dict[str, Any] = {
+        "method": "extract_knowledge_graph",
+        "options": dict(_PRIVATE_EXTRACTOR_OPTIONS),
+        "diagnostics": [],
+    }
+    sentences: List[str] = []
+    payload_status = "unavailable"
+    backend_available = False
+    degraded_reason: Optional[str] = None
+    implementation_status = "unavailable"
 
-    passage_kind = legal_namespace_kind(metadata) if legal_passage else FACTUAL_ASSERTION_KIND
-    for index, sentence in enumerate(sentences[:25]):
-        if legal_passage:
+    if not submitted.strip():
+        private_extraction["status"] = "degraded"
+        private_extraction["diagnostic"] = "input_empty"
+        private_extraction["diagnostics"] = ["input_empty"]
+        payload_status = "degraded"
+        degraded_reason = "input_empty"
+        implementation_status = "degraded"
+    elif len(submitted) > _PRIVATE_EXTRACTION_TEXT_LIMIT:
+        private_extraction["status"] = "degraded"
+        private_extraction["diagnostic"] = "input_bound_exceeded"
+        private_extraction["diagnostics"] = ["input_bound_exceeded"]
+        payload_status = "degraded"
+        degraded_reason = "input_bound_exceeded"
+        implementation_status = "degraded"
+    elif legal_passage:
+        sentences = _split_sentences(submitted)
+        if not sentences and submitted.strip():
+            sentences = [submitted.strip()]
+        passage_kind = legal_namespace_kind(metadata)
+        for index, sentence in enumerate(sentences[:25]):
             fact_id = mint_graph_record_id(
                 passage_kind, artifact_id or source_id or "legal", str(index), sentence,
             )
-            entity_type = passage_kind
-            relation_name = "cites_authority"
-        else:
-            fact_id = _stable_identifier("fact", artifact_id or source_id or "text", str(index), sentence)
-            entity_type = "fact"
-            relation_name = "has_fact"
-        entities.append(
-            GraphEntity(
-                entity_id=fact_id,
-                entity_type=entity_type,
-                name=sentence[:120],
-                confidence=0.6,
-                attributes={
-                    "text": sentence,
-                    "sentence_index": index,
-                    "source_id": artifact_id,
-                    "record_kind": passage_kind if legal_passage else "fact",
-                    "about_complainant": False if legal_passage else True,
-                    "provenance": graph_provenance,
-                },
-            )
-        )
-        if artifact_id:
-            relationships.append(
-                GraphRelationship(
-                    relationship_id=_stable_identifier("rel", artifact_id, fact_id, relation_name),
-                    source_id=artifact_id,
-                    target_id=fact_id,
-                    relation_type=relation_name,
-                    confidence=1.0,
-                    attributes={"sentence_index": index, "provenance": graph_provenance},
-                )
-            )
-        if claim_node_id and not legal_passage:
-            relationships.append(
-                GraphRelationship(
-                    relationship_id=_stable_identifier("rel", fact_id, claim_node_id, "supports"),
-                    source_id=fact_id,
-                    target_id=claim_node_id,
-                    relation_type="supports",
+            entities.append(
+                GraphEntity(
+                    entity_id=fact_id,
+                    entity_type=passage_kind,
+                    name=sentence[:120],
                     confidence=0.6,
-                    attributes={"sentence_index": index, "provenance": graph_provenance},
+                    attributes={
+                        "text": sentence,
+                        "sentence_index": index,
+                        "source_id": artifact_id,
+                        "record_kind": passage_kind,
+                        "about_complainant": False,
+                        "extraction_mode": "legal_heuristic",
+                        "provenance": graph_provenance,
+                    },
                 )
             )
+            if artifact_id:
+                relationships.append(
+                    GraphRelationship(
+                        relationship_id=_stable_identifier("rel", artifact_id, fact_id, "cites_authority"),
+                        source_id=artifact_id,
+                        target_id=fact_id,
+                        relation_type="cites_authority",
+                        confidence=1.0,
+                        attributes={"sentence_index": index, "provenance": graph_provenance, "extraction_mode": "legal_heuristic"},
+                    )
+                )
+        private_extraction["status"] = "legal_heuristic"
+        private_extraction["diagnostic"] = "legal_passage_not_private_extraction"
+        private_extraction["diagnostics"] = ["legal_passage_not_private_extraction"]
+        payload_status = "available-fallback"
+        implementation_status = "legal_heuristic"
+        backend_available = False
+    else:
+        caller_context = _caller_source_context(str(artifact_id or source_id or ""), metadata)
+        extraction = _run_private_extraction(submitted, caller_context, timeout_seconds)
+        private_extraction.update({
+            "status": extraction["status"],
+            "diagnostic": extraction["diagnostic"],
+            "diagnostics": list(extraction["diagnostics"]),
+            "provenance": extraction["provenance"],
+        })
+        if extraction["status"] == "available":
+            entities.extend(extraction["entities"])
+            relationships.extend(extraction["relationships"])
+            sentences = _split_sentences(submitted)
+            if not sentences and submitted.strip():
+                sentences = [submitted.strip()]
+            for index, sentence in enumerate(sentences[:25]):
+                fact_id = _stable_identifier("fact", artifact_id or source_id or "text", str(index), sentence)
+                entities.append(
+                    GraphEntity(
+                        entity_id=fact_id,
+                        entity_type="fact",
+                        name=sentence[:120],
+                        confidence=0.6,
+                        attributes={
+                            "text": sentence,
+                            "sentence_index": index,
+                            "source_id": artifact_id,
+                            "record_kind": "fact",
+                            "about_complainant": True,
+                            "extraction_mode": "legacy_sentence_heuristic",
+                            "asserted": False,
+                            "provenance": graph_provenance,
+                        },
+                    )
+                )
+                if artifact_id:
+                    relationships.append(
+                        GraphRelationship(
+                            relationship_id=_stable_identifier("rel", artifact_id, fact_id, "has_fact"),
+                            source_id=artifact_id,
+                            target_id=fact_id,
+                            relation_type="has_fact",
+                            confidence=1.0,
+                            attributes={"sentence_index": index, "provenance": graph_provenance, "extraction_mode": "legacy_sentence_heuristic"},
+                        )
+                    )
+                if claim_node_id:
+                    relationships.append(
+                        GraphRelationship(
+                            relationship_id=_stable_identifier("rel", fact_id, claim_node_id, "supports"),
+                            source_id=fact_id,
+                            target_id=claim_node_id,
+                            relation_type="supports",
+                            confidence=0.6,
+                            attributes={"sentence_index": index, "provenance": graph_provenance, "extraction_mode": "legacy_sentence_heuristic"},
+                        )
+                    )
+            payload_status = "available"
+            backend_available = True
+            implementation_status = "upstream"
+        else:
+            degraded_reason = str(extraction["diagnostic"] or extraction["status"])
+            payload_status = extraction["status"]
+            backend_available = False
+            implementation_status = extraction["status"]
 
-    implementation_status = "fallback" if KNOWLEDGE_GRAPHS_AVAILABLE else "unavailable"
     return with_adapter_metadata(
         GraphPayload(
-            status="available-fallback" if KNOWLEDGE_GRAPHS_AVAILABLE else "unavailable",
+            status=payload_status,
             source_id=source_id or "",
             entities=entities,
             relationships=relationships,
             metadata={
                 **metadata,
-                "text_length": len(text),
+                "text_length": len(submitted),
                 "sentence_count": len(sentences),
                 "provenance": graph_provenance,
+                "private_extraction": private_extraction,
             },
         ).as_dict(),
         operation="extract_graph_from_text",
-        backend_available=KNOWLEDGE_GRAPHS_AVAILABLE,
-        degraded_reason=GRAPHS_ERROR if not KNOWLEDGE_GRAPHS_AVAILABLE else None,
+        backend_available=backend_available,
+        degraded_reason=degraded_reason,
         implementation_status=implementation_status,
+        extra_metadata={"private_extraction": private_extraction},
     )
 
 

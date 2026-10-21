@@ -486,3 +486,300 @@ def test_unchanged_deserialized_real_link_replays_without_rewriting_proof():
     assert builder.add_fact_rule_link(replay, **kwargs) == link
     assert len(replay.dependencies) == len(replay.metadata["cross_graph_links"]) == 1
     assert fact.provenance == kwargs["factual_provenance"]
+
+
+def _statement_context(text, **overrides):
+    from integrations.ipfs_datasets.types import source_byte_hash
+    context = {
+        "source_kind": "user_statement",
+        "source_id": "message-private",
+        "message_id": "message-private",
+        "source_hash": source_byte_hash(text),
+        "assertion_status": "asserted",
+        "extractor_version": "audit.v1",
+    }
+    context.update(overrides)
+    return context
+
+
+class _UpstreamEntity:
+    def __init__(self, entity_id, entity_type, name, source_text, extraction_method="rule_based"):
+        self.entity_id = entity_id
+        self.entity_type = entity_type
+        self.name = name
+        self.properties = {}
+        self.confidence = 0.99
+        self.source_text = source_text
+        self.extraction_method = extraction_method
+
+    def to_dict(self):
+        return {
+            "entity_id": self.entity_id,
+            "entity_type": self.entity_type,
+            "name": self.name,
+            "properties": dict(self.properties),
+            "confidence": self.confidence,
+            "source_text": self.source_text,
+        }
+
+
+class _UpstreamRelationship:
+    def __init__(self, relationship_id, relationship_type, source, target, source_text):
+        self.relationship_id = relationship_id
+        self.relationship_type = relationship_type
+        self.source_entity = source
+        self.target_entity = target
+        self.properties = {"source_id": source.entity_id, "target_id": target.entity_id}
+        self.confidence = 0.91
+        self.source_text = source_text
+        self.extraction_method = "rule_based"
+
+    def to_dict(self):
+        return {
+            "relationship_id": self.relationship_id,
+            "relationship_type": self.relationship_type,
+            "source": self.source_entity.to_dict(),
+            "target": self.target_entity.to_dict(),
+            "properties": dict(self.properties),
+            "confidence": self.confidence,
+            "source_text": self.source_text,
+        }
+
+
+class _UpstreamGraph:
+    def __init__(self, entities, relationships):
+        self.entities = {entity.entity_id: entity for entity in entities}
+        self.relationships = {relationship.relationship_id: relationship for relationship in relationships}
+
+    def to_dict(self):
+        return {
+            "entities": [entity.to_dict() for entity in self.entities.values()],
+            "relationships": [relationship.to_dict() for relationship in self.relationships.values()],
+        }
+
+
+def _patch_extractor(monkeypatch, graph_factory):
+    seen = {"constructed": [], "texts": []}
+
+    class _Extractor:
+        def __init__(self, **options):
+            seen["constructed"].append(dict(options))
+
+        def extract_knowledge_graph(self, text, extraction_temperature=0.7, structure_temperature=0.5):
+            seen["texts"].append(text)
+            seen["temperatures"] = (extraction_temperature, structure_temperature)
+            return graph_factory(text)
+
+    monkeypatch.setattr(
+        "integrations.ipfs_datasets.graphs._load_private_extractor_class",
+        lambda: (_Extractor, None),
+    )
+    return seen
+
+
+def _asserted_upstream(result):
+    from integrations.ipfs_datasets.types import user_assertion_from_mapping
+    asserted = []
+    for entity in result["entities"]:
+        if entity.get("attributes", {}).get("extraction_mode") == "legacy_sentence_heuristic":
+            continue
+        if entity.get("type") in {"artifact", "claim_element"}:
+            continue
+        envelope = user_assertion_from_mapping(entity.get("assertion") or {})
+        if envelope.is_asserted_user_fact:
+            asserted.append((entity, envelope))
+    return asserted
+
+
+def test_private_extractor_is_called_with_safe_flags_and_exact_spans(monkeypatch):
+    text = "José reported the hazard."
+    person = _UpstreamEntity("uuid-person", "person", "José", text)
+    date = _UpstreamEntity("uuid-date", "date", "hazard", text)
+    relation = _UpstreamRelationship("uuid-rel", "reported", person, date, text)
+    seen = _patch_extractor(monkeypatch, lambda submitted: _UpstreamGraph([person, date], [relation]))
+    result = extract_graph_from_text(text, source_id="message-private", metadata=_statement_context(text))
+    assert seen["constructed"] == [{
+        "use_spacy": False,
+        "use_transformers": False,
+        "use_tracer": False,
+        "use_srl": False,
+    }]
+    assert seen["texts"] == [text]
+    assert result["metadata"]["implementation_status"] == "upstream"
+    asserted = _asserted_upstream(result)
+    assert {entity["name"] for entity, _envelope in asserted} == {"José", "hazard"}
+    raw = text.encode("utf-8")
+    for entity, envelope in asserted:
+        assert entity["id"] not in {"uuid-person", "uuid-date", "message-private"}
+        assert raw[envelope.source_span_start:envelope.source_span_end].decode("utf-8") == entity["name"]
+        assert envelope.source_hash
+        assert entity["provenance"]["extractor"]["extraction_method"] == "rule_based"
+    relationships = [item for item in result["relationships"] if item["relation_type"] == "reported"]
+    assert len(relationships) == 1
+    relation_payload = relationships[0]
+    asserted_ids = {entity["id"] for entity, _envelope in asserted}
+    assert relation_payload["source_id"] in asserted_ids
+    assert relation_payload["target_id"] in asserted_ids
+    assert relation_payload["source_id"] != "message-private"
+    assert "uuid-rel" not in {relation_payload["id"], relation_payload["source_id"], relation_payload["target_id"]}
+    from integrations.ipfs_datasets.types import user_assertion_from_mapping
+    assert not user_assertion_from_mapping(relation_payload["assertion"]).is_asserted_user_fact
+
+
+def test_repeated_unicode_and_model_mentions_stay_unasserted(monkeypatch):
+    text = "José saw José near the café."
+    records = [
+        _UpstreamEntity("p1", "person", "José", text),
+        _UpstreamEntity("f1", "field", "café", text, extraction_method="model"),
+        _UpstreamEntity("w1", "person", text, text),
+    ]
+    _patch_extractor(monkeypatch, lambda _submitted: _UpstreamGraph(records, []))
+    result = extract_graph_from_text(text, source_id="message-private", metadata=_statement_context(text))
+    assert _asserted_upstream(result) == []
+    rendered = str(result["entities"])
+    assert "ambiguous_source_span" in rendered
+    assert "source_text_not_a_span" in rendered or "model" in rendered
+
+
+def test_document_source_binds_graph_endpoints_not_document_ids(monkeypatch):
+    from integrations.ipfs_datasets.types import source_byte_hash, user_assertion_from_mapping
+    text = "Ada notified HR."
+    person = _UpstreamEntity("uuid-ada", "person", "Ada", "window")
+    org = _UpstreamEntity("uuid-hr", "organization", "HR", "window")
+    relation = _UpstreamRelationship("uuid-edge", "notified", person, org, text)
+    _patch_extractor(monkeypatch, lambda _submitted: _UpstreamGraph([person, org], [relation]))
+    metadata = {
+        "source_kind": "user_uploaded_document",
+        "source_id": "document-9",
+        "document_id": "document-9",
+        "source_hash": source_byte_hash(text),
+        "assertion_status": "asserted",
+        "extractor_version": "audit.v1",
+    }
+    result = extract_graph_from_text(text, source_id="document-9", metadata=metadata)
+    asserted = {entity["name"]: entity for entity, _envelope in _asserted_upstream(result)}
+    assert set(asserted) == {"Ada", "HR"}
+    edge = next(item for item in result["relationships"] if item["relation_type"] == "notified")
+    assert edge["source_id"] == asserted["Ada"]["id"]
+    assert edge["target_id"] == asserted["HR"]["id"]
+    assert edge["assertion"]["graph_source_id"] == asserted["Ada"]["id"]
+    assert edge["assertion"]["graph_target_id"] == asserted["HR"]["id"]
+    assert edge["source_id"] != "document-9"
+    assert not user_assertion_from_mapping(edge["assertion"]).is_asserted_user_fact
+
+
+@pytest.mark.parametrize("override", [
+    {"source_hash": "0" * 64},
+    {"message_id": "", "source_id": ""},
+    {"assertion_status": "suggestion"},
+    {"extractor_version": ""},
+    {"source_kind": "model_output"},
+])
+def test_missing_or_mismatched_caller_source_cannot_assert(monkeypatch, override):
+    text = "Ada notified HR."
+    _patch_extractor(monkeypatch, lambda _submitted: _UpstreamGraph([
+        _UpstreamEntity("uuid-ada", "person", "Ada", text),
+    ], []))
+    context = _statement_context(text)
+    context.update(override)
+    result = extract_graph_from_text(text, source_id=context.get("source_id") or None, metadata=context)
+    assert _asserted_upstream(result) == []
+
+
+def test_absent_error_invalid_and_hanging_backends_fabricate_nothing(monkeypatch):
+    from integrations.ipfs_datasets.types import user_assertion_from_mapping
+    text = "Ada notified HR."
+    context = _statement_context(text, extraction_timeout_seconds=0.05)
+
+    monkeypatch.setattr(
+        "integrations.ipfs_datasets.graphs._load_private_extractor_class",
+        lambda: (None, "extractor_import_failed: missing"),
+    )
+    absent = extract_graph_from_text(text, source_id="message-private", metadata=context)
+    assert absent["status"] == "unavailable"
+    assert absent["metadata"]["private_extraction"]["diagnostic"].startswith("extractor_import_failed")
+    assert _asserted_upstream(absent) == []
+
+    class _Boom:
+        def __init__(self, **_options):
+            pass
+        def extract_knowledge_graph(self, _text, **_kwargs):
+            raise RuntimeError("backend failed")
+
+    monkeypatch.setattr("integrations.ipfs_datasets.graphs._load_private_extractor_class", lambda: (_Boom, None))
+    failed = extract_graph_from_text(text, source_id="message-private", metadata=context)
+    assert failed["status"] == "degraded"
+    assert "extractor_error" in failed["metadata"]["private_extraction"]["diagnostic"]
+    assert _asserted_upstream(failed) == []
+
+    class _Invalid:
+        def __init__(self, **_options):
+            pass
+        def extract_knowledge_graph(self, _text, **_kwargs):
+            return {"entities": "not-a-graph"}
+
+    monkeypatch.setattr("integrations.ipfs_datasets.graphs._load_private_extractor_class", lambda: (_Invalid, None))
+    invalid = extract_graph_from_text(text, source_id="message-private", metadata=context)
+    assert invalid["status"] == "degraded"
+    assert invalid["metadata"]["private_extraction"]["diagnostic"] == "extractor_invalid_result"
+    assert _asserted_upstream(invalid) == []
+
+    class _Hang:
+        def __init__(self, **_options):
+            pass
+        def extract_knowledge_graph(self, _text, **_kwargs):
+            import time
+            time.sleep(2)
+
+    monkeypatch.setattr("integrations.ipfs_datasets.graphs._load_private_extractor_class", lambda: (_Hang, None))
+    hung = extract_graph_from_text(text, source_id="message-private", metadata=context)
+    assert hung["status"] == "degraded"
+    assert hung["metadata"]["private_extraction"]["diagnostic"] == "extractor_timeout"
+    assert _asserted_upstream(hung) == []
+    for payload in (absent, failed, invalid, hung):
+        for entity in payload["entities"]:
+            envelope = user_assertion_from_mapping(entity.get("assertion") or {})
+            assert not envelope.is_asserted_user_fact
+
+
+def test_real_private_extractor_smoke_disables_network_and_downloads(monkeypatch):
+    def _blocked(*_args, **_kwargs):
+        raise AssertionError("network or model download is outside private extraction")
+
+    import socket
+    monkeypatch.setattr(socket, "create_connection", _blocked)
+    try:
+        import urllib.request
+        monkeypatch.setattr(urllib.request, "urlopen", _blocked)
+    except ImportError:
+        pass
+    try:
+        import spacy
+        if hasattr(spacy, "cli"):
+            monkeypatch.setattr(spacy.cli, "download", _blocked)
+    except ImportError:
+        pass
+    text = "Marie Curie reported a hazard in 2020."
+    result = extract_graph_from_text(text, source_id="message-private", metadata=_statement_context(text))
+    private = result["metadata"]["private_extraction"]
+    if private.get("status") == "unavailable":
+        assert "extractor_import_failed" in str(private.get("diagnostic")) or "extractor_unavailable" in str(private.get("diagnostic"))
+        assert _asserted_upstream(result) == []
+        return
+    assert private["status"] == "available"
+    assert private["options"] == {
+        "use_spacy": False,
+        "use_transformers": False,
+        "use_tracer": False,
+        "use_srl": False,
+    }
+    asserted = _asserted_upstream(result)
+    assert asserted
+    raw = text.encode("utf-8")
+    for entity, envelope in asserted:
+        assert raw[envelope.source_span_start:envelope.source_span_end].decode("utf-8") == envelope.source_span_text
+        assert entity["name"] in text
+    from integrations.ipfs_datasets.types import user_assertion_from_mapping
+    for relationship in result["relationships"]:
+        if relationship.get("attributes", {}).get("upstream_extraction") is True:
+            assert not user_assertion_from_mapping(relationship.get("assertion") or {}).is_asserted_user_fact

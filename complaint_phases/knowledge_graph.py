@@ -2114,6 +2114,7 @@ class KnowledgeGraphBuilder:
         extractor_provenance: Optional[Mapping[str, Any]] = None,
         extracted_entities: Optional[Sequence[Mapping[str, Any]]] = None,
         extracted_relationships: Optional[Sequence[Mapping[str, Any]]] = None,
+        include_local_heuristics: bool = True,
     ) -> KnowledgeGraph:
         """
         Build a knowledge graph from complaint text.
@@ -2158,9 +2159,10 @@ class KnowledgeGraphBuilder:
         )
 
         entities: List[Dict[str, Any]] = []
-        for entity_data in self._extract_entities(source_text):
-            if isinstance(entity_data, Mapping):
-                entities.append(dict(entity_data))
+        if include_local_heuristics:
+            for entity_data in self._extract_entities(source_text):
+                if isinstance(entity_data, Mapping):
+                    entities.append(dict(entity_data))
         for raw_entity in extracted_entities or []:
             if not isinstance(raw_entity, Mapping):
                 continue
@@ -2236,9 +2238,10 @@ class KnowledgeGraphBuilder:
                 entity_key_to_id[extractor_key] = entity.id
 
         relationships: List[Dict[str, Any]] = []
-        for rel_data in self._extract_relationships(source_text, graph):
-            if isinstance(rel_data, Mapping):
-                relationships.append(dict(rel_data))
+        if include_local_heuristics:
+            for rel_data in self._extract_relationships(source_text, graph):
+                if isinstance(rel_data, Mapping):
+                    relationships.append(dict(rel_data))
         for raw_relationship in extracted_relationships or []:
             if not isinstance(raw_relationship, Mapping):
                 continue
