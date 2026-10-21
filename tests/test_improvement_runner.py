@@ -239,6 +239,36 @@ def test_native_task_parser_sees_entire_dag_and_grok_route(campaign):
     assert result["ready_task_ids"] == ["CIMP-TUI-01"]
 
 
+def test_parse_task_file_keeps_hold_owner_and_receipt_without_ingestion_completion(campaign):
+    root, spec_path, _, generated = campaign
+    from integrations.ipfs_accelerate.improvement_plan import PLAN_RELATIVE, generate
+
+    board = Path(generated["board_path"])
+    plan = root / PLAN_RELATIVE
+    text = board.read_text(encoding="utf-8")
+    text = text.replace("- Status: todo\n", "- Status: in_progress\n- Manual hold: true\n- Owner: worker-7\n- Claim: claim-42\n", 1)
+    text = text.replace("- Status: todo\n", "- Status: completed\n- Completion receipt: baguqeerareceiptreference\n", 1)
+    board.write_text(text, encoding="utf-8")
+    before_board, before_plan = board.read_bytes(), plan.read_bytes()
+    result = generate(spec_path, root)
+    assert board.read_bytes() == before_board
+    assert plan.read_bytes() == before_plan
+    assert result["receipt"]["tasks_completed_by_ingestion"] == 0
+    assert result["receipt"]["execution_started"] is False
+    _, daemon = runner._native_modules(ROOT)
+    tasks = daemon.parse_task_file(board, task_header_prefix=runner.TASK_PREFIX)
+    by_id = {task.task_id: task for task in tasks}
+    assert by_id["CIMP-TUI-01"].status == "in_progress"
+    assert by_id["CIMP-TUI-01"].metadata["manual hold"] == "true"
+    assert by_id["CIMP-TUI-01"].metadata["owner"] == "worker-7"
+    assert by_id["CIMP-TUI-01"].metadata["claim"] == "claim-42"
+    assert by_id["CIMP-TUI-02"].status == "completed"
+    assert by_id["CIMP-TUI-02"].metadata["completion receipt"] == "baguqeerareceiptreference"
+    summary = runner._board_summary(tasks)
+    assert summary["manual_hold_task_ids"] == ["CIMP-TUI-01"]
+    assert summary["completed"] == 1
+
+
 def test_board_validation_rejects_changed_dependency(campaign):
     root, spec, _, generated = campaign
     from integrations.ipfs_accelerate.improvement_plan import load_spec

@@ -219,3 +219,109 @@ def test_declared_submodules_survive_formal_and_real_native_daemon_ingestion(tmp
 def test_submodule_declaration_is_optional_and_does_not_change_old_plan_metadata(spec):
     plan = build_improvement_work_plan(spec)
     assert all("submodules" not in task.metadata for task in plan.tasks)
+
+
+def test_reviewed_spec_roundtrips_formal_plan_and_native_markdown(tmp_path):
+    source = Path(__file__).resolve().parents[1] / SPEC_RELATIVE
+    spec = json.loads(source.read_text(encoding="utf-8"))
+    plan = build_improvement_work_plan(spec)
+    from ipfs_accelerate_py.agent_supervisor.planning.formal_planning_contracts import FormalWorkPlan
+    from ipfs_accelerate_py.agent_supervisor.planning.formal_plan_validator import FormalPlanValidator
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import parse_task_file, parse_task_text
+
+    restored = FormalWorkPlan.from_dict({**plan.to_dict(), "plan_id": plan.plan_id})
+    assert restored.plan_id == plan.plan_id
+    assert restored.trace_bound == 1
+    assert restored.events == ()
+    validation = FormalPlanValidator().validate(restored).to_record()
+    assert validation["status"] != "consistent"
+    assert any(item["code"] == "terminal_outcome_missing" for item in validation["findings"])
+    result = generate(_write_spec(tmp_path, spec), tmp_path)
+    receipt = result["receipt"]
+    assert receipt["execution_started"] is False
+    assert receipt["tasks_completed_by_ingestion"] == 0
+    assert receipt["validations_executed"] == []
+    assert receipt["native_validation"]["status"] != "consistent"
+    board = Path(result["board_path"])
+    text = board.read_text(encoding="utf-8")
+    production = tmp_path / BOARD_RELATIVE
+    parsed = parse_task_text(text, path=production, task_header_prefix="## CIMP-")
+    ingested = parse_task_file(production, task_header_prefix="## CIMP-")
+    assert [task.task_id for task in parsed] == [task.task_id for task in ingested]
+    assert {task.task_id for task in ingested} == {task["id"] for task in spec["tasks"]}
+    by_id = {task["id"]: task for task in spec["tasks"]}
+    for task in ingested:
+        source_task = by_id[task.task_id]
+        assert task.status == "todo"
+        assert task.completion == "validation"
+        assert task.outputs == source_task["targets"]
+        assert task.depends_on == source_task["depends_on"]
+        assert task.validation == source_task["validation_commands"]
+        assert task.metadata["goal"] == source_task["goal_id"]
+        assert task.metadata["subgoal"] == source_task["subgoal_id"]
+        assert task.metadata["implementation provider"] == "grok"
+        assert task.metadata["provider role"] == "grok-only"
+        assert task.metadata["model"] == "grok-4.7"
+        assert task.metadata["router"] == "ipfs_accelerate_py.llm_router"
+        assert task.metadata["provider fallback"] == "disabled"
+        assert task.canonical_task_cid and task.canonical_task_key
+        assert restored.tasks[next(index for index, item in enumerate(restored.tasks) if item.task_id == task.task_id)].metadata["completion"] == "validation"
+
+
+@pytest.mark.parametrize("label,old,new", [
+    ("outputs", "- Outputs: applications/complaint_workspace.py, tests/test_tui.py",
+     "- Outputs: applications/other.py"),
+    ("acceptance", "- Acceptance: Answer updates the fact graph. Missing requirements produce relevant questions.",
+     "- Acceptance: Answer updates the fact graph."),
+    ("completion", "- Completion: validation", "- Completion: manual"),
+    ("validation", "- Validation: python -m pytest -q tests/test_tui.py",
+     "- Validation: python -m pytest -q tests/test_other.py"),
+    ("dependencies", "- Depends on: \n", "- Depends on: CIMP-TUI-02\n"),
+    ("goal", "- Goal: goal.tui", "- Goal: goal.other"),
+    ("subgoal", "- Subgoal: subgoal.intake", "- Subgoal: subgoal.other"),
+    ("submodules", "- Submodules: \n", "- Submodules: external/ipfs_datasets_py\n"),
+    ("implementation provider", "- Implementation provider: grok", "- Implementation provider: codex"),
+    ("provider role", "- Provider role: grok-only", "- Provider role: mixed"),
+    ("model", "- Model: grok-4.7", "- Model: grok-other"),
+    ("router", "- Router: ipfs_accelerate_py.llm_router", "- Router: other.router"),
+    ("provider fallback", "- Provider fallback: disabled", "- Provider fallback: enabled"),
+    ("semantic identity", "## CIMP-TUI-01 Verify intake behavior 1", "## CIMP-TUI-01 Renamed work"),
+])
+def test_same_marker_contract_drift_is_rejected_without_writes(tmp_path, spec, label, old, new):
+    path = _write_spec(tmp_path, spec)
+    generate(path, tmp_path)
+    board, plan = tmp_path / BOARD_RELATIVE, tmp_path / PLAN_RELATIVE
+    board.write_text(board.read_text(encoding="utf-8").replace(old, new, 1), encoding="utf-8")
+    before_board, before_plan = board.read_bytes(), plan.read_bytes()
+    with pytest.raises(ValueError, match="migrate explicitly"):
+        generate(path, tmp_path)
+    assert label
+    assert board.read_bytes() == before_board
+    assert plan.read_bytes() == before_plan
+
+
+def test_runtime_hold_owner_and_receipt_stay_byte_identical(tmp_path, spec):
+    path = _write_spec(tmp_path, spec)
+    generate(path, tmp_path)
+    board = tmp_path / BOARD_RELATIVE
+    text = board.read_text(encoding="utf-8")
+    text = text.replace("- Status: todo\n", "- Status: in_progress\n- Manual hold: true\n- Owner: worker-7\n- Claim: claim-42\n", 1)
+    text = text.replace("- Status: todo\n", "- Status: completed\n- Completion receipt: baguqeerareceiptreference\n", 1)
+    text += "\nOperator note: leave this hold in place.\n"
+    board.write_text(text, encoding="utf-8")
+    before = board.read_bytes()
+    result = generate(path, tmp_path)
+    assert board.read_bytes() == before
+    assert result["receipt"]["board_preserved"] is True
+    assert result["receipt"]["tasks_completed_by_ingestion"] == 0
+    assert result["receipt"]["execution_started"] is False
+    assert result["receipt"]["validations_executed"] == []
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import parse_task_file
+
+    tasks = {task.task_id: task for task in parse_task_file(board, task_header_prefix="## CIMP-")}
+    assert tasks["CIMP-TUI-01"].status == "in_progress"
+    assert tasks["CIMP-TUI-01"].metadata["manual hold"] == "true"
+    assert tasks["CIMP-TUI-01"].metadata["owner"] == "worker-7"
+    assert tasks["CIMP-TUI-01"].metadata["claim"] == "claim-42"
+    assert tasks["CIMP-TUI-02"].status == "completed"
+    assert tasks["CIMP-TUI-02"].metadata["completion receipt"] == "baguqeerareceiptreference"

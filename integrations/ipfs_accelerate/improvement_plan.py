@@ -241,6 +241,66 @@ def _render_board(spec: Mapping[str, Any], plan_id: str) -> str:
     return "\n".join(lines)
 
 
+_TASK_HEADER_PREFIX = "## CIMP-"
+_CONTRACT_METADATA = (
+    "goal", "subgoal", "submodules", "implementation provider", "provider role",
+    "model", "router", "provider fallback",
+)
+
+
+def _parsed_projection(text: str, root: Path) -> dict[str, Any]:
+    """Parse with the production board path so semantic identities stay path-bound."""
+
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import parse_task_text
+
+    parsed = parse_task_text(text, path=root / BOARD_RELATIVE, task_header_prefix=_TASK_HEADER_PREFIX)
+    tasks: dict[str, Any] = {}
+    for task in parsed:
+        if task.task_id in tasks:
+            raise ValueError("existing task board differs from this plan; preserve it and migrate explicitly")
+        tasks[task.task_id] = task
+    return tasks
+
+
+def _projection_drift(existing: Any, expected: Any) -> list[str]:
+    """Return contract fields that differ. Runtime status and notes are not contract."""
+
+    drifted = []
+    if (existing.canonical_task_cid != expected.canonical_task_cid
+            or existing.canonical_task_key != expected.canonical_task_key):
+        drifted.append("semantic identity")
+    if tuple(existing.outputs) != tuple(expected.outputs):
+        drifted.append("outputs")
+    if existing.acceptance != expected.acceptance:
+        drifted.append("acceptance")
+    if tuple(existing.depends_on) != tuple(expected.depends_on):
+        drifted.append("dependencies")
+    if tuple(existing.validation) != tuple(expected.validation):
+        drifted.append("validation")
+    if existing.completion != expected.completion or existing.completion != "validation":
+        drifted.append("completion")
+    for key in _CONTRACT_METADATA:
+        if existing.metadata.get(key, "") != expected.metadata.get(key, ""):
+            drifted.append(key)
+    return drifted
+
+
+def _require_matching_projection(existing_text: str, spec: Mapping[str, Any], plan_id: str, root: Path) -> None:
+    expected_text = _render_board(spec, plan_id)
+    existing, expected = _parsed_projection(existing_text, root), _parsed_projection(expected_text, root)
+    planned = {task["id"] for task in spec["tasks"]}
+    if set(existing) != planned or set(expected) != planned:
+        raise ValueError("existing task board differs from this plan; preserve it and migrate explicitly")
+    drifted = {task_id: _projection_drift(existing[task_id], expected[task_id]) for task_id in sorted(planned)}
+    drifted = {task_id: fields for task_id, fields in drifted.items() if fields}
+    if drifted:
+        detail = "; ".join(f"{task_id}: {', '.join(fields)}" for task_id, fields in drifted.items())
+        raise ValueError(
+            "existing task board contract differs from this plan "
+            f"({detail}); preserve it and migrate explicitly"
+        )
+
+
 def _atomic_write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
@@ -282,6 +342,10 @@ def generate(spec_path: Path | str, repo_root: Path | str) -> dict[str, Any]:
         headings = re.findall(r"^## (CIMP-[A-Za-z0-9_.:-]+)(?:\s|$)", existing, re.MULTILINE)
         if marker not in existing or len(headings) != len(set(headings)) or set(headings) != {task["id"] for task in spec["tasks"]}:
             raise ValueError("existing task board differs from this plan; preserve it and migrate explicitly")
+        # Same plan marker and headings are not a contract. Compare the native
+        # parse before any artifact write so a drifted active board is neither
+        # rewritten nor given an ingestion receipt.
+        _require_matching_projection(existing, spec, plan.plan_id, root)
     # The board is not touched at all when it already exists, so a concurrent
     # daemon can keep changing its statuses without a compiler overwrite race.
     _atomic_write(plan_path, json.dumps(document, indent=2, sort_keys=True) + "\n")
