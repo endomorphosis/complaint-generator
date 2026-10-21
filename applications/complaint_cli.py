@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from functools import wraps
 import inspect
 import json
 import os
@@ -86,7 +87,7 @@ except ModuleNotFoundError:
 from complaint_generator.legacy_session_migration import migrate_legacy_session
 from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
 
-from .complaint_workspace import ComplaintWorkspaceService
+from .complaint_workspace import ComplaintWorkspaceService, WorkspaceAuthorizationDenied, WorkspacePersistenceError
 
 
 DEFAULT_UI_UX_SCREENSHOT_TARGET = "playwright/tests/complaint-flow.spec.js"
@@ -96,6 +97,63 @@ DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
 
 app = typer.Typer(help="Unified complaint workspace CLI.")
 service = ComplaintWorkspaceService()
+
+
+def _emit_workspace_failure(error: Exception) -> None:
+    """Close the terminal exception boundary without exposing callback locals."""
+
+    codes = {
+        "unlock_needed", "authentication_failed", "corrupt_session", "read_error",
+        "binding_missing", "owner_mismatch", "overwrite_blocked", "key_unavailable",
+        "private_persistence_unavailable", "migration_required",
+    }
+    status, code = "unavailable", "workspace_operation_failed"
+    if isinstance(error, WorkspacePersistenceError):
+        if error.public_status in {"unlock_needed", "recoverable", "unavailable"}:
+            status = error.public_status
+        if isinstance(error.code, str) and error.code in codes:
+            code = error.code
+    elif isinstance(error, WorkspaceAuthorizationDenied):
+        code = "authorization_denied"
+    typer.echo(json.dumps({
+        "status": status,
+        "code": code,
+        "message": "The private workspace operation could not continue. Unlock or recover the selected case, then retry.",
+        "actions": ["unlock_selected_case", "recover_selected_case", "retry"],
+        "awaiting_user": True,
+        "persistence_outcome": "unverified",
+        "privacy_bypassed": False,
+        "unlock_is_remote_consent": False,
+    }, sort_keys=True))
+    raise SystemExit(2) from None
+
+
+def _workspace_command_boundary(function):
+    @wraps(function)
+    def invoke(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except EOFError:
+            # EOF/pause semantics are a separate terminal-controls contract.
+            raise
+        except Exception as error:
+            # Typer/Rich may otherwise render private answer and storage locals.
+            # SystemExit and KeyboardInterrupt keep their existing semantics.
+            _emit_workspace_failure(error)
+
+    return invoke
+
+
+def _require_readable_session(payload: dict[str, Any]) -> None:
+    state = payload.get("session") if isinstance(payload.get("session"), dict) else payload
+    if state.get("session_readable") is False or state.get("existing_unreadable") is True:
+        status = state.get("status")
+        code = state.get("code")
+        raise WorkspacePersistenceError(
+            "Private session is not readable",
+            code=code if isinstance(code, str) else "private_persistence_unavailable",
+            public_status=status if isinstance(status, str) else "unavailable",
+        )
 
 
 def run_ui_review_workflow(*args, **kwargs):
@@ -178,6 +236,7 @@ def answer(user_id: str = "demo-user", question_id: str = "", answer_text: str =
 
 
 @app.command("chat-turn")
+@_workspace_command_boundary
 def chat_turn(
     user_id: str = "demo-user",
     message: Optional[str] = None,
@@ -272,11 +331,13 @@ def _read_chat_answer(inquiry: dict) -> str:
 
 
 @app.command("chat")
+@_workspace_command_boundary
 def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
     payload = service.run_intake_chat_turn(user_id)
     accepted_turns = 0
 
     while True:
+        _require_readable_session(payload)
         typer.echo(str(payload.get("message") or "").strip())
         inquiry = dict(payload.get("inquiry") or {})
         if not inquiry:
@@ -1258,6 +1319,7 @@ def ui_optimizer_stop(
     _print(payload)
 
 
+@_workspace_command_boundary
 def main() -> None:
     app()
 
