@@ -444,7 +444,7 @@ Implementation instructions:
 
 ## CIMP-LAW-03 Separate corpus retrieval relevance from entailment and applicability
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.law
