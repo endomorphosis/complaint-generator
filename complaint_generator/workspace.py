@@ -86,6 +86,8 @@ def run_intake_chat_turn(
     *,
     message: Optional[str] = None,
     question_id: Optional[str] = None,
+    expected_question_revision: Optional[int] = None,
+    interview_action: Optional[str] = None,
     service: Optional[ComplaintWorkspaceService] = None,
     root_dir: Optional[str | Path] = None,
 ) -> dict[str, Any]:
@@ -93,13 +95,16 @@ def run_intake_chat_turn(
 
     The first turn stores ``message`` on ``original_complaint`` (versioned
     narrative and revisions). Later structured ``question_id`` answers stay in
-    ``intake_answers``. API and MCP callers use this same service transition.
+    ``intake_answers``. Graph start, answer, and resume use the same mediator
+    transition for package, API, and MCP callers.
     """
 
     return _resolve_service(service, root_dir=root_dir).run_intake_chat_turn(
         user_id,
         message=message,
         question_id=question_id,
+        expected_question_revision=expected_question_revision,
+        interview_action=interview_action,
     )
 
 

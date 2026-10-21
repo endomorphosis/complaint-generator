@@ -1,6 +1,9 @@
-from typing import Any, Dict, List
+import hashlib
+import json
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
-from complaint_phases import ComplaintPhase
+from complaint_phases import ComplaintPhase, DependencyGraph, KnowledgeGraph
 from intake_status import (
 	_build_document_grounding_improvement_next_action,
 	_build_document_grounding_recovery_action,
@@ -110,6 +113,408 @@ class WorkflowActionService:
 			alignment_evidence_tasks=alignment_evidence_tasks,
 			document_grounding_recovery_action=document_grounding_recovery_action,
 		)
+
+	# One versioned interview transition. Session identity lives here; graph
+	# updates stay on Mediator.start_three_phase_process and
+	# process_denoising_answer.
+	INTERVIEW_CONTRACT_VERSION = "interview-transition-v1"
+	SESSION_PROJECTION_VERSION = "shared-interview-session-v1"
+
+	def bind_interview_privacy(self, policy: Any, *, user_id: str, case_id: str, data_class: str = "raw_intake") -> Dict[str, Any]:
+		"""Attach the per-case privacy context used before any interview inference."""
+		from integrations.ipfs_datasets.llm import build_complaint_privacy_context, privacy_policy_for_mode
+
+		resolved = policy
+		if not isinstance(resolved, dict):
+			resolved = privacy_policy_for_mode(user_id, case_id, "local")
+		context = build_complaint_privacy_context(
+			resolved,
+			user_id=str(user_id or ""),
+			case_id=str(case_id or user_id or ""),
+			data_class=data_class,
+		)
+		self._mediator._interview_privacy_context = context
+		self._interview_privacy_policy = context.get("policy")
+		return context
+
+	@property
+	def interview_started(self) -> bool:
+		meta = getattr(self, "_interview_meta", None)
+		return bool(isinstance(meta, dict) and meta.get("started"))
+
+	def transition_interview(
+		self,
+		*,
+		action: str,
+		narrative: Optional[str] = None,
+		answer: Optional[str] = None,
+		inquiry_id: Optional[str] = None,
+		expected_question_revision: Optional[int] = None,
+		session_projection: Optional[Dict[str, Any]] = None,
+		privacy_policy: Any = None,
+		user_id: Optional[str] = None,
+		case_id: Optional[str] = None,
+	) -> Dict[str, Any]:
+		"""Start, answer, resume, or report one shared interview step.
+
+		The pending question is the canonical graph question already stored on
+		the phase manager. A caller-supplied question body is not accepted.
+		"""
+		normalized = str(action or "status").strip().lower()
+		identity = str(user_id or getattr(self._mediator.state, "username", None) or "anonymous")
+		bound_case = str(case_id or identity)
+		if privacy_policy is not None or normalized in {"start", "answer"}:
+			self.bind_interview_privacy(privacy_policy, user_id=identity, case_id=bound_case)
+		if normalized == "resume":
+			if isinstance(session_projection, dict):
+				restored = self.restore_session_projection(session_projection)
+				if restored.get("error"):
+					return restored
+			elif not self.interview_started:
+				return self._interview_receipt(
+					action="resume",
+					status="unavailable",
+					error=self._interview_error("session_missing", resumable=True),
+				)
+			return self._interview_receipt(action="resume", status=self._interview_runtime_status())
+		if normalized == "prompt":
+			return self._interview_receipt(
+				action="prompt",
+				status="awaiting_user",
+				inquiry=self._narrative_prompt_inquiry(),
+			)
+		if normalized == "start":
+			text = str(narrative or "").strip()
+			if not text:
+				return self._interview_receipt(
+					action="start",
+					status="awaiting_user",
+					inquiry=self._narrative_prompt_inquiry(),
+					error=self._interview_error("narrative_required", resumable=True),
+				)
+			if self.interview_started:
+				return self._interview_receipt(action="start", status=self._interview_runtime_status())
+			try:
+				engine = self._mediator.start_three_phase_process(text)
+			except Exception as exc:
+				return self._failure_receipt("start", exc)
+			self._remember_start(engine)
+			return self._interview_receipt(action="start", status=self._interview_runtime_status(), engine=engine)
+		if normalized == "answer":
+			if not self.interview_started:
+				return self._interview_receipt(
+					action="answer",
+					status="unavailable",
+					error=self._interview_error("session_missing", resumable=True),
+				)
+			pending = self._canonical_pending_question()
+			if pending is None:
+				return self._interview_receipt(action="answer", status="complete")
+			refusal = self._stale_refusal(pending, inquiry_id, expected_question_revision)
+			if refusal is not None:
+				return refusal
+			answer_text = str(answer or "").strip()
+			if not answer_text:
+				return self._interview_receipt(
+					action="answer",
+					status="awaiting_user",
+					error=self._interview_error("answer_required", resumable=True),
+				)
+			self._note_answer_quality(answer_text)
+			try:
+				engine = self._mediator.process_denoising_answer(pending["question"], answer_text)
+			except Exception as exc:
+				return self._failure_receipt("answer", exc)
+			self._remember_answer(engine)
+			return self._interview_receipt(action="answer", status=self._interview_runtime_status(), engine=engine)
+		if normalized == "status":
+			return self._interview_receipt(action="status", status=self._interview_runtime_status())
+		return self._interview_receipt(
+			action=normalized,
+			status="refused",
+			error=self._interview_error("unknown_action", resumable=True),
+		)
+
+	def export_session_projection(self) -> Optional[Dict[str, Any]]:
+		"""Versioned snapshot that can rebuild KG/DG without a new extraction."""
+		if not self.interview_started:
+			return None
+		mediator = self._mediator
+		phase_manager = mediator.phase_manager
+		kg = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "knowledge_graph")
+		dg = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
+		if kg is None or dg is None or not hasattr(kg, "to_dict") or not hasattr(dg, "to_dict"):
+			return None
+		meta = dict(self._interview_meta)
+		denoiser = getattr(mediator, "denoiser", None)
+		history = list(getattr(denoiser, "questions_asked", []) or [])
+		projection = {
+			"schema_version": self.SESSION_PROJECTION_VERSION,
+			"contract_version": self.INTERVIEW_CONTRACT_VERSION,
+			"session_id": meta.get("session_id"),
+			"session_revision": meta.get("session_revision", 0),
+			"phase": phase_manager.current_phase.value,
+			"narrative_extraction_count": meta.get("narrative_extraction_count", 0),
+			"question_revision": meta.get("question_revision", 0),
+			"pending_inquiry": meta.get("pending_inquiry"),
+			"answered_inquiries": list(meta.get("answered_inquiries") or []),
+			"unknown_reasons": list(meta.get("unknown_reasons") or []),
+			"unavailable_reasons": list(meta.get("unavailable_reasons") or []),
+			"capped_reasons": list(meta.get("capped_reasons") or []),
+			"legal_sufficiency": False,
+			"knowledge_graph": kg.to_dict(),
+			"dependency_graph": dg.to_dict(),
+			"denoiser_history": history,
+			"iteration_count": phase_manager.iteration_count,
+			"loss_history": list(getattr(phase_manager, "loss_history", []) or []),
+			"phase_history": list(getattr(phase_manager, "phase_history", []) or []),
+			"intake_case_file": phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file") or {},
+			"current_questions": phase_manager.get_phase_data(ComplaintPhase.INTAKE, "current_questions") or [],
+			"question_candidates": phase_manager.get_phase_data(ComplaintPhase.INTAKE, "question_candidates") or [],
+		}
+		return _json_ready(projection)
+
+	def restore_session_projection(self, projection: Dict[str, Any]) -> Dict[str, Any]:
+		"""Restore graphs and denoiser history. Does not extract the narrative again."""
+		if not isinstance(projection, dict):
+			return self._interview_receipt(
+				action="resume",
+				status="unavailable",
+				error=self._interview_error("projection_invalid", resumable=True),
+			)
+		if projection.get("schema_version") != self.SESSION_PROJECTION_VERSION:
+			return self._interview_receipt(
+				action="resume",
+				status="unavailable",
+				error=self._interview_error("projection_version", resumable=True),
+			)
+		try:
+			kg = KnowledgeGraph.from_dict(projection.get("knowledge_graph") or {})
+			dg = DependencyGraph.from_dict(projection.get("dependency_graph") or {})
+		except Exception as exc:
+			return self._failure_receipt("resume", exc)
+		phase_manager = self._mediator.phase_manager
+		phase_name = str(projection.get("phase") or ComplaintPhase.INTAKE.value)
+		try:
+			phase_manager.current_phase = ComplaintPhase(phase_name)
+		except ValueError:
+			phase_manager.current_phase = ComplaintPhase.INTAKE
+		phase_manager.update_phase_data(ComplaintPhase.INTAKE, "knowledge_graph", kg)
+		phase_manager.update_phase_data(ComplaintPhase.INTAKE, "dependency_graph", dg)
+		phase_manager.update_phase_data(ComplaintPhase.INTAKE, "intake_case_file", projection.get("intake_case_file") or {})
+		phase_manager.update_phase_data(ComplaintPhase.INTAKE, "current_questions", list(projection.get("current_questions") or []))
+		phase_manager.update_phase_data(ComplaintPhase.INTAKE, "question_candidates", list(projection.get("question_candidates") or []))
+		phase_manager.iteration_count = int(projection.get("iteration_count") or 0)
+		phase_manager.loss_history = list(projection.get("loss_history") or [])
+		phase_manager.phase_history = list(projection.get("phase_history") or [])
+		denoiser = getattr(self._mediator, "denoiser", None)
+		if denoiser is not None:
+			denoiser.questions_asked = list(projection.get("denoiser_history") or [])
+		self._interview_meta = {
+			"started": True,
+			"session_id": projection.get("session_id") or f"interview-{uuid4().hex[:12]}",
+			"session_revision": int(projection.get("session_revision") or 0),
+			"narrative_extraction_count": int(projection.get("narrative_extraction_count") or 0),
+			"question_revision": int(projection.get("question_revision") or 0),
+			"pending_inquiry": projection.get("pending_inquiry"),
+			"answered_inquiries": list(projection.get("answered_inquiries") or []),
+			"unknown_reasons": list(projection.get("unknown_reasons") or []),
+			"unavailable_reasons": list(projection.get("unavailable_reasons") or []),
+			"capped_reasons": list(projection.get("capped_reasons") or []),
+		}
+		return self._interview_receipt(action="resume", status=self._interview_runtime_status())
+
+	def _remember_start(self, engine: Dict[str, Any]) -> None:
+		questions = list((engine or {}).get("initial_questions") or [])
+		candidates = list((engine or {}).get("question_candidates") or [])
+		self._interview_meta = {
+			"started": True,
+			"session_id": f"interview-{uuid4().hex[:12]}",
+			"session_revision": 1,
+			"narrative_extraction_count": 1,
+			"question_revision": 1 if questions else 0,
+			"pending_inquiry": self._inquiry_from_question(questions[0], revision=1) if questions else None,
+			"answered_inquiries": [],
+			"unknown_reasons": [],
+			"unavailable_reasons": [],
+			"capped_reasons": ["question_cap"] if len(candidates) > len(questions) else [],
+		}
+
+	def _remember_answer(self, engine: Dict[str, Any]) -> None:
+		meta = self._interview_meta
+		previous = meta.get("pending_inquiry") or {}
+		meta["answered_inquiries"] = list(meta.get("answered_inquiries") or []) + [
+			{"inquiry_id": previous.get("inquiry_id"), "revision": previous.get("revision")}
+		]
+		meta["session_revision"] = int(meta.get("session_revision") or 0) + 1
+		questions = list((engine or {}).get("next_questions") or [])
+		candidates = list((engine or {}).get("question_candidates") or [])
+		if len(candidates) > len(questions) and "question_cap" not in meta["capped_reasons"]:
+			meta["capped_reasons"] = list(meta.get("capped_reasons") or []) + ["question_cap"]
+		if questions:
+			revision = int(meta.get("question_revision") or 0) + 1
+			meta["question_revision"] = revision
+			meta["pending_inquiry"] = self._inquiry_from_question(questions[0], revision=revision)
+		else:
+			meta["pending_inquiry"] = None
+
+	def _note_answer_quality(self, answer_text: str) -> None:
+		lowered = answer_text.lower()
+		unknown_tokens = {"unknown", "not sure", "unsure", "i don't know", "i do not know", "n/a", "na", "none"}
+		meta = self._interview_meta
+		if lowered in unknown_tokens and "user_answer_unknown" not in meta.get("unknown_reasons", []):
+			meta["unknown_reasons"] = list(meta.get("unknown_reasons") or []) + ["user_answer_unknown"]
+
+	def _canonical_pending_question(self) -> Optional[Dict[str, Any]]:
+		questions = self._mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "current_questions") or []
+		if not questions or not isinstance(questions[0], dict):
+			return None
+		meta = self._interview_meta
+		inquiry = meta.get("pending_inquiry") or self._inquiry_from_question(
+			questions[0], revision=int(meta.get("question_revision") or 1)
+		)
+		meta["pending_inquiry"] = inquiry
+		return {"inquiry": inquiry, "question": questions[0]}
+
+	def _stale_refusal(self, pending: Dict[str, Any], inquiry_id: Optional[str], expected_revision: Optional[int]) -> Optional[Dict[str, Any]]:
+		inquiry = pending["inquiry"]
+		supplied_id = str(inquiry_id or "").strip()
+		if supplied_id and supplied_id != inquiry.get("inquiry_id"):
+			return self._interview_receipt(
+				action="answer",
+				status="refused",
+				error=self._interview_error("stale_question", resumable=True),
+			)
+		if expected_revision is not None and int(expected_revision) != int(inquiry.get("revision") or 0):
+			return self._interview_receipt(
+				action="answer",
+				status="refused",
+				error=self._interview_error("stale_question", resumable=True),
+			)
+		return None
+
+	def _inquiry_from_question(self, question: Dict[str, Any], *, revision: int) -> Dict[str, Any]:
+		qtype = str(question.get("type") or "clarification")
+		text = str(question.get("question") or "").strip()
+		digest = hashlib.sha256(f"{qtype}|{text}".encode("utf-8")).hexdigest()[:16]
+		reasons = []
+		if not text:
+			reasons.append("question_text_unavailable")
+		return {
+			"inquiry_id": f"inq-{digest}",
+			"revision": int(revision),
+			"question": text,
+			"question_type": qtype,
+			"kind": "graph",
+			"unknown_reasons": reasons,
+			"legal_sufficiency": False,
+		}
+
+	def _narrative_prompt_inquiry(self) -> Dict[str, Any]:
+		return {
+			"inquiry_id": "inq-narrative",
+			"revision": 0,
+			"question": "Describe your complaint in plain language.",
+			"question_type": "narrative",
+			"kind": "narrative",
+			"legal_sufficiency": False,
+		}
+
+	def _interview_runtime_status(self) -> str:
+		if not self.interview_started:
+			return "awaiting_user"
+		pending = (self._interview_meta or {}).get("pending_inquiry")
+		return "awaiting_user" if pending else "complete"
+
+	def _failure_receipt(self, action: str, exc: BaseException) -> Dict[str, Any]:
+		privacy = getattr(exc, "description", "") if exc.__class__.__name__ == "UserPresentableException" else ""
+		if isinstance(privacy, str) and privacy.startswith("privacy_denied"):
+			meta = getattr(self, "_interview_meta", None)
+			if isinstance(meta, dict) and "privacy_refused" not in meta.get("unavailable_reasons", []):
+				meta["unavailable_reasons"] = list(meta.get("unavailable_reasons") or []) + ["privacy_refused"]
+			return self._interview_receipt(
+				action=action,
+				status="refused",
+				error=self._interview_error("privacy_refused", resumable=True, detail=privacy),
+			)
+		return self._interview_receipt(
+			action=action,
+			status="unavailable",
+			error=self._interview_error(
+				"capability_unavailable",
+				resumable=True,
+				detail=type(exc).__name__,
+			),
+		)
+
+	def _interview_error(self, code: str, *, resumable: bool, detail: Optional[str] = None) -> Dict[str, Any]:
+		error = {"code": code, "resumable": bool(resumable), "legal_sufficiency": False}
+		if detail and detail.startswith("privacy_denied"):
+			error["reason"] = detail
+		elif detail:
+			error["error_type"] = detail
+		return error
+
+	def _interview_receipt(
+		self,
+		*,
+		action: str,
+		status: str,
+		inquiry: Optional[Dict[str, Any]] = None,
+		error: Optional[Dict[str, Any]] = None,
+		engine: Optional[Dict[str, Any]] = None,
+	) -> Dict[str, Any]:
+		meta = getattr(self, "_interview_meta", None) or {}
+		pending = inquiry if inquiry is not None else meta.get("pending_inquiry")
+		kg = None
+		try:
+			kg = self._mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "knowledge_graph")
+		except Exception:
+			kg = None
+		graph = {
+			"entity_count": len(getattr(kg, "entities", {}) or {}),
+			"relationship_count": len(getattr(kg, "relationships", {}) or {}),
+			"graph_id": getattr(kg, "graph_id", "") if kg is not None else "",
+			"graph_version": getattr(kg, "graph_version", "") if kg is not None else "",
+			"provenance": {},
+			"legal_sufficiency": False,
+		}
+		if kg is not None:
+			provenance = getattr(kg, "provenance", None)
+			if not isinstance(provenance, dict):
+				provenance = (getattr(kg, "metadata", {}) or {}).get("provenance")
+			if isinstance(provenance, dict):
+				graph["provenance"] = {"keys": sorted(str(key) for key in provenance.keys())}
+		readiness = {}
+		if isinstance(engine, dict) and isinstance(engine.get("intake_readiness"), dict):
+			readiness = {
+				"ready_to_advance": bool(engine["intake_readiness"].get("ready_to_advance", False)),
+				"legal_sufficiency": False,
+			}
+		receipt = {
+			"contract_version": self.INTERVIEW_CONTRACT_VERSION,
+			"action": action,
+			"status": status,
+			"awaiting_user": status == "awaiting_user",
+			"session_id": meta.get("session_id"),
+			"session_revision": int(meta.get("session_revision") or 0),
+			"narrative_extraction_count": int(meta.get("narrative_extraction_count") or 0),
+			"inquiry": pending,
+			"expected_question_revision": None if not isinstance(pending, dict) else pending.get("revision"),
+			"answered_count": len(meta.get("answered_inquiries") or []),
+			"graph": graph,
+			"readiness": readiness,
+			"unknown_reasons": list(meta.get("unknown_reasons") or []),
+			"unavailable_reasons": list(meta.get("unavailable_reasons") or []),
+			"capped_reasons": list(meta.get("capped_reasons") or []),
+			"legal_sufficiency": False,
+			"error": error,
+		}
+		if isinstance(pending, dict) and pending.get("unknown_reasons"):
+			for reason in pending["unknown_reasons"]:
+				if reason not in receipt["unknown_reasons"]:
+					receipt["unknown_reasons"].append(reason)
+		return receipt
 
 	def _build_intake_workflow_action_queue(
 		self,
@@ -490,6 +895,23 @@ class WorkflowActionService:
 			'workflow_action_phase': matched_phase,
 			'workflow_action_focus_areas': matched_focus_areas,
 		}
+
+
+def _json_ready(value: Any) -> Any:
+	"""Drop values that cannot be stored in the versioned session projection."""
+	try:
+		return json.loads(json.dumps(value, default=_json_default))
+	except (TypeError, ValueError):
+		return None
+
+
+def _json_default(value: Any) -> Any:
+	if isinstance(value, set):
+		return sorted(value)
+	name = getattr(value, "value", None)
+	if isinstance(name, str):
+		return name
+	raise TypeError(type(value).__name__)
 
 
 # A concise name for new integrations.  Keep WorkflowActionService as the
