@@ -53,7 +53,7 @@ Implementation instructions:
 
 ## CIMP-TUI-03 Adapt the graph workflow into one shared interview service
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.tui
