@@ -2737,8 +2737,12 @@ def build_canonical_fact_edges(knowledge_graph) -> List[Dict[str, Any]]:
     relationships = getattr(knowledge_graph, "relationships", {})
     relationship_values = relationships.values() if isinstance(relationships, Mapping) else relationships
     for relationship in relationship_values:
+        # Revalidate mutable graph records before projecting their assertion.
+        serializer = getattr(relationship, "to_dict", None)
+        serialized = serializer() if callable(serializer) else {}
+        provenance = serialized.get("provenance", getattr(relationship, "provenance", {}))
         projection = _project_user_assertion(
-            getattr(relationship, "provenance", {}),
+            provenance,
             legacy_ref=str(getattr(relationship, "id", "") or ""),
         )
         edges.append(
