@@ -321,3 +321,112 @@ def test_live_process_stop_checks_containers_after_birth_bound_signals(campaign,
     result = runner.stop(campaign.state, timeout=0)
     assert result['status'] == 'stopped' and result['signalled'] is True
     assert fake.effects == [('stop', CONTAINER), ('rm', CONTAINER)]
+
+
+def configure_external(campaign):
+    target = campaign.state.parent / 'private-worktree-root'
+    target.mkdir(mode=0o700)
+    binding = runner._validate_worktree_root(campaign.repo, campaign.state, target, claim=True)
+    campaign.record.update(worktree_root=str(target), worktree_root_binding=binding)
+    campaign.record['argv'].extend(['--worktree-root', str(target)])
+    campaign.record['identity']['argv'] = campaign.record['argv'][:]
+    runner._atomic_json(campaign.state / 'launcher.json', campaign.record)
+    campaign.workspace = target / 'workspace_synthetic_01'
+    campaign.workspace.mkdir()
+    campaign.event['worktree_path'] = str(campaign.workspace)
+    (campaign.state / 'complaint_intake_events.jsonl').write_text(json.dumps(campaign.event) + '\n')
+    return target
+
+
+def test_configured_root_closes_only_current_bound_workers_and_preserves_legacy_root(campaign, docker):
+    old_workspace = campaign.workspace
+    target = configure_external(campaign)
+    fake, _ = docker
+    fake.containers = {CONTAINER: container(campaign),
+                       OTHER_CONTAINER: container(campaign, OTHER_CONTAINER, workspace=old_workspace)}
+    original_events = (campaign.state / 'complaint_intake_events.jsonl').read_bytes()
+    result = close(campaign)
+    assert result['status'] == 'stopped' and result['quiesced'] is True
+    assert result['worktree_root'] == str(target)
+    assert result['worktree_root_binding'] == campaign.record['worktree_root_binding']
+    assert fake.effects == [('stop', CONTAINER), ('rm', CONTAINER)]
+    assert OTHER_CONTAINER in fake.containers and old_workspace.is_dir()
+    assert (campaign.state / 'complaint_intake_events.jsonl').read_bytes() == original_events
+
+
+@pytest.mark.parametrize('mutation', ['record_missing', 'flag_missing', 'flag_duplicate', 'marker_corrupt', 'directory_replaced'])
+def test_configured_root_unknown_custody_refuses_all_docker_effects(campaign, docker, mutation):
+    target = configure_external(campaign)
+    if mutation == 'record_missing':
+        campaign.record.pop('worktree_root_binding')
+    elif mutation == 'flag_missing':
+        campaign.record['argv'] = campaign.record['argv'][:-2]
+    elif mutation == 'flag_duplicate':
+        campaign.record['argv'] += ['--worktree-root', str(target)]
+    elif mutation == 'marker_corrupt':
+        (target / runner.WORKTREE_MARKER).write_text('{}')
+    else:
+        target.rename(target.with_name('preserved-original-root'))
+        target.mkdir(mode=0o700)
+    runner._atomic_json(campaign.state / 'launcher.json', campaign.record)
+    assert close(campaign)['status'] == 'stop_incomplete'
+    assert not docker[0].calls and not docker[0].effects
+
+
+def test_directory_swap_during_container_observation_cannot_grant_stop_authority(campaign, docker):
+    target = configure_external(campaign)
+    fake, _ = docker
+    fake.containers = {CONTAINER: container(campaign)}
+    def swap(*unused):
+        fake.before_inspect = None
+        target.rename(target.with_name('preserved-before-swap'))
+        target.mkdir(mode=0o700)
+    fake.before_inspect = swap
+    result = close(campaign)
+    assert result['status'] == 'stop_incomplete' and not fake.effects
+
+
+def test_legacy_root_is_not_reinterpreted_from_current_ambient_configuration(campaign, docker, monkeypatch):
+    monkeypatch.setenv('IPFS_ACCELERATE_AGENT_WORKTREE_ROOT', '/foreign/root')
+    fake, _ = docker
+    fake.containers = {CONTAINER: container(campaign)}
+    result = close(campaign)
+    assert result['status'] == 'stopped'
+    assert result['worktree_root'] == str(campaign.state / 'worktrees')
+    assert result['worktree_root_binding'] is None
+    assert fake.effects == [('stop', CONTAINER), ('rm', CONTAINER)]
+
+
+@pytest.mark.parametrize('proof', ['missing', 'wrong_owner', 'not_quiesced', 'live_parent'])
+def test_switching_legacy_root_requires_old_launch_closure_and_dead_owner(campaign, docker, monkeypatch, proof):
+    target = campaign.state.parent / 'new-root'
+    target.mkdir(mode=0o700)
+    if proof != 'missing':
+        assert close(campaign)['quiesced'] is True
+        receipt = campaign.state / shutdown.RECEIPT_NAME
+        body = json.loads(receipt.read_text())
+        if proof == 'wrong_owner':
+            body['owner_token_sha256'] = 'f' * 64
+        elif proof == 'not_quiesced':
+            body['quiesced'] = False
+        runner._atomic_json(receipt, body)
+    if proof == 'live_parent':
+        monkeypatch.setattr(runner, 'process_identity', lambda _pid: campaign.record['identity'])
+    before = (campaign.state / 'launcher.json').read_bytes()
+    with pytest.raises(ValueError, match='closure-verified'):
+        runner._select_worktree_root(campaign.repo, campaign.state, campaign.record, target)
+    assert (campaign.state / 'launcher.json').read_bytes() == before
+    assert not (target / runner.WORKTREE_MARKER).exists()
+
+
+def test_stopped_legacy_launch_can_choose_new_root_without_changing_old_epoch_history(campaign, docker):
+    target = campaign.state.parent / 'new-root'
+    target.mkdir(mode=0o700)
+    assert close(campaign)['quiesced'] is True
+    original = {name: (campaign.state / name).read_bytes() for name in
+                ['launcher.json', 'complaint_intake_events.jsonl', 'complaint_intake_supervisor_status.json']}
+    root, binding = runner._select_worktree_root(campaign.repo, campaign.state, campaign.record, target)
+    assert root == target and binding['state_dir'] == str(campaign.state)
+    assert not (target / runner.WORKTREE_MARKER).exists()  # Doctor is read-only.
+    assert original == {name: (campaign.state / name).read_bytes() for name in original}
+    assert campaign.workspace.is_dir()

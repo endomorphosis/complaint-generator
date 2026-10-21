@@ -22,6 +22,7 @@ import platform
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -41,6 +42,7 @@ PRIVATE_PATHS_ENV = "IPFS_ACCELERATE_AGENT_GROK_PRIVATE_PATHS_JSON"
 REASONING_EFFORT_ENV = "IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"
 ORCHESTRATION_DIR_ENV = "IPFS_ACCELERATE_AGENT_ORCHESTRATION_DIR"
 AUTOMATIC_RETRY_REARM_ENV = "IPFS_ACCELERATE_AGENT_AUTOMATIC_RETRY_REARM"
+WORKTREE_MARKER = ".complaint-worktree-root.json"
 _PRIVATE_PATHS = (".complaint_workspace", "data", "output", "statefiles", "exports", "secrets",
                   ".env*", "*.key", "*.pem")
 
@@ -84,6 +86,136 @@ def _lock(state_dir: Path, name: str = "launcher.lock", *, blocking: bool = True
             yield
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+
+def _worktree_directory(path: Path, repo_root: Path, state_dir: Path) -> dict[str, Any]:
+    """Validate a dedicated external root without creating it or following aliases."""
+    if (not path.is_absolute() or path.resolve(strict=True) != path
+            or path == repo_root or path.is_relative_to(repo_root) or repo_root.is_relative_to(path)
+            or path == state_dir or path.is_relative_to(state_dir) or state_dir.is_relative_to(path)):
+        raise ValueError("configured worktree root must be canonical and outside repository/state")
+    metadata = path.lstat()
+    if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o700):
+        raise ValueError("configured worktree root must be an existing UID-owned0700 directory")
+    return {"schema_version": "complaint-worktree-root@1", "path": str(path),
+            "device": metadata.st_dev, "inode": metadata.st_ino, "uid": metadata.st_uid, "mode": 0o700,
+            "repo_root": str(repo_root), "state_dir": str(state_dir)}
+
+
+def _worktree_marker(path: Path) -> tuple[dict[str, Any], str] | None:
+    marker = path / WORKTREE_MARKER
+    try:
+        descriptor = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None
+    try:
+        before = os.fstat(descriptor)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) != 0o600 or before.st_size > 16384):
+            raise ValueError("worktree root marker ownership differs")
+        raw = os.read(descriptor, 16385)
+        after = marker.lstat()
+        if (len(raw) != before.st_size or any(getattr(before, field) != getattr(after, field)
+                for field in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"))):
+            raise ValueError("worktree root marker changed")
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise ValueError("worktree root marker must be an object")
+        return value, hashlib.sha256(raw).hexdigest()
+    finally:
+        os.close(descriptor)
+
+
+def _validate_worktree_root(repo_root: Path, state_dir: Path, path: Path, *,
+                            expected: Mapping[str, Any] | None = None, claim: bool = False) -> dict[str, Any]:
+    directory = _worktree_directory(path, repo_root, state_dir)
+    marker = _worktree_marker(path)
+    if marker is None:
+        if expected is not None or any(path.iterdir()):
+            raise ValueError("worktree root has no bound marker or is not a fresh dedicated directory")
+        if not claim:
+            return directory
+        raw = (json.dumps(directory, sort_keys=True) + "\n").encode()
+        try:
+            descriptor = os.open(path / WORKTREE_MARKER, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        except FileExistsError:
+            return _validate_worktree_root(repo_root, state_dir, path, expected=expected)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+        marker = _worktree_marker(path)
+    if marker is None or marker[0] != directory:
+        raise ValueError("worktree root marker belongs to a different repository/epoch/directory")
+    binding = {**directory, "marker_sha256": marker[1]}
+    if expected is not None and dict(expected) != binding:
+        raise ValueError("recorded worktree root identity differs")
+    if _worktree_directory(path, repo_root, state_dir) != directory:
+        raise ValueError("worktree root directory changed")
+    return binding
+
+
+def recorded_worktree_root(record: Mapping[str, Any], state_dir: Path) -> tuple[Path, dict[str, Any] | None]:
+    """Legacy records keep their original root; configured records require exact custody."""
+    has_root = "worktree_root" in record or "worktree_root_binding" in record
+    if not has_root:
+        if "--worktree-root" in (record.get("argv") or []):
+            raise ValueError("launcher worktree flag has no recorded binding")
+        return state_dir / "worktrees", None
+    value, binding = record.get("worktree_root"), record.get("worktree_root_binding")
+    argv = record.get("argv")
+    if (not isinstance(value, str) or not isinstance(binding, dict) or not isinstance(argv, list)
+            or argv.count("--worktree-root") != 1
+            or argv[argv.index("--worktree-root") + 1:][:1] != [value]):
+        raise ValueError("launcher worktree flag/binding differs")
+    repo = Path(str(record.get("repo_root") or ""))
+    if not repo.is_absolute() or repo.resolve() != repo or record.get("state_dir") != str(state_dir):
+        raise ValueError("launcher worktree repository/epoch differs")
+    return Path(value), _validate_worktree_root(repo, state_dir, Path(value), expected=binding)
+
+
+def _shutdown_verified(record: Mapping[str, Any], shutdown: Mapping[str, Any], repo_root: Path, state_dir: Path) -> bool:
+    return bool(
+        record.get("schema_version") == "complaint-improvement-launcher@1"
+        and shutdown.get("schema") == "complaint-improvement-container-shutdown@1"
+        and shutdown.get("repo_root") == record.get("repo_root") == str(repo_root)
+        and shutdown.get("state_dir") == record.get("state_dir") == str(state_dir)
+        and shutdown.get("plan_id") == record.get("plan_id")
+        and shutdown.get("started_at") == record.get("started_at")
+        and isinstance(record.get("owner_token"), str)
+        and shutdown.get("owner_token_sha256") == hashlib.sha256(record["owner_token"].encode()).hexdigest()
+        and shutdown.get("quiesced") is True and shutdown.get("status") == "stopped"
+        and shutdown.get("completion_authority") is False
+        and shutdown.get("provider_callback_settled") is False
+        and shutdown.get("attempt_refunded") is False
+        and ("worktree_root" not in record or (shutdown.get("worktree_root") == record["worktree_root"]
+             and shutdown.get("worktree_root_binding") == record.get("worktree_root_binding")))
+    )
+
+
+def _select_worktree_root(repo_root: Path, state_dir: Path, record: Mapping[str, Any],
+                          requested: Path | None) -> tuple[Path, dict[str, Any] | None]:
+    previous, binding = recorded_worktree_root(record, state_dir)
+    if requested is None or requested == previous:
+        return previous, binding
+    if record:
+        identity = record.get("identity") or {}
+        current = process_identity(identity.get("pid")) if isinstance(identity, dict) else None
+        old_birth_alive = current and all(current.get(key) == identity.get(key) for key in ("pid", "start_ticks", "boot_id"))
+        from .improvement_shutdown import _context
+        if _context(state_dir, record) is None:
+            raise ValueError("changing worktree root requires a full previous ownership receipt")
+        if (old_birth_alive or record.get("status") != "stopped"
+                or not _shutdown_verified(record, _read_json(state_dir / "container_shutdown.json"), repo_root, state_dir)):
+            raise ValueError("changing worktree root requires a stopped, closure-verified previous launch")
+    return requested, _validate_worktree_root(repo_root, state_dir, requested)
 
 
 def process_identity(pid: int) -> dict[str, Any] | None:
@@ -268,7 +400,42 @@ def _private_runtime_checks(repo_root: Path, env: Mapping[str, str]) -> dict[str
             "reason": reason}
 
 
-def native_argv(board_path: Path, state_dir: Path, merge_target: str) -> list[str]:
+
+def _worktree_capacity(repo_root: Path, worktree_root: Path) -> dict[str, Any]:
+    """Report a local pinned tracked-byte lower bound, without fetching objects."""
+    probe = worktree_root
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    result: dict[str, Any] = {"filesystem_path": str(probe), "free_bytes": shutil.disk_usage(probe).free,
+                              "minimum_cold_checkout_bytes": None, "sufficient": None}
+    minimum = 0
+    try:
+        repositories = [(repo_root, "HEAD")]
+        for directory, revision in repositories:
+            observed = subprocess.run(["git", "ls-tree", "-r", "-l", "-z", revision], cwd=directory,
+                capture_output=True, check=False, timeout=10, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+            if observed.returncode or len(observed.stdout) > 16_000_000:
+                raise ValueError("local pinned Git tree unavailable or exceeds bound")
+            for entry in observed.stdout.split(b"\0"):
+                if not entry:
+                    continue
+                header, name = entry.split(b"\t", 1)
+                mode, kind, oid, size = header.split()
+                if kind == b"blob":
+                    minimum += int(size)
+                elif kind == b"commit" and name == b"external/ipfs_datasets_py" and directory == repo_root:
+                    repositories.append((repo_root / "external/ipfs_datasets_py", oid.decode("ascii")))
+        if len(repositories) != 2:
+            raise ValueError("pinned datasets tree is unavailable")
+        result.update(minimum_cold_checkout_bytes=minimum, sufficient=result["free_bytes"] >= minimum,
+                      reason="local_pinned_tracked_blob_lower_bound", includes_filesystem_overhead=False,
+                      assumes_uncompressed_file_content=True)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        result["reason"] = "local_pinned_checkout_size_unavailable"
+    return result
+
+
+def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktree_root: Path | None = None) -> list[str]:
     """Compile only options supported by the actual native supervisor parser."""
     return [
         "--todo-path", str(board_path), "--state-dir", str(state_dir),
@@ -282,7 +449,7 @@ def native_argv(board_path: Path, state_dir: Path, merge_target: str) -> list[st
         "--implementation-log-stall-seconds", str(STALL_SECONDS),
         "--max-task-attempts", "3", "--max-restarts", "5", "--validation-max-workers", "1",
         "--task-shard-count", "1", "--task-shard-index", "0",
-        "--worktree-root", str(state_dir / "worktrees"), "--merge-target-branch", merge_target,
+        "--worktree-root", str(worktree_root if worktree_root is not None else state_dir / "worktrees"), "--merge-target-branch", merge_target,
         # The workspace imports datasets during pytest collection. This pinned
         # source is required even for tasks that edit only first-party files.
         "--worktree-submodule-path", "external/ipfs_datasets_py",
@@ -337,7 +504,7 @@ def prepare(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]
     return result
 
 
-def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: str | None = None) -> dict[str, Any]:
+def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: str | None = None, worktree_root: Path | None = None) -> dict[str, Any]:
     """Read-only readiness checks: never run a model, daemon, or auth command."""
     os.chdir(repo_root)
     from .improvement_plan import BOARD_RELATIVE, build_improvement_work_plan, load_spec
@@ -345,7 +512,8 @@ def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: s
     plan = build_improvement_work_plan(spec)
     branch = merge_target or _branch(repo_root)
     supervisor, _ = _native_modules(repo_root)
-    args = native_argv(repo_root / BOARD_RELATIVE, state_dir, branch)
+    selected_root, root_binding = _select_worktree_root(repo_root, state_dir, _read_json(state_dir / "launcher.json"), worktree_root)
+    args = native_argv(repo_root / BOARD_RELATIVE, state_dir, branch, worktree_root=selected_root)
     parsed = supervisor.parse_args(args)
     config = supervisor.supervisor_config_from_args(parsed, repo_root=repo_root)
     board = _validate_board(repo_root, repo_root / BOARD_RELATIVE, spec)
@@ -361,25 +529,27 @@ def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: s
     except OSError:
         pass
     privacy = _private_runtime_checks(repo_root, env)
-    return {"status": "ready" if grok and auth_present and privacy["ready"] else "not_ready",
+    capacity = _worktree_capacity(repo_root, selected_root)
+    return {"status": "ready" if grok and auth_present and privacy["ready"] and capacity["sufficient"] is not False else "not_ready",
             "provider": "grok_cli", "model": MODEL, "allow_fallback": False,
             "grok_binary_present": bool(grok), "auth_material_present": bool(auth_present),
             "auth_provider_command_supported": False,
             "auth_validated": False, "paid_calls": 0, "native_plan_id": plan.plan_id,
             "native_config_validated": True, "native_task_source": parsed.task_source_kind,
             "ephemeral_worktrees": config.use_ephemeral_worktree, "merge_target": branch,
-            "privacy": privacy,
+            "privacy": privacy, "worktree_capacity": capacity, "worktree_root": str(selected_root), "worktree_root_binding": root_binding,
             "board": board, "native_argv": args,
             "limitations": ["Credential presence does not verify login, quota, model access or execution progress.",
                             "Native supervisor retries are bounded per task and to five daemon restarts; manual holds are never cleared.",
                             "Cross-worktree reconciliation and dynamic guardrail/refill task generation are disabled for this fixed campaign; native dependency readiness, process fencing and implementation watchdog remain enabled."]}
 
 
-def start(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
+def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: Path | None = None) -> dict[str, Any]:
     state_dir = state_dir.resolve()
     with _lock(state_dir):
         owner_path = state_dir / "launcher.json"
         previous = _read_json(owner_path)
+        selected_root, root_binding = _select_worktree_root(repo_root, state_dir, previous, worktree_root)
         if owns_process(previous):
             return {"status": "already_running", "pid": previous["identity"]["pid"], "state_dir": str(state_dir)}
         # A missing/edited owner receipt cannot authorize a duplicate runner.
@@ -391,14 +561,19 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
                 if ("_run" in argv or native) and "--state-dir" in argv and str(state_dir) in argv:
                     raise RuntimeError("campaign runner exists without a valid owner receipt; inspect its ownership before restarting")
         prepared = prepare(repo_root, spec_path, state_dir)
-        check = doctor(repo_root, spec_path, state_dir)
+        check = (doctor(repo_root, spec_path, state_dir, worktree_root=selected_root) if root_binding is not None
+                 else doctor(repo_root, spec_path, state_dir))
         if check["status"] != "ready":
             return {"status": "not_ready", "doctor": check}
+        if root_binding is not None:
+            root_binding = _validate_worktree_root(repo_root, state_dir, selected_root, claim=True)
         token = secrets.token_hex(24)
         script = repo_root / "scripts/run_complaint_improvement_supervisor.py"
         argv = [sys.executable, str(script), "_run", "--repo-root", str(repo_root),
                 "--spec", str(spec_path), "--state-dir", str(state_dir),
                 "--owner-token", token, "--merge-target", check["merge_target"]]
+        if root_binding is not None:
+            argv.extend(["--worktree-root", str(selected_root)])
         log_path = state_dir / "launcher.log"
         from .improvement_plan import load_spec
         policy = load_spec(spec_path)["execution_policy"]
@@ -420,6 +595,8 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
                   "state_dir": str(state_dir), "merge_target": check["merge_target"],
                   "board_path": prepared["board_path"], "plan_id": check["native_plan_id"],
                   "provider": "grok_cli", "model": MODEL, "allow_fallback": False}
+        if root_binding is not None:
+            record.update(worktree_root=str(selected_root), worktree_root_binding=root_binding)
         if not owns_process(record):
             process.terminate()
             process.wait(timeout=5)
@@ -615,19 +792,12 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
                                                started_at=now - since_start) if claim_verified else None
     shutdown = _read_json(state_dir / "container_shutdown.json")
     full_launch = record.get("schema_version") == "complaint-improvement-launcher@1"
-    shutdown_verified = bool(
-        full_launch and shutdown.get("schema") == "complaint-improvement-container-shutdown@1"
-        and shutdown.get("repo_root") == record.get("repo_root") == str(repo_root)
-        and shutdown.get("state_dir") == record.get("state_dir") == str(state_dir)
-        and shutdown.get("plan_id") == record.get("plan_id")
-        and shutdown.get("started_at") == record.get("started_at")
-        and isinstance(record.get("owner_token"), str)
-        and shutdown.get("owner_token_sha256") == hashlib.sha256(record["owner_token"].encode()).hexdigest()
-        and shutdown.get("quiesced") is True and shutdown.get("status") == "stopped"
-        and shutdown.get("completion_authority") is False
-        and shutdown.get("provider_callback_settled") is False
-        and shutdown.get("attempt_refunded") is False
-    )
+    try:
+        selected_root, root_binding = recorded_worktree_root(record, state_dir)
+        worktree_error = None
+    except (OSError, ValueError, TypeError) as error:
+        selected_root, root_binding, worktree_error = None, None, str(error)
+    shutdown_verified = _shutdown_verified(record, shutdown, repo_root, state_dir) and worktree_error is None
     if not owned:
         if identity and process_identity(identity.get("pid")):
             health = "identity_mismatch"
@@ -685,11 +855,15 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "no_progress"
     else:
         health = "running"
+    if worktree_error is not None:
+        health = "identity_mismatch" if owned else "stop_incomplete"
     keys = ("heartbeat_at", "last_progress_at", "active_task_id", "active_task_started_at", "active_phase", "active_phase_detail",
             "implementation_in_progress", "active_attempt", "last_implementation_returncode",
             "recommended_task_id", "ready_task_ids", "selectable_ready_task_ids", "blocked_task_ids", "selection_idle_reason")
     return {"status": health, "owned_process_alive": owned,
             "pid": identity.get("pid"), "state_dir": str(state_dir),
+            "worktree_root": str(selected_root) if selected_root is not None else None,
+            "worktree_root_binding": root_binding, "worktree_root_error": worktree_error,
             "provider": "grok_cli", "model": MODEL, "allow_fallback": False,
             "native_heartbeat_age_seconds": heartbeat_age, "observed_activity_age_seconds": progress_age,
             "native_read_errors": {key: value.get("read_error") for key, value in
@@ -754,6 +928,10 @@ def stop(state_dir: Path, *, timeout: float = 15.0) -> dict[str, Any]:
         path = state_dir / "launcher.json"
         record = _read_json(path)
         from .improvement_shutdown import close_campaign_containers
+        try:
+            recorded_worktree_root(record, state_dir)
+        except (OSError, ValueError, TypeError) as error:
+            return {"status": "stop_incomplete", "signalled": False, "reason": str(error), "manual_holds_preserved": True}
         if not owns_process(record):
             containers = close_campaign_containers(state_dir, record)
             if not containers["applicable"]:
@@ -800,12 +978,15 @@ def stop(state_dir: Path, *, timeout: float = 15.0) -> dict[str, Any]:
                 "container_shutdown": containers, "manual_holds_preserved": True}
 
 
-def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, merge_target: str) -> int:
+def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, merge_target: str, *, worktree_root: Path | None = None) -> int:
     # Serialize startup against parent receipt publication and future starts.
     with _lock(state_dir):
         record = _read_json(state_dir / "launcher.json")
         if record.get("owner_token") != token or not owns_process(record) or record["identity"]["pid"] != os.getpid():
             raise RuntimeError("internal runner lacks its exact owned launch receipt")
+        selected_root, root_binding = recorded_worktree_root(record, state_dir)
+        if (root_binding is not None and worktree_root != selected_root) or (root_binding is None and worktree_root is not None):
+            raise RuntimeError("internal worktree root differs from its owned launch")
     with _lock(state_dir, "runner.lock", blocking=False):
         os.chdir(repo_root)
         from .improvement_plan import BOARD_RELATIVE, build_improvement_work_plan, load_spec
@@ -822,9 +1003,12 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
         from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor_runner import (
             run_configured_portal_implementation_supervisor,
         )
+        # Recheck the bound storage directory immediately before native admission.
+        if recorded_worktree_root(record, state_dir) != (selected_root, root_binding):
+            raise RuntimeError("worktree root changed before native admission")
         # No --once: this is the real native run_forever watchdog and daemon.
         run_configured_portal_implementation_supervisor(
-            native_argv(repo_root / BOARD_RELATIVE, state_dir, merge_target),
+            native_argv(repo_root / BOARD_RELATIVE, state_dir, merge_target, worktree_root=selected_root),
             repo_root=repo_root, logger=_LOGGER,
         )
     return 0
@@ -838,6 +1022,8 @@ def main(argv: list[str] | None = None) -> int:
         child.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
         child.add_argument("--spec", type=Path)
         child.add_argument("--state-dir", type=Path)
+        if command in {"doctor", "start", "_run"}:
+            child.add_argument("--worktree-root", type=Path, help="Existing dedicated canonical UID-owned0700 external directory; persisted for future starts.")
         if command == "_run":
             child.add_argument("--owner-token", required=True)
             child.add_argument("--merge-target", required=True)
@@ -852,11 +1038,12 @@ def main(argv: list[str] | None = None) -> int:
             state = resolve_active_epoch(root, spec, default_state_dir(root))
         os.chdir(root)
         if args.command == "_run":
-            return run_internal(root, spec, state, args.owner_token, args.merge_target)
+            return run_internal(root, spec, state, args.owner_token, args.merge_target, worktree_root=args.worktree_root)
         if args.command == "stop":
             result = stop(state)
         else:
-            result = {"prepare": prepare, "doctor": doctor, "start": start, "status": status}[args.command](root, spec, state)
+            keywords = {"worktree_root": args.worktree_root} if getattr(args, "worktree_root", None) is not None else {}
+            result = {"prepare": prepare, "doctor": doctor, "start": start, "status": status}[args.command](root, spec, state, **keywords)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 2 if result.get("status") in {"not_ready", "board_error", "state_error", "identity_mismatch", "stop_incomplete"} else 0
     except (OSError, ValueError, RuntimeError) as exc:

@@ -253,11 +253,16 @@ def test_doctor_checks_presence_without_running_auth_or_provider(campaign, monke
     monkeypatch.setenv("XAI_API_KEY", "fixture-secret")
     monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/bin/grok")
     monkeypatch.setattr(runner, "_private_runtime_checks", lambda *a: {"ready": True})
+    # The local Git size observation is tested with real synthetic repositories
+    # below; this presence-only contract keeps all process dispatch forbidden.
+    capacity_observations = []
+    monkeypatch.setattr(runner, "_worktree_capacity", lambda *a: capacity_observations.append(a) or {"sufficient": None})
     monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **k: pytest.fail("doctor spawned a provider/process"))
     result = runner.doctor(root, spec, state, merge_target="local-campaign")
     assert result["status"] == "ready" and result["paid_calls"] == 0
     assert result["auth_validated"] is False
     assert result["native_config_validated"]
+    assert capacity_observations == [(root, state / "worktrees")]
     assert not state.exists()
 
 
@@ -735,3 +740,181 @@ def test_internal_entry_calls_actual_native_runner_contract_without_once(campaig
     assert len(calls) == 1 and "--once" not in calls[0][0]
     assert calls[0][1]["repo_root"] == root
     assert "--implement" in calls[0][0]
+
+
+def _configured_owner(repo, state, workspace_root):
+    binding = runner._validate_worktree_root(repo, state, workspace_root, claim=True)
+    record = _owner(state)
+    record.update(repo_root=str(repo), state_dir=str(state), worktree_root=str(workspace_root),
+                  worktree_root_binding=binding)
+    record['argv'].extend(['--worktree-root', str(workspace_root)])
+    record['identity']['argv'] = record['argv'][:]
+    return record
+
+
+@pytest.mark.parametrize('mutation', ['symlink', 'public_mode', 'nonempty', 'foreign_marker', 'foreign_uid', 'inside_repo', 'inside_state'])
+def test_configured_worktree_root_rejects_unowned_or_non_dedicated_directory(tmp_path, monkeypatch, mutation):
+    repo, state = tmp_path / 'repo', tmp_path / 'state'
+    repo.mkdir(); state.mkdir(mode=0o700)
+    target = tmp_path / 'external-root'
+    target.mkdir(mode=0o700)
+    if mutation == 'symlink':
+        alias = tmp_path / 'alias'; alias.symlink_to(target, target_is_directory=True); target = alias
+    elif mutation == 'public_mode':
+        target.chmod(0o755)
+    elif mutation == 'nonempty':
+        (target / 'unrelated.txt').write_text('preserve')
+    elif mutation == 'foreign_marker':
+        runner._validate_worktree_root(repo, tmp_path / 'foreign-epoch', target, claim=True)
+    elif mutation == 'foreign_uid':
+        uid = os.getuid(); monkeypatch.setattr(runner.os, 'getuid', lambda: uid + 1)
+    elif mutation == 'inside_repo':
+        target = repo / 'private'; target.mkdir(mode=0o700)
+    elif mutation == 'inside_state':
+        target = state / 'private'; target.mkdir(mode=0o700)
+    with pytest.raises((ValueError, OSError)):
+        runner._validate_worktree_root(repo, state, target, claim=True)
+
+
+def test_bound_worktree_root_persists_identity_without_touching_epoch_or_task_history(tmp_path, monkeypatch):
+    repo, state, target = tmp_path / 'repo', tmp_path / 'epoch', tmp_path / 'storage-root'
+    repo.mkdir(); state.mkdir(mode=0o700); target.mkdir(mode=0o700)
+    history = state / 'spent-counts-and-quarantine.json'
+    history.write_text('{"spent":4,"quarantine":"retained"}')
+    before = history.read_bytes()
+    record = _configured_owner(repo, state, target)
+    assert (target / runner.WORKTREE_MARKER).stat().st_mode & 0o777 == 0o600
+    (target / 'workspace_native_01').mkdir()
+    monkeypatch.setenv('IPFS_ACCELERATE_AGENT_WORKTREE_ROOT', '/untrusted/ambient')
+    selected, binding = runner._select_worktree_root(repo, state, record, None)
+    assert selected == target and binding == record['worktree_root_binding']
+    assert binding['device'] == target.stat().st_dev and binding['inode'] == target.stat().st_ino
+    assert history.read_bytes() == before
+    assert not (state / 'worktrees').exists()
+
+
+@pytest.mark.parametrize('mutation', ['directory_replaced', 'marker_replaced', 'flag_missing', 'flag_duplicate', 'record_path_changed'])
+def test_recorded_root_rejects_identity_or_argv_changes_before_stop_effects(tmp_path, monkeypatch, mutation):
+    repo, state, target = tmp_path / 'repo', tmp_path / 'epoch', tmp_path / 'storage-root'
+    repo.mkdir(); state.mkdir(mode=0o700); target.mkdir(mode=0o700)
+    record = _configured_owner(repo, state, target)
+    if mutation == 'directory_replaced':
+        target.rename(tmp_path / 'preserved-old-root'); target.mkdir(mode=0o700)
+        (target / runner.WORKTREE_MARKER).write_bytes((tmp_path / 'preserved-old-root' / runner.WORKTREE_MARKER).read_bytes())
+        (target / runner.WORKTREE_MARKER).chmod(0o600)
+    elif mutation == 'marker_replaced':
+        (target / runner.WORKTREE_MARKER).write_text('{}')
+    elif mutation == 'flag_missing':
+        record['argv'] = record['argv'][:-2]
+    elif mutation == 'flag_duplicate':
+        record['argv'] += ['--worktree-root', str(target)]
+    else:
+        record['worktree_root'] = str(tmp_path / 'other-root')
+    runner._atomic_json(state / 'launcher.json', record)
+    monkeypatch.setattr(runner, '_signal_birth', lambda *a: pytest.fail('invalid binding signalled process'))
+    from integrations.ipfs_accelerate import improvement_shutdown
+    monkeypatch.setattr(improvement_shutdown, 'close_campaign_containers', lambda *a, **k: pytest.fail('invalid binding inspected Docker'))
+    assert runner.stop(state)['status'] == 'stop_incomplete'
+
+
+def test_actual_native_parser_uses_external_root_without_moving_state_or_queue(campaign):
+    root, spec, state, generated = campaign
+    target = root / 'external-storage'
+    target.mkdir(mode=0o700)
+    # This config parser is pure; storage validation is separately exercised on
+    # a directory outside the synthetic repository boundary.
+    native, _ = runner._native_modules(ROOT)
+    parsed = native.parse_args(runner.native_argv(Path(generated['board_path']), state, 'campaign', worktree_root=target))
+    config = native.supervisor_config_from_args(parsed, repo_root=root)
+    assert config.worktree_root == target
+    assert config.state_path == state / 'complaint_intake_task_state.json'
+    assert config.merge_queue_dir == state / 'merge-queue'
+
+
+def test_cli_accepts_explicit_root_only_for_start_doctor_and_owned_internal(monkeypatch, capsys, tmp_path):
+    observed = []
+    target = tmp_path / 'private-root'
+    monkeypatch.setattr(runner, 'doctor', lambda *a, **k: observed.append(k) or {'status': 'ready'})
+    assert runner.main(['doctor', '--repo-root', str(ROOT), '--state-dir', str(tmp_path), '--worktree-root', str(target)]) == 0
+    assert observed == [{'worktree_root': target}]
+    capsys.readouterr()
+    for command in ['status', 'stop']:
+        with pytest.raises(SystemExit):
+            runner.main([command, '--worktree-root', str(target)])
+
+
+def test_capacity_preflight_uses_real_pinned_blob_sizes_without_fetch(tmp_path, monkeypatch):
+    repo = tmp_path / 'source'
+    datasets = repo / 'external/ipfs_datasets_py'
+    datasets.mkdir(parents=True)
+    def git(path, *args):
+        return runner.subprocess.run(['git', '-c', 'user.name=Synthetic Fixture', '-c', 'user.email=fixture@example.invalid', *args],
+            cwd=path, check=True, capture_output=True, text=True).stdout.strip()
+    git(datasets, 'init', '-q')
+    (datasets / 'payload').write_bytes(b'd' * 8192)
+    git(datasets, 'add', 'payload'); git(datasets, 'commit', '-qm', 'synthetic datasets')
+    pinned = git(datasets, 'rev-parse', 'HEAD')
+    git(repo, 'init', '-q')
+    (repo / 'payload').write_bytes(b'r' * 4096)
+    git(repo, 'add', 'payload')
+    git(repo, 'update-index', '--add', '--cacheinfo', '160000,' + pinned + ',external/ipfs_datasets_py')
+    git(repo, 'commit', '-qm', 'synthetic source with pinned datasets')
+    target = tmp_path / 'target'; target.mkdir(mode=0o700)
+    monkeypatch.setattr(runner.shutil, 'disk_usage', lambda path: SimpleNamespace(free=12287))
+    capacity = runner._worktree_capacity(repo, target)
+    assert capacity['minimum_cold_checkout_bytes'] == 12288
+    assert capacity['sufficient'] is False and capacity['free_bytes'] == 12287
+    assert list(target.iterdir()) == []
+
+
+def test_doctor_refuses_known_insufficient_checkout_space_without_provider(campaign, monkeypatch):
+    root, spec, state, generated = campaign
+    monkeypatch.setattr(runner, '_branch', lambda path: 'campaign')
+    monkeypatch.setattr(runner.shutil, 'which', lambda *a, **k: '/synthetic/grok')
+    monkeypatch.setenv('XAI_API_KEY', 'synthetic-not-used')
+    monkeypatch.setattr(runner, '_private_runtime_checks', lambda *a: {'ready': True})
+    monkeypatch.setattr(runner, '_worktree_capacity', lambda *a: {'sufficient': False, 'free_bytes': 1, 'minimum_cold_checkout_bytes': 2})
+    result = runner.doctor(root, spec, state)
+    assert result['status'] == 'not_ready' and result['paid_calls'] == 0
+    assert result['worktree_capacity']['sufficient'] is False
+
+
+def test_configured_start_and_owned_reentry_preserve_root_epoch_and_native_contract(campaign, monkeypatch):
+    root, spec, state, generated = campaign
+    state.mkdir(mode=0o700)
+    target = root.parent / (root.name + '-dedicated-storage')
+    target.mkdir(mode=0o700)
+    history = state / 'original-accounting-and-quarantine.json'
+    history.write_text('{"spent":4,"quarantine":"preserved"}')
+    original = history.read_bytes()
+    current = {}
+    monkeypatch.setattr(runner, 'process_identity', lambda pid: current.get(pid))
+    monkeypatch.setattr(runner, 'prepare', lambda *a: generated)
+    monkeypatch.setattr(runner, 'doctor', lambda *a, **k: {'status': 'ready', 'merge_target': 'campaign',
+                                                       'native_plan_id': generated['receipt']['plan_id']})
+    def spawn(argv, **kwargs):
+        current[991119] = _identity(argv=argv)
+        return SimpleNamespace(pid=991119, poll=lambda: None)
+    monkeypatch.setattr(runner.subprocess, 'Popen', spawn)
+    assert runner.start(root, spec, state, worktree_root=target)['status'] == 'starting'
+    record = runner._read_json(state / 'launcher.json')
+    assert record['argv'].count('--worktree-root') == 1
+    assert record['argv'][-2:] == ['--worktree-root', str(target)]
+    assert record['worktree_root_binding']['marker_sha256'] == runner.hashlib.sha256((target / runner.WORKTREE_MARKER).read_bytes()).hexdigest()
+    assert runner._select_worktree_root(root, state, record, None)[0] == target
+    record['identity']['pid'] = os.getpid()
+    runner._atomic_json(state / 'launcher.json', record)
+    monkeypatch.setattr(runner, 'owns_process', lambda item: True)
+    monkeypatch.setattr(runner, '_validate_board', lambda *a: {})
+    monkeypatch.setattr(runner, '_private_runtime_checks', lambda *a: {'ready': True})
+    monkeypatch.setattr(runner.os, 'environ', dict(os.environ))
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor_runner as native_runner
+    calls = []
+    monkeypatch.setattr(native_runner, 'run_configured_portal_implementation_supervisor', lambda argv, **kwargs: calls.append(argv))
+    assert runner.run_internal(root, spec, state, record['owner_token'], 'campaign', worktree_root=target) == 0
+    assert len(calls) == 1 and calls[0].count('--worktree-root') == 1
+    assert calls[0][calls[0].index('--worktree-root') + 1] == str(target)
+    assert calls[0][calls[0].index('--state-dir') + 1] == str(state)
+    assert calls[0][calls[0].index('--merge-queue-dir') + 1] == str(state / 'merge-queue')
+    assert history.read_bytes() == original
+    assert not (state / 'worktrees').exists()

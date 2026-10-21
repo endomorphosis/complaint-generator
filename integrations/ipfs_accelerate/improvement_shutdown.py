@@ -51,11 +51,11 @@ def _timestamp(value: Any) -> float:
     return result
 
 
-def _confined_workspace(value: Any, state_dir: Path) -> Path:
+def _confined_workspace(value: Any, state_dir: Path, *, worktree_root: Path | None = None) -> Path:
     if not isinstance(value, str):
         raise ValueError('worker workspace missing')
     path = Path(value)
-    parent = state_dir / 'worktrees'
+    parent = worktree_root if worktree_root is not None else state_dir / 'worktrees'
     if (not path.is_absolute() or path.parent != parent or path.resolve() != path
             or parent.is_symlink() or not re.fullmatch(r'workspace_[A-Za-z0-9_\-]{1,100}', path.name)):
         raise ValueError('worker workspace is not a direct confined campaign worktree')
@@ -74,6 +74,7 @@ def _context(state_dir: Path, record: Mapping[str, Any]) -> dict[str, Any] | Non
         return None
     from . import improvement_recovery as recovery
     from .improvement_plan import BOARD_RELATIVE
+    from .improvement_runner import recorded_worktree_root
     if record.get('schema_version') != 'complaint-improvement-launcher@1':
         raise ValueError('full launcher ownership record required')
     if state_dir.resolve() != state_dir:
@@ -96,10 +97,13 @@ def _context(state_dir: Path, record: Mapping[str, Any]) -> dict[str, Any] | Non
     identity, argv, token = record.get('identity'), record.get('argv'), record.get('owner_token')
     if not isinstance(identity, dict) or not isinstance(argv, list) or not isinstance(token, str) or not token:
         raise ValueError('launcher historical process identity missing')
+    worktree_root, root_binding = recorded_worktree_root(record, state_dir)
     pid = identity.get('pid')
     expected = [argv[0] if argv else '', str(repo / 'scripts/run_complaint_improvement_supervisor.py'), '_run',
                 '--repo-root', str(repo), '--spec', str(spec), '--state-dir', str(state_dir),
                 '--owner-token', token, '--merge-target', record.get('merge_target')]
+    if root_binding is not None:
+        expected.extend(['--worktree-root', str(worktree_root)])
     if (argv != expected or identity.get('argv') != argv or type(pid) is not int or pid <= 1
             or identity.get('session') != pid or identity.get('process_group') != pid
             or type(identity.get('start_ticks')) is not int or identity['start_ticks'] <= 0
@@ -110,11 +114,12 @@ def _context(state_dir: Path, record: Mapping[str, Any]) -> dict[str, Any] | Non
     if started > time.time():
         raise ValueError('launcher start time is in the future')
     return {'repo_root': str(repo), 'plan_id': plan, 'state_dir': str(state_dir),
+            'worktree_root': str(worktree_root), 'worktree_root_binding': root_binding,
             'started_at': started, 'owner_token_sha256': hashlib.sha256(token.encode()).hexdigest(),
             'launcher_sha256': hashlib.sha256(raw).hexdigest()}
 
 
-def _events(state_dir: Path, started_at: float) -> tuple[dict[Path, list[dict[str, Any]]], str]:
+def _events(state_dir: Path, started_at: float, *, worktree_root: Path | None = None) -> tuple[dict[Path, list[dict[str, Any]]], str]:
     from .improvement_recovery import _owned_bytes
     path = state_dir / 'complaint_intake_events.jsonl'
     if not os.path.lexists(path):
@@ -155,7 +160,7 @@ def _events(state_dir: Path, started_at: float) -> tuple[dict[Path, list[dict[st
                 or stamp > time.time()):
             raise ValueError('native start event identity differs')
         identities.add(event_id)
-        workspace = _confined_workspace(event.get('worktree_path'), state_dir)
+        workspace = _confined_workspace(event.get('worktree_path'), state_dir, worktree_root=worktree_root)
         workspaces.setdefault(workspace, []).append({'event_id': event_id, 'started_at': stamp,
             'task_id': event['task_id'], 'canonical_task_cid': cid, 'attempt': event['attempt']})
         if len(identities) > 1024:
@@ -200,7 +205,7 @@ def close_campaign_containers(state_dir: Path, record: Mapping[str, Any], *, par
             return {**result, 'applicable': False, 'status': 'not_applicable', 'reason': 'legacy_process_only_record'}
         result.update(context)
         _parent_closed(state_dir, record, context, parent_quiesced)
-        starts, event_sha = _events(state_dir, context['started_at'])
+        starts, event_sha = _events(state_dir, context['started_at'], worktree_root=Path(context['worktree_root']))
         result['event_log_sha256'] = event_sha
         native = _native_runtime()
         docker = native._docker_isolation_binary()
@@ -248,12 +253,12 @@ def close_campaign_containers(state_dir: Path, record: Mapping[str, Any], *, par
                 mounts = value.get('Mounts')
                 if not isinstance(mounts, list) or len(mounts) > 256:
                     raise ValueError('Docker mount observation unavailable')
-                scope = state_dir / 'worktrees'
+                scope = Path(context['worktree_root'])
                 possible = [workspace_text, *(item.get('Source') for item in mounts if isinstance(item, dict))]
                 touches = any(isinstance(item, str) and Path(item).is_absolute() and Path(item).is_relative_to(scope) for item in possible)
                 if not touches:
                     return None
-                workspace = _confined_workspace(workspace_text, state_dir)
+                workspace = _confined_workspace(workspace_text, state_dir, worktree_root=scope)
                 created = _timestamp(value.get('Created'))
                 candidates = [start for start in starts.get(workspace, ()) if start['started_at'] <= created]
                 if (value.get('Image') != image or value.get('Label') != 'true'
@@ -271,8 +276,11 @@ def close_campaign_containers(state_dir: Path, record: Mapping[str, Any], *, par
                 from .improvement_recovery import _owned_bytes
                 if hashlib.sha256(_owned_bytes(state_dir / 'launcher.json')).hexdigest() != context['launcher_sha256']:
                     raise ValueError('launcher ownership changed before Docker effect')
+                from .improvement_runner import recorded_worktree_root
+                if recorded_worktree_root(record, state_dir) != (Path(context['worktree_root']), context['worktree_root_binding']):
+                    raise ValueError('worktree root ownership changed before Docker effect')
                 _parent_closed(state_dir, record, context, parent_quiesced)
-                if _events(state_dir, context['started_at'])[1] != event_sha:
+                if _events(state_dir, context['started_at'], worktree_root=Path(context['worktree_root']))[1] != event_sha:
                     raise ValueError('native start evidence changed before Docker effect')
                 value = inspect(identifier)
                 if value is not None and bound(value) != identity:

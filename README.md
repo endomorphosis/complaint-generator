@@ -159,6 +159,17 @@ gaps in graph-driven questioning, truthful stopping, and encrypted persistence.
 
 Use `python scripts/run_complaint_improvement_supervisor.py prepare`, then
 `doctor`, `start`, and `status` to prepare and monitor the native supervisor.
+`doctor` and `start` accept `--worktree-root /absolute/private/directory` for
+new workspaces on a larger volume. Create an empty dedicated directory owned by
+your user with mode `0700`; aliases, shared directories and existing unrelated
+contents are rejected. The launcher binds its canonical path, device/inode and
+repository/epoch marker. Later starts retain that binding without needing the
+option again. Changing it requires a stopped prior launch with verified container
+closure. State, existing worktrees, claims, task identities, attempts and history
+stay in their existing epoch; `status` and `stop` use the recorded launch root.
+`doctor` reports free bytes and, when local pinned Git trees are available,
+refuses a filesystem smaller than their tracked-file cold-checkout lower bound.
+That bound excludes filesystem overhead and future generated artifacts.
 `stop` terminates only the campaign's owned process tree. Runtime files live
 outside the repository and retain process birth identities. The campaign pins
 Grok 4.7 with low reasoning through `ipfs_accelerate_py.llm_router`, allows up to
