@@ -1011,6 +1011,30 @@ def provider_diagnostics(user_id: str = "demo-user") -> None:
     _print(service.get_provider_diagnostics(user_id))
 
 
+@app.command("router-session-diagnostics")
+def router_session_diagnostics(config_path: str = "config.llm_router.json", backend_id: str = "llm-router-grok-4.7") -> None:
+    from backends.llm_router_backend import router_session_diagnostics_payload
+
+    _print(router_session_diagnostics_payload(config_path, backend_id))
+
+
+@app.command("router-task-receipt")
+def router_task_receipt(config_path: str = "config.llm_router.json", backend_id: str = "llm-router-grok-4.7") -> None:
+    from backends.llm_router_backend import router_task_receipt_payload
+
+    _print(router_task_receipt_payload(config_path, backend_id))
+
+
+@app.command("router-live-canary")
+def router_live_canary(config_path: str = "config.llm_router.json", backend_id: str = "llm-router-grok-4.7", confirm_live: bool = False) -> None:
+    """Opt-in synthetic canary. It does not read or send complaint sessions."""
+
+    from backends.llm_router_backend import load_terminal_router_backend
+
+    backend = load_terminal_router_backend(config_path, backend_id)
+    _print(backend.run_synthetic_live_canary(confirm_live=bool(confirm_live)))
+
+
 @app.command("docket-view")
 def docket_view(
     input_path: str,
