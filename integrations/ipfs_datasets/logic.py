@@ -2800,12 +2800,302 @@ def _known_token(value: str) -> bool:
     return value.strip().lower() not in _UNKNOWN_TOKENS
 
 
+_TEMPORAL_AUTHORITY_MODULE = (
+    "ipfs_datasets_py.logic.integration.reasoning.legal_ir_temporal_authority"
+)
+_TEMPORAL_APPLICABILITY_CONTRACT = "legal_ir_temporal_applicability_v1"
+_BLOCKING_TREATMENT_TYPES = frozenset({
+    "adverse",
+    "good_law_unconfirmed",
+    "questioned",
+    "limits",
+    "distinguishes",
+    "superseded",
+})
+_TEMPORAL_STATUS_LABELS = {
+    "applicable": "effective",
+    "not_yet_effective": "future",
+    "expired": "expired",
+    "repealed": "repealed",
+    "superseded": "superseded",
+    "wrong_jurisdiction": "wrong_jurisdiction",
+    "authority_preempted": "authority_preempted",
+    "emergency_expired": "expired",
+    "unresolved_authority": "unavailable",
+}
+
+
+def _temporal_authority_api() -> Tuple[Any, str]:
+    """Load LegalIR temporal graph and query APIs only when a caller needs them."""
+    module, error = import_module_optional(_TEMPORAL_AUTHORITY_MODULE)
+    required = (
+        "build_legal_ir_temporal_authority_graph",
+        "query_legal_ir_temporal_applicability",
+        "LegalIRTemporalQueryContext",
+    )
+    if module is None or any(not hasattr(module, name) for name in required):
+        return None, _provider_diagnostic(error, fallback="temporal_authority_api_unavailable")
+    return module, ""
+
+
+def _unavailable_temporal_applicability(reason: str, **extra: Any) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "contract": _TEMPORAL_APPLICABILITY_CONTRACT,
+        "available": False,
+        "applicable": False,
+        "applicability_status": "unavailable",
+        "legal_ir_status": "unavailable",
+        "reason": reason,
+        "review_reason": f"temporal_applicability_{reason}",
+        "guessed_current_rule": False,
+        "selected_current_rule": False,
+        "query_date_source": "unavailable",
+        "decisions": [],
+        "version_decisions": [],
+        "diagnostics": [],
+        "api": _TEMPORAL_AUTHORITY_MODULE,
+    }
+    payload.update(extra)
+    return payload
+
+
+def _iter_treatment_records(authority: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    records: List[Dict[str, Any]] = []
+    edges = authority.get("authority_treatment_edges")
+    if isinstance(edges, list) and edges:
+        records.extend(item for item in edges if isinstance(item, Mapping))
+    else:
+        raw = authority.get("treatment_records")
+        if not isinstance(raw, list):
+            summary = authority.get("treatment_summary")
+            raw = summary.get("records") if isinstance(summary, Mapping) else []
+        if isinstance(raw, list):
+            records.extend(item for item in raw if isinstance(item, Mapping))
+    return records
+
+
+def requirement_treatment_support(authority: Mapping[str, Any]) -> Dict[str, Any]:
+    """Keep treatment edges visible and say whether they block requirement support."""
+    visible: List[Dict[str, Any]] = []
+    types: List[str] = []
+    for record in _iter_treatment_records(authority):
+        treatment_type = str(
+            record.get("relation_type") or record.get("treatment_type") or record.get("type") or ""
+        ).strip()
+        if not treatment_type:
+            continue
+        types.append(treatment_type)
+        visible.append({
+            "treatment_type": treatment_type,
+            "source_authority_id": str(
+                record.get("source_authority_id") or record.get("treated_by_authority_id") or ""
+            ),
+            "target_authority_id": str(
+                record.get("target_authority_id")
+                or record.get("treated_authority_id")
+                or record.get("target_id")
+                or ""
+            ),
+            "explanation": str(record.get("explanation") or record.get("treatment_explanation") or ""),
+        })
+    blocking = [name for name in types if name in _BLOCKING_TREATMENT_TYPES]
+    return {
+        "treatment_edges": visible,
+        "treatment_types": list(dict.fromkeys(types)),
+        "treatment_edges_visible": True,
+        "blocking_treatments": list(dict.fromkeys(blocking)),
+        "treatment_blocks_support": bool(blocking),
+        "support_eligible": not blocking,
+    }
+
+
+def _selected_law_versions(authority: Mapping[str, Any], coordinates: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    supplied = authority.get("law_versions")
+    if isinstance(supplied, list) and supplied:
+        versions = [dict(item) for item in supplied if isinstance(item, Mapping)]
+        if versions:
+            return versions
+    dates = coordinates.get("applicable_date") if isinstance(coordinates.get("applicable_date"), Mapping) else {}
+    version = str(coordinates.get("authority_version") or "")
+    authority_id = str(coordinates.get("authority_id") or coordinates.get("citation") or "authority")
+    window = authority.get("temporal_window") if isinstance(authority.get("temporal_window"), Mapping) else {}
+    return [{
+        "law_version_id": str(authority.get("law_version_id") or f"{authority_id}:{version or 'unspecified'}"),
+        "citation": str(coordinates.get("citation") or ""),
+        "authority_id": str(coordinates.get("authority_id") or ""),
+        "jurisdiction": str(coordinates.get("jurisdiction") or ""),
+        "version": version,
+        "effective_date": str(window.get("effective_date") or dates.get("effective_date") or ""),
+        "sunset_date": str(window.get("sunset_date") or authority.get("sunset_date") or authority.get("expiration_date") or dates.get("expiration_date") or ""),
+        "repeal_date": str(window.get("repeal_date") or authority.get("repeal_date") or ""),
+        "superseded_date": str(window.get("superseded_date") or authority.get("superseded_date") or ""),
+    }]
+
+
+def _label_temporal_status(legal_ir_status: str, law: Any) -> str:
+    label = _TEMPORAL_STATUS_LABELS.get(legal_ir_status, legal_ir_status or "unavailable")
+    amended_by = tuple(getattr(law, "amended_by", ()) or ())
+    if legal_ir_status == "superseded" and amended_by:
+        return "amended"
+    return label
+
+
+def evaluate_temporal_requirement_applicability(
+    authority: Mapping[str, Any],
+    query_context: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Decide applicability with LegalIR's temporal graph and query context.
+
+    An unknown source version or query date stays ``unavailable``. This function
+    does not substitute today's date or another version and call it current.
+    """
+    payload = _as_mapping(authority)
+    context = dict(query_context or {})
+    nested_query = payload.get("query_context") or payload.get("temporal_query_context")
+    if isinstance(nested_query, Mapping):
+        merged = dict(nested_query)
+        merged.update(context)
+        context = merged
+    coordinates = _authority_coordinates(payload)
+    dates = coordinates.get("applicable_date") if isinstance(coordinates.get("applicable_date"), Mapping) else {}
+    version = str(context.get("authority_version") or context.get("version") or coordinates.get("authority_version") or "")
+    explicit_version_id = str(context.get("law_version_id") or payload.get("law_version_id") or "")
+    versions = _selected_law_versions(payload, coordinates)
+    if explicit_version_id:
+        matched = [item for item in versions if str(item.get("law_version_id") or "") == explicit_version_id]
+        selected_version = matched[0] if matched else {}
+        if selected_version and not _known_token(version):
+            version = str(selected_version.get("version") or "")
+    else:
+        selected_version = next(
+            (item for item in versions if str(item.get("version") or "") == version),
+            versions[0] if len(versions) == 1 else {},
+        )
+    if not _known_token(version):
+        return _unavailable_temporal_applicability(
+            "unknown_source_version",
+            authority_version=version,
+            known_versions=[str(item.get("version") or "") for item in versions],
+        )
+    query_date = _iso_date(context.get("query_date") or context.get("as_of") or context.get("as_of_date") or dates.get("as_of_date"))
+    query_date_source = "as_of_date" if query_date else ""
+    if not query_date:
+        query_date = _iso_date(
+            context.get("effective_date")
+            or (selected_version or {}).get("effective_date")
+            or dates.get("effective_date")
+        )
+        query_date_source = "effective_date" if query_date else ""
+    if not query_date:
+        return _unavailable_temporal_applicability(
+            "unknown_source_date",
+            authority_version=version,
+            query_date_source="unavailable",
+        )
+    module, error = _temporal_authority_api()
+    if module is None:
+        return _unavailable_temporal_applicability(
+            "temporal_authority_api_unavailable",
+            authority_version=version,
+            query_date=query_date,
+            diagnostic=error,
+        )
+    authority_id = str(
+        (selected_version or {}).get("authority_id")
+        or coordinates.get("authority_id")
+        or ""
+    )
+    jurisdiction = str((selected_version or {}).get("jurisdiction") or coordinates.get("jurisdiction") or "")
+    query_jurisdiction = str(context.get("jurisdiction") or jurisdiction)
+    law_versions = []
+    for item in versions:
+        law = dict(item)
+        law.setdefault("authority_id", authority_id)
+        law.setdefault("jurisdiction", jurisdiction)
+        law.setdefault("citation", str(coordinates.get("citation") or ""))
+        if not str(law.get("law_version_id") or "").strip():
+            law["law_version_id"] = f"{law['authority_id']}:{law.get('version') or 'unspecified'}"
+        law_versions.append(law)
+    if not selected_version:
+        return _unavailable_temporal_applicability(
+            "unknown_source_version",
+            authority_version=version,
+            query_date=query_date,
+            known_versions=[str(item.get("version") or "") for item in versions],
+        )
+    selected_id = str(selected_version.get("law_version_id") or f"{authority_id}:{version}")
+    changes = payload.get("changes") or payload.get("temporal_changes") or []
+    document = {
+        "document_id": authority_id or "legal-requirement",
+        "authority_id": authority_id,
+        "jurisdiction": jurisdiction,
+        "version": version,
+        "law_versions": law_versions,
+        "changes": list(changes) if isinstance(changes, list) else [],
+    }
+    graph = module.build_legal_ir_temporal_authority_graph(document)
+    query = module.LegalIRTemporalQueryContext(
+        query_date=query_date,
+        jurisdiction=query_jurisdiction,
+        authority_id=authority_id,
+        law_version_ids=(selected_id,),
+    )
+    result = module.query_legal_ir_temporal_applicability(graph, query)
+    result_dict = result.to_dict()
+    decisions = list(result_dict.get("decisions") or [])
+    decision = next((item for item in decisions if item.get("law_version_id") == selected_id), None)
+    if decision is None and decisions:
+        decision = decisions[0]
+    if decision is None:
+        return _unavailable_temporal_applicability(
+            "temporal_applicability_unresolved",
+            authority_version=version,
+            query_date=query_date,
+            query_date_source=query_date_source,
+            query_jurisdiction=query_jurisdiction,
+            diagnostics=list(result_dict.get("diagnostics") or []),
+            guessed_current_rule=False,
+        )
+    law = graph.law_version_by_id.get(str(decision.get("law_version_id") or ""))
+    legal_ir_status = str(decision.get("status") or "unavailable")
+    label = _label_temporal_status(legal_ir_status, law)
+    applicable = legal_ir_status == "applicable" and label == "effective"
+    return {
+        "contract": _TEMPORAL_APPLICABILITY_CONTRACT,
+        "available": True,
+        "applicable": applicable,
+        "applicability_status": label,
+        "legal_ir_status": legal_ir_status,
+        "reason": "" if applicable else f"temporal_applicability_{label}",
+        "review_reason": "" if applicable else f"temporal_applicability_{label}",
+        "guessed_current_rule": False,
+        "selected_current_rule": False,
+        "query_date": query_date,
+        "query_date_source": query_date_source,
+        "query_jurisdiction": query_jurisdiction,
+        "authority_version": str(getattr(law, "version", "") or version),
+        "law_version_id": str(decision.get("law_version_id") or ""),
+        "effective_date": str(decision.get("effective_date") or ""),
+        "end_date": str(decision.get("end_date") or ""),
+        "amended_by": list(getattr(law, "amended_by", ()) or ()),
+        "superseded_by": str(getattr(law, "superseded_by", "") or ""),
+        "repealed_by": str(getattr(law, "repealed_by", "") or ""),
+        "decisions": decisions,
+        "version_decisions": decisions,
+        "diagnostics": list(decision.get("diagnostics") or []),
+        "schema_version": result_dict.get("schema_version") or "",
+        "api": _TEMPORAL_AUTHORITY_MODULE,
+        "temporal_authority_graph_id": graph.temporal_authority_graph_id,
+    }
+
+
 def is_applicable_legal_requirement(attributes: Any) -> bool:
     """Return whether a graph element may be used as an applicable requirement.
 
     Records that never went through this gate stay eligible so existing
-    hand-built elements keep their previous meaning. Explicit templates and
-    unpromoted candidates do not.
+    hand-built elements keep their previous meaning. Explicit templates,
+    unpromoted candidates, unavailable temporal decisions, and blocking
+    treatment marks do not.
     """
     if not isinstance(attributes, Mapping):
         return False
@@ -2817,6 +3107,14 @@ def is_applicable_legal_requirement(attributes: Any) -> bool:
         return False
     if attributes.get("promotion_status") in {"candidate", "unverified_template", "not_promoted"}:
         return False
+    if attributes.get("support_eligible") is False or attributes.get("treatment_blocks_support") is True:
+        return False
+    temporal = attributes.get("temporal_applicability")
+    if isinstance(temporal, Mapping):
+        if temporal.get("applicable") is False:
+            return False
+        if str(temporal.get("applicability_status") or "") not in {"", "effective", "applicable"}:
+            return False
     return True
 
 
@@ -2872,6 +3170,7 @@ def _promotion_reasons(
 
 def _candidate_record(
     *,
+    authority: Mapping[str, Any],
     coordinates: Mapping[str, Any],
     sentence: str,
     span: Optional[Dict[str, Any]],
@@ -2886,7 +3185,13 @@ def _candidate_record(
         structure=structure,
         legacy_template=legacy_template,
     )
+    temporal = evaluate_temporal_requirement_applicability(authority)
+    treatment = requirement_treatment_support(authority)
+    if not temporal.get("applicable"):
+        reason = str(temporal.get("review_reason") or "temporal_applicability_unavailable")
+        reasons.append(reason)
     promoted = not reasons
+    support_eligible = bool(promoted and treatment.get("support_eligible") and temporal.get("applicable"))
     source_text = str(coordinates.get("source_text") or "")
     span_text = str(span.get("text") if span else "")
     return {
@@ -2895,7 +3200,12 @@ def _candidate_record(
         "promotion_status": "promoted" if promoted else "candidate",
         "verification_status": "promoted" if promoted else "candidate",
         "promoted": promoted,
-        "applicable": promoted,
+        "applicable": promoted and support_eligible,
+        "support_eligible": support_eligible,
+        "treatment_blocks_support": bool(treatment.get("treatment_blocks_support")),
+        "treatment_edges": list(treatment.get("treatment_edges") or []),
+        "blocking_treatments": list(treatment.get("blocking_treatments") or []),
+        "temporal_applicability": temporal,
         "legacy_template": legacy_template,
         "review_reason": ";".join(reasons),
         "review_reasons": reasons,
@@ -3010,6 +3320,7 @@ def extract_source_bound_rule_candidates(authority: Mapping[str, Any]) -> Dict[s
     }
     candidates = [
         _candidate_record(
+            authority=payload,
             coordinates=coordinates,
             sentence=sentence,
             span=span,
@@ -3023,6 +3334,7 @@ def extract_source_bound_rule_candidates(authority: Mapping[str, Any]) -> Dict[s
     if not candidates:
         candidates = [
             _candidate_record(
+                authority=payload,
                 coordinates=coordinates,
                 sentence="",
                 span=None,
@@ -3117,7 +3429,9 @@ __all__ = [
     "_COMPLAINT_PREDICATE_TEMPLATES",
     "SOURCE_BOUND_RULE_CONTRACT",
     "extract_source_bound_rule_candidates",
+    "evaluate_temporal_requirement_applicability",
     "is_applicable_legal_requirement",
+    "requirement_treatment_support",
     "legacy_procedural_template_attributes",
     "legacy_unverified_requirement_templates",
     "sha256_utf8",

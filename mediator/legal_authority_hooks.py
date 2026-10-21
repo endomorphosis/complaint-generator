@@ -3386,6 +3386,38 @@ class LegalAuthorityStorageHook:
             return {'available': False, 'error': str(e)}
 
 
+def gate_rule_use_by_temporal_authority(
+    authority: Dict[str, Any],
+    query_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Gate requirement support with LegalIR temporal applicability and treatment edges.
+
+    Treatment rows stay in the result. Adverse and unconfirmed-good-law treatment
+    removes support eligibility. Unknown version or date stays unavailable and
+    does not select another version as the current rule.
+    """
+    from integrations.ipfs_datasets.logic import (
+        evaluate_temporal_requirement_applicability,
+        requirement_treatment_support,
+    )
+
+    temporal = evaluate_temporal_requirement_applicability(authority, query_context=query_context)
+    treatment = requirement_treatment_support(authority)
+    support_eligible = bool(temporal.get('applicable')) and bool(treatment.get('support_eligible'))
+    return {
+        'temporal_applicability': temporal,
+        'applicability_status': temporal.get('applicability_status'),
+        'applicable': bool(temporal.get('applicable')),
+        'available': bool(temporal.get('available')),
+        'guessed_current_rule': False,
+        'treatment_edges': list(treatment.get('treatment_edges') or []),
+        'treatment_edges_visible': True,
+        'blocking_treatments': list(treatment.get('blocking_treatments') or []),
+        'treatment_blocks_support': bool(treatment.get('treatment_blocks_support')),
+        'support_eligible': support_eligible,
+    }
+
+
 class LegalAuthorityAnalysisHook:
     """
     Hook for analyzing stored legal authorities.
@@ -3396,6 +3428,10 @@ class LegalAuthorityAnalysisHook:
     
     def __init__(self, mediator):
         self.mediator = mediator
+
+    def gate_rule_use(self, authority: Dict[str, Any], query_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Return temporal applicability and whether treatment still allows support."""
+        return gate_rule_use_by_temporal_authority(authority, query_context=query_context)
     
     def analyze_authorities_for_claim(self, user_id: str, claim_type: str) -> Dict[str, Any]:
         """

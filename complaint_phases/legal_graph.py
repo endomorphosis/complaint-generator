@@ -463,6 +463,9 @@ class LegalGraphBuilder:
             for key in (
                 'authority_id', 'authority_version', 'version', 'source_hash', 'content_hash',
                 'content_hash_scope', 'effective_date', 'as_of_date', 'applicable_date', 'expiration_date',
+                'sunset_date', 'repeal_date', 'superseded_date', 'law_versions', 'changes',
+                'query_context', 'temporal_query_context', 'authority_treatment_edges',
+                'treatment_records', 'treatment_summary',
             ):
                 if key in statute:
                     statute_attributes[key] = statute.get(key)
@@ -499,6 +502,8 @@ class LegalGraphBuilder:
                     'source_span', 'source_hash', 'authority_id', 'authority_identity',
                     'authority_version', 'jurisdiction', 'applicable_date', 'structure',
                     'rule_character', 'promoted', 'span_sha256', 'authority_text_sha256',
+                    'temporal_applicability', 'support_eligible', 'treatment_blocks_support',
+                    'treatment_edges', 'blocking_treatments',
                 ):
                     if key in req_data:
                         attributes[key] = req_data[key]
@@ -615,6 +620,15 @@ class LegalGraphBuilder:
                 'effective_date': statute.attributes.get('effective_date') or '',
                 'as_of_date': statute.attributes.get('as_of_date') or statute.attributes.get('applicable_date') or '',
                 'expiration_date': statute.attributes.get('expiration_date') or '',
+                'sunset_date': statute.attributes.get('sunset_date') or '',
+                'repeal_date': statute.attributes.get('repeal_date') or '',
+                'superseded_date': statute.attributes.get('superseded_date') or '',
+                'law_versions': statute.attributes.get('law_versions') or [],
+                'changes': statute.attributes.get('changes') or [],
+                'query_context': statute.attributes.get('query_context') or statute.attributes.get('temporal_query_context') or {},
+                'authority_treatment_edges': statute.attributes.get('authority_treatment_edges') or [],
+                'treatment_records': statute.attributes.get('treatment_records') or [],
+                'treatment_summary': statute.attributes.get('treatment_summary') or {},
             }
             extracted = extract_source_bound_rule_candidates(authority)
             for candidate in extracted['candidates']:
@@ -644,6 +658,11 @@ class LegalGraphBuilder:
                     'promoted': promoted,
                     'span_sha256': candidate.get('span_sha256'),
                     'authority_text_sha256': candidate.get('authority_text_sha256'),
+                    'temporal_applicability': candidate.get('temporal_applicability'),
+                    'support_eligible': candidate.get('support_eligible'),
+                    'treatment_blocks_support': candidate.get('treatment_blocks_support'),
+                    'treatment_edges': candidate.get('treatment_edges'),
+                    'blocking_treatments': candidate.get('blocking_treatments'),
                     'attributes': {
                         'source_bound_candidate': candidate,
                     },
@@ -831,12 +850,56 @@ class LegalGraphBuilder:
                 graph, source_node_id, authority, element_id_to_graph_id
             )
 
+        self._apply_visible_treatment_support(graph)
+
         logger.debug(
             "built authority legal graph: %d elements, %d relations",
             len(graph.elements),
             len(graph.relations),
         )
         return graph
+
+    def _apply_visible_treatment_support(self, graph: 'LegalGraph') -> None:
+        """Keep treatment edges and stop them from supporting a requirement."""
+        blocking_types = {
+            'adverse', 'good_law_unconfirmed', 'questioned', 'limits', 'distinguishes', 'superseded',
+        }
+        visible_types = blocking_types | {'supports'}
+        treatments_by_authority: Dict[str, List[LegalRelation]] = {}
+        for relation in graph.relations.values():
+            if relation.relation_type in visible_types:
+                treatments_by_authority.setdefault(relation.target_id, []).append(relation)
+        rule_to_authority = {
+            relation.source_id: relation.target_id
+            for relation in graph.relations.values()
+            if relation.relation_type == 'extracted_from'
+        }
+        requirement_to_rule = {
+            relation.source_id: relation.target_id
+            for relation in graph.relations.values()
+            if relation.relation_type == 'promoted_from'
+        }
+        for element in graph.elements.values():
+            authority_node = rule_to_authority.get(element.id)
+            if authority_node is None and element.id in requirement_to_rule:
+                authority_node = rule_to_authority.get(requirement_to_rule[element.id])
+            if not authority_node:
+                continue
+            relations = treatments_by_authority.get(authority_node, [])
+            treatment_types = [relation.relation_type for relation in relations]
+            blocking = [name for name in treatment_types if name in blocking_types]
+            element.attributes['treatment_edges_visible'] = True
+            element.attributes['visible_treatment_types'] = treatment_types
+            element.attributes['blocking_treatments'] = list(dict.fromkeys(blocking))
+            if blocking:
+                element.attributes['treatment_blocks_support'] = True
+                element.attributes['support_eligible'] = False
+                element.attributes['applicable'] = False
+            elif element.attributes.get('promotion_status') == 'promoted':
+                temporal = element.attributes.get('temporal_applicability')
+                temporal_ok = not isinstance(temporal, dict) or temporal.get('applicable') is True
+                element.attributes['support_eligible'] = bool(temporal_ok and element.attributes.get('applicable') is not False)
+                element.attributes['treatment_blocks_support'] = False
 
     def _add_treatment_edges(
         self,
@@ -986,6 +1049,9 @@ class LegalGraphBuilder:
                 'source_text', 'text', 'source_hash', 'content_hash', 'content_hash_scope',
                 'authority_version', 'version', 'jurisdiction', 'citation', 'authority_id',
                 'effective_date', 'as_of_date', 'applicable_date', 'expiration_date',
+                'sunset_date', 'repeal_date', 'superseded_date', 'law_versions', 'changes',
+                'query_context', 'temporal_query_context', 'authority_treatment_edges',
+                'treatment_records', 'treatment_summary', 'law_version_id',
             ):
                 if key not in promotion_input and key in authority:
                     promotion_input[key] = authority.get(key)
@@ -1031,6 +1097,11 @@ class LegalGraphBuilder:
                     'authority_version': promoted_candidate.get('authority_version') or '',
                     'source_hash': promoted_candidate.get('source_hash') or '',
                     'applicable_date': promoted_candidate.get('applicable_date') or {},
+                    'temporal_applicability': promoted_candidate.get('temporal_applicability') or {},
+                    'support_eligible': promoted_candidate.get('support_eligible'),
+                    'treatment_blocks_support': promoted_candidate.get('treatment_blocks_support'),
+                    'treatment_edges': list(promoted_candidate.get('treatment_edges') or []),
+                    'blocking_treatments': list(promoted_candidate.get('blocking_treatments') or []),
                 },
             )
             graph.add_element(rule_node)
@@ -1051,7 +1122,12 @@ class LegalGraphBuilder:
                     attributes={
                         'record_kind': 'legal_requirement',
                         'about_complainant': False,
-                        'applicable': True,
+                        'applicable': bool(promoted_candidate.get('applicable')),
+                        'support_eligible': bool(promoted_candidate.get('support_eligible')),
+                        'treatment_blocks_support': bool(promoted_candidate.get('treatment_blocks_support')),
+                        'treatment_edges': list(promoted_candidate.get('treatment_edges') or []),
+                        'blocking_treatments': list(promoted_candidate.get('blocking_treatments') or []),
+                        'temporal_applicability': promoted_candidate.get('temporal_applicability') or {},
                         'promoted': True,
                         'promotion_status': 'promoted',
                         'verification_status': 'promoted',

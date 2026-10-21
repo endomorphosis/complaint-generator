@@ -8,11 +8,13 @@ pytestmark = [pytest.mark.no_auto_llm, pytest.mark.no_auto_network, pytest.mark.
 
 from complaint_phases.legal_graph import LegalGraphBuilder
 from integrations.ipfs_datasets.logic import (
+    evaluate_temporal_requirement_applicability,
     extract_source_bound_rule_candidates,
     is_applicable_legal_requirement,
     legacy_unverified_requirement_templates,
     sha256_utf8,
 )
+from mediator.legal_authority_hooks import gate_rule_use_by_temporal_authority
 
 
 def _authority(text: str, **overrides):
@@ -246,3 +248,179 @@ def test_graph_promotion_keeps_candidate_distinct_from_requirement():
     assert requirement.attributes["source_hash"] == sha256_utf8(text)
     assert any(rel.relation_type == "promoted_from" for rel in authority_graph.relations.values())
     assert authority_graph.get_requirements_for_claim_type("retaliation") == [requirement]
+
+
+_RULE = "An employer shall not retaliate against an employee for opposing an unlawful practice."
+
+
+def _version_authority(version_id: str, *, version: str, effective: str, as_of: str = "2024-06-01", **extra):
+    payload = _authority(
+        _RULE,
+        authority_version=version,
+        law_version_id=version_id,
+        effective_date=effective,
+        as_of_date=as_of,
+        law_versions=[{
+            "law_version_id": version_id,
+            "version": version,
+            "effective_date": effective,
+            "jurisdiction": extra.pop("jurisdiction", "US-OR"),
+            "sunset_date": extra.pop("sunset_date", ""),
+            "repeal_date": extra.pop("repeal_date", ""),
+            "superseded_date": extra.pop("superseded_date", ""),
+        }],
+    )
+    payload.update(extra)
+    return payload
+
+
+def test_temporal_fixtures_distinguish_version_dispositions():
+    cases = {
+        "effective": _version_authority("v-effective", version="2024-edition", effective="2024-01-01"),
+        "future": _version_authority(
+            "v-future", version="2026-edition", effective="2026-01-01", as_of="2024-06-01",
+        ),
+        "expired": _version_authority(
+            "v-expired", version="2020-edition", effective="2020-01-01", sunset_date="2023-01-01",
+        ),
+        "repealed": _version_authority(
+            "v-repealed", version="2018-edition", effective="2018-01-01", repeal_date="2022-01-01",
+        ),
+        "superseded": _version_authority(
+            "v-superseded", version="2019-edition", effective="2019-01-01", superseded_date="2023-06-01",
+        ),
+    }
+    amended = _version_authority("v-old", version="2019-edition", effective="2019-01-01")
+    amended["law_versions"].append({
+        "law_version_id": "v-new",
+        "version": "2024-edition",
+        "effective_date": "2024-01-01",
+        "jurisdiction": "US-OR",
+    })
+    amended["changes"] = [{
+        "change_kind": "amendment",
+        "target_law_version_id": "v-old",
+        "replacement_law_version_id": "v-new",
+        "effective_date": "2024-01-01",
+    }]
+    cases["amended"] = amended
+    mismatch = _version_authority("v-effective", version="2024-edition", effective="2024-01-01")
+    mismatch["query_context"] = {"query_date": "2024-06-01", "jurisdiction": "US-CA", "law_version_id": "v-effective"}
+    cases["wrong_jurisdiction"] = mismatch
+
+    expected = {
+        "effective": "effective",
+        "future": "future",
+        "expired": "expired",
+        "amended": "amended",
+        "repealed": "repealed",
+        "superseded": "superseded",
+        "wrong_jurisdiction": "wrong_jurisdiction",
+    }
+    for name, authority in cases.items():
+        decision = evaluate_temporal_requirement_applicability(authority)
+        gated = gate_rule_use_by_temporal_authority(authority)
+        assert decision["applicability_status"] == expected[name]
+        assert decision["guessed_current_rule"] is False
+        assert gated["applicability_status"] == expected[name]
+        assert gated["guessed_current_rule"] is False
+        assert (decision["applicable"] is True) is (name == "effective")
+        if name != "effective":
+            result = extract_source_bound_rule_candidates(authority)
+            assert result["promoted_count"] == 0
+            assert result["candidates"][0]["temporal_applicability"]["applicability_status"] == expected[name]
+
+
+def test_unknown_version_or_date_is_unavailable_and_not_the_current_rule():
+    current = {
+        "law_version_id": "v-current",
+        "version": "2024-edition",
+        "effective_date": "2024-01-01",
+        "jurisdiction": "US-OR",
+    }
+    unknown_version = _authority(
+        _RULE,
+        authority_version="current",
+        as_of_date="2024-06-01",
+        law_versions=[current],
+    )
+    decision = evaluate_temporal_requirement_applicability(unknown_version)
+    assert decision["applicability_status"] == "unavailable"
+    assert decision["reason"] == "unknown_source_version"
+    assert decision["available"] is False
+    assert decision["applicable"] is False
+    assert decision["guessed_current_rule"] is False
+    assert decision["selected_current_rule"] is False
+    assert decision.get("law_version_id", "") != "v-current"
+    assert "v-current" not in {item.get("law_version_id") for item in decision["decisions"]}
+
+    unknown_date = _authority(_RULE, authority_version="2024-edition", effective_date="", as_of_date="")
+    decision = evaluate_temporal_requirement_applicability(unknown_date)
+    assert decision["applicability_status"] == "unavailable"
+    assert decision["reason"] == "unknown_source_date"
+    assert decision["query_date_source"] == "unavailable"
+    assert decision["guessed_current_rule"] is False
+    gated = gate_rule_use_by_temporal_authority(unknown_date)
+    assert gated["support_eligible"] is False
+    assert gated["available"] is False
+
+
+def test_adverse_and_unconfirmed_treatment_stay_visible_and_block_support():
+    text = _RULE
+    for treatment_type in ("adverse", "good_law_unconfirmed"):
+        authority = _authority(
+            text,
+            authority_treatment_edges=[{
+                "source_authority_id": "case:1",
+                "target_authority_id": "ors:659A.030",
+                "relation_type": treatment_type,
+                "explanation": "synthetic treatment",
+            }],
+        )
+        result = extract_source_bound_rule_candidates(authority)
+        candidate = result["candidates"][0]
+        assert candidate["promoted"] is True
+        assert candidate["support_eligible"] is False
+        assert candidate["treatment_edges"][0]["treatment_type"] == treatment_type
+        assert not is_applicable_legal_requirement(candidate)
+        gated = gate_rule_use_by_temporal_authority(authority)
+        assert gated["treatment_edges_visible"] is True
+        assert gated["treatment_edges"][0]["treatment_type"] == treatment_type
+        assert gated["support_eligible"] is False
+        assert treatment_type in gated["blocking_treatments"]
+
+        graph = LegalGraphBuilder().build_from_authorities([
+            {
+                "authority_id": "ors:659A.030",
+                "name": "ORS 659A.030",
+                "citation": "ORS 659A.030",
+                "jurisdiction": "US-OR",
+                "authority_version": "2024-edition",
+                "source_text": text,
+                "source_hash": sha256_utf8(text),
+                "effective_date": "2024-01-01",
+                "as_of_date": "2024-06-01",
+                "claim_type": "retaliation",
+                "authority_treatment_edges": [{
+                    "source_authority_id": "case:1",
+                    "target_authority_id": "ors:659A.030",
+                    "relation_type": treatment_type,
+                }],
+                "rule_candidates": [{"rule_text": text, "rule_type": "prohibition"}],
+            },
+            {
+                "authority_id": "case:1",
+                "name": "Synthetic treatment case",
+                "citation": "1 F. Supp. 1",
+                "jurisdiction": "US-OR",
+            },
+        ])
+        relations = [rel for rel in graph.relations.values() if rel.relation_type == treatment_type]
+        assert relations
+        requirement = next(
+            element for element in graph.elements.values()
+            if element.element_type == "legal_requirement" and element.attributes.get("promoted") is True
+        )
+        assert requirement.attributes["support_eligible"] is False
+        assert treatment_type in requirement.attributes["visible_treatment_types"]
+        assert graph.get_requirements_for_claim_type("retaliation") == []
