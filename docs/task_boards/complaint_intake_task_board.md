@@ -30,7 +30,7 @@ Implementation instructions:
 
 ## CIMP-TUI-02 Capture complaint narrative separately from structured answers
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.tui
