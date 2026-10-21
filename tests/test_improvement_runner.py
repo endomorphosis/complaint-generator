@@ -388,6 +388,35 @@ def test_real_proc_identity_reads_own_process():
     assert identity["start_ticks"] > 0 and identity["boot_id"] and identity["argv"]
 
 
+def _full_owner(root, spec, state, plan_id):
+    token = "test-owner"
+    argv = [sys.executable, str(root / "scripts/run_complaint_improvement_supervisor.py"), "_run",
+            "--repo-root", str(root), "--spec", str(spec), "--state-dir", str(state),
+            "--owner-token", token, "--merge-target", "campaign"]
+    return {"schema_version": "complaint-improvement-launcher@1", "identity": _identity(argv=argv),
+            "argv": argv, "owner_token": token, "started_at": runner.time.time() - 30,
+            "status": "starting", "repo_root": str(root), "spec_path": str(spec),
+            "state_dir": str(state), "merge_target": "campaign",
+            "board_path": str(root / "docs/complaint_intake_improvement_board.md"),
+            "plan_id": plan_id, "provider": "grok_cli", "model": "grok-4.7", "allow_fallback": False}
+
+
+def _shutdown_receipt(record, **overrides):
+    receipt = {"schema": "complaint-improvement-container-shutdown@1", "repo_root": record["repo_root"],
+               "state_dir": record["state_dir"], "plan_id": record["plan_id"], "started_at": record["started_at"],
+               "owner_token_sha256": runner.hashlib.sha256(record["owner_token"].encode()).hexdigest(),
+               "quiesced": True, "status": "stopped", "completion_authority": False,
+               "provider_callback_settled": False, "attempt_refunded": False}
+    receipt.update(overrides)
+    return receipt
+
+
+def _refuse_effects(monkeypatch):
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **k: pytest.fail("launch"))
+    monkeypatch.setattr(runner, "_signal_birth", lambda *a, **k: pytest.fail("signal"))
+    monkeypatch.setattr(runner, "prepare", lambda *a, **k: pytest.fail("prepare"))
+
+
 def test_duplicate_start_returns_existing_owned_process(tmp_path, monkeypatch):
     record = _owner(tmp_path)
     runner._atomic_json(tmp_path / "launcher.json", record)
@@ -414,6 +443,116 @@ def test_start_spawns_detached_but_reports_starting_not_running(tmp_path, monkey
     assert observations["stdin"] == runner.subprocess.DEVNULL
     assert observations["cwd"] == ROOT and observations["close_fds"] is True
     assert runner.owns_process(runner._read_json(tmp_path / "launcher.json"))
+
+
+@pytest.mark.parametrize("field", ["repo_root", "spec_path", "plan_id", "state_dir"])
+def test_live_receipt_mismatch_cannot_reuse_or_signal(campaign, monkeypatch, field):
+    root, spec, state, generated = campaign
+    state.mkdir(mode=0o700)
+    record = _full_owner(root, spec, state, generated["receipt"]["plan_id"])
+    record[field] = "/unrelated/campaign" if field != "plan_id" else "another-plan"
+    runner._atomic_json(state / "launcher.json", record)
+    original = (state / "launcher.json").read_bytes()
+    monkeypatch.setattr(runner, "process_identity", lambda pid: record["identity"] if pid == record["identity"]["pid"] else None)
+    _refuse_effects(monkeypatch)
+    result = runner.start(root, spec, state)
+    assert result["status"] == "stop_incomplete" and result["signalled"] is False
+    assert result["reason"] == "live_campaign_mismatch"
+    assert (state / "launcher.json").read_bytes() == original
+
+
+@pytest.mark.parametrize("proof", ["missing", "stale", "unknown", "live_container"])
+def test_dead_full_receipt_without_closure_cannot_launch_or_overwrite(campaign, monkeypatch, proof):
+    root, spec, state, generated = campaign
+    state.mkdir(mode=0o700)
+    record = _full_owner(root, spec, state, generated["receipt"]["plan_id"])
+    runner._atomic_json(state / "launcher.json", record)
+    original = (state / "launcher.json").read_bytes()
+    if proof != "missing":
+        receipt = _shutdown_receipt(record)
+        if proof == "stale":
+            receipt["started_at"] = record["started_at"] - 5
+        runner._atomic_json(state / "container_shutdown.json", receipt)
+        evidence = (state / "container_shutdown.json").read_bytes()
+    monkeypatch.setattr(runner, "process_identity", lambda pid: None)
+    calls = []
+
+    def close(state_dir, owned, **kwargs):
+        calls.append(owned["owner_token"])
+        if proof == "unknown":
+            return {"applicable": True, "quiesced": False, "status": "stop_incomplete", "reason": "inspection_unavailable"}
+        if proof == "live_container":
+            return {"applicable": True, "quiesced": False, "status": "stop_incomplete", "reason": "owned_worker_running"}
+        pytest.fail("closure observation")
+
+    monkeypatch.setattr("integrations.ipfs_accelerate.improvement_shutdown.close_campaign_containers", close)
+    _refuse_effects(monkeypatch)
+    result = runner.start(root, spec, state)
+    assert result["status"] == "stop_incomplete" and result["signalled"] is False
+    assert (state / "launcher.json").read_bytes() == original
+    if proof in {"missing", "stale"}:
+        assert result["reason"] == "shutdown_proof_unverified" and calls == []
+        if proof == "stale":
+            assert (state / "container_shutdown.json").read_bytes() == evidence
+    else:
+        assert result["reason"] == "container_closure_unverified" and calls == [record["owner_token"]]
+
+
+def test_exact_quiesced_receipt_permits_one_detached_launch(campaign, monkeypatch):
+    root, spec, state, generated = campaign
+    state.mkdir(mode=0o700)
+    record = _full_owner(root, spec, state, generated["receipt"]["plan_id"])
+    runner._atomic_json(state / "launcher.json", record)
+    runner._atomic_json(state / "container_shutdown.json", _shutdown_receipt(record))
+    current = {}
+    monkeypatch.setattr(runner, "process_identity", lambda pid: current.get(pid))
+    monkeypatch.setattr(runner, "prepare", lambda *a: {"board_path": record["board_path"]})
+    monkeypatch.setattr(runner, "doctor", lambda *a, **k: {"status": "ready", "merge_target": "campaign", "native_plan_id": record["plan_id"]})
+    observations = {}
+    closes = []
+
+    def close(state_dir, owned, **kwargs):
+        closes.append(owned["plan_id"])
+        return {"applicable": True, "quiesced": True, "status": "stopped", "completion_authority": False}
+
+    monkeypatch.setattr("integrations.ipfs_accelerate.improvement_shutdown.close_campaign_containers", close)
+
+    def spawn(argv, **kwargs):
+        observations.update(kwargs)
+        current[991119] = _identity(argv=argv)
+        return SimpleNamespace(pid=991119, poll=lambda: None)
+
+    monkeypatch.setattr(runner.subprocess, "Popen", spawn)
+    result = runner.start(root, spec, state)
+    assert closes == [record["plan_id"]]
+    assert result["status"] == "starting" and result["progress_verified"] is False
+    assert observations["stdin"] is runner.subprocess.DEVNULL and observations["cwd"] == root
+    assert observations["start_new_session"] is True
+    retained = runner._read_json(state / "launcher.json")
+    assert retained["owner_token"] != record["owner_token"]
+    assert retained["repo_root"] == str(root) and retained["plan_id"] == record["plan_id"]
+    assert runner.owns_process(retained)
+
+
+def test_duplicate_start_and_pid_reuse_preserve_unrelated_campaign(campaign, monkeypatch):
+    root, spec, state, generated = campaign
+    state.mkdir(mode=0o700)
+    record = _full_owner(root, spec, state, generated["receipt"]["plan_id"])
+    runner._atomic_json(state / "launcher.json", record)
+    unrelated = campaign[0] / "unrelated-campaign"
+    unrelated.mkdir(mode=0o700)
+    runner._atomic_json(unrelated / "launcher.json", _owner(unrelated))
+    unrelated_bytes = (unrelated / "launcher.json").read_bytes()
+    owned_bytes = (state / "launcher.json").read_bytes()
+    monkeypatch.setattr(runner, "process_identity", lambda pid: record["identity"] if pid == record["identity"]["pid"] else None)
+    _refuse_effects(monkeypatch)
+    assert runner.start(root, spec, state)["status"] == "already_running"
+    reused = {**record["identity"], "start_ticks": record["identity"]["start_ticks"] + 1, "argv": ["unrelated-process"]}
+    monkeypatch.setattr(runner, "process_identity", lambda pid: reused if pid == record["identity"]["pid"] else None)
+    result = runner.start(root, spec, state)
+    assert result["status"] == "stop_incomplete" and result["signalled"] is False
+    assert (state / "launcher.json").read_bytes() == owned_bytes
+    assert (unrelated / "launcher.json").read_bytes() == unrelated_bytes
 
 
 def test_unready_start_never_launches(tmp_path, monkeypatch):

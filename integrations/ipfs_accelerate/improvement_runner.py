@@ -181,6 +181,42 @@ def recorded_worktree_root(record: Mapping[str, Any], state_dir: Path) -> tuple[
     return Path(value), _validate_worktree_root(repo, state_dir, Path(value), expected=binding)
 
 
+def _full_launch_record(record: Mapping[str, Any]) -> bool:
+    """Process-only fixtures stay process-only; any campaign binding requires closure proof."""
+    if not record or record.get("read_error"):
+        return False
+    return record.get("schema_version") == "complaint-improvement-launcher@1" or any(
+        key in record for key in ("repo_root", "spec_path", "plan_id", "state_dir")
+    )
+
+
+def _requested_plan_id(spec_path: Path) -> str | None:
+    from .improvement_plan import build_improvement_work_plan, load_spec
+    try:
+        return build_improvement_work_plan(load_spec(spec_path)).plan_id
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
+def _campaign_tuple_matches(record: Mapping[str, Any], repo_root: Path, spec_path: Path, state_dir: Path) -> bool:
+    plan_id = _requested_plan_id(spec_path)
+    return bool(
+        plan_id and record.get("schema_version") == "complaint-improvement-launcher@1"
+        and record.get("repo_root") == str(repo_root)
+        and record.get("spec_path") == str(spec_path)
+        and record.get("state_dir") == str(state_dir)
+        and record.get("plan_id") == plan_id
+        and record.get("provider") == "grok_cli"
+        and record.get("model") == MODEL
+        and record.get("allow_fallback") is False
+    )
+
+
+def _stop_incomplete(state_dir: Path, reason: str) -> dict[str, Any]:
+    return {"status": "stop_incomplete", "signalled": False, "reason": reason,
+            "state_dir": str(state_dir), "manual_holds_preserved": True}
+
+
 def _shutdown_verified(record: Mapping[str, Any], shutdown: Mapping[str, Any], repo_root: Path, state_dir: Path) -> bool:
     return bool(
         record.get("schema_version") == "complaint-improvement-launcher@1"
@@ -552,9 +588,36 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
     with _lock(state_dir):
         owner_path = state_dir / "launcher.json"
         previous = _read_json(owner_path)
+        if previous.get("read_error"):
+            return _stop_incomplete(state_dir, "launcher_receipt_unreadable")
         selected_root, root_binding = _select_worktree_root(repo_root, state_dir, previous, worktree_root)
+        full_launch = _full_launch_record(previous)
+        # Compare the requested campaign before treating a live PID as this launch.
+        # A matching live owner is reused; a different repo, spec, plan, or epoch is not signalled.
         if owns_process(previous):
+            if full_launch and not _campaign_tuple_matches(previous, repo_root, spec_path, state_dir):
+                return _stop_incomplete(state_dir, "live_campaign_mismatch")
             return {"status": "already_running", "pid": previous["identity"]["pid"], "state_dir": str(state_dir)}
+        if full_launch:
+            # A dead PID is not evidence that private Docker workers are gone.
+            # Keep the retained receipt until the same proof status uses is current
+            # and a fresh bounded closure observation agrees.
+            if not _shutdown_verified(previous, _read_json(state_dir / "container_shutdown.json"), repo_root, state_dir):
+                return _stop_incomplete(state_dir, "shutdown_proof_unverified")
+            from .improvement_shutdown import close_campaign_containers
+            containers = close_campaign_containers(state_dir, previous)
+            current = _read_json(owner_path)
+            if current != previous or current.get("read_error"):
+                return _stop_incomplete(state_dir, "ownership_changed_during_closure")
+            if owns_process(current):
+                if not _campaign_tuple_matches(current, repo_root, spec_path, state_dir):
+                    return _stop_incomplete(state_dir, "live_campaign_mismatch")
+                return {"status": "already_running", "pid": current["identity"]["pid"], "state_dir": str(state_dir)}
+            shutdown = _read_json(state_dir / "container_shutdown.json")
+            if (not containers.get("applicable") or not containers.get("quiesced")
+                    or containers.get("status") != "stopped"
+                    or not _shutdown_verified(current, shutdown, repo_root, state_dir)):
+                return _stop_incomplete(state_dir, "container_closure_unverified")
         # A missing/edited owner receipt cannot authorize a duplicate runner.
         for candidate in Path("/proc").iterdir():
             if candidate.name.isdigit():
