@@ -168,7 +168,7 @@
       }
     }
   },
-  "native_medium_reasoning_commit": "432162102",
+  "native_medium_reasoning_commit": "4321621020d2a93a9c7c2dd90904c1c57df0c9f5",
   "live_native_medium_reasoning_canary": {
     "schema_version": "complaint-grok-private-canary@1",
     "provider": "grok_cli",
@@ -231,5 +231,19 @@
     "scope": "Actual native timeout of first ordinary Grok attempt with continuous log output; no task completion claimed. Owned campaign stopped at its idle boundary to apply qualified medium reasoning config.",
     "observed_started_to_timeout_seconds": 904.051606,
     "native_elapsed_field_note": "Native timeout event reported elapsed_seconds=0; wall duration above is computed from the native start and timeout timestamps. The configured hard deadline was900 seconds."
+  },
+  "compatibility_regression_baseline": {
+    "baseline_commit": "2fbc97d602616e9a8b74ba1cbff1750289141801",
+    "current_source_commit": "432162102",
+    "comparison_method": "isolated pytest-process module overlay compiled with original runner.__file__; shared source untouched",
+    "baseline_cases": 92,
+    "current_cases": 92,
+    "baseline_failures": 46,
+    "current_failures": 46,
+    "identical_case_dispositions": true,
+    "introduced_failures": [],
+    "disposition_changes": {},
+    "comparison_sha256": "add2aca6b0c6bc9b628b728e98f7e39f4f6a671b18f68a4f63b0b713e6cf10b0",
+    "scope": "Older quota/Terra compatibility suite retains46 baseline failures and1 baseline skip. Current ordinary Grok effort cases25 and explicit-Grok cases12 pass; this change introduces no case-disposition changes."
   }
 }
