@@ -1090,8 +1090,11 @@ def _owned_attempt_log_evidence(events_path: Path, state_dir: Path, binding: Map
                 continue
             if kind == "usage" and isinstance(frame.get("usage"), dict):
                 counts["usage"] += 1
+                # A native repair round can append to this same owned log.
+                terminal = False
             elif kind in {"tool_call", "tool_call_update"}:
                 counts[kind] += 1
+                terminal = False
             elif kind in {"end", "error", "max_turns_reached"}:
                 terminal = True
         if not counts:

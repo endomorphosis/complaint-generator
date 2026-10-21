@@ -173,3 +173,75 @@ def test_recovery_config_ignores_untrusted_native_path_and_command_overrides(tmp
     assert config.state_path==daemon.state_path and config.todo_path==daemon.todo_path
     assert config.worktree_root==daemon.worktree_root
     assert config.implementation_command!='foreign-provider'
+
+
+@pytest.mark.parametrize('kind', ['usage', 'tool_call', 'tool_call_update'])
+def test_later_real_provider_progress_clears_prior_round_terminal(tmp_path, monkeypatch, kind):
+    root, spec, state, _, log, _ = _real_shaped_progress(tmp_path, monkeypatch)
+    frame = {'type': kind}
+    if kind == 'usage':
+        frame['usage'] = {'inputTokens': 19}
+    with log.open('a') as handle:
+        handle.write(json.dumps({'type': 'end', 'stopReason': 'end_turn'}) + '\n')
+        handle.write(json.dumps(frame) + '\n')
+    observed = runner.status(root, spec, state)
+    assert observed['provider_execution_verified'] is True
+    assert observed['provider_execution_evidence']['provider_terminal_observed'] is False
+    assert observed['provider_progress_verified'] is True
+    assert observed['status'] == 'active' and observed['healthy'] is True
+    assert observed['completion_authority'] is False
+
+
+@pytest.mark.parametrize('kind', ['thought', 'text', 'available_commands'])
+def test_nonprogress_frames_do_not_clear_provider_terminal(tmp_path, monkeypatch, kind):
+    root, spec, state, _, log, _ = _real_shaped_progress(tmp_path, monkeypatch)
+    with log.open('a') as handle:
+        handle.write(json.dumps({'type': 'end', 'stopReason': 'end_turn'}) + '\n')
+        handle.write(json.dumps({'type': kind, 'text': 'synthetic-unused'}) + '\n')
+    observed = runner.status(root, spec, state)
+    assert observed['provider_execution_evidence']['provider_terminal_observed'] is True
+    assert observed['provider_progress_verified'] is False
+    assert observed['status'] == 'post_provider'
+
+
+@pytest.mark.parametrize('kind', ['end', 'error', 'max_turns_reached'])
+def test_final_provider_terminal_relatches_after_repair_progress(tmp_path, monkeypatch, kind):
+    root, spec, state, _, log, _ = _real_shaped_progress(tmp_path, monkeypatch)
+    with log.open('a') as handle:
+        for frame in ({'type': 'end'}, {'type': 'usage', 'usage': {'inputTokens': 19}}, {'type': kind}):
+            handle.write(json.dumps(frame) + '\n')
+    observed = runner.status(root, spec, state)
+    assert observed['provider_execution_evidence']['provider_terminal_observed'] is True
+    assert observed['provider_progress_verified'] is False
+    assert observed['status'] == 'post_provider'
+
+
+@pytest.mark.parametrize('suffix', [b'{"type":"usage","usage":{}}', b'{"type":"usage","usage":[]}\n'])
+def test_partial_or_malformed_usage_does_not_clear_provider_terminal(tmp_path, monkeypatch, suffix):
+    root, spec, state, _, log, _ = _real_shaped_progress(tmp_path, monkeypatch)
+    with log.open('ab') as handle:
+        handle.write(b'{"type":"end"}\n' + suffix)
+    observed = runner.status(root, spec, state)
+    assert observed['provider_execution_evidence']['provider_terminal_observed'] is True
+    assert observed['provider_progress_verified'] is False
+
+
+def test_later_repair_progress_cannot_extend_overall_attempt_deadline(tmp_path, monkeypatch):
+    root, spec, state, record, log, start = _real_shaped_progress(tmp_path, monkeypatch)
+    payload_path = state / f'{runner.STATE_PREFIX}_task_state.json'
+    payload = json.loads(payload_path.read_text())
+    payload['active_task_started_at'] = _stamp(runner.TIMEOUT_SECONDS + 20)
+    old_execution = payload['last_implementation_started_at']
+    execution = _stamp(runner.TIMEOUT_SECONDS + 18)
+    payload['last_implementation_started_at'] = execution
+    runner._atomic_json(payload_path, payload)
+    record['started_at'] = runner.time.time() - runner.TIMEOUT_SECONDS - 30
+    runner._atomic_json(state / 'launcher.json', record)
+    log.write_text(log.read_text().replace('Started: ' + old_execution, 'Started: ' + execution)
+                   + '{"type":"end"}\n{"type":"usage","usage":{"inputTokens":19}}\n')
+    start['timestamp'] = execution
+    (state / f'{runner.STATE_PREFIX}_events.jsonl').write_text(json.dumps(start) + '\n')
+    observed = runner.status(root, spec, state)
+    assert observed['provider_execution_verified'] is True
+    assert observed['status'] == 'stalled' and observed['healthy'] is False
+    assert observed['completion_authority'] is False
