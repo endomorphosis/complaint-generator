@@ -92,7 +92,7 @@ def test_explicit_environment_removes_ambient_routes_and_pins_model():
     assert environment["TODO_DAEMON_LLM_ALLOW_CROSS_PROVIDER_FALLBACK"] == "0"
     assert environment["TODO_DAEMON_LLM_ALLOW_LOCAL_FALLBACK"] == "0"
     assert environment["IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS"] == "32"
-    assert environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "medium"
+    assert environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "low"
     assert environment[runner.AUTOMATIC_RETRY_REARM_ENV] == "0"
     assert environment["IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS"] == "external/ipfs_datasets_py"
     assert environment["HOME"] == "/preserved/user"
@@ -145,11 +145,11 @@ def test_private_policy_survives_actual_native_daemon_and_provider_environment(c
     )
     child_environment = observations[0]
     assert child_environment[runner.PRIVATE_PATHS_ENV] == policy[runner.PRIVATE_PATHS_ENV]
-    assert child_environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "medium"
+    assert child_environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "low"
     monkeypatch.setattr(runner.os, "environ", child_environment)
     provider_environment = daemon.PortalImplementationDaemon._implementation_untrusted_process_environment()
     assert provider_environment[runner.PRIVATE_PATHS_ENV] == policy[runner.PRIVATE_PATHS_ENV]
-    assert provider_environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "medium"
+    assert provider_environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "low"
     assert provider_environment["IPFS_ACCELERATE_AGENT_IMPLEMENTATION_PROVIDER"] == "grok"
 
 

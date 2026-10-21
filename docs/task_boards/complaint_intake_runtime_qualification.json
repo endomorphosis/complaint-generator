@@ -235,6 +235,15 @@
       "errors": 0,
       "skipped": 0,
       "scope": "Pending narrative-task amendment, queue preservation and pointer/source binding; focused later refinements recorded separately."
+    },
+    {
+      "receipt": "/tmp/complaint-low-effort-runner-20261021.xml",
+      "sha256": "90018c74f8c4bf3dd12f1370eb88ff136a083fa2a83589d204f10beb0f3b4ea5",
+      "tests": 66,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Future Grok4.7 implementation launches pin low reasoning; inherited higher effort cannot override the campaign."
     }
   ],
   "implementation_tasks_completed_by_these_checks": 0,
@@ -546,5 +555,35 @@
     "sha256": "feccbb85096769df3c82b931d0b5ca55f1e111cba965939c14978a2776f4f22f",
     "required_followup": "Add TUI-12 to REL-03 dependency closure before release dispatch; retain truthful separate pre-admission and post-completion audits.",
     "resolved": false
+  },
+  "live_native_private_low_effort_canary": {
+    "schema_version": "complaint-grok-private-low-canary@1",
+    "provider": "grok_cli",
+    "requested_model": "grok-4.7",
+    "native_runner": true,
+    "private_policy_present": true,
+    "synthetic_only": true,
+    "provider_returncode": 0,
+    "reasoning_effort": "low",
+    "tool_calls": 0,
+    "ok": true,
+    "answer_matched": true,
+    "seconds": 19.415,
+    "log_path": "/tmp/complaint_grok_private_low_canary_20261021.log",
+    "log_sha256": "98f66cba268dace68814e595e2eefebed94ae88d34d1a817e345e08339a910c4",
+    "task_completion_authority": false,
+    "receipt": "/tmp/complaint_grok_private_low_canary_20261021.json",
+    "receipt_sha256": "e13c5fd4f8b067d677067b7095129831e267f919ecc2d75fb8915be3cd81abdd"
+  },
+  "execution_effort_adjustment": {
+    "from": "medium",
+    "to": "low",
+    "provider": "grok_cli",
+    "model": "grok-4.7",
+    "basis": "FACT-01 attempt1 spent23 of32 model turns inspecting before its first edit, then reached the configured turn limit.",
+    "attempt_budget_unchanged": true,
+    "deadline_unchanged": true,
+    "required_validation_unchanged": true,
+    "task_completion_authority": false
   }
 }

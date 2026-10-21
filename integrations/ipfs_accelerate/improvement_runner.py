@@ -174,7 +174,7 @@ def campaign_environment(repo_root: Path, ambient: Mapping[str, str] | None = No
         "IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS": "external/ipfs_datasets_py",
         "IPFS_ACCELERATE_AGENT_GROK_MODEL": MODEL,
         "IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS": "32",
-        "IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT": "medium",
+        "IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT": "low",
         "IPFS_ACCELERATE_PY_GROK_CLI_MODEL": MODEL,
         "ipfs_accelerate_py_GROK_CLI_MODEL": MODEL,
         "GROK_CLI_MODEL": MODEL, "GROK_MODEL": MODEL,
