@@ -570,10 +570,15 @@ def _patch_extractor(monkeypatch, graph_factory):
             seen["temperatures"] = (extraction_temperature, structure_temperature)
             return graph_factory(text)
 
-    monkeypatch.setattr(
-        "integrations.ipfs_datasets.graphs._load_private_extractor_class",
-        lambda: (_Extractor, None),
-    )
+    def _owned_transport(text, timeout_seconds):
+        from integrations.ipfs_datasets.graphs import _PRIVATE_EXTRACTOR_OPTIONS
+        instance = _Extractor(**_PRIVATE_EXTRACTOR_OPTIONS)
+        graph = instance.extract_knowledge_graph(text)
+        return "ok", {
+            "status": "ok", "entities": list(graph.entities.values()),
+            "relationships": list(graph.relationships.values()),
+        }
+    monkeypatch.setattr("integrations.ipfs_datasets.graphs._run_owned_private_extractor", _owned_transport)
     return seen
 
 
@@ -687,83 +692,53 @@ def test_missing_or_mismatched_caller_source_cannot_assert(monkeypatch, override
 
 
 def test_absent_error_invalid_and_hanging_backends_fabricate_nothing(monkeypatch):
+    """Typed transport mapping; real deadline/cleanup is exercised separately."""
     from integrations.ipfs_datasets.types import user_assertion_from_mapping
     text = "Ada notified HR."
     context = _statement_context(text, extraction_timeout_seconds=0.05)
-
-    monkeypatch.setattr(
-        "integrations.ipfs_datasets.graphs._load_private_extractor_class",
-        lambda: (None, "extractor_import_failed: missing"),
-    )
-    absent = extract_graph_from_text(text, source_id="message-private", metadata=context)
-    assert absent["status"] == "unavailable"
-    assert absent["metadata"]["private_extraction"]["diagnostic"].startswith("extractor_import_failed")
-    assert _asserted_upstream(absent) == []
-
-    class _Boom:
-        def __init__(self, **_options):
-            pass
-        def extract_knowledge_graph(self, _text, **_kwargs):
-            raise RuntimeError("backend failed")
-
-    monkeypatch.setattr("integrations.ipfs_datasets.graphs._load_private_extractor_class", lambda: (_Boom, None))
-    failed = extract_graph_from_text(text, source_id="message-private", metadata=context)
-    assert failed["status"] == "degraded"
-    assert "extractor_error" in failed["metadata"]["private_extraction"]["diagnostic"]
-    assert _asserted_upstream(failed) == []
-
-    class _Invalid:
-        def __init__(self, **_options):
-            pass
-        def extract_knowledge_graph(self, _text, **_kwargs):
-            return {"entities": "not-a-graph"}
-
-    monkeypatch.setattr("integrations.ipfs_datasets.graphs._load_private_extractor_class", lambda: (_Invalid, None))
-    invalid = extract_graph_from_text(text, source_id="message-private", metadata=context)
-    assert invalid["status"] == "degraded"
-    assert invalid["metadata"]["private_extraction"]["diagnostic"] == "extractor_invalid_result"
-    assert _asserted_upstream(invalid) == []
-
-    class _Hang:
-        def __init__(self, **_options):
-            pass
-        def extract_knowledge_graph(self, _text, **_kwargs):
-            import time
-            time.sleep(2)
-
-    monkeypatch.setattr("integrations.ipfs_datasets.graphs._load_private_extractor_class", lambda: (_Hang, None))
-    hung = extract_graph_from_text(text, source_id="message-private", metadata=context)
-    assert hung["status"] == "degraded"
-    assert hung["metadata"]["private_extraction"]["diagnostic"] == "extractor_timeout"
-    assert _asserted_upstream(hung) == []
-    for payload in (absent, failed, invalid, hung):
-        for entity in payload["entities"]:
+    outcomes = [
+        ("extractor_unavailable", None, "unavailable", "extractor_unavailable"),
+        ("error", None, "degraded", "extractor_error"),
+        ("ok", {"status": "extractor_invalid_result"}, "degraded", "extractor_invalid_result"),
+        ("timeout", None, "degraded", "extractor_timeout"),
+    ]
+    for outcome, payload, expected_status, diagnostic in outcomes:
+        monkeypatch.setattr("integrations.ipfs_datasets.graphs._run_owned_private_extractor",
+                            lambda *_args, _outcome=outcome, _payload=payload: (_outcome, _payload))
+        result = extract_graph_from_text(text, source_id="message-private", metadata=context)
+        assert result["status"] == expected_status
+        assert result["metadata"]["private_extraction"]["diagnostic"] == diagnostic
+        assert _asserted_upstream(result) == []
+        assert not result["relationships"]
+        for entity in result["entities"]:
             envelope = user_assertion_from_mapping(entity.get("assertion") or {})
             assert not envelope.is_asserted_user_fact
 
 
-def test_real_private_extractor_smoke_disables_network_and_downloads(monkeypatch):
-    def _blocked(*_args, **_kwargs):
-        raise AssertionError("network or model download is outside private extraction")
-
-    import socket
-    monkeypatch.setattr(socket, "create_connection", _blocked)
-    try:
-        import urllib.request
-        monkeypatch.setattr(urllib.request, "urlopen", _blocked)
-    except ImportError:
-        pass
-    try:
-        import spacy
-        if hasattr(spacy, "cli"):
-            monkeypatch.setattr(spacy.cli, "download", _blocked)
-    except ImportError:
-        pass
+def test_real_private_extractor_smoke_disables_network_and_downloads(tmp_path, monkeypatch):
+    """Actual configured source checkout; optional absence remains explicit."""
     text = "Marie Curie reported a hazard in 2020."
     result = extract_graph_from_text(text, source_id="message-private", metadata=_statement_context(text))
     private = result["metadata"]["private_extraction"]
-    if private.get("status") == "unavailable":
-        assert "extractor_import_failed" in str(private.get("diagnostic")) or "extractor_unavailable" in str(private.get("diagnostic"))
+    # Keep the real optional-backend branch observable without retaining text.
+    import json
+    observed = {
+        "schema": "complaint-fact02-configured-smoke-outcome@1",
+        "status": private.get("status"), "diagnostic": private.get("diagnostic"),
+        "bounded": private.get("bounded"), "options": private.get("options"),
+        "entity_count": len(result["entities"]), "relationship_count": len(result["relationships"]),
+        "asserted_entity_count": len(_asserted_upstream(result)),
+        "real_network_permitted": False,
+    }
+    outcome = tmp_path / "configured-extractor-smoke.json"
+    outcome.write_text(json.dumps(observed, sort_keys=True) + "\n")
+    outcome.chmod(0o600)
+    if private.get("status") != "available":
+        assert private.get("status") in {"unavailable", "degraded"}
+        assert private.get("diagnostic") in {
+            "extractor_unavailable", "extractor_custody_unavailable", "extractor_effect_denied",
+            "extractor_timeout", "extractor_cleanup_unconfirmed", "extractor_error",
+        }
         assert _asserted_upstream(result) == []
         return
     assert private["status"] == "available"
@@ -783,3 +758,327 @@ def test_real_private_extractor_smoke_disables_network_and_downloads(monkeypatch
     for relationship in result["relationships"]:
         if relationship.get("attributes", {}).get("upstream_extraction") is True:
             assert not user_assertion_from_mapping(relationship.get("assertion") or {}).is_asserted_user_fact
+
+
+
+def test_model_person_with_exact_span_is_not_a_user_fact(monkeypatch):
+    text = "Ada notified HR."
+    _patch_extractor(monkeypatch, lambda _submitted: _UpstreamGraph([
+        _UpstreamEntity("model-ada", "person", "Ada", text, extraction_method="neural"),
+    ], []))
+    result = extract_graph_from_text(text, source_id="message-private", metadata=_statement_context(text))
+    assert _asserted_upstream(result) == []
+    person = next(item for item in result["entities"] if item["name"] == "Ada")
+    assert person["assertion"]["assertion_status"] != "asserted"
+    assert not any(item["relation_type"] == "supports" for item in result["relationships"])
+
+
+def test_empty_upstream_graph_does_not_invent_legacy_fact_or_support(monkeypatch):
+    text = "A synthetic allegation with no extracted record."
+    _patch_extractor(monkeypatch, lambda _submitted: _UpstreamGraph([], []))
+    result = extract_graph_from_text(text, source_id="message-private", metadata={
+        **_statement_context(text), "claim_element_id": "synthetic-causation",
+        "claim_element_text": "causation",
+    })
+    assert result["status"] == "available"
+    assert "extractor_empty" in result["metadata"]["private_extraction"]["diagnostics"]
+    assert {item["type"] for item in result["entities"]} <= {"artifact", "claim_element"}
+    assert result["relationships"] == []
+    assert _asserted_upstream(result) == []
+    from complaint_phases.knowledge_graph import KnowledgeGraph, graph_entity_to_entity
+    graph = KnowledgeGraph()
+    for entity in result["entities"]:
+        graph.add_entity(graph_entity_to_entity(entity))
+    assert graph._support_facts("synthetic-causation", "causation") == []
+    assert graph.query_support("synthetic-causation", claim_element_text="causation")["results"] == []
+
+
+def test_canonical_builder_uses_same_owned_preparation_once_and_preserves_local_proofs(monkeypatch):
+    text = "My employer Acme fired me on January 2, 2025. Ada notified HR."
+    context = _statement_context(text)
+    baseline = KnowledgeGraphBuilder().build_from_text(
+        text, source_context=context, extracted_entities=[], extracted_relationships=[],
+    )
+    person = _UpstreamEntity("upstream-ada", "person", "Ada", text)
+    organization = _UpstreamEntity("upstream-hr", "organization", "HR", text)
+    relation = _UpstreamRelationship("upstream-notified", "notified", person, organization, text)
+    seen = _patch_extractor(monkeypatch, lambda _submitted: _UpstreamGraph([person, organization], [relation]))
+    graph = KnowledgeGraphBuilder().build_from_text(text, source_context=context)
+    assert seen["texts"] == [text]
+    assert len(seen["constructed"]) == 1
+    assert graph.metadata["private_extraction"]["status"] == "available"
+    assert baseline.entities
+    for identifier, entity in baseline.entities.items():
+        assert graph.entities[identifier].to_dict() == entity.to_dict()
+    for identifier, relationship in baseline.relationships.items():
+        assert graph.relationships[identifier].to_dict() == relationship.to_dict()
+    upstream = {entity.name:entity for entity in graph.entities.values()
+                if entity.attributes.get("upstream_extraction") is True}
+    assert set(upstream) == {"Ada", "HR"}
+    assert not set(entity.id for entity in upstream.values()) & set(baseline.entities)
+    from integrations.ipfs_datasets.types import user_assertion_from_mapping
+    for entity in upstream.values():
+        envelope = user_assertion_from_mapping(entity.provenance["user_assertion"])
+        assert envelope.is_asserted_user_fact
+        assert text.encode()[envelope.source_span_start:envelope.source_span_end].decode() == entity.name
+    upstream_links = [link for link in graph.relationships.values()
+                      if link.attributes.get("upstream_extraction") is True]
+    assert len(upstream_links) == 1
+    assert upstream_links[0].source_id == upstream["Ada"].id
+    assert upstream_links[0].target_id == upstream["HR"].id
+    assert upstream_links[0].relation_type == "notified"
+    assert not user_assertion_from_mapping(upstream_links[0].provenance["user_assertion"]).is_asserted_user_fact
+    assert all(link.id in baseline.relationships or link.attributes.get("upstream_extraction") is True
+               for link in graph.relationships.values())
+
+
+def test_canonical_builder_missing_source_cannot_authorize_upstream_model_or_support(monkeypatch):
+    text = "Ada notified HR."
+    seen = _patch_extractor(monkeypatch, lambda _submitted: _UpstreamGraph([
+        _UpstreamEntity("upstream-ada", "person", "Ada", text),
+    ], []))
+    graph = KnowledgeGraphBuilder().build_from_text(text)
+    upstream = [entity for entity in graph.entities.values() if entity.attributes.get("upstream_extraction") is True]
+    assert seen["texts"] == [text]
+    assert len(upstream) == 1
+    assert upstream[0].provenance["user_assertion"]["assertion_status"] != "asserted"
+    assert "caller_source_not_authorized" in graph.metadata["private_extraction"]["diagnostics"]
+    assert not any(link.relation_type in {"supports", "supported_by", "has_fact"}
+                   and upstream[0].id in {link.source_id, link.target_id}
+                   for link in graph.relationships.values())
+
+
+@pytest.mark.parametrize("method, text, context_override", [
+    ("neural", "Ada notified HR.", {}),
+    ("rule_based", "Ada notified HR.", {"source_hash":"0"*64}),
+    ("rule_based", "Ada saw Ada.", {}),
+])
+def test_unverified_upstream_fact_cannot_enter_actual_support_query(monkeypatch, method, text, context_override):
+    from complaint_phases.knowledge_graph import KnowledgeGraph, graph_entity_to_entity
+    _patch_extractor(monkeypatch, lambda _submitted: _UpstreamGraph([
+        _UpstreamEntity("upstream-fact", "fact", "Ada", text, extraction_method=method),
+    ], []))
+    result = extract_graph_from_text(text, source_id="message-private", metadata=_statement_context(text, **context_override))
+    graph = KnowledgeGraph()
+    for record in result["entities"]:
+        graph.add_entity(graph_entity_to_entity(record))
+    candidate = next(entity for entity in graph.entities.values() if entity.attributes.get("upstream_extraction") is True)
+    assert candidate.type == "model_suggestion"
+    assert candidate.attributes["origin"] == "model"
+    assert candidate.attributes["record_type"] == "model_suggestion"
+    assert candidate.attributes["upstream_entity_type"] == "fact"
+    assert candidate.provenance["user_assertion"]["assertion_status"] != "asserted"
+    assert graph._support_facts("unseen-claim", "Ada") == []
+    assert graph.query_support("unseen-claim", claim_element_text="Ada")["results"] == []
+
+
+def test_verified_upstream_fact_retains_source_proof_and_support_visibility(monkeypatch):
+    from complaint_phases.knowledge_graph import KnowledgeGraph, graph_entity_to_entity
+    text = "Ada notified HR."
+    _patch_extractor(monkeypatch, lambda _submitted: _UpstreamGraph([
+        _UpstreamEntity("upstream-fact", "fact", "Ada", text),
+    ], []))
+    result = extract_graph_from_text(text, source_id="message-private", metadata=_statement_context(text))
+    graph = KnowledgeGraph()
+    for record in result["entities"]:
+        graph.add_entity(graph_entity_to_entity(record))
+    fact = next(entity for entity in graph.entities.values() if entity.attributes.get("upstream_extraction") is True)
+    assert fact.type == "fact"
+    assert fact.provenance["user_assertion"]["assertion_status"] == "asserted"
+    support = graph._support_facts("unseen-claim", "Ada")
+    assert len(support) == 1 and support[0]["fact_id"] == fact.id
+    assert support[0]["provenance"]["user_assertion"] == fact.provenance["user_assertion"]
+    assert len(graph.query_support("unseen-claim", claim_element_text="Ada")["results"]) == 1
+
+
+@pytest.mark.parametrize("relation_type", ["supports", "supported_by"])
+def test_unverified_upstream_support_edge_cannot_link_a_verified_fact_to_a_claim(monkeypatch, relation_type):
+    from complaint_phases.knowledge_graph import KnowledgeGraph, graph_entity_to_entity, graph_relationship_to_relationship
+    text = "Ada notified HR."
+    fact = _UpstreamEntity("upstream-fact", "fact", "Ada", text)
+    claim = _UpstreamEntity("upstream-claim", "claim", "HR", text, extraction_method="model")
+    link = _UpstreamRelationship("upstream-support", relation_type, fact, claim, text)
+    _patch_extractor(monkeypatch, lambda _submitted: _UpstreamGraph([fact, claim], [link]))
+    result = extract_graph_from_text(text, source_id="message-private", metadata=_statement_context(text))
+    graph = KnowledgeGraph()
+    for record in result["entities"]:
+        graph.add_entity(graph_entity_to_entity(record))
+    for record in result["relationships"]:
+        graph.add_relationship(graph_relationship_to_relationship(record))
+    fact_node = next(entity for entity in graph.entities.values() if entity.name == "Ada")
+    claim_node = next(entity for entity in graph.entities.values() if entity.name == "HR")
+    assert fact_node.provenance["user_assertion"]["assertion_status"] == "asserted"
+    assert len(graph.relationships) == 1
+    suggestion = next(iter(graph.relationships.values()))
+    assert suggestion.relation_type == "model_suggestion"
+    assert suggestion.attributes["upstream_relationship_type"] == relation_type
+    assert suggestion.attributes["record_type"] == "model_suggestion"
+    assert suggestion.provenance["user_assertion"]["assertion_status"] != "asserted"
+    assert graph._support_facts(claim_node.id, "HR") == []
+    assert graph.query_support(claim_node.id, claim_element_text="HR")["results"] == []
+
+
+def test_canonical_legal_and_explicit_record_projections_do_not_dispatch_private_extractor(monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Explicit/legal projection must not invoke the private extractor")
+    monkeypatch.setattr("integrations.ipfs_datasets.graphs._run_owned_private_extractor", forbidden)
+    legal = KnowledgeGraphBuilder().build_from_text(
+        "Retaliation is prohibited.", source_context={"source_kind":"law", "source_id":"synthetic-law"},
+    )
+    assert all(entity.type == "legal_text" for entity in legal.entities.values())
+    explicit = KnowledgeGraphBuilder().build_from_text("Ada notified HR.", extracted_entities=[], extracted_relationships=[])
+    assert "private_extraction" not in explicit.metadata
+    projected = KnowledgeGraphBuilder().build_from_text("Ada notified HR.", include_local_heuristics=False)
+    assert not projected.entities
+
+
+PRIVATE_EXTRACTOR_FIXTURE_SOURCE = r"""
+import hashlib, json, os, pathlib, socket, subprocess, sys, time
+from types import SimpleNamespace
+root = pathlib.Path(__file__).resolve().parents[3]
+mode = json.loads((root/'mode.json').read_text())['mode']
+def birth(pid):
+    value = pathlib.Path('/proc/'+str(pid)+'/stat').read_text()
+    return int(value[value.rfind(')')+2:].split()[19])
+(root/'worker.json').write_text(json.dumps({'pid':os.getpid(),'ticks':birth(os.getpid()),
+    'manager_pid':os.getppid(),'manager_ticks':birth(os.getppid()),'mode':mode}))
+if mode == 'import-block': time.sleep(30)
+class KnowledgeGraphExtractor:
+    def __init__(self, **options):
+        assert options == {'use_spacy':False,'use_transformers':False,'use_tracer':False,'use_srl':False}
+        assert os.environ.get('IPFS_DATASETS_PY_AUTO_NLTK_DOWNLOAD') == '0'
+        assert os.environ.get('HF_HUB_OFFLINE') == '1'
+        assert os.environ.get('TRANSFORMERS_OFFLINE') == '1'
+        assert not any(os.environ.get(k) for k in ('XAI_API_KEY','OPENAI_API_KEY','ANTHROPIC_API_KEY','GROK_API_KEY'))
+        (root/'options.json').write_text(json.dumps({'options':options,'nltk_auto_download':'0'}))
+        if mode == 'constructor-block': time.sleep(30)
+    def extract_knowledge_graph(self, text):
+        assert text == 'Ada notified HR.'
+        (root/'submitted.json').write_text(json.dumps({'text_sha256':hashlib.sha256(text.encode()).hexdigest()}))
+        if mode == 'call-inner-block':
+            pid=os.fork()
+            if pid == 0:
+                (root/'inner.json').write_text(json.dumps({'pid':os.getpid(),'ticks':birth(os.getpid())}))
+                time.sleep(30)
+                os._exit(0)
+            while not (root/'inner.json').exists(): time.sleep(.005)
+            time.sleep(30)
+        if mode == 'private-error': raise RuntimeError('synthetic-private-backend-secret-marker')
+        if mode == 'network-denied': socket.create_connection(('127.0.0.1',9),timeout=.1)
+        if mode == 'caught-network-denied':
+            try: socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+            except PermissionError: pass
+        if mode == 'spawn-denied': subprocess.Popen([sys.executable,'-c','raise SystemExit(0)'])
+        if mode == 'invalid': return SimpleNamespace(entities='invalid',relationships={})
+        if mode == 'empty': return SimpleNamespace(entities={},relationships={})
+        class Entity:
+            entity_id='source-ada';entity_type='person';name='Ada';confidence=.9
+            source_text=text;extraction_method='rule_based'
+            @property
+            def properties(self):
+                if mode == 'serialization-block': time.sleep(30)
+                if mode == 'output-limit': return {str(i):'x'*18000 for i in range(30)}
+                return {}
+        return SimpleNamespace(entities={'source-ada':Entity()},relationships={})
+"""
+
+
+@pytest.mark.parametrize("mode, diagnostic", [
+    ("success", ""), ("empty", ""),
+    ("import-block", "extractor_timeout"),
+    ("constructor-block", "extractor_timeout"),
+    ("call-inner-block", "extractor_timeout"),
+    ("serialization-block", "extractor_timeout"),
+    ("private-error", "extractor_error"),
+    ("network-denied", "extractor_effect_denied"),
+    ("caught-network-denied", "extractor_effect_denied"),
+    ("spawn-denied", "extractor_effect_denied"),
+    ("invalid", "extractor_invalid_result"),
+    ("output-limit", "extractor_output_limit"),
+])
+def test_real_owned_extractor_bounds_import_call_serialization_and_reaps_inner_child(tmp_path, monkeypatch, mode, diagnostic):
+    """Real current manager/call, fixed inert source package, no provider/network."""
+    import concurrent.futures
+    import hashlib
+    import json
+    import os
+    from pathlib import Path
+    import time
+    from integrations.ipfs_datasets import graphs
+    root = tmp_path / "extractor-owned-process"
+    root.mkdir(mode=0o700)
+    package = root / "ipfs_datasets_py" / "knowledge_graphs" / "extraction"
+    package.mkdir(parents=True, mode=0o700)
+    for directory in (package, package.parent, package.parent.parent):
+        directory.chmod(0o700)
+        path = directory / "__init__.py"
+        path.write_text("")
+        path.chmod(0o600)
+    module = package / "extractor.py"
+    module.write_text(PRIVATE_EXTRACTOR_FIXTURE_SOURCE)
+    module.chmod(0o600)
+    mode_file = root / "mode.json"
+    mode_file.write_text(json.dumps({"mode": mode}))
+    mode_file.chmod(0o600)
+    before = {str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob("*.py")}
+    monkeypatch.setattr(graphs, "_private_extractor_roots", lambda: [str(root)])
+    def no_threads(*_args, **_kwargs):
+        raise AssertionError("An uncooperative extractor cannot use an abandoned thread")
+    monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", no_threads)
+    text = "Ada notified HR."
+    started = time.monotonic()
+    result = extract_graph_from_text(text, source_id="message-private", metadata=_statement_context(text, extraction_timeout_seconds=.8))
+    elapsed = time.monotonic() - started
+    private = result["metadata"]["private_extraction"]
+    assert elapsed < 4.0
+    assert private["diagnostic"] == diagnostic
+    assert private["bounded"] is True
+    assert private["status"] == ("available" if diagnostic == "" else "degraded")
+    assert "synthetic-private-backend-secret-marker" not in json.dumps(result)
+    assert before == {str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob("*.py")}
+    assert not list(root.rglob("__pycache__"))
+    worker = json.loads((root / "worker.json").read_text())
+    def same_birth(pid, ticks):
+        try:
+            value = Path('/proc/'+str(pid)+'/stat').read_text()
+        except FileNotFoundError:
+            return False
+        fields = value[value.rfind(')')+2:].split()
+        return int(fields[19]) == ticks
+    assert not same_birth(worker['pid'], worker['ticks'])
+    assert not same_birth(worker['manager_pid'], worker['manager_ticks'])
+    if mode == 'call-inner-block':
+        inner = json.loads((root / "inner.json").read_text())
+        assert not same_birth(inner['pid'], inner['ticks'])
+    if mode != 'import-block':
+        options = json.loads((root / "options.json").read_text())
+        assert options == {'options':graphs._PRIVATE_EXTRACTOR_OPTIONS,'nltk_auto_download':'0'}
+    if mode not in {'import-block','constructor-block'}:
+        assert json.loads((root/'submitted.json').read_text()) == {'text_sha256':hashlib.sha256(text.encode()).hexdigest()}
+    if mode == 'success':
+        assert {item['name'] for item,_ in _asserted_upstream(result)} == {'Ada'}
+    else:
+        assert _asserted_upstream(result) == []
+    assert not any(item['relation_type'] in {'supports','has_fact'} for item in result['relationships'])
+
+
+@pytest.mark.parametrize("ack", [b'not-json synthetic-private-backend-secret-marker',
+    b'{"outcome":"ok","payload":{"status":"ok","entities":[],"relationships":[]}}',
+    b'{"outcome":"ok","cleanup_confirmed":false,"payload":{}}'])
+def test_missing_or_malformed_cleanup_acknowledgement_is_not_a_bounded_success(tmp_path, monkeypatch, ack):
+    import subprocess
+    from integrations.ipfs_datasets import graphs
+    class Manager:
+        returncode = 0
+        def communicate(self, *_args, **_kwargs): return ack, None
+        def poll(self): return 0
+    monkeypatch.setattr(graphs, '_private_extractor_roots', lambda: [str(tmp_path)])
+    monkeypatch.setattr(subprocess, 'Popen', lambda *_args, **_kwargs: Manager())
+    text = 'Ada notified HR.'
+    result = extract_graph_from_text(text, source_id='message-private', metadata=_statement_context(text))
+    private = result['metadata']['private_extraction']
+    assert private['diagnostic'] == 'extractor_cleanup_unconfirmed'
+    assert private['bounded'] is False
+    assert private['status'] == 'degraded'
+    assert _asserted_upstream(result) == []
+    assert 'synthetic-private-backend-secret-marker' not in str(result)

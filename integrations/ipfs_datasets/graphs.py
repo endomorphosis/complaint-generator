@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import concurrent.futures
 import hashlib
 import json
 import os
@@ -28,9 +27,10 @@ from .types import (
 _knowledge_graphs_module, _knowledge_graphs_error = import_module_optional(
     "ipfs_datasets_py.knowledge_graphs"
 )
-_graph_extraction_module, _graph_extraction_error = import_module_optional(
-    "ipfs_datasets_py.knowledge_graphs.extraction"
-)
+# The private extractor is resolved only inside the owned deadline worker.
+# Importing the optional extraction package here would run its cold imports
+# before that boundary and cannot establish extraction capability.
+_graph_extraction_module, _graph_extraction_error = None, "private_extractor_not_probed_in_parent"
 _graph_query_module, _graph_query_error = import_module_optional(
     "ipfs_datasets_py.knowledge_graphs.query"
 )
@@ -902,29 +902,306 @@ _ASSERTABLE_UPSTREAM_TYPES = frozenset({"person", "organization", "date", "fact"
 _PRIVATE_EXTRACTOR_MODULE = "ipfs_datasets_py.knowledge_graphs.extraction.extractor"
 
 
-def _load_private_extractor_class() -> tuple[Any, Optional[str]]:
-    """Capability is a successful class and method lookup, not a package flag."""
-    try:
-        from ipfs_datasets_py.knowledge_graphs.extraction.extractor import KnowledgeGraphExtractor
-    except Exception as exc:
-        return None, f"extractor_import_failed: {exc}"
-    method = getattr(KnowledgeGraphExtractor, "extract_knowledge_graph", None)
-    if not callable(method):
-        return None, "extractor_unavailable: extract_knowledge_graph missing"
-    return KnowledgeGraphExtractor, None
+_PRIVATE_EXTRACTOR_CALL_SOURCE = r"""
+import ctypes, importlib, itertools, json, math, os, signal, socket, sys
+# -I ignores PYTHONDONTWRITEBYTECODE; suppress source-cache writes explicitly.
+sys.dont_write_bytecode = True
+request = json.loads(sys.stdin.buffer.read(1048577))
+if request.get('schema') != 'complaint-private-graph-call@1': raise SystemExit(2)
+manager = request.get('expected_manager_pid')
+if type(manager) is not int or manager <= 1 or os.getppid() != manager: raise SystemExit(2)
+if ctypes.CDLL(None).prctl(1, signal.SIGKILL, 0, 0, 0) != 0: raise SystemExit(2)
+if os.getppid() != manager: raise SystemExit(2)
+roots = request.get('roots')
+if not isinstance(roots, list) or not roots or not all(type(p) is str for p in roots): raise SystemExit(2)
+text = request.get('text')
+options = {'use_spacy':False,'use_transformers':False,'use_tracer':False,'use_srl':False}
+if type(text) is not str or len(text) > 20000 or request.get('options') != options: raise SystemExit(2)
+# No inherited provider credentials, user home, executable model helpers, or
+# private-query network. This is a Python effect fence, not an OS sandbox.
+socket.has_ipv6 = False
+denials = {}
+class PrivateEffectDenied(PermissionError): pass
+def effect_guard(event, args):
+    network = (event == 'socket.__new__' and args[1] in (socket.AF_INET,socket.AF_INET6))
+    network = network or event in ('socket.getaddrinfo','socket.gethostbyname','socket.gethostbyaddr','socket.getnameinfo')
+    network = network or (event in ('socket.connect','socket.sendto') and args[0].family in (socket.AF_INET,socket.AF_INET6))
+    if network or event in ('subprocess.Popen','os.system','os.exec','os.posix_spawn','os.spawn'):
+        denials[event] = denials.get(event,0)+1
+        raise PrivateEffectDenied('private_extractor_effect_denied')
+sys.addaudithook(effect_guard)
+sys.path[:0] = roots
+budget = [4096]
+def safe(value, depth=0):
+    budget[0] -= 1
+    if budget[0] < 0 or depth > 8: raise ValueError()
+    if value is None or type(value) in (bool,int): return value
+    if type(value) is float:
+        if not math.isfinite(value): raise ValueError()
+        return value
+    if type(value) is str:
+        if len(value)>20000: raise ValueError()
+        value.encode('utf-8')
+        return value
+    if isinstance(value,dict):
+        if len(value)>128 or any(type(k) is not str or len(k)>200 for k in value): raise ValueError()
+        return {k:safe(v,depth+1) for k,v in value.items()}
+    if isinstance(value,(list,tuple)):
+        if len(value)>128: raise ValueError()
+        return [safe(v,depth+1) for v in value]
+    raise ValueError()
+def get(record,*names):
+    for name in names:
+        value = record.get(name) if isinstance(record,dict) else getattr(record,name,None)
+        if value is not None and value != '': return value
+    return None
+def endpoint(value):
+    if value is None or type(value) is str: return value
+    return {'entity_id':get(value,'entity_id','id'),'name':get(value,'name')}
+def records(values, relationship=False):
+    if isinstance(values,dict): items=values.items()
+    elif isinstance(values,list): items=enumerate(values)
+    else: raise ValueError()
+    truncated = len(values)>40
+    result=[]
+    for key,record in itertools.islice(items,40):
+        if relationship:
+            row={'relationship_id':get(record,'relationship_id','id') or str(key),
+                 'relationship_type':get(record,'relationship_type','relation_type','type'),
+                 'source_entity':endpoint(get(record,'source_entity','source')),
+                 'target_entity':endpoint(get(record,'target_entity','target')),
+                 'source_id':get(record,'source_id'),'target_id':get(record,'target_id')}
+        else:
+            row={'entity_id':get(record,'entity_id','id') or str(key),
+                 'entity_type':get(record,'entity_type','type'),'name':get(record,'name')}
+        row.update({name:get(record,name) for name in ('properties','source_text','confidence','extraction_method')})
+        result.append(safe(row))
+    return result,truncated
+result={'status':'extractor_error','entities':[],'relationships':[]}
+try:
+    module = importlib.import_module('ipfs_datasets_py.knowledge_graphs.extraction.extractor')
+    cls = getattr(module,'KnowledgeGraphExtractor')
+    if not callable(getattr(cls,'extract_knowledge_graph',None)): raise AttributeError()
+    extractor = cls(**options)
+    graph = extractor.extract_knowledge_graph(text)
+    entities,truncated_entities = records(get(graph,'entities'))
+    relationships,truncated_relationships = records(get(graph,'relationships') or {},True)
+    result={'status':'ok','entities':entities,'relationships':relationships,
+            'entity_result_bound':truncated_entities,'relationship_result_bound':truncated_relationships}
+except (ImportError,AttributeError,FileNotFoundError):
+    result={'status':'extractor_unavailable','entities':[],'relationships':[]}
+except PrivateEffectDenied:
+    result={'status':'extractor_effect_denied','entities':[],'relationships':[]}
+except (ValueError,TypeError,UnicodeError,RecursionError):
+    result={'status':'extractor_invalid_result','entities':[],'relationships':[]}
+except BaseException:
+    result={'status':'extractor_error','entities':[],'relationships':[]}
+# Optional imports can catch PermissionError; an attempted forbidden effect
+# still makes the whole private extraction unavailable, never a valid result.
+if denials:
+    result={'status':'extractor_effect_denied','entities':[],'relationships':[]}
+result['denied_effect_counts'] = denials
+try:
+    encoded=json.dumps(result,ensure_ascii=True,allow_nan=False,separators=(',',':')).encode()
+    if len(encoded)>524288: raise ValueError()
+except BaseException:
+    encoded=b'{"status":"extractor_output_limit","entities":[],"relationships":[],"denied_effect_counts":{}}'
+sys.stdout.buffer.write(encoded);sys.stdout.buffer.flush()
+"""
+
+_PRIVATE_EXTRACTOR_MANAGER_SOURCE = r"""
+import ctypes, errno, json, os, selectors, signal, subprocess, sys, time
+# This isolated manager, never the application process, adopts orphaned call descendants.
+if sys.platform != 'linux': raise SystemExit(2)
+libc = ctypes.CDLL(None, use_errno=True)
+if libc.prctl(36, 1, 0, 0, 0) != 0: raise SystemExit(2)
+request = json.loads(sys.stdin.buffer.read(1048577))
+call_source = CALL_SOURCE_LITERAL
+cancelled = False
+process = None
+cleanup_confirmed = False
+def cancel(_signal, _frame):
+ global cancelled
+ cancelled = True
+signal.signal(signal.SIGTERM,cancel)
+signal.signal(signal.SIGINT,cancel)
+def cleanup():
+ # First stop the sole call group. Then reap its adopted descendants, including
+ # an upstream subprocess left behind when an AnyIO worker's parent exits.
+ if process is not None:
+  try: os.killpg(process.pid,signal.SIGKILL)
+  except ProcessLookupError: pass
+  except OSError: return False
+  try: process.wait(timeout=.25)
+  except subprocess.TimeoutExpired: return False
+ deadline=time.monotonic()+.75
+ while time.monotonic()<deadline:
+  try:
+   children=[int(p) for p in open('/proc/self/task/'+str(os.getpid())+'/children').read().split()]
+  except (OSError,ValueError): return False
+  for pid in children:
+   # A direct, unreaped child cannot have its PID reused until this manager waits.
+   try: os.kill(pid,signal.SIGKILL)
+   except ProcessLookupError: pass
+  try:
+   while True:
+    pid,_=os.waitpid(-1,os.WNOHANG)
+    if pid==0: break
+  except ChildProcessError:
+   return True
+  time.sleep(.005)
+ return False
+result={'outcome':'error','cleanup_confirmed':False}
+try:
+ deadline=time.monotonic()+float(request['timeout_seconds'])
+ call=dict(request['call']);call['expected_manager_pid']=os.getpid()
+ raw=json.dumps(call,ensure_ascii=True,allow_nan=False,separators=(',',':')).encode()
+ process=subprocess.Popen([sys.executable,'-I','-c',call_source],stdin=subprocess.PIPE,
+  stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=dict(os.environ),process_group=0)
+ process.stdin.write(raw);process.stdin.close()
+ selector=selectors.DefaultSelector()
+ for stream in (process.stdout,process.stderr):
+  os.set_blocking(stream.fileno(),False);selector.register(stream,selectors.EVENT_READ)
+ output=bytearray();total=0
+ outcome='ok'
+ while selector.get_map():
+  if cancelled: outcome='cancelled';break
+  remaining=deadline-time.monotonic()
+  if remaining<=0: outcome='timeout';break
+  for key,_ in selector.select(min(.02,remaining)):
+   chunk=os.read(key.fileobj.fileno(),65536)
+   if not chunk: selector.unregister(key.fileobj);continue
+   total+=len(chunk)
+   if total>524288: outcome='output_limit';break
+   if key.fileobj is process.stdout: output.extend(chunk)
+  if outcome!='ok':break
+ result={'outcome':outcome,'cleanup_confirmed':False}
+ if outcome=='ok':
+  try:result['payload']=json.loads(output)
+  except (ValueError,UnicodeError):result={'outcome':'error','cleanup_confirmed':False}
+except BaseException:
+ result={'outcome':'error','cleanup_confirmed':False}
+finally:
+ cleanup_confirmed=cleanup()
+ result['cleanup_confirmed']=cleanup_confirmed
+ if result.get('outcome')=='ok' and process is not None and process.returncode!=0:
+  result={'outcome':'error','cleanup_confirmed':cleanup_confirmed}
+ if not cleanup_confirmed:result={'outcome':'cleanup_unconfirmed','cleanup_confirmed':False}
+ for stream in (() if process is None else (process.stdin,process.stdout,process.stderr)):
+  try:stream.close()
+  except (OSError,ValueError):pass
+ sys.stdout.write(json.dumps(result,ensure_ascii=True,allow_nan=False,separators=(',',':')))
+ sys.stdout.flush()
+"""
 
 
-def _bounded_call(fn: Any, timeout_seconds: float) -> tuple[Any, Optional[str]]:
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="private-kg")
-    future = executor.submit(fn)
+def _private_extractor_roots() -> List[str]:
+    """Use configured source checkouts; never substitute an installed dataset."""
+    import site
+    import sys
+    from .loader import get_repo_paths
+    paths = get_repo_paths()
+    roots: List[str] = []
+    datasets_present = False
+    for package, candidate in (("ipfs_datasets_py", paths.ipfs_datasets_repo),
+                               ("ipfs_accelerate_py", paths.ipfs_accelerate_repo)):
+        root = Path(candidate).resolve() if candidate is not None else None
+        if root is not None and (root / package / "__init__.py").is_file():
+            roots.append(str(root))
+            datasets_present = datasets_present or package == "ipfs_datasets_py"
+            continue
+        loaded = sys.modules.get(package)
+        source = getattr(loaded, "__file__", None)
+        if source:
+            root = Path(source).resolve().parent.parent
+            if root.name == package and (root / ".git").exists() and (root / package / "__init__.py").is_file():
+                roots.append(str(root))
+                datasets_present = datasets_present or package == "ipfs_datasets_py"
+    if not datasets_present:
+        return []
+    candidates = [*site.getsitepackages(), *(value for value in sys.path
+        if isinstance(value, str) and Path(value).name in {"site-packages", "dist-packages"})]
+    for root in candidates:
+        if Path(root).is_dir() and root not in roots:
+            roots.append(root)
+    return roots
+
+
+def _run_owned_private_extractor(text: str, timeout_seconds: float) -> tuple[str, Any]:
+    """Own cold import, construction, extraction, serialization and cleanup.
+
+    The Linux manager adopts and reaps the fixed call's orphaned descendants.
+    Missing or abnormal cleanup acknowledgement is never a bounded timeout.
+    The deadline covers upstream work; process custody cleanup may add up to
+    the bounded manager grace. No private text enters argv, logs or files.
+    """
+    import signal
+    import subprocess
+    import sys
+    if sys.platform != "linux":
+        return "custody_unavailable", None
+    process = None
     try:
-        return future.result(timeout=timeout_seconds), None
-    except concurrent.futures.TimeoutError:
-        return None, "extractor_timeout"
-    except Exception as exc:
-        return None, f"extractor_error: {exc}"
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+        roots = _private_extractor_roots()
+        if not roots:
+            return "extractor_unavailable", None
+        call = {"schema": "complaint-private-graph-call@1", "text": text,
+                "options": dict(_PRIVATE_EXTRACTOR_OPTIONS), "roots": roots}
+        try:
+            encoded = json.dumps({"call": call, "timeout_seconds": timeout_seconds},
+                                 ensure_ascii=True, allow_nan=False).encode()
+        except (TypeError, ValueError, UnicodeError):
+            return "invalid_parameters", None
+        if len(encoded) > 1048576:
+            return "invalid_parameters", None
+        source = _PRIVATE_EXTRACTOR_MANAGER_SOURCE.replace("CALL_SOURCE_LITERAL", repr(_PRIVATE_EXTRACTOR_CALL_SOURCE), 1)
+        process = None
+        with tempfile.TemporaryDirectory(prefix="complaint-private-graph-") as temporary:
+            private_root = Path(temporary)
+            private_root.chmod(0o700)
+            home, cache = private_root / "home", private_root / "temporary"
+            home.mkdir(mode=0o700)
+            cache.mkdir(mode=0o700)
+            environment = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL") if key in os.environ}
+            environment.update({"HOME": str(home), "TMPDIR": str(cache),
+                "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+                "COMMON_CRAWL_AUTO_CLONE_SOURCE": "0", "IPFS_DATASETS_PY_MINIMAL_IMPORTS": "1",
+                "IPFS_DATASETS_PY_AUTO_NLTK_DOWNLOAD": "0", "PYTHONDONTWRITEBYTECODE": "1"})
+            try:
+                process = subprocess.Popen([sys.executable, "-I", "-c", source], cwd=private_root,
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    env=environment, start_new_session=True)
+                output, _ = process.communicate(encoded, timeout=timeout_seconds + 1.5)
+                if process.returncode != 0 or len(output) > 600000:
+                    return "cleanup_unconfirmed", None
+                result = json.loads(output)
+                if not isinstance(result, dict) or result.get("cleanup_confirmed") is not True:
+                    return "cleanup_unconfirmed", None
+                outcome = result.get("outcome")
+                return (outcome, result.get("payload")) if outcome in {"ok", "timeout", "cancelled", "output_limit", "error"} else ("error", None)
+            except subprocess.TimeoutExpired:
+                process.send_signal(signal.SIGTERM)
+                try:
+                    process.communicate(timeout=1.5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=.25)
+                return "cleanup_unconfirmed", None
+            except BaseException as exc:
+                if process is not None and process.poll() is None:
+                    process.send_signal(signal.SIGTERM)
+                    try:
+                        process.communicate(timeout=1.5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=.25)
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+                return ("cleanup_unconfirmed" if process is not None else "custody_unavailable"), None
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        return ("cleanup_unconfirmed" if process is not None else "custody_unavailable"), None
 
 
 def _mapping_or_empty(value: Any) -> Dict[str, Any]:
@@ -932,8 +1209,8 @@ def _mapping_or_empty(value: Any) -> Dict[str, Any]:
 
 
 def _upstream_records(graph: Any) -> tuple[List[Any], List[Any], Optional[str]]:
-    entities = getattr(graph, "entities", None)
-    relationships = getattr(graph, "relationships", None)
+    entities = graph.get("entities") if isinstance(graph, Mapping) else getattr(graph, "entities", None)
+    relationships = graph.get("relationships") if isinstance(graph, Mapping) else getattr(graph, "relationships", None)
     if isinstance(entities, Mapping):
         entity_records = list(entities.values())
     elif isinstance(entities, list):
@@ -1029,7 +1306,8 @@ def _normalize_upstream_entity(record: Any, index: int, source_text: str) -> Opt
     elif isinstance(upstream_source, str) and upstream_source == source_text:
         span_status = "source_text_not_a_span"
     attributes["span_status"] = span_status
-    origin = "heuristic" if span_status == "unique" and entity_type.lower() in _ASSERTABLE_UPSTREAM_TYPES else "model"
+    rule_based = extraction_method in (None, "", "rule_based", "rule-based", "heuristic")
+    origin = "heuristic" if rule_based and span_status == "unique" and entity_type.lower() in _ASSERTABLE_UPSTREAM_TYPES else "model"
     provenance = {
         "extractor": "KnowledgeGraphExtractor",
         "upstream_entity_id": upstream_id,
@@ -1093,19 +1371,13 @@ def _normalize_upstream_relationship(
     return payload
 
 
-def _project_upstream_graph(
+def _normalize_private_records(
     text: str,
     entity_records: List[Any],
     relationship_records: List[Any],
     caller_context: Mapping[str, Any],
-    extractor_provenance: Mapping[str, Any],
-) -> tuple[List[GraphEntity], List[GraphRelationship], List[str]]:
-    from complaint_phases.knowledge_graph import (
-        KnowledgeGraphBuilder,
-        entity_to_graph_entity,
-        relationship_to_graph_relationship,
-    )
-
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+    """Prepare records without constructing another graph or granting authority."""
     normalized_entities: List[Dict[str, Any]] = []
     key_by_upstream_id: Dict[str, str] = {}
     diagnostics: List[str] = []
@@ -1145,66 +1417,49 @@ def _project_upstream_graph(
         diagnostics.append("caller_source_not_authorized")
         for entity in normalized_entities:
             entity["origin"] = "model"
-    built = KnowledgeGraphBuilder().build_from_text(
-        text,
-        source_context=caller_context,
-        extracted_entities=normalized_entities,
-        extracted_relationships=normalized_relationships,
-        extractor_provenance=dict(extractor_provenance),
-        include_local_heuristics=False,
-    )
-    entities = [
-        entity_to_graph_entity(entity)
-        for entity in built.entities.values()
-        if (entity.attributes or {}).get("upstream_extraction") is True
-    ]
-    relationships = [
-        relationship_to_graph_relationship(relationship)
-        for relationship in built.relationships.values()
-        if (relationship.attributes or {}).get("upstream_extraction") is True
-    ]
-    return entities, relationships, diagnostics
+    return normalized_entities, normalized_relationships, diagnostics
 
 
-def _run_private_extraction(
+def prepare_private_extraction(
     text: str,
     caller_context: Mapping[str, Any],
-    timeout_seconds: float,
+    timeout_seconds: float = _PRIVATE_EXTRACTION_TIMEOUT_SECONDS,
 ) -> Dict[str, Any]:
-    extractor_cls, load_error = _load_private_extractor_class()
-    provenance = {
-        "extractor": "KnowledgeGraphExtractor",
-        "module": _PRIVATE_EXTRACTOR_MODULE,
-        "options": dict(_PRIVATE_EXTRACTOR_OPTIONS),
-        "method": "extract_knowledge_graph",
-    }
-    if extractor_cls is None:
-        return {
-            "status": "unavailable",
-            "diagnostic": load_error or "extractor_unavailable",
-            "entities": [],
-            "relationships": [],
-            "diagnostics": [load_error or "extractor_unavailable"],
-            "provenance": provenance,
-            "backend_available": False,
-        }
-    def _invoke() -> Any:
-        extractor = extractor_cls(**_PRIVATE_EXTRACTOR_OPTIONS)
-        return extractor.extract_knowledge_graph(text)
+    """Return bounded normalized records for both the adapter and canonical builder.
 
-    graph, call_error = _bounded_call(_invoke, timeout_seconds)
-    if call_error:
-        diagnostic = "extractor_timeout" if call_error == "extractor_timeout" else call_error
-        status = "degraded"
-        return {
-            "status": status,
-            "diagnostic": diagnostic,
-            "entities": [],
-            "relationships": [],
-            "diagnostics": [diagnostic],
-            "provenance": provenance,
-            "backend_available": False,
-        }
+    These records do not carry authority unless the caller supplied the original
+    scoped source context. Graph construction remains the caller's single pass.
+    """
+    provenance = {
+        "extractor": "KnowledgeGraphExtractor", "module": _PRIVATE_EXTRACTOR_MODULE,
+        "options": dict(_PRIVATE_EXTRACTOR_OPTIONS), "method": "extract_knowledge_graph",
+    }
+    if not isinstance(text, str) or not text.strip() or len(text) > _PRIVATE_EXTRACTION_TEXT_LIMIT:
+        diagnostic = "input_empty" if isinstance(text, str) and not text.strip() else "input_bound_exceeded"
+        return {"status": "degraded", "diagnostic": diagnostic, "entities": [], "relationships": [],
+                "diagnostics": [diagnostic], "provenance": provenance, "backend_available": False, "bounded": True}
+    import math
+    try:
+        timeout_seconds = float(timeout_seconds)
+        if not math.isfinite(timeout_seconds):
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        timeout_seconds = _PRIVATE_EXTRACTION_TIMEOUT_SECONDS
+    timeout_seconds = min(max(timeout_seconds, .01), _PRIVATE_EXTRACTION_TIMEOUT_SECONDS)
+    outcome, graph = _run_owned_private_extractor(text, timeout_seconds)
+    diagnostic = ""
+    if outcome != "ok":
+        diagnostic = {"timeout": "extractor_timeout", "cleanup_unconfirmed": "extractor_cleanup_unconfirmed",
+                      "custody_unavailable": "extractor_custody_unavailable", "extractor_unavailable": "extractor_unavailable",
+                      "cancelled": "extractor_cancelled", "output_limit": "extractor_output_limit"}.get(outcome, "extractor_error")
+    elif not isinstance(graph, dict) or graph.get("status") != "ok":
+        status = graph.get("status") if isinstance(graph, dict) else None
+        diagnostic = status if type(status) is str and status in {"extractor_unavailable", "extractor_effect_denied", "extractor_invalid_result", "extractor_output_limit", "extractor_error"} else "extractor_invalid_result"
+    if diagnostic:
+        status = "unavailable" if diagnostic in {"extractor_unavailable", "extractor_custody_unavailable"} else "degraded"
+        return {"status": status, "diagnostic": diagnostic, "entities": [], "relationships": [],
+                "diagnostics": [diagnostic], "provenance": provenance, "backend_available": False,
+                "bounded": diagnostic != "extractor_cleanup_unconfirmed"}
     entity_records, relationship_records, invalid = _upstream_records(graph)
     if invalid:
         return {
@@ -1215,14 +1470,15 @@ def _run_private_extraction(
             "diagnostics": [invalid],
             "provenance": provenance,
             "backend_available": False,
+            "bounded": True,
         }
-    entities, relationships, diagnostics = _project_upstream_graph(
-        text,
-        entity_records,
-        relationship_records,
-        caller_context,
-        provenance,
+    entities, relationships, diagnostics = _normalize_private_records(
+        text, entity_records, relationship_records, caller_context,
     )
+    if graph.get("entity_result_bound") is True:
+        diagnostics.append("entity_result_bound")
+    if graph.get("relationship_result_bound") is True:
+        diagnostics.append("relationship_result_bound")
     if not entities and not relationships and "extractor_empty" not in diagnostics:
         diagnostics.append("extractor_empty")
     return {
@@ -1233,7 +1489,34 @@ def _run_private_extraction(
         "diagnostics": diagnostics,
         "provenance": provenance,
         "backend_available": True,
+        "bounded": True,
     }
+
+
+def _run_private_extraction(
+    text: str,
+    caller_context: Mapping[str, Any],
+    timeout_seconds: float,
+) -> Dict[str, Any]:
+    """Project prepared records through the canonical assertion builder once."""
+    extraction = prepare_private_extraction(text, caller_context, timeout_seconds)
+    if extraction["status"] != "available":
+        return extraction
+    from complaint_phases.knowledge_graph import (
+        KnowledgeGraphBuilder, entity_to_graph_entity, relationship_to_graph_relationship,
+    )
+    built = KnowledgeGraphBuilder().build_from_text(
+        text, source_context=caller_context,
+        extracted_entities=extraction["entities"],
+        extracted_relationships=extraction["relationships"],
+        extractor_provenance=extraction["provenance"],
+        include_local_heuristics=False,
+    )
+    return {**extraction,
+        "entities": [entity_to_graph_entity(entity) for entity in built.entities.values()
+                     if (entity.attributes or {}).get("upstream_extraction") is True],
+        "relationships": [relationship_to_graph_relationship(relationship) for relationship in built.relationships.values()
+                          if (relationship.attributes or {}).get("upstream_extraction") is True]}
 
 
 def extract_graph_from_text(
@@ -1386,6 +1669,7 @@ def extract_graph_from_text(
             "diagnostic": extraction["diagnostic"],
             "diagnostics": list(extraction["diagnostics"]),
             "provenance": extraction["provenance"],
+            "bounded": extraction.get("bounded", True),
         })
         if extraction["status"] == "available":
             entities.extend(extraction["entities"])
@@ -1393,48 +1677,6 @@ def extract_graph_from_text(
             sentences = _split_sentences(submitted)
             if not sentences and submitted.strip():
                 sentences = [submitted.strip()]
-            for index, sentence in enumerate(sentences[:25]):
-                fact_id = _stable_identifier("fact", artifact_id or source_id or "text", str(index), sentence)
-                entities.append(
-                    GraphEntity(
-                        entity_id=fact_id,
-                        entity_type="fact",
-                        name=sentence[:120],
-                        confidence=0.6,
-                        attributes={
-                            "text": sentence,
-                            "sentence_index": index,
-                            "source_id": artifact_id,
-                            "record_kind": "fact",
-                            "about_complainant": True,
-                            "extraction_mode": "legacy_sentence_heuristic",
-                            "asserted": False,
-                            "provenance": graph_provenance,
-                        },
-                    )
-                )
-                if artifact_id:
-                    relationships.append(
-                        GraphRelationship(
-                            relationship_id=_stable_identifier("rel", artifact_id, fact_id, "has_fact"),
-                            source_id=artifact_id,
-                            target_id=fact_id,
-                            relation_type="has_fact",
-                            confidence=1.0,
-                            attributes={"sentence_index": index, "provenance": graph_provenance, "extraction_mode": "legacy_sentence_heuristic"},
-                        )
-                    )
-                if claim_node_id:
-                    relationships.append(
-                        GraphRelationship(
-                            relationship_id=_stable_identifier("rel", fact_id, claim_node_id, "supports"),
-                            source_id=fact_id,
-                            target_id=claim_node_id,
-                            relation_type="supports",
-                            confidence=0.6,
-                            attributes={"sentence_index": index, "provenance": graph_provenance, "extraction_mode": "legacy_sentence_heuristic"},
-                        )
-                    )
             payload_status = "available"
             backend_available = True
             implementation_status = "upstream"
@@ -2299,6 +2541,7 @@ __all__ = [
     "build_graph_persistence_request",
     "build_graph_support_query",
     "extract_graph_from_text",
+    "prepare_private_extraction",
     "query_graph_support",
     "persist_graph_snapshot",
     "query_graph_snapshot",

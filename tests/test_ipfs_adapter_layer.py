@@ -1434,8 +1434,11 @@ def test_extract_graph_from_text_returns_normalized_shape():
 
     assert result['source_id'] == 'artifact-1'
     assert result['entities'][0]['id'] == 'artifact-1'
-    assert any(entity['type'] == 'fact' for entity in result['entities'])
-    assert any(relationship['relation_type'] == 'has_fact' for relationship in result['relationships'])
+    assert result['status'] in {'available', 'degraded', 'unavailable'}
+    assert result['metadata']['private_extraction']['status'] in {'available', 'degraded', 'unavailable'}
+    assert all(entity['type'] in {'artifact', 'model_suggestion'} for entity in result['entities'])
+    assert all(entity.get('assertion', {}).get('assertion_status') != 'asserted' for entity in result['entities'])
+    assert not any(relationship['relation_type'] in {'has_fact', 'supports', 'supported_by'} for relationship in result['relationships'])
     assert result['metadata']['operation'] == 'extract_graph_from_text'
 
 
@@ -1534,7 +1537,14 @@ def test_analyze_pdf_relationships_and_cross_document_delegate_to_upstream_tools
 
 
 def test_persist_graph_snapshot_returns_stable_contract():
-    graph_payload = extract_graph_from_text('Example complaint text', source_id='artifact-1')
+    # Persistence preserves a real unavailable/suggestion payload; it must not
+    # depend on optional extraction inventing a fact or an edge for this test.
+    graph_payload = {
+        'status': 'unavailable', 'source_id': 'artifact-1',
+        'entities': [{'id': 'artifact-1', 'type': 'artifact', 'name': 'Example complaint text'}],
+        'relationships': [],
+        'metadata': {'private_extraction': {'status': 'unavailable', 'diagnostic': 'extractor_unavailable'}},
+    }
 
     result = persist_graph_snapshot(
         graph_payload,
@@ -1549,8 +1559,8 @@ def test_persist_graph_snapshot_returns_stable_contract():
     assert result['persisted'] is True
     assert result['created'] is True
     assert result['reused'] is False
-    assert result['node_count'] >= 1
-    assert result['edge_count'] >= 1
+    assert result['node_count'] == 1
+    assert result['edge_count'] == 0
     assert result['metadata']['source_id'] == 'artifact-1'
     assert result['metadata']['projection_target'] == 'complaint_phase_knowledge_graph'
     assert result['metadata']['lineage']['status'] == graph_payload['status']

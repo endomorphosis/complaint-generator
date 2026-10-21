@@ -2158,12 +2158,36 @@ class KnowledgeGraphBuilder:
             },
         )
 
+        from integrations.ipfs_datasets.graphs import (
+            legal_namespace_kind,
+            mint_graph_record_id,
+            prepare_private_extraction,
+            source_is_legal_norm,
+        )
+
+        legal_source = {"metadata": source_context or {}, "provenance": provenance or {}, "attributes": extractor_provenance or {}}
+        legal_passage = source_is_legal_norm(legal_source) or source_is_legal_norm(caller_context)
+        private_entities: List[Mapping[str, Any]] = []
+        private_relationships: List[Mapping[str, Any]] = []
+        # Explicit record projection is also used by the standalone adapter.
+        # It must not recurse or repeat the owned extractor invocation.
+        if include_local_heuristics and extracted_entities is None and extracted_relationships is None and not legal_passage:
+            extraction = prepare_private_extraction(source_text, caller_context)
+            graph.metadata["private_extraction"] = {
+                key: extraction[key] for key in ("status", "diagnostic", "diagnostics", "provenance", "bounded")
+                if key in extraction
+            }
+            if extraction["status"] == "available":
+                private_entities = extraction["entities"]
+                private_relationships = extraction["relationships"]
+
         entities: List[Dict[str, Any]] = []
         if include_local_heuristics:
             for entity_data in self._extract_entities(source_text):
                 if isinstance(entity_data, Mapping):
                     entities.append(dict(entity_data))
-        for raw_entity in extracted_entities or []:
+        local_entity_count = len(entities)
+        for raw_entity in [*(extracted_entities or []), *private_entities]:
             if not isinstance(raw_entity, Mapping):
                 continue
             prepared = dict(raw_entity)
@@ -2176,16 +2200,9 @@ class KnowledgeGraphBuilder:
             prepared.setdefault("origin", "user")
             entities.append(prepared)
 
-        from integrations.ipfs_datasets.graphs import (
-            legal_namespace_kind,
-            mint_graph_record_id,
-            source_is_legal_norm,
-        )
-
-        legal_source = {"metadata": source_context or {}, "provenance": provenance or {}, "attributes": extractor_provenance or {}}
-        legal_passage = source_is_legal_norm(legal_source) or source_is_legal_norm(caller_context)
         entity_key_to_id: Dict[str, str] = {}
-        for entity_data in entities:
+        local_entity_ids: Set[str] = set()
+        for entity_index, entity_data in enumerate(entities):
             entity_is_legal = legal_passage or source_is_legal_norm(entity_data)
             if entity_is_legal:
                 entity_data = dict(entity_data)
@@ -2207,6 +2224,14 @@ class KnowledgeGraphBuilder:
             if carried_extractor:
                 provenance_payload["extractor"] = carried_extractor
             attributes = entity_data.get("attributes") if isinstance(entity_data.get("attributes"), Mapping) else {}
+            upstream_unverified = attributes.get("upstream_extraction") is True and not entity_is_legal and not envelope.is_asserted_user_fact
+            if upstream_unverified:
+                # Legacy support consumers inspect entity.type. Keeping a model
+                # or source-mismatched record as type=fact would promote it there.
+                attributes = dict(attributes)
+                attributes["upstream_entity_type"] = str(entity_data.get("type") or "")
+                attributes["origin"] = "model"
+                attributes["record_type"] = "model_suggestion"
             raw_confidence = entity_data.get("confidence", 0.8)
             if entity_is_legal:
                 passage_kind = legal_namespace_kind({"metadata": legal_source, "attributes": entity_data, **dict(caller_context)})
@@ -2225,24 +2250,32 @@ class KnowledgeGraphBuilder:
                 entity_source = str(entity_data.get("source") or "complaint")
             entity = Entity(
                 id=entity_id,
-                type=str(entity_data.get("type") or ""),
+                type="model_suggestion" if upstream_unverified else str(entity_data.get("type") or ""),
                 name=str(entity_data.get("name") or ""),
                 attributes=dict(attributes),
                 confidence=float(0.8 if raw_confidence is None else raw_confidence),
-                source=entity_source,
+                source="model" if upstream_unverified else entity_source,
                 provenance=provenance_payload,
             )
             graph.add_entity(entity)
+            if entity_index < local_entity_count:
+                local_entity_ids.add(entity.id)
             extractor_key = _clean_context_text(entity_data.get("extractor_key"))
             if extractor_key:
                 entity_key_to_id[extractor_key] = entity.id
 
         relationships: List[Dict[str, Any]] = []
         if include_local_heuristics:
-            for rel_data in self._extract_relationships(source_text, graph):
+            # Keep existing heuristic/LLM relationships confined to their original
+            # local records; upstream model mentions cannot acquire support here.
+            local_graph = graph
+            if private_entities:
+                local_graph = copy.copy(graph)
+                local_graph.entities = {key: value for key, value in graph.entities.items() if key in local_entity_ids}
+            for rel_data in self._extract_relationships(source_text, local_graph):
                 if isinstance(rel_data, Mapping):
                     relationships.append(dict(rel_data))
-        for raw_relationship in extracted_relationships or []:
+        for raw_relationship in [*(extracted_relationships or []), *private_relationships]:
             if not isinstance(raw_relationship, Mapping):
                 continue
             prepared_relationship = dict(raw_relationship)
@@ -2304,6 +2337,15 @@ class KnowledgeGraphBuilder:
             if carried_extractor:
                 provenance_payload["extractor"] = carried_extractor
             attributes = rel_data.get("attributes") if isinstance(rel_data.get("attributes"), Mapping) else {}
+            upstream_support_suggestion = (attributes.get("upstream_extraction") is True
+                and not envelope.is_asserted_user_fact
+                and relation_type in (_SUPPORT_RELATION_TYPES | {"has_fact"}))
+            if upstream_support_suggestion:
+                attributes = dict(attributes)
+                attributes["upstream_relationship_type"] = relation_type
+                attributes["origin"] = "model"
+                attributes["record_type"] = "model_suggestion"
+                relation_type = "model_suggestion"
             raw_confidence = rel_data.get("confidence", 0.8)
             graph.add_relationship(
                 Relationship(
@@ -2313,7 +2355,7 @@ class KnowledgeGraphBuilder:
                     relation_type=relation_type,
                     attributes=dict(attributes),
                     confidence=float(0.8 if raw_confidence is None else raw_confidence),
-                    source="legal" if legal_passage else str(rel_data.get("source") or "complaint"),
+                    source="model" if upstream_support_suggestion else ("legal" if legal_passage else str(rel_data.get("source") or "complaint")),
                     provenance=provenance_payload,
                 )
             )
