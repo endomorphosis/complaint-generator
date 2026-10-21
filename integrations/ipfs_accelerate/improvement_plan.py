@@ -442,15 +442,34 @@ def canonical_model_policy() -> dict[str, Any]:
             "model": _PROVIDER["model"], "allow_fallback": False}
 
 
+_PRIVATE_BINDING_ROOTS = frozenset({"data", "output", "statefiles", "exports", ".complaint_workspace", "secrets", "evidence", "uploads", "attachments", "private", "sessions"})
+
+
+def _private_binding_path(relative: str) -> bool:
+    path = Path(relative)
+    return bool(path.parts and (path.parts[0] in _PRIVATE_BINDING_ROOTS or
+                any(part.startswith(".env") or part.endswith((".key", ".pem")) for part in path.parts)))
+
+
 def _safe_relative(root: Path, value: Any) -> Path | None:
     if not isinstance(value, str) or not value.strip() or len(value) > 512:
         return None
     relative = Path(value)
+    if _private_binding_path(value):
+        return None
     if relative.is_absolute() or ".." in relative.parts or relative.as_posix() in {"", ".", "./"}:
         return None
+    root = root.resolve()
+    cursor = root
+    for part in relative.parts:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            return None
     candidate = (root / relative).resolve()
     try:
-        candidate.relative_to(root.resolve())
+        resolved_relative = candidate.relative_to(root)
+        if _private_binding_path(resolved_relative.as_posix()):
+            return None
     except ValueError:
         return None
     return candidate
@@ -493,7 +512,11 @@ def bind_sources(repo_root: Path | str, relative_paths: Sequence[str]) -> dict[s
             continue
         members: list[tuple[str, str]] = []
         count = 0
+        unsafe = False
         for child in sorted(path.rglob("*")):
+            if _safe_relative(root, child.relative_to(root).as_posix()) is None:
+                unsafe = True
+                break
             if not child.is_file():
                 continue
             count += 1
@@ -503,6 +526,10 @@ def bind_sources(repo_root: Path | str, relative_paths: Sequence[str]) -> dict[s
             if child.stat().st_size <= 0:
                 continue
             members.append((child.relative_to(path).as_posix(), _hash_file(child)))
+        if unsafe:
+            missing.append(key)
+            files[key] = {"present": False, "sha256": "", "kind": "unsafe_alias"}
+            continue
         if unbounded:
             files[key] = {"present": True, "sha256": "", "kind": "directory", "unbounded": True}
             break
@@ -571,7 +598,7 @@ def _claimed_binding_stale(claimed: Any, fresh: Mapping[str, Any]) -> bool:
 def assess_behavioral_evidence(task: Mapping[str, Any], observation: Mapping[str, Any], *,
                                source_binding: Mapping[str, Any],
                                model_policy: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Decide whether one observation can complete a task. Rejection stays repairable.
+    """Assess measured admission evidence. Native callback alone completes a task.
 
     Only a current-source local-node integration run can complete a task.
     Unit fakes and optional real-provider smoke are recorded as different
@@ -604,6 +631,8 @@ def assess_behavioral_evidence(task: Mapping[str, Any], observation: Mapping[str
         "required_cases": cases or [],
         "artifacts": artifacts if isinstance(artifacts, list) else [],
         "native_validation": {},
+        "completion_authority": False,
+        "enforcement": "admission_evidence_only_native_callback_completes",
     }
 
     def reject(reason: str) -> dict[str, Any]:
@@ -631,14 +660,18 @@ def assess_behavioral_evidence(task: Mapping[str, Any], observation: Mapping[str
         "verdict_kind": classified.effective_verdict_kind.value,
         "command": classified.command,
     }
-    if classified.effective_verdict_kind.value != "test":
+    release_companion = (task.get("id") == "CIMP-REL-03" and command == "python scripts/validate_complaint_intake.py --phase pre-admission"
+        and isinstance(observation, _MeasuredEvidence) and observation.get("host_measurement", {}).get("behavioral_companion") == "tests/test_intake_release_gate.py")
+    if classified.effective_verdict_kind.value != "test" and not release_companion:
         return reject("command_not_behavioral_test")
     if policy != canonical_model_policy():
         return reject("model_policy_rejected")
-    if lane != "unit_fake":
+    if lane != "unit_fake" and not isinstance(observation, _MeasuredEvidence):
         mismatch = _environment_mismatch(observation.get("environment"))
         if mismatch:
             return reject(mismatch)
+    if isinstance(observation, _MeasuredEvidence) and observation["host_measurement"].get("reason"):
+        return reject(observation["host_measurement"]["reason"])
     if receipt["timed_out"] is True:
         return reject("subprocess_timeout")
     exit_status = observation.get("exit_status")
@@ -668,7 +701,7 @@ def assess_behavioral_evidence(task: Mapping[str, Any], observation: Mapping[str
     required = observation.get("required_nodeids")
     if not isinstance(required, list) or not required:
         return reject("missing_required_test_identities")
-    if len(set(required)) != len(required) or any(not isinstance(item, str) for item in required):
+    if any(not isinstance(item, str) or not item for item in required) or len(set(required)) != len(required):
         return reject("required_test_identity_malformed")
     observed_ids = [row["nodeid"] for row in cases]
     if any(item not in observed_ids for item in required):
@@ -685,8 +718,145 @@ def assess_behavioral_evidence(task: Mapping[str, Any], observation: Mapping[str
         return reject("unit_fake_is_not_current_source_completion")
     if lane == "optional_real_provider_smoke":
         return reject("optional_real_provider_smoke_is_not_completion")
+    measurement_reason = _host_evidence_reason(observation, task)
+    if measurement_reason:
+        return reject(measurement_reason)
+    receipt["host_measurement"] = observation["host_measurement"]
+    receipt["measurement_record"] = observation.measurement_record
+    receipt["task_contract_digest"] = observation["host_measurement"]["task_contract_digest"]
     receipt["admitted"] = True
     receipt["completion"] = True
     receipt["repairable"] = False
     receipt["reason"] = "current_source_behavioral_evidence"
     return receipt
+
+
+# This in-process capability is minted only after an owned host command has run.
+# Serialized receipts remain observations and can never recreate this capability.
+_MEASURED = object()
+_HOST_MEASUREMENT_RECORDS = {}
+
+
+def _pin_measurement(observation, path, sha256):
+    import weakref
+    key = id(observation)
+    def release(reference):
+        entry = _HOST_MEASUREMENT_RECORDS.get(key)
+        if entry is not None and entry[0] is reference:
+            _HOST_MEASUREMENT_RECORDS.pop(key, None)
+    _HOST_MEASUREMENT_RECORDS[key] = (weakref.ref(observation, release), (str(path), str(sha256)))
+
+
+def _measurement_record(observation):
+    entry = _HOST_MEASUREMENT_RECORDS.get(id(observation))
+    if entry is None or entry[0]() is not observation:
+        return None
+    return {"path": entry[1][0], "sha256": entry[1][1]}
+
+
+class _MeasuredEvidence(dict):
+    def __init__(self, value, *, capability=None):
+        if capability is not _MEASURED:
+            raise ValueError("host_measurement_required")
+        super().__init__(value)
+        self.capability = capability
+
+    @property
+    def measurement_record(self):
+        # A returned dict is descriptive; changing it cannot rebind the host pin.
+        return _measurement_record(self)
+
+    def copy(self):
+        copied = _MeasuredEvidence(self, capability=self.capability)
+        pin = _measurement_record(self)
+        if pin is not None:
+            _pin_measurement(copied, pin["path"], pin["sha256"])
+        return copied
+
+
+def _host_evidence_reason(observation, task):
+    if not isinstance(observation, _MeasuredEvidence) or observation.capability is not _MEASURED:
+        return "host_measurement_required"
+    try:
+        record = _measurement_record(observation)
+        if not isinstance(record, dict) or _hash_file(Path(record["path"])) != record["sha256"]:
+            return "stale_measurement_record"
+        measured = json.loads(Path(record["path"]).read_text())
+        if measured != observation["host_measurement"]:
+            return "measurement_record_mismatch"
+        if measured.get("reason"):
+            return measured["reason"]
+        expected = measured["observation_binding"]
+        if any(observation.get(key) != value for key, value in expected.items()):
+            return "measured_case_identity_mismatch"
+        from .improvement_runner import _source_freeze
+        if _source_freeze(Path(measured["workspace_path"]), measured["output_paths"]) != measured["source_after"]:
+            return "stale_source_hash"
+        if observation["host_task_contract"]["task"] != dict(task):
+            return "task_contract_changed"
+        for artifact in measured["artifacts"]:
+            if _hash_file(Path(artifact["path"])) != artifact["sha256"]:
+                return "stale_evidence_artifact"
+        if measured["reason"]:
+            return measured["reason"]
+        if not measured["source_unchanged"]:
+            return "stale_source_hash"
+        for path, digest in measured["imported_sources"].items():
+            if _hash_file(Path(path)) != digest:
+                return "stale_source_hash"
+        if not measured["required_nodeids"] or measured["required_nodeids"] != [r["nodeid"] for r in measured["cases"]]:
+            return "collection_identity_mismatch"
+        if measured["task_contract_digest"] != _digest(observation["host_task_contract"]):
+            return "task_contract_changed"
+    except (KeyError, TypeError, ValueError, OSError):
+        return "host_measurement_unavailable"
+    return ""
+
+
+# Explicit pytest plugin: the native validation environment filters ambient
+# PYTEST_PLUGINS/ADDOPTS, so the host adds this module with `-p` to owned commands.
+def pytest_addoption(parser):
+    parser.addoption("--complaint-evidence-path", default=None)
+
+
+def pytest_configure(config):
+    path = config.getoption("--complaint-evidence-path")
+    if path:
+        config._complaint_evidence = {"nodeids": [], "reports": [], "path": path}
+
+
+def pytest_collection_finish(session):
+    state = getattr(session.config, "_complaint_evidence", None)
+    if state is not None:
+        state["nodeids"] = [item.nodeid for item in session.items]
+        for item in session.items:
+            item.user_properties.append(("complaint_nodeid", item.nodeid))
+
+
+class _PhaseObserver:
+    def __init__(self, state):
+        self.state = state
+
+    def pytest_runtest_logreport(self, report):
+        self.state["reports"].append({"nodeid": report.nodeid, "when": report.when,
+                                      "outcome": report.outcome})
+
+
+def pytest_sessionstart(session):
+    state = getattr(session.config, "_complaint_evidence", None)
+    if state is not None:
+        session.config.pluginmanager.register(_PhaseObserver(state), "complaint-evidence-phases")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    state = getattr(session.config, "_complaint_evidence", None)
+    if state is None:
+        return
+    path = Path(state["path"])
+    value = {"schema": "complaint-pytest-observation@1", "nodeids": state["nodeids"],
+             "reports": state["reports"], "exitstatus": int(exitstatus), "completion_authority": False}
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        json.dump(value, stream, sort_keys=True)
+        stream.flush()
+        os.fsync(stream.fileno())

@@ -81,6 +81,81 @@ def _spec(*tasks: dict) -> dict:
 
 
 def _gate(tmp_path: Path, task: dict, observation: dict, **kwargs) -> dict:
+    # Migrate the positive prerequisite to an actual owned sealed pytest run.
+    # Old defect assertions still alter claimed metadata, while the host also
+    # independently verifies collection/JUnit/phases/current AST and source.
+    from integrations.ipfs_accelerate.improvement_runner import measure_behavioral_command
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
+    from ipfs_accelerate_py.agent_supervisor.validation.validation_runtime import build_validation_environment, validation_environment_for_runner
+    import os
+    import subprocess
+    measurement_fault = kwargs.pop("_measurement_fault", None)
+    if observation.get("lane") == "local_node_integration" and all((tmp_path / p).is_file() for p in task["targets"]):
+        tests = tmp_path / "tests"
+        tests.mkdir(exist_ok=True)
+        (tmp_path / "conftest.py").write_text("def pytest_addoption(parser):\n for flag in ('--run-llm','--run-network','--run-heavy'): parser.addoption(flag, action='store_true')\n")
+        (tmp_path / "complaint_fixture_guard.py").write_text("""import json, socket, sys
+from pathlib import Path
+from collections import Counter
+_counts = Counter()
+def _audit(event, args):
+ if event == 'subprocess.Popen':
+  _counts['denied_process'] += 1
+  raise AssertionError('nested_fixture_process_denied')
+ if event == 'socket.connect' and args[0].family in (socket.AF_INET, socket.AF_INET6):
+  _counts['denied_network'] += 1
+  raise AssertionError('nested_fixture_network_denied')
+sys.addaudithook(_audit)
+def pytest_sessionfinish(session, exitstatus):
+ path=Path(session.config.getoption('--complaint-evidence-path')).with_suffix('.guard.json')
+ path.write_text(json.dumps({'schema':'complaint-nested-fixture-egress@1','exitstatus':int(exitstatus),'denied_attempts':dict(_counts),'network_process_dispatch_permitted':False,'guard_load_order':'explicit first -p before AST and phase plugins; pytest bootstrap precedes guard'}))
+ path.chmod(0o600)
+""")
+        adapter = tmp_path / "adapter.py"
+        if not adapter.exists(): adapter.write_text("VERSION=1\n")
+        names = [node.rsplit("::", 1)[1] for node in (NODE_A, NODE_B)]
+        claims = observation.get("cases")
+        outcomes = [row.get("outcome") for row in claims] if isinstance(claims, list) and all(isinstance(row, dict) for row in claims) else []
+        bodies = []
+        for index, name in enumerate(names):
+            outcome = outcomes[index] if index < len(outcomes) else "passed"
+            body = "pytest.skip('synthetic required skip')" if outcome == "skipped" else "assert False, 'synthetic required failure'" if outcome == "failed" else "assert adapter.VERSION > 0"
+            bodies.append("def " + name + "(): " + body)
+        (tests / "test_improvement_evidence_gate.py").write_text("import adapter, pytest\n" + "\n".join(bodies))
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        subprocess.run(["git", "-C", str(tmp_path), "add", "out", "tests", "conftest.py", "adapter.py", "complaint_fixture_guard.py"], check=True)
+        native = PortalImplementationDaemon._validation_command_runner
+        import sys
+        source_env = dict(os.environ)
+        source_env.pop("IPFS_ACCELERATE_AGENT_VALIDATION_PYTHON", None)
+        env = build_validation_environment(source_env)
+        env["PYTHONPATH"] = str(tmp_path) + os.pathsep + os.pathsep.join(p for p in sys.path if p and Path(p).is_absolute() and Path(p).is_dir())
+        env = validation_environment_for_runner(env, native)
+        def delegate(**call):
+            result = native(**call)
+            command = call["spec"].command
+            if measurement_fault and "--collect-only" not in command and result.get("returncode") == 0:
+                import shlex
+                tokens = shlex.split(command)
+                manifest = Path(next(t.split("=", 1)[1] for t in tokens if t.startswith("--complaint-evidence-path=")))
+                if measurement_fault == "junit": (manifest.parent / "junit.xml").unlink()
+                elif measurement_fault == "phases": manifest.unlink()
+                elif measurement_fault == "catalog": manifest.with_suffix(".duckdb").unlink()
+                elif measurement_fault == "population":
+                    value = json.loads(manifest.read_text()); value["nodeids"].pop(); manifest.write_text(json.dumps(value))
+                elif measurement_fault == "source": adapter.write_text("VERSION=99\n")
+            return result
+        measured = measure_behavioral_command(tmp_path, tmp_path / "state" / "runs", task, COMMAND,
+                                               runner=delegate, environment=env, timeout_seconds=45, context={"require_child_guard": True, "pytest_guard_plugin": "complaint_fixture_guard"})
+        from integrations.ipfs_accelerate.improvement_runner import _observed_artifacts
+        observation["artifacts"] = _observed_artifacts(tmp_path, observation)
+        if all(a["present"] for a in observation["artifacts"]):
+            observation.pop("artifacts")  # host-measured artifacts, not authored claims
+        observation.pop("environment", None)
+        measured.update(observation)
+        observation = measured
+        if kwargs.pop("_return_measurement", False):
+            return observation, native, env
     return gate_task_completion(
         tmp_path, tmp_path / "state", task, observation,
         facts=kwargs.pop("facts", {"narrative": "synthetic"}),
@@ -256,3 +331,383 @@ def test_assess_rejects_non_test_command_and_wrong_model_policy(tmp_path: Path) 
     )
     assert rejected["reason"] == "model_policy_rejected"
     assert rejected["repairable"] is True
+
+
+def test_caller_report_without_host_measurement_is_not_admitted(tmp_path):
+    _write_output(tmp_path, "CIMP-OPS-04")
+    receipt = gate_task_completion(tmp_path, tmp_path / "state", _task(), _observation(tmp_path))
+    assert receipt["completion"] is False
+    assert receipt["completion_authority"] is False
+    assert receipt["reason"] == "host_measurement_required"
+
+
+def test_missing_execution_time_binding_is_not_admitted(tmp_path):
+    _write_output(tmp_path, "CIMP-OPS-04")
+    receipt = gate_task_completion(tmp_path, tmp_path / "state", _task(), _observation(tmp_path, source_binding=None))
+    assert receipt["completion"] is False
+    assert receipt["repairable"] is True
+
+
+def test_malformed_required_nodeid_is_typed_rejection(tmp_path):
+    _write_output(tmp_path, "CIMP-OPS-04")
+    receipt = _gate(tmp_path, _task(), _observation(tmp_path, required_nodeids=[[NODE_A]]))
+    assert receipt["completion"] is False
+    assert receipt["repairable"] is True
+
+
+def test_imported_adapter_change_invalidates_prior_measurement(tmp_path):
+    _write_output(tmp_path, "CIMP-OPS-04")
+    adapter = tmp_path / "adapter.py"
+    adapter.write_text("VERSION=1\n")
+    observed = _observation(tmp_path)
+    observed["execution_sources"] = bind_sources(tmp_path, ["adapter.py"])
+    _gate(tmp_path, _task(), observed)
+    adapter.write_text("VERSION=2\n")
+    readiness = recompute_dependent_readiness(tmp_path, tmp_path / "state", _spec(_task()))
+    assert readiness["tasks"]["CIMP-OPS-04"]["complete"] is False
+
+
+@pytest.mark.parametrize("fault,reason", [("junit", "missing_output"), ("phases", "missing_phase_manifest"),
+    ("catalog", "missing_output"), ("population", "collection_identity_mismatch"), ("source", "stale_source_hash")])
+def test_actual_measured_artifacts_and_source_are_required(tmp_path, fault, reason):
+    _write_output(tmp_path, "CIMP-OPS-04")
+    receipt = _gate(tmp_path, _task(), _observation(tmp_path), _measurement_fault=fault)
+    assert receipt["completion"] is False and receipt["admitted"] is False
+    assert receipt["reason"] == reason and receipt["repairable"] is True
+    assert receipt["completion_authority"] is False
+
+
+def test_serialized_measured_receipt_cannot_recreate_host_capability(tmp_path):
+    _write_output(tmp_path, "CIMP-OPS-04")
+    original = _gate(tmp_path, _task(), _observation(tmp_path))
+    receipt = gate_task_completion(tmp_path, tmp_path / "other-state", _task(), json.loads(json.dumps(original)), legal_data_version="synthetic")
+    assert receipt["admitted"] is False and receipt["completion_authority"] is False
+
+
+def test_supported_runner_entrypoint_is_consumed_by_actual_supervisor(tmp_path, monkeypatch):
+    import integrations.ipfs_accelerate.improvement_runner as runner
+    import inspect
+    assert "daemon_script_path=Path(__file__).resolve()" in inspect.getsource(runner.run_internal)
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor import PortalImplementationSupervisor
+    # The real command builder must launch this script with the original native
+    # task/owner/profile arguments. No authored replacement daemon command.
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor import parse_args, supervisor_config_from_args
+    from integrations.ipfs_accelerate.improvement_plan import BOARD_RELATIVE
+    root = Path(runner.__file__).resolve().parents[2]
+    args = parse_args(runner.native_argv(root / BOARD_RELATIVE, tmp_path, "main"))
+    config = supervisor_config_from_args(args, repo_root=root)
+    from dataclasses import replace
+    supervisor = PortalImplementationSupervisor(replace(config, daemon_script_path=Path(runner.__file__)))
+    command = supervisor._build_daemon_command()
+    assert str(Path(runner.__file__)) in command
+    assert command[command.index("--todo-path") + 1] == str(root / BOARD_RELATIVE)
+    assert command[command.index("--board-namespace") + 1] == "complaint-intake-improvement"
+    assert command[command.index("--max-task-attempts") + 1] == "3"
+
+
+def test_advisory_readiness_never_claims_native_scheduling_authority(tmp_path):
+    _write_output(tmp_path, "CIMP-OPS-04")
+    receipt = recompute_dependent_readiness(tmp_path, tmp_path / "state", _spec(_task()))
+    assert receipt["completion_authority"] is False
+    assert receipt["native_scheduling_enforced"] is False
+
+
+@pytest.mark.parametrize("skip", [False, True])
+def test_native_proposal_scheduler_actually_consumes_gate_before_acceptance(tmp_path, skip):
+    from integrations.ipfs_accelerate.improvement_runner import EvidenceValidationScheduler
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalTask
+    from ipfs_accelerate_py.agent_supervisor.validation.validation_scheduler import ValidationScheduler, build_declared_validation_plan_graph
+    from ipfs_accelerate_py.agent_supervisor.validation.proposal_validation import ImplementationProposal, CandidateDiffEntry, DiffChangeKind, ProposalValidationPolicy, validate_implementation_proposal
+    _write_output(tmp_path, "CIMP-OPS-04")
+    task = _task()
+    _, executor, env = _gate(tmp_path, task, _observation(tmp_path), _return_measurement=True)
+    if skip:
+        test = tmp_path / "tests/test_improvement_evidence_gate.py"
+        test.write_text("import pytest\ndef test_required_case(): pytest.skip('synthetic required skip')\n")
+    proposal = ImplementationProposal(task_id=task["id"], accepted_plan_id="plan:synthetic", repository_id="repo:synthetic",
+        repository_tree_id="tree:synthetic", objective_id="objective:synthetic", baseline_id="baseline:synthetic",
+        context_id="context:owned-synthetic-attempt", replay_nonce="synthetic-attempt-1",
+        declared_paths=tuple(task["targets"]), candidate_diff=(CandidateDiffEntry(old_path=task["targets"][0], new_path=task["targets"][0],
+            change_kind=DiffChangeKind.MODIFY, before_source="def ready(): return False\n", after_source="def ready(): return True\n"),))
+    accepted = validate_implementation_proposal(proposal, policy=ProposalValidationPolicy(allowed_paths=tuple(task["targets"])))
+    assert accepted.accepted
+    import shlex
+    # Match the real daemon's explicit worktree PYTHONPATH wrapper. Rebuilding
+    # a native validation environment intentionally strips ambient package roots.
+    source_command = "PYTHONPATH=" + shlex.quote(env["PYTHONPATH"]) + " " + COMMAND
+    commands, graph = build_declared_validation_plan_graph([source_command], repository_tree_id=proposal.repository_tree_id, changed_paths=task["targets"])
+    scheduler = EvidenceValidationScheduler(ValidationScheduler(max_workers=1), state_dir=tmp_path / "native-evidence", spec=_spec(task))
+    native_task = PortalTask(task["id"], "Synthetic owned task", "todo", "", "P0", "synthetic", outputs=task["targets"], validation=[COMMAND], canonical_task_cid="synthetic-task-cid")
+    assert scheduler.bind_task(native_task, tmp_path) == {}
+    from ipfs_accelerate_py.agent_supervisor.validation.validation_runtime import sealed_validation_python_runner
+    from types import SimpleNamespace
+    @sealed_validation_python_runner
+    def guarded_executor(**call):
+        spec = call["spec"]
+        instrumented = spec.command.replace(" -m pytest ", " -m pytest -p complaint_fixture_guard ", 1)
+        assert instrumented != spec.command
+        call["spec"] = SimpleNamespace(command=instrumented, raw_command=spec.raw_command)
+        return executor(**call)
+    report = scheduler.run_validated(accepted, commands, workspace_path=tmp_path, runner=guarded_executor, environment=env,
+        impact_graph=graph, require_impact_graph=True, require_full_validation=True, scope="pre_merge")
+    assert report["passed"] is (not skip)
+    assert report["returncode"] == (78 if skip else 0)
+    assert report["firstparty_completion_authority"] is False
+    assert report["proposal_validation"]["accepted"] is True
+    assert report["cache_hits"] == 0
+    assert report["behavioral_evidence"]
+    if skip:
+        assert report["behavioral_evidence"][0]["reason"] == "skipped_required_case"
+    else:
+        receipt = report["behavioral_evidence"][0]
+        assert receipt["admitted"] is True and receipt["completion_authority"] is False
+        assert receipt["host_measurement"]["lane_basis"] == "native_host_validation"
+        assert receipt["host_measurement"]["live_node_verified"] is False
+        assert len([a for a in receipt["host_measurement"]["artifacts"] if a["path"].endswith(".guard.json")]) == 2
+
+
+def test_ordinary_adapter_preserves_native_constructor_scope_and_sole_loop(tmp_path, monkeypatch):
+    import integrations.ipfs_accelerate.improvement_runner as runner
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon_runner as loop
+    from ipfs_accelerate_py.agent_supervisor.runtime import process_security
+    captured = {}
+    monkeypatch.setattr(process_security, "harden_state_authority_process", lambda: captured.setdefault("hardened", True))
+    real_constructor = native.PortalImplementationDaemon
+    def construct(**kwargs):
+        captured["kwargs"] = kwargs
+        return real_constructor(**kwargs)
+    monkeypatch.setattr(native, "PortalImplementationDaemon", construct)
+    def sole_loop(daemon, context, **kwargs):
+        captured["daemon"] = daemon
+        captured["context"] = context
+        assert daemon.validation_scheduler is scheduler
+        assert daemon.board_namespace == "complaint-intake-improvement"
+        daemon.close_event_runtime()
+    monkeypatch.setattr(loop, "run_portal_implementation_daemon_loop", sole_loop)
+    board = tmp_path / "board.md"; board.write_text("# Synthetic\n")
+    scheduler = object()
+    runner._run_evidence_daemon_adapter(["--todo-path", str(board), "--state-dir", str(tmp_path / "state"),
+        "--state-prefix", "synthetic", "--task-source-kind", "legacy-markdown", "--authority-mode", "legacy_markdown",
+        "--explicit-legacy-task-source", "--board-namespace", "complaint-intake-improvement", "--once",
+        "--validation-max-workers", "1", "--validation-resource-budget", "1"], repo_root=tmp_path, validation_scheduler=scheduler)
+    values = captured["kwargs"]
+    assert captured["hardened"] and len(values) == 51
+    assert values["implement"] is False
+    assert values["validation_max_workers"] == values["validation_resource_budget"] == 1
+    assert values["generated_status_paths"] == [] and values["external_reservation_manifest_paths"] == []
+    assert values["expected_task_source_root_id"] == ""
+    assert captured["context"].state_path == tmp_path / "state/synthetic_task_state.json"
+
+
+@pytest.mark.parametrize("flag,value", [("--authority-mode", "duckdb"), ("--task-source-kind", "duckdb"), ("--manual-completion-authority-task-id", "CIMP-OPS-04")])
+def test_unsupported_authority_modes_never_construct_adapter(tmp_path, monkeypatch, flag, value):
+    import integrations.ipfs_accelerate.improvement_runner as runner
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+    from ipfs_accelerate_py.agent_supervisor.runtime import process_security
+    monkeypatch.setattr(process_security, "harden_state_authority_process", lambda: None)
+    monkeypatch.setattr(native, "PortalImplementationDaemon", lambda **kwargs: pytest.fail("unsupported mode constructed"))
+    with pytest.raises((ValueError, SystemExit)):
+        runner._run_evidence_daemon_adapter(["--todo-path", str(tmp_path / "board.md"), flag, value], repo_root=tmp_path, validation_scheduler=object())
+
+
+@pytest.mark.parametrize("script_status", [0, 1])
+def test_exact_rel03_script_and_trusted_behavioral_companion_are_both_required(tmp_path, script_status):
+    from integrations.ipfs_accelerate.improvement_runner import measure_behavioral_command
+    _write_output(tmp_path, "CIMP-OPS-04")
+    _, executor, env = _gate(tmp_path, _task(), _observation(tmp_path), _return_measurement=True)
+    script = tmp_path / "scripts/validate_complaint_intake.py"; script.parent.mkdir()
+    # Explicit first import installs the same child denies before this exact
+    # synthetic script body. It does not claim a real release validation.
+    script.write_text("import complaint_fixture_guard\nimport json\nprint(json.dumps({'phase':'pre-admission','release_eligible':False,'self_pending':True,'other_completed':57}))\nraise SystemExit(" + str(script_status) + ")\n")
+    companion = tmp_path / "tests/test_intake_release_gate.py"
+    companion.write_text("def test_release_self_pending_is_not_eligible():\n assert 57 < 58\n")
+    task = {"id":"CIMP-REL-03","targets":["scripts/validate_complaint_intake.py","tests/test_intake_release_gate.py"],
+        "validation_commands":["python scripts/validate_complaint_intake.py --phase pre-admission"],"depends_on":[]}
+    observed = measure_behavioral_command(tmp_path, tmp_path / "rel-runs", task, task["validation_commands"][0],
+        runner=executor, environment=env, timeout_seconds=45,
+        context={"require_child_guard":True,"pytest_guard_plugin":"complaint_fixture_guard"})
+    receipt = gate_task_completion(tmp_path, tmp_path / "rel-state", task, observed, legal_data_version="synthetic-source-version")
+    assert receipt["admitted"] is (script_status == 0)
+    assert receipt["completion_authority"] is False
+    if script_status == 0:
+        measurement = receipt["host_measurement"]
+        assert measurement["behavioral_companion"] == "tests/test_intake_release_gate.py"
+        assert [r["mode"] for r in measurement["results"]] == ["declared_script","collect","run"]
+        original = json.loads(Path(measurement["artifacts"][0]["path"]).read_text())
+        assert '"release_eligible": false' in original["output"]
+    else:
+        assert receipt["reason"] == "declared_command_failed"
+
+
+@pytest.mark.parametrize("mutation", ["cases", "required", "count", "record", "unimported_source", "contract"])
+def test_measured_capability_rejects_postrun_mutants(tmp_path, mutation):
+    import subprocess
+    _write_output(tmp_path, "CIMP-OPS-04")
+    unimported = tmp_path / "unused_shared_adapter.py"; unimported.write_text("VERSION=1\n")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", unimported.name], check=True)
+    observed, _, _ = _gate(tmp_path, _task(), _observation(tmp_path), _return_measurement=True)
+    altered = observed.copy()
+    if mutation == "cases": altered["cases"] = [{"nodeid":"foreign.py::test_foreign", "outcome":"passed"}]
+    elif mutation == "required": altered["required_nodeids"] = [NODE_A]
+    elif mutation == "count": altered["collected_count"] = 1
+    elif mutation == "record": Path(altered.measurement_record["path"]).unlink()
+    elif mutation == "contract": altered["host_task_contract"] = {"task":{},"context":{},"command":COMMAND}
+    else: unimported.write_text("VERSION=2\n")
+    receipt = gate_task_completion(tmp_path, tmp_path / "mutant-state", _task(), altered, legal_data_version="synthetic")
+    assert receipt["admitted"] is False and receipt["completion"] is False
+    assert receipt["repairable"] is True and receipt["completion_authority"] is False
+
+
+def test_native_catalog_rejects_empty_seal_and_file_count(tmp_path):
+    import duckdb
+    from integrations.ipfs_accelerate.improvement_runner import _read_catalog
+    _write_output(tmp_path, "CIMP-OPS-04")
+    observed, _, _ = _gate(tmp_path, _task(), _observation(tmp_path), _return_measurement=True)
+    catalog = next(Path(a["path"]) for a in observed["host_measurement"]["artifacts"] if a["path"].endswith("run.duckdb"))
+    with duckdb.connect(str(catalog)) as database:
+        database.execute("UPDATE pytest_ast_seal SET seal='', file_count=0")
+    with pytest.raises(ValueError, match="catalog_seal_invalid"):
+        _read_catalog(catalog)
+
+
+def test_tracked_private_bodies_are_never_hashed_or_exposed_by_source_binding(tmp_path, monkeypatch):
+    import subprocess
+    import integrations.ipfs_accelerate.improvement_plan as plan
+    from integrations.ipfs_accelerate.improvement_runner import _source_freeze
+    source = tmp_path / "source.py"; source.write_text("VALUE=1\n")
+    private = ["secrets/body.json", "evidence/body.py", "uploads/body.json", "attachments/body.py", "data/body.json", ".env.local", "owner.key", "owner.pem"]
+    for name in private:
+        path = tmp_path / name; path.parent.mkdir(exist_ok=True); path.write_text("synthetic-private-canary")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-f", "."], check=True)
+    real_hash = plan._hash_file
+    seen = []
+    def hash_file(path):
+        relative = path.relative_to(tmp_path).as_posix()
+        assert relative not in private, "private body opened"
+        seen.append(relative)
+        return real_hash(path)
+    monkeypatch.setattr(plan, "_hash_file", hash_file)
+    frozen = _source_freeze(tmp_path, ["source.py"])
+    assert set(frozen["files"]) == {"source.py"} and seen
+    assert all(name not in json.dumps(frozen) for name in private)
+    assert all(plan._safe_relative(tmp_path, name) is None for name in private)
+    with pytest.raises(ValueError, match="private_source_binding_forbidden"):
+        _source_freeze(tmp_path, [private[0]])
+
+
+def test_borrowed_measured_object_cannot_replace_original_host_record_pin(tmp_path):
+    import hashlib
+    _write_output(tmp_path, "CIMP-OPS-04")
+    original, _, _ = _gate(tmp_path, _task(), _observation(tmp_path), _return_measurement=True)
+    altered = original.copy()
+    forged = json.loads(json.dumps(altered["host_measurement"]))
+    forged["cases"] = [{"nodeid":"foreign.py::test_foreign", "outcome":"passed"}]
+    forged["required_nodeids"] = ["foreign.py::test_foreign"]
+    forged["observation_binding"].update(cases=forged["cases"], required_nodeids=forged["required_nodeids"], collected_count=1)
+    replacement = tmp_path / "replacement.json"; replacement.write_text(json.dumps(forged))
+    replacement_record = {"path":str(replacement),"sha256":hashlib.sha256(replacement.read_bytes()).hexdigest()}
+    with pytest.raises(AttributeError):
+        altered.measurement_record = replacement_record
+    # Mutating the returned descriptive dict also cannot change the registry.
+    altered.measurement_record.update(replacement_record)
+    altered["host_measurement"] = forged
+    altered.update(cases=forged["cases"], required_nodeids=forged["required_nodeids"], collected_count=1)
+    receipt = gate_task_completion(tmp_path, tmp_path / "replacement-state", _task(), altered, legal_data_version="synthetic")
+    assert receipt["admitted"] is False and receipt["reason"] == "measurement_record_mismatch"
+    assert receipt["completion_authority"] is False
+
+
+def test_private_aliases_and_symlinked_source_parents_are_refused_before_body_read(tmp_path, monkeypatch):
+    import subprocess
+    import integrations.ipfs_accelerate.improvement_plan as plan
+    from integrations.ipfs_accelerate.improvement_runner import _source_freeze
+    secret = tmp_path / "secrets/body.json"; secret.parent.mkdir(); secret.write_text("synthetic-private-body")
+    alias = tmp_path / "alias.py"; alias.symlink_to(secret)
+    package = tmp_path / "pkg"; package.mkdir(); (package / "source.py").write_text("VALUE=1\n")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "pkg/source.py"], check=True)
+    (package / "source.py").unlink(); package.rmdir(); package.symlink_to(secret.parent, target_is_directory=True)
+    called = []
+    monkeypatch.setattr(plan, "_hash_file", lambda path: called.append(path) or pytest.fail("aliased body read"))
+    assert plan.bind_sources(tmp_path, ["alias.py"])["missing"] == ["alias.py"]
+    assert plan.bind_sources(tmp_path, ["pkg"])["missing"] == ["pkg"]
+    with pytest.raises(ValueError, match="source_alias_forbidden"):
+        _source_freeze(tmp_path)
+    assert called == []
+
+
+def test_impacted_checks_use_actual_reused_adapter_paths():
+    from integrations.ipfs_accelerate.improvement_runner import _impacted_behavioral_checks
+    root = Path(__file__).resolve().parents[1]
+    assert {"tests/test_explicit_legal_context.py", "tests/test_ipfs_adapter_layer.py"} <= set(_impacted_behavioral_checks(root, ["integrations/ipfs_datasets/legal.py"]))
+    assert "tests/test_proof_report_and_pinning.py" in _impacted_behavioral_checks(root, ["integrations/ipfs_datasets/storage.py"])
+    assert "tests/test_private_workspace_keys.py" in _impacted_behavioral_checks(root, ["integrations/ipfs_datasets/private_storage.py"])
+    assert _impacted_behavioral_checks(root, ["unrelated.py"]) == []
+
+
+@pytest.mark.parametrize("advisory_failure", [None, "timeout", "failed_git", "malformed_receipt"])
+def test_consumed_scheduler_recomputes_advisory_after_real_dependency_revision(tmp_path, monkeypatch, advisory_failure):
+    import os, shlex, subprocess
+    from types import SimpleNamespace
+    from integrations.ipfs_accelerate.improvement_runner import EvidenceValidationScheduler
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalTask
+    from ipfs_accelerate_py.agent_supervisor.validation.validation_scheduler import ValidationScheduler
+    from ipfs_accelerate_py.agent_supervisor.validation.validation_runtime import sealed_validation_python_runner
+    first, second = _task("CIMP-OPS-01"), _task("CIMP-OPS-04")
+    for task in (first, second): _write_output(tmp_path, task["id"])
+    dependency = tmp_path / "external/ipfs_datasets_py"; dependency.mkdir(parents=True)
+    def git(where, *args):
+        return subprocess.check_output(["git", "-C", str(where), *args], text=True).strip()
+    git(tmp_path, "init", "-q"); git(dependency, "init", "-q")
+    def revision(value):
+        (dependency / "rules.py").write_text("VERSION=" + str(value) + "\n")
+        git(dependency, "add", "rules.py")
+        git(dependency, "-c", "user.name=Synthetic Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Synthetic revision")
+        return git(dependency, "rev-parse", "HEAD")
+    old_revision = revision(1)
+    git(tmp_path, "update-index", "--add", "--cacheinfo", "160000," + old_revision + ",external/ipfs_datasets_py")
+    _, executor, env = _gate(tmp_path, first, _observation(tmp_path, first["id"]), _return_measurement=True)
+    @sealed_validation_python_runner
+    def guarded_executor(**call):
+        spec = call["spec"]
+        command = spec.command.replace(" -m pytest ", " -m pytest -p complaint_fixture_guard ", 1)
+        assert command != spec.command
+        call["spec"] = SimpleNamespace(command=command, raw_command=spec.raw_command)
+        return executor(**call)
+    state = tmp_path / "advisory-state"
+    scheduler = EvidenceValidationScheduler(ValidationScheduler(max_workers=1), state_dir=state, spec=_spec(first, second))
+    def run(task):
+        native = PortalTask(task["id"], "Synthetic", "todo", "", "P0", "synthetic", outputs=task["targets"], validation=[COMMAND])
+        scheduler.bind_task(native, tmp_path)
+        return scheduler.run(["PYTHONPATH=" + shlex.quote(env["PYTHONPATH"]) + " " + COMMAND],
+            workspace_path=tmp_path, runner=guarded_executor, environment=env, require_full_validation=True, scope="pre_merge")
+    before = run(first)
+    assert before["passed"] is True
+    assert before["dependent_readiness"]["tasks"][first["id"]]["complete"] is True
+    assert before["dependent_readiness"]["legal_data_version"] == old_revision
+    new_revision = revision(2)
+    if advisory_failure is not None:
+        import integrations.ipfs_accelerate.improvement_runner as runner
+        def unavailable(*args, **kwargs):
+            if advisory_failure == "timeout":
+                raise subprocess.TimeoutExpired(["git", "ls-files"], timeout=20)
+            if advisory_failure == "failed_git":
+                raise subprocess.CalledProcessError(128, ["git", "ls-files"])
+            raise AttributeError("synthetic malformed advisory record")
+        monkeypatch.setattr(runner, "recompute_dependent_readiness", unavailable)
+    after = run(second)
+    assert after["passed"] is True  # advisory history never becomes another scheduler
+    advisory = after["dependent_readiness"]
+    if advisory_failure is not None:
+        assert advisory == {"available":False,"reason":"advisory_observation_unavailable",
+            "native_scheduling_enforced":False,"completion_authority":False}
+        assert json.loads((state / "evidence/readiness.json").read_text())["legal_data_version"] == old_revision
+        return
+    assert advisory["legal_data_version"] == new_revision != old_revision
+    assert advisory["tasks"][first["id"]]["complete"] is False
+    assert advisory["tasks"][first["id"]]["reason"] in {"stale_source_hash", "legal_data_version_changed"}
+    assert advisory["native_scheduling_enforced"] is False and advisory["completion_authority"] is False
+    assert json.loads((state / "evidence/readiness.json").read_text()) == advisory

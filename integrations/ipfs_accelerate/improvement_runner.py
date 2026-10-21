@@ -1805,6 +1805,7 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
         run_configured_portal_implementation_supervisor(
             native_argv(repo_root / BOARD_RELATIVE, state_dir, merge_target, worktree_root=selected_root),
             repo_root=repo_root, logger=_LOGGER,
+            daemon_script_path=Path(__file__).resolve(),
         )
     return 0
 
@@ -1849,7 +1850,7 @@ def gate_task_completion(repo_root: Path, state_dir: Path, task: Mapping[str, An
                          model_policy: Mapping[str, Any] | None = None,
                          legal_data_version: str = "",
                          spec: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Persist one lane receipt and admit completion only for current local-node evidence."""
+    """Persist admission evidence; native callbacks alone publish completion."""
 
     from .improvement_plan import COMPLETING_LANE, EVIDENCE_LANES, assess_behavioral_evidence, bind_sources, _digest
 
@@ -1858,9 +1859,12 @@ def gate_task_completion(repo_root: Path, state_dir: Path, task: Mapping[str, An
     root = Path(repo_root).resolve()
     state_dir = Path(state_dir).resolve()
     binding = bind_sources(root, _task_outputs(task))
-    observed = dict(observation)
-    observed["artifacts"] = _observed_artifacts(root, observation)
+    observed = observation.copy()
+    from .improvement_plan import _MeasuredEvidence
+    if not isinstance(observation, _MeasuredEvidence):
+        observed["artifacts"] = _observed_artifacts(root, observation)
     receipt = assess_behavioral_evidence(task, observed, source_binding=binding, model_policy=model_policy)
+    receipt["host_task_contract"] = observation.get("host_task_contract")
     receipt["facts_digest"] = _digest(dict(facts or {}))
     receipt["legal_data_version"] = legal_data_version
     receipt["implementation_digest"] = binding.get("digest") or ""
@@ -1954,6 +1958,10 @@ def recompute_dependent_readiness(repo_root: Path, state_dir: Path, spec: Mappin
                     reason = "stale_source_hash" if fresh.get("digest") or receipt.get("implementation_digest") else "missing_output"
                     if fresh.get("missing") or fresh.get("empty"):
                         reason = "missing_output"
+                elif receipt.get("host_measurement") and (receipt["host_measurement"].get("source_after") != _source_freeze(root, _task_outputs(by_id[task_id])) or any(not Path(p).is_file() or hashlib.sha256(Path(p).read_bytes()).hexdigest() != h for p, h in receipt["host_measurement"].get("imported_sources", {}).items())):
+                    reason = "stale_source_hash"
+                elif not isinstance(receipt.get("host_task_contract"), dict) or receipt["host_task_contract"].get("task") != by_id[task_id]:
+                    reason = "task_contract_changed"
                 elif receipt.get("model_policy") != policy:
                     reason = "model_policy_changed"
                 elif legal_data_version is not None and receipt.get("legal_data_version") != legal_data_version:
@@ -1971,7 +1979,7 @@ def recompute_dependent_readiness(repo_root: Path, state_dir: Path, spec: Mappin
                     path.parent.mkdir(parents=True, exist_ok=True)
                     _atomic_json(path, receipt)
             blocked = [item for item in dependencies[task_id] if not reports[item]["complete"]]
-            if complete and blocked:
+            if blocked:
                 complete = False
                 reason = "upstream_evidence_not_current"
                 if receipt:
@@ -1986,6 +1994,8 @@ def recompute_dependent_readiness(repo_root: Path, state_dir: Path, spec: Mappin
                 "repairable": not complete,
             }
         document = {"schema_version": READINESS_SCHEMA, "tasks": reports,
+                    "completion_authority": False, "native_scheduling_enforced": False,
+                    "enforcement": "admission_advisory_only_no_native_ready_filter",
                     "model_policy": policy, "legal_data_version": legal_data_version,
                     "facts_digest": facts_digest}
         destination = state_dir / "evidence"
@@ -2030,3 +2040,491 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"status": "error", "error": str(exc)}), file=sys.stderr)
         return 2
 
+
+
+def _source_freeze(root: Path, extra=()):
+    """Bind tracked implementation inputs, explicit outputs and dependency heads.
+
+    Generated board/status commits do not invalidate unchanged implementation
+    inputs. Existing private/untracked user directories are never inventoried.
+    """
+    from .improvement_plan import _hash_file, _digest, _private_binding_path, _safe_relative
+    result = subprocess.run(["git", "--no-optional-locks", "ls-files", "-z", "--stage"],
+                            cwd=root, capture_output=True, check=True, timeout=20)
+    files, dependencies = {}, {}
+    for entry in result.stdout.decode().split("\0"):
+        if not entry:
+            continue
+        metadata, relative = entry.split("\t", 1)
+        if _private_binding_path(relative):
+            continue
+        mode, blob, stage = metadata.split()
+        if stage != "0":
+            raise ValueError("unmerged_source")
+        path = root / relative
+        if _safe_relative(root, relative) is None:
+            raise ValueError("source_alias_forbidden")
+        if mode == "160000":
+            if not (path / ".git").exists():
+                dependencies[relative] = {"gitlink": blob, "head": "unavailable"}
+                continue
+            head = subprocess.run(["git", "--no-optional-locks", "-C", str(path), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True, timeout=10)
+            dependencies[relative] = {"gitlink": blob, "head": head.stdout.strip() if head.returncode == 0 else "unavailable"}
+        elif (Path(relative).suffix in {".py", ".sh", ".toml", ".ini", ".cfg", ".json"}
+              and not relative.startswith(("docs/", "data/", "output/", "statefiles/", "exports/", ".complaint_workspace/"))):
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("source_unavailable")
+            files[relative] = {"sha256": _hash_file(path), "mode": stat.S_IMODE(path.stat().st_mode), "git_mode": mode}
+    for relative in extra:
+        if _private_binding_path(relative):
+            raise ValueError("private_source_binding_forbidden")
+        path = _safe_relative(root, relative)
+        if path is None:
+            raise ValueError("source_alias_forbidden")
+        if path.is_file() and not (root / relative).is_symlink():
+            files[relative] = {"sha256": _hash_file(path), "mode": stat.S_IMODE(path.stat().st_mode)}
+        elif not path.is_dir():
+            raise ValueError("missing_output")
+    value = {"files": files, "dependencies": dependencies}
+    return {**value, "digest": _digest(value)}
+
+
+def _pytest_instrument(command, arguments):
+    # Keep the original shell/environment prefix and original selectors. This
+    # adapter supports one explicit pytest invocation, not arbitrary scripts.
+    pattern = r"(?<![\w-])(?:python(?:3(?:\.\d+)*)?\s+-m\s+pytest|pytest)(?=\s|$)"
+    matches = list(re.finditer(pattern, command))
+    if len(matches) != 1 or any(flag in command for flag in ("--junit", "--collect-only", "--complaint-evidence-path", " -p no:")):
+        raise ValueError("unsupported_behavioral_command")
+    end = matches[0].end()
+    import shlex
+    return command[:end] + " " + shlex.join(arguments) + command[end:]
+
+
+def _read_catalog(path, *, repo_root=None):
+    import duckdb
+    from .improvement_plan import _hash_file, _private_binding_path
+    with duckdb.connect(str(path), read_only=True) as database:
+        nodes = database.execute("SELECT nodeid, seal, file_count, completion_authority FROM pytest_ast_seal").fetchall()
+        files = database.execute("SELECT path, content_hash FROM pytest_ast_file_hash").fetchall()
+    if len(nodes) > 20000 or len(files) > 20000:
+        raise ValueError("catalog_population_unbounded")
+    hashes = {str(p): str(h) for p, h in files}
+    if repo_root is not None:
+        for name in hashes:
+            relative = Path(name).resolve().relative_to(repo_root) if Path(name).resolve().is_relative_to(repo_root) else None
+            if relative is not None and _private_binding_path(relative.as_posix()):
+                raise ValueError("private_source_binding_forbidden")
+    if len(hashes) != len(files) or any(_hash_file(Path(p)) != h for p, h in hashes.items()):
+        raise ValueError("stale_source_hash")
+    if (len({n for n, _, _, _ in nodes}) != len(nodes) or
+            any(not isinstance(n, str) or not n or not isinstance(seal, str) or re.fullmatch(r"[0-9a-f]{64}", seal) is None
+                or type(count) is not int or not 0 < count <= len(hashes) or authority is not False
+                for n, seal, count, authority in nodes)):
+        raise ValueError("catalog_seal_invalid")
+    return [n for n, _, _, _ in nodes], hashes
+
+
+_IMPACTED_BEHAVIORAL_CHECKS = {
+    "integrations/ipfs_datasets/legal.py": ("tests/test_explicit_legal_context.py", "tests/test_ipfs_adapter_layer.py"),
+    "integrations/ipfs_datasets/storage.py": ("tests/test_private_storage_adapter.py", "tests/test_ipfs_kit_storage_adapter.py", "tests/test_proof_report_and_pinning.py"),
+    "integrations/ipfs_datasets/private_storage.py": ("tests/test_private_workspace_crypto.py", "tests/test_private_workspace_keys.py", "tests/test_private_storage_adapter.py"),
+    "applications/complaint_workspace.py": ("tests/test_private_workspace_isolation.py", "tests/test_private_workspace_policy.py", "tests/test_private_workspace_keys.py"),
+    "integrations/ipfs_datasets/llm.py": ("tests/test_grok47_router_contract.py", "tests/test_private_workspace_policy.py"),
+    "mediator/mediator.py": ("tests/test_factual_correction_replay.py", "tests/test_tui_shared_interview.py"),
+}
+
+
+def _impacted_behavioral_checks(root, changed_paths):
+    selected = set()
+    for changed in changed_paths:
+        selected.update(_IMPACTED_BEHAVIORAL_CHECKS.get(changed, ()))
+    if any(not (root / path).is_file() for path in selected):
+        raise ValueError("impacted_check_missing")
+    return sorted(selected)
+
+
+def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, Any], command: str, *,
+                               runner, environment: dict, timeout_seconds: float = TIMEOUT_SECONDS,
+                               context: Mapping[str, Any] | None = None, declared_command: str | None = None):
+    """Execute and measure an owned command; never accept serialized success.
+
+    Independent collection freezes the required population. The actual command
+    runs with explicit phase and native AST plugins, a fresh catalog and JUnit.
+    The caller-provided runner must be the native sealed executor or a test seam
+    which delegates it. This callback is trusted host code, not an untrusted
+    remote or JSON input; a sealed marker is not callback authentication. The
+    consumed native path supplies the original canonical executor.
+    """
+    import shlex
+    import xml.etree.ElementTree as ET
+    from types import SimpleNamespace
+    from .improvement_plan import (_MeasuredEvidence, _MEASURED, _pin_measurement, _digest, _hash_file,
+                                   bind_sources, SEALED_ENVIRONMENT_POLICY)
+    root, state_dir = Path(root).resolve(), Path(state_dir).resolve()
+    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    run = Path(tempfile.mkdtemp(prefix="measured-", dir=state_dir)); run.chmod(0o700)
+    observation_command = declared_command or command
+    contract = {"task": dict(task), "context": dict(context or {}), "command": command, "declared_command": observation_command}
+    extra = _task_outputs(task)
+    start = time.monotonic()
+    original_command = command
+    impacted = _impacted_behavioral_checks(root, (context or {}).get("changed_paths", ()))
+    release_script = (task.get("id") == "CIMP-REL-03" and
+        task.get("validation_commands") == ["python scripts/validate_complaint_intake.py --phase pre-admission"] and
+        "tests/test_intake_release_gate.py" in extra and
+        command.rstrip().endswith("python scripts/validate_complaint_intake.py --phase pre-admission"))
+    before = _source_freeze(root, extra)
+    artifacts, results = [], []
+    required, cases, imported = [], [], {}
+    reason = ""
+    def execute(mode):
+        catalog, manifest = run / (mode + ".duckdb"), run / (mode + ".json")
+        junit = run / "junit.xml"
+        options = (["-p", str(context["pytest_guard_plugin"])] if (context or {}).get("pytest_guard_plugin") else []) + ["-p", "integrations.ipfs_accelerate.improvement_plan", "-p", "ipfs_accelerate_py.testing.pytest_ast_seal",
+                   "--complaint-evidence-path=" + str(manifest)]
+        options += ["--collect-only"] if mode == "collect" else ["--junitxml=" + str(junit), "-o", "junit_family=xunit2"]
+        options += [p for p in impacted if p not in command.split()]
+        instrumented = _pytest_instrument(command, options)
+        export = "export IPFS_ACCELERATE_PYTEST_SEAL_DUCKDB=" + shlex.quote(str(catalog))
+        # Never depend on ambient pytest injection or a shared/reused catalog.
+        export += " PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTEST_ADDOPTS='' PYTEST_PLUGINS=''"
+        instrumented = export + " && " + instrumented
+        remaining = timeout_seconds - (time.monotonic() - start)
+        if remaining <= 0:
+            raise TimeoutError("subprocess_timeout")
+        result = runner(spec=SimpleNamespace(command=instrumented, raw_command=command),
+                        workspace_path=root, timeout_seconds=remaining, environment=environment)
+        _atomic_json(run / (mode + "-native-result.json"), result)
+        results.append({"mode": mode, "original_command": command, "instrumented_command": instrumented, "executed_command": result.get("command"),
+                        "returncode": result.get("returncode"), "timed_out": bool(result.get("timed_out")),
+                        "validation_python_launcher": result.get("validation_python_launcher", {})})
+        if result.get("validation_python_launcher", {}).get("sealed") is not True:
+            raise ValueError("sealed_execution_unavailable")
+        if result.get("timed_out") or result.get("error") == "subprocess_timeout":
+            raise TimeoutError("subprocess_timeout")
+        if not manifest.is_file():
+            raise ValueError("missing_phase_manifest")
+        guard_path = manifest.with_suffix(".guard.json")
+        if (context or {}).get("require_child_guard") or guard_path.is_file():
+            guard = _read_json(guard_path)
+            if guard.get("network_process_dispatch_permitted") is not False or guard.get("exitstatus") != result.get("returncode"):
+                raise ValueError("nested_fixture_guard_unavailable")
+            artifacts.append({"path": str(guard_path), "sha256": _hash_file(guard_path)})
+        observation = _read_json(manifest, limit=20_000_000)
+        if observation.get("exitstatus") != result.get("returncode"):
+            raise ValueError("exit_status_mismatch")
+        for path in (manifest, catalog, run / (mode + "-native-result.json"), *([junit] if mode == "run" else [])):
+            if not path.is_file():
+                raise ValueError("missing_output")
+            artifacts.append({"path": str(path), "sha256": _hash_file(path)})
+        return result, observation, _read_catalog(catalog, repo_root=root)
+    try:
+        if release_script:
+            if time.monotonic() - start >= timeout_seconds:
+                raise TimeoutError("subprocess_timeout")
+            original = runner(spec=SimpleNamespace(command=original_command, raw_command=original_command),
+                workspace_path=root, timeout_seconds=max(0.001, timeout_seconds - (time.monotonic() - start)), environment=environment)
+            _atomic_json(run / "declared-script-result.json", original)
+            artifacts.append({"path": str(run / "declared-script-result.json"), "sha256": _hash_file(run / "declared-script-result.json")})
+            results.append({"mode": "declared_script", "original_command": original_command,
+                "instrumented_command": original_command, "returncode": original.get("returncode"),
+                "validation_python_launcher": original.get("validation_python_launcher", {})})
+            if original.get("validation_python_launcher", {}).get("sealed") is not True:
+                raise ValueError("sealed_execution_unavailable")
+            if original.get("timed_out"):
+                raise TimeoutError("subprocess_timeout")
+            if original.get("returncode") != 0:
+                raise ValueError("declared_command_failed")
+            command = command[:-len("python scripts/validate_complaint_intake.py --phase pre-admission")] + "python -m pytest -q --run-llm --run-network --run-heavy tests/test_intake_release_gate.py"
+        collected_result, collection, (_, collected_hashes) = execute("collect")
+        required = collection.get("nodeids", [])
+        if collected_result.get("returncode") != 0:
+            raise ValueError("collection_failed")
+        if not required:
+            raise ValueError("zero_test_collection")
+        if len(required) != len(set(required)) or any(not isinstance(n, str) or not n for n in required):
+            raise ValueError("required_test_identity_malformed")
+        if before != _source_freeze(root, extra):
+            raise ValueError("stale_source_hash")
+        executed, phases, (sealed_nodes, imported) = execute("run")
+        if required != phases.get("nodeids"):
+            raise ValueError("collection_identity_mismatch")
+        by_node = {}
+        for row in phases.get("reports", []):
+            by_node.setdefault(row["nodeid"], []).append(row)
+        for node in required:
+            reports = by_node.get(node, [])
+            outcomes = [r.get("outcome") for r in reports]
+            outcome = "skipped" if "skipped" in outcomes else "failed" if "failed" in outcomes else "passed"
+            cases.append({"nodeid": node, "outcome": outcome})
+            if outcome == "skipped":
+                raise ValueError("skipped_required_case")
+            if outcome == "failed":
+                raise ValueError("failed_assertion")
+            if sorted(r.get("when") for r in reports) != ["call", "setup", "teardown"]:
+                raise ValueError("missing_required_case_phase")
+        if set(by_node) != set(required) or executed.get("returncode") != 0:
+            raise ValueError("failed_assertion")
+        junit_nodes = []
+        for case in ET.parse(run / "junit.xml").iter("testcase"):
+            identity = [p.get("value") for p in case.findall("properties/property") if p.get("name") == "complaint_nodeid"]
+            if len(identity) != 1 or any(case.find(tag) is not None for tag in ("failure", "error", "skipped")):
+                raise ValueError("junit_required_case_mismatch")
+            junit_nodes.extend(identity)
+        if len(junit_nodes) != len(required) or set(junit_nodes) != set(required):
+            raise ValueError("junit_required_case_mismatch")
+        if len(sealed_nodes) != len(required) or set(sealed_nodes) != set(required):
+            raise ValueError("missing_current_ast_seal")
+        if any(imported.get(p) != h for p, h in collected_hashes.items()):
+            raise ValueError("stale_source_hash")
+    except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
+        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command"} else "host_measurement_unavailable"
+    after = _source_freeze(root, extra)
+    if before != after:
+        reason = "stale_source_hash"
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
+    measured = {"schema": "complaint-owned-behavioral-measurement@1", "reason": reason,
+                "trusted_executor": {"module": str(getattr(runner, "__module__", "")), "qualname": str(getattr(runner, "__qualname__", "")),
+                    "canonical_native_identity": runner is PortalImplementationDaemon._validation_command_runner,
+                    "boundary": "trusted host code; returned sealed marker alone does not authenticate arbitrary callbacks"},
+                "required_nodeids": required, "cases": cases, "source_before": before, "source_after": after,
+                "source_unchanged": before == after, "imported_sources": imported,
+                "task_contract_digest": _digest(contract), "results": results, "artifacts": artifacts,
+                "completion_authority": False, "run_path": str(run),
+                "lane_basis": "native_host_validation", "live_node_verified": False, "impacted_checks": impacted,
+                "behavioral_companion": "tests/test_intake_release_gate.py" if release_script else None,
+                "environment_policy": {"effective_PATH": environment.get("PATH"), "python": environment.get("IPFS_ACCELERATE_VALIDATION_PYTHON_EXECUTABLE"),
+                    "HOME": "fresh private native command directory; not operator home", "ambient_pytest_injection": False}}
+    measured["workspace_path"] = str(root)
+    measured["output_paths"] = extra
+    artifact_rows = [{"relative_path": os.path.relpath(a["path"], root), "path": a["path"],
+                      "present": True, "sha256": a["sha256"]} for a in artifacts]
+    # These environment fields describe native policy, not access to the real home.
+    observed_environment = {**SEALED_ENVIRONMENT_POLICY, "HOME": "native-managed-fresh-private-home"}
+    measured["observation_binding"] = {"command": observation_command, "collected_count": len(required),
+        "required_nodeids": required, "cases": cases, "source_binding": bind_sources(root, extra),
+        "exit_status": 0 if not reason else 1, "timed_out": reason == "subprocess_timeout",
+        "lane": "local_node_integration", "artifacts": artifact_rows, "environment": observed_environment}
+    _atomic_json(run / "measurement.json", measured)
+    observed = _MeasuredEvidence({"lane": "local_node_integration", "command": observation_command,
+            "exit_status": 0 if not reason else 1, "timed_out": reason == "subprocess_timeout",
+            "collected_count": len(required), "cases": cases, "required_nodeids": required,
+            "environment": observed_environment, "source_binding": bind_sources(root, extra),
+            "artifacts": artifact_rows, "host_measurement": measured, "host_task_contract": contract}, capability=_MEASURED)
+    _pin_measurement(observed, run / "measurement.json", _hash_file(run / "measurement.json"))
+    result_path = next((run / name for name in ("run-native-result.json", "collect-native-result.json", "declared-script-result.json") if (run / name).is_file()), run / "unavailable")
+    observed.native_result = _read_json(result_path, limit=20_000_000)
+    return observed
+
+
+class EvidenceValidationScheduler:
+    """Native scheduler decorator: preserve proposal/impact binding and sole loop."""
+    def __init__(self, native_scheduler, *, state_dir, spec):
+        self.native_scheduler = native_scheduler
+        self.state_dir, self.spec = Path(state_dir), spec
+        self.bound_task = None
+
+    def bind_task(self, task, workspace):
+        self.bound_task = (task, Path(workspace).resolve())
+        return {}  # native proof_workflow has no invented proof/fallback options
+
+    def _run(self, method, *args, **kwargs):
+        from dataclasses import replace
+        from ipfs_accelerate_py.agent_supervisor.validation.validation_runtime import sealed_validation_python_runner
+        if self.bound_task is None or self.bound_task[1] != Path(kwargs["workspace_path"]).resolve():
+            return {"attempted": False, "passed": False, "returncode": 78, "results": [], "reason": "task_evidence_binding_missing"}
+        native_task, root = self.bound_task
+        task = next((t for t in self.spec["tasks"] if t["id"] == native_task.task_id), None)
+        if task is None:
+            return {"attempted": False, "passed": False, "returncode": 78, "results": [], "reason": "task_evidence_contract_missing"}
+        delegate = kwargs.get("runner")
+        receipts = []
+        @sealed_validation_python_runner
+        def measured_runner(*, spec, workspace_path, timeout_seconds, environment):
+            observed = measure_behavioral_command(root, self.state_dir / "evidence-runs", task, str(spec.command),
+                runner=delegate, environment=environment, timeout_seconds=timeout_seconds,
+                declared_command=task["validation_commands"][spec.ordinal] if spec.ordinal < len(task["validation_commands"]) else None,
+                context={"task_id": native_task.task_id, "task_cid": str(getattr(native_task, "canonical_task_cid", "")),
+                         "proposal_id": str(getattr(getattr(args[0], "proposal", None), "proposal_id", "")) if method == "run_validated" else "",
+                         "proposal_context_id": str(getattr(getattr(args[0], "proposal", None), "context_id", "")) if method == "run_validated" else "",
+                         "proposal_replay_nonce_sha256": hashlib.sha256(str(getattr(getattr(args[0], "proposal", None), "replay_nonce", "")).encode()).hexdigest() if method == "run_validated" else "",
+                         "changed_paths": list(getattr(getattr(args[0], "proposal", None), "changed_paths", ())) if method == "run_validated" else [],
+                         "attempt_ordinal": None, "attempt_binding_status": "ordinal_unavailable_from_public_task_hook; native_proposal_context_retained",
+                         "repository_tree_id": str(getattr(getattr(args[0], "proposal", None), "repository_tree_id", "")) if method == "run_validated" else "",
+                         "model_policy": {"model": MODEL, "fallback": False}})
+            receipt = gate_task_completion(root, self.state_dir, task, observed,
+                legal_data_version=observed["host_measurement"]["source_before"]["dependencies"].get("external/ipfs_datasets_py", {}).get("head", "unavailable"))
+            receipts.append(receipt)
+            result = dict(observed.native_result)
+            result.update(command=str(spec.command), raw_command=str(spec.raw_command or spec.command),
+                          returncode=0 if receipt["admitted"] else 78, behavioral_evidence=receipt)
+            return result
+        kwargs["runner"] = measured_runner
+        # A previous cached return code cannot stand in for current measured cases.
+        command_index = 1 if method == "run_validated" else 0
+        mutable = list(args)
+        from ipfs_accelerate_py.agent_supervisor.validation.validation_commands import build_validation_commands
+        mutable[command_index] = tuple(replace(c, cacheable=False) for c in build_validation_commands(mutable[command_index]))
+        result = getattr(self.native_scheduler, method)(*mutable, **kwargs)
+        if result.get("passed") and (not receipts or any(not r["admitted"] for r in receipts)):
+            result.update(passed=False, returncode=78, reason="current_behavioral_evidence_required",
+                          merge_eligible=False, completion_authoritative=False, authoritative=False)
+        result["behavioral_evidence"] = receipts
+        result["firstparty_completion_authority"] = False
+        from .improvement_plan import canonical_model_policy
+        try:
+            dependency = _source_freeze(root).get("dependencies", {}).get("external/ipfs_datasets_py", {})
+            legal_version = dependency.get("head") or dependency.get("gitlink") or "unavailable"
+            result["dependent_readiness"] = recompute_dependent_readiness(
+                root, self.state_dir, self.spec, model_policy=canonical_model_policy(), legal_data_version=legal_version)
+        except Exception:
+            # Advisory observation must not replace native validation results;
+            # cancellation/SystemExit remain outside this ordinary-exception fence.
+            result["dependent_readiness"] = {"available": False, "reason": "advisory_observation_unavailable",
+                "native_scheduling_enforced": False, "completion_authority": False}
+        return result
+
+    def run(self, *args, **kwargs):
+        return self._run("run", *args, **kwargs)
+
+    def run_validated(self, *args, **kwargs):
+        return self._run("run_validated", *args, **kwargs)
+
+def _run_evidence_daemon_adapter(argv, *, repo_root, validation_scheduler, proof_workflow=None):
+    import signal
+    import threading
+    from pathlib import Path
+    from ipfs_accelerate_py.agent_supervisor.runtime.process_security import harden_state_authority_process
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon_runner import (
+        ImplementationDaemonRunContext, implementation_state_paths,
+        configure_daemon_logging, apply_merge_resolver_environment,
+        run_portal_implementation_daemon_loop,
+    )
+    harden_state_authority_process()
+    args = native.parse_args(list(argv))
+    if validation_scheduler is None:
+        raise ValueError("behavioral_evidence_scheduler_unavailable")
+    # This adapter owns the ordinary Markdown route only. Do not demote any
+    # richer authority mode or discard a requested maintenance operation.
+    if (str(getattr(args, 'authority_mode', '') or '') not in {'', 'legacy_markdown'}
+            or str(getattr(args, 'task_source_kind', '') or '') not in {'', 'legacy-markdown'}):
+        raise ValueError("unsupported_evidence_daemon_authority")
+    forbidden = (
+        'database_path', 'coordination_path', 'quack_endpoint', 'owner_session_id',
+        'state_owner_client_id', 'task_context_bundle_artifact', 'task_context_bundle_sha256',
+        'production_provider_policy', 'production_provider_launch_authority_receipt_path',
+        'production_provider_launch_authority_receipt_content_id',
+        'manual_completion_authority_task_id', 'manual_completion_authority_required_task_id',
+        'manual_completion_authority_epoch_id', 'manual_completion_authority_revalidation_only',
+        'reset_manual_completion_authority_renewal_task_id', 'clear_protected_path_incident',
+        'approve_protected_path_commit', 'operator_clearance_note',
+        'approve_disposed_ephemeral_workspace', 'accepted_control_plane_pin_json',
+        'configured_board_live_admission_json', 'plan_bound_revision_cid',
+    )
+    if any(getattr(args, name, None) for name in forbidden):
+        raise ValueError("unsupported_evidence_daemon_authority")
+    if int(getattr(args, 'state_owner_bootstrap_fd', -1)) != -1:
+        raise ValueError("unsupported_evidence_daemon_owner_bootstrap")
+    configure_daemon_logging(args)
+    apply_merge_resolver_environment(args)
+    # Preserve nativeA main's exact49 argument expressions. In particular this
+    # includes validation workers/budget, generated paths, reservations, source
+    # root expectations, slices, worktree/merge scope and all custody options.
+    REPO_ROOT = Path(repo_root).resolve()
+    daemon = native.PortalImplementationDaemon(
+        assumed_completed_task_ids=args.assume_completed_task_id,
+        board_namespace=str(getattr(args, "board_namespace", "") or ""),
+        events_path=args.state_dir / f"{args.state_prefix}_events.jsonl",
+        execution_slice_task_cids=args.execution_slice_task_cid,
+        execution_slice_task_ids=args.execution_slice_task_id,
+        expected_task_source_repository_root_id=args.expected_task_source_repository_root,
+        expected_task_source_root_id=args.expected_task_source_root,
+        external_reservation_manifest_paths=args.external_reservation_manifest_path,
+        generated_status_paths=args.generated_status_path,
+        idle_lane_work_stealing=args.idle_lane_work_stealing,
+        implement=args.implement,
+        implementation_command=args.implementation_command or None,
+        implementation_protected_paths=args.implementation_protected_path,
+        implementation_timeout=args.implementation_timeout,
+        llm_merge_resolver_command=args.llm_merge_resolver_command or None,
+        llm_merge_resolver_timeout_seconds=args.llm_merge_resolver_timeout_seconds,
+        maintenance_interval_seconds=args.maintenance_interval_seconds,
+        manual_completion_authority_epoch_id=args.manual_completion_authority_epoch_id,
+        manual_completion_authority_required_task_ids=args.manual_completion_authority_required_task_id,
+        manual_completion_authority_revalidation_only=args.manual_completion_authority_revalidation_only,
+        manual_completion_authority_task_ids=args.manual_completion_authority_task_id,
+        max_task_attempts=args.max_task_attempts,
+        merge_queue_dir=args.merge_queue_dir,
+        merge_reconciliation_max_merges=args.merge_reconciliation_max_merges,
+        merge_target_branch=args.merge_target_branch,
+        merged_worktree_cleanup_max=args.merged_worktree_cleanup_max,
+        objective_bundle_dir=args.objective_bundle_dir,
+        objective_path=args.objective_path,
+        production_provider_context_budget_tokens=args.production_provider_context_budget_tokens,
+        production_provider_launch_authority_receipt_content_id=args.production_provider_launch_authority_receipt_content_id,
+        production_provider_launch_authority_receipt_path=args.production_provider_launch_authority_receipt_path,
+        production_provider_policy=args.production_provider_policy,
+        production_provider_review_authority_key_path=args.production_provider_review_authority_key_path,
+        production_provider_timeout_seconds=args.production_provider_timeout_seconds,
+        repo_root=REPO_ROOT,
+        state_path=args.state_dir / f"{args.state_prefix}_task_state.json",
+        strategy_path=args.state_dir / f"{args.state_prefix}_strategy.json",
+        strict_task_sharding=args.strict_task_sharding,
+        task_header_prefix=args.task_prefix,
+        task_shard_count=args.task_shard_count,
+        task_shard_index=args.task_shard_index,
+        task_source=args.todo_path
+                            if args.task_source_kind in {"markdown", "duckdb"}
+                            else None,
+        task_source_kind=args.task_source_kind
+                            if args.task_source_kind in {"markdown", "duckdb"}
+                            else "",
+        todo_path=args.todo_path,
+        use_ephemeral_worktree=args.implement and not args.no_ephemeral_worktree,
+        validation_max_workers=args.validation_max_workers,
+        validation_resource_budget=args.validation_resource_budget,
+        worktree_root=args.worktree_root,
+        worktree_submodule_paths=args.worktree_submodule_path or None,
+        validation_scheduler=validation_scheduler,
+        proof_workflow=proof_workflow,
+    )
+    context = ImplementationDaemonRunContext(parsed=args, **implementation_state_paths(args))
+    handlers_installed = threading.current_thread() is threading.main_thread()
+    previous_term = previous_int = None
+    def request_stop(signum, _frame):
+        raise SystemExit(128 + signum)
+    if handlers_installed:
+        previous_term = signal.signal(signal.SIGTERM, request_stop)
+        previous_int = signal.signal(signal.SIGINT, request_stop)
+    try:
+        # The public native loop owns run_once, bounded wait and event close.
+        return run_portal_implementation_daemon_loop(daemon, context, logger=native.logger)
+    finally:
+        if handlers_installed:
+            signal.signal(signal.SIGTERM, previous_term)
+            signal.signal(signal.SIGINT, previous_int)
+
+
+def evidence_daemon_main(argv):
+    root = Path(__file__).resolve().parents[2]
+    _native_modules(root)
+    from .improvement_plan import load_spec
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+    from ipfs_accelerate_py.agent_supervisor.validation.validation_scheduler import ValidationScheduler
+    args = native.parse_args(list(argv))
+    scheduler = EvidenceValidationScheduler(ValidationScheduler(max_workers=args.validation_max_workers,
+        resource_budget=args.validation_resource_budget, default_timeout_seconds=args.implementation_timeout),
+        state_dir=args.state_dir, spec=load_spec(root / SPEC_RELATIVE))
+    return _run_evidence_daemon_adapter(argv, repo_root=root, validation_scheduler=scheduler, proof_workflow=scheduler.bind_task)
+
+
+if __name__ == "__main__":
+    # The native supervisor executes its public daemon_script_path directly.
+    # Bootstrap before relative imports; ordinary application CLI stays intact.
+    if __package__ in {None, ""}:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+        __package__ = "integrations.ipfs_accelerate"
+    raise SystemExit(evidence_daemon_main(sys.argv[1:]) if "--todo-path" in sys.argv[1:] else main())
