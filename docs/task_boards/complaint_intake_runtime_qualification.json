@@ -283,7 +283,7 @@
     }
   ],
   "implementation_tasks_completed_by_these_checks": 0,
-  "scope": "Provisioning and startup-path qualification with source and synthetic fixtures. The full implementation taskboard is still pending; native supervisor progress must be observed separately.",
+  "scope": "Implementation is underway; current_campaign_progress reports native taskboard completion. Provisioning and source checks grant no completion themselves. Full release qualification remains pending.",
   "first_party_source_sha256": {
     "integrations/ipfs_accelerate/improvement_plan.py": "034a30d5f23e5dec606fa7ff09c3bd27921bcbab527bd1d8103b45beab8f9781",
     "integrations/ipfs_accelerate/improvement_runner.py": "a7048dd2e02769989fbf04ebfa6d580a3833e238d7ac5c611e9aab478afb3ea8",
@@ -785,14 +785,14 @@
     }
   },
   "current_campaign_progress": {
-    "completed": 6,
-    "pending": 52,
+    "completed": 8,
+    "pending": 50,
     "total": 58,
-    "state": "stopped_ready_for_capacity_bound_start",
-    "observed_at": "2026-10-21T09:24:31.564458+00:00",
+    "state": "stopped_ready_to_resume_after_qualified_privacy_corrections",
+    "observed_at": "2026-10-21T10:09:47.016997+00:00",
     "release_qualified": false,
     "continue_until_all58_completed": true,
-    "source": "Actual native taskboard and stopped full-payload receipt; capacity/source changes add no completions."
+    "source": "Native committed taskboard and exact successful PRIV002/003 validation/merge/finish events; source corrections grant no completion."
   },
   "pending_task_runtime_guidance": {
     "receipt": "/tmp/complaint-pending-guidance-install-20261021-63nbl1nl/receipt.json",
@@ -1144,6 +1144,46 @@
       "native_queued": false,
       "validation_passed": true,
       "validation_returncode": 0,
+      "provider_attempt_refunded": false
+    },
+    {
+      "task_id": "CIMP-PRIV-002",
+      "attempt": 2,
+      "event_id": "sha256:f6d11e7470bf2f510851807f40ab47a7f6c2c0372ffb23cb5d02dc19f63bc957",
+      "finished_at": "2026-10-21T09:40:26.074755+00:00",
+      "candidate_commit": "ac4a8a3e30637def5026dfb2284cc19e866cf121",
+      "integration_commit": "13bbe4e16d0bfd6a06dd18e963832f229967a9f9",
+      "native_pipeline_returncode": 0,
+      "validation_passed": true,
+      "native_board_completion": {
+        "complete": true,
+        "pending_merge": false,
+        "reason": "merged_into_target"
+      },
+      "event_receipt": {
+        "receipt": "/tmp/complaint-priv002-priv003-native-completion-20261021-swfzkx1_/cimp-priv-002-events.json",
+        "sha256": "39f31cc432bd24d0022291ca0d341b61800c3dbb0ea22a31382411577775c83b"
+      },
+      "provider_attempt_refunded": false
+    },
+    {
+      "task_id": "CIMP-PRIV-003",
+      "attempt": 1,
+      "event_id": "sha256:708e3f40d724d2492896d105210e72b8e1d4a92082dea23c93fb61c115b099a8",
+      "finished_at": "2026-10-21T09:49:04.986985+00:00",
+      "candidate_commit": "22fda37877cbe8056e756a5d7500853471b03ce6",
+      "integration_commit": "4202ecd9efe7f055dfbbe16587a3e2e709566441",
+      "native_pipeline_returncode": 0,
+      "validation_passed": true,
+      "native_board_completion": {
+        "complete": true,
+        "pending_merge": false,
+        "reason": "merged_into_target"
+      },
+      "event_receipt": {
+        "receipt": "/tmp/complaint-priv002-priv003-native-completion-20261021-swfzkx1_/cimp-priv-003-events.json",
+        "sha256": "e41b215f7ccee11feea38c9f57323dcca03d4f20f3868d2da797dbe318fa0ee6"
+      },
       "provider_attempt_refunded": false
     }
   ],
@@ -1659,12 +1699,144 @@
       "includes_filesystem_overhead": false,
       "assumes_uncompressed_file_content": true
     },
-    "root_binding_claimed_by_start_yet": false,
+    "root_binding_claimed_by_start_yet": true,
     "existing_state_epoch_and_history_unchanged": true,
-    "only_future_checkouts_use_new_root": true
+    "only_future_checkouts_use_new_root": true,
+    "persisted_root_binding": {
+      "schema_version": "complaint-worktree-root@1",
+      "path": "/storage/barberb/changuard/.complaint-generator-worktrees-20261021",
+      "device": 55,
+      "inode": 5623844,
+      "uid": 1003,
+      "mode": 448,
+      "repo_root": "/home/barberb/.cache/codex-worktrees/complaint-generator-publish-20261021",
+      "state_dir": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021",
+      "marker_sha256": "6931a3fab29694cd2ae74f73133bcb0d0d62292ec527afb4ba48525f5f48f860"
+    }
   },
   "operator_control_plane_context_diagnosis": {
     "receipt": "/tmp/complaint_settlement_environment_diagnosis_20261021.json",
     "sha256": "5c0932c964b76df57b76a575a245ea55224b7f1bff1e5a4b5a0d513fdd5c8992"
+  },
+  "privacy_corrections_after_native_priv003": {
+    "installation": {
+      "receipt": "/tmp/complaint-qualified-privacy-correction-installation-20261021-3pr1bzc6/receipt.json",
+      "sha256": "7f49dcc2677b88d1fe29021167519607df9702bd8c2d6bf9e017bbd7fe761ec0"
+    },
+    "corrections": [
+      {
+        "kind": "owner",
+        "accepted_candidate": "ac4a8a3e30637def5026dfb2284cc19e866cf121",
+        "qualified_child": "ca53f971721954338aa088fd6a9ebe657d3e217c",
+        "actual_parent": "0aff471b40107e924f7c03f1fcfc6b5b1297afb5",
+        "applied_commit": "af1afde11fad4fd72521a19a9b137b294551f5c0",
+        "manifest": "/tmp/complaint_priv002_ast_install_manifest_20261021.json",
+        "manifest_sha256": "1a99443f769490fa30a7da149a7f78e5a87844dc6b02771045593b24c484c039",
+        "qualification_manifest": {
+          "receipt": "/tmp/complaint_priv002_ast_install_manifest_20261021.json",
+          "sha256": "1a99443f769490fa30a7da149a7f78e5a87844dc6b02771045593b24c484c039"
+        },
+        "first_party_test_count": 93,
+        "scope": "Owner/case artifact isolation and local-only host-path correction. Explicit fresh AST catalog binds93 node passes and all six changed files; separate observer records279 passed setup/call/teardown phases. Existing session persistence remains plaintext_pending.",
+        "ast_catalogs": [
+          {
+            "explicit_plugin": "ipfs_accelerate_py.testing.pytest_ast_seal",
+            "catalog": "/tmp/complaint-privacy-priv002-corrective-ast-committed-final-20261021-1l2ndxos/pytest-seals.duckdb",
+            "catalog_sha256": "605b2338dc4e177341aa36d458b1af33e4699e538587925655bc941c64be3dfa",
+            "catalog_size": 1323008,
+            "per_node_call_pass_seals": 93,
+            "completion_authority_all_false": true,
+            "file_closure_hash_rows": 105,
+            "all_six_changed_files_match_catalog": true,
+            "phase_manifest": "/tmp/complaint-privacy-priv002-corrective-ast-committed-final-20261021-1l2ndxos/phases.json",
+            "phase_manifest_sha256": "cba4cad79f0dc5ed3b29a3663c462b5cc78a4078cd4ba8b4a0df15677f856128",
+            "matching_setup_call_teardown_pass_reports": 279,
+            "phase_observer_sha256": "0d8f31584602c8bff1cd0abd7406d54f8227906a7deb48d18aeabf98f5c955c5",
+            "fresh_catalog_no_reuse": true
+          }
+        ]
+      },
+      {
+        "kind": "crypto",
+        "accepted_candidate": "22fda37877cbe8056e756a5d7500853471b03ce6",
+        "qualified_child": "89e440b8fd1a732d7b154d9c072ae6adec580ccb",
+        "actual_parent": "af1afde11fad4fd72521a19a9b137b294551f5c0",
+        "applied_commit": "3106b0d037ac95d0ead3ed39eef3a0c9a1fb6f34",
+        "manifest": "/tmp/complaint_priv003_ast_install_manifest_20261021.json",
+        "manifest_sha256": "ff5c8ad8776a9a5f4eaf689ec22c07d86f7c193f21ab00a4f989f0a3de62cd00",
+        "qualification_manifest": {
+          "receipt": "/tmp/complaint_priv003_ast_install_manifest_20261021.json",
+          "sha256": "ff5c8ad8776a9a5f4eaf689ec22c07d86f7c193f21ab00a4f989f0a3de62cd00"
+        },
+        "first_party_test_count": 40,
+        "scope": "Authenticated wire2 routing header and case AAD; typed secure-RNG/backend failures without storage effects; genuine wire1 fixture rejected. First-party40 and separate unchangedKit23 have explicit fresh AST catalogs. No historical persistence migration claimed.",
+        "ast_catalogs": [
+          {
+            "role": "first_party_crypto_and_storage",
+            "catalog": "/tmp/complaint-privacy-private-crypto-ast-final-20261021-j4_glci8/pytest-seals.duckdb",
+            "sha256": "3dafb1dc84b868525a2f2fd28a6707afe17af0910049dfa840eced9e7f636153",
+            "call_pass_nodes": 40,
+            "file_hash_count": 31,
+            "completion_authority": false
+          },
+          {
+            "role": "separate_pinned_kit_aes_unit",
+            "catalog": "/tmp/complaint-privacy-private-crypto-upstream-kit-ast-final-20261021-bflrqebx/pytest-seals.duckdb",
+            "sha256": "ef3bff15ecd2204580bc82721fb63fa4dc067cdf715a0af0aeb188310f84e6bd",
+            "call_pass_nodes": 23,
+            "file_hash_count": 2,
+            "completion_authority": false
+          }
+        ]
+      }
+    ],
+    "native_taskboard_and_authority_unchanged": true,
+    "session_at_rest_protection": "plaintext_pending_until_DUR002",
+    "crypto_wire_schema_version": 2,
+    "wire1_migration_claimed": false,
+    "upstream_kit_compatibility": {
+      "receipt": {
+        "path": "/tmp/complaint-privacy-private-crypto-upstream-kit-ast-final-20261021-bflrqebx/receipt.json",
+        "sha256": "b1dbb4f3a4964b096c261098ea92e87541b22893fd269ce435f22fed35b36d4e"
+      },
+      "junit": {
+        "path": "/tmp/complaint-privacy-private-crypto-upstream-kit-ast-final-20261021-bflrqebx/cases.xml",
+        "sha256": "8236543a43624e3e3e833635d0e25c192e23fe88a12f74f8ea150368b9e2c593"
+      },
+      "catalog": {
+        "role": "separate_pinned_kit_aes_unit",
+        "catalog": "/tmp/complaint-privacy-private-crypto-upstream-kit-ast-final-20261021-bflrqebx/pytest-seals.duckdb",
+        "sha256": "ef3bff15ecd2204580bc82721fb63fa4dc067cdf715a0af0aeb188310f84e6bd",
+        "call_pass_nodes": 23,
+        "file_hash_count": 2,
+        "completion_authority": false
+      },
+      "passed": 23,
+      "skipped": 0,
+      "separate_unchanged_kit_pin": "40c98c71b95be750509ffdb21e7e5494d91b4e79",
+      "parent_daemon_conftest_loaded": false
+    },
+    "limits": "Source-bound synthetic qualification; no real complaint or live-provider canary. Earlier native-launcher-only runs are separate from explicit AST-catalog reruns."
+  },
+  "native_priv002_priv003_completion_observation": {
+    "receipt": "/tmp/complaint-priv002-priv003-native-completion-20261021-swfzkx1_/receipt.json",
+    "sha256": "3b75d46c1865f99ae29c31ec0eb81c09af45e222002000eee41d31a35c043d0a"
+  },
+  "privacy_completion_boundary_stop": {
+    "receipt": {
+      "receipt": "/tmp/complaint-priv003-boundary-stop-20261021-zr0eedwf/stop-result.json",
+      "sha256": "6a1c609fa5452c7c6230534bff926246fdfdd0fcba3bc3ac51095fbe10fca5dc"
+    },
+    "native_preimage": {
+      "receipt": "/tmp/complaint-priv003-boundary-native-preimage-20261021-w75tulp1/receipt.json",
+      "sha256": "39ff1db912d67f82dd3fbfd257b27c899da8016fa201e767369e16675f4d4432"
+    },
+    "first_preflight": {
+      "receipt": "/tmp/complaint-stopped-boundary-restart-ad2uc3nc/preflight.json",
+      "sha256": "20e1544a6837b2e51adb11ac0d7a30f98cbf78db3f432684c29ec53648e63c22"
+    },
+    "cached_native_completed_count": 7,
+    "actual_taskboard_completed_count": 8,
+    "cached_projection_preserved_for_next_ordinary_pass": true
   }
 }
