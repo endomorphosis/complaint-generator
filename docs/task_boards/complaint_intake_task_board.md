@@ -1065,7 +1065,7 @@ Implementation instructions:
 
 ## CIMP-ROUTE-02 Unify interview generation behind typed bounded llm_router requests
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.router
