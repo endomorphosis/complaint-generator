@@ -96,10 +96,19 @@ def _assert_quiet(spy: _Spy, payload: object) -> None:
     assert spy.process == 0
 
 
-def _service(root: Path):
-    from applications.complaint_workspace import ComplaintWorkspaceService
+_FIXTURE_PASSPHRASE = "synthetic policy fixture protection phrase"
 
-    return ComplaintWorkspaceService(root_dir=root)
+
+def _service(root: Path, *, users=()):
+    from applications.complaint_workspace import ComplaintWorkspaceService
+    service = ComplaintWorkspaceService(root_dir=root)
+    if service.private_key_status()["status"] == "absent":
+        service.initialize_private_keys(protection="passphrase", passphrase=_FIXTURE_PASSPHRASE)
+    else:
+        service.unlock_private_keys(passphrase=_FIXTURE_PASSPHRASE)
+    for user_id in users:
+        service.ensure_private_case_key(user_id, user_id)
+    return service
 
 
 def _seed_draft(service, user_id: str, body: str) -> None:
@@ -112,13 +121,14 @@ def _seed_draft(service, user_id: str, body: str) -> None:
 def test_inventory_separates_private_claim_graph_from_public_law(tmp_path: Path) -> None:
     from complaint_generator.workspace import get_privacy_policy, inventory_private_data_classes
 
-    inventory = inventory_private_data_classes("user-inventory", root_dir=tmp_path)
+    service = _service(tmp_path, users=["user-inventory"])
+    inventory = inventory_private_data_classes("user-inventory", service=service)
     private_ids = {item["id"] for item in inventory["private_claim_fact_graph"]}
     assert private_ids == PRIVATE_CLASS_IDS
     assert inventory["public_legal_source_graph"]["id"] == "public_legal_source_graph"
     assert inventory["public_legal_source_graph"]["classification"] == "public"
     assert inventory["public_legal_source_graph"]["distinct_from"] == "private_claim_fact_graph"
-    assert inventory["at_rest_protection"] == "plaintext_pending"
+    assert inventory["at_rest_protection"] == "private_envelope"
     assert inventory["encryption_at_rest_blocks_remote_llm"] is False
     assert inventory["authenticates_tenant"] is False
     assert inventory["reads_existing_private_paths"] is False
@@ -129,7 +139,7 @@ def test_inventory_separates_private_claim_graph_from_public_law(tmp_path: Path)
         "export",
         "secret",
     ]
-    policy = get_privacy_policy("user-inventory", root_dir=tmp_path)
+    policy = get_privacy_policy("user-inventory", service=service)
     assert policy["policy"]["cloud_processing_enabled"] is False
     assert policy["policy"]["processing_mode"] == "local_private"
     assert policy["authenticates_tenant"] is False
@@ -179,7 +189,7 @@ def test_parser_rejects_version_scope_case_and_malformed_consent() -> None:
 def test_legacy_and_malformed_session_permit_no_cloud(tmp_path: Path) -> None:
     from applications.complaint_workspace import ComplaintWorkspaceService
 
-    service = ComplaintWorkspaceService(root_dir=tmp_path)
+    service = _service(tmp_path, users=["legacy-user", "older-user"])
     path = service._session_path("legacy-user")
     path.write_text(
         json.dumps(
@@ -194,7 +204,11 @@ def test_legacy_and_malformed_session_permit_no_cloud(tmp_path: Path) -> None:
             }
         )
     )
-    reloaded = ComplaintWorkspaceService(root_dir=tmp_path)
+    reloaded = _service(tmp_path)
+    original = path.read_bytes()
+    result = reloaded.migrate_legacy_private_session("legacy-user")
+    assert result["complete"] and result["source_bytes_preserved"]
+    assert path.read_bytes() == original
     state = reloaded._load_state("legacy-user")
     assert state["privacy_policy"]["cloud_processing_enabled"] is False
     assert state["privacy_policy"]["processing_mode"] == "local_private"
@@ -207,7 +221,11 @@ def test_legacy_and_malformed_session_permit_no_cloud(tmp_path: Path) -> None:
 
     missing = service._session_path("older-user")
     missing.write_text(json.dumps({"user_id": "older-user", "intake_answers": {"party_name": "Older"}}))
-    older = ComplaintWorkspaceService(root_dir=tmp_path)._load_state("older-user")
+    older_service = _service(tmp_path)
+    before = missing.read_bytes()
+    assert older_service.migrate_legacy_private_session("older-user")["complete"]
+    assert missing.read_bytes() == before
+    older = older_service._load_state("older-user")
     assert older["privacy_policy_load"]["reason"] == "legacy_missing"
     assert older["privacy_policy"]["cloud_processing_enabled"] is False
 
@@ -215,20 +233,25 @@ def test_legacy_and_malformed_session_permit_no_cloud(tmp_path: Path) -> None:
 def test_privacy_commands_do_not_consume_answers_and_persist(tmp_path: Path) -> None:
     from complaint_generator.workspace import get_privacy_policy, set_privacy_policy
 
-    service = _service(tmp_path)
+    service = _service(tmp_path, users=["chat-user"])
     opening = service.run_intake_chat_turn("chat-user")
     assert opening["privacy_notice"]
-    assert "Let's start with the basics." in opening["message"]
-    assert opening["inquiry"]["question_id"] == "party_name"
+    assert opening["inquiry"]["question_id"] == "original_complaint"
+    assert opening["inquiry"]["prompt"] in opening["message"]
     assert opening["accepted_answer"] is None
 
     switched = service.run_intake_chat_turn("chat-user", message="/privacy grok")
     assert switched["accepted_answer"] is None
     assert switched["privacy_command"]["stored_as_answer"] is False
     assert switched["privacy_command"]["processing_mode"] == "grok_cloud"
-    assert switched["inquiry"]["question_id"] == "party_name"
+    assert switched["inquiry"]["question_id"] == "original_complaint"
     assert "/privacy grok" not in json.dumps(switched["session"]["intake_answers"])
     assert "/privacy grok" not in json.dumps(switched["session"]["intake_history"])
+    assert "/privacy grok" not in json.dumps(switched["session"]["original_complaint"])
+    narrative = service.run_intake_chat_turn("chat-user", message="Synthetic original complaint narrative")
+    assert narrative["accepted_answer"]["question_id"] == "original_complaint"
+    assert narrative["session"]["intake_answers"] == {}
+    assert narrative["inquiry"]["question_id"] == "party_name"
 
     first = service.run_intake_chat_turn("chat-user", message="Ada Example")
     second = service.run_intake_chat_turn("chat-user", message="Opposing Example")
@@ -242,14 +265,14 @@ def test_privacy_commands_do_not_consume_answers_and_persist(tmp_path: Path) -> 
     assert persisted["policy"]["cloud_processing_enabled"] is True
     assert persisted["policy"]["permitted_remote"] == {"provider": "grok_cli", "model": "grok-4.7"}
 
-    disabled = set_privacy_policy("chat-user", "local", root_dir=tmp_path)
+    disabled = set_privacy_policy("chat-user", "local", service=_service(tmp_path))
     assert disabled["updated"] is True
     assert disabled["policy"]["cloud_processing_enabled"] is False
     again = get_privacy_policy("chat-user", service=_service(tmp_path))
     assert again["policy"]["processing_mode"] == "local_private"
     assert again["policy"]["cloud_processing_enabled"] is False
 
-    wrong = set_privacy_policy("chat-user", "grok", case_id="some-other-case", root_dir=tmp_path)
+    wrong = set_privacy_policy("chat-user", "grok", case_id="some-other-case", service=_service(tmp_path))
     assert wrong["updated"] is False
     assert wrong["load"]["cloud_processing_enabled"] is False
     assert get_privacy_policy("chat-user", service=_service(tmp_path))["policy"]["cloud_processing_enabled"] is False
@@ -269,7 +292,7 @@ def test_local_mode_blocks_three_egresses_and_status(
     monkeypatch.setenv("HF_TOKEN", TOKEN)
     monkeypatch.setenv("COMPLAINT_USE_IPFS_LLM_ROUTER_STATUS", "1")
 
-    service = _service(tmp_path)
+    service = _service(tmp_path, users=["egress-user"])
     user_id = "egress-user"
     _seed_draft(service, user_id, f"Draft body that must stay local. {MARKER}")
 
@@ -352,7 +375,7 @@ def test_grok_opt_in_is_exact_and_does_not_fall_back(
 
     monkeypatch.setenv("IPFS_DATASETS_PY_LLM_PROVIDER", "openrouter")
     monkeypatch.setenv("HF_TOKEN", TOKEN)
-    service = _service(tmp_path)
+    service = _service(tmp_path, users=["grok-user"])
     user_id = "grok-user"
     service.set_privacy_policy(user_id, "grok")
     _seed_draft(service, user_id, f"Filed body {MARKER}")
@@ -574,7 +597,7 @@ def test_workspace_backend_config_cannot_replace_its_private_context(tmp_path, m
         user_id="other-user", case_id="other-case", data_class="public_legal_source_graph")
     monkeypatch.setattr(review, "_load_backend_kwargs", lambda *a, **k: {
         "id": "synthetic", "complaint_privacy_context": forged})
-    service = _service(tmp_path)
+    service = _service(tmp_path, users=["local-user"])
     _seed_draft(service, "local-user", MARKER)
     generated = service.generate_complaint("local-user", use_llm=True,
         provider="grok_cli", model="grok-4.7")
@@ -585,7 +608,7 @@ def test_workspace_backend_config_cannot_replace_its_private_context(tmp_path, m
 def test_loaded_foreign_identity_cannot_transfer_cloud_consent(tmp_path, spies):
     import integrations.ipfs_datasets.llm as llm
 
-    service = _service(tmp_path)
+    service = _service(tmp_path, users=["selected-user"])
     state = service._load_state("selected-user")
     state["user_id"] = "foreign-user"
     state["case_id"] = "foreign-case"
@@ -609,7 +632,7 @@ def test_draft_backend_error_receipt_cannot_quote_private_case(tmp_path, monkeyp
     def fail(*args, **kwargs):
         raise RuntimeError(MARKER + TOKEN)
     monkeypatch.setattr(review, "_load_backend_kwargs", fail)
-    service = _service(tmp_path)
+    service = _service(tmp_path, users=["draft-error"])
     service.set_privacy_policy("draft-error", "grok")
     state = service._load_state("draft-error")
     assert service._refine_draft_with_llm_router(state, {"body": MARKER}, provider="grok_cli", model="grok-4.7") is None

@@ -19,6 +19,8 @@ from applications.complaint_workspace import (
     PrincipalRegistry,
     WorkspaceAccess,
     WorkspaceAuthorizationDenied,
+    WorkspacePersistenceError,
+    workspace_access_scope,
     WorkspaceAuthorizer,
     _slugify_user_id,
     principal_namespace,
@@ -43,8 +45,24 @@ class _DenyAll(WorkspaceAuthorizer):
         return False
 
 
-def _service(root: Path, access: WorkspaceAccess, authorizer=None) -> ComplaintWorkspaceService:
-    return ComplaintWorkspaceService(root_dir=root, access=access, authorizer=authorizer)
+_FIXTURE_PASSPHRASE = "synthetic isolation fixture protection phrase"
+
+
+def _service(root: Path, access: WorkspaceAccess, authorizer=None, *, users=()) -> ComplaintWorkspaceService:
+    service = ComplaintWorkspaceService(root_dir=root, access=access, authorizer=authorizer)
+    if access.trust == "unauthenticated" or authorizer is not None:
+        return service  # Refusal subjects need no private key capability.
+    with workspace_access_scope(WorkspaceAccess.trusted_local()):
+        if service.private_key_status()["status"] == "absent":
+            service.initialize_private_keys(protection="passphrase", passphrase=_FIXTURE_PASSPHRASE)
+        else:
+            service.unlock_private_keys(passphrase=_FIXTURE_PASSPHRASE)
+        bindings = list(users)
+        if access.principal_id and access.case_id:
+            bindings.append((access.principal_id, access.case_id))
+        for owner, case_id in bindings:
+            service.ensure_private_case_key(owner, case_id)
+    return service
 
 
 def _plant_legacy(service: ComplaintWorkspaceService, owner: str, marker: str) -> Path:
@@ -91,6 +109,9 @@ def test_colliding_legacy_slugs_do_not_share_namespace_or_data(tmp_path: Path) -
     legacy = _plant_legacy(alice, ALICE, MARKER)
     legacy_bytes = legacy.read_bytes()
 
+    migrated = alice.migrate_legacy_private_session(ALICE)
+    assert migrated["complete"] and migrated["private_session_verified"]
+    assert migrated["source_bytes_preserved"] and not migrated["cleanup_performed"]
     alice_session = alice.get_session(ALICE)
     bob_session = bob.get_session(BOB)
 
@@ -98,19 +119,19 @@ def test_colliding_legacy_slugs_do_not_share_namespace_or_data(tmp_path: Path) -
     assert bob_session["session"]["intake_answers"] == {}
     assert MARKER not in json.dumps(bob_session)
     assert alice._session_path(ALICE) != bob._session_path(BOB)
-    assert alice._session_path(ALICE).is_file()
+    successor = root / (alice._session_path(ALICE).name + ".cgpe")
+    assert successor.is_file() and successor.read_bytes().startswith(b"CGPE")
+    assert MARKER.encode() not in successor.read_bytes()
     assert bob._session_path(BOB).is_file()
     assert legacy.read_bytes() == legacy_bytes
-    mapping = json.loads((root / "legacy-namespace-map.json").read_text(encoding="utf-8"))
     legacy_name = alice._legacy_filename(ALICE)
     assert legacy_name == f"{_slugify_user_id(ALICE)}.json"
-    assert mapping["entries"][legacy_name]["owner"] == ALICE
-    assert mapping["entries"][legacy_name]["namespace"] == principal_namespace(ALICE)
+    assert not (root / "legacy-namespace-map.json").exists()
 
     alice.set_privacy_policy(ALICE, "grok")
     bob.set_privacy_policy(BOB, "local")
     assert alice.get_privacy_policy(ALICE)["policy"]["processing_mode"] != bob.get_privacy_policy(BOB)["policy"]["processing_mode"]
-    assert bob.get_privacy_policy(BOB)["at_rest_protection"] == "plaintext_pending"
+    assert bob.get_privacy_policy(BOB)["at_rest_protection"] == "private_envelope"
     assert MARKER not in json.dumps(bob.get_privacy_policy(BOB))
 
 
@@ -147,7 +168,7 @@ def test_unauthenticated_and_foreign_principals_are_refused(tmp_path: Path) -> N
         assert str(caught.value) == "authorization_denied"
         assert MARKER not in str(caught.value)
 
-    copied = json.loads(owner._session_path(ALICE).read_text(encoding="utf-8"))
+    copied = owner.get_session(ALICE)["session"]
     copied["user_id"] = BOB
     copied["intake_answers"] = {"party_name": OTHER_MARKER}
     owner._session_path(ALICE).write_text(json.dumps(copied), encoding="utf-8")
@@ -164,7 +185,7 @@ def test_wrong_case_and_reference_are_rejected(tmp_path: Path) -> None:
     alice.remember_private_reference(ALICE, cid="cid-owned", storage_key="key-owned", case_id=ALICE)
     admitted = alice.resolve_private_reference(ALICE, case_id=ALICE, cid="cid-owned", storage_key="key-owned")
     assert admitted["admitted"] is True
-    assert admitted["at_rest_protection"] == "plaintext_pending"
+    assert admitted["at_rest_protection"] == "private_envelope"
     assert MARKER not in json.dumps(admitted)
 
     with pytest.raises(WorkspaceAuthorizationDenied) as wrong_case:
@@ -178,7 +199,7 @@ def test_wrong_case_and_reference_are_rejected(tmp_path: Path) -> None:
 
     soft = alice.get_privacy_policy(ALICE, case_id="other-case")
     assert soft["load"]["admitted"] is False
-    assert soft["at_rest_protection"] == "plaintext_pending"
+    assert soft["at_rest_protection"] == "private_envelope"
     assert MARKER not in json.dumps(soft)
 
     bob = _service(root, WorkspaceAccess.authenticated(BOB, case_id=BOB))
@@ -217,7 +238,7 @@ def test_traversal_and_symlink_escape_do_not_read_or_write(tmp_path: Path) -> No
     assert secret.read_text(encoding="utf-8") == MARKER
 
     written = alice.write_contained_workspace_file(ALICE, "note.txt", b"owned-note")
-    assert written["at_rest_protection"] == "plaintext_pending"
+    assert written["at_rest_protection"] == "private_envelope"
     assert alice.read_contained_workspace_file(ALICE, "note.txt") == b"owned-note"
 
 
@@ -337,16 +358,18 @@ def test_http_mcp_and_facade_authorization(tmp_path: Path, monkeypatch: pytest.M
     assert direct["result"]["isError"] is True
     assert MARKER not in json.dumps(direct)
 
-    local_client = _client(ComplaintWorkspaceService(root_dir=root), trusted_local=True)
+    local_operator = _service(root, WorkspaceAccess.trusted_local(), users=[("local-operator", "local-operator")])
+    local_client = _client(local_operator, trusted_local=True)
     local_session = local_client.get("/api/complaint-workspace/session", params={"user_id": "local-operator"})
     assert local_session.status_code == 200
     assert local_session.json()["session"]["user_id"] == "local-operator"
     assert MARKER not in local_session.text
 
     facade_root = tmp_path / "facade"
-    first = start_session(ALICE, root_dir=facade_root)
-    set_privacy_policy(ALICE, "local", root_dir=facade_root)
-    second = start_session(BOB, root_dir=facade_root)
+    facade_operator = _service(facade_root, WorkspaceAccess.trusted_local(), users=[(ALICE, ALICE), (BOB, BOB)])
+    first = start_session(ALICE, service=facade_operator)
+    set_privacy_policy(ALICE, "local", service=facade_operator)
+    second = start_session(BOB, service=facade_operator)
     assert first["session"]["user_id"] == ALICE
     assert second["session"]["user_id"] == BOB
     assert principal_namespace(first["session"]["user_id"]) != principal_namespace(second["session"]["user_id"])
@@ -398,16 +421,26 @@ def test_same_filename_and_case_denials_preserve_scoped_artifacts(tmp_path):
     root = tmp_path / 'sessions'
     alice = _service(root, WorkspaceAccess.authenticated(ALICE, case_id=ALICE))
     bob = _service(root, WorkspaceAccess.authenticated(BOB, case_id=BOB))
+    alice.submit_intake_answers(ALICE, {"party_name": MARKER})
+    bob.submit_intake_answers(BOB, {"party_name": OTHER_MARKER})
     alice.write_contained_workspace_file(ALICE, 'nested/note.txt', MARKER.encode())
     bob.write_contained_workspace_file(BOB, 'nested/note.txt', OTHER_MARKER.encode())
     fresh_alice = _service(root, WorkspaceAccess.authenticated(ALICE, case_id=ALICE))
     assert fresh_alice.read_contained_workspace_file(ALICE, 'nested/note.txt') == MARKER.encode()
     assert bob.read_contained_workspace_file(BOB, 'nested/note.txt') == OTHER_MARKER.encode()
     wrong_case = _service(root, WorkspaceAccess.authenticated(ALICE, case_id='foreign-case'))
-    with pytest.raises(WorkspaceAuthorizationDenied):
-        wrong_case.read_contained_workspace_file(ALICE, 'nested/note.txt')
-    with pytest.raises(WorkspaceAuthorizationDenied):
-        wrong_case.write_contained_workspace_file(ALICE, 'nested/note.txt', b'overwrite')
+    # A wrong expected case cannot authenticate the opaque session envelope.
+    # Require the exact typed refusal and preservation, without adding a
+    # plaintext case sidecar merely to classify cryptographic rejection.
+    protected = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    for operation in (lambda: wrong_case.read_contained_workspace_file(ALICE, 'nested/note.txt'),
+                      lambda: wrong_case.write_contained_workspace_file(ALICE, 'nested/note.txt', b'overwrite')):
+        with pytest.raises(WorkspacePersistenceError) as refused:
+            operation()
+        assert refused.value.code == "authentication_failed"
+        assert refused.value.public_status == "recoverable"
+        assert MARKER not in str(refused.value) and OTHER_MARKER not in str(refused.value)
+        assert all(path.read_bytes() == content for path, content in protected.items())
     assert fresh_alice.read_contained_workspace_file(ALICE, 'nested/note.txt') == MARKER.encode()
     assert bob.read_contained_workspace_file(BOB, 'nested/note.txt') == OTHER_MARKER.encode()
     assert not (root / 'nested').exists()
@@ -452,11 +485,14 @@ def test_unowned_or_invalid_namespaced_record_is_not_relabelled_or_replaced(tmp_
     target = alice._session_path(ALICE)
     target.write_text(json.dumps(record) if record != 'invalid-json' else '{')
     original = target.read_bytes()
-    with pytest.raises(WorkspaceAuthorizationDenied):
-        alice.get_session(ALICE)
-    with pytest.raises(WorkspaceAuthorizationDenied):
-        alice._save_state({'user_id': ALICE, 'case_id': ALICE, 'intake_answers': {}})
-    assert target.read_bytes() == original
+    expected = WorkspaceAuthorizationDenied if isinstance(record, dict) else WorkspacePersistenceError
+    for operation in (lambda: alice.get_session(ALICE), lambda: alice._save_state({'user_id': ALICE, 'case_id': ALICE, 'intake_answers': {}})):
+        with pytest.raises(expected) as refused:
+            operation()
+        if expected is WorkspacePersistenceError:
+            assert refused.value.code == "corrupt_session"
+            assert refused.value.public_status == "recoverable"
+        assert target.read_bytes() == original
 
 
 @pytest.mark.parametrize('path', [
@@ -527,3 +563,39 @@ def test_transport_errors_never_echo_backend_private_paths_or_values(tmp_path, m
         response = client.post('/api/complaint-workspace' + endpoint, json=payload, headers=headers)
         assert 'workspace_operation_failed' in response.text
         assert MARKER not in response.text and '/foreign/private/path' not in response.text
+
+
+@pytest.mark.parametrize("unsafe", ["symlink", "hardlink"])
+def test_legacy_namespace_filesystem_denials_preserve_outside_bytes(tmp_path, unsafe):
+    root = tmp_path / "sessions"
+    alice = _service(root, WorkspaceAccess.authenticated(ALICE, case_id=ALICE))
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"user_id": ALICE, "case_id": ALICE, "intake_answers": {"party_name": MARKER}}))
+    original = outside.read_bytes()
+    legacy = alice._legacy_session_path(ALICE)
+    if unsafe == "symlink":
+        legacy.symlink_to(outside)
+    else:
+        os.link(outside, legacy)
+    with pytest.raises(WorkspaceAuthorizationDenied, match="^authorization_denied$"):
+        alice.get_session(ALICE)
+    assert outside.read_bytes() == original
+    assert legacy.read_bytes() == original
+    assert not alice._session_path(ALICE).exists()
+    assert not (root / (alice._session_path(ALICE).name + ".cgpe")).exists()
+
+
+@pytest.mark.parametrize("corrupt", [b"{", b"[]", b"null", b'"synthetic-not-a-session"'])
+def test_corrupt_legacy_namespace_remains_recoverable_without_empty_replacement(tmp_path, corrupt):
+    root = tmp_path / "sessions"
+    alice = _service(root, WorkspaceAccess.authenticated(ALICE, case_id=ALICE))
+    legacy = alice._legacy_session_path(ALICE)
+    legacy.write_bytes(corrupt)
+    with pytest.raises(WorkspacePersistenceError) as refused:
+        alice.get_session(ALICE)
+    assert refused.value.code == "corrupt_session"
+    assert refused.value.public_status == "recoverable"
+    assert MARKER not in str(refused.value)
+    assert legacy.read_bytes() == corrupt
+    assert not alice._session_path(ALICE).exists()
+    assert not (root / (alice._session_path(ALICE).name + ".cgpe")).exists()
