@@ -5,6 +5,7 @@ Iteratively asks questions to fill gaps in the knowledge graph and reduce
 noise/ambiguity in the complaint information.
 """
 
+import copy
 import hashlib
 import logging
 import re
@@ -3701,7 +3702,14 @@ class ComplaintDenoiser:
     
     def process_answer(self, question: Dict[str, Any], answer: str,
                       knowledge_graph: KnowledgeGraph,
-                      dependency_graph: Optional[DependencyGraph] = None) -> Dict[str, Any]:
+                      dependency_graph: Optional[DependencyGraph] = None,
+                      *,
+                      answer_event_id: Optional[str] = None,
+                      source_context: Optional[Dict[str, Any]] = None,
+                      factual_action: Optional[str] = None,
+                      supersedes_stable_id: Optional[str] = None,
+                      retracts_stable_id: Optional[str] = None,
+                      contradicts_stable_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Process an answer to a denoising question.
 
@@ -3714,6 +3722,48 @@ class ComplaintDenoiser:
         Returns:
             Information about what was updated
         """
+        from complaint_phases.knowledge_graph import answer_event_payload
+
+        event_payload = answer_event_payload(
+            question=question,
+            answer=answer,
+            source_context=source_context,
+            factual_action=factual_action,
+            supersedes_stable_id=supersedes_stable_id,
+            retracts_stable_id=retracts_stable_id,
+            contradicts_stable_id=contradicts_stable_id,
+        )
+        if answer_event_id and knowledge_graph is not None:
+            prior = knowledge_graph.begin_answer_event(answer_event_id, event_payload)
+            if prior is not None and prior.get("denoiser_updates") is not None:
+                return dict(prior["denoiser_updates"])
+        if factual_action:
+            updates = self._process_factual_revision(
+                question,
+                answer,
+                knowledge_graph,
+                dependency_graph=dependency_graph,
+                factual_action=factual_action,
+                source_context=source_context,
+                supersedes_stable_id=supersedes_stable_id,
+                retracts_stable_id=retracts_stable_id,
+                contradicts_stable_id=contradicts_stable_id,
+                answer_event_id=answer_event_id,
+            )
+            self.questions_asked.append({
+                'question': question,
+                'answer': answer,
+                'answer_event_id': answer_event_id,
+                'factual_action': factual_action,
+            })
+            if answer_event_id and knowledge_graph is not None:
+                knowledge_graph.finish_answer_event(
+                    answer_event_id,
+                    event_payload,
+                    denoiser_updates=dict(updates),
+                )
+            return updates
+
         self.questions_asked.append({
             'question': question,
             'answer': answer
@@ -5453,7 +5503,206 @@ class ComplaintDenoiser:
         except Exception:
             pass
 
+        if answer_event_id and knowledge_graph is not None:
+            knowledge_graph.finish_answer_event(
+                answer_event_id,
+                event_payload,
+                denoiser_updates=dict(updates),
+            )
         return updates
+
+    def _process_factual_revision(
+        self,
+        question: Dict[str, Any],
+        answer: str,
+        knowledge_graph: KnowledgeGraph,
+        *,
+        dependency_graph: Optional[DependencyGraph] = None,
+        factual_action: str,
+        source_context: Optional[Dict[str, Any]],
+        supersedes_stable_id: Optional[str],
+        retracts_stable_id: Optional[str],
+        contradicts_stable_id: Optional[str],
+        answer_event_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Append a sourced correction, retraction, or contradiction without editing history."""
+        from integrations.ipfs_datasets.types import build_user_assertion_envelope, locate_unique_byte_span
+
+        action = str(factual_action or "").strip().lower()
+        if action not in {"assert", "correct", "retract", "contradict"}:
+            raise ValueError(f"unsupported factual action {factual_action}")
+        context = dict(source_context or {})
+        source_text = context.get("source_text")
+        if not isinstance(source_text, str) or source_text == "":
+            raise ValueError("a factual revision requires a new validated user source")
+        span = context.get("source_span") if isinstance(context.get("source_span"), dict) else None
+        if span is None:
+            located = locate_unique_byte_span(source_text, str(answer or ""))
+            if located.deficiency or located.start is None or located.end is None:
+                raise ValueError(located.deficiency or "missing_source_span")
+            span = {"start": located.start, "end": located.end, "text": located.text}
+        envelope = build_user_assertion_envelope(
+            source_text=source_text,
+            source_kind=str(context.get("source_kind") or ""),
+            source_id=str(context.get("source_id") or ""),
+            message_id=str(context.get("message_id") or ""),
+            document_id=str(context.get("document_id") or ""),
+            assertion_status=str(context.get("assertion_status") or ""),
+            extractor_version=str(context.get("extractor_version") or ""),
+            source_hash=str(context.get("source_hash") or ""),
+            source_span=span,
+            role="fact",
+            subject_key=str(context.get("subject_key") or "fact"),
+            confidence=context.get("confidence"),
+        )
+        if not envelope.is_asserted_user_fact:
+            raise ValueError(
+                "a factual revision requires its own validated user source: "
+                + ",".join(envelope.deficiencies)
+            )
+        target_id = {
+            "correct": supersedes_stable_id,
+            "retract": retracts_stable_id,
+            "contradict": contradicts_stable_id,
+        }.get(action)
+        previous = None
+        if action != "assert":
+            # All source and target admission precedes entity/ledger mutation.
+            previous = knowledge_graph.require_revision_target(target_id or "", envelope)
+        span_text = envelope.source_span_text
+        entity = Entity(
+            id=self._next_entity_id(knowledge_graph),
+            type="fact",
+            name=span_text,
+            attributes={
+                "description": span_text,
+                "fact_type": str((question.get("context") or {}).get("fact_type") or "clarification")
+                if isinstance(question.get("context"), dict) else "clarification",
+                "factual_action": action,
+            },
+            confidence=float(envelope.confidence if envelope.confidence is not None else 1.0),
+            source="complaint",
+            provenance={"user_assertion": envelope.as_dict()},
+        )
+        knowledge_graph.add_entity(entity)
+        knowledge_graph.register_assertion(entity, envelope, status="active", event_id=answer_event_id or "")
+        updates = {
+            "entities_updated": 1,
+            "relationships_added": 0,
+            "requirements_satisfied": 0,
+            "factual_action": action,
+            "stable_id": envelope.stable_id,
+            "entity_id": entity.id,
+            "invalidated_support": [],
+        }
+        if action == "correct":
+            if not supersedes_stable_id:
+                raise ValueError("correction requires the assertion it supersedes")
+            revision = knowledge_graph.supersede_assertion(
+                supersedes_stable_id,
+                entity,
+                envelope,
+                event_id=answer_event_id or "",
+            )
+            updates["revision"] = revision["revision_index"]
+            updates["superseded_stable_id"] = supersedes_stable_id
+        elif action == "retract":
+            if not retracts_stable_id:
+                raise ValueError("retraction requires the assertion it retracts")
+            revision = knowledge_graph.retract_assertion(
+                retracts_stable_id,
+                entity,
+                envelope,
+                event_id=answer_event_id or "",
+            )
+            updates["revision"] = revision["revision_index"]
+            updates["retracted_stable_id"] = retracts_stable_id
+        elif action == "contradict":
+            if not contradicts_stable_id:
+                raise ValueError("contradiction requires the assertion it conflicts with")
+            prior = knowledge_graph.entity_for_stable_id(contradicts_stable_id)
+            revision = knowledge_graph.record_assertion_conflict(
+                contradicts_stable_id,
+                envelope.stable_id,
+                event_id=answer_event_id or "",
+                left_entity_id=prior.id if prior is not None else "",
+                right_entity_id=entity.id,
+            )
+            updates["revision"] = revision["revision_index"]
+            updates["conflict_stable_ids"] = [contradicts_stable_id, envelope.stable_id]
+        else:
+            knowledge_graph.append_revision({
+                "action": "assert",
+                "event_id": answer_event_id or "",
+                "new_stable_id": envelope.stable_id,
+                "new_entity_id": entity.id,
+                "new_envelope": envelope.as_dict(),
+            })
+        updates["invalidated_support"] = [
+            relationship.id
+            for relationship in knowledge_graph.relationships.values()
+            if (relationship.attributes or {}).get("activity_status") == "invalidated"
+        ]
+        if previous is not None and dependency_graph is not None:
+            updates["dependency_nodes_invalidated"] = self._invalidate_factual_dependency_support(
+                dependency_graph, question, previous, target_id or "", action,
+                answer_event_id or "",
+            )
+        return updates
+
+    @staticmethod
+    def _invalidate_factual_dependency_support(
+        dependency_graph: DependencyGraph, question: Dict[str, Any], previous: Entity,
+        stable_id: str, reason: str, event_id: str,
+    ) -> List[str]:
+        """Reopen dependency state bound to a withdrawn or disputed source."""
+        context = question.get("context") if isinstance(question.get("context"), dict) else {}
+        target_ids = {str(context.get(key) or "") for key in
+                      ("requirement_id", "node_id", "target_element_id")}
+        previous_text = " ".join(str((previous.attributes or {}).get("description") or previous.name).split())
+        invalidated = set()
+        for node in dependency_graph.nodes.values():
+            attrs = node.attributes if isinstance(node.attributes, dict) else {}
+            refs = set()
+            for key in ("source_entity_id", "fact_id", "source_fact_id", "assertion_stable_id"):
+                value = attrs.get(key)
+                if isinstance(value, str):
+                    refs.add(value)
+            for key in ("source_fact_ids", "supporting_fact_ids", "satisfied_fact_bundle", "event_support_refs"):
+                values = attrs.get(key)
+                if isinstance(values, list):
+                    refs.update(value for value in values if isinstance(value, str))
+            answer_text = " ".join(str(attrs.get("satisfied_answer_text") or "").split())
+            if (node.id in target_ids or previous.id in refs or stable_id in refs
+                    or (answer_text and answer_text == previous_text)):
+                invalidated.add(node.id)
+        # Dependents cannot retain derived satisfaction after their premise changes.
+        pending = list(invalidated)
+        while pending:
+            source = pending.pop()
+            for edge in dependency_graph.dependencies.values():
+                kind = getattr(edge.dependency_type, "value", edge.dependency_type)
+                if (kind in {"requires", "supports", "implies", "depends_on"}
+                        and edge.source_id == source and edge.target_id not in invalidated):
+                    invalidated.add(edge.target_id)
+                    pending.append(edge.target_id)
+        for node_id in sorted(invalidated):
+            node = dependency_graph.get_node(node_id)
+            if node is None:
+                continue
+            attrs = copy.deepcopy(node.attributes or {})
+            history = list(attrs.get("factual_support_invalidations") or [])
+            history.append({"event_id": event_id, "source_entity_id": previous.id,
+                "assertion_stable_id": stable_id, "reason": reason,
+                "previous_satisfied": bool(node.satisfied),
+                "previous_satisfied_answer_text": attrs.get("satisfied_answer_text")})
+            attrs["factual_support_invalidations"] = history
+            attrs["support_invalidated"] = True
+            attrs["satisfied_via_denoiser"] = False
+            attrs.pop("satisfied_answer_text", None)
+            node.attributes = attrs
+            node.satisfied = False
+        return sorted(invalidated)
     
     def calculate_noise_level(self, 
                              knowledge_graph: KnowledgeGraph,

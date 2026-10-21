@@ -5,6 +5,8 @@ Extracts entities, relationships, and facts from complaint text to build
 a knowledge graph representation for denoising and evidence gathering.
 """
 
+import copy
+import hashlib
 import json
 import logging
 import math
@@ -34,6 +36,58 @@ def _utc_now_isoformat() -> str:
     return datetime.now(UTC).isoformat()
 
 logger = logging.getLogger(__name__)
+
+_LOCAL_BUILDER_ID = re.compile(r"^(?:entity|ent|rel)_\d+$")
+_INACTIVE_ASSERTION_STATES = frozenset({"superseded", "retracted"})
+_UNSETTLED_ASSERTION_STATES = frozenset({"superseded", "retracted", "conflict"})
+_SUPPORT_RELATION_TYPES = frozenset({
+    "supports",
+    "supported_by",
+    "has_requirement_fact",
+    "has_gap_resolution",
+    "has_timeline_detail",
+    "has_impact",
+    "seeks_remedy",
+})
+
+
+class AnswerEventConflict(ValueError):
+    """The same scoped answer-event id was reused with a different payload."""
+
+
+def answer_event_payload(
+    *,
+    question: Any,
+    answer: Any,
+    source_context: Optional[Mapping[str, Any]] = None,
+    factual_action: Optional[str] = None,
+    supersedes_stable_id: Optional[str] = None,
+    retracts_stable_id: Optional[str] = None,
+    contradicts_stable_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Canonical payload for one scoped answer event. Identity is exact content."""
+    return {
+        "question": question,
+        "answer": answer,
+        "source_context": dict(source_context) if isinstance(source_context, Mapping) else None,
+        "factual_action": factual_action or None,
+        "supersedes_stable_id": supersedes_stable_id or None,
+        "retracts_stable_id": retracts_stable_id or None,
+        "contradicts_stable_id": contradicts_stable_id or None,
+    }
+
+
+def answer_event_fingerprint(payload: Mapping[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, default=str, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _normalized_record_text(record: Any) -> str:
+    attributes = getattr(record, "attributes", None)
+    if not isinstance(attributes, Mapping):
+        attributes = {}
+    raw = attributes.get("description") or getattr(record, "name", "") or ""
+    return " ".join(str(raw).split()).lower()
 
 
 def _merge_provenance(*records: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -617,6 +671,18 @@ class KnowledgeGraph:
         Returns a list of gaps with suggested questions.
         """
         gaps = []
+        effective_entities = {key: entity for key, entity in self.entities.items()
+                              if self.entity_is_effective(entity)}
+        effective_relationships = {
+            key: relationship for key, relationship in self.relationships.items()
+            if relationship.source_id in effective_entities and relationship.target_id in effective_entities
+            and (relationship.attributes or {}).get("effective") is not False
+            and (relationship.attributes or {}).get("activity_status") != "invalidated"
+        }
+
+        def _relationships_for_entity(entity_id):
+            return [relationship for relationship in effective_relationships.values()
+                    if entity_id in {relationship.source_id, relationship.target_id}]
 
         def _entity_text(entity: Entity) -> str:
             attributes = entity.attributes if isinstance(entity.attributes, dict) else {}
@@ -656,7 +722,7 @@ class KnowledgeGraph:
             )
         
         # Check for entities with low confidence
-        for entity in self.entities.values():
+        for entity in effective_entities.values():
             if entity.confidence < 0.7:
                 gaps.append({
                     'type': 'low_confidence_entity',
@@ -668,8 +734,8 @@ class KnowledgeGraph:
                 })
         
         # Check for incomplete relationships
-        for entity in self.entities.values():
-            rels = self.get_relationships_for_entity(entity.id)
+        for entity in effective_entities.values():
+            rels = _relationships_for_entity(entity.id)
             if len(rels) == 0 and entity.type in ['person', 'organization']:
                 gaps.append({
                     'type': 'isolated_entity',
@@ -680,10 +746,10 @@ class KnowledgeGraph:
                 })
         
         # Check for claims without evidence
-        claims = self.get_entities_by_type('claim')
+        claims = [entity for entity in effective_entities.values() if entity.type == 'claim']
         for claim in claims:
             evidence_rels = [
-                rel for rel in self.get_relationships_for_entity(claim.id)
+                rel for rel in _relationships_for_entity(claim.id)
                 if rel.relation_type == 'supported_by'
             ]
             if len(evidence_rels) == 0:
@@ -695,14 +761,14 @@ class KnowledgeGraph:
                 })
 
         # Check for missing timeline details
-        has_dates = any(e.type == 'date' for e in self.entities.values())
+        has_dates = any(e.type == 'date' for e in effective_entities.values())
         has_timeline_rel = any(
             rel.relation_type in {'occurred_on', 'has_timeline_detail'}
-            for rel in self.relationships.values()
+            for rel in effective_relationships.values()
         )
         has_timeline_fact = any(
             e.type == 'fact' and e.attributes.get('fact_type') == 'timeline'
-            for e in self.entities.values()
+            for e in effective_entities.values()
         )
         if not has_dates and not has_timeline_rel and not has_timeline_fact:
             gaps.append({
@@ -712,7 +778,7 @@ class KnowledgeGraph:
 
         timeline_fact_texts = [
             _entity_text(entity)
-            for entity in self.entities.values()
+            for entity in effective_entities.values()
             if entity.type == "fact" and (entity.attributes or {}).get("fact_type") == "timeline"
         ]
         decision_timeline_terms = (
@@ -742,10 +808,10 @@ class KnowledgeGraph:
             })
 
         # Check for missing responsible party (no orgs or respondent roles captured)
-        has_org = any(e.type == 'organization' for e in self.entities.values())
+        has_org = any(e.type == 'organization' for e in effective_entities.values())
         has_respondent_person = any(
             e.type == 'person' and e.attributes.get('role', '').lower() in {'respondent', 'manager', 'supervisor', 'employer', 'owner', 'landlord'}
-            for e in self.entities.values()
+            for e in effective_entities.values()
         )
         if not has_org and not has_respondent_person:
             gaps.append({
@@ -756,11 +822,11 @@ class KnowledgeGraph:
         # Check for missing impact/remedy details
         has_impact = any(
             e.type == 'fact' and e.attributes.get('fact_type') == 'impact'
-            for e in self.entities.values()
+            for e in effective_entities.values()
         )
         has_remedy = any(
             e.type == 'fact' and e.attributes.get('fact_type') == 'remedy'
-            for e in self.entities.values()
+            for e in effective_entities.values()
         )
         if not has_impact or not has_remedy:
             gaps.append({
@@ -771,12 +837,12 @@ class KnowledgeGraph:
             })
 
         # Blocker checks: written notices, hearing request dates, and identifiable staff actors.
-        all_entity_text = " ".join(_entity_text(entity) for entity in self.entities.values())
+        all_entity_text = " ".join(_entity_text(entity) for entity in effective_entities.values())
         notice_terms = ("notice", "letter", "email", "message", "termination letter", "denial notice")
         has_notice_reference = any(term in all_entity_text for term in notice_terms)
         has_notice_evidence = any(
             entity.type == "evidence" and any(term in _entity_text(entity) for term in notice_terms)
-            for entity in self.entities.values()
+            for entity in effective_entities.values()
         )
         if has_notice_reference and not has_notice_evidence:
             gaps.append({
@@ -787,7 +853,7 @@ class KnowledgeGraph:
         hearing_terms = ("hearing", "grievance", "appeal")
         has_hearing_reference = any(term in all_entity_text for term in hearing_terms)
         hearing_has_date = False
-        for entity in self.entities.values():
+        for entity in effective_entities.values():
             text_value = _entity_text(entity)
             if not any(term in text_value for term in hearing_terms):
                 continue
@@ -806,7 +872,7 @@ class KnowledgeGraph:
         response_terms = ("respond", "response", "replied", "reply", "denied", "approved", "ignored", "no response")
         has_response_reference = any(term in all_entity_text for term in response_terms)
         has_response_date = False
-        for entity in self.entities.values():
+        for entity in effective_entities.values():
             text_value = _entity_text(entity)
             if not any(term in text_value for term in response_terms):
                 continue
@@ -823,12 +889,12 @@ class KnowledgeGraph:
             })
 
         named_staff_entities = [
-            entity for entity in self.entities.values()
+            entity for entity in effective_entities.values()
             if entity.type == "person" and len((entity.name or "").split()) >= 2
         ]
         has_staff_role = any(
             entity.type == "person" and (entity.attributes or {}).get("role")
-            for entity in self.entities.values()
+            for entity in effective_entities.values()
         )
         if has_staff_role and not named_staff_entities:
             gaps.append({
@@ -854,7 +920,7 @@ class KnowledgeGraph:
             entity.type in {"fact", "claim", "evidence"}
             and any(term in _entity_text(entity) for term in timeline_action_terms)
             and not _has_exact_date_signal(_entity_text(entity))
-            for entity in self.entities.values()
+            for entity in effective_entities.values()
         )
         if has_action_without_exact_date:
             gaps.append({
@@ -876,7 +942,7 @@ class KnowledgeGraph:
                     token in _entity_text(entity)
                     for token in ("protected activity", "complained", "reported", "grievance", "requested accommodation")
                 )
-                for entity in self.entities.values()
+                for entity in effective_entities.values()
             )
             has_adverse_action_fact = any(
                 entity.type in {"fact", "claim"}
@@ -884,32 +950,32 @@ class KnowledgeGraph:
                     token in _entity_text(entity)
                     for token in ("fired", "terminated", "demoted", "disciplined", "suspended", "reduced")
                 )
-                for entity in self.entities.values()
+                for entity in effective_entities.values()
             )
             has_retaliation_timeline = any(
                 rel.relation_type in {"occurred_on", "has_timeline_detail"}
-                for rel in self.relationships.values()
-            ) or any(entity.type == "date" for entity in self.entities.values())
+                for rel in effective_relationships.values()
+            ) or any(entity.type == "date" for entity in effective_entities.values())
             has_protected_activity_date = any(
                 entity.type == "fact"
                 and "protected" in _entity_text(entity)
                 and _has_date_signal(_entity_text(entity))
-                for entity in self.entities.values()
+                for entity in effective_entities.values()
             )
             has_adverse_action_date = any(
                 entity.type == "fact"
                 and any(token in _entity_text(entity) for token in ("fired", "terminated", "demoted", "disciplined", "suspended", "reduced", "adverse"))
                 and _has_date_signal(_entity_text(entity))
-                for entity in self.entities.values()
+                for entity in effective_entities.values()
             )
             has_causation_link_signal = any(
                 rel.relation_type in {"caused_by", "causal_link", "follows_protected_activity", "occurred_after"}
-                for rel in self.relationships.values()
+                for rel in effective_relationships.values()
             ) or any(
                 "because" in _entity_text(entity)
                 or "after" in _entity_text(entity)
                 or "soon after" in _entity_text(entity)
-                for entity in self.entities.values()
+                for entity in effective_entities.values()
                 if entity.type == "fact"
             )
             if not (
@@ -944,34 +1010,476 @@ class KnowledgeGraph:
         
         return gaps
     
+    def factual_ledger(self) -> Dict[str, Any]:
+        """Append-only correction state stored beside immutable assertion envelopes."""
+        ledger = self.metadata.get("factual_ledger")
+        if not isinstance(ledger, dict):
+            ledger = {}
+            self.metadata["factual_ledger"] = ledger
+        ledger.setdefault("answer_events", {})
+        ledger.setdefault("revisions", [])
+        ledger.setdefault("assertion_states", {})
+        ledger.setdefault("conflicts", [])
+        ledger.setdefault("reopened_questions", [])
+        return ledger
+
+    def begin_answer_event(self, event_id: str, payload: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+        """Return the stored event when the payload matches. A changed payload fails."""
+        if not event_id:
+            return None
+        fingerprint = answer_event_fingerprint(payload)
+        ledger = self.metadata.get("factual_ledger") or {}
+        existing = ledger.get("answer_events", {}).get(event_id)
+        if existing is None:
+            return None
+        if existing.get("fingerprint") != fingerprint:
+            raise AnswerEventConflict(
+                f"answer event {event_id} was reused with a different payload"
+            )
+        return copy.deepcopy(existing)
+
+    def finish_answer_event(self, event_id: str, payload: Mapping[str, Any], **fields: Any) -> Dict[str, Any]:
+        if not event_id:
+            return {}
+        fingerprint = answer_event_fingerprint(payload)
+        events = self.factual_ledger()["answer_events"]
+        existing = events.get(event_id)
+        if existing is not None and existing.get("fingerprint") != fingerprint:
+            raise AnswerEventConflict(
+                f"answer event {event_id} was reused with a different payload"
+            )
+        record = dict(existing or {})
+        record["fingerprint"] = fingerprint
+        record["payload"] = json.loads(json.dumps(payload, sort_keys=True, default=str, ensure_ascii=False))
+        for key, value in fields.items():
+            if key not in record or record.get(key) is None:
+                record[key] = copy.deepcopy(value)
+        events[event_id] = record
+        return copy.deepcopy(record)
+
+    def assertion_state(self, stable_id: str) -> Dict[str, Any]:
+        ledger = self.metadata.get("factual_ledger") or {}
+        state = ledger.get("assertion_states", {}).get(stable_id or "")
+        return copy.deepcopy(dict(state)) if isinstance(state, Mapping) else {}
+
+    def entity_activity(self, entity_id: str) -> str:
+        statuses = [
+            str(state.get("status") or "")
+            for state in (self.metadata.get("factual_ledger") or {}).get("assertion_states", {}).values()
+            if isinstance(state, Mapping) and state.get("entity_id") == entity_id
+        ]
+        if not statuses:
+            return "active"
+        if "active" in statuses:
+            return "active"
+        if "retracted" in statuses:
+            return "retracted"
+        if "superseded" in statuses:
+            return "superseded"
+        if "conflict" in statuses:
+            return "conflict"
+        return statuses[-1]
+
+    def entity_for_stable_id(self, stable_id: str) -> Optional[Entity]:
+        state = self.assertion_state(stable_id)
+        entity_id = str(state.get("entity_id") or "")
+        if entity_id and entity_id in self.entities:
+            return self.entities[entity_id]
+        for entity in self.entities.values():
+            envelope = assertion_from_provenance(entity.provenance)
+            if envelope is not None and envelope.stable_id == stable_id:
+                return entity
+        return None
+
+    def register_assertion(
+        self,
+        entity: Entity,
+        envelope: UserAssertionEnvelope,
+        *,
+        status: str = "active",
+        event_id: str = "",
+    ) -> Dict[str, Any]:
+        """Record activity beside the envelope. The envelope dict is not rewritten."""
+        proof = copy.deepcopy(envelope.as_dict())
+        state = {
+            "status": status,
+            "entity_id": entity.id,
+            "event_id": event_id,
+            "stable_id": envelope.stable_id,
+            "source_identity": envelope.source_identity,
+            "envelope": proof,
+        }
+        self.factual_ledger()["assertion_states"][envelope.stable_id] = state
+        return state
+
+    def append_revision(self, revision: Mapping[str, Any]) -> Dict[str, Any]:
+        ledger = self.factual_ledger()
+        record = copy.deepcopy(dict(revision))
+        record.setdefault("revision_index", len(ledger["revisions"]) + 1)
+        record.setdefault("created_at", _utc_now_isoformat())
+        ledger["revisions"].append(record)
+        return copy.deepcopy(record)
+
+    def require_revision_target(self, stable_id: str, new_envelope: UserAssertionEnvelope) -> Entity:
+        """Admit a source-bound revision before changing any graph record."""
+        if not stable_id:
+            raise ValueError("factual revision requires its target assertion")
+        previous = self.entity_for_stable_id(stable_id)
+        if previous is None:
+            raise KeyError("unknown target assertion")
+        previous_envelope = assertion_from_provenance(previous.provenance)
+        if (previous_envelope is None or not previous_envelope.is_asserted_user_fact
+                or previous_envelope.stable_id != stable_id):
+            raise ValueError("factual revision requires a verified target assertion")
+        if not new_envelope.is_asserted_user_fact or new_envelope.stable_id == stable_id:
+            raise ValueError("factual revision requires a distinct validated user source")
+        if self.entity_activity(previous.id) in _INACTIVE_ASSERTION_STATES:
+            raise ValueError("factual revision target is no longer current")
+        return previous
+
+    def supersede_assertion(
+        self,
+        previous_stable_id: str,
+        new_entity: Entity,
+        new_envelope: UserAssertionEnvelope,
+        *,
+        event_id: str = "",
+    ) -> Dict[str, Any]:
+        previous = self.require_revision_target(previous_stable_id, new_envelope)
+        previous_proof = copy.deepcopy((previous.provenance or {}).get("user_assertion"))
+        if not isinstance(previous_proof, Mapping):
+            raise ValueError("supersession requires the original verified envelope")
+        self.register_assertion(new_entity, new_envelope, status="active", event_id=event_id)
+        states = self.factual_ledger()["assertion_states"]
+        previous_state = dict(states.get(previous_stable_id) or {})
+        previous_state.update({
+            "status": "superseded",
+            "entity_id": previous.id,
+            "stable_id": previous_stable_id,
+            "superseded_by": new_envelope.stable_id,
+            "event_id": event_id,
+            "envelope": previous_proof,
+        })
+        states[previous_stable_id] = previous_state
+        revision = self.append_revision({
+            "action": "supersede",
+            "event_id": event_id,
+            "previous_stable_id": previous_stable_id,
+            "new_stable_id": new_envelope.stable_id,
+            "previous_entity_id": previous.id,
+            "new_entity_id": new_entity.id,
+            "previous_envelope": previous_proof,
+            "new_envelope": copy.deepcopy(new_envelope.as_dict()),
+        })
+        notes = list((previous.provenance or {}).get("revision_refs") or [])
+        notes.append({"action": "superseded", "revision_index": revision["revision_index"], "by_stable_id": new_envelope.stable_id})
+        previous.provenance = {**dict(previous.provenance or {}), "revision_refs": notes, "user_assertion": previous_proof}
+        self.invalidate_dependents(previous.id, reason="superseded", event_id=event_id)
+        return revision
+
+    def retract_assertion(
+        self,
+        stable_id: str,
+        retraction_entity: Entity,
+        retraction_envelope: UserAssertionEnvelope,
+        *,
+        event_id: str = "",
+    ) -> Dict[str, Any]:
+        previous = self.require_revision_target(stable_id, retraction_envelope)
+        previous_proof = copy.deepcopy((previous.provenance or {}).get("user_assertion"))
+        if not isinstance(previous_proof, Mapping):
+            raise ValueError("retraction requires the original verified envelope")
+        self.register_assertion(retraction_entity, retraction_envelope, status="active", event_id=event_id)
+        states = self.factual_ledger()["assertion_states"]
+        previous_state = dict(states.get(stable_id) or {})
+        previous_state.update({
+            "status": "retracted",
+            "entity_id": previous.id,
+            "stable_id": stable_id,
+            "retracted_by": retraction_envelope.stable_id,
+            "event_id": event_id,
+            "envelope": previous_proof,
+        })
+        states[stable_id] = previous_state
+        revision = self.append_revision({
+            "action": "retract",
+            "event_id": event_id,
+            "previous_stable_id": stable_id,
+            "new_stable_id": retraction_envelope.stable_id,
+            "previous_entity_id": previous.id,
+            "new_entity_id": retraction_entity.id,
+            "previous_envelope": previous_proof,
+            "new_envelope": copy.deepcopy(retraction_envelope.as_dict()),
+        })
+        notes = list((previous.provenance or {}).get("revision_refs") or [])
+        notes.append({"action": "retracted", "revision_index": revision["revision_index"], "by_stable_id": retraction_envelope.stable_id})
+        previous.provenance = {**dict(previous.provenance or {}), "revision_refs": notes, "user_assertion": previous_proof}
+        self.invalidate_dependents(previous.id, reason="retracted", event_id=event_id)
+        return revision
+
+    def record_assertion_conflict(
+        self,
+        left_stable_id: str,
+        right_stable_id: str,
+        *,
+        event_id: str = "",
+        left_entity_id: str = "",
+        right_entity_id: str = "",
+    ) -> Dict[str, Any]:
+        """Keep both assertions. Confidence is not a resolution."""
+        states = self.factual_ledger()["assertion_states"]
+        for stable_id, entity_id in ((left_stable_id, left_entity_id), (right_stable_id, right_entity_id)):
+            if not stable_id:
+                continue
+            current = dict(states.get(stable_id) or {})
+            if current.get("status") in _INACTIVE_ASSERTION_STATES:
+                continue
+            entity = self.entity_for_stable_id(stable_id)
+            proof = copy.deepcopy((entity.provenance or {}).get("user_assertion")) if entity is not None else current.get("envelope")
+            current.update({
+                "status": "conflict",
+                "stable_id": stable_id,
+                "entity_id": entity_id or current.get("entity_id") or (entity.id if entity is not None else ""),
+                "event_id": event_id or current.get("event_id") or "",
+                "envelope": proof,
+            })
+            states[stable_id] = current
+        conflict = {
+            "action": "conflict",
+            "event_id": event_id,
+            "stable_ids": [left_stable_id, right_stable_id],
+            "entity_ids": [left_entity_id, right_entity_id],
+            "status": "unresolved",
+        }
+        self.factual_ledger()["conflicts"].append(conflict)
+        revision = self.append_revision(conflict)
+        if left_entity_id:
+            self.invalidate_dependents(left_entity_id, reason="conflict", event_id=event_id)
+        if right_entity_id:
+            self.invalidate_dependents(right_entity_id, reason="conflict", event_id=event_id)
+        return revision
+
+    def invalidate_dependents(self, entity_id: str, *, reason: str, event_id: str = "") -> List[str]:
+        """Mark support that depended on an assertion stale and reopen a question."""
+        if not entity_id:
+            return []
+        invalidated: List[str] = []
+        for relationship in self.relationships.values():
+            if entity_id not in {relationship.source_id, relationship.target_id}:
+                continue
+            if relationship.relation_type not in _SUPPORT_RELATION_TYPES:
+                continue
+            attributes = dict(relationship.attributes or {})
+            attributes["activity_status"] = "invalidated"
+            attributes["effective"] = False
+            attributes["invalidation_reason"] = reason
+            attributes["invalidated_entity_id"] = entity_id
+            relationship.attributes = attributes
+            invalidated.append(relationship.id)
+        for entity in self.entities.values():
+            attributes = dict(entity.attributes or {})
+            changed = False
+            for key in ("satisfied_requirements", "resolved_gaps", "satisfied_fact_bundle", "event_support_refs"):
+                values = attributes.get(key)
+                if not isinstance(values, list) or entity_id not in values:
+                    continue
+                attributes[key] = [item for item in values if item != entity_id]
+                changed = True
+            if changed:
+                attributes["support_invalidated"] = True
+                entity.attributes = attributes
+        question = {
+            "type": "clarification",
+            "question": (
+                "The earlier statement is no longer active support. "
+                "What is the current fact, and which source should be used?"
+            ),
+            "context": {
+                "regenerated": True,
+                "invalidated_entity_id": entity_id,
+                "invalidation_reason": reason,
+                "event_id": event_id,
+            },
+            "candidate_source": "factual_revision",
+        }
+        questions = self.factual_ledger()["reopened_questions"]
+        if question not in questions:
+            questions.append(question)
+        return invalidated
+
+    def effective_fact_entities(self) -> List[Entity]:
+        """Facts still eligible as current support. Superseded and retracted facts stay stored."""
+        facts: List[Entity] = []
+        for entity in self.entities.values():
+            if entity.type != "fact":
+                continue
+            if not self.entity_is_effective(entity):
+                continue
+            facts.append(entity)
+        return facts
+
+    def entity_is_effective(self, entity: Entity) -> bool:
+        """Historical and unresolved assertions cannot satisfy current support."""
+        return (self.entity_activity(entity.id) not in _UNSETTLED_ASSERTION_STATES
+                and (entity.attributes or {}).get("factual_action") != "retract")
+
+    def _allocate_record_id(self, preferred: str, existing: Mapping[str, Any]) -> str:
+        if preferred not in existing:
+            return preferred
+        index = 1
+        while f"{preferred}__rev_{index}" in existing:
+            index += 1
+        return f"{preferred}__rev_{index}"
+
+    def _clone_entity(self, entity: Entity, entity_id: str) -> Entity:
+        return Entity(
+            id=entity_id,
+            type=entity.type,
+            name=entity.name,
+            attributes=copy.deepcopy(entity.attributes or {}),
+            confidence=float(entity.confidence),
+            source=entity.source,
+            provenance=copy.deepcopy(entity.provenance or {}),
+        )
+
     def merge_with(self, other_graph: 'KnowledgeGraph'):
-        """Merge another knowledge graph into this one."""
-        # Check before any mutation, including confidence/provenance updates.
+        """Merge another knowledge graph without letting confidence erase a different fact.
+
+        Builder-local ids restart on every builder. A colliding id with different
+        text is kept as its own record. Verified envelopes stay byte-for-byte on
+        their original records. Contradictory asserted facts stay explicit conflicts.
+        """
         for entity in other_graph.entities.values():
             if entity.id in self.entities:
                 self._assert_compatible_entity_domains(self.entities[entity.id], entity)
+        id_remap: Dict[str, str] = {}
         for entity in other_graph.entities.values():
             if entity.id not in self.entities:
-                self.add_entity(entity)
-            else:
-                # Update confidence if higher
-                existing = self.entities[entity.id]
-                if entity.confidence > existing.confidence:
-                    existing.confidence = entity.confidence
-                    existing.attributes.update(entity.attributes)
-                existing.provenance = _merge_provenance(existing.provenance, entity.provenance)
-        
+                self.add_entity(self._clone_entity(entity, entity.id))
+                self._register_merged_assertion(self.entities[entity.id])
+                continue
+            existing = self.entities[entity.id]
+            existing_text = _normalized_record_text(existing)
+            incoming_text = _normalized_record_text(entity)
+            texts_differ = bool(existing_text and incoming_text and existing_text != incoming_text)
+            existing_envelope = assertion_from_provenance(existing.provenance)
+            incoming_envelope = assertion_from_provenance(entity.provenance)
+            if texts_differ:
+                kept_id = self._allocate_record_id(entity.id, self.entities)
+                id_remap[entity.id] = kept_id
+                kept = self._clone_entity(entity, kept_id)
+                self.add_entity(kept)
+                self._register_merged_assertion(existing)
+                self._register_merged_assertion(kept)
+                if (
+                    existing_envelope is not None
+                    and incoming_envelope is not None
+                    and existing_envelope.is_asserted_user_fact
+                    and incoming_envelope.is_asserted_user_fact
+                    and existing_envelope.stable_id != incoming_envelope.stable_id
+                ):
+                    self.record_assertion_conflict(
+                        existing_envelope.stable_id,
+                        incoming_envelope.stable_id,
+                        left_entity_id=existing.id,
+                        right_entity_id=kept.id,
+                    )
+                continue
+            primary_assertion = copy.deepcopy((existing.provenance or {}).get("user_assertion"))
+            if (
+                entity.confidence > existing.confidence
+                and not (
+                    existing_envelope is not None
+                    and existing_envelope.is_asserted_user_fact
+                    and incoming_envelope is not None
+                    and incoming_envelope.is_asserted_user_fact
+                    and existing_envelope.stable_id != incoming_envelope.stable_id
+                )
+            ):
+                existing.confidence = entity.confidence
+                for key, value in (entity.attributes or {}).items():
+                    if key not in existing.attributes or existing.attributes.get(key) in (None, "", [], {}):
+                        existing.attributes[key] = copy.deepcopy(value)
+            existing.provenance = _merge_provenance(existing.provenance, entity.provenance)
+            if isinstance(primary_assertion, Mapping):
+                existing.provenance["user_assertion"] = primary_assertion
+            self._register_merged_assertion(existing)
+            if incoming_envelope is not None and incoming_envelope.is_asserted_user_fact:
+                self._retain_corroborating_assertion(existing, incoming_envelope)
+
         for rel in other_graph.relationships.values():
+            source_id = id_remap.get(rel.source_id, rel.source_id)
+            target_id = id_remap.get(rel.target_id, rel.target_id)
+            endpoints_changed = source_id != rel.source_id or target_id != rel.target_id
+            if endpoints_changed or (
+                rel.id in self.relationships
+                and (
+                    self.relationships[rel.id].source_id != source_id
+                    or self.relationships[rel.id].target_id != target_id
+                    or self.relationships[rel.id].relation_type != rel.relation_type
+                )
+            ):
+                # A verified envelope is bound to its original endpoints.
+                new_id = self._allocate_record_id(rel.id, self.relationships)
+                provenance = copy.deepcopy(rel.provenance or {})
+                if endpoints_changed:
+                    provenance.pop("user_assertion", None)
+                    provenance.pop("user_assertions", None)
+                    provenance["endpoint_binding"] = {
+                        "dropped_prior_assertion": True,
+                        "reason": "endpoint_ids_changed",
+                        "prior_relationship_id": rel.id,
+                    }
+                self.add_relationship(Relationship(
+                    id=new_id,
+                    source_id=source_id,
+                    target_id=target_id,
+                    relation_type=rel.relation_type,
+                    attributes=copy.deepcopy(rel.attributes or {}),
+                    confidence=float(rel.confidence),
+                    source=rel.source,
+                    provenance=provenance,
+                ))
+                continue
             if rel.id not in self.relationships:
-                self.add_relationship(rel)
-            else:
-                existing = self.relationships[rel.id]
-                existing.provenance = _merge_provenance(existing.provenance, rel.provenance)
+                self.add_relationship(Relationship(
+                    id=rel.id,
+                    source_id=source_id,
+                    target_id=target_id,
+                    relation_type=rel.relation_type,
+                    attributes=copy.deepcopy(rel.attributes or {}),
+                    confidence=float(rel.confidence),
+                    source=rel.source,
+                    provenance=copy.deepcopy(rel.provenance or {}),
+                ))
+                continue
+            existing_rel = self.relationships[rel.id]
+            primary_assertion = copy.deepcopy((existing_rel.provenance or {}).get("user_assertion"))
+            existing_rel.provenance = _merge_provenance(existing_rel.provenance, rel.provenance)
+            if isinstance(primary_assertion, Mapping):
+                existing_rel.provenance["user_assertion"] = primary_assertion
 
         self.metadata['provenance'] = _merge_provenance(
             self.provenance,
             other_graph.provenance,
         )
+
+    def _register_merged_assertion(self, entity: Entity) -> None:
+        envelope = assertion_from_provenance(entity.provenance)
+        if envelope is None or not envelope.is_asserted_user_fact:
+            return
+        current = self.assertion_state(envelope.stable_id)
+        if current.get("status") in _UNSETTLED_ASSERTION_STATES:
+            return
+        self.register_assertion(entity, envelope, status="active")
+
+    def _retain_corroborating_assertion(self, entity: Entity, envelope: UserAssertionEnvelope) -> None:
+        if not envelope.is_asserted_user_fact:
+            return
+        current = self.assertion_state(envelope.stable_id)
+        if current.get("status") in _UNSETTLED_ASSERTION_STATES:
+            return
+        self.register_assertion(entity, envelope, status="active")
 
     def to_graph_payload(self, *, source_id: Optional[str] = None) -> Dict[str, Any]:
         """Return the normalized list-based payload consumed by graph adapters."""
@@ -982,10 +1490,10 @@ class KnowledgeGraph:
             'entities': [entity.to_dict() for entity in self.entities.values()],
             'relationships': [relationship.to_dict() for relationship in self.relationships.values()],
             'metadata': {
-                **self.metadata,
+                **copy.deepcopy(self.metadata),
                 'graph_id': self.graph_id,
                 'graph_version': self.graph_version,
-                'provenance': self.provenance,
+                'provenance': copy.deepcopy(self.provenance),
             },
         }
 
@@ -1041,6 +1549,9 @@ class KnowledgeGraph:
         if claim_entities:
             for relationship in self.relationships.values():
                 if relationship.relation_type in {'supports', 'supported_by'}:
+                    if ((relationship.attributes or {}).get('effective') is False
+                            or (relationship.attributes or {}).get('activity_status') == 'invalidated'):
+                        continue
                     if relationship.target_id in claim_entities:
                         supported_fact_ids.add(relationship.source_id)
                     if relationship.source_id in claim_entities:
@@ -1049,6 +1560,8 @@ class KnowledgeGraph:
         facts: List[Dict[str, Any]] = []
         for entity in self.entities.values():
             if entity.type not in {'fact', 'evidence', 'authority'}:
+                continue
+            if not self.entity_is_effective(entity):
                 continue
             if claim_entities and entity.id not in supported_fact_ids:
                 continue
@@ -1106,10 +1619,10 @@ class KnowledgeGraph:
     def to_dict(self) -> dict:
         """Serialize to dictionary."""
         return {
-            'metadata': dict(self.metadata),
+            'metadata': copy.deepcopy(self.metadata),
             'graph_id': self.graph_id,
             'graph_version': self.graph_version,
-            'provenance': self.provenance,
+            'provenance': copy.deepcopy(self.provenance),
             'entities': {eid: e.to_dict() for eid, e in self.entities.items()},
             'relationships': {rid: r.to_dict() for rid, r in self.relationships.items()}
         }
@@ -1131,6 +1644,7 @@ class KnowledgeGraph:
         """Deserialize from dictionary."""
         if not isinstance(data, Mapping):
             raise TypeError('knowledge graph data must be a mapping')
+        data = copy.deepcopy(dict(data))
         stored_metadata = data.get('metadata') if isinstance(data.get('metadata'), Mapping) else {}
         merged_provenance = _merge_provenance(
             stored_metadata.get('provenance') if isinstance(stored_metadata.get('provenance'), Mapping) else None,
