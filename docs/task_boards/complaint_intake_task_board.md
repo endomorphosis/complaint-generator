@@ -306,7 +306,7 @@ Implementation instructions:
 
 ## CIMP-FACT-02 Connect upstream graph extraction with validated user-source spans
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.facts
