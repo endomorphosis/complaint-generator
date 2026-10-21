@@ -1058,6 +1058,7 @@ def test_internal_entry_requires_exact_parent_ownership(tmp_path, monkeypatch):
 @pytest.mark.parametrize("changed_spec", [False, True])
 def test_internal_entry_calls_actual_native_runner_contract_without_once(campaign, monkeypatch, changed_spec):
     root, spec, state, generated = campaign
+    monkeypatch.setenv("XAI_API_KEY", "synthetic-owner-admission-never-dispatched")
     state.mkdir()
     record = _owner(state)
     record["plan_id"] = generated["receipt"]["plan_id"]
@@ -1224,6 +1225,7 @@ def test_doctor_refuses_known_insufficient_checkout_space_without_provider(campa
 
 
 def test_configured_start_and_owned_reentry_preserve_root_epoch_and_native_contract(campaign, monkeypatch):
+    monkeypatch.setenv("XAI_API_KEY", "synthetic-owner-admission-never-dispatched")
     _admission_transport(monkeypatch)
     root, spec, state, generated = campaign
     state.mkdir(mode=0o700)
