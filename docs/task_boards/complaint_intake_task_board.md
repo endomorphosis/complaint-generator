@@ -1157,7 +1157,7 @@ Implementation instructions:
 
 ## CIMP-OPS-02 Make supervisor launch and restart ownership reliable for this repository and campaign
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.supervision
