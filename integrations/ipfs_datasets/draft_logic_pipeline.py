@@ -443,113 +443,59 @@ def render_proof_report(
 # ---------------------------------------------------------------------------
 
 def _pin_private_proof_report(report: Dict[str, Any], private_context: Dict[str, Any], *, claim_id: str, pinned_at: str) -> Dict[str, Any]:
-    """Seal the full proof report and theorem sources. No plaintext content hash."""
-
+    """Seal report and full theorem sources; private failures never fall back."""
     from integrations.ipfs_datasets.storage import store_automatic_private_artifact
+    from integrations.private_storage import PrivateKeyLockedError
 
-    if private_context.get("locked") or private_context.get("key") is None:
-        return {
-            "report_cid": "",
-            "lean4_cid": "",
-            "coq_cid": "",
-            "pinned": False,
-            "backend": "private",
-            "pinned_at": pinned_at,
-            "claim_id": "",
-            "stored_local": False,
-            "uploaded": False,
-            "verified": False,
-            "replicated": False,
-            "deferred": False,
-            "network_durable": False,
-            "status": "unlock_needed",
-            "private_artifact": True,
-            "plaintext_exported": False,
-            "overwrites_existing": False,
-        }
-    theorem_export = dict(report.get("theorem_export") or {})
-    pieces = {
-        "proof-history": json.dumps(report, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8"),
-        "theorem-source": json.dumps(
-            {
-                "lean4": theorem_export.get("lean4") or "",
-                "coq": theorem_export.get("coq") or "",
-                "errors": list(report.get("errors") or []),
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        ).encode("utf-8"),
-    }
-    # Theorem dialects are sealed in full, not as a summary that drops source.
-    if theorem_export.get("lean4"):
-        pieces["theorem-source"] = json.dumps(
-            {"lean4": theorem_export.get("lean4") or "", "coq": theorem_export.get("coq") or "", "errors": list(report.get("errors") or [])},
-            ensure_ascii=False,
-            sort_keys=True,
-        ).encode("utf-8")
+    empty = {"report_cid": "", "lean4_cid": "", "coq_cid": "", "pinned": False,
+             "backend": "private", "pinned_at": pinned_at, "claim_id": "", "stored_local": False,
+             "uploaded": False, "verified": False, "replicated": False, "deferred": False,
+             "network_durable": False, "private_artifact": True, "plaintext_exported": False,
+             "overwrites_existing": False}
+    if not isinstance(private_context, dict):
+        return {**empty, "status": "recoverable", "deferred": True, "code": "private_context_invalid"}
+    missing_key = private_context.get("key") is None and private_context.get("key_provider") is None
+    if private_context.get("locked") or missing_key:
+        return {**empty, "status": "unlock_needed"}
     artifacts: dict[str, Any] = {}
     try:
-        for kind, payload in (
-            ("proof-history", json.dumps(report, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")),
-            ("theorem-source", pieces["theorem-source"]),
-        ):
+        theorem_export = dict(report.get("theorem_export") or {})
+        pieces = {
+            "proof-history": json.dumps(report, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8"),
+            "theorem-source": json.dumps({"lean4": theorem_export.get("lean4") or "", "coq": theorem_export.get("coq") or "",
+                                           "errors": list(report.get("errors") or [])}, ensure_ascii=False, sort_keys=True).encode("utf-8"),
+        }
+        for kind, payload in pieces.items():
             artifacts[kind] = store_automatic_private_artifact(
-                payload,
-                access=private_context["access"],
-                tenant_id=str(private_context["tenant_id"]),
-                case_id=str(private_context["case_id"]),
-                artifact_kind=kind,
+                payload, access=private_context["access"], tenant_id=str(private_context["tenant_id"]),
+                case_id=str(private_context["case_id"]), artifact_kind=kind,
                 revision=str(private_context.get("revision") or "proof-1") + ":" + kind,
                 principal_id=str(private_context.get("principal_id") or private_context["tenant_id"]),
-                key=private_context.get("key"),
-                key_id=private_context.get("key_id"),
-                backend=private_context.get("backend"),
-                backend_name=private_context.get("backend_name"),
-                pin_content=bool(private_context.get("pin_content", True)),
+                key=private_context.get("key"), key_id=private_context.get("key_id"),
+                key_provider=private_context.get("key_provider"), backend=private_context.get("backend"),
+                backend_name=private_context.get("backend_name"), pin_content=bool(private_context.get("pin_content", True)),
             )
     except Exception as exc:
-        return {
-            "report_cid": "",
-            "lean4_cid": "",
-            "coq_cid": "",
-            "pinned": False,
-            "backend": "private",
-            "pinned_at": pinned_at,
-            "claim_id": "",
-            "stored_local": False,
-            "uploaded": False,
-            "verified": False,
-            "replicated": False,
-            "deferred": True,
-            "network_durable": False,
-            "status": "recoverable",
-            "private_artifact": True,
-            "plaintext_exported": False,
-            "error": type(exc).__name__,
-            "code": str(getattr(exc, "code", "") or "private_proof_failed"),
-            "overwrites_existing": False,
-        }
-    report_pin = artifacts["proof-history"]
+        return {**empty, "status": "unlock_needed" if isinstance(exc, PrivateKeyLockedError) else "recoverable",
+                "deferred": not isinstance(exc, PrivateKeyLockedError), "error": type(exc).__name__,
+                "code": str(getattr(exc, "code", "") or "private_proof_failed"), "artifacts": artifacts}
+    report_pin, theorem_pin = artifacts["proof-history"], artifacts["theorem-source"]
+    complete = all(item.get("verified") is True and item.get("status") in {"available", "degraded"} for item in artifacts.values())
+    if not complete:
+        return {**empty, "status": "recoverable", "deferred": True,
+                "code": "private_proof_incomplete", "artifacts": artifacts}
     return {
-        "report_cid": str(report_pin.get("cid") or ""),
-        "lean4_cid": str(report_pin.get("cid") or ""),
-        "coq_cid": str(artifacts["theorem-source"].get("cid") or ""),
-        "pinned": bool(report_pin.get("pinned")),
-        "backend": "private",
-        "pinned_at": pinned_at,
-        "claim_id": claim_id,
-        "stored_local": bool(report_pin.get("stored_local")),
-        "uploaded": bool(report_pin.get("uploaded")),
-        "verified": bool(report_pin.get("verified")),
-        "replicated": False,
-        "deferred": bool(report_pin.get("deferred")),
-        "network_durable": bool((report_pin.get("receipt") or {}).get("network_durable")),
-        "verification": dict(report_pin.get("verification") or {}),
-        "receipt": dict(report_pin.get("receipt") or {}),
-        "private_artifact": True,
-        "plaintext_exported": False,
-        "artifacts": artifacts,
-        "status": "available",
+        **empty, "report_cid": str(report_pin.get("cid") or ""),
+        "lean4_cid": str(theorem_pin.get("cid") or "") if theorem_export.get("lean4") else "",
+        "coq_cid": str(theorem_pin.get("cid") or "") if theorem_export.get("coq") else "",
+        "claim_id": claim_id, "pinned": all(item.get("pinned") is True for item in artifacts.values()),
+        "stored_local": all(item.get("stored_local") is True for item in artifacts.values()),
+        "uploaded": all(item.get("uploaded") is True for item in artifacts.values()), "verified": True,
+        "deferred": any(item.get("deferred") is True for item in artifacts.values()),
+        "network_durable": all((item.get("receipt") or {}).get("network_durable") is True for item in artifacts.values()),
+        "verification": {"matched": True, "method": "all-private-artifact-ciphertext-readbacks"},
+        "receipt": dict(report_pin.get("receipt") or {}), "artifacts": artifacts,
+        "status": "degraded" if any(item.get("status") == "degraded" for item in artifacts.values()) else "available",
     }
 
 

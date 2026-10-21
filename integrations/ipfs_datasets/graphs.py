@@ -1306,103 +1306,109 @@ def query_graph_support(
     return payload
 
 
+def _write_private_graph_ciphertext(destination: Any, name: str, envelope: bytes) -> None:
+    """Publish only authenticated ciphertext, privately and without replacement."""
+    import secrets
+    import stat
+
+    root = Path(os.path.abspath(destination))
+    if root.resolve() != root:
+        raise ValueError("private_graph_destination_alias")
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    temporary = ".private-graph-" + secrets.token_hex(16)
+    try:
+        metadata = os.fstat(descriptor)
+        if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != 0o700:
+            raise ValueError("private_graph_destination_permissions")
+        handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=descriptor)
+        with os.fdopen(handle, "wb") as output:
+            os.fchmod(output.fileno(), 0o600)
+            output.write(envelope)
+            output.flush()
+            os.fsync(output.fileno())
+        current = root.lstat()
+        if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino):
+            raise ValueError("private_graph_destination_changed")
+        try:
+            os.link(temporary, name, src_dir_fd=descriptor, dst_dir_fd=descriptor, follow_symlinks=False)
+        except FileExistsError:
+            existing = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=descriptor)
+            with os.fdopen(existing, "rb") as source:
+                item = os.fstat(source.fileno())
+                if (not stat.S_ISREG(item.st_mode) or item.st_uid != os.getuid()
+                        or stat.S_IMODE(item.st_mode) != 0o600 or item.st_size != len(envelope)
+                        or source.read(len(envelope) + 1) != envelope):
+                    raise ValueError("private_graph_destination_exists")
+        os.fsync(descriptor)
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=descriptor)
+        except FileNotFoundError:
+            pass
+        os.close(descriptor)
+
+
 def persist_private_graph_snapshot(
     graph_payload: Dict[str, Any],
     private_context: Mapping[str, Any],
     *,
     graph_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Seal a case graph. Do not write a plaintext catalog or client index.
-
-    Private graph indexing is unsupported. Callers get an authenticated
-    ciphertext snapshot, or an explicit locked/unavailable result with no
-    durable plaintext mutation.
-    """
-
+    """Seal a case graph; never create a plaintext catalog or client index."""
     if not isinstance(graph_payload, Mapping):
         raise TypeError("graph_payload must be a mapping")
     if not isinstance(private_context, Mapping):
         raise TypeError("private_context must be a mapping")
-    locked = bool(private_context.get("locked"))
-    if locked or private_context.get("key") is None:
-        return {
-            "status": "unlock_needed",
-            "persisted": False,
-            "private_artifact": True,
-            "private_indexing": "unsupported",
-            "plaintext_catalog": False,
-            "graph_id": str(graph_id or graph_payload.get("graph_id") or ""),
-            "overwrites_existing": False,
-        }
-    body = json.dumps(dict(graph_payload), sort_keys=True, default=str).encode("utf-8")
-    from integrations.ipfs_datasets.storage import store_automatic_private_artifact
-
+    missing_key = private_context.get("key") is None and private_context.get("key_provider") is None
+    if private_context.get("locked") or missing_key:
+        return {"status": "unlock_needed", "persisted": False, "private_artifact": True,
+                "private_indexing": "unsupported", "plaintext_catalog": False,
+                "overwrites_existing": False}
+    from integrations.ipfs_datasets.storage import store_automatic_private_artifact, retrieve_bytes
+    from integrations.private_storage import (
+        PrivateArtifactBinding, PrivateKeyLockedError, PrivateStorageError,
+        _resolve_key, assert_access_matches_binding, open_private_artifact,
+    )
     try:
-        receipt = store_automatic_private_artifact(
-            body,
-            access=private_context["access"],
-            tenant_id=str(private_context["tenant_id"]),
-            case_id=str(private_context["case_id"]),
-            artifact_kind="fact-graph",
-            revision=str(private_context.get("revision") or "fact-graph-1"),
+        body = json.dumps(dict(graph_payload), sort_keys=True, default=str).encode("utf-8")
+        binding = PrivateArtifactBinding(
+            tenant_id=str(private_context["tenant_id"]), case_id=str(private_context["case_id"]),
             principal_id=str(private_context.get("principal_id") or private_context["tenant_id"]),
-            key=private_context.get("key"),
-            key_id=private_context.get("key_id"),
-            backend=private_context.get("backend"),
-            backend_name=private_context.get("backend_name"),
-            pin_content=bool(private_context.get("pin_content", True)),
+            artifact_kind="fact-graph", revision=str(private_context.get("revision") or "fact-graph-1"),
         )
+        receipt = store_automatic_private_artifact(
+            body, access=private_context["access"], tenant_id=binding.tenant_id,
+            case_id=binding.case_id, principal_id=binding.principal_id,
+            artifact_kind=binding.artifact_kind, revision=binding.revision,
+            key=private_context.get("key"), key_id=private_context.get("key_id"),
+            key_provider=private_context.get("key_provider"), backend=private_context.get("backend"),
+            backend_name=private_context.get("backend_name"), pin_content=bool(private_context.get("pin_content", True)),
+        )
+        destination = private_context.get("destination_dir")
+        if destination is not None:
+            loaded = retrieve_bytes(str(receipt.get("cid") or ""), backend=private_context.get("backend"),
+                                    backend_name=private_context.get("backend_name"))
+            blob = loaded.get("data")
+            if loaded.get("status") not in {"available", "degraded"} or not isinstance(blob, (bytes, bytearray)):
+                raise PrivateStorageError("private graph ciphertext unavailable", code="readback_mismatch")
+            assert_access_matches_binding(private_context["access"], binding)
+            key_id, key = _resolve_key(binding, key=private_context.get("key"), key_id=private_context.get("key_id"),
+                                       key_provider=private_context.get("key_provider"))
+            if key_id != receipt.get("key_id") or open_private_artifact(bytes(blob), binding=binding, key=key, expected_key_id=key_id) != body:
+                raise PrivateStorageError("private graph ciphertext mismatch", code="readback_mismatch")
+            name = "".join(ch if ch.isalnum() else "-" for ch in str(receipt.get("cid") or ""))[:80] or "fact-graph"
+            _write_private_graph_ciphertext(destination, name + ".bin", bytes(blob))
     except Exception as exc:
-        return {
-            "status": "recoverable",
-            "persisted": False,
-            "private_artifact": True,
-            "private_indexing": "unsupported",
-            "plaintext_catalog": False,
-            "error": type(exc).__name__,
-            "code": str(getattr(exc, "code", "") or "private_graph_failed"),
-            "overwrites_existing": False,
-        }
-    destination = private_context.get("destination_dir")
-    if destination:
-        dest_root = Path(destination)
-        dest_root.mkdir(parents=True, exist_ok=True)
-        name = str(receipt.get("cid") or "fact-graph")
-        safe = "".join(ch if ch.isalnum() else "-" for ch in name)[:80] or "fact-graph"
-        target = dest_root / f"{safe}.bin"
-        # Ciphertext only. The receipt CID is an address of the envelope.
-        from integrations.ipfs_datasets.storage import retrieve_bytes
-
-        loaded = retrieve_bytes(
-            str(receipt.get("cid") or ""),
-            backend=private_context.get("backend"),
-            backend_name=private_context.get("backend_name"),
-        )
-        blob = loaded.get("data")
-        if not isinstance(blob, (bytes, bytearray)):
-            return {
-                "status": "recoverable",
-                "persisted": False,
-                "private_artifact": True,
-                "private_indexing": "unsupported",
-                "plaintext_catalog": False,
-                "code": "readback_mismatch",
-                "overwrites_existing": False,
-            }
-        target.write_bytes(bytes(blob))
-    return {
-        "status": "stored-private",
-        "persisted": True,
-        "private_artifact": True,
-        "private_indexing": "unsupported",
-        "plaintext_catalog": False,
-        "plaintext_index": False,
-        "graph_id": str(graph_id or ""),
-        "cid": receipt.get("cid"),
-        "verified": True,
-        "receipt": receipt,
-        "overwrites_existing": False,
-    }
+        return {"status": "unlock_needed" if isinstance(exc, PrivateKeyLockedError) else "recoverable",
+                "persisted": False, "verified": False, "private_artifact": True,
+                "private_indexing": "unsupported", "plaintext_catalog": False,
+                "error": type(exc).__name__, "code": str(getattr(exc, "code", "") or "private_graph_failed"),
+                "overwrites_existing": False}
+    return {"status": "stored-private", "persisted": True, "private_artifact": True,
+            "private_indexing": "unsupported", "plaintext_catalog": False, "plaintext_index": False,
+            "graph_id": str(graph_id or ""), "cid": receipt.get("cid"), "verified": receipt.get("verified") is True,
+            "deferred": receipt.get("deferred") is True, "receipt": receipt, "overwrites_existing": False}
 
 
 def persist_graph_snapshot(
