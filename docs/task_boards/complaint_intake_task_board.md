@@ -766,7 +766,7 @@ Implementation instructions:
 
 ## CIMP-PRIV-003 Implement versioned encrypt-before-addressing private artifact envelope
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.privacy
