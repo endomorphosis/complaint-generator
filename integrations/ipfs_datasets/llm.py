@@ -5,12 +5,26 @@ import importlib
 import json
 import logging
 import os
+from pathlib import Path
 import re
 import shutil
 import threading
+import uuid
 from typing import Any, Dict, Mapping, Optional
 
-from integrations.ipfs_accelerate.routers import load_llm_symbols, normalize_accelerate_provider
+from integrations.ipfs_accelerate.routers import (
+	INFERENCE_OWNER,
+	PINNED_GROK_CANARY_PROMPT,
+	PINNED_GROK_MODEL,
+	PINNED_GROK_PROVIDER,
+	interpret_canary_dispatch,
+	load_llm_symbols,
+	normalize_accelerate_provider,
+	pinned_grok47_canary_kwargs,
+	pinned_grok47_dispatch_kwargs,
+	unpinned_grok_route_reason,
+	vetted_route_observation,
+)
 from .types import with_adapter_metadata
 
 
@@ -226,7 +240,94 @@ def _provider_preflight_error(
 	if provider_key in {"codex", "codex_cli"} and shutil.which("codex") is None:
 		return "Codex CLI unavailable: codex binary not found on PATH."
 
+	if provider_key == PINNED_GROK_PROVIDER:
+		model = str(metadata.get("effective_model_name") or "").strip()
+		if model != PINNED_GROK_MODEL:
+			return unpinned_grok_route_reason(provider_key, model) or (
+				"Grok CLI unavailable: model_name must be exactly grok-4.7."
+			)
+
 	return ""
+
+
+def grok_cli_binary_present() -> bool:
+	"""PATH-only discovery. Operator home bins are not treated as available."""
+
+	return shutil.which("grok") is not None
+
+
+def grok_cli_auth_present() -> bool:
+	"""Report whether auth is configured. Never read or return secret bytes."""
+
+	for name in (
+		"XAI_API_KEY",
+		"ipfs_accelerate_py_XAI_API_KEY",
+		"IPFS_ACCELERATE_PY_XAI_API_KEY",
+		"IPFS_DATASETS_PY_XAI_API_KEY",
+		"GROK_AUTH_PROVIDER_COMMAND",
+	):
+		if os.getenv(name, "").strip():
+			return True
+	candidates = []
+	configured_home = os.getenv("GROK_HOME", "").strip()
+	if configured_home:
+		candidates.append(Path(configured_home).expanduser() / "auth.json")
+	candidates.append(Path.home() / ".grok" / "auth.json")
+	for path in candidates:
+		try:
+			if path.is_file() and path.stat().st_size > 0:
+				return True
+		except OSError:
+			continue
+	return False
+
+
+def _new_request_id() -> str:
+	return uuid.uuid4().hex
+
+
+def _public_error(message: str, prompt: str) -> str:
+	"""Drop preflight text that echoes the prompt or is too large to be a code."""
+
+	text = str(message or "")
+	if prompt and prompt in text:
+		return "provider_exception"
+	if len(text) > 500:
+		return "provider_exception"
+	return text
+
+
+def _apply_pinned_grok_options(provider: str, call_options: Dict[str, Any]) -> None:
+	if str(provider or "").strip() != PINNED_GROK_PROVIDER:
+		return
+	call_options.update(
+		{
+			"allow_local_fallback": False,
+			"allow_cross_provider_fallback": False,
+		}
+	)
+
+
+def _route_receipt(
+	*,
+	requested_provider: str,
+	requested_model: str,
+	observe: bool,
+) -> Dict[str, Any]:
+	trace: Any = None
+	if observe and callable(get_last_generation_trace):
+		try:
+			trace = get_last_generation_trace()
+		except Exception:
+			trace = None
+	fields = vetted_route_observation(
+		trace,
+		requested_provider=requested_provider,
+		requested_model=requested_model,
+	)
+	fields["request_id"] = _new_request_id()
+	fields["inference_owner"] = INFERENCE_OWNER
+	return fields
 
 
 def _pop_first_string(options: Dict[str, Any], *names: str) -> str:
@@ -569,6 +670,7 @@ def _prepare_generate_text_call(
 		"effective_model_name": str(model_name or ""),
 		"router_base_url": "",
 	}
+	_apply_pinned_grok_options(str(mapped_provider or ""), call_options)
 	return str(mapped_provider or ""), model_name, call_options, {}, metadata
 
 
@@ -612,6 +714,9 @@ def generate_text_via_router(
 	if privacy_context is not None:
 		provider, model_name = PRIVACY_GROK_PROVIDER, PRIVACY_GROK_MODEL
 		kwargs = _private_generation_options(kwargs)
+	route_block = unpinned_grok_route_reason(provider, model_name)
+	if route_block:
+		raise RuntimeError("private_generation_preflight_unavailable" if privacy_context is not None else route_block)
 	effective_provider, effective_model_name, call_options, env_overrides, _ = _prepare_generate_text_call(
 		prompt,
 		provider=provider,
@@ -624,7 +729,9 @@ def generate_text_via_router(
 		env_overrides=env_overrides,
 	)
 	if preflight_error:
-		raise RuntimeError("private_generation_preflight_unavailable" if privacy_context is not None else preflight_error)
+		if privacy_context is not None:
+			raise RuntimeError("private_generation_preflight_unavailable")
+		raise RuntimeError(_public_error(preflight_error, prompt))
 	try:
 		with _temporary_env(env_overrides):
 			return generate_text(
@@ -666,9 +773,12 @@ def generate_text_with_metadata(
 			{
 				"status": "unavailable",
 				"text": "",
-				**({"prompt": prompt} if privacy_context is None else {}),
 				"provider_name": provider or "",
 				"model_name": model_name or "",
+				"resumable": True,
+				"live_canary": False,
+				"request_id": _new_request_id(),
+				"inference_owner": INFERENCE_OWNER,
 			},
 			operation="generate_text",
 			backend_available=False,
@@ -679,6 +789,28 @@ def generate_text_with_metadata(
 	if privacy_context is not None:
 		provider, model_name = PRIVACY_GROK_PROVIDER, PRIVACY_GROK_MODEL
 		kwargs = _private_generation_options(kwargs)
+	route_block = unpinned_grok_route_reason(provider, model_name)
+	if route_block:
+		return with_adapter_metadata(
+			{
+				"status": "unavailable",
+				"text": "",
+				"provider_name": provider or "",
+				"model_name": model_name or "",
+				"requested_provider_name": provider or "",
+				"requested_model_name": model_name or "",
+				"error": "private_generation_preflight_unavailable" if privacy_context is not None else route_block,
+				"availability_hint": "private_generation_preflight_unavailable" if privacy_context is not None else route_block,
+				"resumable": True,
+				"dispatch": "none",
+				"live_canary": False,
+				"request_id": _new_request_id(),
+				"inference_owner": INFERENCE_OWNER,
+			},
+			operation="generate_text",
+			backend_available=True,
+			implementation_status="available",
+		)
 	effective_provider, effective_model_name, call_options, env_overrides, metadata = _prepare_generate_text_call(
 		prompt,
 		provider=provider,
@@ -691,16 +823,23 @@ def generate_text_with_metadata(
 		env_overrides=env_overrides,
 	)
 	if preflight_error:
+		private_preflight = privacy_context is not None
+		grok_preflight = str(effective_provider or "") == PINNED_GROK_PROVIDER
+		public_preflight = "private_generation_preflight_unavailable" if private_preflight else _public_error(preflight_error, prompt)
 		return with_adapter_metadata(
 			{
-				"status": "error",
+				"status": "error" if private_preflight or not grok_preflight else "unavailable",
 				"text": "",
-				**({"prompt": prompt} if privacy_context is None else {}),
 				"provider_name": provider or "",
 				"model_name": model_name or "",
 				**metadata,
-				"error": "private_generation_preflight_unavailable" if privacy_context is not None else preflight_error,
-				"availability_hint": "private_generation_preflight_unavailable" if privacy_context is not None else preflight_error,
+				"error": public_preflight,
+				"availability_hint": public_preflight,
+				"resumable": True,
+				"dispatch": "none",
+				"live_canary": False,
+				"request_id": _new_request_id(),
+				"inference_owner": INFERENCE_OWNER,
 			},
 			operation="generate_text",
 			backend_available=True,
@@ -715,36 +854,45 @@ def generate_text_with_metadata(
 				model_name=effective_model_name,
 				**call_options,
 			)
-	except Exception as exc:
+	except Exception:
+		private_failure = privacy_context is not None
+		grok_failure = str(effective_provider or "") == PINNED_GROK_PROVIDER
 		return with_adapter_metadata(
 			{
-				"status": "error",
+				"status": "error" if private_failure or not grok_failure else "unavailable",
 				"text": "",
-				**({"prompt": prompt} if privacy_context is None else {}),
 				"provider_name": provider or "",
 				"model_name": model_name or "",
 				**metadata,
-				"error": "private_generation_failed" if privacy_context is not None else str(exc),
+				"error": "private_generation_failed" if private_failure else "provider_exception",
+				"availability_hint": "private_generation_failed" if private_failure else "provider_exception",
+				"resumable": True,
+				"dispatch": "attempted",
+				"live_canary": False,
+				"request_id": _new_request_id(),
+				"inference_owner": INFERENCE_OWNER,
 			},
 			operation="generate_text",
 			backend_available=True,
 			implementation_status="available",
 		)
 
+	receipt = _route_receipt(
+		requested_provider=str(metadata.get("effective_provider_name") or effective_provider or ""),
+		requested_model=str(metadata.get("effective_model_name") or effective_model_name or ""),
+		observe=True,
+	)
+	receipt.pop("requested_provider_name", None)
+	receipt.pop("requested_model_name", None)
 	return with_adapter_metadata(
 		{
 			"status": "available",
 			"text": text,
-			**({"prompt": prompt} if privacy_context is None else {}),
 			"provider_name": provider or "",
 			"model_name": model_name or "",
 			**metadata,
-			**(
-				get_last_generation_trace()
-				if callable(get_last_generation_trace)
-				and not str(metadata.get("effective_provider_name") or "").strip()
-				else {}
-			),
+			**receipt,
+			"resumable": False,
 		},
 		operation="generate_text",
 		backend_available=True,
@@ -876,6 +1024,149 @@ def llm_router_status(
 		backend_available=payload["status"] == "available",
 		degraded_reason=payload.get("error") or None,
 		implementation_status="available" if payload["status"] != "unavailable" else "unavailable",
+	)
+
+
+def grok47_route_capability(
+	*,
+	include_canary: bool = False,
+	canary_transport: Any = None,
+) -> Dict[str, Any]:
+	"""Publish a no-secret pinned-route receipt.
+
+	Static inspection never prepares a generation and never selects an
+	architecture route. The synthetic canary runs only when ``include_canary``
+	is true and binary, auth, and the router symbol are already present.
+	"""
+
+	router_ready = callable(generate_text)
+	binary_ready = grok_cli_binary_present()
+	auth_ready = grok_cli_auth_present()
+	gaps = []
+	if not router_ready:
+		gaps.append("llm_router symbol is unavailable. The pinned route was not dispatched.")
+	if not binary_ready:
+		gaps.append(
+			"Grok CLI unavailable: grok binary not found on PATH. "
+			"No fallback provider was contacted."
+		)
+	if not auth_ready:
+		gaps.append(
+			"Grok CLI unavailable: missing authentication. "
+			"Set XAI_API_KEY or sign in so the active HOME has a non-empty Grok CLI auth file. "
+			"No fallback provider was contacted."
+		)
+	payload: Dict[str, Any] = {
+		"inference_owner": INFERENCE_OWNER,
+		"requested_provider_name": PINNED_GROK_PROVIDER,
+		"requested_model_name": PINNED_GROK_MODEL,
+		"selected_provider_name": PINNED_GROK_PROVIDER if not gaps else "",
+		"selected_model_name": PINNED_GROK_MODEL if not gaps else "",
+		"allow_local_fallback": False,
+		"allow_cross_provider_fallback": False,
+		"router_symbol_available": router_ready,
+		"binary_available": binary_ready,
+		"auth_present": auth_ready,
+		"model_pinned": True,
+		"static_capability_only": True,
+		"probe_performed": False,
+		"canary_enabled": bool(include_canary),
+		"live_canary": False,
+		"provider_reported_model": "",
+		"response_cache_hit": False,
+		"canary_token_matched": False,
+		"dispatch": "none",
+		"request_id": _new_request_id(),
+		"text": "",
+		"status": "unavailable" if gaps else "available",
+		"error": " ".join(gaps),
+		"resumable": bool(gaps),
+		"route_observation": "unverified",
+		"route_evidence_class": "absent",
+	}
+	if gaps or not include_canary:
+		return with_adapter_metadata(
+			payload,
+			operation="grok47_route_capability",
+			backend_available=not gaps and router_ready,
+			degraded_reason=payload["error"] or None,
+			implementation_status="available" if router_ready else "unavailable",
+		)
+
+	transport = canary_transport if callable(canary_transport) else generate_text
+	canary_kwargs = pinned_grok47_canary_kwargs()
+	payload["static_capability_only"] = False
+	payload["selected_provider_name"] = canary_kwargs["provider"]
+	payload["selected_model_name"] = canary_kwargs["model_name"]
+	try:
+		result = transport(prompt=PINNED_GROK_CANARY_PROMPT, **canary_kwargs)
+	except Exception:
+		payload.update(
+			{
+				"status": "unavailable",
+				"error": "provider_exception",
+				"availability_hint": "provider_exception",
+				"resumable": True,
+				"dispatch": "attempted",
+				"live_canary": False,
+			}
+		)
+		return with_adapter_metadata(
+			payload,
+			operation="grok47_route_capability",
+			backend_available=True,
+			degraded_reason="provider_exception",
+			implementation_status="available",
+		)
+
+	canary_view = interpret_canary_dispatch(result)
+	observed_text = result.get("text") if isinstance(result, Mapping) else result
+	token_matched = str(observed_text or "").strip() == PINNED_GROK_CANARY_PROMPT
+	trace = None
+	if callable(get_last_generation_trace):
+		try:
+			trace = get_last_generation_trace()
+		except Exception:
+			trace = None
+	observation = vetted_route_observation(
+		trace,
+		requested_provider=PINNED_GROK_PROVIDER,
+		requested_model=PINNED_GROK_MODEL,
+	)
+	payload.update(canary_view)
+	payload["route_observation"] = observation["route_observation"]
+	payload["route_evidence_class"] = observation["route_evidence_class"]
+	payload["observed_provider_name"] = observation["observed_provider_name"]
+	payload["observed_model_name"] = observation["observed_model_name"]
+	payload["canary_token_matched"] = token_matched
+	payload["dispatch"] = "canary" if canary_view["live_canary"] else "canary_unverified"
+	reported = str(canary_view.get("provider_reported_model") or "")
+	if canary_view["live_canary"] and reported == PINNED_GROK_MODEL and token_matched:
+		payload["status"] = "available"
+		payload["error"] = ""
+		payload["resumable"] = False
+	elif canary_view["live_canary"] and reported != PINNED_GROK_MODEL:
+		payload["status"] = "unavailable"
+		payload["error"] = (
+			"Grok canary unavailable: provider-reported model did not match grok-4.7. "
+			"The result was not accepted."
+		)
+		payload["resumable"] = True
+	else:
+		payload["status"] = "unverified"
+		payload["error"] = (
+			"Grok canary did not produce live wire-model evidence. "
+			"Router selection and injected or cached results are not a live canary."
+		)
+		payload["resumable"] = True
+		payload["live_canary"] = False
+		payload["provider_reported_model"] = ""
+	return with_adapter_metadata(
+		payload,
+		operation="grok47_route_capability",
+		backend_available=payload["status"] == "available",
+		degraded_reason=payload.get("error") or None,
+		implementation_status="available",
 	)
 
 
@@ -1192,6 +1483,9 @@ __all__ = [
 	"generate_text",
 	"generate_text_via_router",
 	"generate_text_with_metadata",
+	"grok47_route_capability",
+	"grok_cli_auth_present",
+	"grok_cli_binary_present",
 	"llm_router_status",
 	"LLM_ROUTER_AVAILABLE",
 	"LLM_ROUTER_ERROR",
