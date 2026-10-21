@@ -342,7 +342,7 @@ def terminal_service(tmp_path, monkeypatch):
     prior = sys.modules.pop('applications.complaint_cli', None)
     package = importlib.import_module('applications')
     previous_attribute = getattr(package, 'complaint_cli', None)
-    cli = importlib.import_module('applications.complaint_cli')
+    import applications.complaint_cli as cli
     service = cli.TerminalComplaintWorkspaceService(root_dir=tmp_path / 'sessions')
     service.initialize_private_keys(protection='passphrase', passphrase='synthetic-test-passphrase')
     service.ensure_private_case_key('synthetic-user', 'synthetic-user')
