@@ -2572,9 +2572,25 @@ class ComplaintWorkspaceRequestHandlers:
         *,
         message: Optional[str] = None,
         question_id: Optional[str] = None,
+        expected_question_revision: Optional[int] = None,
+        interview_action: Optional[str] = None,
     ) -> Dict[str, Any]:
         workspace = self.workspace
         state = self._load_state(user_id)
+        normalized_action = str(interview_action or "").strip().lower()
+        if normalized_action == "resume":
+            interview = workspace.apply_shared_interview(
+                state,
+                message=None,
+                question_id=None,
+                expected_question_revision=None,
+                interview_action="resume",
+                narrative_turn=False,
+            )
+            workspace._save_state(state)
+            payload = workspace._build_intake_chat_payload(state)
+            payload["interview"] = interview
+            return payload
         normalized_question_id = str(question_id or "").strip()
         narrative_turn = normalized_question_id == ORIGINAL_COMPLAINT_QUESTION_ID or (
             not normalized_question_id and _narrative_is_open(state)
@@ -2587,7 +2603,12 @@ class ComplaintWorkspaceRequestHandlers:
                 if normalized_question_id
                 else workspace._next_question(state.get("intake_answers") or {})
             )
-        if normalized_question_id and target_question is None:
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        pending_graph = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else {}
+        if not normalized_question_id and not narrative_turn and message and pending_graph.get("inquiry_id"):
+            normalized_question_id = str(pending_graph["inquiry_id"])
+        graph_inquiry = normalized_question_id.startswith("inq-")
+        if normalized_question_id and target_question is None and not graph_inquiry:
             raise ValueError(f"Unknown intake question_id: {question_id}")
 
         accepted_answer: Optional[Dict[str, Any]] = None
@@ -2623,7 +2644,7 @@ class ComplaintWorkspaceRequestHandlers:
         show_privacy_notice = not bool(state.get("privacy_notice_shown"))
         if show_privacy_notice:
             state["privacy_notice_shown"] = True
-        if normalized_message:
+        if normalized_message and not (graph_inquiry or normalized_action in {"answer", "status"}):
             if target_question is None:
                 raise ValueError("The intake flow is already complete for this session.")
             if narrative_turn:
@@ -2662,12 +2683,21 @@ class ComplaintWorkspaceRequestHandlers:
                 }
                 history.append(deepcopy(accepted_answer))
 
+        interview = workspace.apply_shared_interview(
+            state,
+            message=normalized_message or None,
+            question_id=normalized_question_id or None,
+            expected_question_revision=expected_question_revision,
+            interview_action=normalized_action or None,
+            narrative_turn=bool(normalized_message and narrative_turn),
+        )
         workspace._save_state(state)
         payload = workspace._build_intake_chat_payload(
             state,
             accepted_answer=accepted_answer,
-            requested_question_id=question_id if accepted_answer is None else None,
+            requested_question_id=None if accepted_answer is not None or graph_inquiry else question_id,
         )
+        payload["interview"] = interview
         if show_privacy_notice:
             payload["privacy_notice"] = _PRIVACY_MODE_NOTICE
             if str(payload.get("message") or "").startswith("Let's start with the basics."):
@@ -2928,6 +2958,121 @@ class ComplaintWorkspaceService:
         self._default_access = access if access is not None else WorkspaceAccess.trusted_local()
         self._authorizer = authorizer or WorkspaceAuthorizer()
         self.request_handlers = ComplaintWorkspaceRequestHandlers(self)
+        self._interview_mediators: Dict[tuple[str, str], Any] = {}
+
+    def apply_shared_interview(
+        self,
+        state: Dict[str, Any],
+        *,
+        message: Optional[str],
+        question_id: Optional[str],
+        expected_question_revision: Optional[int],
+        interview_action: Optional[str],
+        narrative_turn: bool,
+    ) -> Dict[str, Any]:
+        """Delegate narrative start, graph answers, and resume to one mediator transition."""
+        user_id = str(state.get("user_id") or DEFAULT_USER_ID)
+        case_id = _state_case_id(state, user_id)
+        self._check_access(user_id, ability="write", case_id=case_id, record_case_id=case_id)
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else None
+        action = str(interview_action or "").strip().lower()
+        graph_question = str(question_id or "").startswith("inq-")
+        should_run = bool(narrative_turn or graph_question or action in {"resume", "status", "start", "answer"} or projection)
+        if not should_run:
+            return {
+                "contract_version": "interview-transition-v1",
+                "action": "deferred",
+                "status": "awaiting_user",
+                "awaiting_user": True,
+                "legal_sufficiency": False,
+                "error": None,
+            }
+        try:
+            mediator = self._mediator_for_shared_interview(user_id, case_id)
+            kwargs: Dict[str, Any] = {
+                "privacy_policy": state.get("privacy_policy"),
+                "user_id": user_id,
+                "case_id": case_id,
+            }
+            # Rehydrate first, then apply this same request. A cold answer is
+            # never silently consumed as a resume-only operation.
+            if projection and not mediator.workflow_actions.interview_started:
+                restored = mediator.transition_shared_interview(action="resume", session_projection=projection, **kwargs)
+                if restored.get("error"):
+                    return restored
+            if action == "resume":
+                receipt = mediator.transition_shared_interview(action="resume", **kwargs)
+            elif narrative_turn or action == "start":
+                receipt = mediator.transition_shared_interview(
+                    action="start",
+                    narrative=message or _narrative_record(state).get("text"),
+                    **kwargs,
+                )
+            elif graph_question or action == "answer":
+                receipt = mediator.transition_shared_interview(
+                    action="answer",
+                    answer=message,
+                    inquiry_id=question_id,
+                    expected_question_revision=expected_question_revision,
+                    **kwargs,
+                )
+            else:
+                receipt = mediator.transition_shared_interview(action="status", **kwargs)
+            exported = mediator.workflow_actions.export_session_projection()
+            if exported:
+                state["shared_interview"] = exported
+            return receipt
+        except Exception as exc:
+            return {
+                "contract_version": "interview-transition-v1",
+                "action": action or "status",
+                "status": "unavailable",
+                "awaiting_user": False,
+                "legal_sufficiency": False,
+                "error": {
+                    "code": "capability_unavailable",
+                    "resumable": True,
+                    "error_type": type(exc).__name__,
+                    "legal_sufficiency": False,
+                },
+            }
+
+    def _mediator_for_shared_interview(self, user_id: str, case_id: str):
+        self._check_access(user_id, ability="read", case_id=case_id, record_case_id=case_id)
+        cache_key = (user_id, case_id)
+        cached = self._interview_mediators.get(cache_key)
+        if cached is not None:
+            return cached
+        from mediator.mediator import Mediator
+
+        # The cache and derived database namespace include both owner and
+        # case. Raw caller identifiers never become filesystem components.
+        identity = hashlib.sha256(json.dumps([user_id, case_id], separators=(",", ":")).encode()).hexdigest()
+        db_dir = self._session_dir / "interview-db" / identity
+        db_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+        def _interview_backend(prompt, complaint_privacy_context=None, **kwargs):
+            from integrations.ipfs_datasets.llm import generate_text_with_metadata
+            from mediator.exceptions import UserPresentableException
+
+            generated = generate_text_with_metadata(
+                prompt, provider="grok_cli", model_name="grok-4.7",
+                complaint_privacy_context=complaint_privacy_context,
+            )
+            if (not isinstance(generated, dict) or generated.get("status") not in {"available", "success"}
+                    or generated.get("error") or not isinstance(generated.get("text"), str)):
+                raise UserPresentableException("interview-unavailable", "privacy_denied:interview_generation_unavailable")
+            return str(generated.get("text") or "")
+
+        mediator = Mediator(
+            [_interview_backend],
+            evidence_db_path=str(db_dir / "evidence.db"),
+            legal_authority_db_path=str(db_dir / "legal-authority.db"),
+            claim_support_db_path=str(db_dir / "claim-support.db"),
+        )
+        mediator.state.username = user_id
+        self._interview_mediators[cache_key] = mediator
+        return mediator
 
     def _private_artifact_context(self, user_id: str, case_id: Optional[str] = None, *, revision: str = "session-v1") -> Dict[str, Any]:
         """Resolve current request admission and the live user-owned key session."""
@@ -3873,7 +4018,7 @@ class ComplaintWorkspaceService:
                 "how_to_answer": "No further intake answer is required right now.",
                 "review_focus": "Shift attention to corroborating documents, witness testimony, and legal support.",
             }
-        return {
+        payload = {
             "user_id": str(state.get("user_id") or DEFAULT_USER_ID),
             "message": message,
             "inquiry": {
@@ -3911,6 +4056,31 @@ class ComplaintWorkspaceService:
                 "remaining_question_ids": [item["id"] for item in _INTAKE_QUESTIONS if not str(answers.get(item["id"]) or "").strip()],
             },
         }
+
+        projection = state.get("shared_interview")
+        if isinstance(projection, dict) and projection.get("schema_version") == "shared-interview-session-v1":
+            pending = projection.get("pending_inquiry")
+            payload["legacy_inquiry"] = deepcopy(payload["inquiry"])
+            payload["legacy_conversation_state"] = deepcopy(payload["conversation_state"])
+            if isinstance(pending, dict):
+                inquiry = {
+                    "question_id": pending.get("inquiry_id"), "inquiry_id": pending.get("inquiry_id"),
+                    "label": "Complaint follow-up", "prompt": str(pending.get("question") or ""),
+                    "placeholder": "", "kind": "graph", "revision": pending.get("revision"),
+                }
+                payload["inquiry"] = inquiry
+                payload["next_question"] = {"id": inquiry["question_id"], **inquiry}
+                payload["message"] = inquiry["prompt"]
+                payload["expected_question_revision"] = pending.get("revision")
+            else:
+                payload["inquiry"] = None
+                payload["next_question"] = None
+                payload["expected_question_revision"] = None
+                payload["message"] = "The shared interview has no pending question. Review its unknown, unavailable and capped reasons before proceeding."
+            payload["conversation_state"]["is_complete"] = pending is None
+            payload["conversation_state"]["active_engine"] = "shared_interview"
+            payload["legal_sufficiency"] = False
+        return payload
 
     def _support_matrix(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
         answers = state.get("intake_answers") or {}
@@ -6734,11 +6904,15 @@ class ComplaintWorkspaceService:
         *,
         message: Optional[str] = None,
         question_id: Optional[str] = None,
+        expected_question_revision: Optional[int] = None,
+        interview_action: Optional[str] = None,
     ) -> Dict[str, Any]:
         return self.request_handlers.run_intake_chat_turn(
             user_id,
             message=message,
             question_id=question_id,
+            expected_question_revision=expected_question_revision,
+            interview_action=interview_action,
         )
 
     def save_evidence(
@@ -11641,6 +11815,8 @@ class ComplaintWorkspaceService:
                 args.get("user_id"),
                 message=args.get("message"),
                 question_id=args.get("question_id"),
+                expected_question_revision=args.get("expected_question_revision"),
+                interview_action=args.get("interview_action"),
             )
         if tool_name == "complaint.save_evidence":
             return self.save_evidence(

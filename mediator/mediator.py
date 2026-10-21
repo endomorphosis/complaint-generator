@@ -170,11 +170,36 @@ class Mediator:
 
 	def get_state(self):
 		state = self.state.serialize()
-		return self.state.serialize()
+		projection = None
+		exporter = getattr(getattr(self, 'workflow_actions', None), 'export_session_projection', None)
+		if callable(exporter):
+			projection = exporter()
+		if projection:
+			state['shared_interview'] = projection
+		return state
 
 
 	def set_state(self, serialized):
 		self.state = State.from_serialized(serialized)
+		projection = serialized.get('shared_interview') if isinstance(serialized, dict) else None
+		restorer = getattr(getattr(self, 'workflow_actions', None), 'restore_session_projection', None)
+		if isinstance(projection, dict) and callable(restorer):
+			restorer(projection)
+
+	def transition_shared_interview(self, text=None, **kwargs):
+		"""Route narrative start, answer, resume, and status through one contract."""
+		service = self.workflow_actions
+		action = kwargs.pop('action', None)
+		if action is None:
+			if text is None:
+				action = 'status' if service.interview_started else 'prompt'
+			else:
+				action = 'answer' if service.interview_started else 'start'
+		if action == 'start' and 'narrative' not in kwargs:
+			kwargs['narrative'] = text
+		elif action == 'answer' and 'answer' not in kwargs:
+			kwargs['answer'] = text
+		return service.transition_interview(action=action, **kwargs)
 
 	def response(self):
 		return "I'm sorry, I don't understand. Please try again."
@@ -1439,10 +1464,37 @@ class Mediator:
 
 
 	def finalize(self):
-		raise UserPresentableException(
-			'not-implemented',
-			'The Q&A has been completed. The follow-up flow has not yet been implemented.'
-		)
+		"""Return an honest workflow result when the legacy inquiry queue is done.
+
+		This does not claim that the complaint is legally sufficient.
+		"""
+		interview = {}
+		transition = getattr(getattr(self, 'workflow_actions', None), 'transition_interview', None)
+		if callable(transition):
+			try:
+				interview = transition(action='status') or {}
+			except Exception:
+				interview = {}
+		if not isinstance(interview, dict):
+			interview = {}
+		return {
+			'contract_version': 'interview-transition-v1',
+			'status': 'workflow_result',
+			'awaiting_user': False,
+			'legal_sufficiency': False,
+			'message': (
+				'Legacy intake questions for this queue are complete. '
+				'This result is not a legal sufficiency determination.'
+			),
+			'workflow_status': interview.get('status'),
+			'inquiry': interview.get('inquiry'),
+			'session_id': interview.get('session_id'),
+			'session_revision': interview.get('session_revision'),
+			'unknown_reasons': list(interview.get('unknown_reasons') or []),
+			'unavailable_reasons': list(interview.get('unavailable_reasons') or []),
+			'capped_reasons': list(interview.get('capped_reasons') or []),
+			'error': None,
+		}
 
 	def analyze_complaint_legal_issues(self):
 		"""
@@ -13396,6 +13448,10 @@ class Mediator:
 
 
 	def query_backend(self, prompt):
+		context = getattr(self, '_interview_privacy_context', None)
+		if context is not None:
+			return self._query_backend_with_privacy(prompt, context)
+
 		backend = self.backends[0]
 
 		try:
@@ -13406,6 +13462,35 @@ class Mediator:
 
 		self.log('backend_query', backend=backend.id, prompt=prompt, response=response)
 
+		return response
+
+	def _query_backend_with_privacy(self, prompt, context):
+		"""Decide the per-case privacy context before any provider call."""
+		from integrations.ipfs_datasets.llm import _privacy_context_block_reason
+
+		policy = context.get('policy') if isinstance(context, dict) else {}
+		permitted = policy.get('permitted_remote') if isinstance(policy, dict) else None
+		provider = permitted.get('provider') if isinstance(permitted, dict) else None
+		model_name = permitted.get('model') if isinstance(permitted, dict) else None
+		block = _privacy_context_block_reason(context, provider=provider, model_name=model_name)
+		if block:
+			self.log('privacy_refusal', code=block)
+			raise UserPresentableException('privacy-refused', block)
+
+		backend = self.backends[0]
+		try:
+			# The shared-interview backend contract accepts its bound context.
+			# A backend TypeError may occur after dispatch; never retry it without
+			# the context or turn one request into two provider invocations.
+			response = backend(prompt, complaint_privacy_context=context)
+		except Exception as exception:
+			self.log(
+				'backend_error',
+				backend=getattr(backend, 'id', 'backend'),
+				error_type=type(exception).__name__,
+			)
+			raise
+		self.log('backend_query', backend=getattr(backend, 'id', 'backend'), privacy='enforced')
 		return response
 		
 

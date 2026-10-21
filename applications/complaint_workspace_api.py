@@ -149,6 +149,8 @@ class IntakeChatTurnRequest(BaseModel):
     user_id: Optional[str] = None
     message: Optional[str] = None
     question_id: Optional[str] = None
+    expected_question_revision: Optional[int] = Field(default=None, ge=0)
+    interview_action: Optional[str] = None
 
 
 class EvidenceRequest(BaseModel):
@@ -427,6 +429,8 @@ def create_complaint_workspace_router(
             request.user_id,
             message=request.message,
             question_id=request.question_id,
+            expected_question_revision=request.expected_question_revision,
+            interview_action=request.interview_action,
         )
 
     @router.post("/api/complaint-workspace/evidence")

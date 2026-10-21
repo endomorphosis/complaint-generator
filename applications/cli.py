@@ -121,6 +121,11 @@ class CLI:
 			if text is not None:
 				print('\033[96m%s\033[0m' % f'You: {text}')
 			print('\033[93m%s\033[0m' % 'Mediator is thinking...')
+			transition = getattr(self.mediator, 'transition_shared_interview', None)
+			if callable(transition):
+				response = transition(text)
+				self.print_response(self._format_shared_interview(response))
+				return
 			response = self.mediator.io(text)
 			self.print_response(response)
 			payload_getter = getattr(self.mediator, 'get_current_inquiry_payload', None)
@@ -135,6 +140,28 @@ class CLI:
 		except Exception as exception:
 			self.print_error('error occured: %s' % exception)
 			print('\ninternal state may be corrupted. proceed with caution.')
+
+	def _format_shared_interview(self, response):
+		if not isinstance(response, dict):
+			return response
+		inquiry = response.get('inquiry') if isinstance(response.get('inquiry'), dict) else {}
+		question = str(inquiry.get('question') or response.get('message') or '').strip()
+		lines = [
+			f"status={response.get('status')}",
+			f"session_id={response.get('session_id')}",
+			f"session_revision={response.get('session_revision')}",
+			f"expected_question_revision={response.get('expected_question_revision')}",
+			f"inquiry_id={inquiry.get('inquiry_id')}",
+			f"legal_sufficiency={response.get('legal_sufficiency')}",
+		]
+		error = response.get('error') if isinstance(response.get('error'), dict) else None
+		if error:
+			lines.append(f"error={error.get('code')} resumable={error.get('resumable')}")
+		if question:
+			lines.append(question)
+		elif response.get('message'):
+			lines.append(str(response.get('message')))
+		return '\n'.join(lines)
 
 
 
@@ -213,6 +240,16 @@ class CLI:
 			lines.append(f"- [{timestamp}] {sender}: {message}")
 		return '\n'.join(lines)
 
+	def _shared_interview_projection(self):
+		exporter = getattr(getattr(self.mediator, 'workflow_actions', None), 'export_session_projection', None)
+		if not callable(exporter):
+			return None
+		try:
+			return exporter()
+		except Exception:
+			log.warning('Could not export the shared interview projection', exc_info=True)
+			return None
+
 	def _local_state_dir(self):
 		return Path(__file__).resolve().parent.parent / 'statefiles'
 
@@ -240,6 +277,7 @@ class CLI:
 				"current_inquiry_explanation": getattr(state, 'current_inquiry_explanation', None),
 				"data": getattr(state, 'data', {}),
 			},
+			"shared_interview": self._shared_interview_projection(),
 		}
 
 	def _restore_local_session_payload(self, payload):
@@ -247,6 +285,10 @@ class CLI:
 		state = self.mediator.state
 		for field_name, value in state_payload.items():
 			setattr(state, field_name, value)
+		projection = payload.get('shared_interview') if isinstance(payload, dict) else None
+		restorer = getattr(getattr(self.mediator, 'workflow_actions', None), 'restore_session_projection', None)
+		if isinstance(projection, dict) and callable(restorer):
+			restorer(projection)
 		sync_chat_history = getattr(state, '_sync_chat_history_state', None)
 		if callable(sync_chat_history):
 			sync_chat_history()
@@ -980,10 +1022,7 @@ class CLI:
 		docx_available = importlib.util.find_spec('docx') is not None
 		if isinstance(output_formats, list):
 			if 'docx' in output_formats and not docx_available:
-				self.print_error('python-docx is not installed; skipping docx export for this run.')
-				output_formats = [fmt for fmt in output_formats if fmt != 'docx']
-			if not output_formats:
-				output_formats = ['pdf']
+				self.print_error('python-docx is not installed; the document builder will report availability for the requested docx format.')
 		service_recipient_details = options.get('service_recipient_details')
 		if isinstance(service_recipient_details, str):
 			try:
