@@ -87,6 +87,7 @@ def test_explicit_environment_removes_ambient_routes_and_pins_model():
         "IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS": "1000",
         runner.AUTOMATIC_RETRY_REARM_ENV: "1",
         "IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS": "external/ambient-unrelated",
+        "IPFS_ACCELERATE_AGENT_WORKTREE_POOL_MAX_ENTRIES": "1000",
     })
     assert environment["IPFS_ACCELERATE_AGENT_IMPLEMENTATION_PROVIDER"] == "grok"
     assert environment["GROK_MODEL"] == environment["TODO_DAEMON_LLM_MODEL"] == "grok-4.7"
@@ -96,6 +97,7 @@ def test_explicit_environment_removes_ambient_routes_and_pins_model():
     assert environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "low"
     assert environment[runner.AUTOMATIC_RETRY_REARM_ENV] == "0"
     assert environment["IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS"] == "external/ipfs_datasets_py"
+    assert environment["IPFS_ACCELERATE_AGENT_WORKTREE_POOL_MAX_ENTRIES"] == "1"
     assert environment["HOME"] == "/preserved/user"
     assert environment["XAI_API_KEY"] == "fixture-secret"
     assert json.loads(environment[runner.PRIVATE_PATHS_ENV]) == list(runner._PRIVATE_PATHS)
@@ -148,12 +150,66 @@ def test_private_policy_survives_actual_native_daemon_and_provider_environment(c
     assert child_environment[runner.PRIVATE_PATHS_ENV] == policy[runner.PRIVATE_PATHS_ENV]
     assert child_environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "low"
     assert child_environment["IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS"] == "64"
+    assert child_environment["IPFS_ACCELERATE_AGENT_WORKTREE_POOL_MAX_ENTRIES"] == "1"
     monkeypatch.setattr(runner.os, "environ", child_environment)
     provider_environment = daemon.PortalImplementationDaemon._implementation_untrusted_process_environment()
     assert provider_environment[runner.PRIVATE_PATHS_ENV] == policy[runner.PRIVATE_PATHS_ENV]
     assert provider_environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "low"
     assert provider_environment["IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS"] == "64"
     assert provider_environment["IPFS_ACCELERATE_AGENT_IMPLEMENTATION_PROVIDER"] == "grok"
+
+
+def test_campaign_pool_limit_preserves_leased_worktrees_and_prunes_only_idle(tmp_path, monkeypatch):
+    import subprocess
+
+    _, native = runner._native_modules(ROOT)
+    repo = tmp_path / "synthetic-repo"
+    repo.mkdir()
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, text=True, capture_output=True, check=True)
+
+    git("init", "-b", "main")
+    (repo / "app.py").write_text("VALUE = 1\n")
+    git("add", "app.py")
+    git("-c", "user.name=Pool fixture", "-c", "user.email=pool@example.invalid",
+        "commit", "-m", "Synthetic pool baseline")
+    state_dir = repo / "state"
+    policy = runner.campaign_environment(repo, {"PATH": os.defpath,
+        "IPFS_ACCELERATE_AGENT_WORKTREE_POOL_MAX_ENTRIES": "1000"}, state_dir=state_dir)
+    monkeypatch.setattr(runner.os, "environ", dict(policy))
+    todo = repo / "todo.md"
+    todo.write_text("# Synthetic pool fixture\n")
+    daemon = native.PortalImplementationDaemon(
+        todo_path=todo, state_path=state_dir / "task_state.json",
+        strategy_path=state_dir / "strategy.json", events_path=state_dir / "events.jsonl",
+        repo_root=repo, implement=False, use_ephemeral_worktree=True,
+        worktree_root=repo / "worktrees", merge_queue_dir=state_dir / "merge-queue",
+        llm_merge_resolver_command="",
+    )
+    pool = daemon.worktree_pool
+    assert pool is not None and pool.max_entries == 1
+    held = pool.acquire(cache_key="synthetic-held", base_ref="main")
+    try:
+        first = pool.acquire(cache_key="synthetic-first", base_ref="main")
+        assert first.release()["pooled"] is True
+        first_state = pool.state_root / f"{first.entry_id}.json"
+        held_state = pool.state_root / f"{held.entry_id}.json"
+        held_before = held_state.read_bytes()
+        second = pool.acquire(cache_key="synthetic-second", base_ref="main")
+        assert second.release()["pooled"] is True
+        assert not first.path.exists() and not first_state.exists()
+        assert second.path.is_dir()
+        assert held.path.is_dir() and held_state.read_bytes() == held_before
+        assert held_state.with_suffix(".lock").is_file()
+        states = [json.loads(path.read_text()) for path in pool.state_root.glob("*.json")]
+        assert [item["lease_token"] for item in states if item["state"] == "idle"] == [second.entry_id]
+        assert [item["lease_token"] for item in states if item["state"] == "leased"] == [held.entry_id]
+        state = native.PortalTaskState.load(daemon.state_path)
+        assert not state.implementation_attempts and not state.implementation_attempts_by_cid
+        assert not state.completed_task_ids
+    finally:
+        held.release(reusable=False)
 
 
 def test_real_native_parser_and_config_accept_explicit_bounded_campaign(campaign):

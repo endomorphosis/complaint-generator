@@ -165,7 +165,9 @@ Grok 4.7 with low reasoning through `ipfs_accelerate_py.llm_router`, allows up t
 64 model turns within a 900-second hard deadline and a 180-second idle limit,
 disables provider fallback,
 and uses source code and synthetic fixtures with private data paths masked in
-Docker. Its native catalogs are isolated from other campaigns. `doctor` checks
+Docker. Its native catalogs are isolated from other campaigns. The campaign retains
+at most one eligible idle prepared worktree after pool release; leased or fenced
+worktrees remain protected. `doctor` checks
 the cached, source-qualified execution image; AMD64 provisioning instructions
 live in `external/ipfs_accelerate_py/containers/external-agent/ordinary-task-toolchain/amd64/README.md`.
 The first task characterizes the actual terminal interface; subsequent tasks
