@@ -84,7 +84,6 @@ except ModuleNotFoundError:
     typer = _MiniTyperModule()
 
 from complaint_generator.legacy_session_migration import migrate_legacy_session
-from applications.ui_review import run_ui_review_workflow
 from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
 
 from .complaint_workspace import ComplaintWorkspaceService
@@ -97,6 +96,14 @@ DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
 
 app = typer.Typer(help="Unified complaint workspace CLI.")
 service = ComplaintWorkspaceService()
+
+
+def run_ui_review_workflow(*args, **kwargs):
+    """Load screenshot/model review dependencies only for UI review requests."""
+
+    from applications.ui_review import run_ui_review_workflow as workflow
+
+    return workflow(*args, **kwargs)
 
 
 def _require_ipfs_attr(module_name: str, attr_name: str) -> Any:
