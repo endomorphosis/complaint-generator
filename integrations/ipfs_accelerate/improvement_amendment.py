@@ -281,7 +281,8 @@ def _completed_queue_bindings(root: Path, state: Path, branch: str) -> dict[str,
     return queue.completed_task_cid_bindings()
 
 
-def _assert_quiescent(root: Path, state: Path, old_plan_id: str, old_cid: str, new_cid: str) -> dict[str, Any]:
+def _assert_quiescent(root: Path, state: Path, old_plan_id: str, old_cid: str, new_cid: str,
+                      *, task_id: str = TASK) -> dict[str, Any]:
     _, native = runner._native_modules(root)
     launcher = recovery._object(state / "launcher.json")
     heartbeat = recovery._object(state / f"{runner.STATE_PREFIX}_supervisor_status.json", legacy_group_write=True)
@@ -298,27 +299,31 @@ def _assert_quiescent(root: Path, state: Path, old_plan_id: str, old_cid: str, n
     if _completed_queue_bindings(root, state, launcher.get("merge_target", "")).get(BASELINE_TASK) != {BASELINE_CID}:
         raise ValueError("exact versioned native queue completion of the baseline is required")
     forbidden_lists = ("completed_task_ids", "assumed_completed_task_ids", "blocked_task_ids", "external_reserved_task_ids")
-    if any(set(payload.get(key, [])) & {TASK, old_cid, new_cid} for key in forbidden_lists):
+    refs = {task_id, old_cid, new_cid}
+    if any(set(payload.get(key, [])) & refs for key in forbidden_lists):
         raise ValueError("changed task is completed, held, blocked or reserved")
     for key in ("implementation_attempts", "implementation_attempts_by_cid", "protected_implementation_attempts",
                 "retry_budget_repair_receipts", "retry_budget_repair_rearm_receipts",
                 "stale_proposal_replay_rearm_receipts", "validation_obsolescence_rearm_receipts"):
-        if any(value for ref, value in (payload.get(key) or {}).items() if ref in {TASK, old_cid, new_cid}):
+        if any(value for ref, value in (payload.get(key) or {}).items()
+               if ref in refs or isinstance(value, Mapping) and any(
+                   isinstance(value.get(field), str) and value[field] in refs
+                   for field in ("task_id", "canonical_task_cid", "task_revision_cid"))):
             raise ValueError("changed task has consumed attempts, held state or retry history")
-    status = (payload.get("task_statuses") or {}).get(TASK, "todo")
+    status = (payload.get("task_statuses") or {}).get(task_id, "todo")
     if status not in {"todo", "needed", "pending", "waiting"}:
         raise ValueError("changed task native status is not pending")
     facade = object.__new__(native.PortalImplementationDaemon)
     facade.repo_root, facade.state_path = root, state / f"{runner.STATE_PREFIX}_task_state.json"
     for cid in (old_cid, new_cid):
-        if os.path.lexists(facade._implementation_task_claim_path(TASK, canonical_task_cid=cid)):
+        if os.path.lexists(facade._implementation_task_claim_path(task_id, canonical_task_cid=cid)):
             raise ValueError("changed task has an existing native claim")
     for name in ("implementation.lock", native.IMPLEMENTATION_PROTECTED_ACTIVE_SNAPSHOT_FILENAME,
                  native.IMPLEMENTATION_PROTECTED_INCIDENT_FILENAME):
         if os.path.lexists(state / name):
             raise ValueError("native implementation claim or protected fence remains")
     from ipfs_accelerate_py.agent_supervisor.merge.worktree_lifecycle import WorktreeLifecycleStore
-    if any(record.task_id == TASK or record.canonical_task_cid in {old_cid, new_cid}
+    if any(record.task_id == task_id or record.canonical_task_cid in {old_cid, new_cid}
            for record in WorktreeLifecycleStore(repo_root=root).iter_records()):
         raise ValueError("changed task has native worktree history")
     events = state / f"{runner.STATE_PREFIX}_events.jsonl"
@@ -332,14 +337,14 @@ def _assert_quiescent(root: Path, state: Path, old_plan_id: str, old_cid: str, n
                 raise ValueError("native execution history is malformed") from exc
             if not isinstance(event, dict):
                 raise ValueError("native execution history is malformed")
-            if event.get("task_id") == TASK:
+            if event.get("task_id") == task_id or event.get("canonical_task_cid") in refs:
                 raise ValueError("changed task already has native execution history")
     return {"state_sha256": recovery._digest(_encoded(payload)), "processes": processes,
             "containers": containers, "native_state": payload}
 
 
 @contextmanager
-def _native_maintenance(root: Path):
+def _native_maintenance(root: Path, *, operation: str = "pending_tui_baseline_amendment"):
     from ipfs_accelerate_py.agent_supervisor.merge import checkout_lock as locks
     paths = [locks.board_scoped_protected_path_maintenance_lock_path(root, "complaint-intake-improvement"),
              locks.board_scoped_checkout_mutation_lock_path(root, "complaint-intake-improvement")]
@@ -349,7 +354,7 @@ def _native_maintenance(root: Path):
             metadata = locks.checkout_lock_metadata(
                 kind="implementation-protected-maintenance" if not leases else "merge",
                 repo_root=root, owner_script="",
-                extra={"lease_id": uuid.uuid4().hex, "operation": "pending_tui_baseline_amendment"})
+                extra={"lease_id": uuid.uuid4().hex, "operation": operation})
             lease, _, _, _ = locks.acquire_checkout_mutation_lease(path, metadata, owner_active=lambda _: True)
             if lease is None:
                 raise ValueError("native maintenance or merge owner is present")
@@ -474,8 +479,21 @@ def apply_tui_baseline_amendment(repo_root: Path, spec_path: Path, base_state_di
         return receipt
 
 
-def resolve_amended_epoch(root: Path, spec_path: Path, base: Path, pointer: Mapping[str, Any], plan_id: str) -> Path:
-    """Validate one complete old-recovery → pending-amendment pointer chain."""
+def resolve_amended_epoch(root: Path, spec_path: Path, base: Path, pointer: Mapping[str, Any], plan_id: str,
+                          *, historical_artifacts: Mapping[str, bytes] | None = None) -> Path:
+    """Validate one v2 chain against current files or hash-bound successor snapshots.
+
+    Only a successor resolver supplies historical_artifacts after validating
+    its immutable snapshots. Active v2 resolution always checks current files.
+    This avoids rewriting earlier receipts when a later pending task changes.
+    """
+    if historical_artifacts is not None and (
+            set(historical_artifacts) != {"spec", "plan", "board", "baseline_receipt"}
+            or any(not isinstance(value, bytes) for value in historical_artifacts.values())):
+        raise ValueError("historical amendment artifact set differs")
+
+    def artifact(name: str, path: Path) -> bytes:
+        return historical_artifacts[name] if historical_artifacts is not None else _source_bytes(path)
     relative = pointer.get("amendment")
     if not isinstance(relative, str) or re.fullmatch(r"amendments/[0-9a-f]{64}/receipt\.json", relative) is None:
         raise ValueError("invalid amendment receipt path")
@@ -512,7 +530,7 @@ def resolve_amended_epoch(root: Path, spec_path: Path, base: Path, pointer: Mapp
             or json.loads(snapshots["new_plan"]) != {**new_plan.to_dict(), "plan_id": new_plan.plan_id}
             or snapshots["new_board"] != _board_revision(snapshots["old_board"], old_spec, new_spec,
                 old_plan.plan_id, new_plan.plan_id)
-            or recovery._digest(_source_bytes(root / BASELINE_RECEIPT)) != hashes["old_baseline_receipt"]):
+            or recovery._digest(artifact("baseline_receipt", root / BASELINE_RECEIPT)) != hashes["old_baseline_receipt"]):
         raise ValueError("amendment is not the bounded baseline recipe or historical receipt changed")
     _, native = runner._native_modules(root)
     old_tasks = _tasks(native, root, snapshots["old_board"])
@@ -525,8 +543,8 @@ def resolve_amended_epoch(root: Path, spec_path: Path, base: Path, pointer: Mapp
             or receipt.get("unchanged_task_cids") != {
                 key: task.canonical_task_cid for key, task in old_tasks.items() if key != TASK}):
         raise ValueError("amendment task identity proof changed")
-    current_tasks = _tasks(native, root, _source_bytes(root / compiler.BOARD_RELATIVE))
-    current_plan = json.loads(_source_bytes(root / compiler.PLAN_RELATIVE))
+    current_tasks = _tasks(native, root, artifact("board", root / compiler.BOARD_RELATIVE))
+    current_plan = json.loads(artifact("plan", root / compiler.PLAN_RELATIVE))
     route_keys = ("implementation provider", "provider role", "model", "router", "provider fallback")
     if (set(current_tasks) != set(new_tasks) or current_plan != json.loads(snapshots["new_plan"])
             or any(current_tasks[key].canonical_task_cid != task.canonical_task_cid
@@ -542,7 +560,7 @@ def resolve_amended_epoch(root: Path, spec_path: Path, base: Path, pointer: Mapp
             or old_pointer.get("plan_id") != pointer.get("origin_plan_id")
             or old_pointer.get("epoch") != pointer.get("epoch")
             or old_pointer.get("recovery_receipt_sha256") != pointer.get("recovery_receipt_sha256")
-            or recovery._digest(_source_bytes(spec_path)) != hashes["new_spec"]):
+            or recovery._digest(artifact("spec", spec_path)) != hashes["new_spec"]):
         raise ValueError("amendment origin pointer or current specification changed")
     target = recovery._epoch_path(base, pointer.get("epoch"))
     origin_raw = recovery._owned_bytes(target / recovery.RECEIPT_NAME)

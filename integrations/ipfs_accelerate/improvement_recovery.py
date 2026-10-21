@@ -82,12 +82,15 @@ def resolve_active_epoch(repo_root: Path, spec_path: Path, base_state_dir: Path)
     pointer = _object(pointer_path)
     plan_id = _plan_id(repo_root, spec_path)
     from . import improvement_amendment as amendment
-    if (pointer.get("schema") not in {POINTER_SCHEMA, amendment.POINTER_SCHEMA}
+    from . import improvement_release_amendment as release_amendment
+    if (pointer.get("schema") not in {POINTER_SCHEMA, amendment.POINTER_SCHEMA, release_amendment.POINTER_SCHEMA}
             or pointer.get("repo_root") != str(repo_root.resolve())
             or pointer.get("plan_id") != plan_id):
         raise ValueError("active epoch repository or plan binding changed")
     if pointer["schema"] == amendment.POINTER_SCHEMA:
         return amendment.resolve_amended_epoch(repo_root, spec_path, base, pointer, plan_id)
+    if pointer["schema"] == release_amendment.POINTER_SCHEMA:
+        return release_amendment.resolve_release_amended_epoch(repo_root, spec_path, base, pointer, plan_id)
     target = _epoch_path(base, pointer.get("epoch"))
     raw = _owned_bytes(target / RECEIPT_NAME)
     receipt = json.loads(raw)
