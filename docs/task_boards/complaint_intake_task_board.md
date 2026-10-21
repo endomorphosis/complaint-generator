@@ -329,7 +329,7 @@ Implementation instructions:
 
 ## CIMP-FACT-03 Record factual corrections, retractions and supersession without erasing history
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.facts
