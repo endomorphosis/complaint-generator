@@ -475,7 +475,8 @@ class LegalGraphBuilder:
                 name=statute.get('name', 'Unnamed Statute'),
                 description=statute.get('description', ''),
                 citation=statute.get('citation', ''),
-                jurisdiction=statute.get('jurisdiction', 'US'),
+                jurisdiction=(statute.get('jurisdiction')
+                              if isinstance(statute.get('jurisdiction'), str) else ''),
                 attributes=statute_attributes,
             )
             graph.add_element(element)
@@ -1045,6 +1046,10 @@ class LegalGraphBuilder:
             from integrations.ipfs_datasets.logic import extract_source_bound_rule_candidates
 
             promotion_input = dict(candidate)
+            # Normalize the supported text alias before source admission. The
+            # exact candidate text, rather than a different authority sentence,
+            # must own every promoted requirement's source span.
+            promotion_input['rule_text'] = rule_text
             for key in (
                 'source_text', 'text', 'source_hash', 'content_hash', 'content_hash_scope',
                 'authority_version', 'version', 'jurisdiction', 'citation', 'authority_id',
@@ -1060,7 +1065,7 @@ class LegalGraphBuilder:
             extraction = extract_source_bound_rule_candidates(promotion_input)
             promoted_candidate = next(
                 (item for item in extraction['candidates'] if item.get('rule_text') == rule_text),
-                extraction['candidates'][0] if extraction['candidates'] else {},
+                {},
             )
             rule_node = LegalElement(
                 id=self._get_element_id('rule_candidate', {
