@@ -480,6 +480,38 @@ def _result_from_backend_call(raw: Any, *, backend_name: str, fallback_cid: str 
     return translated
 
 
+def _pin_acknowledgement(raw: Any, *, cid: str, backend_name: str) -> dict[str, Any]:
+    """Normalize a pin acknowledgement while binding it to the requested CID."""
+    if raw is None:
+        raw = {"success": True, "cid": cid, "pinned": True}
+    if isinstance(raw, dict) and "Pins" in raw:
+        # Kubo pin/add replies with {"Pins": [cid, ...]}. The requested root
+        # must be present; an array for another root is not this call's receipt.
+        candidate = dict(raw)
+        candidate.setdefault("cid", cid)
+        translated = _result_from_backend_call(candidate, backend_name=backend_name, fallback_cid=cid)
+        pins = raw["Pins"]
+        cid_aliases_match = all(
+            isinstance(raw[name], str) and bool(raw[name]) and raw[name] == cid
+            for name in ("cid", "resulting_content_cid", "Hash") if name in raw
+        )
+        valid = (
+            isinstance(pins, list) and bool(pins)
+            and all(isinstance(item, str) and bool(item.strip()) for item in pins)
+            and cid in pins and cid_aliases_match and translated.get("cid") == cid
+            and translated.get("pinned_observed") is not False
+        )
+        if translated["status"] == "available" and valid:
+            translated["pinned_observed"] = True
+            return translated
+        translated["status"] = "error"
+        translated["cid"] = cid
+        translated["pinned_observed"] = False
+        translated["error"] = translated.get("error") or "pin acknowledgement does not confirm requested CID"
+        return translated
+    return _result_from_backend_call(raw, backend_name=backend_name, fallback_cid=cid)
+
+
 def _cid_kind(cid: str, *, backend_name: str, stored_local: bool) -> str:
     if not cid:
         return "missing"
@@ -659,7 +691,7 @@ def _store_with_object(backend: Any, data: bytes, *, pin_content: bool, backend_
     ):
         try:
             pin_raw = _invoke_byte_backend(backend, "pin", translated["cid"])
-            pin_translated = _result_from_backend_call(pin_raw if pin_raw is not None else {"success": True, "cid": translated["cid"]}, backend_name=backend_name, fallback_cid=translated["cid"])
+            pin_translated = _pin_acknowledgement(pin_raw, backend_name=backend_name, cid=translated["cid"])
             pin_observed = pin_translated.get("pinned_observed")
             pinned = pin_translated["status"] == "available" and (pin_observed is not False)
             pin_evidence = "pin_call"
@@ -709,9 +741,7 @@ def _retrieve_with_object(backend: Any, cid: str, *, backend_name: str) -> dict[
 
 def _pin_with_object(backend: Any, cid: str, *, backend_name: str) -> dict[str, Any]:
     raw = _invoke_byte_backend(backend, "pin", cid)
-    if raw is None:
-        raw = {"success": True, "cid": cid, "pinned": True}
-    translated = _result_from_backend_call(raw, backend_name=backend_name, fallback_cid=cid)
+    translated = _pin_acknowledgement(raw, backend_name=backend_name, cid=cid)
     if translated["status"] != "available":
         raise RuntimeError(translated["error"] or "kit pin failed")
     observed = translated.get("pinned_observed")
@@ -1022,8 +1052,7 @@ def pin_cid(cid: str, *, backend: Any = None, backend_name: str | None = None) -
     router_name = "local_cache" if router_local else str(probe.get("backend_name") or "datasets_router")
     # The datasets pin protocol returns None on success. Other acknowledgements
     # still undergo the same explicit-failure checks as injected byte backends.
-    raw = {"success": True, "cid": cid, "pinned": True} if result is None else result
-    translated = _result_from_backend_call(raw, backend_name=router_name, fallback_cid=cid)
+    translated = _pin_acknowledgement(result, backend_name=router_name, cid=cid)
     translated["data"] = result
     return _finish_storage_call(
         translated, operation="pin_cid", cid=cid,

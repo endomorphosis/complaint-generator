@@ -411,3 +411,78 @@ def test_datasets_pin_rejects_explicit_failure_and_malformed_flags(monkeypatch, 
     assert result["pinned"] is False
     assert result["verified"] is False
     assert result["network_durable"] is False
+
+
+@pytest.mark.parametrize("path", ["datasets", "injected"])
+@pytest.mark.parametrize("ack,accepted", [
+    ({"Pins": ["QmRequested"]}, True),
+    ({"Pins": ["QmOther", "QmRequested"]}, True),
+    ({"Pins": []}, False),
+    ({"Pins": ["QmOther"]}, False),
+    ({"Pins": "QmRequested"}, False),
+    ({"Pins": None}, False),
+    ({"Pins": ["QmRequested", 7]}, False),
+    ({"Pins": ["QmRequested", ""]}, False),
+    ({"Pins": ["QmRequested"], "error": "pin failed"}, False),
+    ({"Pins": ["QmRequested"], "status": "rejected"}, False),
+    ({"Pins": ["QmRequested"], "success": False}, False),
+    ({"Pins": ["QmRequested"], "success": "false"}, False),
+    ({"Pins": ["QmRequested"], "pinned": False}, False),
+    ({"Pins": ["QmRequested"], "pinned": "false"}, False),
+    ({"Pins": ["QmRequested"], "cid": "QmOther"}, False),
+    ({"Pins": ["QmRequested"], "Hash": "QmOther"}, False),
+    ({"Pins": ["QmRequested"], "resulting_content_cid": "QmOther"}, False),
+])
+def test_kubo_pin_acknowledgement_binds_requested_cid(monkeypatch, path, ack, accepted):
+    from integrations.ipfs_datasets import storage
+
+    class PinBackend:
+        measurement_label = "measured-hermetic"
+
+        def pin(self, cid):
+            assert cid == "QmRequested"
+            return ack
+
+    backend = PinBackend()
+    if path == "injected":
+        result = storage.pin_cid("QmRequested", backend=backend)
+    else:
+        monkeypatch.setattr(storage, "_load_optional_kit_backend", lambda: None)
+        monkeypatch.delenv("COMPLAINT_GENERATOR_ENABLE_IPFS_KIT", raising=False)
+        monkeypatch.setattr(storage, "_runtime_backend_probe", lambda: {
+            "backend": backend, "backend_name": "datasets_router", "status": "available", "reason": "",
+        })
+        monkeypatch.setattr(storage, "pin", backend.pin)
+        result = storage.pin_cid("QmRequested")
+    assert result["cid"] == "QmRequested"
+    assert result["status"] == ("available" if accepted else "error")
+    assert result["pinned"] is accepted
+    assert result["verified"] is False
+    assert result["network_durable"] is False
+    if accepted:
+        assert result["measurement"] == "measured-hermetic"
+
+
+@pytest.mark.parametrize("ack,accepted", [
+    ({"Pins": ["QmRequested"]}, True),
+    ({"Pins": ["QmRequested"], "error": "pin failed"}, False),
+])
+def test_store_reads_back_bytes_independently_of_kubo_pin_result(ack, accepted):
+    class ByteBackend:
+        measurement_label = "measured-hermetic"
+
+        def add_bytes(self, data, pin=True):
+            self.data = bytes(data)
+            return {"success": True, "cid": "QmRequested", "pinned": False}
+
+        def pin(self, cid):
+            return ack
+
+        def cat(self, cid):
+            return self.data
+
+    result = store_bytes(b"synthetic bytes", backend=ByteBackend())
+    assert result["pinned"] is accepted
+    assert result["verified"] is True
+    assert result["network_durable"] is False
+    assert result["measurement"] == "measured-hermetic"
