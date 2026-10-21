@@ -812,7 +812,7 @@ Implementation instructions:
 
 ## CIMP-DUR-001 Bind explicit Kit storage backend with honest durability receipts
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.durability
