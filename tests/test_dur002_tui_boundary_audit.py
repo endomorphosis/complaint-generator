@@ -10,7 +10,7 @@ import pytest
 MARKER = "SYNTHETIC_DUR2_TERMINAL_ANSWER_43820"
 
 CHILD = r'''
-import builtins, hashlib, json, os, socket, subprocess, sys
+import hashlib, json, os, socket, subprocess, sys
 from pathlib import Path
 def blocked(*a, **k):
     raise RuntimeError("external operation blocked")
@@ -33,7 +33,8 @@ service.initialize_private_keys(protection="passphrase", passphrase="synthetic-o
 service.ensure_private_case_key(user, user)
 mode = sys.argv[2]
 proof_path = Path(sys.argv[3])
-proof = {"fault_reached": False, "answer_requested": False, "state_preserved": False,
+proof = {"fault_reached": False, "answer_requested": False, "answer_in_state": False,
+         "state_preserved": False,
          "network_guard": socket.create_connection is blocked, "process_guard": subprocess.Popen is blocked}
 real_load, real_save = service._load_state, service._save_state
 armed = False
@@ -56,19 +57,30 @@ def load(identity):
 def save(state):
     global before
     if armed:
+        proof["answer_in_state"] = state.get("original_complaint", {}).get("text") == "SYNTHETIC_DUR2_TERMINAL_ANSWER_43820"
+        if not proof["answer_in_state"]:
+            return real_save(state)
         if mode == "locked-after-answer":
             fault("unlock_needed", "unlock_needed")
         before = fingerprint()
         proof["fault_reached"] = True
         raise OSError("SYNTHETIC_DUR2_TERMINAL_ANSWER_43820")
     return real_save(state)
-def answer(_prompt):
-    global armed
-    armed = True
-    proof["answer_requested"] = True
-    return "SYNTHETIC_DUR2_TERMINAL_ANSWER_43820"
+class ObservedInput:
+    """Observe consumption of the real pipe without replacing its input."""
+    def __init__(self, stream):
+        self.stream = stream
+    def readline(self, *args, **kwargs):
+        global armed
+        line = self.stream.readline(*args, **kwargs)
+        if line.rstrip("\r\n") == "SYNTHETIC_DUR2_TERMINAL_ANSWER_43820":
+            armed = True
+            proof["answer_requested"] = True
+        return line
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
 service._load_state, service._save_state = load, save
-builtins.input = answer
+sys.stdin = ObservedInput(sys.stdin)
 import complaint_generator.cli as cli
 import applications.complaint_cli as implementation
 implementation.service = service
@@ -98,7 +110,8 @@ def test_real_terminal_private_storage_refusal_is_safe(tmp_path, mode):
     env.update({"HOME": str(home), "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
                 "PYTHONDONTWRITEBYTECODE": "1", "TERM": "dumb", "NO_COLOR": "1"})
     result = subprocess.run([sys.executable, str(script), str(session), mode, str(proof_path)],
-        cwd=Path(__file__).resolve().parents[1], env=env, capture_output=True, text=True, timeout=20)
+        cwd=Path(__file__).resolve().parents[1], env=env, input=MARKER + "\n\n",
+        capture_output=True, text=True, timeout=20)
     combined = result.stdout + result.stderr
     safe_exit, no_trace, no_marker = result.returncode == 2, "Traceback" not in combined, MARKER not in combined
     assert safe_exit, "real terminal did not return documented private-storage refusal code"
@@ -109,6 +122,7 @@ def test_real_terminal_private_storage_refusal_is_safe(tmp_path, mode):
     assert proof["state_preserved"], "injected IO refusal changed prior persisted state"
     assert proof["network_guard"] and proof["process_guard"]
     assert proof["answer_requested"] is (mode not in {"locked-start", "corrupt-start"})
+    assert proof["answer_in_state"] is (mode not in {"locked-start", "corrupt-start"})
     reports = []
     for line in result.stdout.splitlines():
         if line.startswith("{"):
