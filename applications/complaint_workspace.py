@@ -3664,12 +3664,21 @@ class ComplaintWorkspaceService:
             slug = self._legacy_filename(resolved_user)
             if not self._legacy_owner_conflict(slug, resolved_user):
                 try:
-                    legacy = self._read_json_file(slug, strict=True)
+                    legacy_raw = self._read_bytes_nofollow(slug)
+                except FileNotFoundError:
+                    legacy_raw = None
                 except WorkspaceAuthorizationDenied:
-                    raise WorkspacePersistenceError("Existing legacy session is unreadable and was preserved.", code="corrupt_session", public_status="recoverable") from None
+                    raise
+                except OSError:
+                    raise WorkspacePersistenceError("Private session storage is unavailable.", code="read_error", public_status="unavailable") from None
+                if legacy_raw is not None:
+                    try:
+                        legacy = json.loads(legacy_raw.decode("utf-8"))
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        raise WorkspacePersistenceError("Existing legacy session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable") from None
+                    if not isinstance(legacy, dict):
+                        raise WorkspacePersistenceError("Existing legacy session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable")
             if isinstance(legacy, dict) and legacy.get("user_id") == resolved_user:
-                if not isinstance(legacy, dict):
-                    raise WorkspacePersistenceError("Existing session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable")
                 self._prepare_loaded_state(legacy, resolved_user)
                 raise WorkspacePersistenceError("Legacy data requires explicit migration.", code="migration_required", public_status="recoverable")
             loaded = _default_state(resolved_user)
