@@ -377,6 +377,168 @@ def _stable_identifier(prefix: str, *parts: str) -> str:
     return f"{prefix}:{digest}"
 
 
+FACTUAL_ASSERTION_KIND = "factual_assertion"
+AUTHORITY_SOURCE_KIND = "authority_source"
+RULE_CANDIDATE_KIND = "rule_candidate"
+LEGAL_REQUIREMENT_KIND = "legal_requirement"
+SUPPORT_LINK_KIND = "support_link"
+CONTRADICTION_LINK_KIND = "contradiction_link"
+
+DISTINCT_GRAPH_RECORD_KINDS = (
+    FACTUAL_ASSERTION_KIND,
+    AUTHORITY_SOURCE_KIND,
+    RULE_CANDIDATE_KIND,
+    LEGAL_REQUIREMENT_KIND,
+    SUPPORT_LINK_KIND,
+    CONTRADICTION_LINK_KIND,
+)
+
+_LEGAL_NORM_LABELS = frozenset({
+    "law",
+    "legal",
+    "legal_norm",
+    "legal_text",
+    "legal_passage",
+    "authority",
+    "authority_source",
+    "rule",
+    "rule_candidate",
+    "legal_requirement",
+    "requirement",
+    "procedural_requirement",
+    "statute",
+    "regulation",
+    "case_law",
+    "case",
+})
+_USER_TESTIMONY_LABELS = frozenset({
+    "testimony",
+    "user",
+    "user_testimony",
+    "complainant",
+    "interview",
+    "factual_assertion",
+    "user_assertion",
+})
+_RULE_ID_KINDS = frozenset({RULE_CANDIDATE_KIND, LEGAL_REQUIREMENT_KIND})
+
+
+def record_kind_from_id(record_id: str) -> str:
+    """Return the namespace prefix of a graph id, or an empty string."""
+    text = str(record_id or "").strip()
+    prefix, separator, _rest = text.partition(":")
+    if separator and prefix in DISTINCT_GRAPH_RECORD_KINDS:
+        return prefix
+    return ""
+
+
+def mint_graph_record_id(kind: str, *parts: str) -> str:
+    """Mint an id whose prefix is exactly one graph namespace."""
+    normalized_kind = str(kind or "").strip()
+    if normalized_kind not in DISTINCT_GRAPH_RECORD_KINDS:
+        raise ValueError(f"unknown graph record kind: {normalized_kind}")
+    minted = _stable_identifier(normalized_kind, *parts)
+    if not minted:
+        raise ValueError("graph record id requires at least one non-empty part")
+    return minted
+
+
+def _label_set(record: Mapping[str, Any]) -> set:
+    labels: set = set()
+    for key in (
+        "resolution_namespace",
+        "namespace",
+        "record_kind",
+        "record_type",
+        "element_type",
+        "entity_type",
+        "node_type",
+        "source_kind",
+        "source_type",
+        "passage_role",
+        "content_origin",
+        "type",
+    ):
+        value = record.get(key)
+        if isinstance(value, str) and value.strip():
+            labels.add(value.strip().lower())
+    return labels
+
+
+def source_is_legal_norm(record: Optional[Mapping[str, Any]]) -> bool:
+    """True when a record is a legal norm rather than complainant testimony."""
+    if not isinstance(record, Mapping):
+        return False
+    if record.get("legal_passage") is True:
+        return True
+    return bool(_label_set(record) & _LEGAL_NORM_LABELS)
+
+
+def legal_namespace_kind(record: Optional[Mapping[str, Any]]) -> str:
+    """Pick the legal namespace for a passage. Never returns a factual kind."""
+    labels = _label_set(record or {})
+    if labels & {RULE_CANDIDATE_KIND, "rule"}:
+        return RULE_CANDIDATE_KIND
+    if labels & {LEGAL_REQUIREMENT_KIND, "requirement", "procedural_requirement"}:
+        return LEGAL_REQUIREMENT_KIND
+    return AUTHORITY_SOURCE_KIND
+
+
+def _resolution_namespace(entity: Mapping[str, Any]) -> str:
+    labels = _label_set(entity)
+    if labels & _LEGAL_NORM_LABELS:
+        return "legal_norm"
+    if labels & _USER_TESTIMONY_LABELS:
+        return "user_testimony"
+    return "world"
+
+
+def _resolution_namespaces_compatible(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    return {left, right} == {"user_testimony", "world"}
+
+
+def build_namespaced_support_link(
+    *,
+    factual_assertion_id: str,
+    rule_id: str,
+    relation: str = "supports",
+    factual_provenance: Optional[Mapping[str, Any]] = None,
+    rule_provenance: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Link a factual assertion to a rule without collapsing their provenance.
+
+    ``rule_id`` must already be a rule-candidate or legal-requirement id.
+    The link id uses its own support or contradiction namespace.
+    """
+    factual_id = str(factual_assertion_id or "").strip()
+    normalized_rule_id = str(rule_id or "").strip()
+    if record_kind_from_id(factual_id) != FACTUAL_ASSERTION_KIND:
+        raise ValueError("support links require a factual_assertion id")
+    if record_kind_from_id(normalized_rule_id) not in _RULE_ID_KINDS:
+        raise ValueError("support links require a rule_candidate or legal_requirement id")
+    normalized_relation = str(relation or "supports").strip().lower()
+    link_kind = (
+        CONTRADICTION_LINK_KIND
+        if normalized_relation in {"contradicts", "contradiction", "contradiction_link"}
+        else SUPPORT_LINK_KIND
+    )
+    factual_chain = dict(factual_provenance or {})
+    rule_chain = dict(rule_provenance or {})
+    return {
+        "link_id": mint_graph_record_id(link_kind, factual_id, normalized_rule_id, link_kind),
+        "link_type": link_kind,
+        "relation": "contradicts" if link_kind == CONTRADICTION_LINK_KIND else "supports",
+        "factual_assertion_id": factual_id,
+        "rule_id": normalized_rule_id,
+        "provenance_chains": {
+            FACTUAL_ASSERTION_KIND: factual_chain,
+            "rule": rule_chain,
+        },
+    }
+
+
 def _split_sentences(text: str) -> List[str]:
     cleaned = " ".join((text or "").split())
     if not cleaned:
@@ -660,6 +822,7 @@ def extract_graph_from_text(
     artifact_id = source_id or metadata.get("artifact_id") or ""
     claim_element_id = str(metadata.get("claim_element_id") or "").strip()
     claim_element_text = str(metadata.get("claim_element_text") or metadata.get("claim_element") or "").strip()
+    legal_passage = source_is_legal_norm(metadata)
     embedded_provenance = metadata.get("provenance")
     graph_provenance: Dict[str, Any] = (
         dict(embedded_provenance) if isinstance(embedded_provenance, Mapping) else {}
@@ -718,18 +881,30 @@ def extract_graph_from_text(
     if not sentences and text.strip():
         sentences = [text.strip()]
 
+    passage_kind = legal_namespace_kind(metadata) if legal_passage else FACTUAL_ASSERTION_KIND
     for index, sentence in enumerate(sentences[:25]):
-        fact_id = _stable_identifier("fact", artifact_id or source_id or "text", str(index), sentence)
+        if legal_passage:
+            fact_id = mint_graph_record_id(
+                passage_kind, artifact_id or source_id or "legal", str(index), sentence,
+            )
+            entity_type = passage_kind
+            relation_name = "cites_authority"
+        else:
+            fact_id = _stable_identifier("fact", artifact_id or source_id or "text", str(index), sentence)
+            entity_type = "fact"
+            relation_name = "has_fact"
         entities.append(
             GraphEntity(
                 entity_id=fact_id,
-                entity_type="fact",
+                entity_type=entity_type,
                 name=sentence[:120],
                 confidence=0.6,
                 attributes={
                     "text": sentence,
                     "sentence_index": index,
                     "source_id": artifact_id,
+                    "record_kind": passage_kind if legal_passage else "fact",
+                    "about_complainant": False if legal_passage else True,
                     "provenance": graph_provenance,
                 },
             )
@@ -737,15 +912,15 @@ def extract_graph_from_text(
         if artifact_id:
             relationships.append(
                 GraphRelationship(
-                    relationship_id=_stable_identifier("rel", artifact_id, fact_id, "has_fact"),
+                    relationship_id=_stable_identifier("rel", artifact_id, fact_id, relation_name),
                     source_id=artifact_id,
                     target_id=fact_id,
-                    relation_type="has_fact",
+                    relation_type=relation_name,
                     confidence=1.0,
                     attributes={"sentence_index": index, "provenance": graph_provenance},
                 )
             )
-        if claim_node_id:
+        if claim_node_id and not legal_passage:
             relationships.append(
                 GraphRelationship(
                     relationship_id=_stable_identifier("rel", fact_id, claim_node_id, "supports"),
@@ -1301,9 +1476,12 @@ def resolve_duplicate_entities(
         name = str(entity.get("name") or entity.get("text") or "")
         eid = str(entity.get("entity_id") or entity.get("id") or "")
         source_kind = str(entity.get("source_kind") or "unknown")
+        namespace = _resolution_namespace(entity)
 
         matched: Optional[Dict[str, Any]] = None
         for cluster in clusters:
+            if not _resolution_namespaces_compatible(cluster["resolution_namespace"], namespace):
+                continue
             if _texts_semantically_similar(cluster["canonical_name"], name):
                 matched = cluster
                 break
@@ -1311,8 +1489,9 @@ def resolve_duplicate_entities(
         if matched is None:
             clusters.append(
                 {
-                    "canonical_entity_id": eid or _stable_identifier("entity", name),
+                    "canonical_entity_id": eid or _stable_identifier("entity", name, namespace),
                     "canonical_name": name,
+                    "resolution_namespace": namespace,
                     "source_kinds": [source_kind] if source_kind else [],
                     "entity_ids": [eid] if eid else [],
                     "names": [name] if name else [],
@@ -1490,4 +1669,16 @@ __all__ = [
     "resolve_duplicate_entities",
     "attach_provenance_edges",
     "get_authority_graph_api_version",
+    "FACTUAL_ASSERTION_KIND",
+    "AUTHORITY_SOURCE_KIND",
+    "RULE_CANDIDATE_KIND",
+    "LEGAL_REQUIREMENT_KIND",
+    "SUPPORT_LINK_KIND",
+    "CONTRADICTION_LINK_KIND",
+    "DISTINCT_GRAPH_RECORD_KINDS",
+    "record_kind_from_id",
+    "mint_graph_record_id",
+    "source_is_legal_norm",
+    "legal_namespace_kind",
+    "build_namespaced_support_link",
 ]

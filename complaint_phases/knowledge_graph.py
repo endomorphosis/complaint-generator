@@ -1642,8 +1642,22 @@ class KnowledgeGraphBuilder:
             prepared.setdefault("origin", "user")
             entities.append(prepared)
 
+        from integrations.ipfs_datasets.graphs import (
+            legal_namespace_kind,
+            mint_graph_record_id,
+            source_is_legal_norm,
+        )
+
+        legal_passage = source_is_legal_norm(caller_context)
         entity_key_to_id: Dict[str, str] = {}
         for entity_data in entities:
+            if legal_passage:
+                entity_data = dict(entity_data)
+                entity_data["type"] = "legal_text"
+                entity_data["origin"] = "legal"
+                entity_data["source"] = "legal"
+                entity_data["record_type"] = "legal_text"
+                entity_data["legal_hit"] = True
             envelope = envelope_for_extracted_record(
                 entity_data,
                 source_text=source_text,
@@ -1658,13 +1672,28 @@ class KnowledgeGraphBuilder:
                 provenance_payload["extractor"] = carried_extractor
             attributes = entity_data.get("attributes") if isinstance(entity_data.get("attributes"), Mapping) else {}
             raw_confidence = entity_data.get("confidence", 0.8)
+            if legal_passage:
+                passage_kind = legal_namespace_kind({**dict(caller_context), **entity_data})
+                attributes = dict(attributes)
+                attributes["record_kind"] = passage_kind
+                attributes["about_complainant"] = False
+                entity_id = mint_graph_record_id(
+                    passage_kind,
+                    str(len(graph.entities)),
+                    str(entity_data.get("name") or ""),
+                    str(caller_context.get("source_id") or ""),
+                )
+                entity_source = "legal"
+            else:
+                entity_id = self._get_entity_id()
+                entity_source = str(entity_data.get("source") or "complaint")
             entity = Entity(
-                id=self._get_entity_id(),
+                id=entity_id,
                 type=str(entity_data.get("type") or ""),
                 name=str(entity_data.get("name") or ""),
                 attributes=dict(attributes),
                 confidence=float(0.8 if raw_confidence is None else raw_confidence),
-                source=str(entity_data.get("source") or "complaint"),
+                source=entity_source,
                 provenance=provenance_payload,
             )
             graph.add_entity(entity)
@@ -1714,6 +1743,10 @@ class KnowledgeGraphBuilder:
             relationship_record = dict(rel_data)
             relationship_record["relation_type"] = relation_type
             relationship_record["type"] = relation_type
+            if legal_passage:
+                relationship_record["record_type"] = "legal_text"
+                relationship_record["origin"] = "legal"
+                relationship_record["legal_hit"] = True
             envelope = envelope_for_extracted_record(
                 relationship_record,
                 source_text=source_text,
@@ -1743,7 +1776,7 @@ class KnowledgeGraphBuilder:
                     relation_type=relation_type,
                     attributes=dict(attributes),
                     confidence=float(0.8 if raw_confidence is None else raw_confidence),
-                    source=str(rel_data.get("source") or "complaint"),
+                    source="legal" if legal_passage else str(rel_data.get("source") or "complaint"),
                     provenance=provenance_payload,
                 )
             )
