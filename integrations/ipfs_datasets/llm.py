@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy
 import importlib
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import re
 import shutil
 import threading
+import time
 import uuid
 from typing import Any, Dict, Mapping, Optional
 
@@ -350,14 +353,14 @@ class IntakeContractError(ValueError):
 
 
 def intake_request_response_format() -> Dict[str, Any]:
-	"""Strict native response_format. Callers must not repair prose into this shape."""
+	"""Fixed schema description; typed streaming enforces it on the host."""
 
 	return {
 		"type": "json_schema",
 		"json_schema": {
 			"name": INTAKE_REQUEST_SCHEMA_NAME,
 			"strict": True,
-			"schema": INTAKE_REQUEST_OBJECT_SCHEMA,
+			"schema": deepcopy(INTAKE_REQUEST_OBJECT_SCHEMA),
 		},
 	}
 
@@ -391,7 +394,22 @@ def classify_router_failure(exc: BaseException) -> str:
 	return "unavailable"
 
 
-def _host_validate_intake_tree(payload: Any, *, request_id: str, operation: str, source_text: str) -> Dict[str, Any]:
+def _normalize_intake_targets(raw: Any) -> frozenset[str]:
+	"""Freeze host authority; a model-selected reference never grants it."""
+	if type(raw) not in (tuple, list, set, frozenset) or len(raw) > 256:
+		raise IntakeContractError("identity")
+	if any(type(item) is not str or _INTAKE_REF.fullmatch(item) is None for item in raw):
+		raise IntakeContractError("identity")
+	if len(set(raw)) != len(raw):
+		raise IntakeContractError("identity")
+	return frozenset(raw)
+
+
+def _host_validate_intake_tree(payload: Any, *, request_id: str, operation: str, source_text: str,
+                              allowed_target_refs=None) -> Dict[str, Any]:
+	targets = _normalize_intake_targets(allowed_target_refs)
+	if type(operation) is not str or type(source_text) is not str:
+		raise IntakeContractError("identity")
 	if type(payload) is not dict:
 		raise IntakeContractError("malformed")
 	allowed = {"schema_version", "operation", "request_id", "questions", "facts"}
@@ -399,7 +417,7 @@ def _host_validate_intake_tree(payload: Any, *, request_id: str, operation: str,
 		raise IntakeContractError("malformed")
 	if payload.get("schema_version") != INTAKE_REQUEST_SCHEMA_VERSION:
 		raise IntakeContractError("malformed")
-	if payload.get("operation") not in INTAKE_OPERATIONS or payload.get("operation") != operation:
+	if type(payload.get("operation")) is not str or payload["operation"] not in INTAKE_OPERATIONS or payload["operation"] != operation:
 		raise IntakeContractError("identity")
 	if type(payload.get("request_id")) is not str or payload.get("request_id") != request_id or _REQUEST_ID.fullmatch(request_id) is None:
 		raise IntakeContractError("identity")
@@ -413,8 +431,12 @@ def _host_validate_intake_tree(payload: Any, *, request_id: str, operation: str,
 		raise IntakeContractError("malformed")
 	if operation == "extract_facts" and questions:
 		raise IntakeContractError("malformed")
-	source = source_text.encode("utf-8")
+	try:
+		source = source_text.encode("utf-8")
+	except UnicodeError:
+		raise IntakeContractError("span") from None
 	clean_questions = []
+	question_ids, question_targets = set(), set()
 	for item in questions:
 		if type(item) is not dict or set(item) != {"question_id", "prompt", "target_ref"}:
 			raise IntakeContractError("malformed")
@@ -423,8 +445,17 @@ def _host_validate_intake_tree(payload: Any, *, request_id: str, operation: str,
 		target = item.get("target_ref")
 		if type(question_id) is not str or type(prompt) is not str or type(target) is not str:
 			raise IntakeContractError("malformed")
-		if not (1 <= len(question_id) <= 64 and 1 <= len(prompt) <= 500 and _INTAKE_REF.fullmatch(target)):
+		try:
+			question_id.encode("utf-8")
+			prompt.encode("utf-8")
+		except UnicodeError:
+			raise IntakeContractError("malformed") from None
+		if not (1 <= len(question_id) <= 64 and 1 <= len(prompt) <= 500 and _INTAKE_REF.fullmatch(target)) or target not in targets:
 			raise IntakeContractError("malformed")
+		if question_id in question_ids or target in question_targets:
+			raise IntakeContractError("malformed")
+		question_ids.add(question_id)
+		question_targets.add(target)
 		clean_questions.append({"question_id": question_id, "prompt": prompt, "target_ref": target})
 	clean_facts = []
 	for item in facts:
@@ -435,11 +466,11 @@ def _host_validate_intake_tree(payload: Any, *, request_id: str, operation: str,
 		start = item.get("source_start")
 		end = item.get("source_end")
 		target = item.get("target_ref")
-		if field not in INTAKE_FACT_FIELDS or type(value) is not str or type(target) is not str:
+		if type(field) is not str or field not in INTAKE_FACT_FIELDS or type(value) is not str or type(target) is not str:
 			raise IntakeContractError("span")
 		if type(start) is not int or type(end) is not int or isinstance(start, bool) or isinstance(end, bool):
 			raise IntakeContractError("span")
-		if not (1 <= len(value) <= 500 and _INTAKE_REF.fullmatch(target)):
+		if not (1 <= len(value) <= 500 and _INTAKE_REF.fullmatch(target)) or target not in targets:
 			raise IntakeContractError("span")
 		if start < 0 or end < start or end > len(source):
 			raise IntakeContractError("span")
@@ -465,11 +496,15 @@ def _host_validate_intake_tree(payload: Any, *, request_id: str, operation: str,
 	}
 
 
-def parse_intake_request(raw: str, *, request_id: str, operation: str, source_text: str) -> Dict[str, Any]:
+def parse_intake_request(raw: str, *, request_id: str, operation: str, source_text: str, allowed_target_refs=None) -> Dict[str, Any]:
 	"""Validate one model payload. Fenced prose and regex extraction are not accepted."""
 
-	if type(raw) is not str or len(raw.encode("utf-8")) > INTAKE_MAX_OUTPUT_BYTES:
-		raise IntakeContractError("malformed")
+	_normalize_intake_targets(allowed_target_refs)
+	try:
+		if type(raw) is not str or len(raw.encode("utf-8")) > INTAKE_MAX_OUTPUT_BYTES:
+			raise IntakeContractError("malformed")
+	except (UnicodeError, RecursionError):
+		raise IntakeContractError("malformed") from None
 	text = raw.strip()
 	if not text or text[0] != "{":
 		raise IntakeContractError("malformed")
@@ -479,24 +514,7 @@ def parse_intake_request(raw: str, *, request_id: str, operation: str, source_te
 		raise
 	except (json.JSONDecodeError, TypeError, ValueError, RecursionError):
 		raise IntakeContractError("malformed") from None
-	try:
-		from ipfs_accelerate_py.cli_runtime.grok_structured_output import decode_response, validate_response_format
-
-		_schema, _encoded, validator = validate_response_format(intake_request_response_format())
-		decode_response(text, validator)
-	except IntakeContractError:
-		raise
-	except ModuleNotFoundError:
-		# Native jsonschema/referencing support is absent. Host field and span
-		# checks still run; this does not accept unconstrained prose.
-		pass
-	except ImportError:
-		pass
-	except ValueError:
-		raise IntakeContractError("malformed") from None
-	except Exception:
-		raise IntakeContractError("malformed") from None
-	return _host_validate_intake_tree(payload, request_id=request_id, operation=operation, source_text=source_text)
+	return _host_validate_intake_tree(payload, request_id=request_id, operation=operation, source_text=source_text, allowed_target_refs=allowed_target_refs)
 
 
 def _pop_host_metadata(kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -511,12 +529,12 @@ def _pop_host_metadata(kwargs: Dict[str, Any]) -> Dict[str, Any]:
 	source_text = kwargs.pop("intake_source_text", None)
 	if type(request_id) is not str or _REQUEST_ID.fullmatch(request_id) is None:
 		request_id = _new_request_id()
-	if operation is not None and operation not in INTAKE_OPERATIONS:
-		operation = None
 	return {
 		"request_id": request_id,
 		"intake_operation": operation,
 		"intake_source_text": source_text if type(source_text) is str else "",
+		"intake_target_refs": kwargs.pop("intake_target_refs", None),
+		"max_output_bytes": kwargs.pop("max_output_bytes", INTAKE_MAX_OUTPUT_BYTES),
 	}
 
 
@@ -559,15 +577,8 @@ def _redacted_router_trace(trace: Any, *, request_id: str, requested_provider: s
 		requested_provider=requested_provider,
 		requested_model=requested_model,
 	)
-	version = ""
-	if isinstance(trace, Mapping):
-		for key in ("router_version", "model_version", "effective_model_version"):
-			value = trace.get(key)
-			if type(value) is str and value.strip() and len(value) <= 64 and " " not in value:
-				version = value.strip()
-				break
 	fields["request_id"] = request_id
-	fields["router_version"] = version
+	fields["router_version"] = ""
 	fields["configured_provider_name"] = requested_provider
 	fields["configured_model_name"] = requested_model
 	fields["inference_owner"] = INFERENCE_OWNER
@@ -961,6 +972,135 @@ def _temporary_env(overrides: Dict[str, str]):
 					os.environ[key] = value
 
 
+def _intake_provider_prompt(prompt, *, request_id, operation, source_text, targets):
+	"""Serialize the same fixed host contract for every typed entrypoint."""
+	return json.dumps({"schema_version": INTAKE_REQUEST_SCHEMA_VERSION,
+		"operation": operation, "request_id": request_id, "source_text": source_text,
+		"allowed_target_refs": sorted(targets),
+		"schema": intake_request_response_format()["json_schema"]["schema"],
+		"instructions": "Return only one JSON object matching the schema and exact request identity. "
+			"Use only the supplied host targets and exact source spans. Do not invent facts.",
+		"prompt": prompt}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+class _IntakeGenerationCancelled(BaseException):
+	"""Propagate through native capture's Exception-only callback boundary."""
+
+
+def _generate_intake_with_metadata(prompt, *, provider, model_name, request_id, operation,
+                                  source_text, allowed_target_refs, privacy_context, options,
+                                  max_output_bytes=INTAKE_MAX_OUTPUT_BYTES, cancel_event=None,
+                                  progress_callback=None):
+	"""One private typed generation through the owned native streaming API.
+
+	Schema is enforced on the host after native invocation evidence. NativeA's
+	streaming API cannot accept response_format. Its own finalizer owns the
+	direct child; this function has no PID registry or abandoned worker thread.
+	"""
+	base = {"text": "", "request_id": request_id, "provider_name": PINNED_GROK_PROVIDER,
+		"model_name": PINNED_GROK_MODEL, "configured_provider_name": PINNED_GROK_PROVIDER,
+		"configured_model_name": PINNED_GROK_MODEL, "inference_owner": INFERENCE_OWNER,
+		"observed_provider_name": "", "observed_model_name": "", "router_version": "",
+		"route_observation": "unverified", "invocation_bound": False,
+		"resumable": True, "intake_complete": False, "prompt_logged": False, "live_canary": False,
+		"schema_enforcement": "host_fixed_intake_schema", "native_response_format_supported": False}
+	attempted = False
+
+	def fail(kind):
+		return with_adapter_metadata({**base, "status": kind, "failure_kind": kind,
+			"error": "intake_generation_" + kind, "dispatch": "attempted" if attempted else "none"},
+			operation="generate_text", backend_available=True, implementation_status="available")
+
+	try:
+		targets = _normalize_intake_targets(allowed_target_refs)
+		if (type(operation) is not str or operation not in INTAKE_OPERATIONS
+			or type(source_text) is not str or type(request_id) is not str
+			or _REQUEST_ID.fullmatch(request_id) is None
+			or type(max_output_bytes) is not int or not 1 <= max_output_bytes <= INTAKE_MAX_OUTPUT_BYTES):
+			return fail("malformed")
+		if type(prompt) is not str:
+			return fail("malformed")
+		source_text.encode("utf-8")
+		prompt.encode("utf-8")
+		timeout = options.get("timeout", 60.0)
+		if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+			return fail("malformed")
+		deadline = time.monotonic() + min(float(timeout), 60.0)
+		if privacy_context is None or _privacy_context_block_reason(privacy_context,
+			provider=provider, model_name=model_name, options=options):
+			return fail("privacy_denied")
+		if provider != PINNED_GROK_PROVIDER or model_name != PINNED_GROK_MODEL:
+			return fail("privacy_denied")
+		if cancel_event is not None and cancel_event.is_set():
+			return fail("cancelled")
+		generate, result_type, observation_type = load_observed_llm_symbols()
+		if not callable(generate) or not isinstance(result_type, type) or not isinstance(observation_type, type):
+			return fail("route_unverified")
+		provider_prompt = _intake_provider_prompt(prompt, request_id=request_id,
+			operation=operation, source_text=source_text, targets=targets)
+		remaining = deadline - time.monotonic()
+		if remaining <= 0:
+			return fail("timeout")
+
+		def progress(_summary):
+			if cancel_event is not None and cancel_event.is_set():
+				raise _IntakeGenerationCancelled()
+			if callable(progress_callback):
+				try:
+					progress_callback({"phase": "provider_progress", "router": INFERENCE_OWNER})
+				except Exception:
+					pass
+
+		# Only fixed host-owned controls follow the original per-case gate.
+		call_options = {k: v for k, v in options.items() if k in _PRIVATE_GENERATION_OPTIONS
+			and k not in {"response_format", "timeout", "grok_max_turns"}}
+		attempted = True
+		result = generate(prompt=provider_prompt, provider=PINNED_GROK_PROVIDER, model_name=PINNED_GROK_MODEL,
+			observation_request_id=request_id, **{**call_options, "timeout": remaining,
+			"allow_local_fallback": False, "allow_cross_provider_fallback": False,
+			"grok_cli_cmd": ["grok"], "grok_tools": "read_file",
+			"grok_disallowed_tools": "read_file,search_tool,use_tool", "grok_permission_mode": "dontAsk",
+			"grok_max_turns": 1, "grok_stream_progress": True, "grok_progress_callback": progress,
+			"usage_cancel_event": cancel_event})
+		if cancel_event is not None and cancel_event.is_set():
+			return fail("cancelled")
+		if time.monotonic() >= deadline:
+			return fail("timeout")
+		if type(result) is not result_type or type(result.observation) is not observation_type:
+			return fail("route_unverified")
+		obs = result.observation
+		if (obs.request_id != request_id or type(obs.invocation_id) is not str
+			or re.fullmatch(r"[0-9a-f]{32}", obs.invocation_id) is None
+			or type(obs.native_dispatch_count) is not int or obs.native_dispatch_count != 1
+			or obs.invocation_scope != "current_call" or obs.schema != "native-grok-invocation-observation@1"
+			or obs.observation_only is not True or obs.raw_provider_data_exported is not False
+			or type(obs.process_returncode) is not int or obs.process_returncode != 0
+			or obs.stream_complete is not True or obs.wire_model_observed is not True
+			or obs.evidence_class != "native_final_end_model_usage"):
+			return fail("route_unverified")
+		if (obs.selected_provider_name != PINNED_GROK_PROVIDER or obs.selected_model_name != PINNED_GROK_MODEL
+			or obs.provider_reported_model not in {PINNED_GROK_MODEL, "grok-4.7-build"}):
+			return fail("substitution_refused")
+		if type(result.text) is not str or len(result.text.encode("utf-8")) > max_output_bytes:
+			return fail("malformed")
+		parsed = parse_intake_request(result.text, request_id=request_id, operation=operation,
+			source_text=source_text, allowed_target_refs=targets)
+		if time.monotonic() >= deadline:
+			return fail("timeout")
+		return with_adapter_metadata({**base, "status": "available", "failure_kind": "", "error": "",
+			"text": json.dumps(parsed, sort_keys=True, separators=(",", ":")), "resumable": False,
+			"native_invocation_id": obs.invocation_id, "observed_provider_name": obs.selected_provider_name,
+			"observed_model_name": obs.provider_reported_model, "route_observation": "verified",
+			"invocation_bound": True, "successful_empty": not parsed["questions"] and not parsed["facts"],
+			"dispatch": "attempted"}, operation="generate_text", backend_available=True, implementation_status="available")
+	except _IntakeGenerationCancelled:
+		return fail("cancelled")
+	except (IntakeContractError, UnicodeError, RecursionError):
+		return fail("malformed")
+	except Exception as exc:
+		return fail(classify_router_failure(exc))
+
+
 def generate_text_via_router(
 	prompt: str,
 	*,
@@ -968,6 +1108,11 @@ def generate_text_via_router(
 	model_name: Optional[str] = None,
 	**kwargs: Any,
 ) -> str:
+	if kwargs.get("intake_operation") is not None:
+		result = generate_text_with_metadata(prompt, provider=provider, model_name=model_name, **kwargs)
+		if result.get("status") != "available":
+			raise RuntimeError("intake_generation_" + result["failure_kind"])
+		return result["text"]
 	host_meta = _pop_host_metadata(kwargs)
 	if host_meta["intake_operation"] is not None:
 		kwargs["response_format"] = intake_request_response_format()
@@ -1030,10 +1175,12 @@ def generate_text_with_metadata(
 	request_id = host_meta["request_id"]
 	intake_operation = host_meta["intake_operation"]
 	intake_source_text = host_meta["intake_source_text"]
-	if intake_operation is not None:
-		kwargs["response_format"] = intake_request_response_format()
-		kwargs.setdefault("max_tokens", 1024)
 	privacy_context = kwargs.pop("complaint_privacy_context", None)
+	if intake_operation is not None:
+		return _generate_intake_with_metadata(prompt, provider=provider, model_name=model_name,
+			request_id=request_id, operation=intake_operation, source_text=intake_source_text,
+			allowed_target_refs=host_meta["intake_target_refs"], privacy_context=privacy_context,
+			options=kwargs, max_output_bytes=host_meta["max_output_bytes"])
 	privacy_block = _privacy_context_block_reason(
 		privacy_context,
 		provider=provider,
@@ -1191,50 +1338,6 @@ def generate_text_with_metadata(
 		oversize = True
 	else:
 		oversize = False
-	parsed = None
-	if intake_operation is not None:
-		try:
-			parsed = None if oversize else parse_intake_request(
-				text,
-				request_id=request_id,
-				operation=intake_operation,
-				source_text=intake_source_text,
-			)
-		except IntakeContractError:
-			parsed = None
-		if parsed is None:
-			receipt = _route_receipt(
-				requested_provider=str(metadata.get("effective_provider_name") or effective_provider or ""),
-				requested_model=str(metadata.get("effective_model_name") or effective_model_name or ""),
-				observe=True,
-				request_id=request_id,
-			)
-			receipt.pop("requested_provider_name", None)
-			receipt.pop("requested_model_name", None)
-			return with_adapter_metadata(
-				{
-					"status": "malformed",
-					"text": "",
-					"provider_name": provider or "",
-					"model_name": model_name or "",
-					**metadata,
-					**receipt,
-					"error": "malformed",
-					"failure_kind": "malformed",
-					"resumable": True,
-					"dispatch": "attempted",
-					"live_canary": False,
-					"intake_complete": False,
-					"prompt_logged": False,
-				},
-				operation="generate_text",
-				backend_available=True,
-				implementation_status="available",
-			)
-		text = json.dumps(parsed, sort_keys=True, separators=(",", ":"))
-	elif oversize:
-		text = ""
-
 	receipt = _route_receipt(
 		requested_provider=str(metadata.get("effective_provider_name") or effective_provider or ""),
 		requested_model=str(metadata.get("effective_model_name") or effective_model_name or ""),
@@ -1243,7 +1346,7 @@ def generate_text_with_metadata(
 	)
 	receipt.pop("requested_provider_name", None)
 	receipt.pop("requested_model_name", None)
-	successful_empty = bool(parsed is not None and not parsed["questions"] and not parsed["facts"])
+	successful_empty = False
 	return with_adapter_metadata(
 		{
 			"status": "available",

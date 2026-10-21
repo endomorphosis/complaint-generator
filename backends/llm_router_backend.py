@@ -6,7 +6,6 @@ import os
 import random
 import math
 import re
-import signal
 import time
 import threading
 import uuid
@@ -27,6 +26,7 @@ from integrations.ipfs_datasets.llm import (
     generate_text_with_metadata,
     grok47_route_capability,
     intake_request_response_format,
+    _generate_intake_with_metadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -151,8 +151,8 @@ class LLMRouterBackend:
         self.intake_operation = config.pop('intake_operation', None)
         if self.intake_operation not in (None, 'propose_questions', 'extract_facts'):
             raise ValueError('intake_operation must be propose_questions or extract_facts')
-        self.max_output_bytes = int(config.pop('max_output_bytes', 262144) or 262144)
-        if self.max_output_bytes < 1 or self.max_output_bytes > 262144:
+        self.max_output_bytes = config.pop('max_output_bytes', 262144)
+        if type(self.max_output_bytes) is not int or not 1 <= self.max_output_bytes <= 262144:
             raise ValueError('max_output_bytes must be between 1 and 262144')
         self.structured_output = bool(config.pop('structured_output', False))
         schema = config.pop('response_schema', None)
@@ -174,8 +174,6 @@ class LLMRouterBackend:
         self.task_receipts = []
         self.last_result_metadata = None
 
-        self._child_lock = threading.Lock()
-        self._owned_child_pids = set()
         self._stats_lock = threading.Lock()
         self._retry_stats = {
             'calls_total': 0,
@@ -220,32 +218,6 @@ class LLMRouterBackend:
 
     def cancel(self) -> None:
         self._cancel_event.set()
-        self._kill_owned_children()
-
-    def note_owned_child(self, pid: int) -> None:
-        """Record a provider child so cancellation kills the process, not only the waiter."""
-
-        if type(pid) is not int or isinstance(pid, bool) or pid <= 0:
-            return
-        with self._child_lock:
-            self._owned_child_pids.add(pid)
-        if self._cancel_event.is_set():
-            self._kill_pid(pid)
-
-    def _kill_pid(self, pid: int) -> None:
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                return
-
-    def _kill_owned_children(self) -> None:
-        with self._child_lock:
-            pids = list(self._owned_child_pids)
-        for pid in pids:
-            self._kill_pid(pid)
 
     def configuration_receipt(self) -> dict:
         receipt = self._receipt(
@@ -314,8 +286,11 @@ class LLMRouterBackend:
             self._request_id = supplied
         else:
             self._request_id = uuid.uuid4().hex
-        operation = kwargs.get("intake_operation") or self.intake_operation
-        self._call_intake_operation = operation if operation in {"propose_questions", "extract_facts"} else None
+        operation = kwargs["intake_operation"] if "intake_operation" in kwargs else self.intake_operation
+        if operation is not None and (type(operation) is not str or operation not in {"propose_questions", "extract_facts"}):
+            self._fail("malformed_output", route_observation="malformed")
+        self._call_intake_operation = operation
+        self._intake_target_refs = kwargs.get("intake_target_refs")
         source_text = kwargs.get("intake_source_text")
         self._intake_source_text = source_text if type(source_text) is str else ""
         privacy_context = kwargs.get("complaint_privacy_context")
@@ -326,7 +301,10 @@ class LLMRouterBackend:
         last_error = None
         max_attempts = max(1, self.retry_max_attempts)
         deadline = None
-        if self._strict_route() and self.timeout_seconds is not None:
+        if self._call_intake_operation:
+            max_attempts = 1
+            deadline = time.monotonic() + min(float(self.timeout_seconds or 60.0), 60.0)
+        elif self._strict_route() and self.timeout_seconds is not None:
             deadline = time.monotonic() + float(self.timeout_seconds)
         for attempt in range(1, max_attempts + 1):
             self._raise_if_cancelled()
@@ -345,6 +323,9 @@ class LLMRouterBackend:
                         "timeout": "timeout",
                         "cancelled": "cancelled",
                         "malformed": "malformed_output",
+                        "privacy_denied": "privacy_denied",
+                        "route_unverified": "route_unverified",
+                        "substitution_refused": "substitution_refused",
                     }.get(kind, "provider_unavailable")
                     self._fail(
                         error_code,
@@ -504,74 +485,15 @@ class LLMRouterBackend:
         )
 
     def _generate_intake(self, text, options, deadline, privacy_context):
-        from integrations.ipfs_datasets.llm import _PRIVATE_GENERATION_OPTIONS, _privacy_context_block_reason
-
-        remaining = deadline - time.monotonic() if deadline is not None else float(self.timeout_seconds or 60.0)
+        remaining = deadline - time.monotonic() if deadline is not None else 60.0
         if remaining <= 0:
             self._fail("timeout", route_observation="timeout")
-        forwarded = {
-            key: value
-            for key, value in options.items()
-            if key in _PRIVATE_GENERATION_OPTIONS and key not in {
-                "allow_local_fallback", "allow_cross_provider_fallback", "response_format", "timeout",
-            }
-        }
-        if _privacy_context_block_reason(
-            privacy_context,
-            provider=PINNED_GROK_PROVIDER,
-            model_name=PINNED_GROK_MODEL,
-            options=forwarded,
-        ):
-            self._fail("privacy_denied", route_observation="refused")
-        forwarded.update(
-            complaint_privacy_context=privacy_context,
-            request_id=self._request_id,
-            intake_operation=self._call_intake_operation,
-            intake_source_text=self._intake_source_text,
-            response_format=intake_request_response_format(),
-            allow_local_fallback=False,
-            allow_cross_provider_fallback=False,
-            timeout=remaining,
-            grok_max_turns=1,
-        )
-
-        def invoke():
-            return generate_text_with_metadata(
-                prompt=text,
-                provider=PINNED_GROK_PROVIDER,
-                model_name=PINNED_GROK_MODEL,
-                **forwarded,
-            )
-
-        return self._bounded_provider_call(invoke, remaining)
-
-    def _bounded_provider_call(self, fn, timeout):
-        """Bound the whole provider attempt and kill owned children on cancel or deadline."""
-
-        box = {}
-
-        def runner():
-            try:
-                box["value"] = fn()
-            except BaseException as exc:
-                box["error"] = exc
-
-        worker = threading.Thread(target=runner, daemon=True)
-        worker.start()
-        limit = time.monotonic() + max(0.0, float(timeout))
-        while worker.is_alive():
-            if self._cancel_event.is_set():
-                self._kill_owned_children()
-                worker.join(0.3)
-                self._fail("cancelled", route_observation="cancelled")
-            if time.monotonic() >= limit:
-                self._kill_owned_children()
-                worker.join(0.3)
-                self._fail("timeout", route_observation="timeout")
-            time.sleep(0.01)
-        if "error" in box:
-            raise box["error"]
-        return box.get("value")
+        return _generate_intake_with_metadata(text, provider=self.provider, model_name=self.model,
+            request_id=self._request_id, operation=self._call_intake_operation,
+            source_text=self._intake_source_text, allowed_target_refs=self._intake_target_refs,
+            privacy_context=privacy_context, options={**options, "timeout": remaining},
+            max_output_bytes=self.max_output_bytes, cancel_event=self._cancel_event,
+            progress_callback=self._emit_progress)
 
     def _dispatch_observed(self, text, options, deadline, request_id, generate, result_type, observation_type, progress):
         result = generate(prompt=text, provider=PINNED_GROK_PROVIDER,
@@ -617,18 +539,6 @@ class LLMRouterBackend:
             return
         observed_provider = str(metadata.get("observed_provider_name") or metadata.get("effective_provider_name") or "")
         observed_model = str(metadata.get("observed_model_name") or metadata.get("effective_model_name") or "")
-        if self._call_intake_operation:
-            provider_ok = observed_provider in {"", PINNED_GROK_PROVIDER}
-            model_ok = observed_model in {"", *SUPPORTED_GROK_47_IDENTITIES}
-            if (observed_provider and not provider_ok) or (observed_model and not model_ok):
-                self._fail(
-                    "substitution_refused",
-                    metadata=metadata,
-                    selected_provider=observed_provider,
-                    selected_model=observed_model,
-                    route_observation="mismatched",
-                )
-            return
         provider_ok = observed_provider in {"", PINNED_GROK_PROVIDER}
         model_ok = observed_model in {"", *SUPPORTED_GROK_47_IDENTITIES}
         if observed_provider and not provider_ok:

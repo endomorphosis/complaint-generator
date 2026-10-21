@@ -2989,6 +2989,14 @@ class ComplaintWorkspaceService:
             }
         try:
             mediator = self._mediator_for_shared_interview(user_id, case_id)
+            begin_router = getattr(mediator, "begin_intake_router_action", None)
+            if callable(begin_router):
+                previous_router = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
+                router_session = str(previous_router.get("session_id") or "")
+                if not re.fullmatch(r"[0-9a-f]{32}", router_session):
+                    router_session = uuid.uuid4().hex
+                begin_router(owner_id=user_id, case_id=case_id, session_id=router_session,
+                             revision=int((projection or {}).get("session_revision") or 0), previous=previous_router)
             kwargs: Dict[str, Any] = {
                 "privacy_policy": state.get("privacy_policy"),
                 "user_id": user_id,
@@ -3021,6 +3029,32 @@ class ComplaintWorkspaceService:
             exported = mediator.workflow_actions.export_session_projection()
             if exported:
                 state["shared_interview"] = exported
+            snapshot_router = getattr(mediator, "intake_router_snapshot", None)
+            if callable(snapshot_router):
+                snapshot = snapshot_router()
+                previous_router = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
+                prior_receipts = []
+                for item in previous_router.get("receipts") or []:
+                    if (isinstance(item, dict) and set(item) == {"operation", "request_id", "binding_id", "status", "intake_complete"}
+                            and item.get("operation") in {"extract_facts", "propose_questions"}
+                            and item.get("status") in {"available", "privacy_denied", "provider_unavailable", "malformed_output", "quota", "timeout", "cancelled", "stale_request"}
+                            and all(isinstance(item.get(key), str) and re.fullmatch(r"[0-9a-f]{32}", item[key]) for key in ("request_id", "binding_id"))):
+                        prior_receipts.append(dict(item))
+                seen = {item["request_id"] for item in prior_receipts}
+                prior_receipts.extend(item for item in snapshot["receipts"] if item["request_id"] not in seen)
+                state["intake_router"] = {**snapshot, "session_id": router_session,
+                                          "receipts": prior_receipts[-32:]}
+                if snapshot["errors"]:
+                    # Accepted user answers and their graph effects remain in
+                    # this same transaction. An unresolved provider stage is
+                    # explicit on resume and can never establish completion.
+                    receipt["status"] = "awaiting_user" if receipt.get("inquiry") else "unavailable"
+                    receipt["awaiting_user"] = bool(receipt.get("inquiry"))
+                    receipt["intake_complete"] = False
+                    receipt["readiness"] = {"ready_to_advance": False, "legal_sufficiency": False}
+                    receipt["error"] = {"code": "provider_unavailable", "resumable": True,
+                                        "router_failures": dict(snapshot["errors"]), "legal_sufficiency": False}
+                receipt["intake_router"] = deepcopy(state["intake_router"])
             return receipt
         except Exception as exc:
             return {
@@ -3055,13 +3089,18 @@ class ComplaintWorkspaceService:
             from integrations.ipfs_datasets.llm import generate_text_with_metadata
             from mediator.exceptions import UserPresentableException
 
+            host_keys = {"intake_operation", "intake_source_text", "intake_target_refs", "intake_request_id"}
             generated = generate_text_with_metadata(
                 prompt, provider="grok_cli", model_name="grok-4.7",
                 complaint_privacy_context=complaint_privacy_context,
+                **{key: value for key, value in kwargs.items() if key in host_keys},
             )
             if (not isinstance(generated, dict) or generated.get("status") not in {"available", "success"}
                     or generated.get("error") or not isinstance(generated.get("text"), str)):
-                raise UserPresentableException("interview-unavailable", "privacy_denied:interview_generation_unavailable")
+                from backends.llm_router_backend import ProviderRouteError
+                kind = generated.get("failure_kind") if isinstance(generated, dict) else ""
+                code = {"malformed": "malformed_output", "quota": "quota", "timeout": "timeout", "cancelled": "cancelled"}.get(kind, "provider_unavailable")
+                raise ProviderRouteError({"error_code": code, "intake_complete": False})
             return str(generated.get("text") or "")
 
         mediator = Mediator(

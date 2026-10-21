@@ -3360,7 +3360,7 @@ Complaint text (JSON string):
 {json.dumps(text or "", ensure_ascii=False)}
 """
 
-        candidates = self._query_llm_candidates(prompt, "entities")
+        candidates = self._query_llm_candidates(prompt, "entities", source_text=text)
         allowed_types = {
             "person",
             "organization",
@@ -3456,7 +3456,7 @@ Complaint text (JSON string):
 {json.dumps(text or "", ensure_ascii=False)}
 """
 
-        candidates = self._query_llm_candidates(prompt, "relationships")
+        candidates = self._query_llm_candidates(prompt, "relationships", source_text=text)
         entity_ids = set(graph.entities)
         allowed_types = {
             "makes_claim",
@@ -3502,8 +3502,15 @@ Complaint text (JSON string):
             })
         return relationships
 
-    def _query_llm_candidates(self, prompt: str, collection_key: str) -> List[Any]:
-        """Query the mediator and decode a JSON candidate collection safely."""
+    def _query_llm_candidates(self, prompt: str, collection_key: str, *, source_text: str = "") -> List[Any]:
+        """Use the bound canonical role hook before legacy best-effort decoding."""
+        typed_query = getattr(type(self.mediator), "query_intake_candidates", None)
+        if callable(typed_query):
+            candidates = typed_query(self.mediator, collection_key=collection_key, source_text=source_text)
+            if candidates is not None:
+                # Typed candidates are already host-validated. Never repair or
+                # fall back to tolerant JSON after a bound request fails.
+                return candidates if isinstance(candidates, list) else []
         query_backend = getattr(self.mediator, "query_backend", None)
         if not callable(query_backend):
             logger.warning(

@@ -1,305 +1,199 @@
-"""No-paid-call intake router contract. Fakes never contact a provider."""
-
+"""Bounded typed intake exchanges; authored transports are never live evidence."""
 import json
-import subprocess
-import sys
-import threading
 import time
 import uuid
 
 import pytest
 
 import integrations.ipfs_datasets.llm as llm
+import backends.llm_router_backend as backend_module
 from backends.llm_router_backend import LLMRouterBackend, ProviderRouteError
 from integrations.ipfs_accelerate.routers import PINNED_GROK_MODEL, PINNED_GROK_PROVIDER
-from integrations.ipfs_datasets.llm import (
-    intake_request_response_format,
-    parse_intake_request,
-)
 from mediator.mediator import Mediator
+from complaint_phases import ComplaintPhase, KnowledgeGraph
+from tests.test_tui_router_trace import _native_types, _result
 
-SECRET = "PRIVATE_NARRATIVE_SHOULD_NOT_LEAK"
-SOURCE = "José paid"
-
-
-def _request_id():
-    return uuid.uuid4().hex
-
-
-def _body(request_id, operation="extract_facts", questions=None, facts=None):
-    return json.dumps({
-        "schema_version": "intake_request_v1",
-        "operation": operation,
-        "request_id": request_id,
-        "questions": questions or [],
-        "facts": facts or [],
-    }, separators=(",", ":"))
+SECRET = 'PRIVATE_NARRATIVE_SHOULD_NOT_LEAK'
+SOURCE = 'José paid'
+TARGETS = ('party.complainant',)
 
 
-def _fact():
-    encoded = SOURCE.encode("utf-8")
-    value = "José"
-    assert encoded[:len(value.encode())] == value.encode()
-    return {
-        "field": "party",
-        "value": value,
-        "source_start": 0,
-        "source_end": len(value.encode("utf-8")),
-        "target_ref": "party.complainant",
-    }
+def _context():
+    return llm.build_complaint_privacy_context(llm.privacy_policy_for_mode('synthetic','synthetic','grok'),
+        user_id='synthetic',case_id='synthetic',data_class='raw_intake')
+
+
+def _body(request_id, operation='extract_facts', questions=None, facts=None):
+    return json.dumps({'schema_version':'intake_request_v1','operation':operation,'request_id':request_id,
+                       'questions':questions or [],'facts':facts or []},separators=(',',':'))
+
+
+def _fact(target='party.complainant'):
+    return {'field':'party','value':'José','source_start':0,'source_end':len('José'.encode()),'target_ref':target}
 
 
 def _backend(**overrides):
-    options = dict(retry_max_attempts=3, retry_backoff_base_s=5, retry_backoff_max_s=5,
-                   retry_jitter_s=0, timeout_seconds=0.25, intake_operation="extract_facts")
+    options = dict(retry_max_attempts=3,retry_backoff_base_s=5,retry_backoff_max_s=5,
+                   retry_jitter_s=0,timeout_seconds=.25,intake_operation='extract_facts')
     options.update(overrides)
-    return LLMRouterBackend("intake-router", provider=PINNED_GROK_PROVIDER, model=PINNED_GROK_MODEL, **options)
+    return LLMRouterBackend('intake-router',provider=PINNED_GROK_PROVIDER,model=PINNED_GROK_MODEL,**options)
 
 
 def _patch_native(monkeypatch, fn):
-    monkeypatch.setattr(llm, "generate_text", fn)
-    monkeypatch.setattr(llm, "get_last_generation_trace", lambda: {
-        "effective_provider_name": PINNED_GROK_PROVIDER,
-        "effective_model_name": PINNED_GROK_MODEL,
-        "router_version": "router-test-1",
-        "prompt": SECRET,
-        "api_key": "sk-secret",
-        "error": SECRET,
-    })
+    result_type, observation_type = _native_types()
+    monkeypatch.setattr(llm,'load_observed_llm_symbols',lambda: (fn,result_type,observation_type))
+    monkeypatch.setattr(backend_module,'load_observed_llm_symbols',lambda: (fn,result_type,observation_type))
+
+
+def _call(backend, text=SECRET, **kwargs):
+    return backend(text,intake_source_text=SOURCE,intake_target_refs=TARGETS,
+                   complaint_privacy_context=_context(),**kwargs)
 
 
 def _assert_pinned(call):
-    assert call["provider"] == PINNED_GROK_PROVIDER
-    assert call["model_name"] == PINNED_GROK_MODEL
-    assert call["allow_local_fallback"] is False
-    assert call["allow_cross_provider_fallback"] is False
-    schema = call["response_format"]
-    assert schema["type"] == "json_schema"
-    assert schema["json_schema"]["name"] == "intake_request_v1"
-    assert schema["json_schema"]["strict"] is True
-    assert schema["json_schema"]["schema"]["type"] == "object"
+    assert call['provider']==PINNED_GROK_PROVIDER and call['model_name']==PINNED_GROK_MODEL
+    assert call['allow_local_fallback'] is call['allow_cross_provider_fallback'] is False
+    assert call['grok_cli_cmd']==['grok'] and call['grok_tools']=='read_file'
+    assert set(call['grok_disallowed_tools'].split(','))=={'read_file','search_tool','use_tool'}
+
+
+def _mediator(tmp_path, backend):
+    mediator = Mediator([backend],evidence_db_path=str(tmp_path/'e.db'),
+        legal_authority_db_path=str(tmp_path/'l.db'),claim_support_db_path=str(tmp_path/'c.db'))
+    mediator.workflow_actions.bind_interview_privacy(llm.privacy_policy_for_mode('synthetic','synthetic','grok'),
+        user_id='synthetic',case_id='synthetic')
+    mediator.begin_intake_router_action(owner_id='synthetic',case_id='synthetic',session_id=uuid.uuid4().hex,revision=0)
+    return mediator
 
 
 def test_response_format_matches_native_strict_shape():
-    fmt = intake_request_response_format()
-    assert set(fmt) == {"type", "json_schema"}
-    assert set(fmt["json_schema"]) == {"name", "strict", "schema"}
+    fmt=llm.intake_request_response_format()
+    assert set(fmt)=={'type','json_schema'}
+    assert set(fmt['json_schema'])=={'name','strict','schema'} and fmt['json_schema']['strict'] is True
 
 
 def test_quota_failure_dispatches_pinned_model_once(monkeypatch):
-    calls = []
-
-    def native(**kwargs):
-        calls.append(kwargs)
-        raise RuntimeError("quota exceeded " + SECRET)
-
-    _patch_native(monkeypatch, native)
-    backend = _backend()
-    with pytest.raises(ProviderRouteError) as caught:
-        backend(SECRET, intake_source_text=SOURCE)
-    assert caught.value.payload["error_code"] == "quota"
-    assert caught.value.payload["status"] == "quota"
-    assert caught.value.payload["intake_complete"] is False
-    assert len(calls) == 1
+    calls=[]
+    def native(**kw):
+        calls.append(kw);raise RuntimeError('quota exceeded '+SECRET)
+    _patch_native(monkeypatch,native)
+    backend=_backend()
+    with pytest.raises(ProviderRouteError) as caught:_call(backend)
+    assert caught.value.payload['error_code']=='quota' and caught.value.payload['status']=='quota'
+    assert caught.value.payload['intake_complete'] is False and len(calls)==1
     _assert_pinned(calls[0])
-    assert calls[0]["model_name"] is not None
-    blob = json.dumps(caught.value.payload)
-    assert SECRET not in blob
-    assert "sk-secret" not in blob
-    assert caught.value.payload["request_id"]
-    assert caught.value.payload["prompt_logged"] is False
+    assert SECRET not in json.dumps(caught.value.payload)
 
 
 def test_total_retry_budget_does_not_open_another_model(monkeypatch):
-    calls = []
-
-    def native(**kwargs):
-        calls.append(kwargs)
-        raise RuntimeError("temporarily unavailable")
-
-    _patch_native(monkeypatch, native)
-    backend = _backend()
-    started = time.monotonic()
-    with pytest.raises(ProviderRouteError) as caught:
-        backend("synthetic", intake_source_text=SOURCE)
-    elapsed = time.monotonic() - started
-    assert caught.value.payload["error_code"] in {"provider_unavailable", "timeout"}
-    assert len(calls) == 1
-    assert elapsed < 1.0
+    calls=[]
+    def native(**kw):
+        calls.append(kw);raise RuntimeError('temporarily unavailable')
+    _patch_native(monkeypatch,native)
+    started=time.monotonic()
+    with pytest.raises(ProviderRouteError) as caught:_call(_backend())
+    assert caught.value.payload['error_code'] in {'provider_unavailable','timeout'}
+    assert len(calls)==1 and time.monotonic()-started<1
     _assert_pinned(calls[0])
 
 
-def test_cancel_kills_owned_child(monkeypatch):
-    started = threading.Event()
-    children = []
-
-    def native(**kwargs):
-        proc = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(30)"],
-            start_new_session=True,
-        )
-        children.append(proc)
-        backend.note_owned_child(proc.pid)
-        started.set()
-        proc.wait()
-        raise RuntimeError("provider still running")
-
-    _patch_native(monkeypatch, native)
-    backend = _backend(timeout_seconds=5)
-    holder = {}
-
-    def run():
+def test_cancel_unwinds_provider_cleanup_without_background_worker(monkeypatch):
+    backend=_backend(timeout_seconds=1)
+    cleanup=[]
+    monkeypatch.setattr(backend_module.threading,'Thread',lambda *a,**k:pytest.fail('background provider thread'))
+    def native(**kw):
         try:
-            backend("synthetic", intake_source_text=SOURCE)
-        except ProviderRouteError as exc:
-            holder["error"] = exc
-
-    thread = threading.Thread(target=run)
-    thread.start()
-    assert started.wait(2)
-    backend.cancel()
-    thread.join(2)
-    assert not thread.is_alive()
-    assert holder["error"].payload["error_code"] == "cancelled"
-    assert children[0].poll() is not None
-    assert SECRET not in json.dumps(holder["error"].payload)
+            backend.cancel()
+            kw['grok_progress_callback']({})
+            pytest.fail('cancel callback returned')
+        finally:cleanup.append('owned transport closed')
+    _patch_native(monkeypatch,native)
+    with pytest.raises(ProviderRouteError) as caught:_call(backend)
+    assert caught.value.payload['error_code']=='cancelled'
+    assert cleanup==['owned transport closed']
+    assert SECRET not in json.dumps(caught.value.payload)
 
 
-def test_schema_and_span_rejection_leaves_graph_unchanged():
-    mediator = Mediator([lambda prompt, **kwargs: prompt])
-    request_id = _request_id()
-    mediator.intake_model_suggestions = [{"kind": "fact", "record_type": "model_suggestion", "value": "kept"}]
-    mediator.legal_records = [{"record_type": "legal", "citation": "synthetic-statute"}]
-    before_suggestions = list(mediator.intake_model_suggestions)
-    before_legal = list(mediator.legal_records)
-    fenced = "```json\n" + _body(request_id, facts=[_fact()]) + "\n```"
-    duplicate = '{"schema_version":"intake_request_v1","schema_version":"intake_request_v1"}'
-    bad_span = _body(request_id, facts=[{**_fact(), "source_end": 1}])
-    for raw in (fenced, duplicate, bad_span, "not json"):
-        outcome = mediator.apply_intake_router_output(
-            raw, operation="extract_facts", source_text=SOURCE, request_id=request_id,
-        )
-        assert outcome["applied"] is False
-        assert outcome["graph_changed"] is False
-        assert outcome["intake_complete"] is False
-        assert mediator.intake_model_suggestions == before_suggestions
-        assert mediator.legal_records == before_legal
+def test_schema_and_span_rejection_leaves_canonical_graph_unchanged(tmp_path,monkeypatch):
+    raw=['not json']
+    def native(**kw):return _result(kw,raw[0])
+    _patch_native(monkeypatch,native)
+    mediator=_mediator(tmp_path,_backend(timeout_seconds=2))
+    graph=KnowledgeGraph()
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE,'knowledge_graph',graph)
+    before=graph.to_dict()
+    for value in ['not json','```json\n{}\n```','{"schema_version":"intake_request_v1","schema_version":"intake_request_v1"}']:
+        raw[0]=value
+        assert mediator.request_intake_candidates('extract_facts',source_text=SOURCE,
+            targets={'party.complainant':{'field':'party'}}) is None
+        assert graph.to_dict()==before
     with pytest.raises(llm.IntakeContractError):
-        parse_intake_request(bad_span, request_id=request_id, operation="extract_facts", source_text=SOURCE)
+        llm.parse_intake_request(_body(uuid.uuid4().hex,facts=[{**_fact(),'source_end':1}]),
+            request_id=uuid.uuid4().hex,operation='extract_facts',source_text=SOURCE,allowed_target_refs=TARGETS)
 
 
-def test_valid_span_is_suggestion_and_successful_empty_does_not_finish_intake():
-    mediator = Mediator([lambda prompt, **kwargs: prompt])
-    request_id = mediator._session_router_request_id()
-    mediator.legal_records = [{"record_type": "legal", "citation": "synthetic-statute"}]
-    applied = mediator.apply_intake_router_output(
-        _body(request_id, facts=[_fact()]),
-        operation="extract_facts",
-        source_text=SOURCE,
-        request_id=request_id,
-    )
-    assert applied["applied"] is True
-    assert applied["intake_complete"] is False
-    assert applied["graph_changed"] is True
-    assert mediator.intake_complete is False
-    assert mediator.intake_model_suggestions[-1]["record_type"] == "model_suggestion"
-    assert mediator.intake_model_suggestions[-1]["value"] == "José"
-    assert mediator.legal_records == [{"record_type": "legal", "citation": "synthetic-statute"}]
-    empty = mediator.apply_intake_router_output(
-        _body(request_id, operation="propose_questions"),
-        operation="propose_questions",
-        source_text=SOURCE,
-        request_id=request_id,
-    )
-    assert empty["successful_empty"] is True
-    assert empty["intake_complete"] is False
-    assert empty["graph_changed"] is False
+def test_valid_span_is_model_candidate_and_empty_is_not_completion(tmp_path,monkeypatch):
+    def native(**kw):return _result(kw,_body(kw['observation_request_id'],facts=[_fact('candidate:0')]))
+    _patch_native(monkeypatch,native)
+    mediator=_mediator(tmp_path,_backend(timeout_seconds=2))
+    graph=mediator.kg_builder.build_from_text(SOURCE)
+    candidates=[entity for entity in graph.entities.values() if entity.name=='José']
+    from complaint_phases.knowledge_graph import assertion_from_provenance
+    assert candidates and all(assertion_from_provenance(entity.provenance).is_asserted_user_fact is False
+                              and assertion_from_provenance(entity.provenance).record_type == 'model_suggestion' for entity in candidates)
+    assert mediator.intake_router_snapshot()['receipts'][-1]['intake_complete'] is False
+    assert not hasattr(mediator,'intake_model_suggestions')
 
 
-def test_redacted_trace_and_request_id_propagate(monkeypatch):
-    request_id = _request_id()
-    calls = []
-
-    def native(**kwargs):
-        calls.append(kwargs)
-        return _body(request_id, facts=[_fact()])
-
-    _patch_native(monkeypatch, native)
-    backend = _backend(timeout_seconds=2)
-    text = backend(SECRET, intake_request_id=request_id, intake_source_text=SOURCE)
-    parsed = json.loads(text)
-    assert parsed["request_id"] == request_id
-    assert len(calls) == 1
-    _assert_pinned(calls[0])
-    receipt = backend.task_receipts[-1]
-    assert receipt["request_id"] == request_id
-    assert receipt["prompt_logged"] is False
-    assert receipt["intake_complete"] is False
-    assert receipt["error_code"] == ""
-    blob = json.dumps(receipt)
-    assert SECRET not in blob
-    assert "sk-secret" not in blob
-    meta = backend.last_result_metadata
-    assert meta["request_id"] == request_id
-    assert meta["configured_provider_name"] == PINNED_GROK_PROVIDER
-    assert meta["observed_provider_name"] == PINNED_GROK_PROVIDER
-    assert meta["observed_model_name"] == PINNED_GROK_MODEL
-    assert meta["router_version"] == "router-test-1"
-    assert SECRET not in json.dumps({key: value for key, value in meta.items() if key != "text"})
-
-    mediator = Mediator([backend])
-    mediator._router_request_id = request_id
-    mediator.intake_model_suggestions = []
-    mediator.legal_records = [{"record_type": "legal"}]
-
-    def forwarding(prompt, **kwargs):
-        assert kwargs["intake_request_id"] == request_id
-        return backend(prompt, **kwargs)
-
-    mediator.backends = [forwarding]
-    outcome = mediator.intake_router_exchange("synthetic", operation="extract_facts", source_text=SOURCE)
-    assert outcome["applied"] is True
-    assert outcome["intake_complete"] is False
-    assert outcome["request_id"] == request_id
-    logged = json.dumps(mediator.state.log)
-    assert SECRET not in logged
-    assert request_id in logged
-    assert "sk-secret" not in logged
+def test_redacted_trace_and_fresh_request_ids_propagate(tmp_path,monkeypatch):
+    calls=[]
+    def native(**kw):
+        calls.append(kw)
+        prompt=json.loads(kw['prompt'] if kw['prompt'].startswith('{') else kw['prompt'].split('\n',1)[1])
+        if 'allowed_targets' not in prompt:
+            prompt=json.loads(prompt['prompt'].split('\n',1)[1])
+        return _result(kw,_body(prompt['request_id'],operation=prompt['operation']))
+    _patch_native(monkeypatch,native)
+    backend=_backend(timeout_seconds=2)
+    mediator=_mediator(tmp_path,backend)
+    for _ in range(2):
+        assert mediator.request_intake_candidates('extract_facts',source_text=SOURCE,
+            targets={'party.complainant':{'field':'party'}})['facts']==[]
+    assert len(calls)==2
+    assert len({call['observation_request_id'] for call in calls})==2
+    assert len({item['request_id'] for item in backend.task_receipts})==2
+    assert all(item['native_invocation_id'] for item in backend.task_receipts)
+    assert SECRET not in json.dumps(mediator.state.log+backend.task_receipts)
+    assert 'router-test-1' not in json.dumps(backend.last_result_metadata)
 
 
-def test_exchange_failure_does_not_change_graph(monkeypatch):
-    def native(**kwargs):
-        raise RuntimeError("llm_router_unavailable")
+def test_unbound_legacy_application_cannot_claim_canonical_effects(tmp_path):
+    mediator=_mediator(tmp_path,lambda *a,**k:'unused')
+    graph=KnowledgeGraph();mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE,'knowledge_graph',graph)
+    before=graph.to_dict()
+    outcome=mediator.apply_intake_router_output(_body(uuid.uuid4().hex,facts=[_fact()]),
+        operation='extract_facts',source_text=SOURCE,request_id=uuid.uuid4().hex)
+    assert outcome['applied'] is outcome['graph_changed'] is outcome['intake_complete'] is False
+    assert outcome['error_code']=='binding_missing' and graph.to_dict()==before
+    assert not hasattr(mediator,'intake_model_suggestions')
 
-    _patch_native(monkeypatch, native)
-    backend = _backend(retry_max_attempts=1, timeout_seconds=1)
-    mediator = Mediator([backend])
-    mediator.intake_model_suggestions = [{"kept": True}]
-    mediator.legal_records = [{"record_type": "legal"}]
-    outcome = mediator.intake_router_exchange(SECRET, operation="extract_facts", source_text=SOURCE)
-    assert outcome["applied"] is False
-    assert outcome["graph_changed"] is False
-    assert outcome["intake_complete"] is False
-    assert outcome["error_code"] in {"provider_unavailable", "timeout", "quota", "malformed_output"}
-    assert mediator.intake_model_suggestions == [{"kept": True}]
-    assert mediator.legal_records == [{"record_type": "legal"}]
+
+def test_exchange_failure_does_not_change_canonical_graph(tmp_path,monkeypatch):
+    def native(**kw):raise RuntimeError('unavailable '+SECRET)
+    _patch_native(monkeypatch,native)
+    mediator=_mediator(tmp_path,_backend(retry_max_attempts=1,timeout_seconds=1))
+    graph=KnowledgeGraph();mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE,'knowledge_graph',graph)
+    before=graph.to_dict()
+    assert mediator.request_intake_candidates('extract_facts',source_text=SOURCE,
+        targets={'party.complainant':{'field':'party'}}) is None
+    assert graph.to_dict()==before
+    assert mediator.intake_router_snapshot()['errors']['extract_facts']=='provider_unavailable'
     assert SECRET not in json.dumps(mediator.state.log)
 
 
-def test_distinct_failure_kinds(monkeypatch):
-    seen = {}
-
-    def run(message):
-        def native(**kwargs):
-            raise RuntimeError(message)
-        _patch_native(monkeypatch, native)
-        backend = _backend(retry_max_attempts=1, timeout_seconds=1)
-        with pytest.raises(ProviderRouteError) as caught:
-            backend("synthetic", intake_source_text=SOURCE)
-        seen[message] = caught.value.payload["error_code"]
-
-    run("quota exceeded")
-    run("does not match the requested schema")
-    assert seen["quota exceeded"] == "quota"
-    assert seen["does not match the requested schema"] == "malformed_output"
-    assert seen["quota exceeded"] != seen["does not match the requested schema"]
+@pytest.mark.parametrize('message,expected',[('quota exceeded','quota'),('structured output invalid','malformed_output')])
+def test_distinct_failure_kinds(monkeypatch,message,expected):
+    def native(**kw):raise RuntimeError(message)
+    _patch_native(monkeypatch,native)
+    with pytest.raises(ProviderRouteError) as caught:_call(_backend(timeout_seconds=1,retry_max_attempts=1))
+    assert caught.value.payload['error_code']==expected
