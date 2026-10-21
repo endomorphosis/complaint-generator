@@ -102,7 +102,7 @@ class LegalGraph:
         # Find elements tagged with this claim type
         # Include both regular requirements and procedural requirements
         for element in self.elements.values():
-            if element.element_type in ('requirement', 'procedural_requirement'):
+            if element.element_type in ('requirement', 'procedural_requirement', 'legal_requirement'):
                 applicable_claims = element.attributes.get('applicable_claim_types', [])
                 if claim_type in applicable_claims:
                     requirements.append(element)
@@ -264,7 +264,7 @@ class LegalGraph:
             Dict with 'total_requirements', 'claim_types_covered', 'avg_requirements_per_claim'.
         """
         requirements = [e for e in self.elements.values() 
-                       if e.element_type in ('requirement', 'procedural_requirement')]
+                       if e.element_type in ('requirement', 'procedural_requirement', 'legal_requirement')]
         
         claim_types_with_reqs: set = set()
         for req in requirements:
@@ -414,7 +414,7 @@ class LegalGraph:
         """
         counts: dict = {}
         for element in self.elements.values():
-            if element.element_type not in ('requirement', 'procedural_requirement'):
+            if element.element_type not in ('requirement', 'procedural_requirement', 'legal_requirement'):
                 continue
             claim_types = element.attributes.get('applicable_claim_types', [])
             for claim_type in claim_types:
@@ -470,15 +470,17 @@ class LegalGraphBuilder:
             
             for req_data in requirements:
                 req_element = LegalElement(
-                    id=self._get_element_id(),
-                    element_type='requirement',
+                    id=self._get_element_id('legal_requirement'),
+                    element_type='legal_requirement',
                     name=req_data['name'],
                     description=req_data.get('description', ''),
                     citation=statute_elem.citation,
                     required=req_data.get('required', True),
                     attributes={
                         'applicable_claim_types': claim_types,
-                        'source_statute': statute_elem.id
+                        'source_statute': statute_elem.id,
+                        'record_kind': 'legal_requirement',
+                        'about_complainant': False,
                     }
                 )
                 graph.add_element(req_element)
@@ -533,14 +535,14 @@ class LegalGraphBuilder:
         
         for req_data in procedural_reqs:
             element = LegalElement(
-                id=self._get_element_id(),
+                id=self._get_element_id('legal_requirement'),
                 element_type='procedural_requirement',
                 name=req_data['name'],
                 description=req_data['description'],
                 citation=req_data['rule'],
                 jurisdiction=jurisdiction,
                 required=True,
-                attributes={'category': 'civil_procedure'}
+                attributes={'category': 'civil_procedure', 'record_kind': 'legal_requirement', 'about_complainant': False}
             )
             graph.add_element(element)
         
@@ -582,10 +584,47 @@ class LegalGraphBuilder:
         
         return requirements
     
-    def _get_element_id(self) -> str:
-        """Generate unique element ID."""
+    def _get_element_id(self, element_type: str = "") -> str:
+        """Generate a unique element ID in that record's namespace."""
         self.element_counter += 1
+        prefix = {
+            "authority_source": "authority_source",
+            "rule_candidate": "rule_candidate",
+            "requirement": "legal_requirement",
+            "procedural_requirement": "legal_requirement",
+            "legal_requirement": "legal_requirement",
+        }.get(element_type)
+        if prefix:
+            return f"{prefix}:{self.element_counter}"
         return f"legal_elem_{self.element_counter}"
+
+    def project_legal_passage(self, passage: Dict[str, Any]) -> LegalElement:
+        """Project a legal passage into a legal namespace, never a complainant fact.
+
+        The returned element is not added to a graph so callers can attach the
+        passage provenance before insertion.
+        """
+        from integrations.ipfs_datasets.graphs import legal_namespace_kind
+
+        payload = dict(passage or {})
+        payload["legal_passage"] = True
+        kind = legal_namespace_kind(payload)
+        text = str(payload.get("text") or payload.get("name") or payload.get("description") or "").strip()
+        provenance = payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
+        return LegalElement(
+            id=self._get_element_id(kind),
+            element_type=kind,
+            name=(text or kind)[: self._MAX_RULE_NAME_LENGTH],
+            description=text,
+            citation=str(payload.get("citation") or ""),
+            jurisdiction=str(payload.get("jurisdiction") or ""),
+            attributes={
+                "record_kind": kind,
+                "about_complainant": False,
+                "source_passage_id": str(payload.get("passage_id") or payload.get("source_id") or ""),
+                "provenance": dict(provenance),
+            },
+        )
     
     def _get_relation_id(self) -> str:
         """Generate unique relation ID."""
@@ -673,7 +712,7 @@ class LegalGraphBuilder:
             ).strip()
 
             node = LegalElement(
-                id=self._get_element_id(),
+                id=self._get_element_id('authority_source'),
                 element_type='authority_source',
                 name=name,
                 citation=citation,
@@ -681,6 +720,9 @@ class LegalGraphBuilder:
                 attributes={
                     'source_authority_id': raw_id,
                     'authority_family': authority_family,
+                    'record_kind': 'authority_source',
+                    'about_complainant': False,
+                    'provenance': dict(authority.get('provenance') or {}) if isinstance(authority.get('provenance'), dict) else {},
                 },
             )
             graph.add_element(node)
@@ -860,14 +902,17 @@ class LegalGraphBuilder:
                 metadata = candidate.get('metadata', {}) if isinstance(candidate.get('metadata'), dict) else {}
                 grounded_rule = metadata.get('grounded_rule', {}) if isinstance(metadata.get('grounded_rule'), dict) else {}
             rule_node = LegalElement(
-                id=self._get_element_id(),
+                id=self._get_element_id('rule_candidate'),
                 element_type='rule_candidate',
                 name=rule_text[:self._MAX_RULE_NAME_LENGTH],
                 description=rule_text,
                 attributes={
                     'rule_type': rule_type,
+                    'record_kind': 'rule_candidate',
+                    'about_complainant': False,
                     'extraction_confidence': confidence,
                     'source_authority_node': authority_node_id,
+                    'provenance': dict(candidate.get('provenance') or {}) if isinstance(candidate.get('provenance'), dict) else {},
                     'grounded_rule': grounded_rule,
                     'deontic_operator': grounded_rule.get('deontic_operator', ''),
                     'operator_family': grounded_rule.get('operator_family', ''),

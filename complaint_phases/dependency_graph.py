@@ -2936,12 +2936,18 @@ class DependencyGraphBuilder:
                 requirements = legal_requirements.get(claim_type, [])
                 
                 for req_data in requirements:
+                    requirement_provenance = req_data.get('provenance') if isinstance(req_data.get('provenance'), dict) else {}
                     req_node = DependencyNode(
-                        id=self._get_node_id(),
+                        id=self._get_namespaced_node_id('legal_requirement'),
                         node_type=NodeType.LEGAL_ELEMENT,
                         name=req_data.get('name', 'Unnamed Requirement'),
                         description=req_data.get('description', ''),
-                        satisfied=False
+                        satisfied=False,
+                        attributes={
+                            'record_kind': 'legal_requirement',
+                            'about_complainant': False,
+                            'provenance': dict(requirement_provenance),
+                        },
                     )
                     graph.add_node(req_node)
                     
@@ -3127,8 +3133,91 @@ class DependencyGraphBuilder:
         """Generate unique node ID."""
         self.node_counter += 1
         return f"node_{self.node_counter}"
+
+    def _get_namespaced_node_id(self, kind: str) -> str:
+        """Mint a node id that cannot collide with fact, claim, or link ids."""
+        from integrations.ipfs_datasets.graphs import mint_graph_record_id
+
+        self.node_counter += 1
+        return mint_graph_record_id(kind, kind, str(self.node_counter))
     
     def _get_dependency_id(self) -> str:
         """Generate unique dependency ID."""
         self.dependency_counter += 1
         return f"dep_{self.dependency_counter}"
+
+    def add_fact_rule_link(
+        self,
+        graph: DependencyGraph,
+        *,
+        factual_assertion_id: str,
+        rule_id: str,
+        relation: str = "supports",
+        factual_provenance: Optional[Dict[str, Any]] = None,
+        rule_provenance: Optional[Dict[str, Any]] = None,
+        factual_name: str = "",
+        rule_name: str = "",
+    ) -> Dict[str, Any]:
+        """Record a support or contradiction edge across factual and rule namespaces.
+
+        Each side keeps its own provenance chain. The link id is neither a fact
+        id nor a rule id.
+        """
+        from integrations.ipfs_datasets.graphs import (
+            FACTUAL_ASSERTION_KIND,
+            build_namespaced_support_link,
+            record_kind_from_id,
+        )
+
+        link = build_namespaced_support_link(
+            factual_assertion_id=factual_assertion_id,
+            rule_id=rule_id,
+            relation=relation,
+            factual_provenance=factual_provenance,
+            rule_provenance=rule_provenance,
+        )
+        fact_chain = dict(link["provenance_chains"][FACTUAL_ASSERTION_KIND])
+        rule_chain = dict(link["provenance_chains"]["rule"])
+        if factual_assertion_id not in graph.nodes:
+            graph.add_node(DependencyNode(
+                id=factual_assertion_id,
+                node_type=NodeType.FACT,
+                name=factual_name or factual_assertion_id,
+                attributes={
+                    "record_kind": FACTUAL_ASSERTION_KIND,
+                    "provenance": fact_chain,
+                },
+            ))
+        else:
+            graph.nodes[factual_assertion_id].attributes.setdefault("provenance", fact_chain)
+        if rule_id not in graph.nodes:
+            graph.add_node(DependencyNode(
+                id=rule_id,
+                node_type=NodeType.LEGAL_ELEMENT,
+                name=rule_name or rule_id,
+                attributes={
+                    "record_kind": record_kind_from_id(rule_id),
+                    "about_complainant": False,
+                    "provenance": rule_chain,
+                },
+            ))
+        else:
+            graph.nodes[rule_id].attributes.setdefault("provenance", rule_chain)
+        dependency_type = (
+            DependencyType.CONTRADICTS if link["link_type"] == "contradiction_link" else DependencyType.SUPPORTS
+        )
+        graph.add_dependency(Dependency(
+            id=link["link_id"],
+            source_id=factual_assertion_id,
+            target_id=rule_id,
+            dependency_type=dependency_type,
+            required=False,
+            strength=1.0,
+        ))
+        stored = dict(link)
+        stored["provenance_chains"] = {
+            FACTUAL_ASSERTION_KIND: fact_chain,
+            "rule": rule_chain,
+        }
+        graph.metadata.setdefault("cross_graph_links", []).append(stored)
+        return stored
