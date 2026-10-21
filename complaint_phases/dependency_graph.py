@@ -3202,20 +3202,29 @@ class DependencyGraphBuilder:
             node = graph.nodes.get(endpoint)
             if node is None:
                 continue
-            if node.node_type != expected_type or node.attributes.get("record_kind") != expected_kind:
+            if node.id != endpoint or node.node_type != expected_type or node.attributes.get("record_kind") != expected_kind:
                 raise ValueError("cross-graph endpoint has a conflicting type or namespace")
             if node.attributes.get("provenance", {}) != chain:
                 raise ValueError("cross-graph endpoint has conflicting source provenance")
+            if expected_type == NodeType.FACT and link["assertion_verified"] and (
+                not isinstance(node.name, str) or " ".join(node.name.split()) != " ".join(fact_text.split())
+            ):
+                raise ValueError("stored factual text differs from its verified assertion span")
         if fact_ref != factual_assertion_id and factual_assertion_id in graph.nodes:
             node = graph.nodes[factual_assertion_id]
-            if node.node_type != NodeType.FACT or node.attributes.get("provenance", {}) != fact_chain:
+            if node.id != factual_assertion_id or node.node_type != NodeType.FACT or node.attributes.get("provenance", {}) != fact_chain:
                 raise ValueError("local factual endpoint is ambiguous or has conflicting provenance")
+            if link["assertion_verified"] and (
+                not isinstance(node.name, str) or " ".join(node.name.split()) != " ".join(fact_text.split())
+            ):
+                raise ValueError("local factual text differs from its verified assertion span")
         dependency_type = (
             DependencyType.CONTRADICTS if link["link_type"] == "contradiction_link" else DependencyType.SUPPORTS
         )
         existing_dependency = graph.dependencies.get(link["link_id"])
         if existing_dependency is not None and (
-            existing_dependency.source_id != fact_ref or existing_dependency.target_id != rule_id
+            existing_dependency.id != link["link_id"]
+            or existing_dependency.source_id != fact_ref or existing_dependency.target_id != rule_id
             or existing_dependency.dependency_type != dependency_type
             or existing_dependency.required or existing_dependency.strength != 1.0
         ):

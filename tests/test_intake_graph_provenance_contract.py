@@ -446,3 +446,43 @@ def test_nested_span_serialization_remains_valid_without_rewriting_its_proof():
         factual_provenance=proof)
     assert graph.nodes[link["factual_assertion_id"]].name == envelope.source_span_text
     assert link["provenance_chains"]["factual_assertion"] == original == proof
+
+
+@pytest.mark.parametrize("tamper", ["fact_id", "rule_id", "dependency_id", "fact_name"])
+def test_deserialized_link_replay_checks_stored_identity_and_verified_content(tamper):
+    from copy import deepcopy
+    fact = _verified_fact_for_namespace_checks()
+    graph, builder = DependencyGraph(), DependencyGraphBuilder()
+    rule = LegalGraphBuilder().project_legal_passage({"text": "Retaliation is prohibited.",
+        "passage_role": "rule_candidate", "provenance": {"source_id": "synthetic-law"}})
+    kwargs = {"factual_assertion_id": fact.id, "rule_id": rule.id,
+              "factual_provenance": deepcopy(fact.provenance), "rule_provenance": deepcopy(rule.attributes["provenance"])}
+    link = builder.add_fact_rule_link(graph, **kwargs)
+    payload = deepcopy(graph.to_dict())
+    if tamper == "fact_id":
+        payload["nodes"][link["factual_assertion_id"]]["id"] = "authority_source:foreign"
+    elif tamper == "rule_id":
+        payload["nodes"][rule.id]["id"] = "factual_assertion:foreign"
+    elif tamper == "dependency_id":
+        payload["dependencies"][link["link_id"]]["id"] = "contradiction_link:foreign"
+    else:
+        payload["nodes"][link["factual_assertion_id"]]["name"] = "An unrelated unsupported allegation."
+    replay = DependencyGraph.from_dict(payload)
+    before = deepcopy(replay.to_dict())
+    with pytest.raises(ValueError):
+        builder.add_fact_rule_link(replay, **kwargs)
+    assert replay.to_dict() == before
+    assert fact.provenance == kwargs["factual_provenance"]
+
+
+def test_unchanged_deserialized_real_link_replays_without_rewriting_proof():
+    from copy import deepcopy
+    fact = _verified_fact_for_namespace_checks()
+    graph, builder = DependencyGraph(), DependencyGraphBuilder()
+    kwargs = {"factual_assertion_id": fact.id, "rule_id": mint_graph_record_id("rule_candidate", "synthetic-law"),
+              "factual_provenance": deepcopy(fact.provenance), "rule_provenance": {"source_id": "synthetic-law"}}
+    link = builder.add_fact_rule_link(graph, **kwargs)
+    replay = DependencyGraph.from_dict(deepcopy(graph.to_dict()))
+    assert builder.add_fact_rule_link(replay, **kwargs) == link
+    assert len(replay.dependencies) == len(replay.metadata["cross_graph_links"]) == 1
+    assert fact.provenance == kwargs["factual_provenance"]
