@@ -679,3 +679,46 @@ def test_merge_retains_distinct_valid_user_source_assertions():
         histories = [user_assertion_from_mapping(item).source_identity
                      for item in restored.provenance.get("user_assertions", [])]
         assert set(histories) == {"msg-first", "msg-second"}
+
+
+@pytest.mark.parametrize("field,value", [("relation_type", "fired_by"), ("source_id", "another-node"), ("target_id", "another-node")])
+def test_relationship_replay_is_bound_to_predicate_and_graph_endpoints(field, value):
+    text = "Alice worked for Acme."
+    graph = KnowledgeGraphBuilder().build_from_text(text,
+        source_context=_statement_context(source_hash=source_byte_hash(text)),
+        extracted_entities=[
+            {"extractor_key": "alice", "type": "person", "name": "Alice",
+             "source_span": {"start": 0, "end": 5, "text": "Alice"}},
+            {"extractor_key": "acme", "type": "organization", "name": "Acme",
+             "source_span": {"start": 17, "end": 21, "text": "Acme"}},
+        ],
+        extracted_relationships=[{"source_key": "alice", "target_key": "acme", "type": "worked_for",
+            "source_span": {"start": 0, "end": len(text.encode()), "text": text}}])
+    edge = next(item for item in graph.relationships.values() if item.relation_type == "worked_for")
+    envelope = user_assertion_from_mapping(edge.provenance["user_assertion"])
+    assert envelope.is_asserted_user_fact
+    assert (envelope.graph_source_id, envelope.graph_target_id) == (edge.source_id, edge.target_id)
+    unchanged = graph_relationship_to_relationship(relationship_to_graph_relationship(edge))
+    assert user_assertion_from_mapping(unchanged.provenance["user_assertion"]).is_asserted_user_fact
+    payload = edge.to_dict()
+    payload[field] = value
+    replayed = Relationship(**payload)
+    assert not user_assertion_from_mapping(replayed.provenance["user_assertion"]).is_asserted_user_fact
+    # The projection must also recheck a record changed after construction.
+    setattr(edge, field, value)
+    outbound = relationship_to_graph_relationship(edge)
+    assert not user_assertion_from_mapping(outbound.assertion).is_asserted_user_fact
+    projected = next(item for item in build_canonical_fact_edges(graph) if item["relationship_id"] == edge.id)
+    assert projected["assertion_status"] != "asserted"
+
+
+def test_relationship_without_endpoint_proof_stays_unverified():
+    envelope = build_user_assertion_envelope(source_text=STATEMENT,
+        source_kind="user_statement", message_id=MESSAGE_ID, assertion_status="asserted",
+        source_span={"start": 0, "end": len(STATEMENT.encode()), "text": STATEMENT},
+        role="worked_for", subject_key="legacy-relationship")
+    assert envelope.is_asserted_user_fact
+    edge = Relationship(id="legacy-edge", source_id="alice", target_id="acme", relation_type="worked_for",
+        provenance={"user_assertion": envelope.as_dict()})
+    assert not user_assertion_from_mapping(edge.provenance["user_assertion"]).is_asserted_user_fact
+    assert "relationship_binding_mismatch" in edge.provenance["user_assertion"]["deficiencies"]

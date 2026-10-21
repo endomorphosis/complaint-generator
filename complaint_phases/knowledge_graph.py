@@ -327,6 +327,8 @@ def envelope_for_extracted_record(
         origin=_clean_context_text(record.get("origin") or ""),
         role=role or _clean_context_text(record.get("type") or record.get("relation_type") or ""),
         subject_key=_subject_key_for_record(record, span_text),
+        graph_source_id=_clean_context_text(record.get("source_id")) if relation_type else "",
+        graph_target_id=_clean_context_text(record.get("target_id")) if relation_type else "",
         confidence=parsed_confidence,
         legal_hit=bool(record.get("legal_hit") or attributes.get("legal_hit") or context.get("legal_hit")),
         jurisdiction=_clean_context_text(context.get("jurisdiction")),
@@ -356,7 +358,7 @@ def _resolve_graph_endpoint(
 
 def entity_to_graph_entity(entity: "Entity") -> GraphEntity:
     assertion = {}
-    provenance = dict(entity.provenance or {})
+    provenance = dict(entity.to_dict()["provenance"])
     nested = provenance.get("user_assertion")
     if isinstance(nested, Mapping):
         assertion = dict(nested)
@@ -387,7 +389,7 @@ def graph_entity_to_entity(payload: GraphEntity | Mapping[str, Any]) -> "Entity"
 
 
 def relationship_to_graph_relationship(relationship: "Relationship") -> GraphRelationship:
-    provenance = dict(relationship.provenance or {})
+    provenance = dict(relationship.to_dict()["provenance"])
     nested = provenance.get("user_assertion")
     assertion = dict(nested) if isinstance(nested, Mapping) else {}
     return GraphRelationship(
@@ -430,7 +432,7 @@ def assertion_from_provenance(provenance: Optional[Mapping[str, Any]]) -> Option
 
 
 def _validated_graph_provenance(provenance, *, record_type="", name="", attributes=None,
-                                source="", relationship=False):
+                                source="", relationship=False, graph_source_id="", graph_target_id=""):
     """Revalidate both serialized proof and the graph record it describes."""
     result = dict(provenance) if isinstance(provenance, Mapping) else {}
     raw = result.get("user_assertion")
@@ -446,7 +448,12 @@ def _validated_graph_provenance(provenance, *, record_type="", name="", attribut
         envelope = replace(envelope, record_type=classification, source_kind=classification,
             assertion_status="legal_text" if classification == "legal_text" else "suggestion",
             deficiencies=tuple(sorted(set(envelope.deficiencies) | {"non_user_graph_classification"})))
-    if envelope.is_asserted_user_fact and not relationship:
+    if envelope.is_asserted_user_fact and relationship:
+        if (envelope.role != record_type or not envelope.graph_source_id or not envelope.graph_target_id
+                or envelope.graph_source_id != graph_source_id or envelope.graph_target_id != graph_target_id):
+            envelope = replace(envelope, record_type="unverified_candidate", source_kind="unverified",
+                assertion_status="unverified", deficiencies=("relationship_binding_mismatch",))
+    elif envelope.is_asserted_user_fact:
         text = name if record_type in {"person", "organization", "location", "date"} else attrs.get("description") or name
         if not isinstance(text, str) or " ".join(text.split()) != " ".join(envelope.source_span_text.split()):
             envelope = replace(envelope, record_type="unverified_candidate", source_kind="unverified",
@@ -491,12 +498,14 @@ class Relationship:
 
     def __post_init__(self):
         self.provenance = _validated_graph_provenance(self.provenance, record_type=self.relation_type,
-            attributes=self.attributes, source=self.source, relationship=True)
+            attributes=self.attributes, source=self.source, relationship=True,
+            graph_source_id=self.source_id, graph_target_id=self.target_id)
     
     def to_dict(self) -> dict:
         payload = asdict(self)
         payload["provenance"] = _validated_graph_provenance(self.provenance, record_type=self.relation_type,
-            attributes=self.attributes, source=self.source, relationship=True)
+            attributes=self.attributes, source=self.source, relationship=True,
+            graph_source_id=self.source_id, graph_target_id=self.target_id)
         return payload
 
 

@@ -177,7 +177,7 @@ class UserAssertionEnvelope:
     source_span_text: str = ""
     source_hash: str = ""
     # Private original source permits independent hash/span checks on replay.
-    # Encryption and retention are handled by the private workspace store.
+    # This requires private storage; encryption/retention integration is pending.
     source_text: str = ""
     assertion_status: str = ""
     extractor_version: str = ""
@@ -190,6 +190,8 @@ class UserAssertionEnvelope:
     legal_hit: bool = False
     role: str = ""
     subject_key: str = ""
+    graph_source_id: str = ""
+    graph_target_id: str = ""
     deficiencies: Tuple[str, ...] = ()
 
     @property
@@ -202,6 +204,10 @@ class UserAssertionEnvelope:
         return self.message_id or self.document_id or self.source_id
 
     def computed_stable_id(self) -> str:
+        endpoint_binding = {}
+        if self.graph_source_id or self.graph_target_id:
+            endpoint_binding = {"graph_source_id": self.graph_source_id,
+                                "graph_target_id": self.graph_target_id}
         return _user_assertion_stable_id(
             contract_version=self.contract_version, record_type=self.record_type, source_kind=self.source_kind,
             requested_source_kind=self.requested_source_kind,
@@ -210,6 +216,7 @@ class UserAssertionEnvelope:
             source_hash=self.source_hash, extractor_version=self.extractor_version,
             role=self.role, subject_key=self.subject_key, jurisdiction=self.jurisdiction,
             actor=self.actor, name=self.name, event_date=self.event_date,
+            **endpoint_binding,
         )
 
     @property
@@ -301,6 +308,8 @@ def user_assertion_from_mapping(payload: Optional[Mapping[str, Any]]) -> UserAss
         legal_hit=bool(data.get("legal_hit", False)),
         role=_clean_supplied_text(data.get("role")),
         subject_key=_clean_supplied_text(data.get("subject_key")),
+        graph_source_id=_clean_supplied_text(data.get("graph_source_id")),
+        graph_target_id=_clean_supplied_text(data.get("graph_target_id")),
         deficiencies=tuple(str(item) for item in deficiency_values if str(item).strip()),
     )
     if envelope.assertion_status == ASSERTED_USER_STATUS and not envelope.is_asserted_user_fact:
@@ -325,6 +334,8 @@ def build_user_assertion_envelope(
     origin: str = "",
     role: str = "",
     subject_key: str = "",
+    graph_source_id: str = "",
+    graph_target_id: str = "",
     confidence: Optional[float] = None,
     legal_hit: bool = False,
     jurisdiction: str = "",
@@ -469,6 +480,8 @@ def build_user_assertion_envelope(
         legal_hit=bool(legal_hit),
         role=_clean_supplied_text(role),
         subject_key=_clean_supplied_text(subject_key),
+        graph_source_id=_clean_supplied_text(graph_source_id),
+        graph_target_id=_clean_supplied_text(graph_target_id),
         deficiencies=final_deficiencies,
     )
     return replace(envelope, stable_id=envelope.computed_stable_id())
