@@ -36,6 +36,7 @@ pytestmark = [
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RECEIPT_PATH = REPO_ROOT / "docs" / "task_boards" / "complaint_tui_baseline_receipt.json"
 DEADLINE_SECONDS = 15.0
+CANONICAL_STARTUP_SECONDS = 30.0
 PAUSE_MESSAGE = "Chat paused. Resume with the same user ID to continue the saved intake."
 SMOKE_USER_ID = "pty-synthetic-cimp-tui-01"
 EOF_USER_ID = "pty-synthetic-eof"
@@ -159,6 +160,171 @@ with proof_path.open("w", encoding="utf-8") as handle:
 cli.chat(user_id=user_id, max_turns=max_turns)
 """
 
+CANONICAL_CHILD_SCRIPT = r"""
+import importlib
+import json
+import os
+import sys
+from pathlib import Path
+
+def _install_guards():
+    net = importlib.import_module("socket")
+    process = importlib.import_module("subprocess")
+
+    class _GuardedSocket(net.socket):
+        def connect(self, address):
+            raise RuntimeError("network connect blocked")
+
+        def connect_ex(self, address):
+            raise RuntimeError("network connect blocked")
+
+    def _blocked(*_args, **_kwargs):
+        raise RuntimeError("provider process blocked")
+
+    net.socket = _GuardedSocket
+    net.create_connection = _blocked
+    class _BlockedPopen:
+        # Preserve Popen[T] annotations during cold optional imports while
+        # refusing every actual provider/process construction.
+        @classmethod
+        def __class_getitem__(cls, _item):
+            return cls
+        def __new__(cls, *_args, **_kwargs):
+            return _blocked()
+    process.Popen = _BlockedPopen
+    process.call = _blocked
+    process.check_call = _blocked
+    process.check_output = _blocked
+    process.run = _blocked
+    os.system = _blocked
+    for name in (
+        "execl",
+        "execle",
+        "execlp",
+        "execlpe",
+        "execv",
+        "execve",
+        "execvp",
+        "execvpe",
+        "spawnl",
+        "spawnle",
+        "spawnlp",
+        "spawnlpe",
+        "spawnv",
+        "spawnve",
+        "spawnvp",
+        "spawnvpe",
+        "posix_spawn",
+        "posix_spawnp",
+    ):
+        if hasattr(os, name):
+            setattr(os, name, _blocked)
+    return net, process, _GuardedSocket, _BlockedPopen
+
+net, process, _GuardedSocket, _BlockedPopen = _install_guards()
+# Use the installed real library without ctypes spawning ldconfig under the
+# intentionally absolute process denial. No process or library implementation
+# is faked; only this known library's discovery path is supplied explicitly.
+import ctypes.util
+import stat
+_magic_path = None
+for _candidate in (Path("/lib"), Path("/usr/lib")):
+    for _alias in sorted(_candidate.glob("*/libmagic.so.1"))[:16]:
+        _resolved = _alias.resolve(strict=True)
+        _info = _resolved.stat()
+        if _info.st_uid == 0 and stat.S_ISREG(_info.st_mode) and not (_info.st_mode & 0o022):
+            _magic_path = _resolved
+            break
+    if _magic_path is not None:
+        break
+assert _magic_path is not None, "installed libmagic fixture dependency unavailable"
+_real_find_library = ctypes.util.find_library
+def _fixture_find_library(name):
+    return str(_magic_path) if name == "magic" else _real_find_library(name)
+ctypes.util.find_library = _fixture_find_library
+repo_root = os.environ["TUI_BASELINE_REPO_ROOT"]
+if repo_root not in sys.path:
+    sys.path.insert(1, repo_root)
+
+session_dir = Path(os.environ["TUI_BASELINE_SESSION_DIR"])
+user_id = os.environ["TUI_BASELINE_USER_ID"]
+max_turns = 2
+if not isinstance(max_turns, int):
+    raise SystemExit("max_turns must be a real integer")
+
+import applications.complaint_workspace as workspace
+
+workspace._SESSION_DIR = session_dir
+import applications.complaint_cli as cli
+
+cli.service = workspace.ComplaintWorkspaceService(root_dir=session_dir)
+if cli.service.private_key_status()["status"] == "absent":
+    cli.service.initialize_private_keys(protection="passphrase", passphrase="synthetic-pty-fixture-passphrase")
+else:
+    cli.service.unlock_private_keys(passphrase="synthetic-pty-fixture-passphrase")
+cli.service.ensure_private_case_key(user_id, user_id)
+# Explicit dependency injection for this synthetic PTY only. The real shared
+# mediator, graph builder, policy boundary and encrypted session writer remain.
+_real_mediator_factory = cli.service._mediator_for_shared_interview
+_backend_calls = []
+def _fixture_backend(prompt, complaint_privacy_context=None, **kwargs):
+    assert isinstance(complaint_privacy_context, dict)
+    _backend_calls.append(True)
+    return '{"entities":[],"relationships":[]}'
+def _fixture_mediator(user_id, case_id):
+    mediator = _real_mediator_factory(user_id, case_id)
+    mediator.backends = [_fixture_backend]
+    return mediator
+cli.service._mediator_for_shared_interview = _fixture_mediator
+proof = {
+    "entrypoint": "applications.complaint_cli.chat",
+    "max_turns": max_turns,
+    "max_turns_is_int": True,
+    "user_id": user_id,
+    "network_guard_active": net.socket is _GuardedSocket,
+    "process_guard_active": process.Popen is _BlockedPopen,
+}
+proof_path = Path(os.environ["TUI_BASELINE_PROOF"])
+def _write_proof():
+    with proof_path.open("w", encoding="utf-8") as handle:
+        json.dump(proof, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+_real_turn = cli.service.run_intake_chat_turn
+def _observed_turn(*args, **kwargs):
+    payload = _real_turn(*args, **kwargs)
+    inquiry = payload.get("inquiry") or {}
+    interview = payload.get("interview") or {}
+    projection = (payload.get("session") or {}).get("shared_interview") or {}
+    proof["current_inquiry"] = {
+        "id": inquiry.get("question_id"), "kind": inquiry.get("kind"),
+        "revision": inquiry.get("revision"),
+    }
+    proof["session_id"] = interview.get("session_id")
+    proof["expected_question_revision"] = interview.get("expected_question_revision")
+    proof["answered_inquiries"] = projection.get("answered_inquiries") or []
+    proof["interview_status"] = interview.get("status")
+    proof["legal_sufficiency"] = interview.get("legal_sufficiency")
+    proof["fixture_backend_calls"] = len(_backend_calls)
+    _write_proof()
+    return payload
+cli.service.run_intake_chat_turn = _observed_turn
+# Cold construction is measured separately; every import/process guard is
+# already active, and no narrative or answer is submitted before readiness.
+import time
+cli.service._mediator_for_shared_interview(user_id, user_id)
+import magic
+import hashlib
+_loaded_magic = Path(magic.libmagic._name).resolve(strict=True)
+assert _loaded_magic == _magic_path
+proof["libmagic_path"] = str(_loaded_magic)
+proof["libmagic_sha256"] = hashlib.sha256(_loaded_magic.read_bytes()).hexdigest()
+proof["ready_for_chat"] = True
+proof["ready_monotonic"] = time.monotonic()
+_write_proof()
+cli.chat(user_id=user_id, max_turns=max_turns)
+"""
+
 
 @dataclass
 class _PtyResult:
@@ -166,6 +332,8 @@ class _PtyResult:
     transcript: str
     elapsed_seconds: float
     proof: dict
+    startup_seconds: float = 0.0
+    interaction_seconds: float = 0.0
 
 
 def _payloads() -> tuple[str, ...]:
@@ -276,8 +444,33 @@ def _install_parent_guards(monkeypatch: pytest.MonkeyPatch, script_path: Path) -
 
     monkeypatch.setattr(net, "socket", _GuardedSocket)
     monkeypatch.setattr(net, "create_connection", _blocked_connection)
-    monkeypatch.setattr(subprocess, "Popen", _guarded_popen)
+    class _GuardedPopen:
+        @classmethod
+        def __class_getitem__(cls, _item):
+            return cls
+        def __new__(cls, cmd, *args, **kwargs):
+            return _guarded_popen(cmd, *args, **kwargs)
+    monkeypatch.setattr(subprocess, "Popen", _GuardedPopen)
     monkeypatch.setattr(os, "system", _blocked_system)
+    # Cold optional imports use ctypes' discovery helper, which otherwise
+    # spawns ldconfig. Supply its real installed library under the same guard.
+    import ctypes.util
+    import stat
+    magic_path = None
+    for directory in (Path("/lib"), Path("/usr/lib")):
+        for alias in sorted(directory.glob("*/libmagic.so.1"))[:16]:
+            resolved = alias.resolve(strict=True)
+            info = resolved.stat()
+            if info.st_uid == 0 and stat.S_ISREG(info.st_mode) and not (info.st_mode & 0o022):
+                magic_path = resolved
+                break
+        if magic_path is not None:
+            break
+    assert magic_path is not None, "installed libmagic fixture dependency unavailable"
+    real_find_library = ctypes.util.find_library
+    def fixture_find_library(name):
+        return str(magic_path) if name == "magic" else real_find_library(name)
+    monkeypatch.setattr(ctypes.util, "find_library", fixture_find_library)
 
 
 def _import_workspace(monkeypatch: pytest.MonkeyPatch, session_dir: Path):
@@ -308,11 +501,13 @@ def _run_pty(
     user_id: str,
     answers: tuple[bytes, ...] = (),
     eof_after_prompt: bool = False,
+    canonical: bool = False,
 ) -> _PtyResult:
     proof_path = session_dir.parent / f"{user_id}-proof.json"
     env = _child_env(home, session_dir, proof_path, user_id)
     master, slave = os.openpty()
     started = time.monotonic()
+    interactive_started = None if canonical else started
     proc = subprocess.Popen(
         [sys.executable, str(script_path)],
         stdin=slave,
@@ -332,14 +527,29 @@ def _run_pty(
     returncode = 1
     try:
         while True:
-            elapsed = time.monotonic() - started
-            if elapsed > DEADLINE_SECONDS:
+            now = time.monotonic()
+            elapsed = now - started
+            if canonical and interactive_started is None:
+                try:
+                    readiness = json.loads(proof_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    readiness = {}
+                ready_time = readiness.get("ready_monotonic")
+                if readiness.get("ready_for_chat") is True:
+                    if not isinstance(ready_time, (int, float)) or not started <= ready_time <= now:
+                        _fail("canonical PTY readiness clock is invalid")
+                    if ready_time - started > CANONICAL_STARTUP_SECONDS:
+                        _fail("canonical cold construction exceeded 30s")
+                    interactive_started = float(ready_time)
+            phase_elapsed = now - interactive_started if interactive_started is not None else elapsed
+            phase_limit = DEADLINE_SECONDS if interactive_started is not None else CANONICAL_STARTUP_SECONDS
+            if phase_elapsed > phase_limit or elapsed > CANONICAL_STARTUP_SECONDS + DEADLINE_SECONDS:
                 _fail(
-                    f"PTY child exceeded the {DEADLINE_SECONDS:.0f}s deadline",
+                    f"PTY child exceeded its {phase_limit:.0f}s phase deadline",
                     transcript.decode("utf-8", errors="replace"),
                 )
             if master_open:
-                remaining = max(0.0, DEADLINE_SECONDS - elapsed)
+                remaining = max(0.0, phase_limit - phase_elapsed)
                 ready, _, _ = select.select([master], [], [], min(0.1, remaining))
                 if ready:
                     try:
@@ -358,9 +568,20 @@ def _run_pty(
                 if sent == 0 and b"plain language" in text:
                     _write_all(master, answers[0] + b"\n")
                     sent += 1
-                elif sent == 1 and b"bringing the complaint" in text:
+                elif sent == 1 and not canonical and b"bringing the complaint" in text:
                     _write_all(master, answers[1] + b"\n")
                     sent += 1
+                elif sent == 1 and canonical:
+                    # Synchronize with the actual canonical inquiry, rather
+                    # than assuming the former party-name prompt drives chat.
+                    try:
+                        observed = json.loads(proof_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        observed = {}
+                    current = observed.get("current_inquiry") or {}
+                    if current.get("kind") == "graph" and str(current.get("id") or "").startswith("inq-"):
+                        _write_all(master, answers[1] + b"\n")
+                        sent += 1
             if not master_open:
                 time.sleep(0.05)
             if proc.poll() is not None:
@@ -402,6 +623,8 @@ def _run_pty(
         transcript=bytes(transcript).decode("utf-8", errors="replace"),
         elapsed_seconds=elapsed,
         proof=proof,
+        startup_seconds=(interactive_started - started) if canonical and interactive_started is not None else 0.0,
+        interaction_seconds=(time.monotonic() - interactive_started) if interactive_started is not None else 0.0,
     )
 
 
@@ -420,6 +643,15 @@ def _unlocked_service(session_dir: Path, user_id: str):
     else:
         service.unlock_private_keys(passphrase="synthetic-pty-fixture-passphrase")
     service.ensure_private_case_key(user_id, user_id)
+    real_factory = service._mediator_for_shared_interview
+    def fixture_backend(prompt, complaint_privacy_context=None, **kwargs):
+        assert isinstance(complaint_privacy_context, dict)
+        return '{"entities":[],"relationships":[]}'
+    def fixture_factory(user_id, case_id):
+        mediator = real_factory(user_id, case_id)
+        mediator.backends = [fixture_backend]
+        return mediator
+    service._mediator_for_shared_interview = fixture_factory
     return service
 
 
@@ -548,6 +780,123 @@ def test_pty_smoke_pauses_and_fresh_service_resumes_same_id(monkeypatch: pytest.
             _fail("paused session was reported complete")
 
 
+def test_canonical_pty_first_answer_and_cold_encrypted_resume(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    """Real bounded cold construction, canonical PTY answer, encrypted restart."""
+
+    with tempfile.TemporaryDirectory(prefix="tui-canonical-") as raw:
+        root = Path(raw)
+        session_dir = root / "sessions"
+        home = root / "home"
+        session_dir.mkdir()
+        home.mkdir()
+        script_path = root / "_canonical_pty_child.py"
+        script_path.write_text(CANONICAL_CHILD_SCRIPT, encoding="utf-8")
+        _install_parent_guards(monkeypatch, script_path)
+        workspace = _import_workspace(monkeypatch, session_dir)
+        result = _run_pty(
+            script_path=script_path,
+            home=home,
+            session_dir=session_dir,
+            user_id=SMOKE_USER_ID,
+            answers=(NARRATIVE.encode("utf-8"), PARTY_ANSWER.encode("utf-8")),
+            canonical=True,
+        )
+        if result.returncode != 0:
+            _fail(f"PTY chat exited {result.returncode}", result.transcript)
+        if result.startup_seconds > CANONICAL_STARTUP_SECONDS:
+            _fail("canonical cold startup exceeded its independent 30s bound", result.transcript)
+        if result.interaction_seconds > DEADLINE_SECONDS:
+            _fail("canonical PTY interaction exceeded the retained 15s bound", result.transcript)
+        if result.elapsed_seconds > CANONICAL_STARTUP_SECONDS + DEADLINE_SECONDS:
+            _fail("canonical PTY exceeded its 45s total bound", result.transcript)
+        if result.proof.get("ready_for_chat") is not True:
+            _fail("canonical PTY did not publish genuine post-construction readiness")
+        if PAUSE_MESSAGE not in result.transcript:
+            _fail("pause/resume message was not displayed", result.transcript)
+        if result.proof.get("entrypoint") != "applications.complaint_cli.chat":
+            _fail("PTY child did not call applications.complaint_cli.chat", result.transcript)
+        if result.proof.get("max_turns_is_int") is not True or result.proof.get("max_turns") != 2:
+            _fail("PTY child did not pass integer max_turns=2", result.transcript)
+        if result.proof.get("network_guard_active") is not True or result.proof.get("process_guard_active") is not True:
+            _fail("PTY child did not install provider and network guards before chat", result.transcript)
+        _require_same("proof user id", result.proof.get("user_id"), SMOKE_USER_ID)
+
+        saved = _load_session(_session_path(session_dir, SMOKE_USER_ID), SMOKE_USER_ID)
+        answers = saved.get("intake_answers") or {}
+        narrative_record = saved.get("original_complaint") or {}
+        _require_same("user id", saved.get("user_id"), SMOKE_USER_ID)
+        _require_same("narrative text", narrative_record.get("text"), NARRATIVE)
+        if answers.get("party_name"):
+            _fail("canonical graph answer was stored as a legacy party_name answer")
+        projection = saved.get("shared_interview") or {}
+        answered = projection.get("answered_inquiries") or []
+        if len(answered) != 1 or not str(answered[0].get("inquiry_id") or "").startswith("inq-"):
+            _fail("PTY did not answer exactly one canonical graph inquiry")
+        if result.proof.get("answered_inquiries") != answered:
+            _fail("PTY transition proof differs from encrypted shared inquiry history")
+        denoiser_history = projection.get("denoiser_history") or []
+        if sum(item.get("answer") == PARTY_ANSWER for item in denoiser_history) != 1:
+            _fail("PTY's first actual answer was not persisted exactly once in the shared engine")
+        if result.proof.get("interview_status") != "awaiting_user" or result.proof.get("legal_sufficiency") is not False:
+            _fail("PTY did not preserve the honest shared-interview outcome")
+        if result.proof.get("current_inquiry", {}).get("kind") != "graph":
+            _fail("PTY did not pause at an actual canonical graph inquiry")
+        raw = _session_path(session_dir, SMOKE_USER_ID).read_bytes()
+        if not raw.startswith(b"CGPE") or NARRATIVE.encode() in raw or PARTY_ANSWER.encode() in raw:
+            _fail("PTY session exposed synthetic complaint or answer plaintext")
+        if _session_path(session_dir, SMOKE_USER_ID).stat().st_mode & 0o777 != 0o600:
+            _fail("PTY session is not owner-only 0600")
+        if answers.get("opposing_party"):
+            _fail("opposing party was stored before the structured question")
+        if answers.get("protected_activity"):
+            _fail("third intake answer was stored before resume")
+        if saved.get("intake_history"):
+            _fail("canonical graph answer mutated the independent legacy intake history")
+
+        fresh = _unlocked_service(session_dir, SMOKE_USER_ID)
+        again = _unlocked_service(session_dir, SMOKE_USER_ID)
+        if fresh is again:
+            _fail("resume did not construct a fresh workspace service")
+        resumed = again.run_intake_chat_turn(SMOKE_USER_ID, interview_action="resume")
+        resumed_session = resumed.get("session") or {}
+        resumed_answers = resumed_session.get("intake_answers") or {}
+        _require_same("resumed user id", resumed_session.get("user_id"), SMOKE_USER_ID)
+        _require_same(
+            "resumed narrative",
+            (resumed_session.get("original_complaint") or {}).get("text"),
+            NARRATIVE,
+        )
+        if resumed_answers.get("party_name"):
+            _fail("resumed graph session populated the legacy party_name answer")
+        restored = resumed_session.get("shared_interview") or {}
+        _require_same("resumed canonical inquiry history", restored.get("answered_inquiries"), answered)
+        _require_same("resumed first answer history", restored.get("denoiser_history"), denoiser_history)
+        _require_same("resumed interview id", restored.get("session_id"), projection.get("session_id"))
+        next_question = resumed.get("next_question") or {}
+        current = result.proof.get("current_inquiry") or {}
+        _require_same("resumed graph inquiry", next_question.get("id"), current.get("id"))
+        _require_same("resumed graph revision", resumed.get("expected_question_revision"), current.get("revision"))
+        if next_question.get("kind") != "graph":
+            _fail("fresh encrypted service did not resume the canonical graph inquiry")
+        if (resumed_session.get("conversation_state") or {}).get("is_complete") is True:
+            _fail("paused session was reported complete")
+
+        # Persist only safe measured qualification metadata; no answer text,
+        # prompts or private session projection enters JUnit diagnostics.
+        for key, value in {
+            "canonical_startup_seconds": result.startup_seconds,
+            "canonical_interaction_seconds": result.interaction_seconds,
+            "canonical_total_seconds": result.elapsed_seconds,
+            "canonical_first_answer_persisted_once": True,
+            "canonical_cold_resume_history_equal": True,
+            "canonical_session_encrypted": True,
+            "canonical_process_network_guards_active": True,
+            "canonical_libmagic_path": result.proof.get("libmagic_path"),
+            "canonical_libmagic_sha256": result.proof.get("libmagic_sha256"),
+        }.items():
+            request.node.user_properties.append((key, value))
+
+
 def _assert_receipt_separates_defects_from_smoke(receipt: dict) -> None:
     if receipt.get("schema_version") != "complaint-generator.tui-baseline-receipt.v1":
         _fail("baseline receipt schema is missing")
@@ -632,8 +981,13 @@ def test_receipt_records_gaps_independently_of_baseline_smoke(monkeypatch: pytes
         inquiry = narrative_turn.get("inquiry") or {}
         if accepted.get("question_id") != "original_complaint":
             _fail("initial narrative was not stored on original_complaint")
-        if inquiry.get("question_id") != "party_name":
-            _fail("narrative turn did not return the party_name inquiry")
+        interview = narrative_turn.get("interview") or {}
+        if (narrative_turn.get("legacy_inquiry") or {}).get("question_id") != "party_name":
+            _fail("legacy party-name inquiry compatibility was lost")
+        if inquiry.get("kind") != "graph" or inquiry.get("question_id") != (interview.get("inquiry") or {}).get("inquiry_id"):
+            _fail("narrative turn did not publish its actual canonical graph inquiry")
+        if inquiry.get("revision") != interview.get("expected_question_revision"):
+            _fail("canonical graph question revision was not exposed consistently")
         narrative_state = _load_session(_session_path(session_dir, NARRATIVE_USER_ID), NARRATIVE_USER_ID)
         if (narrative_state.get("intake_answers") or {}).get("party_name"):
             _fail("housing narrative became party_name")

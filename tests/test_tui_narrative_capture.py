@@ -48,6 +48,20 @@ def _service(tmp_path: Path, *users: str) -> ComplaintWorkspaceService:
     service.initialize_private_keys(protection="passphrase", passphrase="synthetic-narrative-fixture-passphrase")
     for user_id in users:
         service.ensure_private_case_key(user_id, user_id)
+    return _bind_deterministic_interview_backend(service)
+
+
+def _bind_deterministic_interview_backend(service):
+    """Inject only this fixture's backend; preserve the real engine and policy guard."""
+    real_factory = service._mediator_for_shared_interview
+    def fixture_backend(prompt, complaint_privacy_context=None, **kwargs):
+        assert isinstance(complaint_privacy_context, dict)
+        return '{"entities":[],"relationships":[]}'
+    def factory(user_id, case_id):
+        mediator = real_factory(user_id, case_id)
+        mediator.backends = [fixture_backend]
+        return mediator
+    service._mediator_for_shared_interview = factory
     return service
 
 
@@ -63,8 +77,13 @@ def _assert_narrative_then_name(payload: dict, narrative: str) -> None:
     assert record.get("text") == narrative
     assert int(record.get("revision") or 0) == 1
     assert answers.get("party_name") in (None, "")
-    assert inquiry.get("question_id") == "party_name"
-    assert inquiry.get("kind") == "structured"
+    legacy = payload.get("legacy_inquiry") or {}
+    interview = payload.get("interview") or {}
+    assert legacy.get("question_id") == "party_name"
+    assert legacy.get("kind") == "structured"
+    assert inquiry.get("kind") == "graph"
+    assert inquiry.get("question_id") == interview["inquiry"]["inquiry_id"]
+    assert inquiry.get("revision") == interview["expected_question_revision"]
     assert inquiry.get("question_id") != "original_complaint"
 
 
@@ -163,7 +182,9 @@ def test_multiline_answer_revisions_stay_distinct(tmp_path: Path) -> None:
     assert "Line one" not in str(answers.get("party_name") or "")
     history = (revised.get("session") or {}).get("intake_history") or []
     assert [item.get("question_id") for item in history] == ["party_name"]
-    assert (revised.get("inquiry") or {}).get("question_id") == "opposing_party"
+    assert (revised.get("legacy_inquiry") or {}).get("question_id") == "opposing_party"
+    assert revised["inquiry"]["question_id"] == revised["interview"]["inquiry"]["inquiry_id"]
+    assert revised["inquiry"]["revision"] == revised["interview"]["expected_question_revision"]
 
 
 def test_file_and_stdin_narrative_does_not_run_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

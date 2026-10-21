@@ -108,6 +108,20 @@ def _service(root: Path, *, users=()):
         service.unlock_private_keys(passphrase=_FIXTURE_PASSPHRASE)
     for user_id in users:
         service.ensure_private_case_key(user_id, user_id)
+    return _bind_deterministic_interview_backend(service)
+
+
+def _bind_deterministic_interview_backend(service):
+    """Inject only this fixture's backend; preserve the real engine and policy guard."""
+    real_factory = service._mediator_for_shared_interview
+    def fixture_backend(prompt, complaint_privacy_context=None, **kwargs):
+        assert isinstance(complaint_privacy_context, dict)
+        return '{"entities":[],"relationships":[]}'
+    def factory(user_id, case_id):
+        mediator = real_factory(user_id, case_id)
+        mediator.backends = [fixture_backend]
+        return mediator
+    service._mediator_for_shared_interview = factory
     return service
 
 
@@ -251,10 +265,12 @@ def test_privacy_commands_do_not_consume_answers_and_persist(tmp_path: Path) -> 
     narrative = service.run_intake_chat_turn("chat-user", message="Synthetic original complaint narrative")
     assert narrative["accepted_answer"]["question_id"] == "original_complaint"
     assert narrative["session"]["intake_answers"] == {}
-    assert narrative["inquiry"]["question_id"] == "party_name"
+    assert narrative["legacy_inquiry"]["question_id"] == "party_name"
+    assert narrative["inquiry"]["question_id"] == narrative["interview"]["inquiry"]["inquiry_id"]
+    assert narrative["inquiry"]["revision"] == narrative["interview"]["expected_question_revision"]
 
-    first = service.run_intake_chat_turn("chat-user", message="Ada Example")
-    second = service.run_intake_chat_turn("chat-user", message="Opposing Example")
+    first = service.run_intake_chat_turn("chat-user", message="Ada Example", question_id="party_name")
+    second = service.run_intake_chat_turn("chat-user", message="Opposing Example", question_id="opposing_party")
     assert first["accepted_answer"]["question_id"] == "party_name"
     assert second["accepted_answer"]["question_id"] == "opposing_party"
     assert second["session"]["intake_answers"]["party_name"] == "Ada Example"
