@@ -295,12 +295,25 @@ def _kit_enabled() -> bool:
     return os.environ.get("COMPLAINT_GENERATOR_ENABLE_IPFS_KIT", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+# Operation ids that already exist in Kit source. Dispatch uses one only when
+# the bound registry actually declares it. Missing ids are deferred, not invented.
+_DECLARED_ROUTER_OPERATIONS: dict[str, tuple[str, ...]] = {
+    "add": ("storage.ipfs.add", "storage.local-durable.put"),
+    "cat": ("storage.ipfs.cat", "storage.ipfs.get", "storage.local-durable.get"),
+    "pin": ("storage.ipfs.pin", "storage.ipfs.pin.add"),
+}
+_LIVE_BACKEND_NAMES = frozenset({"datasets_router", "kubo", "pinned_ipfs"})
+_PSEUDO_HEX = frozenset("0123456789abcdef")
+
+
 def _load_optional_kit_backend() -> Any:
     """Return an IPFSSimpleAPI only when kit storage is explicitly enabled.
 
-    CanonicalStorageService is an execute() protocol and does not expose
-    add_bytes/cat/pin. IPFSSimpleAPI construction can start a node, so the
-    default path keeps the datasets router and the local cache.
+    CanonicalStorageService is an execute() protocol reached through
+    ServiceRouter.dispatch. It is not constructed here and it is not treated
+    as an add_bytes/cat/pin object. IPFSSimpleAPI construction can start a
+    node, so import and probe keep the datasets router and the local cache
+    until COMPLAINT_GENERATOR_ENABLE_IPFS_KIT is set.
     """
 
     if not _kit_enabled():
@@ -309,12 +322,6 @@ def _load_optional_kit_backend() -> Any:
 
     ensure_import_paths("ipfs_kit_py")
     simple_api, _error = import_attr_optional("ipfs_kit_py", "IPFSSimpleAPI")
-    canonical, _canonical_error = import_attr_optional("ipfs_kit_py", "CanonicalStorageService")
-    if canonical is not None and all(callable(getattr(canonical, name, None)) for name in ("add_bytes", "cat", "pin")):
-        try:
-            return canonical()
-        except Exception:
-            pass
     if simple_api is None:
         return None
     try:
@@ -330,7 +337,81 @@ def _storage_error_type() -> type[BaseException]:
     return Exception
 
 
+def _measurement_label(backend: Any) -> str:
+    label = getattr(backend, "measurement_label", None) or getattr(backend, "provider_label", None)
+    return str(label or "")
+
+
+def _is_service_router(backend: Any) -> bool:
+    return callable(getattr(backend, "dispatch", None)) and getattr(backend, "registry", None) is not None
+
+
+def _is_execute_protocol(backend: Any) -> bool:
+    """CanonicalStorageService shape: execute() without a byte API or router."""
+
+    if _is_service_router(backend) or callable(getattr(backend, "add_bytes", None)):
+        return False
+    return callable(getattr(backend, "execute", None))
+
+
+def _registry_index(registry: Any) -> dict[str, Any]:
+    found: dict[str, Any] = {}
+    operations = getattr(registry, "operations", None)
+    if not callable(operations):
+        return found
+    for definition in operations() or ():
+        operation_id = getattr(definition, "operation_id", None)
+        if isinstance(operation_id, str) and operation_id:
+            found[operation_id] = definition
+        for alias in getattr(definition, "aliases", ()) or ():
+            if isinstance(alias, str) and alias:
+                found[alias] = definition
+    return found
+
+
+def _select_declared_operation(registry: Any, action: str) -> str | None:
+    found = _registry_index(registry)
+    for candidate in _DECLARED_ROUTER_OPERATIONS.get(action, ()):
+        if candidate in found:
+            return candidate
+    return None
+
+
+def _router_request(operation_id: str, action: str, payload: Any, *, pin_content: bool) -> dict[str, Any]:
+    import base64
+
+    if operation_id == "storage.local-durable.put":
+        blob = bytes(payload)
+        digest = hashlib.sha256(blob).hexdigest()
+        return {
+            "path": f"objects/{digest}",
+            "data_b64": base64.b64encode(blob).decode("ascii"),
+            "pin": bool(pin_content),
+        }
+    if operation_id == "storage.local-durable.get":
+        locator = payload if isinstance(payload, str) else ""
+        return {"path": locator}
+    if action == "add":
+        return {"data": payload, "pin": bool(pin_content)}
+    return {"cid": payload}
+
+
 def _invoke_byte_backend(backend: Any, action: str, payload: Any, *, pin_content: bool = True) -> Any:
+    _invoke_byte_backend.last_locator = ""  # type: ignore[attr-defined]
+    if _is_execute_protocol(backend):
+        raise RuntimeError(
+            "CanonicalStorageService is an execute protocol; bind it with "
+            "ServiceRouter.bind_service and dispatch a declared operation. "
+            "It does not provide add_bytes, cat, or pin."
+        )
+    if _is_service_router(backend):
+        operation_id = _select_declared_operation(backend.registry, action)
+        if operation_id is None:
+            raise RuntimeError(f"bound registry has no declared operation for {action}")
+        request = _router_request(operation_id, action, payload, pin_content=pin_content)
+        if action == "add" and isinstance(request.get("path"), str):
+            _invoke_byte_backend.last_locator = request["path"]  # type: ignore[attr-defined]
+        return backend.dispatch(operation_id, request)
     if action == "add":
         if callable(getattr(backend, "add_bytes", None)):
             return backend.add_bytes(payload, pin=pin_content)
@@ -343,15 +424,115 @@ def _invoke_byte_backend(backend: Any, action: str, payload: Any, *, pin_content
     raise RuntimeError(f"storage backend does not implement {action}")
 
 
+def _explicit_pinned(raw: Any) -> bool | None:
+    if isinstance(raw, dict) and "pinned" in raw:
+        return bool(raw.get("pinned"))
+    pinned = getattr(raw, "pinned", None)
+    if isinstance(pinned, bool):
+        return pinned
+    return None
+
+
 def _result_from_backend_call(raw: Any, *, backend_name: str, fallback_cid: str = "") -> dict[str, Any]:
     if isinstance(raw, str) and raw:
-        return {"cid": raw, "status": "available", "backend_name": backend_name, "data": None, "error": ""}
-    if isinstance(raw, (bytes, bytearray)):
-        return {"cid": fallback_cid, "status": "available", "backend_name": backend_name, "data": bytes(raw), "error": ""}
-    translated = translate_kit_operation_result(raw, backend_name=backend_name)
-    if not translated.get("cid") and fallback_cid:
-        translated["cid"] = fallback_cid
+        translated = {"cid": raw, "status": "available", "backend_name": backend_name, "data": None, "error": ""}
+    elif isinstance(raw, (bytes, bytearray)):
+        translated = {
+            "cid": fallback_cid,
+            "status": "available",
+            "backend_name": backend_name,
+            "data": bytes(raw),
+            "error": "",
+        }
+    elif raw is None or isinstance(raw, (int, float, list, tuple)):
+        translated = {
+            "cid": fallback_cid,
+            "status": "error",
+            "backend_name": backend_name,
+            "data": None,
+            "error": "malformed storage result",
+        }
+    else:
+        translated = translate_kit_operation_result(raw, backend_name=backend_name)
+        if not translated.get("cid") and fallback_cid:
+            translated["cid"] = fallback_cid
+    explicit = _explicit_pinned(raw)
+    if explicit is not None:
+        translated["pinned_observed"] = explicit
+    if isinstance(raw, dict):
+        locator = raw.get("path") or raw.get("locator")
+        if isinstance(locator, str) and locator:
+            translated["locator"] = locator
     return translated
+
+
+def _cid_kind(cid: str, *, backend_name: str, stored_local: bool) -> str:
+    if not cid:
+        return "missing"
+    if cid.startswith("sha256:"):
+        return "sha256_fallback"
+    body = cid[4:] if cid.startswith("bafy") else ""
+    if stored_local or backend_name == "local_cache" or (
+        len(body) == 55 and all(character in _PSEUDO_HEX for character in body)
+    ):
+        return "pseudo_cid"
+    return "content_cid"
+
+
+def _durability_view(
+    *,
+    backend: Any,
+    backend_name: str,
+    cid: str,
+    status: str,
+    stored_local: bool,
+    uploaded: bool,
+    pinned: bool,
+    verified: bool,
+    replicated: bool = False,
+    deferred: bool = False,
+    verification: dict[str, Any] | None = None,
+    pin_evidence: str = "",
+    error: str = "",
+) -> dict[str, Any]:
+    """Keep each durability claim independent of a nonempty CID or success flag."""
+
+    kind = _cid_kind(cid, backend_name=backend_name, stored_local=stored_local)
+    measurement = _measurement_label(backend)
+    local_only = stored_local or kind in {"pseudo_cid", "sha256_fallback"}
+    if local_only:
+        pinned = False
+        uploaded = False
+    live_backend = backend_name in _LIVE_BACKEND_NAMES or bool(getattr(backend, "live_provider", False))
+    if measurement == "measured-hermetic":
+        live_backend = False
+    network_durable = bool(
+        live_backend and uploaded and pinned and verified and kind == "content_cid" and status == "available"
+    )
+    verification_payload = dict(verification or {"matched": bool(verified), "method": "readback"})
+    receipt = {
+        "backend_name": backend_name,
+        "cid": cid,
+        "cid_kind": kind,
+        "status": status,
+        "pin_evidence": pin_evidence,
+        "measurement": measurement,
+        "network_durable": network_durable,
+        "error": error,
+    }
+    return {
+        "stored_local": bool(stored_local),
+        "uploaded": bool(uploaded),
+        "pinned": bool(pinned),
+        "verified": bool(verified),
+        "replicated": bool(replicated),
+        "deferred": bool(deferred),
+        "network_durable": network_durable,
+        "cid_kind": kind,
+        "measurement": measurement,
+        "verification": verification_payload,
+        "receipt": receipt,
+    }
 
 
 def _finish_storage_call(
@@ -361,32 +542,79 @@ def _finish_storage_call(
     size: int = 0,
     pinned: bool | None = None,
     cid: str = "",
+    backend: Any = None,
+    stored_local: bool = False,
+    uploaded: bool = False,
+    verified: bool = False,
+    deferred: bool = False,
+    verification: dict[str, Any] | None = None,
+    pin_evidence: str = "",
 ) -> dict[str, Any]:
     status = str(translated.get("status") or "error")
+    backend_name = str(translated.get("backend_name") or "")
+    resolved_cid = str(translated.get("cid") or cid or "")
     payload: dict[str, Any] = {
         "status": status,
-        "cid": str(translated.get("cid") or cid or ""),
-        "backend_name": str(translated.get("backend_name") or ""),
+        "cid": resolved_cid,
+        "backend_name": backend_name,
         "error": str(translated.get("error") or ""),
     }
-    if operation == "store_bytes":
-        payload["size"] = size
-        payload["pinned"] = bool(pinned)
-    elif operation == "retrieve_bytes":
+    if operation == "retrieve_bytes":
         data = translated.get("data")
         payload["data"] = bytes(data) if isinstance(data, (bytes, bytearray)) else b""
         payload["size"] = len(payload["data"])
-    elif operation == "pin_cid":
-        payload["pinned"] = status == "available"
+        verified = verified or bool(payload["data"])
+    pin_flag = bool(pinned) and status in {"available", "degraded"}
+    if operation == "pin_cid":
         payload["result"] = translated.get("data")
+        if status != "available":
+            pin_flag = False
+    if operation == "store_bytes":
+        payload["size"] = size
+    durability = _durability_view(
+        backend=backend,
+        backend_name=backend_name,
+        cid=resolved_cid,
+        status=status,
+        stored_local=stored_local or backend_name == "local_cache",
+        uploaded=uploaded and status in {"available", "degraded"},
+        pinned=pin_flag,
+        verified=verified and status in {"available", "degraded"},
+        deferred=deferred or status == "unavailable",
+        verification=verification,
+        pin_evidence=pin_evidence,
+        error=payload["error"],
+    )
+    payload.update(durability)
     return with_adapter_metadata(
         payload,
         operation=operation,
         backend_available=status == "available",
         degraded_reason=payload["error"] or None,
-        implementation_status="available" if status == "available" else "degraded",
+        implementation_status="available" if status == "available" else ("unavailable" if status == "unavailable" else "degraded"),
         extra_metadata={"backend_name": payload["backend_name"]},
     )
+
+
+def _readback(backend: Any, cid: str, expected: bytes, *, locator: str = "") -> dict[str, Any]:
+    target: Any = locator or cid
+    try:
+        raw = _invoke_byte_backend(backend, "cat", target)
+    except Exception as exc:
+        return {"matched": False, "verified": False, "method": "readback", "reason": str(exc)}
+    translated = _result_from_backend_call(raw, backend_name="readback", fallback_cid=cid)
+    data = translated.get("data")
+    if isinstance(raw, (bytes, bytearray)):
+        data = bytes(raw)
+    elif isinstance(data, str):
+        data = data.encode("utf-8")
+    matched = isinstance(data, (bytes, bytearray)) and bytes(data) == expected
+    return {
+        "matched": matched,
+        "verified": matched,
+        "method": "readback",
+        "reason": "" if matched else "readback mismatch",
+    }
 
 
 def _store_with_object(backend: Any, data: bytes, *, pin_content: bool, backend_name: str) -> dict[str, Any]:
@@ -394,7 +622,42 @@ def _store_with_object(backend: Any, data: bytes, *, pin_content: bool, backend_
     translated = _result_from_backend_call(raw, backend_name=backend_name)
     if translated["status"] != "available":
         raise RuntimeError(translated["error"] or "kit add failed")
-    return _finish_storage_call(translated, operation="store_bytes", size=len(data), pinned=pin_content)
+    observed = translated.get("pinned_observed")
+    pinned = bool(observed) if observed is not None else False
+    pin_evidence = "add_result" if observed is not None else "not_observed"
+    pin_error = ""
+    if pin_content and observed is not True and (
+        callable(getattr(backend, "pin", None)) or _is_service_router(backend)
+    ):
+        try:
+            pin_raw = _invoke_byte_backend(backend, "pin", translated["cid"])
+            pin_translated = _result_from_backend_call(pin_raw if pin_raw is not None else {"success": True, "cid": translated["cid"]}, backend_name=backend_name, fallback_cid=translated["cid"])
+            pin_observed = pin_translated.get("pinned_observed")
+            pinned = pin_translated["status"] == "available" and (pin_observed is not False)
+            pin_evidence = "pin_call"
+            if not pinned:
+                pin_error = str(pin_translated.get("error") or "pin failed")
+        except Exception as exc:
+            pinned = False
+            pin_evidence = "pin_call_failed"
+            pin_error = str(exc)
+    elif pin_content and observed is False:
+        pin_evidence = "add_result_unpinned"
+    locator = str(translated.get("locator") or getattr(_invoke_byte_backend, "last_locator", "") or "")
+    verification = _readback(backend, translated["cid"], data, locator=locator)
+    if pin_error and not translated.get("error"):
+        translated["error"] = pin_error
+    return _finish_storage_call(
+        translated,
+        operation="store_bytes",
+        size=len(data),
+        pinned=pinned,
+        backend=backend,
+        uploaded=True,
+        verified=bool(verification.get("matched")),
+        verification=verification,
+        pin_evidence=pin_evidence,
+    )
 
 
 def _retrieve_with_object(backend: Any, cid: str, *, backend_name: str) -> dict[str, Any]:
@@ -402,24 +665,59 @@ def _retrieve_with_object(backend: Any, cid: str, *, backend_name: str) -> dict[
     translated = _result_from_backend_call(raw, backend_name=backend_name, fallback_cid=cid)
     if translated["status"] != "available":
         raise RuntimeError(translated["error"] or "kit cat failed")
-    return _finish_storage_call(translated, operation="retrieve_bytes", cid=cid)
+    return _finish_storage_call(
+        translated,
+        operation="retrieve_bytes",
+        cid=cid,
+        backend=backend,
+        uploaded=backend_name not in {"local_cache", ""},
+        verified=isinstance(translated.get("data"), (bytes, bytearray)),
+    )
 
 
 def _pin_with_object(backend: Any, cid: str, *, backend_name: str) -> dict[str, Any]:
     raw = _invoke_byte_backend(backend, "pin", cid)
-    translated = _result_from_backend_call(raw if raw is not None else {"success": True, "cid": cid}, backend_name=backend_name, fallback_cid=cid)
+    if raw is None:
+        raw = {"success": True, "cid": cid, "pinned": True}
+    translated = _result_from_backend_call(raw, backend_name=backend_name, fallback_cid=cid)
     if translated["status"] != "available":
         raise RuntimeError(translated["error"] or "kit pin failed")
-    return _finish_storage_call(translated, operation="pin_cid", cid=cid)
+    observed = translated.get("pinned_observed")
+    pinned = True if observed is None else bool(observed)
+    if observed is False:
+        raise RuntimeError("pin result reported pinned=false")
+    return _finish_storage_call(
+        translated,
+        operation="pin_cid",
+        cid=cid,
+        pinned=pinned,
+        backend=backend,
+        uploaded=True,
+        pin_evidence="pin_call",
+    )
 
 
 def _local_cache_store(data: bytes, *, pin_content: bool, reason: str) -> dict[str, Any]:
-    cid = LocalCacheIPFSBackend().add_bytes(data, pin=pin_content)
+    cache = LocalCacheIPFSBackend()
+    cid = cache.add_bytes(data, pin=False)
+    try:
+        readback = cache.cat(cid)
+        matched = readback == data
+    except Exception as exc:
+        matched = False
+        readback_error = str(exc)
+    else:
+        readback_error = "" if matched else "readback mismatch"
     return _finish_storage_call(
         {"cid": cid, "status": "degraded", "backend_name": "local_cache", "error": reason},
         operation="store_bytes",
         size=len(data),
-        pinned=pin_content,
+        pinned=False,
+        stored_local=True,
+        uploaded=False,
+        verified=matched,
+        verification={"matched": matched, "verified": matched, "method": "local-readback", "reason": readback_error},
+        pin_evidence="local_marker_is_not_a_network_pin" if pin_content else "pin_not_requested",
     )
 
 
@@ -449,9 +747,13 @@ def _local_cache_pin(cid: str, *, reason: str) -> dict[str, Any]:
             cid=cid,
         )
     return _finish_storage_call(
-        {"cid": cid, "status": "degraded", "backend_name": "local_cache", "error": reason, "data": {"pinned": True}},
+        {"cid": cid, "status": "degraded", "backend_name": "local_cache", "error": reason, "data": {"local_pin_marker": True}},
         operation="pin_cid",
         cid=cid,
+        pinned=False,
+        stored_local=True,
+        pin_evidence="local_marker_is_not_a_network_pin",
+        verification={"matched": False, "method": "none", "reason": "local pin marker is not network durability"},
     )
 
 
@@ -471,11 +773,15 @@ def store_bytes(
         try:
             return _store_with_object(backend, data, pin_content=pin_content, backend_name=backend_name or "kit")
         except Exception as exc:
+            deferred = "no declared operation" in str(exc) or "does not implement" in str(exc)
             return _finish_storage_call(
-                {"cid": "", "status": "error", "backend_name": backend_name or "kit", "error": str(exc)},
+                {"cid": "", "status": "deferred" if deferred else "error", "backend_name": backend_name or "kit", "error": str(exc)},
                 operation="store_bytes",
                 size=len(data),
-                pinned=pin_content,
+                pinned=False,
+                backend=backend,
+                deferred=deferred,
+                pin_evidence="not_pinned",
             )
 
     kit_backend = _load_optional_kit_backend()
@@ -492,48 +798,48 @@ def store_bytes(
 
     probe = _runtime_backend_probe()
     if add_bytes is None or probe["status"] != "available":
-        return with_adapter_metadata(
+        return _finish_storage_call(
             {
                 "status": "unavailable",
                 "cid": "",
-                "size": len(data),
-                "pinned": bool(pin_content),
+                "backend_name": str(probe.get("backend_name") or ""),
                 "error": probe["reason"] if probe["status"] != "available" else "",
             },
             operation="store_bytes",
-            backend_available=False,
-            degraded_reason=probe["reason"] or IPFS_ERROR,
-            implementation_status="unavailable",
+            size=len(data),
+            pinned=False,
+            deferred=True,
+            pin_evidence="backend_unavailable",
         )
 
     try:
         cid = add_bytes(data, pin=pin_content)
     except Exception as exc:
-        return with_adapter_metadata(
-            {
-                "status": "error",
-                "cid": "",
-                "size": len(data),
-                "pinned": bool(pin_content),
-                "error": str(exc),
-            },
+        return _finish_storage_call(
+            {"status": "error", "cid": "", "backend_name": str(probe.get("backend_name") or "datasets_router"), "error": str(exc)},
             operation="store_bytes",
-            backend_available=True,
-            implementation_status="available",
+            size=len(data),
+            pinned=False,
+            pin_evidence="add_failed",
         )
 
-    return with_adapter_metadata(
+    router_name = str(probe.get("backend_name") or "datasets_router")
+    # add_bytes(..., pin=) is the datasets router contract. A bare CID is not a
+    # pin receipt, so pinned stays false until a later pin_cid observation.
+    return _finish_storage_call(
         {
             "status": "available",
-            "cid": cid,
-            "size": len(data),
-            "pinned": bool(pin_content),
-            "backend_name": str(probe.get("backend_name") or "datasets_router"),
+            "cid": str(cid or ""),
+            "backend_name": router_name,
+            "error": "",
         },
         operation="store_bytes",
-        backend_available=True,
-        implementation_status="available",
-        extra_metadata={"backend_name": str(probe.get("backend_name") or "datasets_router")},
+        size=len(data),
+        pinned=False,
+        uploaded=bool(cid),
+        verified=False,
+        verification={"matched": False, "method": "readback", "reason": "datasets router bytes were not read back"},
+        pin_evidence="router_pin_argument_unconfirmed" if pin_content else "pin_not_requested",
     )
 
 

@@ -269,6 +269,34 @@ class TestPinProofReportToIPFS:
         ts = result["pinned_at"]
         assert "T" in ts, f"Expected ISO-8601 timestamp, got: {ts}"
 
+    def test_pin_failure_does_not_set_pinned_true(self):
+        def _store(data, **_kwargs):
+            del data
+            return {
+                "status": "available",
+                "cid": "bafyrealnetworkcid",
+                "pinned": False,
+                "verified": True,
+                "uploaded": True,
+                "stored_local": False,
+                "network_durable": False,
+                "cid_kind": "content_cid",
+                "backend_name": "kit",
+                "verification": {"matched": True, "method": "readback"},
+                "receipt": {"cid_kind": "content_cid"},
+            }
+
+        def _pin(cid, **_kwargs):
+            raise RuntimeError(f"pin failed for {cid}")
+
+        with patch("integrations.ipfs_datasets.storage.store_bytes", side_effect=_store):
+            with patch("integrations.ipfs_datasets.storage.pin_cid", side_effect=_pin):
+                result = pin_proof_report_to_ipfs(_minimal_report())
+        assert result["pinned"] is False
+        assert result["network_durable"] is False
+        assert result["report_cid"].startswith("sha256:")
+        assert result["backend"] == "local_content_hash"
+
     def test_report_cid_fallback_starts_with_sha256(self):
         # When the IPFS backend raises, the local sha256 fallback is used.
         with patch(
@@ -280,13 +308,21 @@ class TestPinProofReportToIPFS:
         assert result["report_cid"].startswith("sha256:")
 
     def test_deterministic_cid_for_same_content(self):
-        # Each call produces its own timestamp so the CIDs will differ between
-        # calls. Verify instead that the sha256 fallback CID is well-formed.
+        # Each call produces its own timestamp so envelope bytes differ.
+        # Without a verified network pin, the identifier is a SHA256 fallback
+        # and must not be reported as network pinned or durable.
         report = _minimal_report()
         result = pin_proof_report_to_ipfs(report, claim_id="SAME")
         cid = result["report_cid"]
-        # sha256: prefix fallback → hex digest of 64 chars after the colon.
-        assert cid.startswith("sha256:") and len(cid) == len("sha256:") + 64
+        if result.get("network_durable") is True:
+            assert result["pinned"] is True
+            assert result["backend"] == "ipfs"
+            assert cid
+        else:
+            assert cid.startswith("sha256:") and len(cid) == len("sha256:") + 64
+            assert result["pinned"] is False
+            assert result["backend"] == "local_content_hash"
+            assert result.get("network_durable") is False
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +360,7 @@ class TestConstrainAssertionsVectorPass:
         np.save(str(index_dir / "legal_corpus.vectors.npy"), vectors)
         records = [
             json.dumps({
+                "id": "rec-1",
                 "text": "Employer shall not retaliate against a whistleblower.",
                 "source": "state_law",
                 "citation": "ORS 659A.199",
@@ -331,6 +368,7 @@ class TestConstrainAssertionsVectorPass:
                 "type": "statute",
             }),
             json.dumps({
+                "id": "rec-2",
                 "text": "Employee may file a complaint with the Bureau of Labor.",
                 "source": "state_law",
                 "citation": "ORS 659A.820",

@@ -510,9 +510,7 @@ def store_private_artifact(
     envelope = seal_private_artifact(
         data, binding=binding, key=resolved_key, key_id=resolved_id
     )
-    if replicate is not None:
-        replicate(envelope)
-    from integrations.ipfs_datasets.storage import store_bytes
+    from integrations.ipfs_datasets.storage import retrieve_bytes, store_bytes
 
     stored = store_bytes(
         envelope,
@@ -527,12 +525,37 @@ def store_private_artifact(
             "private artifact backend rejected ciphertext",
             code="backend_rejected",
         )
+    loaded = retrieve_bytes(cid, backend=backend, backend_name=backend_name)
+    readback = loaded.get("data")
+    if loaded.get("status") not in {"available", "degraded"} or not isinstance(readback, (bytes, bytearray)) or bytes(readback) != bytes(envelope):
+        raise PrivateStorageError(
+            "private artifact ciphertext readback mismatch",
+            code="readback_mismatch",
+        )
+    local_only = bool(stored.get("stored_local")) or stored.get("cid_kind") in {"pseudo_cid", "sha256_fallback"}
+    pinned = bool(stored.get("pinned") is True) and not local_only
+    if replicate is not None:
+        replicate(envelope)
     receipt = _opaque_receipt(
         cid=cid,
         key_id=resolved_id,
-        pinned=bool(pin_content and stored.get("pinned", pin_content)),
+        pinned=pinned,
         status=status,
     )
+    receipt["stored_local"] = bool(stored.get("stored_local"))
+    receipt["uploaded"] = bool(stored.get("uploaded")) and not local_only
+    receipt["verified"] = True
+    receipt["replicated"] = False
+    receipt["deferred"] = bool(stored.get("deferred"))
+    receipt["backend"] = str(stored.get("backend_name") or "")
+    receipt["verification"] = {"matched": True, "method": "ciphertext-readback"}
+    receipt["receipt"] = {
+        "cid": cid,
+        "backend_name": receipt["backend"],
+        "cid_kind": stored.get("cid_kind") or "",
+        "network_durable": bool(stored.get("network_durable")) and pinned and not local_only,
+        "measurement": stored.get("measurement") or "",
+    }
     if journal is not None:
         journal(dict(receipt))
     return receipt

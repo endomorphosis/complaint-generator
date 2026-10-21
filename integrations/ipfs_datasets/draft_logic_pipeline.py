@@ -471,10 +471,9 @@ def pin_proof_report_to_ipfs(
         ``{"report_cid": str, "lean4_cid": str, "coq_cid": str,
            "pinned": bool, "backend": str, "pinned_at": str}``
     """
-    from .storage import store_bytes, pin_cid, IPFS_AVAILABLE
+    from .storage import store_bytes, pin_cid
 
     pinned_at = datetime.now(tz=timezone.utc).isoformat()
-    backend = "ipfs" if IPFS_AVAILABLE else "local_content_hash"
 
     # Serialise the report envelope (exclude large sub-results to keep the
     # primary blob focused on the DraftProofReport keys).
@@ -499,38 +498,136 @@ def pin_proof_report_to_ipfs(
     lean4_src = str(theorem_export.get("lean4") or "")
     coq_src = str(theorem_export.get("coq") or "")
 
-    def _pin_blob(data: bytes, description: str) -> str:
+    def _fallback_id(data: bytes) -> str:
         import hashlib
-        try:
-            result = store_bytes(data)
-            cid = str(
-                (result.get("cid") if isinstance(result, dict) else result) or ""
-            ).strip()
-            if cid:
-                try:
-                    pin_cid(cid)
-                except Exception:
-                    pass
-                return cid
-        except Exception:
-            pass
-        # IPFS unavailable or returned an empty CID — fall back to a local
-        # content-addressed hash so callers always get a non-empty identifier.
         return "sha256:" + hashlib.sha256(data).hexdigest()
 
+    def _pin_blob(data: bytes, description: str) -> dict[str, Any]:
+        del description
+        try:
+            result = store_bytes(data)
+        except Exception as exc:
+            return {
+                "cid": _fallback_id(data),
+                "pinned": False,
+                "stored_local": True,
+                "uploaded": False,
+                "verified": False,
+                "replicated": False,
+                "deferred": True,
+                "network_durable": False,
+                "backend": "local_content_hash",
+                "error": str(exc),
+                "verification": {"matched": False, "method": "none", "reason": "store failed"},
+                "receipt": {"cid_kind": "sha256_fallback"},
+            }
+        if not isinstance(result, dict):
+            return {
+                "cid": _fallback_id(data),
+                "pinned": False,
+                "stored_local": True,
+                "uploaded": False,
+                "verified": False,
+                "replicated": False,
+                "deferred": True,
+                "network_durable": False,
+                "backend": "local_content_hash",
+                "error": "malformed storage result",
+                "verification": {"matched": False, "method": "none", "reason": "malformed storage result"},
+                "receipt": {"cid_kind": "sha256_fallback"},
+            }
+        cid = str(result.get("cid") or "").strip()
+        local_only = (
+            bool(result.get("stored_local"))
+            or result.get("cid_kind") in {"pseudo_cid", "sha256_fallback"}
+            or result.get("backend_name") == "local_cache"
+            or cid.startswith("sha256:")
+        )
+        pin_result: dict[str, Any] | None = None
+        if cid and not local_only and result.get("pinned") is not True and result.get("status") in {"available", "degraded"}:
+            try:
+                raw_pin = pin_cid(cid)
+                pin_result = raw_pin if isinstance(raw_pin, dict) else {"pinned": False, "status": "error", "error": "malformed pin result"}
+            except Exception as exc:
+                pin_result = {"pinned": False, "error": str(exc), "status": "error"}
+        elif result.get("pinned") is True and not local_only:
+            pin_result = result
+        network_durable = bool(
+            pin_result
+            and pin_result.get("pinned") is True
+            and pin_result.get("network_durable") is True
+            and result.get("verified") is True
+            and not local_only
+        )
+        if not network_durable:
+            return {
+                "cid": _fallback_id(data),
+                "pinned": False,
+                "stored_local": True,
+                "uploaded": False,
+                "verified": False,
+                "replicated": False,
+                "deferred": bool(result.get("deferred") or result.get("status") in {"unavailable", "deferred", "error"}),
+                "network_durable": False,
+                "backend": "local_content_hash",
+                "error": str((pin_result or result).get("error") or result.get("error") or ""),
+                "verification": dict(result.get("verification") or {}),
+                "receipt": {
+                    **dict(result.get("receipt") or {}),
+                    "cid_kind": "sha256_fallback",
+                    "pin": None if pin_result is None else {
+                        "status": pin_result.get("status"),
+                        "pinned": False if pin_result.get("pinned") is not True else True,
+                        "error": pin_result.get("error"),
+                    },
+                },
+            }
+        return {
+            "cid": cid,
+            "pinned": True,
+            "stored_local": False,
+            "uploaded": True,
+            "verified": True,
+            "replicated": False,
+            "deferred": False,
+            "network_durable": True,
+            "backend": "ipfs",
+            "error": "",
+            "verification": dict(result.get("verification") or {}),
+            "receipt": dict(result.get("receipt") or {}),
+        }
+
     report_bytes = json.dumps(envelope, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    report_cid = _pin_blob(report_bytes, "DraftProofReport")
-    lean4_cid = _pin_blob(lean4_src.encode("utf-8"), "Lean4Export") if lean4_src else ""
-    coq_cid = _pin_blob(coq_src.encode("utf-8"), "CoqExport") if coq_src else ""
+    report_pin = _pin_blob(report_bytes, "DraftProofReport")
+    lean4_pin = _pin_blob(lean4_src.encode("utf-8"), "Lean4Export") if lean4_src else None
+    coq_pin = _pin_blob(coq_src.encode("utf-8"), "CoqExport") if coq_src else None
+    report_cid = str(report_pin["cid"])
+    lean4_cid = str(lean4_pin["cid"]) if lean4_pin else ""
+    coq_cid = str(coq_pin["cid"]) if coq_pin else ""
+    network_pinned = bool(report_pin["pinned"])
+    resolved_backend = "ipfs" if network_pinned else "local_content_hash"
 
     return {
         "report_cid": report_cid,
         "lean4_cid": lean4_cid,
         "coq_cid": coq_cid,
-        "pinned": bool(report_cid),
-        "backend": backend,
+        "pinned": network_pinned,
+        "backend": resolved_backend,
         "pinned_at": pinned_at,
         "claim_id": claim_id,
+        "stored_local": bool(report_pin["stored_local"]),
+        "uploaded": bool(report_pin["uploaded"]),
+        "verified": bool(report_pin["verified"]),
+        "replicated": False,
+        "deferred": bool(report_pin["deferred"]),
+        "network_durable": bool(report_pin["network_durable"]),
+        "verification": report_pin["verification"],
+        "receipt": report_pin["receipt"],
+        "artifacts": {
+            "report": report_pin,
+            "lean4": lean4_pin,
+            "coq": coq_pin,
+        },
     }
 
 
