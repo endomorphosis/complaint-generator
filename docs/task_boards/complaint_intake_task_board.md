@@ -835,7 +835,7 @@ Implementation instructions:
 
 ## CIMP-DUR-002 Migrate private workspace persistence without plaintext secondary paths
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.durability
