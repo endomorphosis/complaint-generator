@@ -125,12 +125,23 @@ def pytest_sessionfinish(session, exitstatus):
         subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
         subprocess.run(["git", "-C", str(tmp_path), "add", "out", "tests", "conftest.py", "adapter.py", "complaint_fixture_guard.py"], check=True)
         native = PortalImplementationDaemon._validation_command_runner
-        import sys
+        import shlex
+        from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native_source
+        # The parent may already have imported these modules while its runtime
+        # sys.path was changed by another synthetic campaign. Bind the child to
+        # these exact first-party/native source origins plus approved packages.
         source_env = dict(os.environ)
         source_env.pop("IPFS_ACCELERATE_AGENT_VALIDATION_PYTHON", None)
         env = build_validation_environment(source_env)
-        env["PYTHONPATH"] = str(tmp_path) + os.pathsep + os.pathsep.join(p for p in sys.path if p and Path(p).is_absolute() and Path(p).is_dir())
+        roots = [tmp_path.resolve(), Path(__file__).resolve().parents[1],
+                 Path(native_source.__file__).resolve().parents[3]]
+        roots += [Path(p).resolve() for p in env.get("PYTHONPATH", "").split(os.pathsep)
+                  if p and Path(p).is_absolute() and Path(p).is_dir()]
+        env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(map(str, roots)))
         env = validation_environment_for_runner(env, native)
+        # Native scheduler environment rebuilding intentionally strips ambient
+        # source roots. The actual fixture command must carry its owned roots.
+        source_command = "PYTHONPATH=" + shlex.quote(env["PYTHONPATH"]) + " " + COMMAND
         def delegate(**call):
             result = native(**call)
             command = call["spec"].command
@@ -145,8 +156,9 @@ def pytest_sessionfinish(session, exitstatus):
                     value = json.loads(manifest.read_text()); value["nodeids"].pop(); manifest.write_text(json.dumps(value))
                 elif measurement_fault == "source": adapter.write_text("VERSION=99\n")
             return result
-        measured = measure_behavioral_command(tmp_path, tmp_path / "state" / "runs", task, COMMAND,
-                                               runner=delegate, environment=env, timeout_seconds=45, context={"require_child_guard": True, "pytest_guard_plugin": "complaint_fixture_guard"})
+        measured = measure_behavioral_command(tmp_path, tmp_path / "state" / "runs", task, source_command,
+                                               runner=delegate, environment=env, timeout_seconds=45, declared_command=COMMAND,
+                                               context={"require_child_guard": True, "pytest_guard_plugin": "complaint_fixture_guard"})
         from integrations.ipfs_accelerate.improvement_runner import _observed_artifacts
         observation["artifacts"] = _observed_artifacts(tmp_path, observation)
         if all(a["present"] for a in observation["artifacts"]):
