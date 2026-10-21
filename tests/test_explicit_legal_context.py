@@ -1,12 +1,17 @@
 """Explicit jurisdiction and legally relevant dates stay unresolved until stated."""
 
+import copy
 from types import SimpleNamespace
+
+import pytest
 
 from complaint_phases import Entity, KnowledgeGraph
 from complaint_phases.intake_case_file import (
     apply_explicit_legal_context,
     build_intake_case_file,
     extract_explicit_jurisdiction_from_text,
+    refresh_explicit_legal_context,
+    refresh_intake_case_file,
 )
 from integrations.ipfs_datasets.legal import (
     apply_legal_context_update,
@@ -231,3 +236,175 @@ def test_mediator_does_not_default_jurisdiction_to_federal():
     questions = mediator.legal_context_questions({"canonical_facts": [], "source_complaint_text": ""})
     assert any(item["field"] == "jurisdiction" for item in questions)
     assert any(item["field"] == "event_date" for item in questions)
+
+
+# These are conservative context-admission regressions, not corpus entailment tests.
+
+
+@pytest.mark.parametrize('value', ['ZZ', 'FD', 'UK', 'AB'])
+def test_regression_unknown_two_letter_jurisdiction_cannot_select_or_search(value):
+    assert resolve_explicit_jurisdiction(value) == 'unknown'
+    context = apply_legal_context_update(empty_legal_context(), {
+        'jurisdiction': value, 'applicable_law_date': '2024-01-01',
+    })
+    assert select_requirement_applicability({'jurisdiction': value}, context)['selected'] is False
+    plan = legal_requirement_search_plan({'jurisdiction': value})
+    assert plan['context_status'] == 'unknown'
+    assert not any(plan[name] for name in ('search_us_code', 'search_state_laws', 'search_case_law'))
+
+
+@pytest.mark.parametrize('value', [
+    'I do not know', '2024-02-31', '2024-13-01', 'January 99, 2024',
+    '2024-03-01 or 2025-04-02', 'not 2024-03-01',
+    '2025-05-20 to 2024-01-01',
+])
+def test_regression_invalid_or_ambiguous_date_is_not_applicable_law(value):
+    context = apply_legal_context_update(empty_legal_context(), {
+        'jurisdiction': 'OR', 'applicable_law_date': value,
+    })
+    classified = context['applicable_law_date']
+    assert classified['raw_text'] == value
+    assert classified['precise_date'] is None
+    selected = select_requirement_applicability({'jurisdiction': 'OR'}, context)
+    assert selected['selected'] is False
+    assert selected['applicability'] == 'unknown'
+    assert any(q['field'] == 'applicable_law_date' for q in context['questions'])
+
+
+@pytest.mark.parametrize(('value', 'expected'), [
+    ('I do not know whether federal law applies.', 'unknown'),
+    ('This is not under federal law. Under Oregon law.', 'OR'),
+    ('Under Oregon law or Washington law.', 'unknown'),
+    ('Under Oregon law and under Washington law.', 'unknown'),
+    ('The employer cited federal law, but I dispute its applicability.', 'unknown'),
+    ('Does federal law apply?', 'unknown'),
+    ('Is this under Oregon law?', 'unknown'),
+    ('Should I file in federal court?', 'unknown'),
+    ('I am a federal employee.', 'unknown'),
+    ('I mailed a federal office.', 'unknown'),
+    ('I work at a federal court.', 'unknown'),
+    ('I received a letter from a federal court clerk.', 'unknown'),
+    ('Under Oregon law on May 5, 2024.', 'OR'),
+    ('Federal law may apply.', 'unknown'),
+    ('The case is pending in federal court.', 'federal'),
+    ('Jurisdiction: Oregon.', 'OR'),
+])
+def test_regression_negated_or_ambiguous_jurisdiction_cannot_select(value, expected):
+    jurisdiction = extract_explicit_jurisdiction_from_text(value)
+    assert jurisdiction == expected
+    context = apply_legal_context_update(empty_legal_context(), {
+        'jurisdiction': jurisdiction, 'applicable_law_date': '2024-01-01',
+    })
+    assert select_requirement_applicability({'jurisdiction': 'federal'}, context)['selected'] is (expected == 'federal')
+
+
+def _selected_case_file():
+    case = {
+        'source_complaint_text': 'Under Oregon law. Applicable law date: 2024-01-01.',
+        'canonical_facts': [{'fact_id': 'fact:1', 'text': 'Synthetic meeting.', 'event_date_or_range': '2024-03-15'}],
+        'proof_leads': [{'lead_id': 'lead:1', 'text': 'Synthetic letter', 'proof_state': 'supported'}],
+    }
+    case['legal_context'] = refresh_explicit_legal_context(case)
+    case['legal_context']['selected_rule_applicability'] = 'selected'
+    case['legal_context']['proof_state'] = 'supported'
+    case['proof_leads'][0]['proof_state'] = 'supported'
+    case['legal_context']['dependent_proof'][0]['proof_state'] = 'supported'
+    return case
+
+
+@pytest.mark.parametrize('clear', ['', None])
+def test_regression_explicit_clear_overrides_source_and_invalidates_proof(clear):
+    case = _selected_case_file()
+    previous_revision = case['legal_context']['context_revision']
+    updated = apply_explicit_legal_context(case, jurisdiction=clear, applicable_law_date=clear, event_date=clear)
+    context = updated['legal_context']
+    assert context['jurisdiction'] == 'unknown'
+    assert context['applicable_law_date']['raw_text'] == ''
+    assert context['event_date']['raw_text'] == ''
+    assert context['event_dates'] == []
+    assert context['context_revision'] > previous_revision
+    assert context['selected_rule_applicability'] == 'invalidated'
+    assert updated['proof_leads'][0]['proof_state'] == 'invalidated'
+    assert not select_requirement_applicability({'jurisdiction': 'OR'}, context)['selected']
+
+
+def test_regression_withdrawn_source_context_drops_old_selected_proof():
+    case = _selected_case_file()
+    old_revision = case['legal_context']['context_revision']
+    case['source_complaint_text'] = 'No governing law or date has been established.'
+    case['canonical_facts'] = []
+    context = refresh_explicit_legal_context(case)
+    assert context['jurisdiction'] == 'unknown'
+    assert context['applicable_law_date']['raw_text'] == ''
+    assert context['event_date']['raw_text'] == ''
+    assert context['context_revision'] > old_revision
+    assert context['selected_rule_applicability'] == 'invalidated'
+    assert case['proof_leads'][0]['proof_state'] == 'invalidated'
+    assert not select_requirement_applicability({'jurisdiction': 'OR', 'context_revision': old_revision}, context)['selected']
+
+
+def test_regression_standard_intake_refresh_propagates_rule_invalidation_to_proof():
+    case = _selected_case_file()
+    case['source_complaint_text'] = 'Under Washington law. Applicable law date: 2024-01-01.'
+    updated = refresh_intake_case_file(case, None)
+    assert updated['legal_context']['jurisdiction'] == 'WA'
+    assert updated['legal_context']['selected_rule_applicability'] == 'invalidated'
+    assert updated['legal_context']['dependent_proof'][0]['proof_state'] == 'invalidated'
+    assert updated['proof_leads'][0]['proof_state'] == 'invalidated'
+    # A second refresh must not copy the old supported record back into context.
+    refreshed = refresh_intake_case_file(updated, None)
+    assert refreshed['proof_leads'][0]['proof_state'] == 'invalidated'
+    assert refreshed['legal_context']['dependent_proof'][0]['proof_state'] == 'invalidated'
+
+
+def test_regression_multiple_event_dates_cannot_keep_stale_single_day():
+    previous = apply_legal_context_update(empty_legal_context(), {'jurisdiction': 'OR', 'event_date': '2024-03-15'})
+    previous['selected_rule_applicability'] = 'selected'
+    previous['proof_state'] = 'supported'
+    changed = apply_legal_context_update(previous, {'event_dates': ['2025-01-01', '2025-02-01']})
+    assert changed['event_date']['precise_date'] is None
+    assert [record['precise_date'] for record in changed['event_dates']] == ['2025-01-01', '2025-02-01']
+    assert changed['selected_rule_applicability'] == 'invalidated'
+
+
+@pytest.mark.parametrize('identities', [{}, {'lead_id': 'duplicate'}])
+def test_regression_context_change_preserves_distinct_legacy_proof_records(identities):
+    case = _selected_case_file()
+    case['proof_leads'] = [
+        {**identities, 'text': 'Synthetic letter A', 'source_span_refs': ['span:A'], 'proof_state': 'supported'},
+        {**identities, 'text': 'Synthetic letter B', 'source_span_refs': ['span:B'], 'proof_state': 'supported'},
+    ]
+    updated = apply_explicit_legal_context(case, jurisdiction='WA')
+    assert [item['text'] for item in updated['proof_leads']] == ['Synthetic letter A', 'Synthetic letter B']
+    assert [item['source_span_refs'] for item in updated['proof_leads']] == [['span:A'], ['span:B']]
+    assert all(item['proof_state'] == 'invalidated' for item in updated['proof_leads'])
+
+
+def test_regression_real_ranges_keep_bounds_and_cannot_be_forged_by_metadata():
+    valid = classify_legal_date('March 2024 to May 2024', role='applicable_law_date')
+    assert valid['precise_date'] is None
+    assert (valid['start_date'], valid['end_date']) == ('2024-03-01', '2024-05-31')
+    context = apply_legal_context_update(empty_legal_context(), {'jurisdiction': 'OR', 'applicable_law_date': valid})
+    assert select_requirement_applicability({'jurisdiction': 'OR'}, context)['selected']
+    forged = copy.deepcopy(context)
+    forged['applicable_law_date'].update(raw_text='I do not know', precise_date='2024-01-01', precision='day')
+    assert not select_requirement_applicability({'jurisdiction': 'OR'}, forged)['selected']
+
+
+def test_regression_explicit_state_court_discovery_does_not_select_federal_law(monkeypatch):
+    calls = []
+    monkeypatch.setattr('integrations.ipfs_datasets.legal.search_recap_documents',
+                        lambda query, **kwargs: calls.append(query) or [{'citation': 'Synthetic court candidate'}])
+    monkeypatch.setattr('integrations.ipfs_datasets.legal.search_us_code',
+                        lambda *_args, **_kwargs: pytest.fail('Implicit federal statutory lookup'))
+    result = search_legal_authority_program({
+        'query_text': 'Synthetic state claim', 'jurisdiction': 'OR',
+        'authority_families': ['case_law', 'docket_material'],
+    })
+    assert calls == ['Synthetic state claim', 'Synthetic state claim']
+    assert result['result_count'] == 2
+    assert result['metadata']['jurisdiction'] == 'OR'
+    assert result['metadata']['selected_rule_applicability'] == 'unselected'
+    context = apply_legal_context_update(empty_legal_context(), {'jurisdiction': 'OR'})
+    assert not select_requirement_applicability({'jurisdiction': 'OR'}, context)['selected']
+    assert not select_requirement_applicability({'jurisdiction': 'federal'}, context)['selected']

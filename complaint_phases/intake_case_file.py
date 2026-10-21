@@ -3892,33 +3892,42 @@ def _legal_context_helpers():
 
 
 def extract_explicit_jurisdiction_from_text(text: Any) -> str:
-    """Read a jurisdiction only from explicit legal wording in the complaint."""
+    """Require an unambiguous affirmative statement, rather than the first hit."""
     helpers = _legal_context_helpers()
     raw = _normalize_text(text)
     if not raw:
         return "unknown"
-    federal_match = re.search(
-        r"\b(?:federal court|federal law|under federal law|jurisdiction\s*[: ]\s*federal)\b",
-        raw,
-        flags=re.IGNORECASE,
+    selected = set()
+    uncertain = re.compile(
+        r"\b(?:not|never|no|unsure|uncertain|whether|maybe|perhaps|might|could|"
+        r"possibly|dispute|disputed|cited|claimed|claims|don't|doesn't|isn't)\b",
+        re.IGNORECASE,
     )
-    if federal_match:
-        return "federal"
-    labeled = re.search(r"\bjurisdiction\s*[: ]\s*([A-Za-z][A-Za-z .]{1,40})", raw, flags=re.IGNORECASE)
-    if labeled:
-        resolved = helpers["resolve_explicit_jurisdiction"](labeled.group(1).strip(" ."))
-        if resolved != "unknown":
-            return resolved
-    state_phrase = re.search(
-        r"\b(?:under|pursuant to|state of)\s+([A-Za-z][A-Za-z ]{1,30}?)\s+(?:law|statute|court)\b",
-        raw,
-        flags=re.IGNORECASE,
-    )
-    if state_phrase:
-        resolved = helpers["resolve_explicit_jurisdiction"](state_phrase.group(1).strip())
-        if resolved != "unknown":
-            return resolved
-    return "unknown"
+    for clause in re.findall(r"[^.;!?\n]+[.;!?\n]?", raw):
+        if clause.rstrip().endswith("?") or re.match(
+            r"\s*(?:do|does|is|are|should|can|would|will|which|what|how|where|when)\b",
+            clause, re.IGNORECASE,
+        ) or uncertain.search(clause) or re.search(r"\bmay\s+(?:be|apply|govern)\b", clause, re.IGNORECASE):
+            continue
+        candidates = []
+        if re.search(
+            r"\bfederal\s+law\s+(?:applies|governs)\b|"
+            r"\b(?:filed|pending)\s+in\s+(?:(?:a|the)\s+)?federal\s+court\b",
+            clause, re.IGNORECASE,
+        ):
+            candidates.append("federal")
+        labeled = re.search(r"\bjurisdiction\s*:\s*([A-Za-z][A-Za-z ]{1,40})", clause, re.IGNORECASE)
+        if labeled:
+            candidates.append(labeled.group(1).strip(" ."))
+        candidates.extend(match.group(1).strip() for match in re.finditer(
+            r"\b(?:under|pursuant to|state of|or|and)\s+(?:(?:under|pursuant to)\s+)?([A-Za-z][A-Za-z ]{1,30}?)\s+(?:law|statute|court)\b",
+            clause, re.IGNORECASE,
+        ))
+        for candidate in candidates:
+            resolved = helpers["resolve_explicit_jurisdiction"](candidate)
+            if resolved != "unknown":
+                selected.add(resolved)
+    return next(iter(selected)) if len(selected) == 1 else "unknown"
 
 
 def _extract_labeled_legal_date(text: str, labels: tuple[str, ...], role: str) -> Dict[str, Any] | None:
@@ -3991,21 +4000,22 @@ def refresh_explicit_legal_context(intake_case_file: Dict[str, Any]) -> Dict[str
         previous = helpers["empty_legal_context"]()
     derived = derive_explicit_legal_context(case_file)
     overrides = _coerce_dict(case_file.get("legal_context_overrides"))
-    updates: Dict[str, Any] = {}
-    if _normalize_text(overrides.get("jurisdiction") or ""):
-        updates["jurisdiction"] = overrides.get("jurisdiction")
-    elif str(derived.get("jurisdiction") or "unknown") != "unknown":
-        updates["jurisdiction"] = derived.get("jurisdiction")
+    # Presence, including an explicit blank, matters. Missing source context
+    # cannot silently retain a previously selected jurisdiction or date.
+    updates: Dict[str, Any] = {
+        "jurisdiction": overrides.get("jurisdiction") if "jurisdiction" in overrides else derived.get("jurisdiction"),
+    }
     for role in ("applicable_law_date", "event_date", "filing_reference_date", "corpus_retrieval_date"):
-        if role in overrides and _normalize_text(overrides.get(role) or ""):
+        if role in overrides:
             updates[role] = overrides.get(role)
         else:
-            derived_record = derived.get(role)
-            derived_raw = _normalize_text(derived_record.get("raw_text") if isinstance(derived_record, dict) else "")
-            if derived_raw:
-                updates[role] = derived_record
-    if derived.get("event_dates"):
-        updates["event_dates"] = derived.get("event_dates")
+            updates[role] = derived.get(role)
+    if "event_dates" in overrides:
+        updates["event_dates"] = overrides.get("event_dates")
+    elif "event_date" in overrides:
+        updates["event_dates"] = [overrides["event_date"]] if overrides["event_date"] else []
+    else:
+        updates["event_dates"] = derived.get("event_dates") or []
     proof = [
         item for item in _coerce_list(case_file.get("proof_leads"))
         if isinstance(item, dict)
@@ -4015,6 +4025,16 @@ def refresh_explicit_legal_context(intake_case_file: Dict[str, Any]) -> Dict[str
         updated,
         selecting_rules=bool(_coerce_list(case_file.get("candidate_claims"))),
     )
+    # Ordinary intake refresh and mediator question refresh use this path too;
+    # invalidation must reach the actual proof records, not only a nested copy.
+    if updated.get("changed_fields"):
+        invalidated = _coerce_list(updated.get("dependent_proof"))
+        if len(invalidated) != len(proof) or not all(isinstance(item, dict) for item in invalidated):
+            raise ValueError("Legal context changed the dependent proof projection shape")
+        # The update preserves order/cardinality. Identity indexing would merge
+        # distinct legacy records with absent or duplicate proof identifiers.
+        case_file["proof_leads"] = [dict(item) for item in invalidated]
+    case_file["legal_context"] = updated
     return updated
 
 
@@ -4023,24 +4043,9 @@ def apply_explicit_legal_context(intake_case_file: Dict[str, Any], **updates: An
     case_file = _coerce_dict(intake_case_file)
     overrides = _coerce_dict(case_file.get("legal_context_overrides"))
     for key, value in updates.items():
-        if value is not None:
-            overrides[key] = value
+        overrides[key] = value
     case_file["legal_context_overrides"] = overrides
     case_file["legal_context"] = refresh_explicit_legal_context(case_file)
-    invalidated = {
-        str(item.get("lead_id") or item.get("proof_id") or ""): item
-        for item in _coerce_list(case_file["legal_context"].get("dependent_proof"))
-        if isinstance(item, dict)
-    }
-    refreshed_leads = []
-    for lead in _coerce_list(case_file.get("proof_leads")):
-        if not isinstance(lead, dict):
-            continue
-        lead_id = _normalize_text(lead.get("lead_id") or lead.get("proof_id") or "")
-        replacement = invalidated.get(lead_id)
-        refreshed_leads.append(replacement if replacement is not None else lead)
-    if refreshed_leads:
-        case_file["proof_leads"] = refreshed_leads
     return case_file
 
 

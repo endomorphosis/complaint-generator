@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+from datetime import date, datetime
 import logging
 import re
 from typing import Any, Dict, List, Optional
@@ -264,17 +265,15 @@ def _resolve_state_code(value: Optional[str], *, default: Optional[str] = None) 
     fallback = str(default or "").strip().upper()
     if not state:
         return fallback
-    if len(state) == 2 and state.isalpha():
-        code = state.upper()
-        if code in {"US", "FD"}:
-            return fallback
-        return code
     state_map = dict(_EXPLICIT_STATE_NAMES)
     if isinstance(_state_code_map, dict):
         for code, name in _state_code_map.items():
             label = str(name or "").strip().lower()
             if label:
                 state_map.setdefault(label, str(code).upper())
+    if len(state) == 2 and state.isalpha():
+        code = state.upper()
+        return code if code in set(state_map.values()) else fallback
     lowered = state.lower()
     if lowered in state_map:
         return state_map[lowered]
@@ -320,7 +319,9 @@ def _parse_explicit_legal_date(value: str) -> Dict[str, Any]:
     if not raw:
         parsed["is_uncertain"] = True
         return parsed
-    if _UNCERTAIN_DATE_RE.search(raw):
+    if _UNCERTAIN_DATE_RE.search(raw) or re.search(
+        r"\b(?:or|not|unknown|unsure|whether|maybe|possibly)\b", raw, re.IGNORECASE
+    ):
         parsed.update({
             "granularity": "uncertain_range",
             "precision": "uncertain_range",
@@ -330,29 +331,39 @@ def _parse_explicit_legal_date(value: str) -> Dict[str, Any]:
         return parsed
 
     month_names = "|".join(_MONTH_NAME_TO_NUMBER)
-    range_match = re.search(
-        rf"\b(?:from\s+)?(.+?)\s+(?:to|through|until|-)\s+(.+)$",
+    range_match = re.fullmatch(
+        r"(?:from\s+)?(.+?)\s+(?:to|through|until|-)\s+(.+)",
         raw,
         flags=re.IGNORECASE,
     )
     if range_match and range_match.group(1).strip() and range_match.group(2).strip():
         start = _parse_explicit_legal_date(range_match.group(1).strip())
         end = _parse_explicit_legal_date(range_match.group(2).strip())
-        if start.get("precision") != "unknown" or end.get("precision") != "unknown":
+        first = start.get("start_date")
+        last = end.get("end_date")
+        if first and last and not start.get("is_uncertain") and not end.get("is_uncertain") and first <= last:
             parsed.update({
-                "start_date": start.get("start_date") or start.get("precise_date"),
-                "end_date": end.get("end_date") or end.get("precise_date"),
+                "start_date": first,
+                "end_date": last,
                 "granularity": "range",
                 "precision": "range",
                 "is_range": True,
                 "is_uncertain": bool(start.get("is_uncertain") or end.get("is_uncertain")),
             })
             return parsed
+        parsed["is_uncertain"] = True
+        return parsed
 
-    iso_match = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", raw)
+    iso_match = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})(?:T\S+)?", raw)
     if iso_match:
         year, month, day = (int(item) for item in iso_match.groups())
-        iso_date = f"{year:04d}-{month:02d}-{day:02d}"
+        try:
+            iso_date = date(year, month, day).isoformat()
+            if "T" in raw:
+                datetime.fromisoformat(raw)
+        except ValueError:
+            parsed["is_uncertain"] = True
+            return parsed
         parsed.update({
             "precise_date": iso_date,
             "start_date": iso_date,
@@ -362,8 +373,8 @@ def _parse_explicit_legal_date(value: str) -> Dict[str, Any]:
         })
         return parsed
 
-    month_day_year = re.search(
-        rf"\b({month_names})\s+(\d{{1,2}}),\s*(\d{{4}})\b",
+    month_day_year = re.fullmatch(
+        rf"({month_names})\s+(\d{{1,2}}),\s*(\d{{4}})",
         raw,
         flags=re.IGNORECASE,
     )
@@ -371,7 +382,11 @@ def _parse_explicit_legal_date(value: str) -> Dict[str, Any]:
         month = _MONTH_NAME_TO_NUMBER[month_day_year.group(1).lower()]
         day = int(month_day_year.group(2))
         year = int(month_day_year.group(3))
-        iso_date = f"{year:04d}-{month:02d}-{day:02d}"
+        try:
+            iso_date = date(year, month, day).isoformat()
+        except ValueError:
+            parsed["is_uncertain"] = True
+            return parsed
         parsed.update({
             "precise_date": iso_date,
             "start_date": iso_date,
@@ -381,10 +396,13 @@ def _parse_explicit_legal_date(value: str) -> Dict[str, Any]:
         })
         return parsed
 
-    month_year = re.search(rf"\b({month_names})\s+(\d{{4}})\b", raw, flags=re.IGNORECASE)
+    month_year = re.fullmatch(rf"({month_names})\s+(\d{{4}})", raw, flags=re.IGNORECASE)
     if month_year:
         month = _MONTH_NAME_TO_NUMBER[month_year.group(1).lower()]
         year = int(month_year.group(2))
+        if year < 1:
+            parsed["is_uncertain"] = True
+            return parsed
         start_date, end_date = _calendar_month_bounds(year, month)
         parsed.update({
             "start_date": start_date,
@@ -395,7 +413,7 @@ def _parse_explicit_legal_date(value: str) -> Dict[str, Any]:
         })
         return parsed
 
-    year_match = re.search(r"\b(19\d{2}|20\d{2}|21\d{2})\b", raw)
+    year_match = re.fullmatch(r"(19\d{2}|20\d{2}|21\d{2})", raw)
     if year_match:
         year = int(year_match.group(1))
         parsed.update({
@@ -413,8 +431,8 @@ def classify_legal_date(value: Any, *, role: str) -> Dict[str, Any]:
     """Classify one legal date role without collapsing other roles into it."""
     if role not in LEGAL_DATE_ROLES:
         raise ValueError(f"unsupported legal date role: {role}")
-    if isinstance(value, dict) and str(value.get("role") or "") == role:
-        raw_value = value.get("raw_text")
+    if isinstance(value, dict):
+        raw_value = value.get("raw_text") if value.get("role") == role else ""
     else:
         raw_value = value
     classified = _parse_explicit_legal_date(str(raw_value or ""))
@@ -446,6 +464,12 @@ def _date_raw(record: Any) -> str:
     if not isinstance(record, dict):
         return ""
     return " ".join(str(record.get("raw_text") or "").split())
+
+
+def _resolved_legal_date(record: Any) -> bool:
+    """Reparse source text; serialized date labels cannot grant applicability."""
+    classified = _parse_explicit_legal_date(_date_raw(record))
+    return bool(classified.get("start_date") and classified.get("end_date") and not classified.get("is_uncertain"))
 
 
 def apply_legal_context_update(
@@ -482,6 +506,8 @@ def apply_legal_context_update(
         elif not prior_raw and new_raw and _context_has_selected_state(current, dependent_proof):
             changed.append(role)
         current[role] = classified
+        if role == DATE_ROLE_EVENT and "event_dates" not in proposed:
+            current["event_dates"] = [classified] if _date_raw(classified) else []
 
     if "event_dates" in proposed:
         event_dates = []
@@ -489,15 +515,17 @@ def apply_legal_context_update(
             event_dates.append(classify_legal_date(item, role=DATE_ROLE_EVENT))
         prior_event_raws = [_date_raw(item) for item in (current.get("event_dates") or []) if _date_raw(item)]
         new_event_raws = [_date_raw(item) for item in event_dates if _date_raw(item)]
-        if prior_event_raws and prior_event_raws != new_event_raws:
+        if prior_event_raws != new_event_raws and (prior_event_raws or _context_has_selected_state(current, dependent_proof)):
             changed.append("event_dates")
         current["event_dates"] = event_dates
-        if len(event_dates) == 1:
-            current["event_date"] = event_dates[0]
+        aggregate = event_dates[0] if len(event_dates) == 1 else classify_legal_date("", role=DATE_ROLE_EVENT)
+        if _date_raw(current.get("event_date")) != _date_raw(aggregate) and _context_has_selected_state(current, dependent_proof):
+            changed.append(DATE_ROLE_EVENT)
+        current["event_date"] = aggregate
 
     if changed:
         current["context_revision"] = int(current.get("context_revision") or 0) + 1
-        current["changed_fields"] = changed
+        current["changed_fields"] = list(dict.fromkeys(changed))
         prior_applicability = str(current.get("selected_rule_applicability") or UNKNOWN_LEGAL_CONTEXT)
         if prior_applicability not in {"", UNKNOWN_LEGAL_CONTEXT}:
             current["selected_rule_applicability"] = "invalidated"
@@ -555,7 +583,7 @@ def questions_for_legal_context(
     """Questions to ask the user. Missing context is not filled in for them."""
     legal_context = context if isinstance(context, dict) else empty_legal_context()
     questions: List[Dict[str, Any]] = []
-    jurisdiction = str(legal_context.get("jurisdiction") or UNKNOWN_LEGAL_CONTEXT)
+    jurisdiction = resolve_explicit_jurisdiction(legal_context.get("jurisdiction"))
     if jurisdiction == UNKNOWN_LEGAL_CONTEXT:
         questions.append({
             "question_id": "legal_context.jurisdiction",
@@ -568,10 +596,10 @@ def questions_for_legal_context(
         })
     event_dates = [
         item for item in (legal_context.get("event_dates") or [])
-        if isinstance(item, dict) and _date_raw(item)
+        if isinstance(item, dict) and _resolved_legal_date(item)
     ]
     event_date = legal_context.get("event_date") if isinstance(legal_context.get("event_date"), dict) else {}
-    if not event_dates and not _date_raw(event_date):
+    if not event_dates and not _resolved_legal_date(event_date):
         questions.append({
             "question_id": "legal_context.event_dates",
             "field": "event_date",
@@ -581,14 +609,14 @@ def questions_for_legal_context(
             ),
             "reason": "missing_event_dates",
         })
-    if selecting_rules and not _date_raw(legal_context.get("applicable_law_date")):
+    if (selecting_rules or _date_raw(legal_context.get("applicable_law_date"))) and not _resolved_legal_date(legal_context.get("applicable_law_date")):
         questions.append({
             "question_id": "legal_context.applicable_law_date",
             "field": "applicable_law_date",
             "prompt": "What date should be used to decide which version of the law applies?",
             "reason": "missing_applicable_law_date",
         })
-    if selecting_rules and not _date_raw(legal_context.get("filing_reference_date")):
+    if selecting_rules and not _resolved_legal_date(legal_context.get("filing_reference_date")):
         questions.append({
             "question_id": "legal_context.filing_reference_date",
             "field": "filing_reference_date",
@@ -612,7 +640,7 @@ def select_requirement_applicability(
     requirement_jurisdiction = resolve_explicit_jurisdiction(
         requirement_record.get("jurisdiction") or requirement_record.get("state")
     )
-    applicable_law_date = context.get("applicable_law_date") if isinstance(context.get("applicable_law_date"), dict) else {}
+    applicable_law_date = classify_legal_date(context.get("applicable_law_date"), role=DATE_ROLE_APPLICABLE_LAW)
     if jurisdiction == UNKNOWN_LEGAL_CONTEXT or requirement_jurisdiction == UNKNOWN_LEGAL_CONTEXT:
         return {
             "applicability": UNKNOWN_LEGAL_CONTEXT,
@@ -631,11 +659,11 @@ def select_requirement_applicability(
             "requirement_jurisdiction": requirement_jurisdiction,
             "context_revision": int(context.get("context_revision") or 0),
         }
-    if not _date_raw(applicable_law_date):
+    if not _resolved_legal_date(applicable_law_date):
         return {
             "applicability": UNKNOWN_LEGAL_CONTEXT,
             "selected": False,
-            "reason": "missing_applicable_law_date",
+            "reason": "unresolved_applicable_law_date" if _date_raw(applicable_law_date) else "missing_applicable_law_date",
             "jurisdiction": jurisdiction,
             "requirement_jurisdiction": requirement_jurisdiction,
             "context_revision": int(context.get("context_revision") or 0),
@@ -691,7 +719,10 @@ def legal_requirement_search_plan(
         "search_federal_register": search_federal and (include_all or "regulation" in families),
         "search_state_laws": search_state and (include_all or "statute" in families),
         "search_state_administrative_rules": search_state and (include_all or "administrative_rule" in families),
-        "search_case_law": search_federal and (include_all or "case_law" in families or "docket_material" in families),
+        # Discovery in an explicitly selected state is allowed. A retrieved
+        # court document still confers neither federal jurisdiction nor rule
+        # applicability; those remain separate context-admission decisions.
+        "search_case_law": (search_federal or search_state) and (include_all or "case_law" in families or "docket_material" in families),
         "authority_families": sorted(families),
     }
 
