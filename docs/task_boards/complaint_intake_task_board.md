@@ -1203,7 +1203,7 @@ Implementation instructions:
 
 ## CIMP-OPS-04 Gate task completion on current-source behavioral evidence and required test identities
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.supervision
