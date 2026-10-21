@@ -639,7 +639,12 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         hard_expired = attempt_age is not None and attempt_age > TIMEOUT_SECONDS
         health = "stalled" if hard_expired or (active_age is not None and active_age > STALL_SECONDS) else "active"
     elif selected:
-        health = "no_progress" if attempt_age is not None and attempt_age > STALL_SECONDS else "selected"
+        health = "no_progress" if (attempt_age if attempt_age is not None else since_start) > STALL_SECONDS else "selected"
+    elif not current_state and since_start > STARTUP_SECONDS:
+        # Supervisor heartbeats and watchdog events prove liveness only. An
+        # early native deferral can otherwise look healthy indefinitely while
+        # it leaves the task-state row untouched from the previous launch.
+        health = "no_progress"
     elif current_state and native_state.get("blocked_task_ids") and not native_state.get("selectable_ready_task_ids"):
         health = "blocked"
     elif not board["ready_task_ids"]:
@@ -796,8 +801,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = args.repo_root.resolve()
     spec = (args.spec or root / SPEC_RELATIVE).resolve()
-    state = (args.state_dir or default_state_dir(root)).resolve()
     try:
+        if args.state_dir is not None:
+            state = args.state_dir.resolve()
+        else:
+            from .improvement_recovery import resolve_active_epoch
+            state = resolve_active_epoch(root, spec, default_state_dir(root))
         os.chdir(root)
         if args.command == "_run":
             return run_internal(root, spec, state, args.owner_token, args.merge_target)

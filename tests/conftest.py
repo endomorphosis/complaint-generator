@@ -161,14 +161,46 @@ def _candidate_ipfs_dataset_roots(repo_root: str) -> list[str]:
 
 
 def _select_ipfs_dataset_root(repo_root: str) -> str:
-    """Prefer a complete checkout, falling back to the worktree seed."""
+    """Honor explicit source paths before discovering a complete checkout.
+
+    Supervisor worktrees can contain empty submodule directories.  A pinned,
+    absolute source checkout supplied through PYTHONPATH must take precedence
+    over an unrelated standalone checkout found in a parent directory.
+    """
 
     fallback = os.path.join(repo_root, "ipfs_datasets_py")
-    for candidate in _candidate_ipfs_dataset_roots(repo_root):
+    explicit_roots = [
+        entry
+        for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep)
+        if os.path.isabs(entry)
+    ]
+    for candidate in explicit_roots + _candidate_ipfs_dataset_roots(repo_root):
         expected_init = os.path.join(candidate, "ipfs_datasets_py", "__init__.py")
         if os.path.isfile(expected_init):
             return candidate
     return fallback
+
+
+def _optional_upstream_module_available(module_name: str) -> bool:
+    """Probe optional modules without hiding unrelated initializer failures."""
+
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except ModuleNotFoundError as exc:
+        # find_spec imports parents of dotted names.  An absent requested
+        # parent means this optional feature is unavailable; a missing import
+        # inside a present parent is a different failure and remains visible.
+        if exc.name and (
+            module_name == exc.name or module_name.startswith(exc.name + ".")
+        ):
+            return False
+        raise
+    except ValueError as exc:
+        # Some tests install lightweight module proxies without a ModuleSpec.
+        # Treat that specific find_spec result as unavailable, not a crash.
+        if str(exc) == f"{module_name}.__spec__ is None":
+            return False
+        raise
 
 
 def _preload_ipfs_datasets_package(expected_init: str) -> None:
@@ -230,7 +262,7 @@ def pytest_ignore_collect(collection_path, path=None, config=None):
         if any(name in candidate for name in _HYPOTHESIS_REQUIRED_TESTS):
             return True
     if any(name in candidate for name in _OPTIONAL_UPSTREAM_REQUIRED_TESTS):
-        if any(importlib.util.find_spec(module) is None for module in _OPTIONAL_UPSTREAM_MODULES):
+        if any(not _optional_upstream_module_available(module) for module in _OPTIONAL_UPSTREAM_MODULES):
             return True
     return None
 
@@ -240,7 +272,10 @@ def pytest_configure() -> None:
 
     repo_root = os.path.dirname(os.path.dirname(__file__))
     submodule_root = _select_ipfs_dataset_root(repo_root)
-    if os.path.isdir(submodule_root) and submodule_root not in sys.path:
+    if os.path.isdir(submodule_root):
+        # A prior import/bootstrap may already have put this path behind a
+        # legacy checkout.  Reposition it before clearing cached modules.
+        sys.path[:] = [entry for entry in sys.path if entry != submodule_root]
         sys.path.insert(0, submodule_root)
 
     # With pytest --import-mode=importlib, the repository root isn't guaranteed to be on

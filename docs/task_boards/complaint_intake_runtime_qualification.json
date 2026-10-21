@@ -127,16 +127,56 @@
       "errors": 0,
       "skipped": 0,
       "scope": "Final first-party runner with current-attempt-only log aging and distinct selected claims."
+    },
+    {
+      "receipt": "/tmp/complaint-capacity-stream-final-tests.xml",
+      "sha256": "58ff75c233f3ffa301cb4a69f6f01a218b450f65ffe15eb0d6d970e863221285",
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Mixed Grok JSONL capacity diagnostics; protected typed audits preserved."
+    },
+    {
+      "receipt": "/tmp/complaint-supervisor-current-progress-tests.xml",
+      "sha256": "f20471253e0956274f5b21cb83dffc191bf2fb58f0524e5cd65c85a0d7c4fdef",
+      "tests": 60,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Runner status detects absent current native progress even with fresh supervisor events."
+    },
+    {
+      "receipt": "/tmp/complaint_optional_collection_contract.xml",
+      "sha256": "50d790cf1633ab538af4829751103e1146b813638a9f0399c7564c4b8d88bae8",
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Pinned explicit dataset source and optional-parent collection handling."
+    },
+    {
+      "receipt": "/tmp/complaint_recovery_epoch_final_validation.xml",
+      "sha256": "56d49a7a57adaaa003b1127767ad05a626286aa489e3e3db78adfcbef5b893ca",
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Fresh epoch preserves native quarantine and two consumed attempts; real native next-attempt API returns three."
     }
   ],
   "implementation_tasks_completed_by_these_checks": 0,
   "scope": "Provisioning and startup-path qualification with source and synthetic fixtures. The full implementation taskboard is still pending; native supervisor progress must be observed separately.",
   "first_party_source_sha256": {
     "integrations/ipfs_accelerate/improvement_plan.py": "56f374730873c86bf3e3b6eb1f2fdaac030cb44620800546bb9c7f09abf5cc0f",
-    "integrations/ipfs_accelerate/improvement_runner.py": "8de8925e76a503b678b9c88a0b8e47579fd8fd6122d0d87de55814ee1b6ec8c0",
+    "integrations/ipfs_accelerate/improvement_runner.py": "3c9ff255a3f02d6cf1a4ea3ac8d00894035bddb42715a5a0bf35adc5c37302a2",
     "scripts/run_complaint_improvement_supervisor.py": "15001fbfc39617a8e913de3a7446d77a63d90e05b062fcb4f6154fbdd2d20238",
     "tests/test_improvement_plan_contract.py": "38d0d7cbffa4a11dfcbdc9f1f99bf32583d959064352e75540e3b853873f8910",
-    "tests/test_improvement_runner.py": "d90668799fec0a3ab2622710f7bab35b71f86ad604e7d8cb218ffef63cff776f"
+    "tests/test_improvement_runner.py": "11123576f0fd4f4c0128ed330349181d655b568a13ffb9ae7d241575af550178",
+    "integrations/ipfs_accelerate/improvement_recovery.py": "e19fd0cbdd43a74423d2d207b46ac86820c0d85ca2020484e3ea28c95601946f",
+    "tests/conftest.py": "f0df011325b871b074247d4fc10ce890898eb719379e22e506cd6accd5f99473",
+    "tests/test_improvement_recovery_epoch.py": "6ee990236e6830cfcf301f9b136a06b67124e239cb4f91573c7b4a8cd7865b8b",
+    "tests/test_optional_upstream_collection.py": "b8527dc963b4007aacc2af3202dd375b5be0fe5ae81e211e71e6dd1e4d3cef1d"
   },
   "doctor": {
     "status": "ready",
@@ -254,5 +294,46 @@
     "disposition_changes": {},
     "comparison_sha256": "add2aca6b0c6bc9b628b728e98f7e39f4f6a671b18f68a4f63b0b713e6cf10b0",
     "scope": "Older quota/Terra compatibility suite retains46 baseline failures and1 baseline skip. Current ordinary Grok effort cases25 and explicit-Grok cases12 pass; this change introduces no case-disposition changes."
+  },
+  "native_capacity_classifier_commit": "9bb60b11e1463595d50fb4d5c1bf14c47d5a7d07",
+  "false_capacity_hold_diagnosis": {
+    "task_id": "CIMP-TUI-01",
+    "attempt": 2,
+    "terminal_reason": "max_turn_requests",
+    "terminal_turns": 32,
+    "log_bytes": 1795211,
+    "log_sha256": "4890d2b0facecb711d11964419c5f2fe5968e13e7c2f7ad2453bad357224c5d5",
+    "false_match": "Legacy XAI/402 capacity regex matched opaque encoded usage, rather than a provider diagnostic.",
+    "old_quarantine_released": false,
+    "attempts_refunded": 0,
+    "completion_authority": false,
+    "actual_log_reclassification_proof": "/tmp/complaint_capacity_actual_log_reclassification.json",
+    "legacy_custody_baseline_comparison": "/tmp/complaint_capacity_classifier_baseline_comparison.json",
+    "legacy_custody_unchanged": {
+      "passed": 21,
+      "failed": 2,
+      "new_failures": 0
+    },
+    "diagnostic_only_candidate_test": {
+      "receipt": "/tmp/complaint_tui_attempt2_host_overlay.xml",
+      "passed": 8,
+      "skipped": 0,
+      "candidate_modified": false,
+      "evidence_reuse_authority": false
+    }
+  },
+  "prepared_false_capacity_recovery_epoch": {
+    "schema": "complaint-improvement-recovery-epoch@1",
+    "plan_id": "baguqeerakleiqcwujifxiu7k5qbsbiki6p2e4bmuiq32agqtwkckzzgri25a",
+    "new_state_dir": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021",
+    "spent_attempts": 2,
+    "next_attempt": 3,
+    "old_quarantine_released": false,
+    "attempt_refunded": false,
+    "completion_authority": false,
+    "evidence_reuse_authority": false,
+    "provider_started": false,
+    "receipt_sha256": "5c1febbc35754c2ba3223f3e85b4563a0b7c4e979d58b8269fae814122a188b9",
+    "receipt_path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/recovery_epoch.json"
   }
 }

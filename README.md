@@ -172,6 +172,13 @@ bounded formal reasoning, and private durable storage. Pending implementation
 tasks and open formal trace obligations are not completion evidence. A task
 claim and a live provider invocation are reported separately. Synthetic live
 qualification receipts are in `docs/task_boards/complaint_intake_runtime_qualification.json`.
+Status reports missing task progress even when the watchdog continues emitting
+heartbeats. Default commands follow a repository/plan/receipt-bound recovery
+epoch when one exists; `--state-dir` selects an explicit campaign directory.
+The guarded `improvement_recovery.prepare_false_capacity_epoch` helper preserves
+the original quarantine and consumed attempts while preparing fresh native
+state after a verified false capacity diagnosis. Diagnostic validation of a
+quarantined candidate does not complete its task or authorize reusing it.
 
 ### 🧠 GraphRAG Ontology Optimization
 

@@ -552,6 +552,31 @@ def test_status_rejects_prior_run_claim_as_progress(campaign, monkeypatch):
     assert not runner.status(root, spec, state)["progress_verified"]
 
 
+
+@pytest.mark.parametrize("has_old_claim", [False, True])
+def test_fresh_supervisor_events_cannot_hide_missing_current_task_progress(campaign, monkeypatch, has_old_claim):
+    root, spec, state, record = _status_fixture(campaign, monkeypatch,
+        native_state={"active_task_id": "CIMP-TUI-01"} if has_old_claim else None)
+    record["started_at"] = runner.time.time() - runner.STARTUP_SECONDS - 10
+    runner._atomic_json(state / "launcher.json", record)
+    if has_old_claim:
+        old = record["started_at"] - 100
+        os.utime(state / f"{runner.STATE_PREFIX}_task_state.json", (old, old))
+    (state / f"{runner.STATE_PREFIX}_supervisor_events.jsonl").write_text(
+        json.dumps({"type": "watchdog_heartbeat"}) + "\n")
+    result = runner.status(root, spec, state)
+    assert result["status"] == "no_progress"
+    assert not result["claim_progress_verified"]
+
+
+def test_selected_claim_without_attempt_clock_has_bounded_wait(campaign, monkeypatch):
+    root, spec, state, record = _status_fixture(campaign, monkeypatch,
+        native_state={"active_task_id": "CIMP-TUI-01", "implementation_in_progress": False})
+    record["started_at"] = runner.time.time() - runner.STALL_SECONDS - 10
+    runner._atomic_json(state / "launcher.json", record)
+    result = runner.status(root, spec, state)
+    assert result["status"] == "no_progress"
+
 def test_status_handles_malformed_owner_and_native_receipts(campaign):
     root, spec, state, _ = campaign
     state.mkdir()
