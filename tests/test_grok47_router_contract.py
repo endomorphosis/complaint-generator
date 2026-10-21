@@ -519,6 +519,7 @@ def test_native_canary_command_disables_tools_and_exposes_evidence_gap(monkeypat
             "text": PINNED_GROK_CANARY_PROMPT, "modelUsage": {PINNED_GROK_MODEL: {"outputTokens": 1}}}), stderr="")
     monkeypatch.setattr(router.subprocess, "run", execute)
     provider = router._get_grok_cli_provider()
+    monkeypatch.setattr(llm, "load_observed_llm_symbols", lambda: (None, None, None))
     monkeypatch.setattr(router, "get_default_router_deps", lambda: SimpleNamespace())
     monkeypatch.setattr(router, "get_llm_provider", lambda name, **_kwargs: provider)
     monkeypatch.setattr(router, "_response_cache_enabled", lambda: False)
@@ -534,9 +535,9 @@ def test_native_canary_command_disables_tools_and_exposes_evidence_gap(monkeypat
     assert argv[argv.index("--max-turns") + 1] == "1"
     assert options["timeout"] == 60
     assert receipt["status"] == "unverified"
-    assert receipt["route_observation"] == "verified"
-    assert receipt["selected_provider_name"] == PINNED_GROK_PROVIDER
-    assert receipt["selected_model_name"] == PINNED_GROK_MODEL
+    assert receipt["route_observation"] == "unverified"
+    assert receipt["selected_provider_name"] == ""
+    assert receipt["selected_model_name"] == ""
     assert receipt["live_canary"] is False and receipt["provider_reported_model"] == ""
     assert receipt["canary_token_matched"] is True
     assert receipt["probe_performed"] is True
@@ -570,3 +571,97 @@ def test_public_native_grok_failure_never_retries_model_or_provider(monkeypatch)
     with pytest.raises(RuntimeError, match="^provider_exception$"):
         llm.generate_text_via_router(MARKER, provider=PINNED_GROK_PROVIDER, model_name=PINNED_GROK_MODEL)
     assert calls == [(PINNED_GROK_PROVIDER, PINNED_GROK_MODEL)]
+
+
+def test_default_legacy_or_cached_canary_does_not_inherit_previous_selection(monkeypatch):
+    _ready(monkeypatch)
+    monkeypatch.setattr(llm, "load_observed_llm_symbols", lambda: (None, None, None))
+    monkeypatch.setattr(llm, "generate_text", lambda **_kwargs: PINNED_GROK_CANARY_PROMPT)
+    monkeypatch.setattr(llm, "get_last_generation_trace", lambda: _trace())
+    receipt = llm.grok47_route_capability(include_canary=True)
+    assert receipt["selected_provider_name"] == receipt["selected_model_name"] == ""
+    assert receipt["route_observation"] == "unverified"
+    assert receipt["live_canary"] is False
+
+
+def test_native_api_cache_or_injected_provider_has_no_invocation_evidence(monkeypatch):
+    from ipfs_accelerate_py import llm_router as router
+    from ipfs_accelerate_py.cli_runtime.grok_invocation_observation import ObservedTextGeneration, GrokInvocationObservation
+    _ready(monkeypatch)
+    monkeypatch.setattr(llm, "generate_text", lambda **_kwargs: "router symbol only")
+    monkeypatch.setattr(router, "generate_text", lambda *_args, **_kwargs: PINNED_GROK_CANARY_PROMPT)
+    monkeypatch.setattr(llm, "load_observed_llm_symbols", lambda: (router.generate_text_with_observation, ObservedTextGeneration, GrokInvocationObservation))
+    monkeypatch.setattr(llm, "get_last_generation_trace", lambda: _trace())
+    receipt = llm.grok47_route_capability(include_canary=True)
+    assert receipt["selected_provider_name"] == receipt["selected_model_name"] == ""
+    assert receipt["live_canary"] is False and receipt["status"] == "unverified"
+
+
+def test_old_typed_observation_cannot_be_replayed_for_a_new_canary_request(monkeypatch):
+    from ipfs_accelerate_py.cli_runtime.grok_invocation_observation import ObservedTextGeneration, GrokInvocationObservation
+    _ready(monkeypatch)
+    monkeypatch.setattr(llm, "generate_text", lambda **_kwargs: "router symbol only")
+    old = ObservedTextGeneration(text=PINNED_GROK_CANARY_PROMPT, observation=GrokInvocationObservation(
+        invocation_id="a" * 32, request_id="b" * 32, native_dispatch_count=1,
+        selected_provider_name=PINNED_GROK_PROVIDER, selected_model_name=PINNED_GROK_MODEL,
+        provider_reported_model="grok-4.7-build", process_returncode=0, stream_complete=True,
+        wire_model_observed=True, evidence_class="native_final_end_model_usage"))
+    monkeypatch.setattr(llm, "load_observed_llm_symbols", lambda: (lambda **_kwargs: old, ObservedTextGeneration, GrokInvocationObservation))
+    receipt = llm.grok47_route_capability(include_canary=True)
+    assert receipt["request_id"] != old.observation.request_id
+    assert receipt["selected_provider_name"] == receipt["provider_reported_model"] == ""
+    assert receipt["live_canary"] is False and receipt["status"] == "unverified"
+    injected = llm.grok47_route_capability(include_canary=True, canary_transport=lambda **_kwargs: old)
+    assert injected["live_canary"] is False and injected["status"] == "unverified"
+
+
+@pytest.mark.parametrize("wire_model", ["grok-4.7", "grok-4.7-build", "grok-4", "grok-4.synthetic-secret-key", None])
+def test_native_canary_observation_consumer_with_authored_process_fixtures(monkeypatch, wire_model):
+    """Exercise the native code path with synthetic frames; this is not a live qualification."""
+    from ipfs_accelerate_py import llm_router as router
+    from ipfs_accelerate_py.cli_runtime import grok_stream_capture
+    from ipfs_accelerate_py.cli_runtime.grok_invocation_observation import ObservedTextGeneration, GrokInvocationObservation
+    _ready(monkeypatch)
+    calls = []
+    monkeypatch.setattr(router, "_cli_available", lambda _command: True)
+    monkeypatch.setattr(router, "_grok_cli_command", lambda: "grok")
+    provider = router._get_grok_cli_provider()
+    monkeypatch.setattr(router, "get_default_router_deps", lambda: SimpleNamespace())
+    monkeypatch.setattr(router, "get_llm_provider", lambda name, **_kwargs: provider)
+    monkeypatch.setattr(router, "_response_cache_enabled", lambda: False)
+    @contextmanager
+    def sampling(environment, **_kwargs):
+        yield environment
+    monkeypatch.setattr(router, "_grok_zero_temperature_environment", sampling)
+    def capture(argv, **kwargs):
+        calls.append(argv)
+        assert argv[argv.index("--tools") + 1] == ""
+        assert set(argv[argv.index("--disallowed-tools") + 1].split(",")) >= {"search_tool", "use_tool"}
+        assert kwargs["timeout"] == 60
+        parser = grok_stream_capture.GrokStreamParser()
+        end = {"type": "end", "stopReason": "end_turn", "usage": {"output_tokens": 1}}
+        if wire_model is not None:
+            end["modelUsage"] = {wire_model: {"prompt": MARKER, "secret": TOKEN}}
+        frames = [{"type": "text", "data": PINNED_GROK_CANARY_PROMPT}, end]
+        parser.feed(b"".join(json.dumps(frame).encode() + b"\n" for frame in frames), elapsed_seconds=.1)
+        parser.eof("stdout", elapsed_seconds=.2); parser.eof("stderr", elapsed_seconds=.2)
+        parser.process_exit(0, elapsed_seconds=.2)
+        return SimpleNamespace(returncode=0, timed_out=False, progress=parser.snapshot(elapsed_seconds=.2),
+            final_payload=parser.final_payload, stdout=json.dumps({**end, "text": parser.response_text}), stderr="", response_text=parser.response_text)
+    monkeypatch.setattr(grok_stream_capture, "capture_grok_stream", capture)
+    monkeypatch.setattr(llm, "generate_text", router.generate_text)
+    monkeypatch.setattr(llm, "load_observed_llm_symbols", lambda: (router.generate_text_with_observation, ObservedTextGeneration, GrokInvocationObservation))
+    receipt = llm.grok47_route_capability(include_canary=True)
+    assert len(calls) == 1
+    assert receipt["selected_provider_name"] == PINNED_GROK_PROVIDER
+    assert receipt["selected_model_name"] == PINNED_GROK_MODEL
+    assert receipt["provider_reported_model"] == (wire_model if wire_model in ("grok-4.7", "grok-4.7-build", "grok-4") else "")
+    assert receipt["route_evidence_class"] == "native_invocation"
+    assert receipt["native_invocation_id"] != receipt["request_id"]
+    if wire_model in ("grok-4.7", "grok-4.7-build"):
+        assert receipt["status"] == "available"
+    elif wire_model == "grok-4":
+        assert receipt["status"] == "unavailable" and receipt["live_canary"] is False
+    else:
+        assert receipt["status"] == "unverified" and receipt["live_canary"] is False
+    _assert_quiet(receipt)

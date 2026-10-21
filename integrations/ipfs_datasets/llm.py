@@ -19,6 +19,7 @@ from integrations.ipfs_accelerate.routers import (
 	PINNED_GROK_PROVIDER,
 	interpret_canary_dispatch,
 	load_llm_symbols,
+	load_observed_llm_symbols,
 	normalize_accelerate_provider,
 	pinned_grok47_canary_kwargs,
 	pinned_grok47_dispatch_kwargs,
@@ -1048,7 +1049,7 @@ def grok47_route_capability(
 	Static presence is configuration evidence, never a selected route. An
 	injected transport cannot attest a live call. The pinned native router's
 	public string result and selection trace do not expose invocation-bound
-	wire-model evidence, so a successful dispatch remains honestly unverified.
+	wire-model evidence; only the optional native observation API can verify it.
 	"""
 
 	if type(include_canary) is not bool:
@@ -1110,12 +1111,17 @@ def grok47_route_capability(
 		)
 
 	injected = canary_transport is not None
-	transport = canary_transport if injected else generate_text
+	observed_generate, result_type, observation_type = (None, None, None) if injected else load_observed_llm_symbols()
+	observed_api = callable(observed_generate) and isinstance(result_type, type) and isinstance(observation_type, type)
+	transport = canary_transport if injected else (observed_generate if observed_api else generate_text)
 	payload["static_capability_only"] = False
 	payload["probe_performed"] = True
 	payload["canary_transport"] = "injected" if injected else "llm_router"
 	try:
-		result = transport(prompt=PINNED_GROK_CANARY_PROMPT, **pinned_grok47_canary_kwargs())
+		canary_kwargs = pinned_grok47_canary_kwargs()
+		if observed_api:
+			canary_kwargs["observation_request_id"] = payload["request_id"]
+		result = transport(prompt=PINNED_GROK_CANARY_PROMPT, **canary_kwargs)
 	except Exception:
 		payload.update({"status": "unavailable", "error": "provider_exception",
 			"availability_hint": "provider_exception", "resumable": True, "dispatch": "attempted"})
@@ -1124,24 +1130,51 @@ def grok47_route_capability(
 
 	payload.update(interpret_canary_dispatch(result))
 	observed_text = result.get("text") if isinstance(result, Mapping) else result
+	observation = None
+	if observed_api and type(result) is result_type and type(result.observation) is observation_type:
+		candidate = result.observation
+		if (candidate.request_id == payload["request_id"]
+				and type(candidate.invocation_id) is str and re.fullmatch(r"[0-9a-f]{32}", candidate.invocation_id)
+				and type(candidate.native_dispatch_count) is int and candidate.native_dispatch_count == 1
+				and candidate.invocation_scope == "current_call"
+				and candidate.observation_only is True and candidate.raw_provider_data_exported is False
+				and candidate.schema == "native-grok-invocation-observation@1"
+				and type(candidate.process_returncode) is int and candidate.process_returncode == 0
+				and candidate.stream_complete is True
+				and candidate.selected_provider_name == PINNED_GROK_PROVIDER
+				and candidate.selected_model_name == PINNED_GROK_MODEL):
+			observation = candidate
+			observed_text = result.text
 	payload["canary_token_matched"] = isinstance(observed_text, str) and observed_text.strip() == PINNED_GROK_CANARY_PROMPT
-	# An injected callback need not touch the native router at all; its leftover
-	# thread-local trace must not be attributed to this synthetic invocation.
-	observation = _route_receipt(requested_provider=PINNED_GROK_PROVIDER,
-		requested_model=PINNED_GROK_MODEL, observe=not injected)
-	for key in ("route_observation", "route_evidence_class", "observed_provider_name", "observed_model_name"):
-		payload[key] = observation[key]
-	if observation["route_evidence_class"] == "router_selection":
-		payload["selected_provider_name"] = observation["observed_provider_name"]
-		payload["selected_model_name"] = observation["observed_model_name"]
-	payload.update({
-		"dispatch": "canary_unverified",
-		"status": "unverified",
-		"error": "Grok canary lacks invocation-bound wire-model evidence from the native router. Injected or cached results and router selection cannot verify a live canary.",
-		"resumable": True,
-	})
+	if observation is not None:
+		payload["native_invocation_id"] = observation.invocation_id
+		payload["selected_provider_name"] = observation.selected_provider_name
+		payload["selected_model_name"] = observation.selected_model_name
+		payload["route_observation"] = "verified"
+		payload["route_evidence_class"] = "native_invocation"
+		if (observation.wire_model_observed is True
+				and observation.evidence_class == "native_final_end_model_usage"
+				and type(observation.provider_reported_model) is str
+				and re.fullmatch(r"grok-[0-9]{1,2}(?:\.[0-9]{1,2}){0,2}(?:-build)?", observation.provider_reported_model)):
+			payload["provider_reported_model"] = observation.provider_reported_model
+			# The requested route remains exactly grok-4.7. Grok's observed native
+			# build label is retained verbatim and accepted only by this explicit set.
+			model_matches = observation.provider_reported_model in {PINNED_GROK_MODEL, "grok-4.7-build"}
+			if model_matches and payload["canary_token_matched"]:
+				payload.update({"live_canary": True, "status": "available", "dispatch": "canary",
+					"error": "", "resumable": False})
+			else:
+				payload.update({"status": "unavailable", "dispatch": "canary_rejected",
+					"error": "canary_model_or_token_mismatch", "resumable": True})
+	if payload["dispatch"] == "none":
+		payload.update({
+			"dispatch": "canary_unverified", "status": "unverified",
+			"error": "Grok canary lacks invocation-bound wire-model evidence from the native router. Injected or cached results and router selection cannot verify a live canary.",
+			"resumable": True,
+		})
 	return with_adapter_metadata(payload, operation="grok47_route_capability",
-		backend_available=False, degraded_reason=payload["error"], implementation_status="available")
+		backend_available=payload["status"] == "available", degraded_reason=payload["error"] or None,
+		implementation_status="available")
 
 
 # Versioned complaint privacy contract. The router stays independent of the

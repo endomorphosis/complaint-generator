@@ -67,6 +67,14 @@ def load_llm_symbols() -> tuple[Any | None, Any | None, Any]:
     return generate_text, trace, error or trace_error
 
 
+def load_observed_llm_symbols() -> tuple[Any | None, Any | None, Any | None]:
+    """Optional additive native API; absence leaves live evidence unverified."""
+    generate, _ = _load_symbol("ipfs_accelerate_py.llm_router", "generate_text_with_observation")
+    result_type, _ = _load_symbol("ipfs_accelerate_py.cli_runtime.grok_invocation_observation", "ObservedTextGeneration")
+    observation_type, _ = _load_symbol("ipfs_accelerate_py.cli_runtime.grok_invocation_observation", "GrokInvocationObservation")
+    return generate, result_type, observation_type
+
+
 def load_embedding_symbols() -> tuple[Any | None, Any | None, Any | None, Any | None, Any | None, Any]:
     from integrations.ipfs_datasets.loader import import_module_optional
 
@@ -290,6 +298,7 @@ __all__ = [
     "accelerate_provider_name",
     "load_embedding_symbols",
     "load_llm_symbols",
+    "load_observed_llm_symbols",
     "load_multimodal_generate",
     "load_multimodal_symbols",
     "INFERENCE_OWNER",
