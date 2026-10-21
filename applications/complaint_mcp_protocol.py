@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-from .complaint_workspace import ComplaintWorkspaceService
+from .complaint_workspace import ComplaintWorkspaceService, WorkspaceAccess, workspace_access_scope
 
 
 JSONRPC_VERSION = "2.0"
@@ -648,6 +648,25 @@ def _error(request_id: Any, code: int, message: str, data: Optional[Any] = None)
 
 
 def handle_jsonrpc_message(
+    service: ComplaintWorkspaceService,
+    request: Any,
+    *,
+    access: Optional[WorkspaceAccess] = None,
+) -> Optional[Dict[str, Any]]:
+    """Dispatch one JSON-RPC message under the same principal contract as HTTP.
+
+    ``access`` overrides the service default for this call. When it is omitted,
+    the active request scope or the service's explicit trusted-local default applies.
+    A tool argument ``user_id`` is never treated as authorization by itself.
+    """
+
+    if access is None:
+        return _handle_jsonrpc_message(service, request)
+    with workspace_access_scope(access):
+        return _handle_jsonrpc_message(service, request)
+
+
+def _handle_jsonrpc_message(
     service: ComplaintWorkspaceService,
     request: Any,
 ) -> Optional[Dict[str, Any]]:
