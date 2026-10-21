@@ -493,6 +493,40 @@ def score_draft_quality(
     )
 
 
+def get_privacy_policy(
+    user_id: Optional[str] = None,
+    case_id: Optional[str] = None,
+    *,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).get_privacy_policy(user_id, case_id=case_id)
+
+
+def set_privacy_policy(
+    user_id: Optional[str],
+    mode: str,
+    case_id: Optional[str] = None,
+    *,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).set_privacy_policy(
+        user_id,
+        mode,
+        case_id=case_id,
+    )
+
+
+def inventory_private_data_classes(
+    user_id: Optional[str] = None,
+    *,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).inventory_private_data_classes(user_id)
+
+
 def improve_draft(
     user_id: Optional[str],
     *,
@@ -1048,6 +1082,9 @@ __all__ = [
     "get_proof_history",
     "get_filing_provenance",
     "get_provider_diagnostics",
+    "get_privacy_policy",
+    "set_privacy_policy",
+    "inventory_private_data_classes",
     "get_packaged_docket_operator_dashboard",
     "load_packaged_docket_operator_dashboard_report",
     "execute_packaged_docket_proof_revalidation_queue",

@@ -1991,9 +1991,60 @@ def generate_decentralized_id() -> Dict[str, Any]:
     }
 
 
-def _default_state(user_id: str) -> Dict[str, Any]:
+_PRIVACY_MODE_NOTICE = (
+    "Privacy mode is local private processing for this case. "
+    "A remote model cannot read submitted content unless you separately enable Grok with /privacy grok. "
+    "At-rest protection is plaintext/pending. Encryption at rest would not by itself stop a remote model from reading submitted content. "
+    "Use /privacy local or /privacy grok once; this setting is saved and is not confirmed again on every step."
+)
+
+
+def _privacy_helpers():
+    from integrations.ipfs_datasets.llm import (
+        build_complaint_privacy_context,
+        coerce_effective_privacy_policy,
+        complaint_data_class_inventory,
+        inspect_privacy_policy,
+        privacy_policy_for_mode,
+    )
+
     return {
+        "build_complaint_privacy_context": build_complaint_privacy_context,
+        "coerce_effective_privacy_policy": coerce_effective_privacy_policy,
+        "complaint_data_class_inventory": complaint_data_class_inventory,
+        "inspect_privacy_policy": inspect_privacy_policy,
+        "privacy_policy_for_mode": privacy_policy_for_mode,
+    }
+
+
+def _state_case_id(state: Mapping[str, Any], user_id: str) -> str:
+    case_id = str(state.get("case_id") or user_id or "").strip()
+    return case_id or str(user_id or "")
+
+
+def _apply_effective_privacy_policy(state: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    helpers = _privacy_helpers()
+    case_id = _state_case_id(state, user_id)
+    state["case_id"] = case_id
+    inspection = helpers["inspect_privacy_policy"](
+        state.get("privacy_policy"),
+        user_id=user_id,
+        case_id=case_id,
+    )
+    state["privacy_policy"] = inspection["policy"]
+    state["privacy_policy_load"] = {
+        "admitted": bool(inspection["admitted"]),
+        "reason": str(inspection["reason"] or ""),
+        "cloud_processing_enabled": bool(inspection["cloud_processing_enabled"]),
+    }
+    state.setdefault("privacy_notice_shown", False)
+    return state
+
+
+def _default_state(user_id: str) -> Dict[str, Any]:
+    state = {
         "user_id": user_id,
+        "case_id": user_id,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
         "claim_type": _normalize_claim_type("retaliation"),
@@ -2009,6 +2060,7 @@ def _default_state(user_id: str) -> Dict[str, Any]:
         "latest_packet_export": None,
         "latest_export_critic": None,
         "ui_readiness": None,
+        "privacy_notice_shown": False,
         "mike_integration": {
             "last_handoff": None,
             "last_sync": None,
@@ -2017,6 +2069,7 @@ def _default_state(user_id: str) -> Dict[str, Any]:
             "audit_trail": [],
         },
     }
+    return _apply_effective_privacy_policy(state, user_id)
 
 
 class _ComplaintWorkspaceHandlerBackend(Protocol):
@@ -2144,6 +2197,37 @@ class ComplaintWorkspaceRequestHandlers:
 
         accepted_answer: Optional[Dict[str, Any]] = None
         normalized_message = str(message or "").strip()
+        privacy_command = normalized_message.lower()
+        if privacy_command in {"/privacy local", "/privacy grok"}:
+            helpers = _privacy_helpers()
+            mode = "grok" if privacy_command.endswith("grok") else "local"
+            case_id = _state_case_id(state, str(state.get("user_id") or self._normalize_user_id(user_id)))
+            state["case_id"] = case_id
+            state["privacy_policy"] = helpers["privacy_policy_for_mode"](
+                str(state.get("user_id") or case_id),
+                case_id,
+                mode,
+            )
+            state["privacy_notice_shown"] = True
+            workspace._save_state(state)
+            payload = workspace._build_intake_chat_payload(
+                state,
+                accepted_answer=None,
+                requested_question_id=question_id,
+            )
+            payload["privacy_command"] = {
+                "applied": True,
+                "stored_as_answer": False,
+                "processing_mode": state["privacy_policy"]["processing_mode"],
+            }
+            payload["privacy_notice"] = _PRIVACY_MODE_NOTICE
+            pending = payload.get("message") or ""
+            payload["message"] = f"Saved privacy mode for this case. The pending question is unchanged.\n{pending}".strip()
+            return payload
+
+        show_privacy_notice = not bool(state.get("privacy_notice_shown"))
+        if show_privacy_notice:
+            state["privacy_notice_shown"] = True
         if normalized_message:
             if target_question is None:
                 raise ValueError("The intake flow is already complete for this session.")
@@ -2158,11 +2242,16 @@ class ComplaintWorkspaceRequestHandlers:
             history.append(deepcopy(accepted_answer))
 
         workspace._save_state(state)
-        return workspace._build_intake_chat_payload(
+        payload = workspace._build_intake_chat_payload(
             state,
             accepted_answer=accepted_answer,
             requested_question_id=question_id if accepted_answer is None else None,
         )
+        if show_privacy_notice:
+            payload["privacy_notice"] = _PRIVACY_MODE_NOTICE
+            if str(payload.get("message") or "").startswith("Let's start with the basics."):
+                payload["message"] = f"{_PRIVACY_MODE_NOTICE}\n\n{payload['message']}"
+        return payload
 
     def save_evidence(
         self,
@@ -2412,6 +2501,9 @@ class ComplaintWorkspaceService:
         payload.setdefault("latest_packet_export", None)
         payload.setdefault("latest_export_critic", None)
         payload.setdefault("ui_readiness", None)
+        payload.setdefault("case_id", user_id)
+        payload.setdefault("privacy_notice_shown", False)
+        _apply_effective_privacy_policy(payload, str(payload.get("user_id") or user_id))
         payload.setdefault(
             "mike_integration",
             {
@@ -2428,7 +2520,10 @@ class ComplaintWorkspaceService:
 
     def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
         state["updated_at"] = _utc_now()
-        path = self._session_path(str(state.get("user_id") or DEFAULT_USER_ID))
+        user_id = str(state.get("user_id") or DEFAULT_USER_ID)
+        state["user_id"] = user_id
+        _apply_effective_privacy_policy(state, user_id)
+        path = self._session_path(user_id)
         temp_path = path.with_name(f"{path.name}.tmp")
         try:
             temp_path.write_text(json.dumps(state, indent=2, sort_keys=True))
@@ -3241,6 +3336,24 @@ class ComplaintWorkspaceService:
         config_path: Optional[str] = None,
         backend_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
+        helpers = _privacy_helpers()
+        case_id = _state_case_id(state, str(state.get("user_id") or DEFAULT_USER_ID))
+        privacy_context = helpers["build_complaint_privacy_context"](
+            state.get("privacy_policy"),
+            user_id=str(state.get("user_id") or DEFAULT_USER_ID),
+            case_id=case_id,
+            data_class="drafts_proofs",
+        )
+        from integrations.ipfs_datasets.llm import _privacy_context_block_reason
+
+        privacy_block = _privacy_context_block_reason(
+            privacy_context,
+            provider=provider,
+            model_name=model,
+        )
+        if privacy_block:
+            self._last_draft_refinement_error = privacy_block
+            return None
         try:
             from backends import LLMRouterBackend
             from .ui_review import _load_backend_kwargs
@@ -3251,6 +3364,7 @@ class ComplaintWorkspaceService:
                 backend_kwargs["provider"] = provider
             if model:
                 backend_kwargs["model"] = model
+            backend_kwargs["complaint_privacy_context"] = privacy_context
             backend = LLMRouterBackend(**backend_kwargs)
             prompt = self._build_formal_complaint_generation_prompt(state, base_draft)
             raw_response = self._invoke_llm_draft_backend_with_timeout(backend, prompt)
@@ -8087,13 +8201,25 @@ class ComplaintWorkspaceService:
                 f"DRAFT:\n{improved_body}"
             )
             try:
+                helpers = _privacy_helpers()
+                case_id = _state_case_id(state, resolved_user_id)
+                privacy_context = helpers["build_complaint_privacy_context"](
+                    state.get("privacy_policy"),
+                    user_id=resolved_user_id,
+                    case_id=case_id,
+                    data_class="drafts_proofs",
+                )
                 llm_result = generate_text_with_metadata(
                     prompt,
                     provider=provider,
-                    model=model,
+                    model_name=model,
                     config_path=config_path,
                     backend_id=backend_id,
+                    complaint_privacy_context=privacy_context,
                 )
+                if str((llm_result or {}).get("privacy_decision") or "") == "denied":
+                    llm_errors.append(str((llm_result or {}).get("error") or "privacy_denied"))
+                    continue
                 revised = str((llm_result or {}).get("text") or "").strip()
                 if revised and len(revised) > _MIN_REVISED_DRAFT_LENGTH:
                     improved_body = revised
@@ -9692,6 +9818,114 @@ class ComplaintWorkspaceService:
             "source": "complaint_workspace_packaged_proof_revalidation_queue_persist",
         }
 
+    def get_privacy_policy(self, user_id: Optional[str] = None, case_id: Optional[str] = None) -> Dict[str, Any]:
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        bound_case = _state_case_id(state, resolved_user_id)
+        requested_case = str(case_id or bound_case)
+        helpers = _privacy_helpers()
+        if requested_case != bound_case:
+            inspection = helpers["inspect_privacy_policy"](
+                state.get("privacy_policy"),
+                user_id=resolved_user_id,
+                case_id=requested_case,
+            )
+            policy = inspection["policy"]
+            load = {
+                "admitted": False,
+                "reason": "privacy_denied:case_binding",
+                "cloud_processing_enabled": False,
+            }
+        else:
+            policy = dict(state.get("privacy_policy") or {})
+            load = dict(state.get("privacy_policy_load") or {})
+        return {
+            "user_id": resolved_user_id,
+            "case_id": bound_case,
+            "requested_case_id": requested_case,
+            "policy": policy,
+            "load": load,
+            "at_rest_protection": "plaintext_pending",
+            "encryption_at_rest_blocks_remote_llm": False,
+            "authenticates_tenant": False,
+            "authorization_note": "user_id selects a workspace record. Tenant authorization is PRIV002, not this policy.",
+        }
+
+    def set_privacy_policy(
+        self,
+        user_id: Optional[str],
+        mode: str,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        bound_case = _state_case_id(state, resolved_user_id)
+        requested_case = str(case_id or bound_case)
+        if requested_case != bound_case:
+            payload = self.get_privacy_policy(resolved_user_id, case_id=requested_case)
+            payload["updated"] = False
+            return payload
+        helpers = _privacy_helpers()
+        state["privacy_policy"] = helpers["privacy_policy_for_mode"](resolved_user_id, bound_case, mode)
+        self._save_state(state)
+        payload = self.get_privacy_policy(resolved_user_id)
+        payload["updated"] = True
+        return payload
+
+    def inventory_private_data_classes(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Describe private case classes without reading other sessions, evidence, exports, or secrets."""
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        helpers = _privacy_helpers()
+        canonical = helpers["complaint_data_class_inventory"]()
+        logical_locations = {
+            "raw_intake": ["session.intake_answers", "session.intake_history"],
+            "attachments": ["session.evidence.documents.attachment_names", "workspace.attachments"],
+            "fact_kg": ["session.annotation_knowledge_graph"],
+            "claim_dependency_evaluations": ["session.review.support_matrix", "session.proof_history"],
+            "annotations": ["session.document_annotations", "session.workspace_annotation_index"],
+            "drafts_proofs": ["session.draft", "session.proof_history", "session.latest_packet_export"],
+            "embeddings": ["workspace.cache.embeddings"],
+            "exports": ["workspace.exports"],
+            "logs": ["workspace.logs"],
+            "caches": ["workspace.cache"],
+            "temporary_files": ["workspace.tmp"],
+            "backups": ["workspace.backups"],
+        }
+        private_rows = []
+        for item in list(canonical.get("private_claim_fact_graph") or []):
+            class_id = str(item.get("id") or "")
+            private_rows.append(
+                {
+                    **item,
+                    "logical_locations": list(logical_locations.get(class_id) or []),
+                    "graph": "private_claim_fact_graph",
+                }
+            )
+        return {
+            "user_id": resolved_user_id,
+            "case_id": _state_case_id(state, resolved_user_id),
+            "reads_existing_private_paths": False,
+            "at_rest_protection": "plaintext_pending",
+            "encryption_at_rest_blocks_remote_llm": False,
+            "authenticates_tenant": False,
+            "private_claim_fact_graph": private_rows,
+            "public_legal_source_graph": dict(canonical.get("public_legal_source_graph") or {}),
+            "agent_context": dict(canonical.get("agent_context") or {}),
+            "present_state_keys": {
+                "raw_intake": bool(state.get("intake_answers") or state.get("intake_history")),
+                "attachments": any(
+                    list(item.get("attachment_names") or [])
+                    for item in list((state.get("evidence") or {}).get("documents") or [])
+                    if isinstance(item, dict)
+                ),
+                "fact_kg": bool((state.get("annotation_knowledge_graph") or {}).get("entities")),
+                "annotations": bool(state.get("document_annotations")),
+                "drafts_proofs": bool(state.get("draft") or state.get("proof_history")),
+            },
+        }
+
     def generate_grounded_text(
         self,
         user_id: Optional[str],
@@ -9703,17 +9937,34 @@ class ComplaintWorkspaceService:
     ) -> Dict[str, Any]:
         from integrations.ipfs_datasets.llm import generate_text_with_metadata
 
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        helpers = _privacy_helpers()
+        privacy_context = helpers["build_complaint_privacy_context"](
+            state.get("privacy_policy"),
+            user_id=resolved_user_id,
+            case_id=_state_case_id(state, resolved_user_id),
+            data_class="raw_intake",
+        )
         resolved_grounding_mode = self._resolve_mike_grounding_mode(grounding_mode or "legal_corpus_only")
         generated = generate_text_with_metadata(
             f"[grounding_mode={resolved_grounding_mode}]\n{prompt}",
             provider=provider,
             model_name=model_name,
+            complaint_privacy_context=privacy_context,
         )
+        if not isinstance(generated, dict):
+            generated = {"status": "error", "text": "", "error": "privacy_denied:malformed_consent"}
+        public_generation = dict(generated)
+        if str(public_generation.get("privacy_decision") or "") == "denied":
+            public_generation.pop("prompt", None)
         return {
-            "user_id": str(user_id or DEFAULT_USER_ID),
+            "user_id": resolved_user_id,
+            "case_id": _state_case_id(state, resolved_user_id),
             "grounding_mode": resolved_grounding_mode,
-            "text": str(generated.get("text") or "") if isinstance(generated, dict) else "",
-            "generation": generated,
+            "text": str(public_generation.get("text") or ""),
+            "generation": public_generation,
+            "at_rest_protection": "plaintext_pending",
         }
 
     def search_corpus(self, *, query: str, max_results: int = 5) -> Dict[str, Any]:

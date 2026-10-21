@@ -600,6 +600,14 @@ def generate_text_via_router(
 ) -> str:
 	if generate_text is None:
 		raise RuntimeError(LLM_ROUTER_ERROR or "llm_router unavailable")
+	privacy_context = kwargs.pop("complaint_privacy_context", None)
+	privacy_block = _privacy_context_block_reason(
+		privacy_context,
+		provider=provider,
+		model_name=model_name,
+	)
+	if privacy_block:
+		raise RuntimeError(privacy_block)
 	effective_provider, effective_model_name, call_options, env_overrides, _ = _prepare_generate_text_call(
 		prompt,
 		provider=provider,
@@ -642,6 +650,28 @@ def generate_text_with_metadata(
 			backend_available=False,
 			degraded_reason=LLM_ROUTER_ERROR,
 			implementation_status="unavailable",
+		)
+
+	privacy_context = kwargs.pop("complaint_privacy_context", None)
+	privacy_block = _privacy_context_block_reason(
+		privacy_context,
+		provider=provider,
+		model_name=model_name,
+	)
+	if privacy_block:
+		return with_adapter_metadata(
+			{
+				"status": "error",
+				"text": "",
+				"provider_name": provider or "",
+				"model_name": model_name or "",
+				"error": privacy_block,
+				"privacy_decision": "denied",
+				"dispatch": "none",
+			},
+			operation="generate_text",
+			backend_available=True,
+			implementation_status="available",
 		)
 
 	effective_provider, effective_model_name, call_options, env_overrides, metadata = _prepare_generate_text_call(
@@ -725,6 +755,7 @@ def llm_router_status(
 	perform_probe: bool = False,
 	**kwargs: Any,
 ) -> Dict[str, Any]:
+	privacy_context = kwargs.pop("complaint_privacy_context", None)
 	if generate_text is None:
 		return with_adapter_metadata(
 			{
@@ -734,12 +765,60 @@ def llm_router_status(
 				"effective_provider_name": "",
 				"effective_model_name": "",
 				"probe_performed": False,
+				"dispatch": "none",
+				"static_capability_only": True,
 				"error": str(LLM_ROUTER_ERROR or "llm_router unavailable"),
 			},
 			operation="llm_router_status",
 			backend_available=False,
 			degraded_reason=LLM_ROUTER_ERROR,
 			implementation_status="unavailable",
+		)
+
+	if not perform_probe:
+		return with_adapter_metadata(
+			{
+				"status": "available",
+				"configured_provider_name": provider or "",
+				"configured_model_name": model_name or "",
+				"effective_provider_name": "",
+				"effective_model_name": "",
+				"probe_performed": False,
+				"dispatch": "none",
+				"static_capability_only": True,
+				"error": "",
+			},
+			operation="llm_router_status",
+			backend_available=True,
+			implementation_status="available",
+		)
+
+	if privacy_context is None:
+		privacy_block = PRIVACY_DENIAL_CLOUD_DISABLED
+	else:
+		privacy_block = _privacy_context_block_reason(
+			privacy_context,
+			provider=provider,
+			model_name=model_name,
+		)
+	if privacy_block:
+		return with_adapter_metadata(
+			{
+				"status": "error",
+				"configured_provider_name": provider or "",
+				"configured_model_name": model_name or "",
+				"effective_provider_name": "",
+				"effective_model_name": "",
+				"probe_performed": False,
+				"dispatch": "none",
+				"static_capability_only": False,
+				"privacy_decision": "denied",
+				"error": privacy_block,
+			},
+			operation="llm_router_status",
+			backend_available=False,
+			degraded_reason=privacy_block,
+			implementation_status="available",
 		)
 
 	effective_provider, effective_model_name, _, env_overrides, metadata = _prepare_generate_text_call(
@@ -766,11 +845,14 @@ def llm_router_status(
 
 	if perform_probe:
 		probe_prompt = prompt or "Return a one-line router health confirmation for the HACC complaint workflow."
+		probe_kwargs = dict(kwargs)
+		if privacy_context is not None:
+			probe_kwargs["complaint_privacy_context"] = privacy_context
 		probe_payload = generate_text_with_metadata(
 			probe_prompt,
 			provider=provider,
 			model_name=model_name,
-			**kwargs,
+			**probe_kwargs,
 		)
 		payload["probe_performed"] = True
 		payload["probe_status"] = probe_payload.get("status")
@@ -789,6 +871,293 @@ def llm_router_status(
 	)
 
 
+# Versioned complaint privacy contract. The router stays independent of the
+# application package; workspace code imports these helpers lazily.
+PRIVACY_POLICY_CONTRACT = "complaint_privacy_policy"
+PRIVACY_POLICY_VERSION = "1"
+PRIVACY_CONTEXT_CONTRACT = "complaint_privacy_context"
+PRIVACY_PROCESSING_LOCAL = "local_private"
+PRIVACY_PROCESSING_GROK = "grok_cloud"
+PRIVACY_GROK_PROVIDER = "grok_cli"
+PRIVACY_GROK_MODEL = "grok-4.7"
+PRIVACY_SCOPE_USER_CASE = "user_case"
+PRIVACY_AT_REST_PROTECTION = "plaintext_pending"
+PRIVACY_DENIAL_CLOUD_DISABLED = "privacy_denied:cloud_processing_disabled"
+PRIVACY_DENIAL_SCOPE = "privacy_denied:grok_scope_mismatch"
+PRIVACY_DENIAL_CASE = "privacy_denied:case_binding"
+PRIVACY_DENIAL_VERSION = "privacy_denied:version"
+PRIVACY_DENIAL_SCOPE_FIELD = "privacy_denied:scope"
+PRIVACY_DENIAL_MALFORMED = "privacy_denied:malformed_consent"
+
+PRIVATE_DATA_CLASSES: tuple[tuple[str, str], ...] = (
+	("raw_intake", "Raw intake answers and intake history for one user and case."),
+	("attachments", "Attachment names and bytes supplied for the case."),
+	("fact_kg", "Claim-specific fact knowledge graph."),
+	("claim_dependency_evaluations", "Claim-specific dependency and element evaluations."),
+	("annotations", "Document and workspace annotations tied to the case."),
+	("drafts_proofs", "Drafts, proof runs, and case theorem exports."),
+	("embeddings", "Embeddings derived from private case text."),
+	("exports", "Filing exports produced from the case."),
+	("logs", "Logs that can quote private case content."),
+	("caches", "Caches derived from private case content."),
+	("temporary_files", "Temporary files created while processing the case."),
+	("backups", "Backups of private session and case state."),
+)
+PUBLIC_LEGAL_SOURCE_CLASS = (
+	"public_legal_source_graph",
+	"Published legal sources. Distinct from the private claim fact graph.",
+)
+_PRIVATE_CLASS_IDS = {item[0] for item in PRIVATE_DATA_CLASSES}
+_KNOWN_DATA_CLASSES = _PRIVATE_CLASS_IDS | {PUBLIC_LEGAL_SOURCE_CLASS[0]}
+_AMBIENT_PROVIDER_ENVS = (
+	"IPFS_DATASETS_PY_LLM_PROVIDER",
+	"COMPLAINT_GENERATOR_LLM_PROVIDER",
+	"LLM_ROUTER_PROVIDER",
+	"COMPLAINT_LLM_PROVIDER",
+	"COMPLAINT_GENERATOR_LLM_DRAFT_PROVIDER",
+)
+_CONSENT_STATUSES = {"implicit_local", "explicit_local", "explicit_grok"}
+
+
+def complaint_data_class_inventory() -> Dict[str, Any]:
+	"""Canonical inventory. Does not read session, evidence, export, or secret paths."""
+
+	return {
+		"contract": PRIVACY_POLICY_CONTRACT,
+		"version": PRIVACY_POLICY_VERSION,
+		"private_claim_fact_graph": [
+			{"id": class_id, "description": description, "classification": "private"}
+			for class_id, description in PRIVATE_DATA_CLASSES
+		],
+		"public_legal_source_graph": {
+			"id": PUBLIC_LEGAL_SOURCE_CLASS[0],
+			"description": PUBLIC_LEGAL_SOURCE_CLASS[1],
+			"classification": "public",
+			"distinct_from": "private_claim_fact_graph",
+		},
+		"at_rest_protection": PRIVACY_AT_REST_PROTECTION,
+		"encryption_at_rest_blocks_remote_llm": False,
+		"authenticates_tenant": False,
+		"agent_context": {
+			"fixtures_only": True,
+			"excluded_path_classes": ["session", "evidence", "export", "secret"],
+		},
+	}
+
+
+def _local_privacy_policy(user_id: str, case_id: str, *, consent_status: str = "implicit_local") -> Dict[str, Any]:
+	return {
+		"contract": PRIVACY_POLICY_CONTRACT,
+		"version": PRIVACY_POLICY_VERSION,
+		"user_id": str(user_id or ""),
+		"case_id": str(case_id or ""),
+		"processing_mode": PRIVACY_PROCESSING_LOCAL,
+		"cloud_processing_enabled": False,
+		"permitted_remote": None,
+		"scope": PRIVACY_SCOPE_USER_CASE,
+		"at_rest_protection": PRIVACY_AT_REST_PROTECTION,
+		"encryption_at_rest_blocks_remote_llm": False,
+		"authenticates_tenant": False,
+		"consent": {"status": consent_status, "cloud_processing": False},
+		"data_classes": {
+			"private": [class_id for class_id, _description in PRIVATE_DATA_CLASSES],
+			"public": [PUBLIC_LEGAL_SOURCE_CLASS[0]],
+		},
+		"agent_context": {
+			"fixtures_only": True,
+			"excluded_path_classes": ["session", "evidence", "export", "secret"],
+		},
+	}
+
+
+def privacy_policy_for_mode(user_id: str, case_id: str, mode: str) -> Dict[str, Any]:
+	normalized = str(mode or "").strip().lower()
+	if normalized in {"local", "local_private"}:
+		return _local_privacy_policy(user_id, case_id, consent_status="explicit_local")
+	if normalized in {"grok", "grok_cloud"}:
+		policy = _local_privacy_policy(user_id, case_id, consent_status="explicit_grok")
+		policy["processing_mode"] = PRIVACY_PROCESSING_GROK
+		policy["cloud_processing_enabled"] = True
+		policy["consent"] = {"status": "explicit_grok", "cloud_processing": True}
+		policy["permitted_remote"] = {
+			"provider": PRIVACY_GROK_PROVIDER,
+			"model": PRIVACY_GROK_MODEL,
+		}
+		return policy
+	raise ValueError("privacy_denied:unknown_mode")
+
+
+def _policy_rejection_reason(raw: Any, *, user_id: str, case_id: str) -> Optional[str]:
+	if not isinstance(raw, Mapping):
+		return "legacy_missing" if raw is None else PRIVACY_DENIAL_MALFORMED
+	if str(raw.get("contract") or "") != PRIVACY_POLICY_CONTRACT:
+		return PRIVACY_DENIAL_MALFORMED
+	if str(raw.get("version") or "") != PRIVACY_POLICY_VERSION:
+		return PRIVACY_DENIAL_VERSION
+	if str(raw.get("scope") or "") != PRIVACY_SCOPE_USER_CASE:
+		return PRIVACY_DENIAL_SCOPE_FIELD
+	policy_user = str(raw.get("user_id") or "")
+	policy_case = str(raw.get("case_id") or "")
+	if not policy_user or not policy_case or policy_user != str(user_id or "") or policy_case != str(case_id or ""):
+		return PRIVACY_DENIAL_CASE
+	if raw.get("authenticates_tenant") is not False:
+		return PRIVACY_DENIAL_MALFORMED
+	if raw.get("encryption_at_rest_blocks_remote_llm") is not False:
+		return PRIVACY_DENIAL_MALFORMED
+	if str(raw.get("at_rest_protection") or "") != PRIVACY_AT_REST_PROTECTION:
+		return PRIVACY_DENIAL_MALFORMED
+	consent = raw.get("consent")
+	if not isinstance(consent, Mapping) or str(consent.get("status") or "") not in _CONSENT_STATUSES:
+		return PRIVACY_DENIAL_MALFORMED
+	mode = str(raw.get("processing_mode") or "")
+	cloud = raw.get("cloud_processing_enabled")
+	permitted = raw.get("permitted_remote")
+	consent_status = str(consent.get("status") or "")
+	if mode == PRIVACY_PROCESSING_LOCAL:
+		if cloud is not False or permitted is not None or consent.get("cloud_processing") is not False:
+			return PRIVACY_DENIAL_MALFORMED
+		if consent_status == "explicit_grok":
+			return PRIVACY_DENIAL_MALFORMED
+	elif mode == PRIVACY_PROCESSING_GROK:
+		if cloud is not True or consent_status != "explicit_grok" or consent.get("cloud_processing") is not True:
+			return PRIVACY_DENIAL_MALFORMED
+		if not isinstance(permitted, Mapping):
+			return PRIVACY_DENIAL_MALFORMED
+		if set(permitted.keys()) != {"provider", "model"}:
+			return PRIVACY_DENIAL_MALFORMED
+		if str(permitted.get("provider") or "") != PRIVACY_GROK_PROVIDER:
+			return PRIVACY_DENIAL_MALFORMED
+		if str(permitted.get("model") or "") != PRIVACY_GROK_MODEL:
+			return PRIVACY_DENIAL_MALFORMED
+	else:
+		return PRIVACY_DENIAL_MALFORMED
+	data_classes = raw.get("data_classes")
+	if not isinstance(data_classes, Mapping):
+		return PRIVACY_DENIAL_MALFORMED
+	if list(data_classes.get("private") or []) != [class_id for class_id, _description in PRIVATE_DATA_CLASSES]:
+		return PRIVACY_DENIAL_MALFORMED
+	if list(data_classes.get("public") or []) != [PUBLIC_LEGAL_SOURCE_CLASS[0]]:
+		return PRIVACY_DENIAL_MALFORMED
+	agent_context = raw.get("agent_context")
+	if not isinstance(agent_context, Mapping) or agent_context.get("fixtures_only") is not True:
+		return PRIVACY_DENIAL_MALFORMED
+	if list(agent_context.get("excluded_path_classes") or []) != ["session", "evidence", "export", "secret"]:
+		return PRIVACY_DENIAL_MALFORMED
+	return None
+
+
+def inspect_privacy_policy(raw: Any, *, user_id: str, case_id: str) -> Dict[str, Any]:
+	"""Validate one serialized policy. Malformed input never enables cloud processing."""
+
+	reason = _policy_rejection_reason(raw, user_id=user_id, case_id=case_id)
+	if reason is None and isinstance(raw, Mapping):
+		admitted = dict(raw)
+		return {
+			"admitted": True,
+			"reason": "ok",
+			"cloud_processing_enabled": bool(admitted.get("cloud_processing_enabled")),
+			"policy": admitted,
+		}
+	load_reason = "legacy_missing" if reason == "legacy_missing" else str(reason or PRIVACY_DENIAL_MALFORMED)
+	return {
+		"admitted": False,
+		"reason": load_reason,
+		"cloud_processing_enabled": False,
+		"policy": _local_privacy_policy(user_id, case_id),
+	}
+
+
+def coerce_effective_privacy_policy(raw: Any, *, user_id: str, case_id: str) -> Dict[str, Any]:
+	inspection = inspect_privacy_policy(raw, user_id=user_id, case_id=case_id)
+	return inspection["policy"]
+
+
+def build_complaint_privacy_context(
+	policy: Any,
+	*,
+	user_id: str,
+	case_id: str,
+	data_class: str,
+) -> Dict[str, Any]:
+	inspection = inspect_privacy_policy(policy, user_id=user_id, case_id=case_id)
+	return {
+		"contract": PRIVACY_CONTEXT_CONTRACT,
+		"version": PRIVACY_POLICY_VERSION,
+		"user_id": str(user_id or ""),
+		"case_id": str(case_id or ""),
+		"data_class": str(data_class or ""),
+		"policy": inspection["policy"],
+		"load": {
+			"admitted": inspection["admitted"],
+			"reason": inspection["reason"],
+			"cloud_processing_enabled": inspection["cloud_processing_enabled"],
+		},
+	}
+
+
+def _resolved_remote_target(provider: Optional[str], model_name: Optional[str]) -> tuple[str, str]:
+	explicit_provider = str(provider or "").strip()
+	explicit_model = str(model_name or "").strip()
+	ambient: list[str] = []
+	for name in _AMBIENT_PROVIDER_ENVS:
+		value = os.getenv(name, "").strip()
+		if value:
+			ambient.append(value)
+	unique = {item.lower() for item in ambient}
+	if explicit_provider:
+		resolved_provider = explicit_provider
+	elif len(unique) == 1:
+		resolved_provider = ambient[0]
+	elif not unique:
+		resolved_provider = ""
+	else:
+		resolved_provider = ""
+	return resolved_provider, explicit_model
+
+
+def _privacy_context_block_reason(
+	context: Any,
+	*,
+	provider: Optional[str],
+	model_name: Optional[str],
+) -> Optional[str]:
+	"""Return a stable denial code, or None when this call may reach preparation.
+
+	A missing context keeps historical callers working. A present context is the
+	first-party private boundary and is decided before provider preparation.
+	"""
+
+	if context is None:
+		return None
+	if not isinstance(context, Mapping):
+		return PRIVACY_DENIAL_MALFORMED
+	if str(context.get("contract") or "") != PRIVACY_CONTEXT_CONTRACT:
+		return PRIVACY_DENIAL_MALFORMED
+	if str(context.get("version") or "") != PRIVACY_POLICY_VERSION:
+		return PRIVACY_DENIAL_VERSION
+	data_class = str(context.get("data_class") or "")
+	if data_class not in _KNOWN_DATA_CLASSES:
+		return PRIVACY_DENIAL_MALFORMED
+	user_id = str(context.get("user_id") or "")
+	case_id = str(context.get("case_id") or "")
+	inspection = inspect_privacy_policy(context.get("policy"), user_id=user_id, case_id=case_id)
+	if not inspection["admitted"]:
+		reason = str(inspection["reason"] or PRIVACY_DENIAL_MALFORMED)
+		if reason == "legacy_missing":
+			return PRIVACY_DENIAL_MALFORMED
+		return reason
+	resolved_provider, resolved_model = _resolved_remote_target(provider, model_name)
+	exact_grok = (
+		resolved_provider.strip().lower() == PRIVACY_GROK_PROVIDER
+		and resolved_model == PRIVACY_GROK_MODEL
+	)
+	if not inspection["cloud_processing_enabled"]:
+		return PRIVACY_DENIAL_CLOUD_DISABLED
+	if not exact_grok:
+		return PRIVACY_DENIAL_SCOPE
+	return None
+
+
 __all__ = [
 	"generate_text",
 	"generate_text_via_router",
@@ -797,4 +1166,14 @@ __all__ = [
 	"LLM_ROUTER_AVAILABLE",
 	"LLM_ROUTER_ERROR",
 	"HF_ROUTER_DEFAULT_BASE_URL",
+	"PRIVACY_POLICY_CONTRACT",
+	"PRIVACY_POLICY_VERSION",
+	"PRIVACY_AT_REST_PROTECTION",
+	"PRIVACY_GROK_PROVIDER",
+	"PRIVACY_GROK_MODEL",
+	"build_complaint_privacy_context",
+	"coerce_effective_privacy_policy",
+	"complaint_data_class_inventory",
+	"inspect_privacy_policy",
+	"privacy_policy_for_mode",
 ]
