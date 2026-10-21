@@ -788,12 +788,12 @@
     "completed": 20,
     "pending": 38,
     "total": 58,
-    "state": "stopped_ready_to_continue_after_ops04_health_parent_corrections",
-    "observed_at": "2026-10-21T18:26:11.862575+00:00",
+    "state": "stopped_ready_for_fresh_ops05_admission_after_bootstrap_correction",
+    "observed_at": "2026-10-21T18:59:42.600283+00:00",
     "release_qualified": false,
     "continue_until_all58_completed": true,
     "cached_native_completed": 20,
-    "source": "Committed taskboard20, source-bound original OPS04 native callback, and retained cached projection20; ordinary native execution owns further projection refresh."
+    "source": "Committed taskboard20 and retained cached projection20 remain unchanged. Scoped bootstrap correction grants no task completion; OPS05 still requires fresh native validation and callback."
   },
   "pending_task_runtime_guidance": {
     "receipt": "/tmp/complaint-pending-guidance-install-20261021-63nbl1nl/receipt.json",
@@ -2430,6 +2430,17 @@
       "continue_until_all58_completed": true,
       "cached_native_completed": 18,
       "source": "Committed taskboard19, two source-bound original native callbacks, and exact retained cached projection18; ordinary next pass owns projection refresh."
+    },
+    {
+      "completed": 20,
+      "pending": 38,
+      "total": 58,
+      "state": "stopped_ready_to_continue_after_ops04_health_parent_corrections",
+      "observed_at": "2026-10-21T18:26:11.862575+00:00",
+      "release_qualified": false,
+      "continue_until_all58_completed": true,
+      "cached_native_completed": 20,
+      "source": "Committed taskboard20, source-bound original OPS04 native callback, and retained cached projection20; ordinary native execution owns further projection refresh."
     }
   ],
   "dur002_tui02_source_corrections_after_native_completion": {
@@ -3640,6 +3651,160 @@
     "ops05_native_admission_performed": false,
     "limits": [
       "The OPS05 projection contains only two synthetic authentication fixture updates; OPS05 production is reserved for separate native admission.",
+      "Corrective cases use isolated synthetic data and explicitly fenced providers/network; they do not prove live model availability or legal sufficiency.",
+      "Native task completions remain historical original callbacks; corrective application qualification grants no additional task or retry authority.",
+      "The already published future-only B/C native changes remain uninstalled in this epoch; runtime source remains A.",
+      "38 of58 tasks remain, and release qualification remains false."
+    ]
+  },
+  "native_validation_bootstrap_source_correction": {
+    "installation": {
+      "path": "/tmp/complaint-bootstrap-parent-install-publish-20261021-_o1hxe9h/installed.json",
+      "sha256": "3efc0c82064191b058b7891583d9a6e6f25906a499d6d8f17eeecb0c9ea84af4"
+    },
+    "combined_current_source_qualification": {
+      "path": "/tmp/complaint-ops20-parent-ops04-bootstrap-final-20261021-87xsrv0i/bound_source_receipt.json",
+      "sha256": "c75056d0da0ce697a92962fe01e4ead7e7aa6e237aeb41d9e3ee4fe074b94d6e"
+    },
+    "qualified_source_commit": "58a53dc8b56e93bdd6664650227bec24727bc974",
+    "verified_historical_native_completions": [
+      {
+        "task_id": "CIMP-OPS-04",
+        "task_cid": "baguqeeradgizlq3d42fdsdptlkqemj5z4zj4npysghy36tpcgg2ec27dkrna",
+        "event_id": "sha256:4dbd7c80e524763b23b006aaef5198ae617990999ae7b1de985db0e9c9047963",
+        "native_events": {
+          "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/complaint_intake_events.jsonl",
+          "sha256": "b05f01302c816c97b2e560ec930e335ed4004991a79a40f37baae2351f508697"
+        },
+        "provider_candidate": "7b92bf2c661fe09a69fc8e66b553b07c8ad54299",
+        "integration_commit": "e7b6b4c0d5eab575a171556d5d8ce48d21a2ebd6",
+        "request_id": "1792601504292877229-1345237-7601a167c88e",
+        "native_required_passed": 12,
+        "native_host_log": {
+          "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/implementation_logs/cimp-ops-04-attempt-1-55f3ea28b50079551bea353f509a4da3.log",
+          "sha256": "6cd7dd1c35d800017da27bbf77d2f217b19dcfe7992b6d0a8efe438ab9e64150"
+        },
+        "sealed_native_validation_passed": true,
+        "native_board_completion": true,
+        "durable_queue_completion_verified": true,
+        "original_provider_dispatched": true,
+        "original_attempt_consumed": true,
+        "corrective_qualification_grants_completion": false
+      }
+    ],
+    "stopped_native_preimage": {
+      "path": "/tmp/complaint-after-ops05-boundary-native-preimage-20261021-o8nia37r/receipt.json",
+      "sha256": "e2acad1744fe441d2bfb605aedd6ad43a0d02265638715c32385d024a1f0e708"
+    },
+    "native_supervisor_commit": "b646cddfe895991f64afae2f2aef4c359ceaa9bf",
+    "native_publication_ref": "refs/heads/codex/complaint-intake-grok-only-20261021",
+    "native_ref_commit": "b646cddfe895991f64afae2f2aef4c359ceaa9bf",
+    "unrelated_native_main_unchanged": "e227152f7ae3cbd404c5da22f21d4b5612ebef2b",
+    "runtime_revision_unchanged": "sha256:cce0c30aa68db00389e06bd352b5441ee10252d8ae917986bf49f3295d9e5a8a",
+    "native_authority_files10_unchanged": {
+      "ipfs_accelerate_py/agent_supervisor/merge/workspace_quarantine.py": {
+        "sha256": "5a470ee8265f8d7b18daa44d2f0075569aaca287ff194a046823d6f576860b03",
+        "git_blob": "9bd5a2aa75828e46b42d2826457d1ee16cf59ad0",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/merge/worktree_lifecycle.py": {
+        "sha256": "b7f8508b4b4b50d5bc259c186b55c4c6f87e938d99689a913383a8a35130249f",
+        "git_blob": "3eddcaf0f95b8abbba3679df6cf8ecd677c01d57",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/rescue/recovery_diagnostics.py": {
+        "sha256": "3a9f10aebcbb0271cbd9f993c1b8b9d21bcd5b78aa7bca5ad658aabf645f5f4d",
+        "git_blob": "1dda05f2477f64e13afbd7d88158de70fa20b8b6",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/rescue/supervisor_watchdog.py": {
+        "sha256": "bd3ea780d15a324f659e9116d3d2b3af7a656d9c5caabfa06a80548e5a1b4dc7",
+        "git_blob": "733e47d6215a51f897a42b99450f24689dd41921",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/current_incident_adjudication.py": {
+        "sha256": "e40f64adf8da98e08556a639e247b03f2369f51c3fe3cb43939afb1455be209c",
+        "git_blob": "717121f82b8a979ab384c1d441ca839fdf259630",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py": {
+        "sha256": "f5a2a70434fe9f294375f3a28a83afae76c5afeb1892dd54844eeba55ae9a0ed",
+        "git_blob": "2e97474b47ec1653c2c7ee993f797ddd53fe7507",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_supervisor.py": {
+        "sha256": "6ded241c546fbc813ea3d3d4462aa795df566ea492440241b6506f6d0e707ac7",
+        "git_blob": "e753376e9461d86145f2ea98f14a85a9e9d54a2c",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/portal_task_state_control_plane.py": {
+        "sha256": "183326a143f3bf2c597d26947edf66e0859619de30aebc4716bb5bb0f21a9dd7",
+        "git_blob": "e01d2dd14e8ca107f9bbfbca87adf56184a2dd90",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/supervisor_loop.py": {
+        "sha256": "350e33ddbf94649c23a2408fb14cd2539f3ddd014e01e0b2146cce2c700e5221",
+        "git_blob": "b8b142e970051d00ff588bc59bf00cc0237be6be",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/supervisor_runtime.py": {
+        "sha256": "71e3fe8ba91ae923ff8d547c4f407ff1af18ec164e741cee4835b0ae9ce19427",
+        "git_blob": "af6a19fb60e0890e5f771d6a6ac06d430b27726e",
+        "mode": 436,
+        "git_mode": "100644"
+      }
+    },
+    "source_scope": [
+      "integrations/ipfs_accelerate/improvement_runner.py",
+      "tests/test_improvement_evidence_gate.py"
+    ],
+    "combined_corrective_cases_passed": 248,
+    "combined_corrective_zero_skips_failures_errors": true,
+    "new_native_completions": [],
+    "historical_proofs": {
+      "parent448": {
+        "path": "/tmp/complaint-ops20-parent-final-v5-20261021-5agot3op/bound_source_receipt.json",
+        "sha256": "887c741b8f9701eff1518cc0c5a43099811bd95d209a310823128e3f0b83cacc"
+      },
+      "prior_ops05_interaction478": {
+        "path": "/tmp/complaint-ops20-parent-ops05-current-parent-20261021-_to6gsfk/bound_source_receipt.json",
+        "sha256": "c8d3209ebd2ae38f225da9eb2ad7c0f12ef128a8d238efa5e7441d47ca44e111"
+      },
+      "failed_native_admission": {
+        "path": "/tmp/complaint-ops05-clean-native-admission-20261021-jdxdtzdf/final_receipt.json",
+        "sha256": "fc8f013bd0d4af0e75d0a5d5e352efa988f1dc333478e1737ca78aa5d5cec408"
+      },
+      "failed_native_reconciliation": {
+        "path": "/tmp/complaint-ops05-clean-native-admission-20261021-jdxdtzdf/native_reconciliation.json",
+        "sha256": "26d782935731416f1edb5484ac38a6489389d4f5f62e047458f0e76e37c37240"
+      }
+    },
+    "board_completed": 20,
+    "board_pending": 38,
+    "cached_native_completed": 20,
+    "ordinary_next_pass_owns_projection_refresh": true,
+    "full_native_state_taskboard_attempts_holds_and_old_history_unchanged": true,
+    "old_settlement_journal": {
+      "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/ordinary-incident-adjudications/901fc6a204914b365a769a688fca9175a1d4e0cbcb9399257fdd6cb32b126712.json",
+      "sha256": "c3f404c4a3a584ab31e540d86e5ba93223cc6d30d64b5e9ba573982864a32701"
+    },
+    "provider_dispatched": false,
+    "attempt_refunded": false,
+    "completion_authority": false,
+    "release_qualified": false,
+    "bootstrap_source_correction_only": true,
+    "ops05_native_admission_performed": false,
+    "limits": [
+      "This source correction fixes actual native validation bootstrap. Historical448/478 and failed provider-free admission remain references only; current four-module qualification grants no native completion.",
       "Corrective cases use isolated synthetic data and explicitly fenced providers/network; they do not prove live model availability or legal sufficiency.",
       "Native task completions remain historical original callbacks; corrective application qualification grants no additional task or retry authority.",
       "The already published future-only B/C native changes remain uninstalled in this epoch; runtime source remains A.",
