@@ -283,7 +283,7 @@ Implementation instructions:
 
 ## CIMP-FACT-01 Define versioned user assertion and source provenance contracts
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.facts
