@@ -3026,6 +3026,11 @@ class ComplaintWorkspaceService:
                 )
             else:
                 receipt = mediator.transition_shared_interview(action="status", **kwargs)
+            # Refusals are authoritative and have no accepted transition to
+            # publish. In particular, an older provider-stage error must not
+            # replace a stale-question receipt or change its saved projection.
+            if receipt.get("status") == "refused":
+                return receipt
             exported = mediator.workflow_actions.export_session_projection()
             if exported:
                 state["shared_interview"] = exported
@@ -3044,7 +3049,7 @@ class ComplaintWorkspaceService:
                 prior_receipts.extend(item for item in snapshot["receipts"] if item["request_id"] not in seen)
                 state["intake_router"] = {**snapshot, "session_id": router_session,
                                           "receipts": prior_receipts[-32:]}
-                if snapshot["errors"]:
+                if snapshot["errors"] and not receipt.get("error"):
                     # Accepted user answers and their graph effects remain in
                     # this same transaction. An unresolved provider stage is
                     # explicit on resume and can never establish completion.

@@ -82,6 +82,19 @@ def _service(tmp_path: Path, user_id: str) -> ComplaintWorkspaceService:
     return service
 
 
+def _assert_refused_state_unchanged(before, after):
+    for field in ("shared_interview", "intake_router", "intake_answers", "intake_history"):
+        assert after.get(field) == before.get(field), field
+
+
+def _assert_local_role_failure(receipt):
+    assert receipt["error"]["code"] == "provider_unavailable"
+    assert receipt["error"]["resumable"] is True
+    assert set(receipt["error"]["router_failures"].values()) == {"privacy_denied"}
+    assert receipt["intake_complete"] is False
+    assert receipt["readiness"]["ready_to_advance"] is False
+
+
 def _graph_fingerprint(mediator) -> tuple:
     from complaint_phases import ComplaintPhase
 
@@ -240,12 +253,21 @@ def test_workspace_package_and_resume_share_inquiry(tmp_path, monkeypatch):
     assert opened["inquiry"]["question_id"] == interview["inquiry"]["inquiry_id"]
     inquiry_id = interview["inquiry"]["inquiry_id"]
     revision = interview["expected_question_revision"]
-    stale = service.run_intake_chat_turn(
-        user_id,
-        message="stale body",
-        question_id=inquiry_id,
-        expected_question_revision=revision + 3,
-    )
+    before_stale = deepcopy(service.get_session(user_id)["session"])
+    from integrations.ipfs_datasets import llm
+    def no_stale_provider():
+        pytest.fail("stale answer entered the native provider loader")
+    with monkeypatch.context() as stale_guard:
+        stale_guard.setattr(llm, "load_observed_llm_symbols", no_stale_provider)
+        stale_guard.setattr(service._interview_mediators[(user_id, user_id)], "request_intake_candidates",
+                            lambda *args, **kwargs: pytest.fail("stale answer entered a typed request"))
+        stale = service.run_intake_chat_turn(
+            user_id,
+            message="stale body",
+            question_id=inquiry_id,
+            expected_question_revision=revision + 3,
+        )
+    _assert_refused_state_unchanged(before_stale, service.get_session(user_id)["session"])
     assert stale["interview"]["error"]["code"] == "stale_question"
     assert stale["interview"]["session_revision"] == interview["session_revision"]
     answered = run_intake_chat_turn(
@@ -255,7 +277,8 @@ def test_workspace_package_and_resume_share_inquiry(tmp_path, monkeypatch):
         expected_question_revision=revision,
         service=service,
     )
-    assert answered["interview"]["error"] is None
+    _assert_local_role_failure(answered["interview"])
+    assert sum(item.get("answer") == ANSWER for item in answered["session"]["shared_interview"]["denoiser_history"]) == 1
     assert answered["interview"]["session_revision"] == interview["session_revision"] + 1
     fresh = ComplaintWorkspaceService(root_dir=tmp_path / "sessions")
     fresh.unlock_private_keys(passphrase="synthetic-shared-interview-passphrase")
@@ -264,6 +287,8 @@ def test_workspace_package_and_resume_share_inquiry(tmp_path, monkeypatch):
     assert resumed["interview"]["inquiry"]["inquiry_id"] == answered["interview"]["inquiry"]["inquiry_id"]
     assert resumed["interview"]["expected_question_revision"] == answered["interview"]["expected_question_revision"]
     assert resumed["original_complaint"]["text"] == NARRATIVE
+    assert resumed["session"]["shared_interview"]["denoiser_history"] == answered["session"]["shared_interview"]["denoiser_history"]
+    _assert_local_role_failure(resumed["interview"])
 
 
 def test_complaint_cli_import_uses_isolated_session_dir(tmp_path, monkeypatch):
@@ -299,8 +324,10 @@ def test_first_answer_after_fresh_unlock_is_applied_not_only_resumed(tmp_path,mo
     opened=run_intake_chat_turn("synthetic-user",message=NARRATIVE,service=value)["interview"]
     fresh=ComplaintWorkspaceService(root_dir=tmp_path/"sessions")
     fresh.unlock_private_keys(passphrase="synthetic-independent-interview")
-    answered=run_intake_chat_turn("synthetic-user",message=ANSWER,question_id=opened["inquiry"]["inquiry_id"],expected_question_revision=opened["expected_question_revision"],service=fresh)["interview"]
-    assert answered["error"] is None
+    answered_payload=run_intake_chat_turn("synthetic-user",message=ANSWER,question_id=opened["inquiry"]["inquiry_id"],expected_question_revision=opened["expected_question_revision"],service=fresh)
+    answered=answered_payload["interview"]
+    _assert_local_role_failure(answered)
+    assert sum(item.get("answer") == ANSWER for item in answered_payload["session"]["shared_interview"]["denoiser_history"]) == 1
     assert answered["session_revision"] == opened["session_revision"] + 1
     assert answered["answered_count"] == 1
 
@@ -308,9 +335,14 @@ def test_stale_explicit_answer_does_not_mutate_legacy_answers_or_history(tmp_pat
     _block_external(monkeypatch); value=_independent_service(tmp_path)
     opened=run_intake_chat_turn("synthetic-user",message=NARRATIVE,service=value)["interview"]
     before=deepcopy(value.get_session("synthetic-user")["session"])
+    from integrations.ipfs_datasets import llm
+    monkeypatch.setattr(llm, "load_observed_llm_symbols", lambda: pytest.fail("stale answer entered provider loader"))
+    monkeypatch.setattr(value._interview_mediators[("synthetic-user", "synthetic-user")], "request_intake_candidates",
+                        lambda *args, **kwargs: pytest.fail("stale answer entered a typed request"))
     response=run_intake_chat_turn("synthetic-user",message="must not persist",question_id="party_name",expected_question_revision=opened["expected_question_revision"]+9,interview_action="answer",service=value)
     assert response["interview"]["status"] == "refused"
     after=value.get_session("synthetic-user")["session"]
+    _assert_refused_state_unchanged(before, after)
     assert after["intake_answers"] == before["intake_answers"]
     assert after["intake_history"] == before["intake_history"]
     assert response["accepted_answer"] is None
@@ -400,6 +432,11 @@ def test_stale_revision_reaches_same_transition_from_every_entrypoint(tmp_path, 
     _block_external(monkeypatch)
     value = _independent_service(tmp_path)
     current = value.run_intake_chat_turn("synthetic-user", message=NARRATIVE)["interview"]
+    before = deepcopy(value.get_session("synthetic-user")["session"])
+    from integrations.ipfs_datasets import llm
+    monkeypatch.setattr(llm, "load_observed_llm_symbols", lambda: pytest.fail("stale answer entered provider loader"))
+    monkeypatch.setattr(value._interview_mediators[("synthetic-user", "synthetic-user")], "request_intake_candidates",
+                        lambda *args, **kwargs: pytest.fail("stale answer entered a typed request"))
     args = {"user_id": "synthetic-user", "message": ANSWER,
         "question_id": current["inquiry"]["inquiry_id"],
         "expected_question_revision": current["expected_question_revision"] + 1,
@@ -414,4 +451,27 @@ def test_stale_revision_reaches_same_transition_from_every_entrypoint(tmp_path, 
     assert response["interview"]["status"] == "refused"
     assert response["interview"]["error"]["code"] == "stale_question"
     assert response["interview"]["session_revision"] == current["session_revision"]
-    assert value.get_session("synthetic-user")["session"]["shared_interview"]["answered_inquiries"] == []
+    after = value.get_session("synthetic-user")["session"]
+    _assert_refused_state_unchanged(before, after)
+    assert after["shared_interview"]["answered_inquiries"] == []
+
+
+def test_empty_current_answer_error_precedes_previous_provider_failure(tmp_path, monkeypatch):
+    _block_external(monkeypatch)
+    value = _independent_service(tmp_path)
+    opened = value.run_intake_chat_turn("synthetic-user", message=NARRATIVE)
+    current = opened["interview"]
+    _assert_local_role_failure(current)
+    before = deepcopy(opened["session"])
+    monkeypatch.setattr(value._interview_mediators[("synthetic-user", "synthetic-user")], "request_intake_candidates",
+                        lambda *args, **kwargs: pytest.fail("empty answer entered a typed request"))
+    response = value.run_intake_chat_turn(
+        "synthetic-user", interview_action="answer",
+        question_id=current["inquiry"]["inquiry_id"],
+        expected_question_revision=current["expected_question_revision"],
+    )
+    assert response["interview"]["error"]["code"] == "answer_required"
+    assert response["interview"]["status"] == "awaiting_user"
+    assert response["interview"]["error"]["resumable"] is True
+    _assert_refused_state_unchanged(before, response["session"])
+    assert response["accepted_answer"] is None

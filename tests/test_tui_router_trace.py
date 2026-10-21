@@ -361,13 +361,23 @@ def test_actual_shared_cli_saves_invocation_with_encrypted_cold_resume(terminal_
     service.set_privacy_policy('synthetic-user', 'grok')
     calls = []
     def generate(**kw):
+        control = json.loads(kw['prompt'])
+        assert control['operation'] in {'extract_facts', 'propose_questions'}
+        assert control['request_id'] == kw['observation_request_id']
         calls.append(kw)
-        return _result(kw, '{"entities":[],"relationships":[]}')
+        body = {key: control[key] for key in ('schema_version', 'operation', 'request_id')}
+        body.update(facts=[], questions=[])
+        return _result(kw, json.dumps(body))
     _observed(monkeypatch, generate)
+    from integrations.ipfs_datasets import llm
+    result_type, observation_type = _native_types()
+    monkeypatch.setattr(llm, 'load_observed_llm_symbols', lambda: (generate, result_type, observation_type))
     narrative = 'SYNTHETIC_NARRATIVE_FOR_ROUTER_TEST'
     monkeypatch.setattr(sys, 'stdin', io.StringIO(narrative + '\n.\nSynthetic Person\n'))
     cli.chat(user_id='synthetic-user', max_turns=2)
     assert calls, 'default canonical chat never reached the observed router backend'
+    assert {json.loads(call['prompt'])['operation'] for call in calls} == {'extract_facts', 'propose_questions'}
+    assert len({call['observation_request_id'] for call in calls}) == len(calls)
     session = service.get_session('synthetic-user')['session']
     projection = session['shared_interview']
     assert projection['knowledge_graph'] is not None
