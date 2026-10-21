@@ -398,7 +398,7 @@ Implementation instructions:
 
 ## CIMP-LAW-01 Require explicit jurisdiction and legally relevant date context
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.law
