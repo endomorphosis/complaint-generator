@@ -437,7 +437,10 @@ class LLMRouterBackend:
         result = generate(prompt=text, provider=PINNED_GROK_PROVIDER,
                           model_name=PINNED_GROK_MODEL, observation_request_id=request_id,
                           **{**options, "timeout": remaining, "grok_stream_progress": True,
-                             "grok_progress_callback": progress, "usage_cancel_event": self._cancel_event})
+                             "grok_progress_callback": progress, "usage_cancel_event": self._cancel_event,
+                             "grok_cli_cmd": ["grok"], "grok_tools": "read_file",
+                             "grok_disallowed_tools": "read_file,search_tool,use_tool",
+                             "grok_max_turns": 1, "grok_permission_mode": "dontAsk"})
         self._raise_if_cancelled()
         if deadline is not None and time.monotonic() >= deadline:
             self._fail("timeout", route_observation="timeout")

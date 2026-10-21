@@ -432,3 +432,53 @@ def test_shell_launcher_enters_private_canonical_chat_without_legacy_config():
     assert 'run.py' not in script and '--config' not in script
     assert 'COMMON_CRAWL_AUTO_CLONE_SOURCE=0' in script
     assert 'umask 077' in script
+
+
+def test_real_native_generation_overrides_ambient_command_and_denies_all_tools(monkeypatch):
+    """Actual native builder/observation, authored stream only; never a live call."""
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    from ipfs_accelerate_py import llm_router as router
+    from ipfs_accelerate_py.cli_runtime import grok_stream_capture as stream
+    from integrations.ipfs_datasets.llm import build_complaint_privacy_context, privacy_policy_for_mode
+    monkeypatch.setenv('IPFS_ACCELERATE_PY_GROK_CLI_CMD', 'grok --tools write_file --resume synthetic-foreign')
+    monkeypatch.setenv('IPFS_ACCELERATE_PY_GROK_CLI_TOOLS', 'write_file,run_terminal_cmd')
+    monkeypatch.setenv('IPFS_ACCELERATE_PY_GROK_CLI_PERMISSION_MODE', 'bypassPermissions')
+    monkeypatch.setenv('IPFS_ACCELERATE_PY_GROK_CLI_MAX_TURNS', '64')
+    monkeypatch.setattr(router, '_cli_available', lambda command: True)
+    provider = router._get_grok_cli_provider()
+    monkeypatch.setattr(router, 'get_default_router_deps', lambda: SimpleNamespace())
+    monkeypatch.setattr(router, 'get_llm_provider', lambda name, **kw: provider)
+    monkeypatch.setattr(router, '_response_cache_enabled', lambda: False)
+    @contextmanager
+    def sampling(environment, **kw): yield environment
+    monkeypatch.setattr(router, '_grok_zero_temperature_environment', sampling)
+    calls = []
+    def capture(argv, **kw):
+        calls.append(argv)
+        assert argv[0] == 'grok' and '--resume' not in argv
+        assert argv[argv.index('--tools') + 1] == 'read_file'
+        assert set(argv[argv.index('--disallowed-tools') + 1].split(',')) == {'read_file','search_tool','use_tool'}
+        assert argv[argv.index('--max-turns') + 1] == '1'
+        assert argv[argv.index('--permission-mode') + 1] == 'dontAsk'
+        assert argv[argv.index('--model') + 1] == PINNED_GROK_MODEL
+        assert '--no-subagents' in argv and '--disable-web-search' in argv
+        assert 0 < kw['timeout'] <= 2
+        assert Path(argv[argv.index('--prompt-file') + 1]).read_text() == COMPLAINT_MARKER
+        end = {'type':'end','stopReason':'end_turn','modelUsage':{PINNED_GROK_MODEL:{'outputTokens':1}}}
+        parser = stream.GrokStreamParser()
+        parser.feed(b''.join(json.dumps(frame).encode()+b'\n' for frame in [{'type':'text','data':'synthetic-ok'},end]), elapsed_seconds=.1)
+        parser.eof('stdout',elapsed_seconds=.2); parser.eof('stderr',elapsed_seconds=.2)
+        parser.process_exit(0,elapsed_seconds=.2)
+        return SimpleNamespace(returncode=0,timed_out=False,progress=parser.snapshot(elapsed_seconds=.2),
+            final_payload=parser.final_payload,stdout=json.dumps({**end,'text':parser.response_text}),stderr='',response_text=parser.response_text)
+    monkeypatch.setattr(stream, 'capture_grok_stream', capture)
+    result_type, observation_type = _native_types()
+    monkeypatch.setattr(module, 'load_observed_llm_symbols', lambda: (router.generate_text_with_observation,result_type,observation_type))
+    policy = privacy_policy_for_mode('synthetic','synthetic','grok')
+    context = build_complaint_privacy_context(policy,user_id='synthetic',case_id='synthetic',data_class='raw_intake')
+    backend, _ = _backend()
+    assert backend(COMPLAINT_MARKER,complaint_privacy_context=context) == 'synthetic-ok'
+    assert len(calls) == 1 and backend.task_receipts[-1]['provider_supported_identity'] is True
+    assert backend.task_receipts[-1]['live_canary'] is False
+    assert COMPLAINT_MARKER not in json.dumps(backend.task_receipts)
