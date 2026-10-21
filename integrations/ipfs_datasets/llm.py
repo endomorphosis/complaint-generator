@@ -287,6 +287,239 @@ def _new_request_id() -> str:
 	return uuid.uuid4().hex
 
 
+# One schema family for question proposals and extracted-fact candidates.
+# Spans are exact UTF-8 byte offsets into the original source, not code points.
+INTAKE_REQUEST_SCHEMA_VERSION = "intake_request_v1"
+INTAKE_REQUEST_SCHEMA_NAME = "intake_request_v1"
+INTAKE_OPERATIONS = frozenset({"propose_questions", "extract_facts"})
+INTAKE_FACT_FIELDS = frozenset({"party", "date", "location", "act", "harm"})
+INTAKE_MAX_QUESTIONS = 8
+INTAKE_MAX_FACTS = 16
+INTAKE_MAX_OUTPUT_BYTES = 262144
+_INTAKE_REF = re.compile(r"^[A-Za-z0-9_.:-]{1,128}\Z")
+_REQUEST_ID = re.compile(r"^[0-9a-f]{32}\Z")
+
+INTAKE_REQUEST_OBJECT_SCHEMA: Dict[str, Any] = {
+	"type": "object",
+	"additionalProperties": False,
+	"required": ["schema_version", "operation", "request_id", "questions", "facts"],
+	"properties": {
+		"schema_version": {"type": "string", "const": INTAKE_REQUEST_SCHEMA_VERSION},
+		"operation": {"type": "string", "enum": ["propose_questions", "extract_facts"]},
+		"request_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+		"questions": {
+			"type": "array",
+			"maxItems": INTAKE_MAX_QUESTIONS,
+			"items": {
+				"type": "object",
+				"additionalProperties": False,
+				"required": ["question_id", "prompt", "target_ref"],
+				"properties": {
+					"question_id": {"type": "string", "minLength": 1, "maxLength": 64},
+					"prompt": {"type": "string", "minLength": 1, "maxLength": 500},
+					"target_ref": {"type": "string", "minLength": 1, "maxLength": 128},
+				},
+			},
+		},
+		"facts": {
+			"type": "array",
+			"maxItems": INTAKE_MAX_FACTS,
+			"items": {
+				"type": "object",
+				"additionalProperties": False,
+				"required": ["field", "value", "source_start", "source_end", "target_ref"],
+				"properties": {
+					"field": {"type": "string", "enum": ["party", "date", "location", "act", "harm"]},
+					"value": {"type": "string", "minLength": 1, "maxLength": 500},
+					"source_start": {"type": "integer", "minimum": 0},
+					"source_end": {"type": "integer", "minimum": 0},
+					"target_ref": {"type": "string", "minLength": 1, "maxLength": 128},
+				},
+			},
+		},
+	},
+}
+
+
+class IntakeContractError(ValueError):
+	"""Schema or source-span rejection. The message is a stable code, never model text."""
+
+	def __init__(self, code: str = "malformed"):
+		self.code = code if code in {"malformed", "identity", "span"} else "malformed"
+		super().__init__(self.code)
+
+
+def intake_request_response_format() -> Dict[str, Any]:
+	"""Strict native response_format. Callers must not repair prose into this shape."""
+
+	return {
+		"type": "json_schema",
+		"json_schema": {
+			"name": INTAKE_REQUEST_SCHEMA_NAME,
+			"strict": True,
+			"schema": INTAKE_REQUEST_OBJECT_SCHEMA,
+		},
+	}
+
+
+def _reject_duplicate_keys(items):
+	parsed: Dict[str, Any] = {}
+	for key, value in items:
+		if key in parsed:
+			raise IntakeContractError("malformed")
+		parsed[key] = value
+	return parsed
+
+
+def _reject_nonfinite(_value):
+	raise IntakeContractError("malformed")
+
+
+def classify_router_failure(exc: BaseException) -> str:
+	"""Map a provider failure to one stable kind. The kind never echoes the exception body."""
+
+	name = type(exc).__name__.lower()
+	if isinstance(exc, TimeoutError) or name in {"timeoutexpired", "timeouterror"}:
+		return "timeout"
+	if "cancel" in name:
+		return "cancelled"
+	text = str(exc).lower()
+	if any(token in text for token in ("insufficient_quota", "quota exceeded", "quota_exhausted", "rate limit")):
+		return "quota"
+	if any(token in text for token in ("does not match the requested schema", "structured output", "malformed json", "duplicate fields")):
+		return "malformed"
+	return "unavailable"
+
+
+def _host_validate_intake_tree(payload: Any, *, request_id: str, operation: str, source_text: str) -> Dict[str, Any]:
+	if type(payload) is not dict:
+		raise IntakeContractError("malformed")
+	allowed = {"schema_version", "operation", "request_id", "questions", "facts"}
+	if set(payload) != allowed:
+		raise IntakeContractError("malformed")
+	if payload.get("schema_version") != INTAKE_REQUEST_SCHEMA_VERSION:
+		raise IntakeContractError("malformed")
+	if payload.get("operation") not in INTAKE_OPERATIONS or payload.get("operation") != operation:
+		raise IntakeContractError("identity")
+	if type(payload.get("request_id")) is not str or payload.get("request_id") != request_id or _REQUEST_ID.fullmatch(request_id) is None:
+		raise IntakeContractError("identity")
+	questions = payload.get("questions")
+	facts = payload.get("facts")
+	if type(questions) is not list or type(facts) is not list:
+		raise IntakeContractError("malformed")
+	if len(questions) > INTAKE_MAX_QUESTIONS or len(facts) > INTAKE_MAX_FACTS:
+		raise IntakeContractError("malformed")
+	if operation == "propose_questions" and facts:
+		raise IntakeContractError("malformed")
+	if operation == "extract_facts" and questions:
+		raise IntakeContractError("malformed")
+	source = source_text.encode("utf-8")
+	clean_questions = []
+	for item in questions:
+		if type(item) is not dict or set(item) != {"question_id", "prompt", "target_ref"}:
+			raise IntakeContractError("malformed")
+		question_id = item.get("question_id")
+		prompt = item.get("prompt")
+		target = item.get("target_ref")
+		if type(question_id) is not str or type(prompt) is not str or type(target) is not str:
+			raise IntakeContractError("malformed")
+		if not (1 <= len(question_id) <= 64 and 1 <= len(prompt) <= 500 and _INTAKE_REF.fullmatch(target)):
+			raise IntakeContractError("malformed")
+		clean_questions.append({"question_id": question_id, "prompt": prompt, "target_ref": target})
+	clean_facts = []
+	for item in facts:
+		if type(item) is not dict or set(item) != {"field", "value", "source_start", "source_end", "target_ref"}:
+			raise IntakeContractError("span")
+		field = item.get("field")
+		value = item.get("value")
+		start = item.get("source_start")
+		end = item.get("source_end")
+		target = item.get("target_ref")
+		if field not in INTAKE_FACT_FIELDS or type(value) is not str or type(target) is not str:
+			raise IntakeContractError("span")
+		if type(start) is not int or type(end) is not int or isinstance(start, bool) or isinstance(end, bool):
+			raise IntakeContractError("span")
+		if not (1 <= len(value) <= 500 and _INTAKE_REF.fullmatch(target)):
+			raise IntakeContractError("span")
+		if start < 0 or end < start or end > len(source):
+			raise IntakeContractError("span")
+		try:
+			excerpt = source[start:end].decode("utf-8")
+		except UnicodeDecodeError:
+			raise IntakeContractError("span") from None
+		if excerpt != value:
+			raise IntakeContractError("span")
+		clean_facts.append({
+			"field": field,
+			"value": value,
+			"source_start": start,
+			"source_end": end,
+			"target_ref": target,
+		})
+	return {
+		"schema_version": INTAKE_REQUEST_SCHEMA_VERSION,
+		"operation": operation,
+		"request_id": request_id,
+		"questions": clean_questions,
+		"facts": clean_facts,
+	}
+
+
+def parse_intake_request(raw: str, *, request_id: str, operation: str, source_text: str) -> Dict[str, Any]:
+	"""Validate one model payload. Fenced prose and regex extraction are not accepted."""
+
+	if type(raw) is not str or len(raw.encode("utf-8")) > INTAKE_MAX_OUTPUT_BYTES:
+		raise IntakeContractError("malformed")
+	text = raw.strip()
+	if not text or text[0] != "{":
+		raise IntakeContractError("malformed")
+	try:
+		payload = json.loads(text, object_pairs_hook=_reject_duplicate_keys, parse_constant=_reject_nonfinite)
+	except IntakeContractError:
+		raise
+	except (json.JSONDecodeError, TypeError, ValueError, RecursionError):
+		raise IntakeContractError("malformed") from None
+	try:
+		from ipfs_accelerate_py.cli_runtime.grok_structured_output import decode_response, validate_response_format
+
+		_schema, _encoded, validator = validate_response_format(intake_request_response_format())
+		decode_response(text, validator)
+	except IntakeContractError:
+		raise
+	except ModuleNotFoundError:
+		# Native jsonschema/referencing support is absent. Host field and span
+		# checks still run; this does not accept unconstrained prose.
+		pass
+	except ImportError:
+		pass
+	except ValueError:
+		raise IntakeContractError("malformed") from None
+	except Exception:
+		raise IntakeContractError("malformed") from None
+	return _host_validate_intake_tree(payload, request_id=request_id, operation=operation, source_text=source_text)
+
+
+def _pop_host_metadata(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+	"""Keep correlation and intake controls out of the provider allowlist."""
+
+	request_id = kwargs.pop("request_id", None)
+	if request_id is None:
+		request_id = kwargs.pop("intake_request_id", None)
+	else:
+		kwargs.pop("intake_request_id", None)
+	operation = kwargs.pop("intake_operation", None)
+	source_text = kwargs.pop("intake_source_text", None)
+	if type(request_id) is not str or _REQUEST_ID.fullmatch(request_id) is None:
+		request_id = _new_request_id()
+	if operation is not None and operation not in INTAKE_OPERATIONS:
+		operation = None
+	return {
+		"request_id": request_id,
+		"intake_operation": operation,
+		"intake_source_text": source_text if type(source_text) is str else "",
+	}
+
+
 # Only literal first-party preflight messages may enter a public receipt.
 # Partial prompt echoes and short credentials cannot be detected by length or
 # comparison with the full prompt, so arbitrary exception text is never copied.
@@ -318,11 +551,36 @@ def _apply_pinned_grok_options(provider: str, call_options: Dict[str, Any]) -> N
 	)
 
 
+def _redacted_router_trace(trace: Any, *, request_id: str, requested_provider: str, requested_model: str) -> Dict[str, Any]:
+	"""Copy route identity only. Prompt, credentials, and raw errors stay out."""
+
+	fields = vetted_route_observation(
+		trace if isinstance(trace, Mapping) else None,
+		requested_provider=requested_provider,
+		requested_model=requested_model,
+	)
+	version = ""
+	if isinstance(trace, Mapping):
+		for key in ("router_version", "model_version", "effective_model_version"):
+			value = trace.get(key)
+			if type(value) is str and value.strip() and len(value) <= 64 and " " not in value:
+				version = value.strip()
+				break
+	fields["request_id"] = request_id
+	fields["router_version"] = version
+	fields["configured_provider_name"] = requested_provider
+	fields["configured_model_name"] = requested_model
+	fields["inference_owner"] = INFERENCE_OWNER
+	fields["prompt_logged"] = False
+	return fields
+
+
 def _route_receipt(
 	*,
 	requested_provider: str,
 	requested_model: str,
 	observe: bool,
+	request_id: str = "",
 ) -> Dict[str, Any]:
 	trace: Any = None
 	if observe and callable(get_last_generation_trace):
@@ -330,14 +588,14 @@ def _route_receipt(
 			trace = get_last_generation_trace()
 		except Exception:
 			trace = None
-	fields = vetted_route_observation(
+	if type(request_id) is not str or _REQUEST_ID.fullmatch(request_id) is None:
+		request_id = _new_request_id()
+	return _redacted_router_trace(
 		trace,
+		request_id=request_id,
 		requested_provider=requested_provider,
 		requested_model=requested_model,
 	)
-	fields["request_id"] = _new_request_id()
-	fields["inference_owner"] = INFERENCE_OWNER
-	return fields
 
 
 def _pop_first_string(options: Dict[str, Any], *names: str) -> str:
@@ -710,6 +968,9 @@ def generate_text_via_router(
 	model_name: Optional[str] = None,
 	**kwargs: Any,
 ) -> str:
+	host_meta = _pop_host_metadata(kwargs)
+	if host_meta["intake_operation"] is not None:
+		kwargs["response_format"] = intake_request_response_format()
 	privacy_context = kwargs.pop("complaint_privacy_context", None)
 	privacy_block = _privacy_context_block_reason(
 		privacy_context,
@@ -765,6 +1026,13 @@ def generate_text_with_metadata(
 	model_name: Optional[str] = None,
 	**kwargs: Any,
 ) -> Dict[str, Any]:
+	host_meta = _pop_host_metadata(kwargs)
+	request_id = host_meta["request_id"]
+	intake_operation = host_meta["intake_operation"]
+	intake_source_text = host_meta["intake_source_text"]
+	if intake_operation is not None:
+		kwargs["response_format"] = intake_request_response_format()
+		kwargs.setdefault("max_tokens", 1024)
 	privacy_context = kwargs.pop("complaint_privacy_context", None)
 	privacy_block = _privacy_context_block_reason(
 		privacy_context,
@@ -789,8 +1057,10 @@ def generate_text_with_metadata(
 				"model_name": model_name or "",
 				"resumable": True,
 				"live_canary": False,
-				"request_id": _new_request_id(),
+				"request_id": request_id,
 				"inference_owner": INFERENCE_OWNER,
+				"failure_kind": "unavailable",
+				"prompt_logged": False,
 			},
 			operation="generate_text",
 			backend_available=False,
@@ -816,8 +1086,10 @@ def generate_text_with_metadata(
 				"resumable": True,
 				"dispatch": "none",
 				"live_canary": False,
-				"request_id": _new_request_id(),
+				"request_id": request_id,
 				"inference_owner": INFERENCE_OWNER,
+				"failure_kind": "unavailable",
+				"prompt_logged": False,
 			},
 			operation="generate_text",
 			backend_available=True,
@@ -850,8 +1122,10 @@ def generate_text_with_metadata(
 				"resumable": True,
 				"dispatch": "none",
 				"live_canary": False,
-				"request_id": _new_request_id(),
+				"request_id": request_id,
 				"inference_owner": INFERENCE_OWNER,
+				"failure_kind": "unavailable",
+				"prompt_logged": False,
 			},
 			operation="generate_text",
 			backend_available=True,
@@ -866,36 +1140,110 @@ def generate_text_with_metadata(
 				model_name=effective_model_name,
 				**call_options,
 			)
-	except Exception:
+	except Exception as exc:
 		private_failure = privacy_context is not None
 		grok_failure = str(effective_provider or "") == PINNED_GROK_PROVIDER
+		kind = classify_router_failure(exc)
+		if private_failure:
+			public_error = "private_generation_failed"
+			status = "error" if kind == "unavailable" else kind
+		elif grok_failure and kind == "unavailable":
+			public_error = "provider_exception"
+			status = "unavailable"
+		elif grok_failure:
+			public_error = kind
+			status = kind
+		else:
+			public_error = "provider_exception"
+			status = "error" if kind == "unavailable" else kind
+		receipt = _route_receipt(
+			requested_provider=str(metadata.get("effective_provider_name") or effective_provider or ""),
+			requested_model=str(metadata.get("effective_model_name") or effective_model_name or ""),
+			observe=True,
+			request_id=request_id,
+		)
+		receipt.pop("requested_provider_name", None)
+		receipt.pop("requested_model_name", None)
 		return with_adapter_metadata(
 			{
-				"status": "error" if private_failure or not grok_failure else "unavailable",
+				"status": status,
 				"text": "",
 				"provider_name": provider or "",
 				"model_name": model_name or "",
 				**metadata,
-				"error": "private_generation_failed" if private_failure else "provider_exception",
-				"availability_hint": "private_generation_failed" if private_failure else "provider_exception",
+				**receipt,
+				"error": public_error,
+				"availability_hint": public_error,
+				"failure_kind": kind,
 				"resumable": True,
 				"dispatch": "attempted",
 				"live_canary": False,
-				"request_id": _new_request_id(),
-				"inference_owner": INFERENCE_OWNER,
+				"intake_complete": False,
+				"prompt_logged": False,
 			},
 			operation="generate_text",
 			backend_available=True,
 			implementation_status="available",
 		)
 
+	if type(text) is not str or len(text.encode("utf-8")) > INTAKE_MAX_OUTPUT_BYTES:
+		text = ""
+		oversize = True
+	else:
+		oversize = False
+	parsed = None
+	if intake_operation is not None:
+		try:
+			parsed = None if oversize else parse_intake_request(
+				text,
+				request_id=request_id,
+				operation=intake_operation,
+				source_text=intake_source_text,
+			)
+		except IntakeContractError:
+			parsed = None
+		if parsed is None:
+			receipt = _route_receipt(
+				requested_provider=str(metadata.get("effective_provider_name") or effective_provider or ""),
+				requested_model=str(metadata.get("effective_model_name") or effective_model_name or ""),
+				observe=True,
+				request_id=request_id,
+			)
+			receipt.pop("requested_provider_name", None)
+			receipt.pop("requested_model_name", None)
+			return with_adapter_metadata(
+				{
+					"status": "malformed",
+					"text": "",
+					"provider_name": provider or "",
+					"model_name": model_name or "",
+					**metadata,
+					**receipt,
+					"error": "malformed",
+					"failure_kind": "malformed",
+					"resumable": True,
+					"dispatch": "attempted",
+					"live_canary": False,
+					"intake_complete": False,
+					"prompt_logged": False,
+				},
+				operation="generate_text",
+				backend_available=True,
+				implementation_status="available",
+			)
+		text = json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+	elif oversize:
+		text = ""
+
 	receipt = _route_receipt(
 		requested_provider=str(metadata.get("effective_provider_name") or effective_provider or ""),
 		requested_model=str(metadata.get("effective_model_name") or effective_model_name or ""),
 		observe=True,
+		request_id=request_id,
 	)
 	receipt.pop("requested_provider_name", None)
 	receipt.pop("requested_model_name", None)
+	successful_empty = bool(parsed is not None and not parsed["questions"] and not parsed["facts"])
 	return with_adapter_metadata(
 		{
 			"status": "available",
@@ -905,6 +1253,10 @@ def generate_text_with_metadata(
 			**metadata,
 			**receipt,
 			"resumable": False,
+			"failure_kind": "",
+			"intake_complete": False,
+			"successful_empty": successful_empty,
+			"prompt_logged": False,
 		},
 		operation="generate_text",
 		backend_available=True,
@@ -1502,7 +1854,14 @@ __all__ = [
 	"PRIVACY_AT_REST_PROTECTION",
 	"PRIVACY_GROK_PROVIDER",
 	"PRIVACY_GROK_MODEL",
+	"IntakeContractError",
+	"INTAKE_REQUEST_OBJECT_SCHEMA",
+	"INTAKE_REQUEST_SCHEMA_NAME",
+	"INTAKE_REQUEST_SCHEMA_VERSION",
 	"build_complaint_privacy_context",
+	"classify_router_failure",
+	"intake_request_response_format",
+	"parse_intake_request",
 	"coerce_effective_privacy_policy",
 	"complaint_data_class_inventory",
 	"inspect_privacy_policy",

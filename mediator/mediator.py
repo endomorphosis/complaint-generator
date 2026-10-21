@@ -13447,51 +13447,218 @@ class Mediator:
 		)
 
 
-	def query_backend(self, prompt):
+	def _session_router_request_id(self):
+		import re
+		import uuid
+		current = getattr(self, '_router_request_id', '')
+		if type(current) is str and re.fullmatch(r'[0-9a-f]{32}', current):
+			return current
+		self._router_request_id = uuid.uuid4().hex
+		return self._router_request_id
+
+	def query_backend(self, prompt, **kwargs):
 		context = getattr(self, '_interview_privacy_context', None)
+		request_id = self._session_router_request_id()
 		if context is not None:
-			return self._query_backend_with_privacy(prompt, context)
+			return self._query_backend_with_privacy(prompt, context, request_id=request_id, **kwargs)
 
 		backend = self.backends[0]
-
 		try:
-			response = backend(prompt)
+			if kwargs.get('intake_operation'):
+				response = backend(
+					prompt,
+					intake_request_id=request_id,
+					intake_operation=kwargs.get('intake_operation'),
+					intake_source_text=kwargs.get('intake_source_text') if isinstance(kwargs.get('intake_source_text'), str) else '',
+				)
+			else:
+				response = backend(prompt)
 		except Exception as exception:
-			self.log('backend_error', backend=backend.id, prompt=prompt, error=str(exception))
+			self.log(
+				'backend_error',
+				backend=getattr(backend, 'id', 'backend'),
+				error_type=type(exception).__name__,
+				request_id=request_id,
+				prompt_logged=False,
+			)
 			raise
 
-		self.log('backend_query', backend=backend.id, prompt=prompt, response=response)
-
+		self.log(
+			'backend_query',
+			backend=getattr(backend, 'id', 'backend'),
+			request_id=request_id,
+			prompt_logged=False,
+			response_logged=False,
+		)
 		return response
 
-	def _query_backend_with_privacy(self, prompt, context):
+	def _query_backend_with_privacy(self, prompt, context, request_id=None, intake_operation=None, intake_source_text=None):
 		"""Decide the per-case privacy context before any provider call."""
 		from integrations.ipfs_datasets.llm import _privacy_context_block_reason
 
+		request_id = request_id or self._session_router_request_id()
 		policy = context.get('policy') if isinstance(context, dict) else {}
 		permitted = policy.get('permitted_remote') if isinstance(policy, dict) else None
 		provider = permitted.get('provider') if isinstance(permitted, dict) else None
 		model_name = permitted.get('model') if isinstance(permitted, dict) else None
 		block = _privacy_context_block_reason(context, provider=provider, model_name=model_name)
 		if block:
-			self.log('privacy_refusal', code=block)
+			self.log('privacy_refusal', code=block, request_id=request_id, prompt_logged=False)
 			raise UserPresentableException('privacy-refused', block)
 
 		backend = self.backends[0]
+		call_kwargs = {
+			'complaint_privacy_context': context,
+			'intake_request_id': request_id,
+		}
+		if intake_operation:
+			call_kwargs['intake_operation'] = intake_operation
+			call_kwargs['intake_source_text'] = intake_source_text if isinstance(intake_source_text, str) else ''
 		try:
 			# The shared-interview backend contract accepts its bound context.
 			# A backend TypeError may occur after dispatch; never retry it without
 			# the context or turn one request into two provider invocations.
-			response = backend(prompt, complaint_privacy_context=context)
+			response = backend(prompt, **call_kwargs)
 		except Exception as exception:
 			self.log(
 				'backend_error',
 				backend=getattr(backend, 'id', 'backend'),
 				error_type=type(exception).__name__,
+				request_id=request_id,
+				prompt_logged=False,
 			)
 			raise
-		self.log('backend_query', backend=getattr(backend, 'id', 'backend'), privacy='enforced')
+		observed_request = getattr(backend, '_request_id', '') or request_id
+		self.log(
+			'backend_query',
+			backend=getattr(backend, 'id', 'backend'),
+			privacy='enforced',
+			request_id=observed_request,
+			prompt_logged=False,
+			response_logged=False,
+		)
 		return response
+
+	def apply_intake_router_output(self, raw_text, *, operation, source_text, request_id):
+		"""Validate schema and source spans before any model suggestion is stored.
+
+		Legal records are never written from model output. A rejected payload
+		leaves suggestions unchanged and does not complete intake.
+		"""
+		from integrations.ipfs_datasets.llm import IntakeContractError, parse_intake_request
+
+		suggestions = list(getattr(self, 'intake_model_suggestions', []) or [])
+		legal_records = list(getattr(self, 'legal_records', []) or [])
+		self.intake_complete = False
+		try:
+			proposal = parse_intake_request(
+				raw_text if isinstance(raw_text, str) else '',
+				request_id=request_id,
+				operation=operation,
+				source_text=source_text if isinstance(source_text, str) else '',
+			)
+		except IntakeContractError as exc:
+			self.intake_model_suggestions = suggestions
+			self.legal_records = legal_records
+			self.log(
+				'intake_router_rejected',
+				error_code=exc.code,
+				request_id=request_id,
+				prompt_logged=False,
+			)
+			return {
+				'applied': False,
+				'error_code': exc.code,
+				'intake_complete': False,
+				'graph_changed': False,
+				'request_id': request_id,
+				'successful_empty': False,
+			}
+		updated = list(suggestions)
+		if operation == 'propose_questions':
+			for question in proposal['questions']:
+				updated.append({
+					'kind': 'question',
+					'record_type': 'model_suggestion',
+					'origin': 'model',
+					'request_id': request_id,
+					**question,
+				})
+		else:
+			for fact in proposal['facts']:
+				updated.append({
+					'kind': 'fact',
+					'record_type': 'model_suggestion',
+					'origin': 'model',
+					'request_id': request_id,
+					**fact,
+				})
+		self.intake_model_suggestions = updated
+		self.legal_records = legal_records
+		self.intake_complete = False
+		self.log(
+			'intake_router_applied',
+			operation=operation,
+			request_id=request_id,
+			count=len(updated) - len(suggestions),
+			prompt_logged=False,
+		)
+		return {
+			'applied': True,
+			'error_code': '',
+			'intake_complete': False,
+			'graph_changed': len(updated) != len(suggestions),
+			'request_id': request_id,
+			'successful_empty': not proposal['questions'] and not proposal['facts'],
+			'suggestions': updated,
+		}
+
+	def intake_router_exchange(self, prompt, *, operation, source_text):
+		"""Run one bounded intake request and apply it only after validation."""
+		request_id = self._session_router_request_id()
+		before = list(getattr(self, 'intake_model_suggestions', []) or [])
+		legal_before = list(getattr(self, 'legal_records', []) or [])
+		try:
+			raw = self.query_backend(
+				prompt,
+				intake_operation=operation,
+				intake_source_text=source_text,
+			)
+		except Exception as exception:
+			self.intake_model_suggestions = before
+			self.legal_records = legal_before
+			self.intake_complete = False
+			payload = getattr(exception, 'payload', None)
+			code = payload.get('error_code') if isinstance(payload, dict) else ''
+			if code not in {'malformed_output', 'quota', 'timeout', 'cancelled', 'provider_unavailable', 'privacy_denied'}:
+				code = 'provider_unavailable'
+			self.log(
+				'intake_router_failed',
+				error_code=code,
+				error_type=type(exception).__name__,
+				request_id=request_id,
+				prompt_logged=False,
+			)
+			return {
+				'applied': False,
+				'error_code': code,
+				'intake_complete': False,
+				'graph_changed': False,
+				'request_id': request_id,
+				'successful_empty': False,
+			}
+		outcome = self.apply_intake_router_output(
+			raw,
+			operation=operation,
+			source_text=source_text,
+			request_id=getattr(self.backends[0], '_request_id', None) or request_id,
+		)
+		if outcome['request_id'] != request_id and getattr(self.backends[0], '_request_id', None):
+			# The backend may echo the same session id; keep the mediator id when
+			# the backend minted a different one so logs stay on one correlation id.
+			self._router_request_id = outcome['request_id']
+		self.intake_complete = False
+		return outcome
 		
 
 
