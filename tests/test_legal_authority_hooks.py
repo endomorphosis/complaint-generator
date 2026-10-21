@@ -14,6 +14,79 @@ from pathlib import Path
 pytestmark = pytest.mark.no_auto_network
 
 
+def _install_legal_passage_graph_fixture(monkeypatch):
+    """Give only the requesting storage unit test an explicit legal graph.
+
+    Extraction capability is exercised separately by the FACT02 contract.
+    These rows describe supplied authority text, never complainant facts or
+    a rule's applicability. Document parsing and all durable storage stay real.
+    """
+    from dataclasses import replace
+    from mediator import legal_authority_hooks
+    from integrations.ipfs_datasets.provenance import build_provenance, stable_content_hash
+    from integrations.ipfs_datasets.types import (
+        GraphEntity, GraphRelationship, build_user_assertion_envelope,
+    )
+
+    calls = []
+
+    def legal_passage_graph(text, *, source_id='', metadata=None):
+        assert isinstance(text, str) and text.strip()
+        assert source_id.startswith('authority:') and source_id.removeprefix('authority:').isdigit()
+        assert isinstance(metadata, dict) and metadata['artifact_id'] == source_id
+        assert metadata['legal_passage'] is True
+        assert metadata['source_family'] == metadata['record_scope'] == 'legal_authority'
+        assert metadata['artifact_family'] == 'legal_authority_text'
+        passage = next(line.strip() for line in text.splitlines() if line.strip())
+        raw = text.encode('utf-8')
+        start = raw.index(passage.encode('utf-8'))
+        span = {'start': start, 'end': start + len(passage.encode('utf-8')), 'text': passage}
+        envelope = build_user_assertion_envelope(
+            source_text=text, source_kind='legal_text', source_id=source_id,
+            source_span=span, source_hash=stable_content_hash(raw),
+            record_type='legal_text', assertion_status='legal_text',
+            extractor_version='authority-storage-unit-fixture.v1',
+        )
+        assert envelope.record_type == 'legal_text' and not envelope.is_asserted_user_fact
+        assert raw[envelope.source_span_start:envelope.source_span_end].decode('utf-8') == passage
+        provenance = replace(build_provenance(
+            source_url=metadata.get('source_url', ''), acquisition_method='synthetic_storage_fixture',
+            source_type='legal_authority', content_hash=stable_content_hash(raw),
+            source_system='authority-storage-unit-fixture',
+            metadata={'record_scope': 'legal_authority', 'source_span': span},
+        ), assertion=envelope.as_dict()).as_dict()
+        attributes = {
+            **metadata, 'record_scope': 'legal_authority', 'source_family': 'legal_authority',
+            'record_type': 'legal_text', 'content_origin': 'legal_authority_text',
+            'source_span': span, 'assertion': envelope.as_dict(),
+        }
+        authority_node = GraphEntity(
+            entity_id=source_id + ':source', entity_type='legal_authority',
+            name=metadata.get('title', ''), attributes=dict(attributes), provenance=provenance,
+            assertion=envelope.as_dict(),
+        ).as_dict()
+        passage_node = GraphEntity(
+            entity_id=source_id + ':legal-passage:0', entity_type='fact', name=passage,
+            confidence=1.0, attributes={**attributes, 'text': passage, 'sentence_index': 0},
+            provenance=provenance, assertion=envelope.as_dict(),
+        ).as_dict()
+        relationship = GraphRelationship(
+            relationship_id=source_id + ':contains-legal-passage:0',
+            source_id=authority_node['id'], target_id=passage_node['id'],
+            relation_type='contains_legal_passage', confidence=1.0,
+            attributes=dict(attributes), provenance=provenance, assertion=envelope.as_dict(),
+        ).as_dict()
+        calls.append({'source_id': source_id, 'span': span, 'content_hash': stable_content_hash(raw)})
+        return {'status': 'available', 'entities': [authority_node, passage_node],
+                'relationships': [relationship], 'metadata': {
+                    **metadata, 'fixture_scope': 'authority-storage-unit',
+                    'record_scope': 'legal_authority', 'provenance': provenance,
+                }}
+
+    monkeypatch.setattr(legal_authority_hooks, 'extract_graph_from_text', legal_passage_graph)
+    return calls
+
+
 class TestLegalAuthoritySearchHook:
     """Test cases for LegalAuthoritySearchHook"""
     
@@ -802,8 +875,9 @@ class TestLegalAuthorityStorageHook:
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
     
-    def test_get_authorities_by_claim(self):
+    def test_get_authorities_by_claim(self, monkeypatch):
         """Test retrieving authorities by claim type"""
+        fixture_calls = _install_legal_passage_graph_fixture(monkeypatch)
         try:
             from mediator.legal_authority_hooks import LegalAuthorityStorageHook
             import duckdb
@@ -827,6 +901,7 @@ class TestLegalAuthorityStorageHook:
                 }
                 
                 hook.add_authority(authority_data, 'testuser', claim_type='employment')
+                assert fixture_calls  # This storage test uses its explicit legal-passage input.
                 
                 # Retrieve by claim
                 results = hook.get_authorities_by_claim('testuser', 'employment')
@@ -842,8 +917,9 @@ class TestLegalAuthorityStorageHook:
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
 
-    def test_add_authority_persists_fact_rows(self):
+    def test_add_authority_persists_fact_rows(self, monkeypatch):
         """Test storing an authority also persists extracted fact rows."""
+        fixture_calls = _install_legal_passage_graph_fixture(monkeypatch)
         try:
             from mediator.legal_authority_hooks import LegalAuthorityStorageHook
             import duckdb
@@ -866,6 +942,7 @@ class TestLegalAuthorityStorageHook:
                 }
 
                 record_id = hook.add_authority(authority_data, 'testuser', claim_type='civil rights')
+                assert fixture_calls  # This storage test uses its explicit legal-passage input.
                 authorities = hook.get_authorities_by_claim('testuser', 'civil rights')
                 facts = hook.get_authority_facts(record_id)
 
@@ -879,8 +956,9 @@ class TestLegalAuthorityStorageHook:
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
 
-    def test_add_authority_persists_parse_summary_and_chunks(self):
+    def test_add_authority_persists_parse_summary_and_chunks(self, monkeypatch):
         """Test authority parsing stores parse summary fields and chunk rows."""
+        fixture_calls = _install_legal_passage_graph_fixture(monkeypatch)
         try:
             from mediator.legal_authority_hooks import LegalAuthorityStorageHook
             import duckdb
@@ -927,6 +1005,7 @@ class TestLegalAuthorityStorageHook:
                 }
 
                 record_id = hook.add_authority(authority_data, 'testuser', claim_type='employment')
+                assert fixture_calls  # This storage test uses its explicit legal-passage input.
                 authority = hook.get_authority_by_id(record_id)
                 chunks = hook.get_authority_chunks(record_id)
 
@@ -1186,8 +1265,9 @@ class TestLegalAuthorityStorageHook:
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
 
-    def test_add_authority_preserves_html_parse_contract(self):
+    def test_add_authority_preserves_html_parse_contract(self, monkeypatch):
         """Test authority HTML content is normalized through the shared parse contract."""
+        fixture_calls = _install_legal_passage_graph_fixture(monkeypatch)
         try:
             from mediator.legal_authority_hooks import LegalAuthorityStorageHook
             import duckdb
@@ -1234,6 +1314,7 @@ class TestLegalAuthorityStorageHook:
                 }
 
                 record_id = hook.add_authority(authority_data, 'testuser', claim_type='employment')
+                assert fixture_calls  # This storage test uses its explicit legal-passage input.
                 authority = hook.get_authority_by_id(record_id)
                 chunks = hook.get_authority_chunks(record_id)
                 facts = hook.get_authority_facts(record_id)
@@ -1295,11 +1376,14 @@ class TestLegalAuthorityStorageHook:
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
 
-    def test_add_authority_persists_graph_metadata(self):
+    def test_add_authority_persists_graph_metadata(self, monkeypatch):
         """Test authority storage persists graph summary fields and graph rows."""
         try:
             from mediator.legal_authority_hooks import LegalAuthorityStorageHook
             import duckdb
+            from integrations.ipfs_datasets import graphs
+            private_extractor = Mock(side_effect=AssertionError('legal authority must not enter private extraction'))
+            monkeypatch.setattr(graphs, '_run_owned_private_extractor', private_extractor)
 
             mock_mediator = Mock()
             mock_mediator.log = Mock()
@@ -1346,6 +1430,12 @@ class TestLegalAuthorityStorageHook:
                 authority = hook.get_authority_by_id(record_id)
                 graph = hook.get_authority_graph(record_id)
 
+                private_extractor.assert_not_called()
+                assert authority['graph_metadata']['legal_passage'] is True
+                assert authority['graph_metadata']['source_family'] == 'legal_authority'
+                assert authority['graph_metadata']['record_scope'] == 'legal_authority'
+                assert authority['graph_metadata']['artifact_family'] == 'legal_authority_text'
+                assert authority['graph_metadata']['private_extraction']['diagnostic'] == 'legal_passage_not_private_extraction'
                 assert record_id > 0
                 assert authority is not None
                 assert authority['graph_status'] in {'unavailable', 'available-fallback'}
@@ -1427,7 +1517,12 @@ class TestLegalAuthorityStorageHook:
                     }
                     for rel in graph['relationships']
                 )
-                assert any(entity['type'] == 'fact' for entity in graph['entities'])
+                legal_nodes = [entity for entity in graph['entities'] if entity['type'] == 'authority_source']
+                assert legal_nodes
+                assert all(entity['id'].startswith('authority_source:') for entity in legal_nodes)
+                assert all(entity['attributes']['about_complainant'] is False for entity in legal_nodes)
+                assert not any(entity['type'] == 'fact' for entity in graph['entities'])
+                assert all(rel['relation_type'] == 'cites_authority' for rel in graph['relationships'])
                 assert len(graph['relationships']) >= 1
                 assert all('relation_type' in rel for rel in graph['relationships'])
             finally:
@@ -1737,8 +1832,9 @@ class TestLegalAuthorityStorageHook:
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
     
-    def test_get_statistics(self):
+    def test_get_statistics(self, monkeypatch):
         """Test getting authority statistics"""
+        fixture_calls = _install_legal_passage_graph_fixture(monkeypatch)
         try:
             from mediator.legal_authority_hooks import LegalAuthorityStorageHook
             import duckdb
@@ -1758,10 +1854,12 @@ class TestLegalAuthorityStorageHook:
                         'type': 'statute',
                         'source': 'us_code',
                         'citation': f'Test § {i}',
-                        'title': f'Test Title {i}'
+                        'title': f'Test Title {i}',
+                        'content': f'Synthetic legal authority passage {i}.'
                     }
                     hook.add_authority(authority_data, 'testuser')
                 
+                assert len(fixture_calls) == 3
                 stats = hook.get_statistics('testuser')
                 
                 assert stats['available'] is True
@@ -1855,8 +1953,9 @@ class TestMediatorLegalAuthorityIntegration:
             pytest.skip(f"Test requires dependencies: {e}")
     
     @pytest.mark.integration
-    def test_mediator_search_and_store_authorities(self):
+    def test_mediator_search_and_store_authorities(self, monkeypatch):
         """Test searching and storing legal authorities through mediator"""
+        fixture_calls = _install_legal_passage_graph_fixture(monkeypatch)
         try:
             from mediator import Mediator
             from complaint_phases import ComplaintPhase
@@ -1969,6 +2068,7 @@ class TestMediatorLegalAuthorityIntegration:
                 
                 # Store
                 stored = mediator.store_legal_authorities(results, claim_type='civil rights')
+                assert fixture_calls  # This storage test uses its explicit legal-passage input.
                 assert 'statutes' in stored
                 assert 'state_statutes' in stored
                 assert 'administrative_rules' in stored

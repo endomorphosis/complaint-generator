@@ -969,3 +969,469 @@ def test_cold_legal_import_disables_nltk_bootstrap_before_optional_imports(monke
     assert all(value == '0' for _, value in observed)
     assert os.environ['IPFS_DATASETS_PY_AUTO_NLTK_DOWNLOAD'] == '0'
     assert callable(module.lookup_bounded_legal_corpus)
+
+
+# LAW03: retrieval relevance is not entailment or applicability.
+
+_LAW03_PASSAGE = (
+    "Every person who, under color of any statute, subjects another to the deprivation of rights."
+)
+_LAW03_CONTEXT = {
+    "jurisdiction": "federal",
+    "applicable_law_date": "2024-06-01",
+    "court": "U.S. District Court for the District of Oregon",
+    "corpus_version": "prelim",
+}
+
+
+def _law03_hit(**overrides):
+    payload = {
+        "citation": "42 U.S.C. § 1983",
+        "uri": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title42-section1983",
+        "text": _LAW03_PASSAGE,
+        "source_passage": _LAW03_PASSAGE,
+        "jurisdiction": "federal",
+        "corpus_version": "prelim",
+        "effective_date": "1871-04-20",
+        "court": "U.S. District Court for the District of Oregon",
+        "cid": "bafyuscode1983",
+        "corpus_id": "justicedao/ipfs_uscode",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _law03_search(monkeypatch, hits=None, exc=None):
+    import integrations.ipfs_datasets.legal as legal
+
+    calls = []
+
+    def bounded(**kwargs):
+        family = kwargs["source_family"]
+        calls.append((family, kwargs["query"]))
+        if exc is not None:
+            raise exc
+        rows = list(hits or []) if family == legal.CORPUS_FAMILY_US_CODE else []
+        return {"status": "success" if rows else "empty", "results": rows, "bounded": True}
+
+    monkeypatch.setattr(legal, "lookup_bounded_legal_corpus", bounded)
+    return calls
+
+
+def _law03_result(monkeypatch, text, hits=None, exc=None, **kwargs):
+    from integrations.ipfs_datasets.legal import constrain_assertions_to_corpus
+
+    _law03_search(monkeypatch, hits=hits, exc=exc)
+    assertion = {"assertion_id": "a-1", "text": text}
+    extra = kwargs.pop("assertion", {})
+    assertion.update(extra)
+    graph = kwargs.pop("factual_graph", None)
+    if graph is not None:
+        assertion["factual_graph"] = graph
+    return constrain_assertions_to_corpus(
+        [assertion],
+        legal_context=kwargs.pop("legal_context", _LAW03_CONTEXT),
+        legal_vector_index_dir=kwargs.pop("legal_vector_index_dir", None),
+        **kwargs,
+    )
+
+
+def test_mapped_source_is_candidate_verified_and_applicable_but_not_entailed(monkeypatch):
+    result = _law03_result(
+        monkeypatch,
+        "42 U.S.C. § 1983 supplies a civil action.",
+        hits=[_law03_hit()],
+    )
+    detail = result["details"][0]
+    assert detail["retrieved_candidate"] is True
+    assert detail["source_verified"] is True
+    assert detail["applicable"] is True
+    assert detail["entails"] is False
+    assert detail["dispositions"]["entailment"] == "unsupported"
+    assert detail["grounded"] is False
+    assert result["grounded_count"] == 0
+    assert result["candidate_count"] == 1
+    assert result["source_verified_count"] == 1
+    assert result["applicable_count"] == 1
+    assert result["entailed_count"] == 0
+    assert result["corpus_coverage_semantics"] == "retrieval_only"
+    assert result["corpus_coverage_percent"] == 100
+    assert result["entailment_prover"] == "unsupported"
+    assert result["compatibility"]["grounded_semantics"]
+    assert detail["no_applicable_law"] is False
+    assert detail["allegation_false"] is False
+
+
+def test_unrelated_high_score_hit_does_not_ground_or_verify_a_fact(monkeypatch):
+    graph = {"nodes": [{"id": "fact-1", "status": "alleged"}]}
+    snapshot = {"nodes": [{"id": "fact-1", "status": "alleged"}]}
+    result = _law03_result(
+        monkeypatch,
+        "The officer arrested the plaintiff on May 1.",
+        hits=[_law03_hit(score=0.99, citation="16 U.S.C. § 1538", text="It is unlawful to take an endangered species.", source_passage="It is unlawful to take an endangered species.")],
+        assertion={"assertion_kind": "factual_allegation", "grounded": True, "entailed": True, "fact_verified": True},
+        factual_graph=graph,
+    )
+    detail = result["details"][0]
+    assert detail["retrieved_candidate"] is True
+    assert detail["source_verified"] is False or detail["applicable"] is False
+    assert detail["applicable"] is False
+    assert detail["entails"] is False
+    assert detail["grounded"] is False
+    assert detail["fact_verified"] is False
+    assert detail["allegation_status"] == "unknown"
+    assert detail["allegation_false"] is False
+    assert detail["no_applicable_law"] is False
+    assert "grounded" in detail["ignored_caller_labels"]
+    assert "entailed" in detail["ignored_caller_labels"]
+    assert graph == snapshot
+    assert result["fact_graph_mutated"] is False
+    assert result["ungrounded"][0]["fact_verified"] is False
+
+
+def test_official_url_without_passage_is_only_a_candidate(monkeypatch):
+    result = _law03_result(
+        monkeypatch,
+        "42 U.S.C. § 1983 supplies a civil action.",
+        hits=[{
+            "citation": "42 U.S.C. § 1983",
+            "uri": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title42-section1983",
+            "jurisdiction": "federal",
+            "corpus_version": "prelim",
+            "score": 0.91,
+        }],
+    )
+    detail = result["details"][0]
+    hit = detail["corpus_hits"][0]
+    assert detail["retrieved_candidate"] is True
+    assert detail["source_verified"] is False
+    assert "absent_source_passage" in hit["disposition_reasons"]
+    assert detail["applicable"] is False
+    assert detail["entails"] is False
+    assert detail["grounded"] is False
+
+
+def test_same_citation_with_wrong_hash_version_jurisdiction_or_date_is_not_applicable(monkeypatch):
+    text = "42 U.S.C. § 1983 supplies a civil action."
+    wrong_hash = _law03_result(
+        monkeypatch,
+        text,
+        hits=[_law03_hit(content_hash="sha256:not-the-passage")],
+    )
+    assert wrong_hash["details"][0]["source_verified"] is False
+    assert "content_hash_mismatch" in wrong_hash["details"][0]["corpus_hits"][0]["disposition_reasons"]
+    assert wrong_hash["details"][0]["grounded"] is False
+
+    wrong_version = _law03_result(
+        monkeypatch,
+        text,
+        hits=[_law03_hit(corpus_version="enacted-1871-reprint")],
+    )
+    assert wrong_version["details"][0]["dispositions"]["applicability"] == "not_applicable"
+    assert "version_mismatch" in wrong_version["details"][0]["corpus_hits"][0]["disposition_reasons"]
+
+    wrong_jurisdiction = _law03_result(
+        monkeypatch,
+        text,
+        hits=[_law03_hit(jurisdiction="OR")],
+    )
+    assert wrong_jurisdiction["details"][0]["dispositions"]["applicability"] == "not_applicable"
+    assert wrong_jurisdiction["details"][0]["applicable_law_conclusion"] == "unknown"
+    assert wrong_jurisdiction["details"][0]["no_applicable_law"] is False
+
+    wrong_date = _law03_result(
+        monkeypatch,
+        text,
+        hits=[_law03_hit(effective_date="2025-01-01")],
+    )
+    assert "effective_after_applicable_date" in wrong_date["details"][0]["corpus_hits"][0]["disposition_reasons"]
+    assert wrong_date["details"][0]["entails"] is False
+
+
+def test_empty_success_is_distinct_from_backend_failure_and_timeout(monkeypatch):
+    empty = _law03_result(monkeypatch, "42 U.S.C. § 1983 supplies a civil action.", hits=[])
+    empty_detail = empty["details"][0]
+    assert empty_detail["dispositions"]["retrieval"] == "empty"
+    assert empty_detail["reason"] == "empty_success"
+    assert empty_detail["retrieved_candidate"] is False
+    assert empty_detail["dispositions"]["applicability"] == "unknown"
+    assert empty_detail["dispositions"]["entailment"] == "unsupported"
+    assert empty_detail["no_applicable_law"] is False
+    assert empty_detail["allegation_false"] is False
+    assert empty["corpus_coverage_percent"] == 0
+    assert empty["corpus_coverage_semantics"] == "retrieval_only"
+
+    failed = _law03_result(
+        monkeypatch,
+        "42 U.S.C. § 1983 supplies a civil action.",
+        exc=RuntimeError("secret backend detail"),
+    )
+    failed_detail = failed["details"][0]
+    assert failed_detail["dispositions"]["retrieval"] == "backend_error"
+    assert failed_detail["reason"] == "backend_error"
+    assert "secret" not in str(failed_detail["diagnostics"])
+    assert failed_detail["applicable_law_conclusion"] == "unknown"
+    assert failed_detail["allegation_false"] is False
+
+    timed_out = _law03_result(
+        monkeypatch,
+        "42 U.S.C. § 1983 supplies a civil action.",
+        exc=TimeoutError("timed out internally"),
+    )
+    assert timed_out["details"][0]["dispositions"]["retrieval"] == "timeout"
+    assert timed_out["details"][0]["reason"] == "timeout"
+    assert timed_out["details"][0]["dispositions"]["source_verification"] == "unknown"
+    assert timed_out["details"][0]["entails"] is False
+
+
+def test_unknown_jurisdiction_does_not_search_or_imply_no_law(monkeypatch):
+    calls = _law03_search(monkeypatch, hits=[_law03_hit()])
+    from integrations.ipfs_datasets.legal import constrain_assertions_to_corpus
+
+    result = constrain_assertions_to_corpus(
+        [{"assertion_id": "a-1", "text": "42 U.S.C. § 1983 supplies a civil action."}],
+        legal_context={"applicable_law_date": "2024-06-01", "court": "U.S. District Court for the District of Oregon"},
+    )
+    assert calls == []
+    detail = result["details"][0]
+    assert detail == {
+        "assertion_id": "a-1",
+        "text": "42 U.S.C. § 1983 supplies a civil action.",
+        "grounded": False,
+        "applicability": "unknown",
+        "reason": "unresolved_legal_context",
+        "corpus_hits": [],
+    }
+    assert result["grounded_count"] == 0
+    assert result["context_status"] == "unknown"
+    assert result["entailment_prover"] == "unsupported"
+    assert result["ungrounded"][0]["grounded"] is False
+    assert result["ungrounded"][0]["applicability"] == "unknown"
+
+
+def test_similarity_edge_is_not_upgraded_to_legal_authority(monkeypatch):
+    import integrations.ipfs_datasets.legal as legal
+
+    text = "42 U.S.C. § 1983 supplies a civil action."
+    cache = {legal._cache_key('us_code', text, 'federal', ''):
+             [_law03_hit(score=0.98, source="vector_index", edge_class="similarity")]}
+    result = legal.constrain_assertions_to_corpus(
+        [{"assertion_id": "a-1", "text": text}],
+        legal_context=_LAW03_CONTEXT, retrieval_mode='cache', offline_cache=cache,
+    )
+    hit = result["details"][0]["corpus_hits"][0]
+    assert hit["authority_label"] == "similarity_not_legal_authority"
+    assert hit["similarity_cannot_establish_legal_authority"] is True
+    assert hit["source_verified"] is False
+    assert result["details"][0]["applicable"] is False
+    assert result["details"][0]["grounded"] is False
+    assert result["details"][0]["entails"] is False
+
+
+def test_injected_proof_route_stays_unsupported(monkeypatch):
+    result = _law03_result(
+        monkeypatch,
+        "42 U.S.C. § 1983 supplies a civil action.",
+        hits=[_law03_hit(entailed=True, grounded=True, proof={"status": "proved"})],
+        assertion={"entails": True, "proof_status": "entailed", "model_label": "entailed"},
+    )
+    detail = result["details"][0]
+    assert detail["dispositions"]["entailment"] == "unsupported"
+    assert detail["entails"] is False
+    assert detail["entailment_reason"] == "no_bound_entailment_prover"
+    assert result["entailed_count"] == 0
+    assert detail["grounded"] is False
+
+
+def test_rule_metadata_labels_are_extraction_provenance_not_entailment():
+    from mediator.legal_authority_hooks import LegalAuthorityStorageHook
+
+    hook = LegalAuthorityStorageHook.__new__(LegalAuthorityStorageHook)
+    metadata = hook._build_grounded_rule_metadata(
+        "The agency must provide notice within 30 days.",
+        "procedural_prerequisite",
+        authority_id=1,
+        authority={"citation": "Synthetic Rule 1", "title": "Notice", "type": "rule", "source": "fixture", "metadata": {}},
+        claim_element={"claim_element_id": "e-1", "claim_element": "notice"},
+        provenance=type("P", (), {"jurisdiction": "federal"})(),
+    )
+    assert metadata["grounding_status"] == "grounded"
+    assert metadata["grounding_status_semantics"] == "extraction_provenance_not_entailment"
+    assert metadata["entailment_status"] == "unsupported"
+    assert metadata["logical_entailment"] is False
+    assert metadata["deontic_operator_source"] == "keyword_heuristic"
+    assert metadata["deontic_operator_is_proof"] is False
+    assert metadata["adverse_treatment_analysis"] == "incomplete_heuristic"
+
+
+@pytest.mark.parametrize('expiry_field', ['sunset_date', 'repealed_date', 'effective_end'])
+def test_sourced_expiry_survives_bounded_cache_before_applicability(expiry_field):
+    import integrations.ipfs_datasets.legal as legal
+    text = '42 U.S.C. § 1983 supplies a civil action.'
+    hit = _law03_hit(**{expiry_field: '2020-12-31'})
+    cache = {legal._cache_key('us_code', text, 'federal', ''): [hit]}
+    result = legal.constrain_assertions_to_corpus(
+        [{'text': text}], legal_context=_LAW03_CONTEXT,
+        retrieval_mode='cache', offline_cache=cache,
+    )
+    detail = result['details'][0]
+    source = detail['corpus_hits'][0]
+    assert source[expiry_field] == '2020-12-31'
+    assert source['source_verified'] is True
+    assert source['applicability'] == 'not_applicable'
+    assert 'version_expired' in source['disposition_reasons']
+    assert detail['applicable'] is False
+    assert detail['grounded'] is False
+    assert detail['fact_verified'] is False
+    assert detail['no_applicable_law'] is False
+
+
+@pytest.mark.parametrize('invalid', ['expiry', 'hash', 'similarity'])
+def test_bounded_normalization_cannot_launder_source_refusals(invalid):
+    import integrations.ipfs_datasets.legal as legal
+    text = '42 U.S.C. § 1983 supplies a civil action.'
+    changes = {'expiry': {'sunset_date': ['2020-12-31']},
+               'hash': {'content_hash': 'sha256:wrong'},
+               'similarity': {'edge_class': 'similarity'}}[invalid]
+    cache = {legal._cache_key('us_code', text, 'federal', ''): [_law03_hit(**changes)]}
+    result = legal.constrain_assertions_to_corpus(
+        [{'text': text, 'entailed': True, 'fact_verified': True}],
+        legal_context=_LAW03_CONTEXT, retrieval_mode='cache', offline_cache=cache,
+    )
+    detail = result['details'][0]
+    assert detail['retrieved_candidate'] is True
+    assert detail['source_verified'] is False
+    assert detail['applicable'] is False
+    assert detail['grounded'] is False
+    assert detail['fact_verified'] is False
+    assert detail['entails'] is False
+    if invalid == 'hash':
+        assert detail['corpus_hits'][0]['content_hash_mismatch'] is True
+    if invalid == 'similarity':
+        assert detail['corpus_hits'][0]['similarity_cannot_establish_legal_authority'] is True
+
+
+@pytest.mark.parametrize('outcome, expected', [('absent', 'unavailable'), ('error', 'backend_error'), ('timeout', 'timeout')])
+def test_actual_bounded_constraint_path_retains_backend_failure_diagnostics(tmp_path, monkeypatch, outcome, expected):
+    import integrations.ipfs_datasets.legal as legal
+    index = tmp_path / 'synthetic-us-code.jsonl'
+    index.write_text('')
+    def legacy_forbidden(*args, **kwargs):
+        raise AssertionError('Unbounded legacy lookup must not run')
+    for name in ('search_us_code', 'search_federal_register', 'search_state_laws'):
+        monkeypatch.setattr(legal, name, legacy_forbidden)
+    monkeypatch.setattr(legal, '_search_us_code_async', None if outcome == 'absent' else object())
+    transports = []
+    def transport(backend, parameters, timeout):
+        transports.append((backend, timeout))
+        return outcome, None
+    monkeypatch.setattr(legal, '_run_owned_deadline', transport)
+    result = legal.constrain_assertions_to_corpus(
+        [{'text': '42 U.S.C. § 1983 applies.'}], legal_context=_LAW03_CONTEXT,
+        index_path=str(index), timeout_seconds=.5,
+    )
+    detail = result['details'][0]
+    assert detail['diagnostics'][0]['backend'] == 'us_code'
+    assert detail['diagnostics'][0]['status'] == expected
+    assert detail['dispositions']['source_verification'] == 'unknown'
+    assert detail['dispositions']['applicability'] == 'unknown'
+    assert detail['retrieved_candidate'] is False
+    assert detail['grounded'] is False
+    assert detail['fact_verified'] is False
+    assert detail['allegation_false'] is False
+    assert detail['no_applicable_law'] is False
+    assert transports == ([] if outcome == 'absent' else [('local_us_code_index', .5)])
+
+
+def test_actual_bounded_empty_success_is_not_backend_unavailability(monkeypatch):
+    import integrations.ipfs_datasets.legal as legal
+    def forbidden(*args, **kwargs):
+        raise AssertionError('An explicit empty cache requires no backend')
+    monkeypatch.setattr(legal, '_run_owned_deadline', forbidden)
+    result = legal.constrain_assertions_to_corpus(
+        [{'text': '42 U.S.C. § 1983 applies.'}], legal_context=_LAW03_CONTEXT,
+        retrieval_mode='cache', offline_cache={},
+    )
+    detail = result['details'][0]
+    assert detail['dispositions']['retrieval'] == 'empty'
+    assert detail['reason'] == 'empty_success'
+    assert all(row['status'] == 'ok' and row['result_count'] == 0 for row in detail['diagnostics'])
+    assert detail['dispositions']['source_verification'] == 'unknown'
+    assert detail['dispositions']['applicability'] == 'unknown'
+    assert detail['grounded'] is False
+    assert detail['no_applicable_law'] is False
+    assert detail['allegation_false'] is False
+
+
+@pytest.mark.parametrize('boundary', ['effective_date', 'sunset_date'])
+def test_applicable_date_range_crossing_sourced_version_boundary_stays_unknown(boundary):
+    import integrations.ipfs_datasets.legal as legal
+    text = '42 U.S.C. § 1983 supplies a civil action.'
+    context = {**_LAW03_CONTEXT, 'applicable_law_date': '2020'}
+    cache = {legal._cache_key('us_code', text, 'federal', ''): [_law03_hit(**{boundary: '2020-06-01'})]}
+    result = legal.constrain_assertions_to_corpus(
+        [{'text': text}], legal_context=context, retrieval_mode='cache', offline_cache=cache,
+    )
+    detail = result['details'][0]
+    assert 'date_range_crosses_rule_version' in detail['corpus_hits'][0]['disposition_reasons']
+    assert detail['dispositions']['applicability'] == 'unknown'
+    assert detail['applicable'] is False
+    assert detail['grounded'] is False
+    assert detail['no_applicable_law'] is False
+
+
+@pytest.mark.parametrize('index_source', ['argument', 'environment'])
+def test_legacy_semantic_index_cannot_authorize_ambient_embedding(monkeypatch, index_source):
+    import integrations.ipfs_datasets.legal as legal
+    from integrations.ipfs_datasets import vector_store
+    calls = []
+    def forbidden(*args, **kwargs):
+        calls.append('unowned_embedding_route')
+        raise AssertionError('No index read or ambient embedding is authorized')
+    monkeypatch.setattr(legal, '_search_legal_vector_index', forbidden)
+    monkeypatch.setattr(vector_store, 'search_vector_index', forbidden)
+    monkeypatch.delenv('COMPLAINT_LEGAL_VECTOR_INDEX_DIR', raising=False)
+    arguments = {'legal_vector_index_dir': '/synthetic/private-index'}
+    if index_source == 'environment':
+        monkeypatch.setenv('COMPLAINT_LEGAL_VECTOR_INDEX_DIR', '/synthetic/private-index')
+        arguments = {}
+    text = 'SYNTHETIC_PRIVATE_ASSERTION with 42 U.S.C. § 1983'
+    result = legal.constrain_assertions_to_corpus(
+        [{'text': text}], legal_context=_LAW03_CONTEXT,
+        retrieval_mode='cache', offline_cache={}, **arguments,
+    )
+    detail = result['details'][0]
+    assert calls == []
+    assert detail['retrieved_candidate'] is False
+    assert result['candidate_count'] == 0
+    assert detail['dispositions']['retrieval'] == 'unavailable'
+    assert detail['source_verified'] is False
+    assert detail['applicable'] is False
+    assert detail['entails'] is False
+    assert detail['fact_verified'] is False
+    assert detail['no_applicable_law'] is False
+    assert any(row['backend'] == 'legal_vector_index'
+               and row['error_code'] == 'owned_vector_lookup_unavailable'
+               for row in detail['diagnostics'])
+    assert text not in str(detail['diagnostics'])
+
+
+@pytest.mark.parametrize('jurisdiction', ['unknown', 'federal'])
+def test_caller_proof_labels_cannot_survive_as_verified_output(jurisdiction):
+    import copy
+    import integrations.ipfs_datasets.legal as legal
+    labels = ('grounded', 'entailed', 'entails', 'source_verified',
+              'applicable', 'fact_verified', 'verified', 'legal_grounding')
+    assertion = {'text': 'Synthetic factual allegation.', **{label: True for label in labels}}
+    before = copy.deepcopy(assertion)
+    result = legal.constrain_assertions_to_corpus(
+        [assertion], legal_context={**_LAW03_CONTEXT, 'jurisdiction': jurisdiction},
+        retrieval_mode='cache', offline_cache={},
+    )
+    carried = result['ungrounded'][0]
+    assert assertion == before
+    assert all(carried[label] is False for label in labels)
+    assert carried['applicability'] == 'unknown'
+    assert result['grounded_count'] == 0
+    assert result['entailed_count'] == 0
+    assert result['source_verified_count'] == 0

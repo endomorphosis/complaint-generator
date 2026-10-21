@@ -1782,6 +1782,10 @@ class LegalAuthorityStorageHook:
             authority_text,
             source_id=f'authority:{authority_id}',
             metadata={
+                'legal_passage': True,
+                'source_family': 'legal_authority',
+                'record_scope': 'legal_authority',
+                'artifact_family': 'legal_authority_text',
                 'artifact_id': f'authority:{authority_id}',
                 'title': authority.get('title', ''),
                 'source_url': authority.get('url', ''),
@@ -2129,6 +2133,8 @@ class LegalAuthorityStorageHook:
             'authority_type': str(authority.get('type') or ''),
             'authority_source': str(authority.get('source') or ''),
             'deontic_operator': deontic_operator,
+            'deontic_operator_source': 'keyword_heuristic',
+            'deontic_operator_is_proof': False,
             'operator_family': operator_family,
             'premise_type': 'legal_rule',
             'rule_type': str(rule_type or ''),
@@ -2136,7 +2142,16 @@ class LegalAuthorityStorageHook:
             'claim_element_text': str(claim_element.get('claim_element') or ''),
             'jurisdiction': str(getattr(provenance, 'jurisdiction', '') or ''),
             'temporal_scope': str(authority.get('metadata', {}).get('effective_date') or ''),
+            # grounding_status is extraction provenance for this sentence, not
+            # logical entailment and not a complete adverse-treatment analysis.
+            # Downstream code must not treat it as a proof shortcut.
             'grounding_status': grounding_status,
+            'grounding_status_semantics': 'extraction_provenance_not_entailment',
+            'entailment_status': 'unsupported',
+            'entailment_reason': 'no_bound_entailment_prover',
+            'logical_entailment': False,
+            'adverse_treatment_analysis': 'incomplete_heuristic',
+            'treatment_influence_semantics': 'extraction_provenance_not_complete_adverse_analysis',
             'premise_failure_category': 'adverse_authority' if adverse_count else '',
             'treatment_influence': treatment_influence,
             'adverse_treatment_count': adverse_count,

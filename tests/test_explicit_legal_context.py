@@ -428,6 +428,7 @@ def test_unresolved_context_cannot_be_grounded_by_vector_candidates(
     for name in ("search_us_code", "search_federal_register", "search_state_laws"):
         monkeypatch.setattr(legal, name, statutes)
     monkeypatch.setattr(legal, "_search_legal_vector_index", vectors)
+    monkeypatch.setattr(legal, "lookup_bounded_legal_corpus", statutes)
     monkeypatch.delenv("COMPLAINT_LEGAL_VECTOR_INDEX_DIR", raising=False)
     arguments = {"legal_vector_index_dir": "synthetic-vector-index"}
     if index_source == "environment":
@@ -471,12 +472,24 @@ def test_explicit_context_vector_candidates_remain_retrieval_not_rule_selection(
     for name in ("search_us_code", "search_federal_register", "search_state_laws"):
         monkeypatch.setattr(legal, name, statutes)
     monkeypatch.setattr(legal, "_search_legal_vector_index", vectors)
+    monkeypatch.setattr(legal, "lookup_bounded_legal_corpus", statutes)
     assertion = {"assertion_id": "synthetic-explicit", "text": "Synthetic legal assertion."}
     result = constrain_assertions_to_corpus(
         [assertion], state=jurisdiction, legal_vector_index_dir="synthetic-vector-index",
     )
-    assert calls == [(assertion["text"], "synthetic-vector-index")]
-    assert result["grounded_count"] == 1
+    assert calls == []
+    assert result["grounded_count"] == 0
+    assert result["candidate_count"] == 0
+    assert result["corpus_coverage_percent"] == 0
+    assert result["corpus_coverage_semantics"] == "retrieval_only"
+    assert result["details"][0]["source_verified"] is False
+    assert result["details"][0]["applicable"] is False
+    assert result["details"][0]["entails"] is False
+    assert result["details"][0]["fact_verified"] is False
+    assert result["details"][0]["dispositions"]["retrieval"] == "unavailable"
+    assert any(row["backend"] == "legal_vector_index"
+               and row["error_code"] == "owned_vector_lookup_unavailable"
+               for row in result["details"][0]["diagnostics"])
     assert result["jurisdiction"] == jurisdiction
     assert result["selected_rule_applicability"] == "unknown"
     context = apply_legal_context_update(empty_legal_context(), {"jurisdiction": jurisdiction})
