@@ -462,6 +462,11 @@ def store_bytes(
     backend: Any = None,
     backend_name: str | None = None,
 ) -> dict[str, Any]:
+    """Store public bytes as given.
+
+    Private complaint artifacts must use ``store_private_artifact``. This
+    function does not encrypt and must not be treated as the private boundary.
+    """
     if backend is not None:
         try:
             return _store_with_object(backend, data, pin_content=pin_content, backend_name=backend_name or "kit")
@@ -663,6 +668,22 @@ def pin_cid(cid: str, *, backend: Any = None, backend_name: str | None = None) -
     )
 
 
+def store_private_artifact(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Encrypt a private artifact, then delegate ciphertext to the public backend."""
+
+    from integrations.private_storage import store_private_artifact as _store_private_artifact
+
+    return _store_private_artifact(*args, **kwargs)
+
+
+def retrieve_private_artifact(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Read ciphertext from the public backend and open it for the expected binding."""
+
+    from integrations.private_storage import retrieve_private_artifact as _retrieve_private_artifact
+
+    return _retrieve_private_artifact(*args, **kwargs)
+
+
 def storage_backend_status() -> dict[str, Any]:
     probe = _runtime_backend_probe()
     backend = probe["backend"]
@@ -695,7 +716,9 @@ __all__ = [
     "LocalCacheIPFSBackend",
     "ensure_ipfs_backend",
     "store_bytes",
+    "store_private_artifact",
     "retrieve_bytes",
+    "retrieve_private_artifact",
     "pin_cid",
     "storage_backend_status",
     "translate_kit_operation_result",
