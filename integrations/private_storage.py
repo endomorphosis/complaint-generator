@@ -835,9 +835,14 @@ def _opaque_key_id(prefix: str) -> str:
     return prefix + os.urandom(16).hex()
 
 
-def _kdf_bytes(passphrase: str, salt: bytes) -> bytes:
+def _require_passphrase(passphrase: Any) -> str:
     if not isinstance(passphrase, str) or passphrase == "":
         raise PrivateKeyMaterialError("passphrase_required")
+    return passphrase
+
+
+def _kdf_bytes(passphrase: str, salt: bytes) -> bytes:
+    _require_passphrase(passphrase)
     if not isinstance(salt, bytes) or len(salt) < 16:
         raise PrivateArtifactIntegrityError("malformed")
     try:
@@ -1022,11 +1027,13 @@ class UserOwnedKeySession:
                 actions=self.public_state()["actions"],
                 protection=str((self._document or {}).get("protection") or protection),
             )
+        if protection == "passphrase":
+            _require_passphrase(passphrase)
         master = _random_secret()
         master_id = _opaque_key_id("m-")
         if protection == "passphrase":
             salt = os.urandom(16)
-            wrapped = _wrap_secret(_kdf_bytes(str(passphrase), salt), master, MASTER_WRAP_AAD)
+            wrapped = _wrap_secret(_kdf_bytes(passphrase, salt), master, MASTER_WRAP_AAD)
             document = self._new_document(
                 protection="passphrase",
                 master_id=master_id,
@@ -1167,7 +1174,25 @@ class UserOwnedKeySession:
                 actions=self.public_state()["actions"],
                 protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
             )
-        return InjectedCaseKeyProvider(dict(self._data_keys))
+        session = self
+
+        class SessionKeyProvider(InjectedCaseKeyProvider):
+            """A retained handle cannot bypass a later session lock."""
+
+            def __init__(self) -> None:
+                # Keep the session handle, never a snapshot of unwrapped keys.
+                super().__init__({})
+
+            def resolve(self, binding: PrivateArtifactBinding) -> tuple[str, bytes]:
+                if not session.unlocked:
+                    raise PrivateKeyLockedError(
+                        "The key session is locked. Unlock it before resolving a case key.",
+                        actions=session.public_state()["actions"],
+                        protection=(session._document or {}).get("protection"),
+                    )
+                return InjectedCaseKeyProvider(session._data_keys).resolve(binding)
+
+        return SessionKeyProvider()
 
     def export_recovery(self, tenant_id: str, case_id: str, recovery_passphrase: str, destination: str | Path | None = None) -> dict[str, Any]:
         if not self.unlocked:
@@ -1176,6 +1201,7 @@ class UserOwnedKeySession:
                 actions=self.public_state()["actions"],
                 protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
             )
+        _require_passphrase(recovery_passphrase)
         key_id = self.ensure_data_key(tenant_id, case_id)
         _key_id, data_key = self._data_keys[(tenant_id, case_id)]
         salt = os.urandom(16)
@@ -1409,14 +1435,20 @@ def read_unlock_passphrase(prompt: str = "Private key passphrase", *, getpass_fn
         if name in {"--passphrase", "--password", "--master-key", "--data-key", "--wrapping-key"}:
             raise PrivateKeyMaterialError("secret_in_argv")
     reader = getpass_fn
-    if reader is None:
-        import getpass
-
-        reader = getpass.getpass
     try:
-        value = reader(f"{prompt}: ")
-    except Exception as exc:
-        raise PrivateKeyMaterialError("passphrase_prompt_failed") from exc
+        if reader is None:
+            import getpass
+            import warnings
+
+            # stdlib warns before falling back to echoed stdin. Refuse that
+            # fallback before it can consume a passphrase.
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", getpass.GetPassWarning)
+                value = getpass.getpass(f"{prompt}: ")
+        else:
+            value = reader(f"{prompt}: ")
+    except Exception:
+        raise PrivateKeyMaterialError("passphrase_prompt_failed") from None
     if not isinstance(value, str) or value == "":
         raise PrivateKeyMaterialError("passphrase_required")
     return value

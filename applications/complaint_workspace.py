@@ -2729,6 +2729,28 @@ class ComplaintWorkspaceRequestHandlers:
         return self.get_session(str(state["user_id"]))
 
 
+class _WorkspaceCaseKeyProvider:
+    """Resolve through current request admission and the current unlocked store.
+
+    The handle carries no key snapshot or request authority. Retaining it across
+    requests or an operator lock does not retain either capability.
+    """
+
+    def __init__(self, workspace: "ComplaintWorkspaceService") -> None:
+        self._workspace = workspace
+
+    def resolve(self, binding):
+        from integrations.private_storage import PrivateArtifactBinding, canonical_associated_data
+
+        if not isinstance(binding, PrivateArtifactBinding):
+            raise WorkspaceAuthorizationDenied()
+        self._workspace._require_private_case_key_access(
+            binding.tenant_id, binding.case_id, principal_id=binding.principal_id
+        )
+        canonical_associated_data(binding)
+        return self._workspace._private_key_session().provider().resolve(binding)
+
+
 class ComplaintWorkspaceService:
     def __init__(
         self,
@@ -10594,8 +10616,34 @@ class ComplaintWorkspaceService:
             self._user_owned_keys = session
         return session
 
+    def _require_private_case_key_access(
+        self, tenant_id: str, case_id: str, *, principal_id: Optional[str] = None
+    ) -> None:
+        """Admit one exact owner/case before any key-store lookup.
+
+        The shared master store has an operator-only lifecycle. Once unlocked,
+        authenticated users may use their bound case through this narrower seam.
+        """
+
+        if (not isinstance(tenant_id, str) or not tenant_id
+                or not isinstance(case_id, str) or not case_id
+                or (principal_id is not None and principal_id != tenant_id)):
+            raise WorkspaceAuthorizationDenied()
+        access = self._effective_access()
+        operator = access.trust == "trusted_local" and not access.principal_id and not access.case_id
+        if not operator:
+            if (access.trust not in {"authenticated", "trusted_local"}
+                    or access.principal_id != tenant_id or access.case_id != case_id):
+                raise WorkspaceAuthorizationDenied()
+        explicit_case = _REQUEST_CASE.get()
+        if explicit_case is not None and explicit_case != case_id:
+            raise WorkspaceAuthorizationDenied()
+        self._check_access(tenant_id, ability="private_key", case_id=case_id)
+
     def private_key_status(self) -> Dict[str, Any]:
-        """Report unlock state without minting keys or reading case plaintext."""
+        """Local operator view of the shared store, without case plaintext."""
+
+        self._require_local_filesystem_access()
 
         from integrations.private_storage import task_key_receipt
 
@@ -10608,7 +10656,9 @@ class ComplaintWorkspaceService:
         passphrase: Optional[str] = None,
         keyring: Any = None,
     ) -> Dict[str, Any]:
-        """Create a wrapped store. Unlock does not change cloud consent."""
+        """Local operator creates the shared store; cloud consent is unchanged."""
+
+        self._require_local_filesystem_access()
 
         from integrations.private_storage import PrivateKeyLockedError, task_key_receipt
 
@@ -10626,7 +10676,9 @@ class ComplaintWorkspaceService:
         passphrase: Optional[str] = None,
         keyring: Any = None,
     ) -> Dict[str, Any]:
-        """Unwrap keys into session memory. This is not consent to send plaintext."""
+        """Local operator unlocks the shared store; remote consent is unchanged."""
+
+        self._require_local_filesystem_access()
 
         from integrations.private_storage import (
             PrivateArtifactIntegrityError,
@@ -10653,6 +10705,9 @@ class ComplaintWorkspaceService:
         return task_key_receipt(state)
 
     def lock_private_keys(self) -> Dict[str, Any]:
+        """Local operator locks the shared store for all case handles."""
+
+        self._require_local_filesystem_access()
         from integrations.private_storage import task_key_receipt
 
         return task_key_receipt(self._private_key_session().lock())
@@ -10665,7 +10720,9 @@ class ComplaintWorkspaceService:
         recovery_passphrase: str,
         destination: str,
     ) -> Dict[str, Any]:
-        """User-requested recovery export. Automatic case backups are a different path."""
+        """Local operator performs an explicit recovery export to a host path."""
+
+        self._require_local_filesystem_access()
 
         from integrations.private_storage import PrivateKeyLockedError, task_key_receipt
 
@@ -10695,6 +10752,9 @@ class ComplaintWorkspaceService:
         payload: bytes,
         store_passphrase: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """Local operator imports recovery material into the shared store."""
+
+        self._require_local_filesystem_access()
         from integrations.private_storage import (
             PrivateArtifactBindingError,
             PrivateArtifactIntegrityError,
@@ -10733,26 +10793,43 @@ class ComplaintWorkspaceService:
     def ensure_private_case_key(self, tenant_id: str, case_id: str) -> Dict[str, Any]:
         """Mint or reload one case data key. The key id is opaque; bytes stay in memory."""
 
+        self._require_private_case_key_access(tenant_id, case_id)
+
         from integrations.private_storage import PrivateKeyLockedError, task_key_receipt
 
         session = self._private_key_session()
         try:
             key_id = session.ensure_data_key(tenant_id, case_id)
         except PrivateKeyLockedError as exc:
-            return task_key_receipt(exc.public_state())
+            receipt = task_key_receipt(exc.public_state())
+            receipt.pop("case_count", None)
+            return receipt
         state = session.public_state()
         state["message"] = "Case data key is available in this unlocked session."
         receipt = task_key_receipt(state)
+        receipt.pop("case_count", None)
         receipt["data_key_id"] = key_id
         return receipt
 
     def private_key_provider(self):
-        """In-memory provider for PRIV003 sealing. Refuses to invent a locked key."""
+        """Request-checked lazy case provider; a handle retains no raw key map."""
 
-        return self._private_key_session().provider()
+        access = self._effective_access()
+        if access.trust == "trusted_local" and not access.principal_id and not access.case_id:
+            self._require_local_filesystem_access()
+        else:
+            self._require_private_case_key_access(access.principal_id, access.case_id)
+        session = self._private_key_session()
+        if not session.unlocked:
+            # Preserve the native typed construction failure without copying any
+            # unlocked case keys into the returned, long-lived handle.
+            session.provider()
+        return _WorkspaceCaseKeyProvider(self)
 
     def continue_without_private_keys(self) -> Dict[str, Any]:
         """Let a coding supervisor proceed without user keys or a privacy bypass."""
+
+        self._require_local_filesystem_access()
 
         from integrations.private_storage import task_key_receipt
 

@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 import sys
+from functools import wraps
 
-from applications.complaint_cli import app, main
+from applications.complaint_cli import app, main as _workspace_main
 
 __all__ = [
     "app",
@@ -39,12 +40,54 @@ def _emit(payload: dict) -> None:
     sys.stdout.write(json.dumps(task_key_receipt(payload), sort_keys=True) + "\n")
 
 
+def _key_command_boundary(function):
+    @wraps(function)
+    def invoke(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except Exception:
+            # CLI exception renderers may include callback locals. Key commands
+            # hold passphrases in memory, so expose only a constant receipt.
+            _emit({
+                "status": "key_operation_failed",
+                "code": "key_operation_failed",
+                "message": "The private key operation failed. Check the selected store and unlock method, then retry.",
+                "actions": ["retry", "keyring_unlock", "recovery_import"],
+                "awaiting_user": True,
+                "worker_may_continue": True,
+                "worker_state": "ready_for_independent_tasks",
+                "raw_key_persisted": False,
+                "cloud_processing_enabled": False,
+                "unlock_is_remote_consent": False,
+            })
+            raise SystemExit(2) from None
+
+    return invoke
+
+
 def _prompt(label: str) -> str:
-    from integrations.private_storage import read_unlock_passphrase
+    from integrations.private_storage import PrivateKeyMaterialError, read_unlock_passphrase
 
-    return read_unlock_passphrase(label)
+    try:
+        return read_unlock_passphrase(label)
+    except PrivateKeyMaterialError:
+        _emit({
+            "status": "unlock_needed",
+            "code": "passphrase_prompt_failed",
+            "message": "No passphrase was accepted. Retry in a private terminal or use keyring protection or recovery import.",
+            "actions": ["retry_in_terminal", "keyring_unlock", "recovery_import"],
+            "awaiting_user": True,
+            "worker_may_continue": True,
+            "worker_state": "ready_for_independent_tasks",
+            "unlocked": False,
+            "raw_key_persisted": False,
+            "cloud_processing_enabled": False,
+            "unlock_is_remote_consent": False,
+        })
+        raise SystemExit(2) from None
 
 
+@_key_command_boundary
 def keys_status(store_dir: str = "") -> None:
     """Print whether the wrapped key store is absent, locked, or unlocked."""
 
@@ -56,6 +99,7 @@ def keys_status(store_dir: str = "") -> None:
     _emit(UserOwnedKeySession(store_dir).public_state())
 
 
+@_key_command_boundary
 def keys_init(store_dir: str = "", protection: str = "passphrase") -> None:
     """Create a passphrase- or keyring-wrapped store. Passphrase comes from getpass."""
 
@@ -76,6 +120,7 @@ def keys_init(store_dir: str = "", protection: str = "passphrase") -> None:
     _emit(state)
 
 
+@_key_command_boundary
 def keys_unlock(store_dir: str = "", protection: str = "") -> None:
     """Unlock an existing store. A locked keyring does not fall back to a raw key."""
 
@@ -115,6 +160,7 @@ def keys_unlock(store_dir: str = "", protection: str = "") -> None:
     _emit(state)
 
 
+@_key_command_boundary
 def keys_lock(store_dir: str = "") -> None:
     """Drop unwrapped keys from the session."""
 
@@ -126,6 +172,7 @@ def keys_lock(store_dir: str = "") -> None:
     _emit(UserOwnedKeySession(store_dir).lock())
 
 
+@_key_command_boundary
 def keys_recover_export(store_dir: str = "", tenant_id: str = "", case_id: str = "", destination: str = "") -> None:
     """Write a deliberate recovery export. This is not an automatic case backup."""
 
@@ -160,6 +207,7 @@ def keys_recover_export(store_dir: str = "", tenant_id: str = "", case_id: str =
     })
 
 
+@_key_command_boundary
 def keys_recover_import(
     store_dir: str = "",
     tenant_id: str = "",
@@ -231,6 +279,17 @@ def _register_key_commands() -> None:
 
 
 _register_key_commands()
+
+
+def main() -> None:
+    key_commands = {
+        "keys-status", "keys-init", "keys-unlock", "keys-lock",
+        "keys-recover-export", "keys-recover-import",
+    }
+    if any(token in key_commands for token in sys.argv[1:]):
+        # Refuse before argument-parser diagnostics can repeat an argv secret.
+        _reject_secret_argv()
+    _workspace_main()
 
 
 if __name__ == "__main__":
