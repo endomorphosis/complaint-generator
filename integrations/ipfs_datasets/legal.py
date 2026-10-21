@@ -1725,39 +1725,300 @@ def _search_legal_vector_index(
     *,
     index_dir: str,
     max_results: int,
-) -> List[Dict[str, Any]]:
-    """Try a semantic vector search against a pre-built legal corpus index.
+) -> Dict[str, Any]:
+    """Defer legacy semantic lookup until an owned, privacy-bound API exists.
 
-    Returns a list of normalised authority dicts (same shape as other
-    ``search_*`` helpers) or an empty list when the index is absent / not
-    set up.
+    A local index does not establish a local embedding provider. Neither index
+    files nor assertion text are passed to the ambient embedding router here.
     """
-    from .vector_store import search_vector_index
-
-    result = search_vector_index(
-        query,
-        index_name="legal_corpus",
-        index_dir=index_dir,
-        top_k=max_results,
+    return _bounded_envelope(
+        status="unavailable", family="legal_corpus", retrieval_mode="offline",
+        capability="owned_vector_lookup_unavailable", error_code="owned_vector_lookup_unavailable",
+        error_message="Legacy semantic corpus lookup has no owned private retrieval capability.",
     )
-    if not isinstance(result, dict) or result.get("status") not in {"success", "available"}:
-        return []
-    raw_hits: List[Dict[str, Any]] = list(result.get("results") or [])
-    normalised: List[Dict[str, Any]] = []
-    for item in raw_hits[:max_results]:
-        if not isinstance(item, dict):
-            continue
-        normalised.append(
-            _normalize_authority(
-                item,
-                str(item.get("type") or "legal_corpus"),
-                str(item.get("source") or "vector_index"),
-                query=query,
-                operation="search_legal_vector_index",
-                upstream_collection="results",
-            )
+
+
+# LAW03 has no bound entailment prover. Caller labels and model output are not proof.
+ENTAILMENT_PROVER_INTEGRATION = "unsupported"
+_CONSTRAINT_CALLER_LABELS = (
+    "grounded",
+    "entailed",
+    "entails",
+    "source_verified",
+    "applicable",
+    "fact_verified",
+    "verified",
+    "legal_grounding",
+)
+_FACTUAL_ASSERTION_KINDS = {
+    "fact",
+    "factual",
+    "factual_allegation",
+    "user_fact",
+    "user_assertion",
+}
+
+
+def _constraint_text(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _recognize_citations(text: str) -> List[Any]:
+    """Regex citation recognition. A match is not source verification.
+
+    The pinned extractor is
+    ``ipfs_datasets_py.processors.legal_data.citation_extraction.extract_citations_from_text``.
+    Positions are character offsets and URLs are generated references.
+    """
+    try:
+        from ipfs_datasets_py.processors.legal_data.citation_extraction import (
+            extract_citations_from_text,
         )
-    return normalised
+    except Exception:
+        return []
+    try:
+        return list(extract_citations_from_text(text) or [])
+    except Exception:
+        return []
+
+
+def _is_similarity_authority_hit(hit: Dict[str, Any], backend: str) -> bool:
+    """Vector and similarity edges are not legal authority.
+
+    The state-law adjacency contract labels this
+    ``similarity_cannot_establish_legal_authority``. Those labels stay in place.
+    """
+    if backend == "legal_vector_index":
+        return True
+    edge = _constraint_text(hit.get("edge_class") or hit.get("edge_kind")).casefold()
+    if "similar" in edge:
+        return True
+    if hit.get("similarity_cannot_establish_legal_authority") is True:
+        return True
+    authority = _constraint_text(hit.get("authority") or hit.get("authority_label")).casefold()
+    if authority in {"similarity", "non_authoritative", "similarity_not_legal_authority"}:
+        return True
+    source = _constraint_text(hit.get("source") or hit.get("retrieval_backend")).casefold()
+    if source in {"vector_index", "legal_vector_index"}:
+        return True
+    return False
+
+
+def _citation_maps_to_assertion(assertion_text: str, citation: str) -> bool:
+    left = _constraint_text(assertion_text).casefold()
+    right = _constraint_text(citation).casefold()
+    return bool(left and right and right in left)
+
+
+def _court_text(value: Any) -> str:
+    if isinstance(value, dict):
+        return _constraint_text(value.get("court") or value.get("name"))
+    return _constraint_text(value)
+
+
+def _version_covers_applicable_date(hit: Dict[str, Any], applicable_law_date: Dict[str, Any]) -> tuple[str, str]:
+    """Map a retrieved row onto the explicit applicable-law date.
+
+    Missing version or effective date stays unknown. It does not mean the rule
+    is inapplicable or that no law exists.
+    """
+    version = hit.get("corpus_version")
+    if not isinstance(version, str) or not version.strip():
+        return "unknown", "missing_rule_version"
+    effective_raw = hit.get("effective_date")
+    if not isinstance(effective_raw, str) or not effective_raw.strip():
+        return "unknown", "missing_rule_version"
+    effective = _parse_explicit_legal_date(effective_raw)
+    if not effective.get("start_date") or effective.get("is_uncertain"):
+        return "unknown", "unparsed_effective_date"
+    law_start = applicable_law_date.get("start_date")
+    law_end = applicable_law_date.get("end_date")
+    if not law_start or not law_end:
+        return "unknown", "missing_applicable_law_date"
+    if law_end < effective["start_date"]:
+        return "not_applicable", "effective_after_applicable_date"
+    if law_start < effective["start_date"] <= law_end:
+        return "unknown", "date_range_crosses_rule_version"
+    # A single effective date starts a version. It is not a one-day version
+    # unless the row also carries a sunset or repeal date.
+    sunset_raw = hit.get("sunset_date") or hit.get("repealed_date") or hit.get("effective_end")
+    rule_end = None
+    if isinstance(sunset_raw, str) and sunset_raw.strip():
+        sunset = _parse_explicit_legal_date(sunset_raw)
+        if not sunset.get("end_date") or sunset.get("is_uncertain"):
+            return "unknown", "unparsed_effective_date"
+        rule_end = sunset.get("end_date")
+    if rule_end and law_start > rule_end:
+        return "not_applicable", "version_expired"
+    if rule_end and law_start <= rule_end < law_end:
+        return "unknown", "date_range_crosses_rule_version"
+    return "in_force", "versioned_rule_mapping"
+
+
+def _classify_constraint_hit(
+    hit: Dict[str, Any],
+    *,
+    assertion_text: str,
+    backend: str,
+    jurisdiction: str,
+    applicable_law_date: Dict[str, Any],
+    court: str,
+    expected_version: str,
+) -> Dict[str, Any]:
+    """Classify one retrieved row without promoting it to proof."""
+    similarity = _is_similarity_authority_hit(hit, backend)
+    normalized = normalize_corpus_candidate(
+        hit,
+        source_family=str(hit.get("source_family") or hit.get("type") or backend or "legal_corpus"),
+        retrieval_mode="constraint",
+        requested_jurisdiction=jurisdiction,
+    )
+    reasons: List[str] = []
+    if similarity:
+        reasons.append("similarity_not_legal_authority")
+        normalized["authority_label"] = "similarity_not_legal_authority"
+        normalized["similarity_cannot_establish_legal_authority"] = True
+    passage_ok = (
+        normalized.get("passage_status") == "full_text"
+        and bool(normalized.get("source_passage"))
+        and normalized.get("content_hash_scope") == "source_passage"
+        and bool(normalized.get("content_hash"))
+        and not normalized.get("content_hash_mismatch")
+        and normalized.get("provenance_status") == "present"
+        and bool(normalized.get("corpus_version"))
+    )
+    source_verified = bool(passage_ok and not similarity and normalized.get("citation_status") == "source")
+    if not normalized.get("source_passage"):
+        reasons.append("absent_source_passage")
+    if normalized.get("content_hash_mismatch"):
+        reasons.append("content_hash_mismatch")
+    if normalized.get("uri_status") == "unverified_generated":
+        reasons.append("generated_reference_url")
+    if normalized.get("passage_status") == "snippet_only":
+        reasons.append("snippet_only")
+
+    citation = str(normalized.get("citation") or "")
+    mapped = _citation_maps_to_assertion(assertion_text, citation)
+    if not mapped:
+        reasons.append("no_versioned_rule_mapping")
+    hit_court = _court_text(hit.get("court"))
+    if not court:
+        reasons.append("missing_court_context")
+    elif not hit_court:
+        reasons.append("missing_source_court")
+    elif hit_court.casefold() != court.casefold():
+        reasons.append("court_mismatch")
+    if normalized.get("jurisdiction_status") == "mismatch":
+        reasons.append("jurisdiction_mismatch")
+    elif normalized.get("jurisdiction") == UNKNOWN_LEGAL_CONTEXT:
+        reasons.append("unknown_source_jurisdiction")
+    if expected_version and str(normalized.get("corpus_version") or "") != expected_version:
+        reasons.append("version_mismatch")
+    version_state, version_reason = _version_covers_applicable_date(normalized, applicable_law_date)
+    if version_reason != "versioned_rule_mapping":
+        reasons.append(version_reason)
+
+    blocking = {
+        "similarity_not_legal_authority",
+        "absent_source_passage",
+        "content_hash_mismatch",
+        "no_versioned_rule_mapping",
+        "missing_court_context",
+        "missing_source_court",
+        "court_mismatch",
+        "jurisdiction_mismatch",
+        "unknown_source_jurisdiction",
+        "version_mismatch",
+        "missing_rule_version",
+        "unparsed_effective_date",
+        "effective_after_applicable_date",
+        "version_expired",
+        "date_range_crosses_rule_version",
+        "missing_applicable_law_date",
+        "snippet_only",
+    }
+    # A conflict is about this candidate only. It is not a finding that no law applies.
+    hard_conflict = {
+        "jurisdiction_mismatch",
+        "court_mismatch",
+        "version_mismatch",
+        "effective_after_applicable_date",
+        "version_expired",
+    }
+    if any(reason in hard_conflict for reason in reasons) or version_state == "not_applicable":
+        applicability = "not_applicable"
+    elif not source_verified or any(reason in blocking for reason in reasons):
+        applicability = UNKNOWN_LEGAL_CONTEXT
+    else:
+        applicability = "applicable"
+
+    normalized.update({
+        "retrieval_backend": backend,
+        "retrieved_candidate": True,
+        "source_verified": source_verified,
+        "source_verification": "verified" if source_verified else "unverified",
+        "applicability": applicability,
+        "applicable": applicability == "applicable",
+        "entailment": ENTAILMENT_PROVER_INTEGRATION,
+        "entails": False,
+        "score_is_not_proof": True,
+        "disposition_reasons": list(dict.fromkeys(reasons)),
+    })
+    return normalized
+
+
+def _constraint_retrieval_status(attempts: List[Dict[str, Any]], hit_count: int) -> str:
+    errors = [item for item in attempts if item.get("status") in {"backend_error", "timeout", "unavailable"}]
+    timeouts = [item for item in attempts if item.get("status") == "timeout"]
+    if any(item.get("status") == "skipped" for item in attempts) and not errors and hit_count == 0:
+        return UNKNOWN_LEGAL_CONTEXT
+    if hit_count and errors:
+        return "partial"
+    if hit_count:
+        return "candidate"
+    if timeouts and not any(item.get("status") == "backend_error" for item in attempts):
+        return "timeout"
+    if errors:
+        return "unavailable" if all(item.get("status") == "unavailable" for item in errors) else "backend_error"
+    if any(item.get("status") == "ok" for item in attempts):
+        return "empty"
+    return UNKNOWN_LEGAL_CONTEXT
+
+
+def _invoke_constraint_backend(
+    backend: str,
+    fn: Callable[[], Any],
+    attempts: List[Dict[str, Any]],
+    collected: List[Dict[str, Any]],
+) -> None:
+    try:
+        rows = fn()
+    except TimeoutError:
+        attempts.append({"backend": backend, "status": "timeout", "error_code": "timeout"})
+        return
+    except Exception:
+        attempts.append({"backend": backend, "status": "backend_error", "error_code": "backend_error"})
+        return
+    if isinstance(rows, dict):
+        status = rows.get("status")
+        if type(status) is not str or status not in {"success", "empty", "partial_success"} or rows.get("bounded") is not True:
+            outcome = "timeout" if status == "timeout" else ("unavailable" if status == "unavailable" else "backend_error")
+            attempts.append({"backend": backend, "status": outcome,
+                             "error_code": "backend_unavailable" if outcome == "unavailable" else outcome})
+            return
+        envelope = rows
+        rows = envelope.get("results")
+        if status == "partial_success":
+            attempts.append({"backend": backend, "status": "backend_error", "error_code": "partial_result"})
+    if not isinstance(rows, list):
+        attempts.append({"backend": backend, "status": "backend_error", "error_code": "malformed_result"})
+        return
+    attempts.append({"backend": backend, "status": "ok", "result_count": len(rows)})
+    for row in rows:
+        if isinstance(row, dict):
+            tagged = dict(row)
+            tagged["_constraint_backend"] = backend
+            collected.append(tagged)
 
 
 def constrain_assertions_to_corpus(
@@ -1767,41 +2028,35 @@ def constrain_assertions_to_corpus(
     max_results_per_assertion: int = 3,
     allow_live_scrape_fallback: bool = False,
     legal_vector_index_dir: Optional[str] = None,
+    legal_context: Optional[Dict[str, Any]] = None,
+    retrieval_mode: str = "offline",
+    offline_cache: Optional[Dict[str, Any]] = None,
+    index_path: Optional[str] = None,
+    timeout_seconds: float = 5.0,
 ) -> Dict[str, Any]:
-    """Ground *assertions* against the legal corpus and classify each one.
+    """Separate corpus retrieval from source verification, applicability, and entailment.
 
-    For every assertion dict (expected to have at least a ``text`` key) the
-    function issues a search against the combined federal and state-law corpus
-    (US Code + Federal Register + state laws) and marks each assertion as one
-    of:
+    A search hit, similarity score, citation string, extracted sentence, or URL
+    is only a retrieved candidate. Source verification requires the identified
+    passage and provenance checks. Applicability requires the case's explicit
+    jurisdiction, applicable-law date, and court, plus a versioned rule mapping.
+    Entailment stays ``unsupported`` until a bound prover result exists.
+    Caller-supplied ``grounded`` / ``entailed`` labels are ignored. Corpus
+    retrieval uses the LAW02 bounded adapter and preserves its typed failures.
+    Offline/cache assets are explicit. The legacy live-scrape compatibility
+    argument never enables unbounded retrieval or grants remote consent.
 
-    * ``grounded``  — at least one authoritative corpus document was found.
-    * ``ungrounded`` — no corpus document could be located.
+    Compatibility fields use conservative meanings:
 
-    The summary dict exposes ``grounded_count``, ``ungrounded_count``, and
-    ``corpus_coverage_percent`` for downstream use by the proof pipeline and
-    the editor guardrails.
-
-    Parameters
-    ----------
-    assertions:
-        List of assertion dicts.  Each should carry at minimum a ``text`` key
-        with the assertion text to search.  A ``assertion_id`` key is used for
-        tracking; one is synthesised if absent.
-    state:
-        Optional two-letter state code to narrow state-law searches.
-    max_results_per_assertion:
-        How many corpus hits to return per assertion.
-    allow_live_scrape_fallback:
-        Whether to permit live-scrape calls when IPFS backends are absent.
-        Defaults to *False* to keep the function fast in offline / test
-        environments.
-    legal_vector_index_dir:
-        Path to a directory that contains a pre-built legal corpus vector index
-        (``legal_corpus.vectors.npy`` + ``legal_corpus.records.jsonl``).
-        When ``None`` the function falls back to the
-        ``COMPLAINT_LEGAL_VECTOR_INDEX_DIR`` environment variable.  If neither
-        is set the semantic search pass is skipped.
+    * ``grounded`` is true only when that assertion is source-verified,
+      applicable, and entailed. It is not true merely because retrieval
+      returned a hit, and false does not mean the allegation is false or that
+      no law applies.
+    * ``ungrounded`` lists assertions that are not in that proved state.
+      Membership is not a finding of falsity or of no applicable law.
+    * ``corpus_coverage_percent`` counts assertions with at least one retrieved
+      candidate. ``corpus_coverage_semantics`` is ``retrieval_only``. It is not
+      a proof rate.
     """
     import os
 
@@ -1814,19 +2069,26 @@ def constrain_assertions_to_corpus(
     grounded: List[Dict[str, Any]] = []
     ungrounded: List[Dict[str, Any]] = []
     details: List[Dict[str, Any]] = []
-    explicit_jurisdiction = resolve_explicit_jurisdiction(state)
+    context = legal_context if isinstance(legal_context, dict) else {}
+    explicit_jurisdiction = resolve_explicit_jurisdiction(
+        context.get("jurisdiction") if "jurisdiction" in context else state
+    )
+    applicable_law_date = classify_legal_date(
+        context.get("applicable_law_date") or context.get(DATE_ROLE_APPLICABLE_LAW),
+        role=DATE_ROLE_APPLICABLE_LAW,
+    )
+    court = _court_text(context.get("court"))
+    expected_version = _constraint_text(context.get("corpus_version") or context.get("expected_corpus_version"))
 
     for index, assertion in enumerate(assertions or []):
+        if not isinstance(assertion, dict):
+            assertion = {}
         assertion_id = str(assertion.get("assertion_id") or assertion.get("id") or f"a-{index + 1}")
         text = str(assertion.get("text") or "").strip()
-        if not text:
-            ungrounded.append(assertion)
-            details.append({"assertion_id": assertion_id, "grounded": False, "corpus_hits": []})
-            continue
-
-        corpus_hits: List[Dict[str, Any]] = []
-
-        # Unresolved jurisdiction does not select federal or Oregon law.
+        kind = _constraint_text(assertion.get("assertion_kind") or assertion.get("kind") or "unspecified").casefold()
+        ignored_labels = [key for key in _CONSTRAINT_CALLER_LABELS if key in assertion]
+        # LAW01 pins this early exit to a fixed record. Unknown jurisdiction is
+        # not a retrieval result, a proof, or a finding that no law applies.
         if explicit_jurisdiction == UNKNOWN_LEGAL_CONTEXT:
             details.append({
                 "assertion_id": assertion_id,
@@ -1836,71 +2098,165 @@ def constrain_assertions_to_corpus(
                 "reason": "unresolved_legal_context",
                 "corpus_hits": [],
             })
-            ungrounded.append({
+            unresolved = {
                 **assertion,
                 "grounded": False,
                 "applicability": UNKNOWN_LEGAL_CONTEXT,
                 "corpus_hits": [],
-            })
+            }
+            for label in _CONSTRAINT_CALLER_LABELS:
+                if label in unresolved:
+                    unresolved[label] = False
+            ungrounded.append(unresolved)
             continue
+        citation_recognition = _recognize_citations(text) if text else []
+        attempts: List[Dict[str, Any]] = []
+        collected: List[Dict[str, Any]] = []
 
-        # 1. Federal statutes only when federal jurisdiction was stated.
-        if explicit_jurisdiction == "federal":
-            try:
-                hits = search_us_code(text, max_results=max_results_per_assertion)
-                corpus_hits.extend(hits or [])
-            except Exception:
-                pass
-
-        # 2. Federal Register only for an explicit federal jurisdiction.
-        if explicit_jurisdiction == "federal" and not corpus_hits:
-            try:
-                hits = search_federal_register(text, max_results=max_results_per_assertion)
-                corpus_hits.extend(hits or [])
-            except Exception:
-                pass
-
-        # 3. State laws only for an explicit state code.
-        if not corpus_hits and explicit_jurisdiction not in {UNKNOWN_LEGAL_CONTEXT, "federal"}:
-            try:
-                hits = search_state_laws(
-                    text,
-                    state=explicit_jurisdiction,
-                    max_results=max_results_per_assertion,
-                    allow_live_scrape_fallback=allow_live_scrape_fallback,
+        if not text:
+            attempts.append({"backend": "corpus", "status": "skipped", "reason": "empty_assertion_text"})
+        else:
+            if explicit_jurisdiction == "federal":
+                _invoke_constraint_backend(
+                    "us_code",
+                    lambda text=text: lookup_bounded_legal_corpus(
+                        source_family=CORPUS_FAMILY_US_CODE, query=text, retrieval_mode=retrieval_mode,
+                        jurisdiction=explicit_jurisdiction, max_results=max_results_per_assertion,
+                        offline_cache=offline_cache, index_path=index_path, timeout_seconds=timeout_seconds),
+                    attempts,
+                    collected,
                 )
-                corpus_hits.extend(hits or [])
-            except Exception:
-                pass
-
-        # 4. Semantic vector similarity search (optional, requires pre-built index)
-        if not corpus_hits and _vector_index_dir:
-            try:
-                hits = _search_legal_vector_index(
-                    text,
-                    index_dir=_vector_index_dir,
-                    max_results=max_results_per_assertion,
+                if not collected:
+                    _invoke_constraint_backend(
+                        "federal_register",
+                        lambda text=text: lookup_bounded_legal_corpus(
+                            source_family=CORPUS_FAMILY_FEDERAL_REGISTER, query=text, retrieval_mode=retrieval_mode,
+                            jurisdiction=explicit_jurisdiction, max_results=max_results_per_assertion,
+                            offline_cache=offline_cache, timeout_seconds=timeout_seconds),
+                        attempts,
+                        collected,
+                    )
+            else:
+                _invoke_constraint_backend(
+                    "state_laws",
+                    lambda text=text: lookup_bounded_legal_corpus(
+                        source_family=CORPUS_FAMILY_STATE_STATUTE, query=text, retrieval_mode=retrieval_mode,
+                        state=explicit_jurisdiction, jurisdiction=explicit_jurisdiction,
+                        max_results=max_results_per_assertion, offline_cache=offline_cache,
+                        timeout_seconds=timeout_seconds),
+                    attempts,
+                    collected,
                 )
-                corpus_hits.extend(hits or [])
-            except Exception:
-                pass
+            if not collected and _vector_index_dir:
+                # Merely setting an index path cannot authorize query embedding
+                # through an ambient provider or an unbounded local index read.
+                attempts.append({"backend": "legal_vector_index", "status": "unavailable",
+                                 "error_code": "owned_vector_lookup_unavailable"})
 
-        is_grounded = bool(corpus_hits)
-        detail: Dict[str, Any] = {
+        classified_hits = [
+            _classify_constraint_hit(
+                hit,
+                assertion_text=text,
+                backend=str(hit.get("_constraint_backend") or ""),
+                jurisdiction=explicit_jurisdiction,
+                applicable_law_date=applicable_law_date,
+                court=court,
+                expected_version=expected_version,
+            )
+            for hit in collected[:max_results_per_assertion]
+        ]
+        retrieval = _constraint_retrieval_status(attempts, len(classified_hits))
+        source_verified = any(item.get("source_verified") for item in classified_hits)
+        applicable = any(item.get("applicable") for item in classified_hits)
+        # No bound prover is integrated. Unsupported is not a proof of non-entailment.
+        entails = False
+        entailment = ENTAILMENT_PROVER_INTEGRATION
+        legally_grounded = bool(source_verified and applicable and entails)
+        if retrieval == "empty":
+            retrieval_reason = "empty_success"
+        elif retrieval == "timeout":
+            retrieval_reason = "timeout"
+        elif retrieval == "backend_error":
+            retrieval_reason = "backend_error"
+        elif retrieval == "unavailable":
+            retrieval_reason = "backend_unavailable"
+        elif retrieval == "partial":
+            retrieval_reason = "partial_retrieval"
+        elif retrieval == "candidate":
+            retrieval_reason = "retrieved_candidate"
+        else:
+            retrieval_reason = str((attempts[0].get("reason") if attempts else "") or "unknown")
+        detail = {
             "assertion_id": assertion_id,
             "text": text,
-            "grounded": is_grounded,
-            "corpus_hits": corpus_hits[:max_results_per_assertion],
+            "assertion_kind": kind,
+            "retrieved_candidate": retrieval == "candidate" or retrieval == "partial",
+            "source_verified": source_verified,
+            "applicable": applicable,
+            "applicability": "applicable" if applicable else UNKNOWN_LEGAL_CONTEXT,
+            "entails": entails,
+            "dispositions": {
+                "retrieval": retrieval,
+                "source_verification": "verified" if source_verified else ("unknown" if retrieval in {UNKNOWN_LEGAL_CONTEXT, "empty", "timeout", "backend_error", "unavailable"} and not classified_hits else "unverified"),
+                "applicability": "applicable" if applicable else UNKNOWN_LEGAL_CONTEXT,
+                "entailment": entailment,
+            },
+            "grounded": legally_grounded,
+            "grounding_semantics": "source_verified_and_applicable_and_entailed",
+            "fact_verified": False,
+            "allegation_status": UNKNOWN_LEGAL_CONTEXT,
+            "applicable_law_conclusion": "applicable" if applicable else UNKNOWN_LEGAL_CONTEXT,
+            "entailment_reason": "no_bound_entailment_prover",
+            "reason": retrieval_reason,
+            "diagnostics": attempts,
+            "ignored_caller_labels": ignored_labels,
+            "citation_recognition": "regex_not_source_verification" if citation_recognition else "none",
+            "citation_recognition_count": len(citation_recognition),
+            "factual_assertion": kind in _FACTUAL_ASSERTION_KINDS,
+            "fact_promotion": "refused",
+            "no_applicable_law": False,
+            "allegation_false": False,
+            "corpus_hits": classified_hits,
         }
+        mapped_conflict = any(
+            item.get("applicability") == "not_applicable"
+            and "no_versioned_rule_mapping" not in (item.get("disposition_reasons") or [])
+            for item in classified_hits
+        )
+        if not applicable and mapped_conflict:
+            detail["dispositions"]["applicability"] = "not_applicable"
+        detail["applicability"] = detail["dispositions"]["applicability"]
+        detail["applicable_law_conclusion"] = "applicable" if applicable else UNKNOWN_LEGAL_CONTEXT
         details.append(detail)
-        if is_grounded:
-            grounded.append({**assertion, "grounded": True, "corpus_hits": corpus_hits[:max_results_per_assertion]})
+        carried = {
+            **assertion,
+            "grounded": legally_grounded,
+            "retrieved_candidate": detail["retrieved_candidate"],
+            "source_verified": source_verified,
+            "applicable": applicable,
+            "applicability": detail["applicability"],
+            "entails": entails,
+            "entailed": False,
+            "fact_verified": False,
+            "allegation_status": UNKNOWN_LEGAL_CONTEXT,
+            "corpus_hits": classified_hits,
+            "diagnostics": attempts,
+        }
+        for label in ("verified", "legal_grounding"):
+            if label in carried:
+                carried[label] = False
+        if legally_grounded:
+            grounded.append(carried)
         else:
-            ungrounded.append({**assertion, "grounded": False, "corpus_hits": []})
+            ungrounded.append(carried)
 
     total = len(assertions or [])
+    candidate_count = sum(1 for item in details if item.get("retrieved_candidate"))
+    source_verified_count = sum(1 for item in details if item.get("source_verified"))
+    applicable_count = sum(1 for item in details if item.get("applicable"))
+    entailed_count = sum(1 for item in details if item.get("entails"))
     grounded_count = len(grounded)
-    corpus_coverage_percent = int(round((grounded_count / total) * 100)) if total else None
+    corpus_coverage_percent = int(round((candidate_count / total) * 100)) if total else None
 
     return {
         "grounded": grounded,
@@ -1908,11 +2264,27 @@ def constrain_assertions_to_corpus(
         "details": details,
         "grounded_count": grounded_count,
         "ungrounded_count": len(ungrounded),
+        "candidate_count": candidate_count,
+        "source_verified_count": source_verified_count,
+        "applicable_count": applicable_count,
+        "entailed_count": entailed_count,
         "total_assertion_count": total,
         "corpus_coverage_percent": corpus_coverage_percent,
+        "corpus_coverage_semantics": "retrieval_only",
+        "grounded_is_not_proof_shortcut": True,
+        "compatibility": {
+            "grounded_semantics": (
+                "true only when source_verified, applicable, and entailed are all true; "
+                "false does not mean the allegation is false or that no law applies"
+            ),
+            "ungrounded_semantics": "not_proved_not_false_allegation",
+            "corpus_coverage_percent_semantics": "retrieval_only",
+        },
+        "entailment_prover": ENTAILMENT_PROVER_INTEGRATION,
         "jurisdiction": explicit_jurisdiction,
         "context_status": UNKNOWN_LEGAL_CONTEXT if explicit_jurisdiction == UNKNOWN_LEGAL_CONTEXT else "explicit",
         "selected_rule_applicability": UNKNOWN_LEGAL_CONTEXT,
+        "fact_graph_mutated": False,
     }
 
 
@@ -2347,6 +2719,19 @@ def normalize_corpus_candidate(
     elif publication_filter:
         base["effective_date_status"] = "not_publication_date"
 
+    for field in ("court", "sunset_date", "repealed_date", "effective_end"):
+        value, invalid = _independent_text(item, field)
+        corrupted = corrupted or invalid
+        if value:
+            base[field] = value
+    # A second normalization pass cannot erase an earlier integrity refusal.
+    if item.get("provenance_status") == "corrupted" or item.get("content_hash_mismatch") is True:
+        corrupted = True
+    if item.get("content_hash_mismatch") is True:
+        base["content_hash_mismatch"] = True
+    if _is_similarity_authority_hit(item, ""):
+        base["similarity_cannot_establish_legal_authority"] = True
+        base["authority_label"] = "similarity_not_legal_authority"
     if item.get("provenance") is not None and not isinstance(item.get("provenance"), dict):
         corrupted = True
     base["provenance_status"] = "corrupted" if corrupted else "present"
