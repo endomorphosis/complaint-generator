@@ -283,7 +283,7 @@
     }
   ],
   "implementation_tasks_completed_by_these_checks": 0,
-  "scope": "Implementation is underway; current_campaign_progress reports native taskboard completion. Provisioning and source checks grant no completion themselves. Full release qualification remains pending.",
+  "scope": "Implementation remains underway:10 of58 native tasks completed,48 pending. Source qualification grants no completion or refund. Full release qualification remains pending.",
   "first_party_source_sha256": {
     "integrations/ipfs_accelerate/improvement_plan.py": "034a30d5f23e5dec606fa7ff09c3bd27921bcbab527bd1d8103b45beab8f9781",
     "integrations/ipfs_accelerate/improvement_runner.py": "a7048dd2e02769989fbf04ebfa6d580a3833e238d7ac5c611e9aab478afb3ea8",
@@ -785,14 +785,14 @@
     }
   },
   "current_campaign_progress": {
-    "completed": 8,
-    "pending": 50,
+    "completed": 10,
+    "pending": 48,
     "total": 58,
-    "state": "stopped_ready_to_resume_after_qualified_privacy_corrections",
-    "observed_at": "2026-10-21T10:09:47.016997+00:00",
+    "state": "stopped_ready_to_resume_after_qualified_key_storage_legal_corrections",
+    "observed_at": "2026-10-21T11:06:09.726315+00:00",
     "release_qualified": false,
     "continue_until_all58_completed": true,
-    "source": "Native committed taskboard and exact successful PRIV002/003 validation/merge/finish events; source corrections grant no completion."
+    "source": "Actual native committed taskboard and exact PRIV004/DUR001 validation/merge/finish events; cached last-pass projection remains9, source repairs grant no completion."
   },
   "pending_task_runtime_guidance": {
     "receipt": "/tmp/complaint-pending-guidance-install-20261021-63nbl1nl/receipt.json",
@@ -1185,6 +1185,48 @@
         "sha256": "e41b215f7ccee11feea38c9f57323dcca03d4f20f3868d2da797dbe318fa0ee6"
       },
       "provider_attempt_refunded": false
+    },
+    {
+      "task_id": "CIMP-PRIV-004",
+      "attempt": 1,
+      "event_id": "sha256:ca2c76cfbf685c6b1d66abf6f81b47677de75c96422321548cc7adbbcf616a3d",
+      "finished_at": "2026-10-21T10:20:02.468759+00:00",
+      "candidate_commit": "5e35e5557e883a94322d0dbbba5eb6c6efbe4983",
+      "integration_commit": "aeed4b454d8f595ad78b9747c466208749915cf5",
+      "native_pipeline_returncode": 0,
+      "validation_passed": true,
+      "native_board_completion": {
+        "complete": true,
+        "pending_merge": false,
+        "reason": "merged_into_target"
+      },
+      "event_receipt": {
+        "path": "/tmp/complaint-priv004-dur001-native-completion-20261021-tv_7e2wu/cimp-priv-004-events.json",
+        "sha256": "004005b7804a8c8d4b88ca7e9a9f86df96e7770853e66193029d8b29550715ce"
+      },
+      "provider_attempt_refunded": false,
+      "independent_post_completion_source_correction": true
+    },
+    {
+      "task_id": "CIMP-DUR-001",
+      "attempt": 1,
+      "event_id": "sha256:f6bbf18c70c50096cee1d83c076f81a06529abc53ee7e4fdd527d225c18ef335",
+      "finished_at": "2026-10-21T10:31:15.102955+00:00",
+      "candidate_commit": "190d1b19246eb565430603674328ab1a6100e191",
+      "integration_commit": "08011a7bb7a9147dfb5ddd0d04cca7130c42ae44",
+      "native_pipeline_returncode": 0,
+      "validation_passed": true,
+      "native_board_completion": {
+        "complete": true,
+        "pending_merge": false,
+        "reason": "merged_into_target"
+      },
+      "event_receipt": {
+        "path": "/tmp/complaint-priv004-dur001-native-completion-20261021-tv_7e2wu/cimp-dur-001-events.json",
+        "sha256": "65eda9aab8742cd8da976d5801ba6ba4baf6c3e87e8928de71eb05ead233e9a7"
+      },
+      "provider_attempt_refunded": false,
+      "independent_post_completion_source_correction": true
     }
   ],
   "current_plan_id": "baguqeerazpmdxshp56ijft7f6agjywb5u6hflpwl565jyhadvuvwy4y2lpzq",
@@ -1838,5 +1880,274 @@
     "cached_native_completed_count": 7,
     "actual_taskboard_completed_count": 8,
     "cached_projection_preserved_for_next_ordinary_pass": true
-  }
+  },
+  "priv004_dur001_source_corrections_after_native_completion": {
+    "installation": {
+      "path": "/tmp/complaint-qualified-priv004-dur001-installation-20261021-f88aik3d/receipt.json",
+      "sha256": "fac97e29c185c343025635d5908e45c1e668344a698856b34f9e2455c5389c9c"
+    },
+    "combined_qualification": {
+      "path": "/tmp/complaint-privacy-priv004-dur001-combined-final427-20261021-nn2frp7q/bound_source_receipt.json",
+      "sha256": "3c08096096fc4e572071eeb774be2e9b1f860977372803508b0ddd7b7832d458"
+    },
+    "combined_prequalification": {
+      "path": "/tmp/complaint_priv004_dur001_combined_final_prequalification_20261021.json",
+      "sha256": "6d0461556c3d80ddf5fcc9141c036a99298a0e220a44b13471c19d504be48e48"
+    },
+    "qualified_source_head": "8e003c2d6a4b233ba8caec76c64d440eb12ecc83",
+    "actual_installed_head": "8e003c2d6a4b233ba8caec76c64d440eb12ecc83",
+    "source_files": {
+      "applications/complaint_workspace.py": {
+        "git_mode": "100644",
+        "mode": 436,
+        "sha256": "2e3d7b9054274c08c2ffd2dbfeb5f6d7ebaef4dc0d7bd7c1aaa7c1203dbd346a"
+      },
+      "complaint_generator/cli.py": {
+        "git_mode": "100644",
+        "mode": 436,
+        "sha256": "1c6d91cdf241aa12e53b2aff921d8c046a07fdf262c3765bf2ba8a16d712230b"
+      },
+      "integrations/ipfs_datasets/draft_logic_pipeline.py": {
+        "git_mode": "100644",
+        "mode": 436,
+        "sha256": "0169ff0aa0554c82f6735fc6c2dbb91e43fbc6a3d1fa44c4215d69e70156bf50"
+      },
+      "integrations/ipfs_datasets/legal.py": {
+        "git_mode": "100644",
+        "mode": 436,
+        "sha256": "88acdaa205ef27eba0b79b18727e1ed697be968f2a40f5834ea3a20abd99f586"
+      },
+      "integrations/ipfs_datasets/storage.py": {
+        "git_mode": "100644",
+        "mode": 436,
+        "sha256": "f3eb13ceea9840b2253a1769abbe3bfad6e411047a43e9580d5a530998413df2"
+      },
+      "integrations/private_storage.py": {
+        "git_mode": "100644",
+        "mode": 436,
+        "sha256": "f47c99542584a8536c0f02bbea50f643816bd6afe01716dd0ed55da50d6b2be0"
+      },
+      "tests/test_explicit_legal_context.py": {
+        "git_mode": "100644",
+        "mode": 436,
+        "sha256": "89a92740ab8acf4eebb20b817b6cca5d29adaf48f8abd5bdaab0566a2339b06b"
+      },
+      "tests/test_ipfs_kit_storage_adapter.py": {
+        "git_mode": "100644",
+        "mode": 436,
+        "sha256": "127371ef8d7923c4b197cb13833399dd67978e9dd0a81693cd5c60bd15b26d5d"
+      },
+      "tests/test_private_storage_adapter.py": {
+        "git_mode": "100644",
+        "mode": 436,
+        "sha256": "64825d3f2f516988dd233da9fbf456b596daae94bab3b66d2bc20a17eb8f6bee"
+      },
+      "tests/test_private_workspace_keys.py": {
+        "git_mode": "100644",
+        "mode": 436,
+        "sha256": "b8fa46833d8d04a457f00dc3247a488ea8e3004be29c195a507a090a7f844205"
+      },
+      "tests/test_proof_report_and_pinning.py": {
+        "git_mode": "100644",
+        "mode": 436,
+        "sha256": "c37d8f8d78816ac4e5c66d577d12c932501570e4120c0833a2642857db82e1ea"
+      }
+    },
+    "passed": 427,
+    "skipped": 0,
+    "failures": 0,
+    "phase_reports": 1281,
+    "ast_nodes": 427,
+    "catalog_file_hash_count": 134,
+    "groups": {
+      "tests.test_private_workspace_keys": 41,
+      "tests.test_private_workspace_crypto": 35,
+      "tests.test_private_workspace_isolation": 49,
+      "tests.test_private_workspace_policy": 30,
+      "tests.test_tui_intake_baseline": 3,
+      "tests.test_ref_132_storage_kubo_probe": 2,
+      "tests.test_ipfs_kit_storage_adapter": 70,
+      "tests.test_proof_report_and_pinning.TestRenderProofReport": 20,
+      "tests.test_proof_report_and_pinning.TestPinProofReportToIPFS": 15,
+      "tests.test_proof_report_and_pinning.TestConstrainAssertionsVectorPass": 4,
+      "tests.test_proof_report_and_pinning.TestPublicAPIExports": 5,
+      "tests.test_private_storage_adapter": 10,
+      "tests.test_explicit_legal_context": 53,
+      "tests.test_ipfs_adapter_layer": 90
+    },
+    "ast_covered_changed_files": [
+      "applications/complaint_workspace.py",
+      "integrations/ipfs_datasets/draft_logic_pipeline.py",
+      "integrations/ipfs_datasets/legal.py",
+      "integrations/ipfs_datasets/storage.py",
+      "integrations/private_storage.py",
+      "tests/test_explicit_legal_context.py",
+      "tests/test_ipfs_kit_storage_adapter.py",
+      "tests/test_private_storage_adapter.py",
+      "tests/test_private_workspace_keys.py",
+      "tests/test_proof_report_and_pinning.py"
+    ],
+    "dynamic_imported_changed_files_bound_by_external_before_after_freeze": [
+      "complaint_generator/cli.py"
+    ],
+    "evidence": [
+      {
+        "path": "/tmp/complaint-privacy-dur001-kubo-pin-ack-final37-20261021-4ji8ri3f/bound_source_receipt.json",
+        "sha256": "88da627aba9550488629a75f00df00258c3bc9a0848bae3194745e6a1d91571b"
+      },
+      {
+        "path": "/tmp/complaint-privacy-dur001-kubo-pin-ack-final37-20261021-4ji8ri3f/commit_receipt.json",
+        "sha256": "b752f88c34c69f6a4ddb758a434525aea0983a8c724c3880ccd3d65b3a5df909"
+      },
+      {
+        "path": "/tmp/complaint_priv004_dur001_combined_final_prequalification_20261021.json",
+        "sha256": "6d0461556c3d80ddf5fcc9141c036a99298a0e220a44b13471c19d504be48e48"
+      },
+      {
+        "path": "/tmp/complaint-privacy-priv004-dur001-combined-final427-20261021-nn2frp7q/receipt.json",
+        "sha256": "cfdd46789f00f7eaa6dcc6e91cee672f616e7b252831283bc1d7fe84c8cb7250"
+      },
+      {
+        "path": "/tmp/complaint-privacy-priv004-dur001-combined-final427-20261021-nn2frp7q/phases.json",
+        "sha256": "1b2cc0bfce28440295f8698af9960ccd9464ff84554978b071ba0ad270b52c1c"
+      },
+      {
+        "path": "/tmp/complaint-privacy-priv004-dur001-combined-final427-20261021-nn2frp7q/cases.xml",
+        "sha256": "5714ea74c4f407af93c1387e5734ecaf12f5f03aee5828d5ea375760a8225d27"
+      },
+      {
+        "path": "/tmp/complaint-privacy-priv004-dur001-combined-final427-20261021-nn2frp7q/pytest-seals.duckdb",
+        "sha256": "09fe57542c07a68c18a41bf8483c69024b1146beb3a53be5b6a3aea900587f9e"
+      },
+      {
+        "path": "/tmp/complaint-privacy-priv004-dur001-combined-final427-20261021-nn2frp7q/native_sealed_validation.json",
+        "sha256": "7998c28084fd2e1bebd42fa8ab731c4d0691c05ddb825fb41028727ab6e7a77d"
+      },
+      {
+        "path": "/tmp/complaint-privacy-priv004-dur001-combined-final427-20261021-nn2frp7q/complaint_priv002_phase_observer.py",
+        "sha256": "0d8f31584602c8bff1cd0abd7406d54f8227906a7deb48d18aeabf98f5c955c5"
+      },
+      {
+        "path": "/tmp/complaint_priv004_dur001_private_storage_preservation_20261021.json",
+        "sha256": "18e3d320a91dbc8955e30727f684ffae3fd780af402e7ad5fc13173dc7dad790"
+      },
+      {
+        "path": "/tmp/complaint-privacy-priv004-corrective-committed-source-20261021-aih3wnb1/bound_source_receipt.json",
+        "sha256": "984ea6f3892e1191e25664be4c1ee61fc4e212952c6120495351a5444dafc055"
+      },
+      {
+        "path": "/tmp/complaint-privacy-dur001-legal-corrected-20261021-n9qfglzt/bound_source_receipt.json",
+        "sha256": "4cc42083c1251b3ede6d505098ac200da164dcf87b230235fea9071941c88998"
+      },
+      {
+        "path": "/tmp/complaint-privacy-dur001-storage-final88-20261021-acynsxvb/bound_source_receipt.json",
+        "sha256": "1b92b026e645b93f2b222aec0b8bc1ed5a4ba5860eeae4030eab9bd788f53586"
+      },
+      {
+        "path": "/tmp/complaint_priv004_independent_production_review_20261021.json",
+        "sha256": "c67f7e485caf7fff7449801bf1027a6cdd37b53c78bb3c265a681aab71daad67"
+      },
+      {
+        "path": "/tmp/complaint_dur001_final88_independent_review_20261021.json",
+        "sha256": "561a3f3498984f51f3d9b773daa5d4acc5b378b4bf2bb66d958238700d8e88e6"
+      }
+    ],
+    "dependency_heads": {
+      "ipfs_accelerate_py": "7a685e29f663d7a4a9820cffb8f6b51c45a13d45",
+      "ipfs_datasets_py": "13061f6783cd2cd7b7ed38080d5c701117643b80",
+      "ipfs_kit_py": "40c98c71b95be750509ffdb21e7e5494d91b4e79"
+    },
+    "preserved_dependency_source_custody": {
+      "ipfs_accelerate_py": {
+        "head": "7a685e29f663d7a4a9820cffb8f6b51c45a13d45",
+        "direct_diff_paths": [],
+        "cached_diff_paths": [],
+        "full_diff_paths": []
+      },
+      "ipfs_datasets_py": {
+        "head": "13061f6783cd2cd7b7ed38080d5c701117643b80",
+        "direct_diff_paths": [
+          "ipfs_datasets_py/processors/web_archiving/common_crawl_search_engine"
+        ],
+        "cached_diff_paths": [],
+        "full_diff_paths": [
+          "ipfs_datasets_py/processors/web_archiving/common_crawl_search_engine"
+        ],
+        "preserved_known_nested_mismatch": {
+          "path": "/home/barberb/.cache/codex-worktrees/complaint-generator-publish-20261021/external/ipfs_datasets_py/ipfs_datasets_py/processors/web_archiving/common_crawl_search_engine",
+          "relative_path": "ipfs_datasets_py/processors/web_archiving/common_crawl_search_engine",
+          "expected_gitlink": "0e635cba586e8f6f6ea8126e3b1668b3e675c029",
+          "actual_head": "eddcce0883b15c9043ba61ff7278751c484d6178",
+          "direct_diff_paths": [],
+          "cached_diff_paths": [],
+          "full_diff_paths": [],
+          "updated_or_reset": false
+        }
+      },
+      "ipfs_kit_py": {
+        "head": "40c98c71b95be750509ffdb21e7e5494d91b4e79",
+        "direct_diff_paths": [],
+        "cached_diff_paths": [],
+        "full_diff_paths": []
+      }
+    },
+    "native_taskboard_and_authority_unchanged": true,
+    "completion_authority": false,
+    "old_incident_settlement": {
+      "path": "/tmp/complaint-current-incident-adjudication-20261021-0cyjy10o/receipt.json",
+      "sha256": "6db23c46d6b65b9d18a58af2224c5b5b02c7523f5b8d1c3a0c19fbbb76c8a387"
+    },
+    "old_settlement_journal": {
+      "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/ordinary-incident-adjudications/901fc6a204914b365a769a688fca9175a1d4e0cbcb9399257fdd6cb32b126712.json",
+      "sha256": "c3f404c4a3a584ab31e540d86e5ba93223cc6d30d64b5e9ba573982864a32701"
+    },
+    "provider_attempt_refunded": false,
+    "release_qualified": false,
+    "correction_areas": [
+      "non-echo passphrase refusal and sanitized real key-command errors",
+      "strict key input typing before RNG/write; context-bound key ownership and lazy lock checks",
+      "DUR001 ciphertext readback ordering retained with combined key correction",
+      "independent storage states, error precedence, honest local receipts and call-local locators",
+      "explicit legal context retrieval guard retained without treating retrieval as verified law"
+    ],
+    "limits": [
+      "Synthetic selected fixtures and inert pinned Kit contract files; no live network or durability canary.",
+      "Dynamic CLI is outside static AST closure; all eleven changed targets are separately frozen and Git-blob verified.",
+      "Native source/settled incident revision and full stopped taskboard/native state are preserved.",
+      "Workspace/session encryption migration is pending CIMP-DUR-002; these corrections do not claim it is complete.",
+      "Lock blocks future key-handle resolution; already authorized copied key bytes cannot be revoked.",
+      "No live network/IPFS replica or provider qualification is inferred from synthetic storage/router tests.",
+      "Hash calculation is not persisted storage; upload, pin, byte verification and replication remain separate.",
+      "Native completion observations and post-completion source repairs are distinct evidence; source checks grant no task completion."
+    ]
+  },
+  "native_priv004_dur001_completion_observation": {
+    "path": "/tmp/complaint-priv004-dur001-native-completion-20261021-tv_7e2wu/receipt.json",
+    "sha256": "9e6070d8ffbf90a424d59bab28fe521da9b8cd65ea5fce7ba121540251ef0505"
+  },
+  "priv004_dur001_completion_boundary_stop": {
+    "receipt": {
+      "path": "/tmp/complaint-dur001-boundary-stop-20261021-mk49n6tj/stop-result.json",
+      "sha256": "0e211f8fe7c52ce2fe3e7194d93696529d402a457f84816a1e0f1b76bf91cf2e"
+    },
+    "native_preimage": {
+      "path": "/tmp/complaint-dur001-boundary-native-preimage-20261021-3jtk6g5x/receipt.json",
+      "sha256": "4bdec07dcf613d2e8b03e9f241b58b81d4457c6f4cc8a67900403294901663dc"
+    },
+    "cached_native_completed_count": 9,
+    "actual_taskboard_completed_count": 10,
+    "cached_projection_preserved_for_next_ordinary_pass": true
+  },
+  "campaign_progress_history": [
+    {
+      "completed": 8,
+      "pending": 50,
+      "total": 58,
+      "state": "stopped_ready_to_resume_after_qualified_privacy_corrections",
+      "observed_at": "2026-10-21T10:09:47.016997+00:00",
+      "release_qualified": false,
+      "continue_until_all58_completed": true,
+      "source": "Native committed taskboard and exact successful PRIV002/003 validation/merge/finish events; source corrections grant no completion."
+    }
+  ]
 }
