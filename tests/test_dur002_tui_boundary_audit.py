@@ -125,4 +125,3 @@ def test_real_terminal_private_storage_refusal_is_safe(tmp_path, mode):
     assert report["awaiting_user"] is True
     assert "worker_may_continue" not in report and "worker_state" not in report
     assert report["persistence_outcome"] == "unverified"
-
