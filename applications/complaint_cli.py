@@ -192,6 +192,85 @@ def chat_turn(
     )
 
 
+def _read_narrative_file(path_text: str) -> str:
+    """Read a narrative file by literal path. The path is never passed to a shell."""
+
+    literal = str(path_text or "").strip()
+    if not literal or "\x00" in literal:
+        raise ValueError("narrative file path is empty")
+    path = Path(literal)
+    try:
+        if not path.is_file():
+            raise ValueError("narrative file is not readable")
+        return path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ValueError("narrative file is not readable") from exc
+
+
+def read_original_complaint_input(stream=None, *, interactive: Optional[bool] = None) -> str:
+    """Read a complaint narrative from the terminal, a pipe, or an ``@path`` file.
+
+    A single interactive line is one narrative. End a line with ``\\`` to
+    continue, or on a pipe finish the narrative with a blank line or a line
+    that is only ``.``. ``@path`` reads that file directly and does not run
+    the path as a command. Structured answers do not use this reader.
+    """
+
+    source = sys.stdin if stream is None else stream
+    if interactive is None:
+        isatty = getattr(source, "isatty", None)
+        interactive = bool(isatty()) if callable(isatty) else False
+
+    def read_line() -> Optional[str]:
+        if interactive and source is sys.stdin:
+            try:
+                return input("> ")
+            except EOFError:
+                return None
+        line = source.readline()
+        if line == "":
+            return None
+        return line.rstrip("\n")
+
+    first = read_line()
+    if first is None:
+        raise EOFError
+    stripped = first.strip()
+    if stripped.startswith("@") and stripped[1:].strip():
+        return _read_narrative_file(stripped[1:])
+
+    chunks: list[str] = []
+    pending = first
+    while True:
+        if pending.endswith("\\"):
+            chunks.append(pending[:-1])
+            nxt = read_line()
+            if nxt is None:
+                break
+            pending = nxt
+            continue
+        if pending.strip() == ".":
+            break
+        chunks.append(pending)
+        if interactive:
+            break
+        nxt = read_line()
+        if nxt is None or nxt.strip() in {"", "."}:
+            break
+        pending = nxt
+    text = "\n".join(chunks).strip()
+    if text == "":
+        raise EOFError
+    return text
+
+
+def _read_chat_answer(inquiry: dict) -> str:
+    if str(inquiry.get("question_id") or "") == "original_complaint":
+        return read_original_complaint_input()
+    answer_text = input("> ")
+    return answer_text.strip()
+
+
 @app.command("chat")
 def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
     payload = service.run_intake_chat_turn(user_id)
@@ -205,7 +284,10 @@ def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
         if max_turns > 0 and accepted_turns >= max_turns:
             typer.echo("Chat paused. Resume with the same user ID to continue the saved intake.")
             break
-        answer_text = input("> ").strip()
+        try:
+            answer_text = _read_chat_answer(inquiry)
+        except EOFError:
+            raise
         if not answer_text:
             typer.echo("Please enter a response or stop the command and resume later with the same user ID.")
             continue

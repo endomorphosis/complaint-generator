@@ -60,6 +60,10 @@ _SENSITIVE_JSON_KEYS = (
     "message",
     "placeholder",
     "prompt",
+    "original_complaint",
+    "narrative",
+    "revision",
+    "revisions",
 )
 
 CHILD_SCRIPT = r"""
@@ -341,14 +345,14 @@ def _run_pty(
                     if chunk:
                         transcript += chunk
             text = bytes(transcript)
-            if eof_after_prompt and master_open and b"bringing the complaint" in text:
+            if eof_after_prompt and master_open and b"plain language" in text:
                 os.close(master)
                 master_open = False
             elif not eof_after_prompt and master_open:
-                if sent == 0 and b"bringing the complaint" in text:
+                if sent == 0 and b"plain language" in text:
                     _write_all(master, answers[0] + b"\n")
                     sent += 1
-                elif sent == 1 and b"filing against" in text:
+                elif sent == 1 and b"bringing the complaint" in text:
                     _write_all(master, answers[1] + b"\n")
                     sent += 1
             if not master_open:
@@ -414,6 +418,7 @@ def _load_session(path: Path) -> dict:
 
 
 def test_diagnostics_redact_synthetic_session_payloads() -> None:
+    narrative_marker = "synthetic-narrative-marker-9f3c2a"
     sample = "\n".join(
         (
             "> " + PARTY_ANSWER,
@@ -423,12 +428,25 @@ def test_diagnostics_redact_synthetic_session_payloads() -> None:
                     "opposing_party": OPPOSING_ANSWER,
                     "message": NARRATIVE,
                     "answer": UNKNOWN_ANSWER,
+                    "original_complaint": narrative_marker,
+                    "narrative": narrative_marker + "-body",
+                    "revision": narrative_marker + "-rev",
+                    "revisions": narrative_marker + "-list",
                 }
             ),
         )
     )
     redacted = _redact(sample)
-    for payload in (PARTY_ANSWER, OPPOSING_ANSWER, NARRATIVE, UNKNOWN_ANSWER):
+    for payload in (
+        PARTY_ANSWER,
+        OPPOSING_ANSWER,
+        NARRATIVE,
+        UNKNOWN_ANSWER,
+        narrative_marker,
+        narrative_marker + "-body",
+        narrative_marker + "-rev",
+        narrative_marker + "-list",
+    ):
         if payload in redacted:
             _fail("diagnostic redaction left a synthetic payload in expanded session text")
     if "> " + REDACTED not in redacted:
@@ -453,7 +471,7 @@ def test_pty_smoke_pauses_and_fresh_service_resumes_same_id(monkeypatch: pytest.
             home=home,
             session_dir=session_dir,
             user_id=SMOKE_USER_ID,
-            answers=(PARTY_ANSWER.encode("utf-8"), OPPOSING_ANSWER.encode("utf-8")),
+            answers=(NARRATIVE.encode("utf-8"), PARTY_ANSWER.encode("utf-8")),
         )
         if result.returncode != 0:
             _fail(f"PTY chat exited {result.returncode}", result.transcript)
@@ -471,13 +489,18 @@ def test_pty_smoke_pauses_and_fresh_service_resumes_same_id(monkeypatch: pytest.
 
         saved = _load_session(_session_path(session_dir, SMOKE_USER_ID))
         answers = saved.get("intake_answers") or {}
+        narrative_record = saved.get("original_complaint") or {}
         _require_same("user id", saved.get("user_id"), SMOKE_USER_ID)
+        _require_same("narrative text", narrative_record.get("text"), NARRATIVE)
         _require_same("party answer", answers.get("party_name"), PARTY_ANSWER)
-        _require_same("opposing answer", answers.get("opposing_party"), OPPOSING_ANSWER)
+        if answers.get("party_name") == NARRATIVE:
+            _fail("housing narrative was stored as party_name")
+        if answers.get("opposing_party"):
+            _fail("opposing party was stored before the structured question")
         if answers.get("protected_activity"):
             _fail("third intake answer was stored before resume")
-        if len(saved.get("intake_history") or []) != 2:
-            _fail("persisted intake history did not contain the two synthetic answers")
+        if len(saved.get("intake_history") or []) != 1:
+            _fail("persisted intake history did not contain only the structured answer")
 
         fresh = workspace.ComplaintWorkspaceService(root_dir=session_dir)
         again = workspace.ComplaintWorkspaceService(root_dir=session_dir)
@@ -487,10 +510,16 @@ def test_pty_smoke_pauses_and_fresh_service_resumes_same_id(monkeypatch: pytest.
         resumed_session = resumed.get("session") or {}
         resumed_answers = resumed_session.get("intake_answers") or {}
         _require_same("resumed user id", resumed_session.get("user_id"), SMOKE_USER_ID)
+        _require_same(
+            "resumed narrative",
+            (resumed_session.get("original_complaint") or {}).get("text"),
+            NARRATIVE,
+        )
         _require_same("resumed party answer", resumed_answers.get("party_name"), PARTY_ANSWER)
-        _require_same("resumed opposing answer", resumed_answers.get("opposing_party"), OPPOSING_ANSWER)
+        if resumed_answers.get("party_name") == NARRATIVE:
+            _fail("resumed session stored the housing narrative as party_name")
         next_question = resumed.get("next_question") or {}
-        if next_question.get("id") != "protected_activity":
+        if next_question.get("id") != "opposing_party":
             _fail("fresh service did not resume the same id at the next unanswered question")
         if (resumed_session.get("conversation_state") or {}).get("is_complete") is True:
             _fail("paused session was reported complete")
@@ -577,12 +606,17 @@ def test_receipt_records_gaps_independently_of_baseline_smoke(monkeypatch: pytes
         narrative_service = workspace.ComplaintWorkspaceService(root_dir=session_dir)
         narrative_turn = narrative_service.run_intake_chat_turn(NARRATIVE_USER_ID, message=NARRATIVE)
         accepted = narrative_turn.get("accepted_answer") or {}
-        if accepted.get("question_id") != "party_name":
-            _fail("initial narrative was not stored on the party_name question")
+        inquiry = narrative_turn.get("inquiry") or {}
+        if accepted.get("question_id") != "original_complaint":
+            _fail("initial narrative was not stored on original_complaint")
+        if inquiry.get("question_id") != "party_name":
+            _fail("narrative turn did not return the party_name inquiry")
         narrative_state = _load_session(_session_path(session_dir, NARRATIVE_USER_ID))
+        if (narrative_state.get("intake_answers") or {}).get("party_name"):
+            _fail("housing narrative became party_name")
         _require_same(
-            "narrative stored as party_name",
-            (narrative_state.get("intake_answers") or {}).get("party_name"),
+            "narrative stored separately",
+            (narrative_state.get("original_complaint") or {}).get("text"),
             NARRATIVE,
         )
 
