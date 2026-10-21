@@ -513,7 +513,7 @@ Implementation instructions:
 
 ## CIMP-LAW-06 Build and refresh verified legal dependency graph during intake
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.law
