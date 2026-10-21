@@ -6,7 +6,7 @@ import hashlib
 import inspect
 import json
 import re
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from lib.formal_logic.capabilities import (
     FormalLogicCapability,
@@ -2560,6 +2560,532 @@ def map_claim_elements_to_predicates(
     )
 
 
+# ---------------------------------------------------------------------------
+# Source-bound legal rule candidates (CIMP-LAW-04)
+# ---------------------------------------------------------------------------
+
+SOURCE_BOUND_RULE_CONTRACT = "source-bound-legal-rule/v1"
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_RULE_SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+)?", re.MULTILINE)
+_EXCEPTION_RE = re.compile(
+    r"\b(except(?:\s+(?:that|when|where|if))?|unless|provided that|however)\b",
+    re.IGNORECASE,
+)
+_CONDITION_RE = re.compile(
+    r"^(if|when|where|whenever)\s+(.+?),\s+(.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+_AND_RE = re.compile(r"\band\b", re.IGNORECASE)
+_OR_RE = re.compile(r"\bor\b", re.IGNORECASE)
+_PROCEDURAL_RE = re.compile(
+    r"\b(within\s+\d+\s+(?:days|hours|months)|deadline|timely|exhaust|notice|"
+    r"venue|filed|file[sd]?|procedure|service of process|statute of limitations)\b",
+    re.IGNORECASE,
+)
+_DEONTIC_RULES: Tuple[Tuple[str, re.Pattern[str]], ...] = (
+    ("prohibition", re.compile(
+        r"\b(must not|shall not|may not|cannot|can not|is prohibited|is forbidden|prohibited)\b",
+        re.IGNORECASE,
+    )),
+    ("obligation", re.compile(
+        r"\b(must|shall|required to|is required to|has a duty to|ought to)\b",
+        re.IGNORECASE,
+    )),
+    ("permission", re.compile(
+        r"\b(may|is permitted to|is allowed to|is entitled to|has the right to)\b",
+        re.IGNORECASE,
+    )),
+)
+_UNKNOWN_TOKENS = frozenset({
+    "", "unknown", "unspecified", "n/a", "na", "none", "null", "current", "latest", "unverified",
+})
+_LEGACY_DISCRIMINATION_TEMPLATES: Tuple[Tuple[str, str], ...] = (
+    ("Protected Class Membership", "Plaintiff must be member of protected class"),
+    ("Adverse Action", "Plaintiff suffered adverse employment/housing action"),
+    ("Causal Connection", "Protected class status was motivating factor"),
+)
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _first_text(mapping: Mapping[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = mapping.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _nested_context(authority: Mapping[str, Any]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {}
+    for key in ("metadata", "provenance", "applicable_date", "date_context"):
+        nested = authority.get(key)
+        if isinstance(nested, Mapping):
+            merged.update(dict(nested))
+    merged.update(dict(authority))
+    return merged
+
+
+def _normalize_sha256(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text.startswith("sha256:"):
+        text = text.split(":", 1)[1].strip()
+    if re.fullmatch(r"[0-9a-f]{64}", text):
+        return text
+    return ""
+
+
+def sha256_utf8(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _byte_span(source_text: str, char_start: int, char_end: int) -> Tuple[int, int]:
+    prefix = source_text[:char_start].encode("utf-8")
+    fragment = source_text[char_start:char_end].encode("utf-8")
+    return len(prefix), len(prefix) + len(fragment)
+
+
+def _unique_fragment_span(source_text: str, fragment: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    if not source_text or not fragment:
+        return None, "missing_source_span"
+    start = source_text.find(fragment)
+    if start < 0:
+        return None, "missing_source_span"
+    if source_text.find(fragment, start + 1) != -1:
+        return None, "ambiguous_source_span"
+    byte_start, byte_end = _byte_span(source_text, start, start + len(fragment))
+    sliced = source_text.encode("utf-8")[byte_start:byte_end].decode("utf-8")
+    if sliced != fragment:
+        return None, "source_span_mismatch"
+    return {
+        "start": byte_start,
+        "end": byte_end,
+        "text": fragment,
+        "unit": "utf-8-bytes",
+    }, ""
+
+
+def _iter_rule_sentences(source_text: str) -> List[Tuple[str, int, int]]:
+    found: List[Tuple[str, int, int]] = []
+    for match in _RULE_SENTENCE_RE.finditer(source_text):
+        raw = match.group(0)
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        leading = len(raw) - len(raw.lstrip())
+        char_start = match.start() + leading
+        char_end = char_start + len(stripped)
+        if source_text[char_start:char_end] != stripped:
+            continue
+        found.append((stripped, char_start, char_end))
+    return found
+
+
+def _deontic_operator(sentence: str) -> str:
+    for name, pattern in _DEONTIC_RULES:
+        if pattern.search(sentence):
+            return name
+    return "unknown"
+
+
+def _clause_record(source_text: str, fragment: str) -> Dict[str, Any]:
+    span, status = _unique_fragment_span(source_text, fragment.strip(" ,;"))
+    return {
+        "text": fragment.strip(" ,;"),
+        "span": span,
+        "span_status": "exact" if span else status,
+    }
+
+
+def _structure_for_sentence(source_text: str, sentence: str) -> Dict[str, Any]:
+    operative = sentence
+    exceptions: List[Dict[str, Any]] = []
+    exception_match = _EXCEPTION_RE.search(sentence)
+    if exception_match:
+        exception_text = sentence[exception_match.start():].strip()
+        operative = sentence[:exception_match.start()].strip(" ,;")
+        exceptions.append(_clause_record(source_text, exception_text))
+    conditions: List[Dict[str, Any]] = []
+    condition_match = _CONDITION_RE.match(operative)
+    if condition_match:
+        conditions.append(_clause_record(source_text, condition_match.group(2).strip()))
+        operative_for_connective = condition_match.group(3).strip()
+    else:
+        operative_for_connective = operative
+    conjunction_count = len(_AND_RE.findall(operative_for_connective))
+    disjunction_count = len(_OR_RE.findall(operative_for_connective))
+    if conjunction_count and disjunction_count:
+        connective = "ambiguous"
+    elif conjunction_count:
+        connective = "conjunction"
+    elif disjunction_count:
+        connective = "disjunction"
+    else:
+        connective = "none"
+    conjuncts: List[Dict[str, Any]] = []
+    disjuncts: List[Dict[str, Any]] = []
+    if connective == "conjunction":
+        conjuncts = [_clause_record(source_text, part) for part in _AND_RE.split(operative_for_connective) if part.strip()]
+    elif connective == "disjunction":
+        disjuncts = [_clause_record(source_text, part) for part in _OR_RE.split(operative_for_connective) if part.strip()]
+    deontic = _deontic_operator(sentence)
+    clause_parts = [operative_for_connective] + [item["text"] for item in exceptions if item.get("text")]
+    if conditions:
+        clause_parts.append(conditions[0]["text"])
+    procedural_parts = [part for part in clause_parts if part and _PROCEDURAL_RE.search(part)]
+    substantive_parts = [
+        part for part in clause_parts
+        if part and not _PROCEDURAL_RE.search(part) and _deontic_operator(part) != "unknown"
+    ]
+    if procedural_parts and substantive_parts:
+        rule_character = "mixed"
+    elif procedural_parts or _PROCEDURAL_RE.search(sentence):
+        rule_character = "procedural"
+    elif deontic != "unknown":
+        rule_character = "substantive"
+    else:
+        rule_character = "unknown"
+    return {
+        "conditions": conditions,
+        "exceptions": exceptions,
+        "connective": connective,
+        "conjunction_count": conjunction_count,
+        "disjunction_count": disjunction_count,
+        "conjuncts": conjuncts,
+        "disjuncts": disjuncts,
+        "rule_character": rule_character,
+        "deontic_operator": deontic,
+        "deontic_operator_source": "pattern_heuristic",
+        "deontic_operator_is_proof": False,
+        "entailment_status": "unsupported",
+    }
+
+
+def _iso_date(value: Any) -> str:
+    text = str(value or "").strip()
+    return text if _ISO_DATE_RE.fullmatch(text) else ""
+
+
+def _authority_coordinates(authority: Mapping[str, Any]) -> Dict[str, Any]:
+    context = _nested_context(authority)
+    jurisdiction = _first_text(context, "jurisdiction")
+    authority_id = _first_text(context, "authority_id", "authority_identity", "id")
+    citation = _first_text(context, "citation", "cite")
+    version = _first_text(context, "authority_version", "version", "corpus_version", "release")
+    source_text = authority.get("source_text")
+    if not isinstance(source_text, str) or source_text == "":
+        source_text = authority.get("text") if isinstance(authority.get("text"), str) else ""
+    supplied_hash = _normalize_sha256(
+        context.get("source_hash") or context.get("content_hash") or context.get("authority_hash")
+    )
+    hash_scope = str(context.get("content_hash_scope") or context.get("source_hash_scope") or "").strip()
+    dates = {
+        "effective_date": _iso_date(context.get("effective_date")),
+        "as_of_date": _iso_date(context.get("as_of_date") or context.get("applicable_date") or context.get("applicable_on")),
+        "expiration_date": _iso_date(context.get("expiration_date")),
+    }
+    return {
+        "jurisdiction": jurisdiction,
+        "authority_id": authority_id,
+        "citation": citation,
+        "authority_version": version,
+        "source_text": source_text,
+        "source_hash": supplied_hash,
+        "hash_scope": hash_scope,
+        "applicable_date": dates,
+    }
+
+
+def _known_token(value: str) -> bool:
+    return value.strip().lower() not in _UNKNOWN_TOKENS
+
+
+def is_applicable_legal_requirement(attributes: Any) -> bool:
+    """Return whether a graph element may be used as an applicable requirement.
+
+    Records that never went through this gate stay eligible so existing
+    hand-built elements keep their previous meaning. Explicit templates and
+    unpromoted candidates do not.
+    """
+    if not isinstance(attributes, Mapping):
+        return False
+    if attributes.get("legacy_template") is True:
+        return False
+    if attributes.get("verification_status") == "unverified_template":
+        return False
+    if attributes.get("applicable") is False:
+        return False
+    if attributes.get("promotion_status") in {"candidate", "unverified_template", "not_promoted"}:
+        return False
+    return True
+
+
+def _promotion_reasons(
+    *,
+    coordinates: Mapping[str, Any],
+    span: Optional[Mapping[str, Any]],
+    span_status: str,
+    structure: Mapping[str, Any],
+    legacy_template: bool,
+) -> List[str]:
+    reasons: List[str] = []
+    if legacy_template:
+        reasons.append("legacy_unverified_template")
+    if not _known_token(str(coordinates.get("jurisdiction") or "")):
+        reasons.append("missing_jurisdiction")
+    if not (_known_token(str(coordinates.get("authority_id") or "")) or _known_token(str(coordinates.get("citation") or ""))):
+        reasons.append("missing_authority_identity")
+    if not _known_token(str(coordinates.get("authority_version") or "")):
+        reasons.append("missing_authority_version")
+    source_text = str(coordinates.get("source_text") or "")
+    supplied_hash = str(coordinates.get("source_hash") or "")
+    if not source_text:
+        reasons.append("missing_source_text")
+    if not supplied_hash:
+        reasons.append("missing_source_hash")
+    elif source_text:
+        full_hash = sha256_utf8(source_text)
+        span_hash = sha256_utf8(str(span.get("text") or "")) if span else ""
+        scope = str(coordinates.get("hash_scope") or "")
+        matches_full = supplied_hash == full_hash
+        matches_span = scope == "source_passage" and bool(span_hash) and supplied_hash == span_hash
+        if not matches_full and not matches_span:
+            reasons.append("source_hash_mismatch")
+    if span is None:
+        reasons.append(span_status or "missing_source_span")
+    dates = coordinates.get("applicable_date") if isinstance(coordinates.get("applicable_date"), Mapping) else {}
+    if not (dates.get("effective_date") or dates.get("as_of_date")):
+        reasons.append("missing_applicable_date")
+    if structure.get("deontic_operator") == "unknown":
+        reasons.append("unsupported_deontic_extraction")
+    if structure.get("connective") == "ambiguous":
+        reasons.append("ambiguous_connective")
+    if structure.get("rule_character") == "unknown":
+        reasons.append("ambiguous_rule_character")
+    for clause in list(structure.get("conditions") or []) + list(structure.get("exceptions") or []):
+        if isinstance(clause, Mapping) and clause.get("span_status") == "ambiguous_source_span":
+            reasons.append("ambiguous_clause_span")
+            break
+    # Caller-supplied promotion flags are never a reason to pass.
+    return list(dict.fromkeys(reasons))
+
+
+def _candidate_record(
+    *,
+    coordinates: Mapping[str, Any],
+    sentence: str,
+    span: Optional[Dict[str, Any]],
+    span_status: str,
+    structure: Mapping[str, Any],
+    legacy_template: bool,
+) -> Dict[str, Any]:
+    reasons = _promotion_reasons(
+        coordinates=coordinates,
+        span=span,
+        span_status=span_status,
+        structure=structure,
+        legacy_template=legacy_template,
+    )
+    promoted = not reasons
+    source_text = str(coordinates.get("source_text") or "")
+    span_text = str(span.get("text") if span else "")
+    return {
+        "contract": SOURCE_BOUND_RULE_CONTRACT,
+        "status": "promoted" if promoted else "candidate",
+        "promotion_status": "promoted" if promoted else "candidate",
+        "verification_status": "promoted" if promoted else "candidate",
+        "promoted": promoted,
+        "applicable": promoted,
+        "legacy_template": legacy_template,
+        "review_reason": ";".join(reasons),
+        "review_reasons": reasons,
+        "rule_text": sentence,
+        "source_span": dict(span) if span else {"start": None, "end": None, "text": "", "unit": "utf-8-bytes"},
+        "span_status": "exact" if span else span_status,
+        "source_hash": str(coordinates.get("source_hash") or ""),
+        "source_hash_scope": (
+            "source_passage"
+            if str(coordinates.get("hash_scope") or "") == "source_passage"
+            else "authority_text"
+        ),
+        "authority_text_sha256": sha256_utf8(source_text) if source_text else "",
+        "span_sha256": sha256_utf8(span_text) if span_text else "",
+        "jurisdiction": str(coordinates.get("jurisdiction") or ""),
+        "authority_id": str(coordinates.get("authority_id") or ""),
+        "authority_identity": str(coordinates.get("authority_id") or coordinates.get("citation") or ""),
+        "authority_version": str(coordinates.get("authority_version") or ""),
+        "citation": str(coordinates.get("citation") or ""),
+        "applicable_date": dict(coordinates.get("applicable_date") or {}),
+        "structure": dict(structure),
+        "rule_character": structure.get("rule_character", "unknown"),
+        "deontic_operator": structure.get("deontic_operator", "unknown"),
+        "deontic_operator_is_proof": False,
+        "entailment_status": "unsupported",
+        "about_complainant": False,
+    }
+
+
+def extract_source_bound_rule_candidates(authority: Mapping[str, Any]) -> Dict[str, Any]:
+    """Extract rule candidates from authority text and promote only exact matches.
+
+    Promotion keeps jurisdiction, authority identity and version, the checked
+    source hash, the exact UTF-8 span, and an applicable ISO date. Keyword
+    templates, missing coordinates, and ambiguous structure stay candidates.
+    Caller-supplied promoted or applicable flags are ignored.
+    """
+    payload = _as_mapping(authority)
+    legacy_template = (
+        payload.get("legacy_template") is True
+        or payload.get("verification_status") == "unverified_template"
+        or payload.get("template_kind") in {"claim_keyword_template", "procedural_template"}
+    )
+    coordinates = _authority_coordinates(payload)
+    source_text = str(coordinates["source_text"] or "")
+    sentences = _iter_rule_sentences(source_text) if source_text else []
+    explicit_rule = _first_text(payload, "rule_text")
+    selected: List[Tuple[str, Optional[Dict[str, Any]], str]] = []
+    if explicit_rule:
+        span, status = _unique_fragment_span(source_text, explicit_rule)
+        supplied_span = payload.get("source_span") if isinstance(payload.get("source_span"), Mapping) else None
+        if span and supplied_span:
+            try:
+                supplied_start = int(supplied_span.get("start"))
+                supplied_end = int(supplied_span.get("end"))
+            except (TypeError, ValueError):
+                supplied_start = supplied_end = None
+            if supplied_start != span["start"] or supplied_end != span["end"]:
+                span = None
+                status = "source_span_mismatch"
+        selected.append((explicit_rule, span, status))
+    elif sentences:
+        seen: Dict[str, int] = {}
+        for sentence, char_start, char_end in sentences:
+            seen[sentence] = seen.get(sentence, 0) + 1
+            byte_start, byte_end = _byte_span(source_text, char_start, char_end)
+            if seen[sentence] > 1:
+                selected.append((sentence, None, "ambiguous_source_span"))
+                continue
+            span = {
+                "start": byte_start,
+                "end": byte_end,
+                "text": sentence,
+                "unit": "utf-8-bytes",
+            }
+            if source_text.find(sentence) != char_start:
+                # An earlier identical sentence makes this occurrence ambiguous.
+                selected.append((sentence, None, "ambiguous_source_span"))
+            else:
+                selected.append((sentence, span, ""))
+        # Mark the first copy ambiguous once a later copy was seen.
+        ambiguous_texts = {text for text, _span, status in selected if status == "ambiguous_source_span"}
+        if ambiguous_texts:
+            rewritten: List[Tuple[str, Optional[Dict[str, Any]], str]] = []
+            seen_text: set[str] = set()
+            for item in selected:
+                text = item[0]
+                if text in seen_text:
+                    continue
+                seen_text.add(text)
+                if text in ambiguous_texts:
+                    rewritten.append((text, None, "ambiguous_source_span"))
+                else:
+                    rewritten.append(item)
+            selected = rewritten
+    else:
+        selected.append(("", None, "missing_source_text"))
+
+    empty_structure = {
+        "conditions": [],
+        "exceptions": [],
+        "connective": "none",
+        "conjunction_count": 0,
+        "disjunction_count": 0,
+        "conjuncts": [],
+        "disjuncts": [],
+        "rule_character": "unknown",
+        "deontic_operator": "unknown",
+        "deontic_operator_source": "pattern_heuristic",
+        "deontic_operator_is_proof": False,
+        "entailment_status": "unsupported",
+    }
+    candidates = [
+        _candidate_record(
+            coordinates=coordinates,
+            sentence=sentence,
+            span=span,
+            span_status=status or "missing_source_span",
+            structure=_structure_for_sentence(source_text, sentence) if sentence else empty_structure,
+            legacy_template=legacy_template,
+        )
+        for sentence, span, status in selected
+        if sentence or not any(item[0] for item in selected)
+    ]
+    if not candidates:
+        candidates = [
+            _candidate_record(
+                coordinates=coordinates,
+                sentence="",
+                span=None,
+                span_status="missing_source_text",
+                structure={
+                    "conditions": [], "exceptions": [], "connective": "none",
+                    "conjunction_count": 0, "disjunction_count": 0, "conjuncts": [], "disjuncts": [],
+                    "rule_character": "unknown", "deontic_operator": "unknown",
+                    "deontic_operator_source": "pattern_heuristic", "deontic_operator_is_proof": False,
+                    "entailment_status": "unsupported",
+                },
+                legacy_template=legacy_template,
+            )
+        ]
+    promoted = [dict(candidate) for candidate in candidates if candidate["promoted"]]
+    return {
+        "contract": SOURCE_BOUND_RULE_CONTRACT,
+        "candidates": candidates,
+        "promoted_requirements": promoted,
+        "candidate_count": len(candidates),
+        "promoted_count": len(promoted),
+    }
+
+
+def legacy_unverified_requirement_templates(claim_types: Sequence[str]) -> List[Dict[str, Any]]:
+    """Return simplified claim-keyword templates that cannot be applied as law."""
+    claim_text = " ".join(str(item) for item in claim_types).lower()
+    if "discrimination" not in claim_text:
+        return []
+    templates: List[Dict[str, Any]] = []
+    for name, description in _LEGACY_DISCRIMINATION_TEMPLATES:
+        templates.append({
+            "name": name,
+            "description": description,
+            "required": True,
+            "element_type": "legal_requirement",
+            "verification_status": "unverified_template",
+            "promotion_status": "unverified_template",
+            "applicable": False,
+            "legacy_template": True,
+            "template_kind": "claim_keyword_template",
+            "review_reason": "legacy_unverified_template",
+            "source_bound": False,
+            "about_complainant": False,
+        })
+    return templates
+
+
+def legacy_procedural_template_attributes() -> Dict[str, Any]:
+    return {
+        "category": "civil_procedure",
+        "record_kind": "legal_requirement",
+        "about_complainant": False,
+        "verification_status": "unverified_template",
+        "promotion_status": "unverified_template",
+        "applicable": False,
+        "legacy_template": True,
+        "template_kind": "procedural_template",
+        "review_reason": "legacy_unverified_template",
+        "source_bound": False,
+    }
+
+
 __all__ = [
     "FormalLogicCapability",
     "FormalLogicCapabilityError",
@@ -2589,4 +3115,10 @@ __all__ = [
     "get_predicate_templates",
     "map_claim_elements_to_predicates",
     "_COMPLAINT_PREDICATE_TEMPLATES",
+    "SOURCE_BOUND_RULE_CONTRACT",
+    "extract_source_bound_rule_candidates",
+    "is_applicable_legal_requirement",
+    "legacy_procedural_template_attributes",
+    "legacy_unverified_requirement_templates",
+    "sha256_utf8",
 ]
