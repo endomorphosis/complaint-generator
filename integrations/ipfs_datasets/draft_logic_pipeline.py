@@ -442,10 +442,122 @@ def render_proof_report(
 # IPFS provenance pinning
 # ---------------------------------------------------------------------------
 
+def _pin_private_proof_report(report: Dict[str, Any], private_context: Dict[str, Any], *, claim_id: str, pinned_at: str) -> Dict[str, Any]:
+    """Seal the full proof report and theorem sources. No plaintext content hash."""
+
+    from integrations.ipfs_datasets.storage import store_automatic_private_artifact
+
+    if private_context.get("locked") or private_context.get("key") is None:
+        return {
+            "report_cid": "",
+            "lean4_cid": "",
+            "coq_cid": "",
+            "pinned": False,
+            "backend": "private",
+            "pinned_at": pinned_at,
+            "claim_id": "",
+            "stored_local": False,
+            "uploaded": False,
+            "verified": False,
+            "replicated": False,
+            "deferred": False,
+            "network_durable": False,
+            "status": "unlock_needed",
+            "private_artifact": True,
+            "plaintext_exported": False,
+            "overwrites_existing": False,
+        }
+    theorem_export = dict(report.get("theorem_export") or {})
+    pieces = {
+        "proof-history": json.dumps(report, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8"),
+        "theorem-source": json.dumps(
+            {
+                "lean4": theorem_export.get("lean4") or "",
+                "coq": theorem_export.get("coq") or "",
+                "errors": list(report.get("errors") or []),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8"),
+    }
+    # Theorem dialects are sealed in full, not as a summary that drops source.
+    if theorem_export.get("lean4"):
+        pieces["theorem-source"] = json.dumps(
+            {"lean4": theorem_export.get("lean4") or "", "coq": theorem_export.get("coq") or "", "errors": list(report.get("errors") or [])},
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
+    artifacts: dict[str, Any] = {}
+    try:
+        for kind, payload in (
+            ("proof-history", json.dumps(report, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")),
+            ("theorem-source", pieces["theorem-source"]),
+        ):
+            artifacts[kind] = store_automatic_private_artifact(
+                payload,
+                access=private_context["access"],
+                tenant_id=str(private_context["tenant_id"]),
+                case_id=str(private_context["case_id"]),
+                artifact_kind=kind,
+                revision=str(private_context.get("revision") or "proof-1") + ":" + kind,
+                principal_id=str(private_context.get("principal_id") or private_context["tenant_id"]),
+                key=private_context.get("key"),
+                key_id=private_context.get("key_id"),
+                backend=private_context.get("backend"),
+                backend_name=private_context.get("backend_name"),
+                pin_content=bool(private_context.get("pin_content", True)),
+            )
+    except Exception as exc:
+        return {
+            "report_cid": "",
+            "lean4_cid": "",
+            "coq_cid": "",
+            "pinned": False,
+            "backend": "private",
+            "pinned_at": pinned_at,
+            "claim_id": "",
+            "stored_local": False,
+            "uploaded": False,
+            "verified": False,
+            "replicated": False,
+            "deferred": True,
+            "network_durable": False,
+            "status": "recoverable",
+            "private_artifact": True,
+            "plaintext_exported": False,
+            "error": type(exc).__name__,
+            "code": str(getattr(exc, "code", "") or "private_proof_failed"),
+            "overwrites_existing": False,
+        }
+    report_pin = artifacts["proof-history"]
+    return {
+        "report_cid": str(report_pin.get("cid") or ""),
+        "lean4_cid": str(report_pin.get("cid") or ""),
+        "coq_cid": str(artifacts["theorem-source"].get("cid") or ""),
+        "pinned": bool(report_pin.get("pinned")),
+        "backend": "private",
+        "pinned_at": pinned_at,
+        "claim_id": claim_id,
+        "stored_local": bool(report_pin.get("stored_local")),
+        "uploaded": bool(report_pin.get("uploaded")),
+        "verified": bool(report_pin.get("verified")),
+        "replicated": False,
+        "deferred": bool(report_pin.get("deferred")),
+        "network_durable": bool((report_pin.get("receipt") or {}).get("network_durable")),
+        "verification": dict(report_pin.get("verification") or {}),
+        "receipt": dict(report_pin.get("receipt") or {}),
+        "private_artifact": True,
+        "plaintext_exported": False,
+        "artifacts": artifacts,
+        "status": "available",
+    }
+
+
 def pin_proof_report_to_ipfs(
     report: Dict[str, Any],
     *,
     claim_id: str = "",
+    private_context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Pin a ``DraftProofReport`` and its theorem exports to IPFS.
 
@@ -474,6 +586,8 @@ def pin_proof_report_to_ipfs(
     from .storage import store_bytes, pin_cid
 
     pinned_at = datetime.now(tz=timezone.utc).isoformat()
+    if private_context is not None:
+        return _pin_private_proof_report(report, private_context, claim_id=claim_id, pinned_at=pinned_at)
 
     # Serialise the report envelope (exclude large sub-results to keep the
     # primary blob focused on the DraftProofReport keys).
