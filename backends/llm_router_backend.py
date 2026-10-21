@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import random
+import math
+import re
 import time
 import threading
 import uuid
@@ -15,6 +17,7 @@ from integrations.ipfs_accelerate.routers import (
     PINNED_GROK_MODEL,
     PINNED_GROK_PROVIDER,
     unpinned_grok_route_reason,
+    load_observed_llm_symbols,
 )
 from integrations.ipfs_datasets.llm import (
     LLM_ROUTER_AVAILABLE,
@@ -59,6 +62,7 @@ _ERROR_TEXT = {
     "cancelled": "The Grok 4.7 request was cancelled. The session was retained.",
     "malformed_output": "Structured output validation failed. The session was retained.",
     "unpinned_route": "Refusing an unpinned Grok route. No substitute model was contacted.",
+    "privacy_denied": "Remote processing is not authorized for this case.",
 }
 
 
@@ -68,6 +72,10 @@ class ProviderRouteError(Exception):
     def __init__(self, payload):
         self.payload = dict(payload)
         super().__init__("llm_router_error: " + json.dumps(self.payload, sort_keys=True, default=str))
+
+
+class _RouterCancelled(BaseException):
+    """Unwind native stream capture through its owned-child cleanup."""
 
 
 class LLMRouterBackend:
@@ -109,6 +117,8 @@ class LLMRouterBackend:
             self.model = model
 
         self.retry_max_attempts = int(config.pop('retry_max_attempts', 1) or 1)
+        if not 1 <= self.retry_max_attempts <= 3:
+            raise ValueError('retry_max_attempts must be between one and three')
         self.retry_backoff_base_s = float(config.pop('retry_backoff_base_s', 0.5) or 0.5)
         self.retry_backoff_max_s = float(config.pop('retry_backoff_max_s', 20.0) or 20.0)
         self.retry_jitter_s = float(config.pop('retry_jitter_s', 0.1) or 0.1)
@@ -129,9 +139,11 @@ class LLMRouterBackend:
                 ],
             )
         )
-        self.timeout_seconds = config.pop('timeout_seconds', config.pop('timeout', None))
+        self.timeout_seconds = config.pop('timeout_seconds', config.pop('timeout', 60 if self.pinned_grok47 else None))
         if self.timeout_seconds is not None:
             self.timeout_seconds = float(self.timeout_seconds)
+            if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+                raise ValueError("timeout must be finite and positive")
         self.structured_output = bool(config.pop('structured_output', False))
         schema = config.pop('response_schema', None)
         self.response_schema_required = []
@@ -178,11 +190,11 @@ class LLMRouterBackend:
         provider call private.
         """
 
-        provider_name = str(self.provider or "")
+        provider_name = self.provider if self.provider in REMOTE_PROVIDERS else "local_or_unverified"
         sends_remotely = provider_name in REMOTE_PROVIDERS or provider_name.lower().startswith("grok")
         return {
             "requested_provider": provider_name,
-            "requested_model": str(self.model or ""),
+            "requested_model": self.model if self.model in SUPPORTED_GROK_47_IDENTITIES else "unverified",
             "sends_complaint_text_remotely": bool(sends_remotely),
             "encryption_at_rest_implies_private_remote_inference": False,
             "explanation": (
@@ -217,9 +229,9 @@ class LLMRouterBackend:
             "router": INFERENCE_OWNER,
             "requested_router": INFERENCE_OWNER,
             "selected_router": latest.get("selected_router") or "",
-            "requested_provider": str(self.provider or ""),
+            "requested_provider": self.provider if self.provider in REMOTE_PROVIDERS else "unverified",
             "selected_provider": latest.get("selected_provider") or "",
-            "requested_model": str(self.model or ""),
+            "requested_model": self.model if self.model in SUPPORTED_GROK_47_IDENTITIES else "unverified",
             "selected_model": latest.get("selected_model") or "",
             "route_observation": latest.get("route_observation") or "not_dispatched",
             "provider_supported_identity": bool(latest.get("provider_supported_identity")),
@@ -259,6 +271,7 @@ class LLMRouterBackend:
         with self._stats_lock:
             self._retry_stats['calls_total'] += 1
 
+        self._request_id = uuid.uuid4().hex
         privacy_context = kwargs.get("complaint_privacy_context")
         route_block = unpinned_grok_route_reason(self.provider, self.model)
         if route_block or (self._strict_route() and not self.pinned_grok47):
@@ -278,6 +291,7 @@ class LLMRouterBackend:
             self._emit_progress({"phase": "provider_wait", "attempt": attempt, "max_attempts": max_attempts, "router": INFERENCE_OWNER})
             try:
                 metadata_payload = self._generate(text, privacy_context=privacy_context, deadline=deadline)
+                self._raise_if_cancelled()
                 if str(metadata_payload.get("status") or "").strip().lower() != "available":
                     raise ProviderRouteError(self._record(
                         status="unavailable",
@@ -299,6 +313,10 @@ class LLMRouterBackend:
                 )
                 self._emit_progress({"phase": "provider_done", "attempt": attempt, "router": INFERENCE_OWNER, "status": "available"})
                 return response
+            except _RouterCancelled:
+                self._fail("cancelled", route_observation="cancelled")
+            except TimeoutError:
+                self._fail("timeout", route_observation="timeout")
             except ProviderRouteError as error:
                 last_error = error
                 if error.payload.get("error_code") in {"substitution_refused", "route_unverified", "malformed_output", "cancelled", "timeout", "unpinned_route"}:
@@ -311,6 +329,8 @@ class LLMRouterBackend:
                         self._retry_stats['failures_total'] += 1
                     raise
             except Exception as error:
+                if deadline is not None and time.monotonic() >= deadline:
+                    self._fail("timeout", route_observation="timeout")
                 last_error = error
                 retryable = self._is_retryable_error(error)
                 if attempt >= max_attempts or not retryable:
@@ -339,121 +359,114 @@ class LLMRouterBackend:
         raise Exception(f'llm_router_error: {str(last_error)}')
 
     def run_synthetic_live_canary(self, *, transport=None, confirm_live=False):
-        """Dispatch only the public synthetic canary token.
-
-        This is not an interview turn. Complaint text is never forwarded.
-        Injected transports stay labeled synthetic and are not rewritten as a
-        native live canary.
-        """
-
-        if confirm_live is not True and transport is None:
-            receipt = self._receipt(
-                status="not_requested",
-                error_code="",
-                selected_provider="",
-                selected_model="",
-                route_observation="not_dispatched",
-                provider_supported_identity=False,
-                request_id="",
-                canary_identity=SYNTHETIC_LIVE_CANARY_IDENTITY,
-                live_canary=False,
-            )
-            self.task_receipts.append(receipt)
-            return receipt
-        from integrations.ipfs_accelerate.routers import pinned_grok47_canary_kwargs
-
-        canary_kwargs = pinned_grok47_canary_kwargs()
-        if transport is None:
-            raise ProviderRouteError(self._receipt(
-                status="error",
-                error_code="provider_unavailable",
-                selected_provider="",
-                selected_model="",
-                route_observation="unavailable",
-                provider_supported_identity=False,
-                request_id="",
-                canary_identity=SYNTHETIC_LIVE_CANARY_IDENTITY,
-            ))
-        transport_result = transport(prompt=PINNED_GROK_CANARY_PROMPT, **canary_kwargs)
-        capability = grok47_route_capability(include_canary=True, canary_transport=transport)
-        extra_provider = ""
-        extra_model = ""
-        if isinstance(transport_result, dict):
-            extra_provider = str(transport_result.get("selected_provider_name") or "")
-            extra_model = str(transport_result.get("selected_model_name") or transport_result.get("provider_reported_model") or "")
-        selected_provider = str(capability.get("selected_provider_name") or extra_provider)
-        selected_model = str(capability.get("selected_model_name") or capability.get("provider_reported_model") or extra_model)
-        supported = selected_provider == PINNED_GROK_PROVIDER and selected_model in SUPPORTED_GROK_47_IDENTITIES
-        native_live = capability.get("live_canary") is True and supported
+        """Use the existing bounded public-token API once; injected evidence is synthetic."""
+        if type(confirm_live) is not bool:
+            raise ValueError("confirm_live must be an explicit boolean")
+        capability = {}
+        requested = confirm_live is True or transport is not None
+        if requested:
+            options = {"include_canary": True}
+            if transport is not None:
+                options["canary_transport"] = transport
+            try:
+                capability = grok47_route_capability(**options)
+            except Exception:
+                capability = {}
+        live = transport is None and capability.get("live_canary") is True
+        provider = capability.get("selected_provider_name") if live else ""
+        model = capability.get("provider_reported_model") if live else ""
+        supported = live and provider == PINNED_GROK_PROVIDER and model in SUPPORTED_GROK_47_IDENTITIES
         receipt = self._receipt(
-            status="available" if supported else str(capability.get("status") or "unverified"),
-            error_code="" if supported else str(capability.get("error") or "route_unverified"),
-            selected_provider=selected_provider,
-            selected_model=selected_model,
-            route_observation="verified" if supported else str(capability.get("route_observation") or "unverified"),
+            status="available" if supported else "unavailable" if requested else "not_requested",
+            error_code="" if supported or not requested else "route_unverified",
+            selected_provider=provider if supported else "",
+            selected_model=model if supported else "",
+            route_observation="verified" if supported else "unverified" if requested else "not_dispatched",
             provider_supported_identity=supported,
-            request_id=str(capability.get("request_id") or ""),
+            request_id=capability.get("request_id", ""),
             canary_identity=SYNTHETIC_LIVE_CANARY_IDENTITY,
-            live_canary=bool(native_live),
+            live_canary=supported,
         )
-        receipt["canary_prompt_class"] = "synthetic_public_token"
-        receipt["complaint_data_included"] = False
-        receipt["evidence_class"] = "native_live_canary" if native_live else "synthetic_canary"
+        receipt.update(canary_prompt_class="synthetic_public_token", complaint_data_included=False,
+                       evidence_class="native_live_canary" if supported else "synthetic_canary" if requested else "absent")
         self.task_receipts.append(receipt)
-        self._emit_progress({"phase": "synthetic_canary", "router": INFERENCE_OWNER, "canary_identity": SYNTHETIC_LIVE_CANARY_IDENTITY})
+        self._emit_progress({"phase": "synthetic_canary", "router": INFERENCE_OWNER,
+                             "canary_identity": SYNTHETIC_LIVE_CANARY_IDENTITY})
         return receipt
 
     def _strict_route(self) -> bool:
-        if self.forbid_model_substitution is not None:
-            return bool(self.forbid_model_substitution)
-        provider_name = str(self.provider or "").lower()
-        model_name = str(self.model or "").lower()
-        return provider_name.startswith("grok") or model_name.startswith("grok") or self.pinned_grok47
+        return (str(self.provider or "").lower().startswith("grok")
+                or str(self.model or "").lower().startswith("grok")
+                or self.forbid_model_substitution is True)
 
     def _generate(self, text, *, privacy_context, deadline):
-        call_kwargs = dict(self.config)
-        if self.pinned_grok47:
-            call_kwargs["allow_local_fallback"] = False
-            call_kwargs["allow_cross_provider_fallback"] = False
-        if privacy_context is not None:
-            call_kwargs["complaint_privacy_context"] = privacy_context
-        if deadline is not None:
-            remaining = max(0.0, deadline - time.monotonic())
-            call_kwargs["timeout"] = remaining
-        if self._cancel_event.is_set():
-            self._fail("cancelled", route_observation="cancelled")
-        if not self._strict_route() or self.timeout_seconds is None:
-            return generate_text_with_metadata(
-                prompt=text,
-                provider=self.provider,
-                model_name=self.model,
-                **call_kwargs,
-            )
-        holder = {}
+        options = dict(self.config)
+        if not self.pinned_grok47:
+            if privacy_context is not None:
+                options["complaint_privacy_context"] = privacy_context
+            return generate_text_with_metadata(prompt=text, provider=self.provider,
+                                               model_name=self.model, **options)
+        from integrations.ipfs_datasets.llm import _privacy_context_block_reason, _PRIVATE_GENERATION_OPTIONS
 
-        def _run():
-            try:
-                holder["result"] = generate_text_with_metadata(
-                    prompt=text,
-                    provider=self.provider,
-                    model_name=self.model,
-                    **call_kwargs,
-                )
-            except Exception as exc:
-                holder["error"] = exc
-
-        worker = threading.Thread(target=_run, name="llm-router-grok47", daemon=True)
-        worker.start()
-        remaining = max(0.0, deadline - time.monotonic()) if deadline is not None else float(self.timeout_seconds)
-        worker.join(remaining)
-        if worker.is_alive():
-            self._cancel_event.set()
+        # Consent admits a pinned generation, never arbitrary provider commands,
+        # endpoints, output paths or callback overrides from configuration.
+        if any(key not in _PRIVATE_GENERATION_OPTIONS for key in options):
+            self._fail("unpinned_route", route_observation="refused")
+        options.update(allow_local_fallback=False, allow_cross_provider_fallback=False)
+        if _privacy_context_block_reason(privacy_context, provider=self.provider,
+                                         model_name=self.model, options=options):
+            self._fail("privacy_denied", route_observation="refused")
+        self._raise_if_cancelled()
+        generate, result_type, observation_type = load_observed_llm_symbols()
+        if not callable(generate) or not isinstance(result_type, type) or not isinstance(observation_type, type):
+            self._fail("route_unverified", route_observation="unverified")
+        request_id = self._request_id
+        remaining = deadline - time.monotonic() if deadline is not None else 60.0
+        if remaining <= 0:
             self._fail("timeout", route_observation="timeout")
-        if self._cancel_event.is_set() and "result" not in holder:
-            self._fail("cancelled", route_observation="cancelled")
-        if "error" in holder:
-            raise holder["error"]
-        return holder.get("result") or {}
+
+        def progress(summary):
+            # Native capture propagates BaseException through its finally block,
+            # which terminates and reaps its own child before returning here.
+            if self._cancel_event.is_set():
+                raise _RouterCancelled()
+            self._emit_progress({"phase": "provider_progress", "router": INFERENCE_OWNER})
+
+        # Synchronous ownership is intentional: no abandoned daemon thread can
+        # keep generating after the terminal reports cancellation or timeout.
+        result = generate(prompt=text, provider=PINNED_GROK_PROVIDER,
+                          model_name=PINNED_GROK_MODEL, observation_request_id=request_id,
+                          **{**options, "timeout": remaining, "grok_stream_progress": True,
+                             "grok_progress_callback": progress, "usage_cancel_event": self._cancel_event})
+        self._raise_if_cancelled()
+        if deadline is not None and time.monotonic() >= deadline:
+            self._fail("timeout", route_observation="timeout")
+        if type(result) is not result_type or type(result.observation) is not observation_type:
+            self._fail("route_unverified", route_observation="unverified")
+        observation = result.observation
+        if (observation.request_id != request_id
+                or not isinstance(observation.invocation_id, str)
+                or not re.fullmatch(r"[0-9a-f]{32}", observation.invocation_id)
+                or type(observation.native_dispatch_count) is not int or observation.native_dispatch_count != 1
+                or observation.invocation_scope != "current_call"
+                or observation.schema != "native-grok-invocation-observation@1"
+                or observation.observation_only is not True or observation.raw_provider_data_exported is not False
+                or type(observation.process_returncode) is not int or observation.process_returncode != 0
+                or observation.stream_complete is not True
+                or observation.wire_model_observed is not True
+                or observation.evidence_class != "native_final_end_model_usage"):
+            self._fail("route_unverified", route_observation="unverified")
+        if (observation.selected_provider_name != PINNED_GROK_PROVIDER
+                or observation.selected_model_name != PINNED_GROK_MODEL
+                or observation.provider_reported_model not in SUPPORTED_GROK_47_IDENTITIES):
+            self._fail("substitution_refused", route_observation="mismatched")
+        if not isinstance(result.text, str):
+            self._fail("malformed_output", route_observation="malformed")
+        return {"status": "available", "text": result.text, "request_id": request_id,
+                "native_invocation_id": observation.invocation_id,
+                "observed_provider_name": observation.selected_provider_name,
+                "observed_model_name": observation.provider_reported_model,
+                "route_observation": "verified", "invocation_bound": True}
 
     def _reject_substitution(self, metadata):
         if not self._strict_route():
@@ -490,7 +503,7 @@ class LLMRouterBackend:
     def _identity_supported(self, metadata) -> bool:
         observed_provider = str(metadata.get("observed_provider_name") or "")
         observed_model = str(metadata.get("observed_model_name") or "")
-        if observed_provider == PINNED_GROK_PROVIDER and observed_model in SUPPORTED_GROK_47_IDENTITIES:
+        if metadata.get("invocation_bound") is True and observed_provider == PINNED_GROK_PROVIDER and observed_model in SUPPORTED_GROK_47_IDENTITIES:
             return True
         if not self.pinned_grok47:
             return bool(observed_provider and observed_model)
@@ -531,6 +544,7 @@ class LLMRouterBackend:
         raise ProviderRouteError(payload)
 
     def _record(self, *, status, error_code, metadata=None, selected_provider="", selected_model="", route_observation="", provider_supported_identity=False, request_id=""):
+        request_id = request_id or getattr(self, "_request_id", "")
         if metadata is not None:
             request_id = request_id or str(metadata.get("request_id") or "")
             if not selected_provider:
@@ -546,12 +560,20 @@ class LLMRouterBackend:
             provider_supported_identity=provider_supported_identity,
             request_id=request_id,
         )
+        if metadata and metadata.get("invocation_bound") is True:
+            invocation = metadata.get("native_invocation_id")
+            if isinstance(invocation, str) and re.fullmatch(r"[0-9a-f]{32}", invocation):
+                receipt["native_invocation_id"] = invocation
         self.task_receipts.append(receipt)
+        self.task_receipts[:] = self.task_receipts[-32:]
         self.session_retained = True
         return receipt
 
     def _receipt(self, *, status, error_code, selected_provider, selected_model, route_observation, provider_supported_identity, request_id, canary_identity="", live_canary=False):
-        selected_router = INFERENCE_OWNER if selected_provider or selected_model or status == "available" else ""
+        selected_provider = selected_provider if selected_provider == PINNED_GROK_PROVIDER else ""
+        selected_model = selected_model if selected_model in SUPPORTED_GROK_47_IDENTITIES else ""
+        request_id = request_id if isinstance(request_id, str) and re.fullmatch(r"[0-9a-f]{32}", request_id) else ""
+        selected_router = INFERENCE_OWNER if selected_provider and selected_model else ""
         if status == "configured":
             selected_router = ""
         return {
@@ -562,9 +584,9 @@ class LLMRouterBackend:
             "router": INFERENCE_OWNER,
             "requested_router": INFERENCE_OWNER,
             "selected_router": selected_router,
-            "requested_provider": str(self.provider or ""),
+            "requested_provider": self.provider if self.provider in REMOTE_PROVIDERS else "unverified",
             "selected_provider": selected_provider,
-            "requested_model": str(self.model or ""),
+            "requested_model": self.model if self.model in SUPPORTED_GROK_47_IDENTITIES else "unverified",
             "selected_model": selected_model,
             "route_observation": route_observation,
             "provider_supported_identity": bool(provider_supported_identity),
@@ -580,9 +602,14 @@ class LLMRouterBackend:
     def _emit_progress(self, event: dict) -> None:
         safe = {key: value for key, value in event.items() if key in {"phase", "attempt", "max_attempts", "router", "status", "canary_identity"}}
         self.progress_events.append(safe)
+        self.progress_events[:] = self.progress_events[-32:]
         callback = self.progress_callback
         if callable(callback):
-            callback(dict(safe))
+            try:
+                callback(dict(safe))
+            except Exception:
+                # A display callback cannot cause a second provider dispatch.
+                pass
         if os.getenv("COMPLAINT_GENERATOR_ROUTER_PROGRESS", "").strip() in {"1", "true", "yes"}:
             print("router_progress " + json.dumps(safe, sort_keys=True), flush=True)
 

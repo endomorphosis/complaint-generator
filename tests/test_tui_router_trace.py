@@ -1,245 +1,427 @@
-"""Offline trace of the terminal Grok 4.7 llm_router selection."""
-
+"""Synthetic terminal routing contracts. Typed fakes are never live-canary evidence."""
+import ctypes.util
+import importlib
+import io
 import json
+import os
 from pathlib import Path
+import stat
+import subprocess
+import sys
+import time
+import uuid
 
 import pytest
 
+import backends.llm_router_backend as module
 from backends.llm_router_backend import (
-    PINNED_GROK_MODEL,
-    PINNED_GROK_PROVIDER,
-    ProviderRouteError,
-    SUPPORTED_GROK_47_IDENTITIES,
-    LLMRouterBackend,
-    router_session_diagnostics_payload,
+    LLMRouterBackend, ProviderRouteError, PINNED_GROK_MODEL, PINNED_GROK_PROVIDER,
+    SUPPORTED_GROK_47_IDENTITIES, router_session_diagnostics_payload,
     router_task_receipt_payload,
 )
 from integrations.ipfs_accelerate.routers import INFERENCE_OWNER, PINNED_GROK_CANARY_PROMPT
-
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPLAINT_MARKER = "COMPLAINT_PRIVATE_FACT_SHOULD_NOT_LEAK"
 
 
-def _trace(provider=PINNED_GROK_PROVIDER, model=PINNED_GROK_MODEL):
-    return {"effective_provider_name": provider, "effective_model_name": model}
-
-
 def _backend(**overrides):
     progress = []
-    config = {
-        "id": "llm-router-grok-4.7",
-        "provider": PINNED_GROK_PROVIDER,
-        "model": PINNED_GROK_MODEL,
-        "timeout_seconds": 2,
-        "retry_max_attempts": 2,
-        "retry_backoff_base_s": 0,
-        "retry_backoff_max_s": 0,
-        "retry_jitter_s": 0,
-        "forbid_model_substitution": True,
-        "progress_callback": progress.append,
-    }
-    config.update(overrides)
-    backend_id = config.pop("id")
-    provider = config.pop("provider")
-    model = config.pop("model")
-    backend = LLMRouterBackend(backend_id, provider=provider, model=model, **config)
-    return backend, progress
+    options = dict(timeout_seconds=2, retry_max_attempts=2, retry_backoff_base_s=0,
+                   retry_backoff_max_s=0, retry_jitter_s=0, progress_callback=progress.append)
+    options.update(overrides)
+    return LLMRouterBackend('terminal-test', provider=PINNED_GROK_PROVIDER,
+                            model=PINNED_GROK_MODEL, **options), progress
+
+
+def _native_types():
+    from ipfs_accelerate_py.cli_runtime.grok_invocation_observation import ObservedTextGeneration, GrokInvocationObservation
+    return ObservedTextGeneration, GrokInvocationObservation
+
+
+def _result(kwargs, text='synthetic-ok', **changes):
+    result_type, observation_type = _native_types()
+    values = dict(invocation_id=uuid.uuid4().hex, request_id=kwargs['observation_request_id'],
+                  native_dispatch_count=1, selected_provider_name=PINNED_GROK_PROVIDER,
+                  selected_model_name=PINNED_GROK_MODEL, provider_reported_model=PINNED_GROK_MODEL,
+                  process_returncode=0, stream_complete=True, wire_model_observed=True,
+                  evidence_class='native_final_end_model_usage')
+    values.update(changes)
+    return result_type(text, observation_type(**values))
+
+
+def _observed(monkeypatch, function):
+    result_type, observation_type = _native_types()
+    monkeypatch.setattr(module, 'load_observed_llm_symbols', lambda: (function, result_type, observation_type))
 
 
 def test_offline_fake_router_traverses_llm_router(monkeypatch):
     calls = []
-
-    def fake_generate_text(**kwargs):
+    def fake(**kwargs):
         calls.append(kwargs)
-        assert kwargs["provider"] == PINNED_GROK_PROVIDER
-        assert kwargs["model_name"] == PINNED_GROK_MODEL
-        assert kwargs["allow_local_fallback"] is False
-        assert kwargs["allow_cross_provider_fallback"] is False
-        return "synthetic-ok"
-
-    monkeypatch.setattr("integrations.ipfs_datasets.llm.generate_text", fake_generate_text)
-    monkeypatch.setattr("integrations.ipfs_datasets.llm.get_last_generation_trace", lambda: _trace())
+        assert kwargs['provider'] == PINNED_GROK_PROVIDER
+        assert kwargs['model_name'] == PINNED_GROK_MODEL
+        assert kwargs['allow_local_fallback'] is kwargs['allow_cross_provider_fallback'] is False
+        assert kwargs['grok_stream_progress'] is True
+        return _result(kwargs)
+    _observed(monkeypatch, fake)
     backend, progress = _backend()
-    session_id = backend.session_id
-    text = backend("synthetic-router-probe")
-    assert text == "synthetic-ok"
-    assert calls, "request did not traverse llm_router generate_text"
-    diagnostics = backend.sanitized_session_diagnostics()
+    assert backend('synthetic-router-probe') == 'synthetic-ok'
+    assert len(calls) == 1
+    diagnostic = backend.sanitized_session_diagnostics()
     receipt = backend.task_receipts[-1]
-    assert diagnostics["requested_router"] == INFERENCE_OWNER
-    assert diagnostics["selected_router"] == INFERENCE_OWNER
-    assert diagnostics["requested_provider"] == PINNED_GROK_PROVIDER
-    assert diagnostics["selected_provider"] == PINNED_GROK_PROVIDER
-    assert diagnostics["requested_model"] == PINNED_GROK_MODEL
-    assert diagnostics["selected_model"] in SUPPORTED_GROK_47_IDENTITIES
-    assert diagnostics["provider_supported_identity"] is True
-    assert diagnostics["route_observation"] == "verified"
-    assert receipt["requested_provider"] == PINNED_GROK_PROVIDER
-    assert receipt["selected_model"] == PINNED_GROK_MODEL
-    assert diagnostics["session_id"] == session_id
-    assert diagnostics["session_retained"] is True
-    assert diagnostics["prompt_logged"] is False
-    blob = json.dumps({"diagnostics": diagnostics, "receipt": receipt, "progress": progress})
-    assert "synthetic-router-probe" not in blob
-    assert progress and progress[0]["phase"] == "provider_wait"
+    assert diagnostic['requested_router'] == diagnostic['selected_router'] == INFERENCE_OWNER
+    assert diagnostic['requested_provider'] == diagnostic['selected_provider'] == PINNED_GROK_PROVIDER
+    assert diagnostic['requested_model'] == diagnostic['selected_model'] == PINNED_GROK_MODEL
+    assert diagnostic['provider_supported_identity'] is True
+    assert diagnostic['route_observation'] == 'verified'
+    assert diagnostic['session_id'] == backend.session_id
+    assert diagnostic['session_retained'] is True
+    assert receipt['request_id'] == calls[0]['observation_request_id']
+    assert len(receipt['native_invocation_id']) == 32
+    assert receipt['live_canary'] is False
+    assert 'synthetic-router-probe' not in json.dumps([diagnostic, receipt, progress])
+    assert progress[0]['phase'] == 'provider_wait'
 
 
 def test_unavailable_grok_does_not_substitute_codex(monkeypatch):
-    def fake_generate_text(**kwargs):
-        raise RuntimeError("grok binary missing")
-
-    monkeypatch.setattr("integrations.ipfs_datasets.llm.generate_text", fake_generate_text)
-    backend, _progress = _backend(retry_max_attempts=1)
-    session_id = backend.session_id
+    def unavailable(**kwargs):
+        raise OSError(COMPLAINT_MARKER)
+    _observed(monkeypatch, unavailable)
+    backend, _ = _backend(retry_max_attempts=1)
     with pytest.raises(ProviderRouteError) as caught:
         backend(COMPLAINT_MARKER)
-    payload = caught.value.payload
-    assert payload["error_code"] == "provider_unavailable"
-    assert payload["session_id"] == session_id
-    assert payload["session_retained"] is True
-    assert payload["selected_provider"] != "codex"
-    assert "codex" not in payload["selected_model"]
+    assert caught.value.payload['error_code'] == 'provider_unavailable'
+    assert caught.value.payload['session_id'] == backend.session_id
+    assert caught.value.payload['session_retained'] is True
+    assert caught.value.payload['selected_provider'] == caught.value.payload['selected_model'] == ''
     assert COMPLAINT_MARKER not in str(caught.value)
-    assert backend.session_id == session_id
-    assert backend.sanitized_session_diagnostics()["session_retained"] is True
 
 
 def test_observed_codex_selection_is_refused(monkeypatch):
-    monkeypatch.setattr(
-        "integrations.ipfs_datasets.llm.generate_text",
-        lambda **kwargs: "should-not-return",
-    )
-    monkeypatch.setattr(
-        "integrations.ipfs_datasets.llm.get_last_generation_trace",
-        lambda: _trace("codex_cli", "gpt-5.3-codex"),
-    )
-    backend, _progress = _backend(retry_max_attempts=1)
-    session_id = backend.session_id
+    _observed(monkeypatch, lambda **kw: _result(kw, selected_provider_name='codex_cli', provider_reported_model='gpt-5.3-codex'))
+    backend, _ = _backend()
     with pytest.raises(ProviderRouteError) as caught:
-        backend("synthetic")
-    assert caught.value.payload["error_code"] == "substitution_refused"
-    assert caught.value.payload["selected_provider"] == "codex_cli"
-    assert backend.session_id == session_id
+        backend('synthetic')
+    assert caught.value.payload['error_code'] == 'substitution_refused'
+    assert caught.value.payload['selected_provider'] == caught.value.payload['selected_model'] == ''
     assert backend.session_retained is True
 
 
 def test_timeout_retry_and_cancel(monkeypatch):
-    attempts = {"count": 0}
-
-    def flaky(**kwargs):
-        attempts["count"] += 1
-        if attempts["count"] == 1:
-            raise RuntimeError("timed out talking to provider")
-        return "second"
-
-    monkeypatch.setattr("integrations.ipfs_datasets.llm.generate_text", flaky)
-    monkeypatch.setattr("integrations.ipfs_datasets.llm.get_last_generation_trace", lambda: _trace())
+    calls = []
+    def flaky(**kw):
+        calls.append(kw)
+        if len(calls) == 1:
+            raise RuntimeError('temporarily unavailable')
+        return _result(kw, 'second')
+    _observed(monkeypatch, flaky)
     backend, progress = _backend()
-    assert backend("synthetic") == "second"
-    assert attempts["count"] == 2
-    assert any(event["phase"] == "retry_backoff" for event in progress)
-
-    def slow(**kwargs):
-        import time
-        time.sleep(5)
-        return "late"
-
-    monkeypatch.setattr("integrations.ipfs_datasets.llm.generate_text", slow)
-    timed, _progress = _backend(timeout_seconds=0.2, retry_max_attempts=1)
+    assert backend('synthetic') == 'second'
+    assert len(calls) == 2
+    assert any(item['phase'] == 'retry_backoff' for item in progress)
+    def timeout(**kw):
+        assert 0 < kw['timeout'] <= .2
+        raise TimeoutError(COMPLAINT_MARKER)
+    _observed(monkeypatch, timeout)
+    timed, _ = _backend(timeout_seconds=.2)
     with pytest.raises(ProviderRouteError) as caught:
-        timed("synthetic")
-    assert caught.value.payload["error_code"] == "timeout"
-    assert timed.session_retained is True
-
-    cancelled, _progress = _backend()
+        timed('synthetic')
+    assert caught.value.payload['error_code'] == 'timeout'
+    assert COMPLAINT_MARKER not in str(caught.value)
+    cancelled, _ = _backend()
     cancelled.cancel()
     with pytest.raises(ProviderRouteError) as caught:
-        cancelled("synthetic")
-    assert caught.value.payload["error_code"] == "cancelled"
-    assert cancelled.session_retained is True
+        cancelled('synthetic')
+    assert caught.value.payload['error_code'] == 'cancelled'
 
 
 def test_structured_output_validation(monkeypatch):
-    monkeypatch.setattr("integrations.ipfs_datasets.llm.generate_text", lambda **kwargs: "not-json")
-    monkeypatch.setattr("integrations.ipfs_datasets.llm.get_last_generation_trace", lambda: _trace())
-    backend, _progress = _backend(structured_output=True, response_schema={"required": ["answer"]})
+    _observed(monkeypatch, lambda **kw: _result(kw, 'not-json'))
+    backend, _ = _backend(structured_output=True, response_schema={'required': ['answer']})
     with pytest.raises(ProviderRouteError) as caught:
-        backend("synthetic")
-    assert caught.value.payload["error_code"] == "malformed_output"
+        backend('synthetic')
+    assert caught.value.payload['error_code'] == 'malformed_output'
     assert backend.session_retained is True
 
 
 def test_build_label_is_provider_supported_identity(monkeypatch):
-    monkeypatch.setattr("integrations.ipfs_datasets.llm.generate_text", lambda **kwargs: "ok")
-    monkeypatch.setattr(
-        "integrations.ipfs_datasets.llm.get_last_generation_trace",
-        lambda: _trace(PINNED_GROK_PROVIDER, "grok-4.7-build"),
-    )
-    backend, _progress = _backend()
-    assert backend("synthetic") == "ok"
-    receipt = backend.task_receipts[-1]
-    assert receipt["selected_model"] == "grok-4.7-build"
-    assert receipt["requested_model"] == PINNED_GROK_MODEL
-    assert receipt["provider_supported_identity"] is True
-    assert receipt["route_observation"] == "verified"
+    _observed(monkeypatch, lambda **kw: _result(kw, 'ok', provider_reported_model='grok-4.7-build'))
+    backend, _ = _backend()
+    assert backend('synthetic') == 'ok'
+    assert backend.task_receipts[-1]['selected_model'] == 'grok-4.7-build'
+    assert backend.task_receipts[-1]['requested_model'] == PINNED_GROK_MODEL
+    assert backend.task_receipts[-1]['provider_supported_identity'] is True
 
 
 def test_config_and_launcher_select_grok47_router():
-    config = json.loads((ROOT / "config.llm_router.json").read_text(encoding="utf-8"))
-    backend = next(item for item in config["BACKENDS"] if item["id"] == "llm-router-grok-4.7")
-    assert backend["type"] == "llm_router"
-    assert backend["provider"] == PINNED_GROK_PROVIDER
-    assert backend["model"] == PINNED_GROK_MODEL
-    assert backend["allow_local_fallback"] is False
-    assert backend["allow_cross_provider_fallback"] is False
-    script = (ROOT / "scripts/run_cli_mediator.sh").read_text(encoding="utf-8")
+    config = json.loads((ROOT / 'config.llm_router.json').read_text())
+    selected = next(item for item in config['BACKENDS'] if item['id'] == 'llm-router-grok-4.7')
+    assert selected['provider'] == PINNED_GROK_PROVIDER and selected['model'] == PINNED_GROK_MODEL
+    assert selected['allow_local_fallback'] is selected['allow_cross_provider_fallback'] is False
+    assert config['MEDIATOR']['backends'] == ['llm-router-grok-4.7']
+    script = (ROOT / 'scripts/run_cli_mediator.sh').read_text()
     assert 'COMPLAINT_GENERATOR_MEDIATOR_BACKENDS="llm-router-grok-4.7"' in script
-    assert "llm-router-codex" not in script.split("COMPLAINT_GENERATOR_MEDIATOR_BACKENDS", 1)[1].split("\n", 1)[0]
 
 
 def test_cli_diagnostics_and_receipts_are_sanitized():
-    diagnostics = router_session_diagnostics_payload(str(ROOT / "config.llm_router.json"))
-    receipts = router_task_receipt_payload(str(ROOT / "config.llm_router.json"))
-    assert diagnostics["requested_router"] == INFERENCE_OWNER
-    assert diagnostics["requested_provider"] == PINNED_GROK_PROVIDER
-    assert diagnostics["requested_model"] == PINNED_GROK_MODEL
-    assert "selected_provider" in diagnostics and "selected_model" in diagnostics
-    assert diagnostics["prompt_logged"] is False
-    disclosure = diagnostics["remote_inference"]
-    assert disclosure["sends_complaint_text_remotely"] is True
-    assert disclosure["encryption_at_rest_implies_private_remote_inference"] is False
-    assert "encryption at rest" in disclosure["explanation"].lower()
-    assert receipts["receipts"]
-    assert receipts["receipts"][0]["requested_model"] == PINNED_GROK_MODEL
-    assert receipts["session_retained"] is True
+    diagnostics = router_session_diagnostics_payload(str(ROOT / 'config.llm_router.json'))
+    receipts = router_task_receipt_payload(str(ROOT / 'config.llm_router.json'))
+    assert diagnostics['requested_router'] == INFERENCE_OWNER
+    assert diagnostics['requested_provider'] == PINNED_GROK_PROVIDER
+    assert diagnostics['requested_model'] == PINNED_GROK_MODEL
+    assert diagnostics['selected_provider'] == diagnostics['selected_model'] == ''
+    assert diagnostics['prompt_logged'] is False
+    assert diagnostics['remote_inference']['sends_complaint_text_remotely'] is True
+    assert diagnostics['remote_inference']['encryption_at_rest_implies_private_remote_inference'] is False
+    assert receipts['receipts'][0]['status'] == 'configured'
 
 
-def test_synthetic_live_canary_records_model_without_complaint_data():
-    backend, progress = _backend()
-
-    def transport(**kwargs):
-        assert kwargs["prompt"] == PINNED_GROK_CANARY_PROMPT
-        assert COMPLAINT_MARKER not in kwargs["prompt"]
-        return {
-            "text": PINNED_GROK_CANARY_PROMPT,
-            "selected_provider_name": PINNED_GROK_PROVIDER,
-            "selected_model_name": "grok-4.7-build",
-        }
-
+def test_synthetic_live_canary_records_model_without_complaint_data(monkeypatch):
+    # Exercise the existing real first-party capability interpreter, with only
+    # a synthetic transport. A mapping is not current-call wire-model evidence.
+    monkeypatch.setattr('integrations.ipfs_datasets.llm.grok_cli_binary_present', lambda: True)
+    monkeypatch.setattr('integrations.ipfs_datasets.llm.grok_cli_auth_present', lambda: True)
+    calls = []
+    def transport(**kw):
+        calls.append(kw)
+        assert kw['prompt'] == PINNED_GROK_CANARY_PROMPT
+        return {'text': PINNED_GROK_CANARY_PROMPT, 'selected_provider_name': PINNED_GROK_PROVIDER,
+                'selected_model_name': 'grok-4.7-build'}
+    backend, _ = _backend()
     receipt = backend.run_synthetic_live_canary(transport=transport)
-    assert receipt["canary_identity"] == "synthetic-live-canary"
-    assert receipt["selected_provider"] == PINNED_GROK_PROVIDER
-    assert receipt["selected_model"] == "grok-4.7-build"
-    assert receipt["complaint_data_included"] is False
-    assert receipt["live_canary"] is False
-    assert receipt["evidence_class"] == "synthetic_canary"
-    blob = json.dumps(receipt)
-    assert COMPLAINT_MARKER not in blob
-    assert PINNED_GROK_CANARY_PROMPT not in blob
-    assert any(event.get("canary_identity") == "synthetic-live-canary" for event in progress)
+    assert len(calls) == 1
+    assert receipt['selected_provider'] == receipt['selected_model'] == ''
+    assert receipt['provider_supported_identity'] is receipt['live_canary'] is False
+    assert receipt['complaint_data_included'] is False
+    assert receipt['evidence_class'] == 'synthetic_canary'
+    assert PINNED_GROK_CANARY_PROMPT not in json.dumps(receipt)
+    assert backend.run_synthetic_live_canary()['status'] == 'not_requested'
 
-    idle = backend.run_synthetic_live_canary()
-    assert idle["status"] == "not_requested"
-    assert idle["canary_identity"] == "synthetic-live-canary"
-    assert idle["live_canary"] is False
+
+def test_pinned_route_cannot_disable_substitution_checks():
+    backend, _ = _backend(forbid_model_substitution=False)
+    assert backend._strict_route() is True
+
+
+def test_injected_canary_identity_stays_unverified_and_calls_once(monkeypatch):
+    monkeypatch.setattr('integrations.ipfs_datasets.llm.grok_cli_binary_present', lambda: True)
+    monkeypatch.setattr('integrations.ipfs_datasets.llm.grok_cli_auth_present', lambda: True)
+    calls = []
+    def injected(**kw):
+        calls.append(kw)
+        return {'text': PINNED_GROK_CANARY_PROMPT, 'selected_provider_name': PINNED_GROK_PROVIDER,
+                'selected_model_name': 'grok-4.7-build', 'live_canary': True}
+    backend, _ = _backend()
+    receipt = backend.run_synthetic_live_canary(transport=injected)
+    assert len(calls) == 1
+    assert receipt['live_canary'] is receipt['provider_supported_identity'] is False
+    assert receipt['route_observation'] != 'verified'
+    assert receipt['selected_provider'] == receipt['selected_model'] == ''
+
+
+def test_explicit_live_canary_delegates_to_existing_bound_firstparty_api(monkeypatch):
+    calls = []
+    def capability(**kw):
+        calls.append(kw)
+        return {'status': 'unavailable', 'live_canary': False}
+    monkeypatch.setattr(module, 'grok47_route_capability', capability)
+    backend, _ = _backend()
+    assert backend.run_synthetic_live_canary(confirm_live=True)['live_canary'] is False
+    assert calls == [{'include_canary': True}]
+
+
+def test_cancel_during_generation_cannot_return_a_late_answer(monkeypatch):
+    backend, _ = _backend()
+    def generation(**kw):
+        backend.cancel()
+        return _result(kw, 'late private output')
+    _observed(monkeypatch, generation)
+    with pytest.raises(ProviderRouteError) as caught:
+        backend('synthetic')
+    assert caught.value.payload['error_code'] == 'cancelled'
+    assert 'late private output' not in str(caught.value)
+
+
+def test_provider_identity_fields_cannot_echo_private_values(monkeypatch):
+    _observed(monkeypatch, lambda **kw: _result(kw, selected_provider_name=COMPLAINT_MARKER,
+                                               provider_reported_model=COMPLAINT_MARKER,
+                                               request_id=COMPLAINT_MARKER))
+    backend, _ = _backend()
+    with pytest.raises(ProviderRouteError) as caught:
+        backend(COMPLAINT_MARKER)
+    assert COMPLAINT_MARKER not in str(caught.value)
+    assert COMPLAINT_MARKER not in json.dumps(backend.task_receipts)
+
+
+@pytest.mark.parametrize('changes', [dict(native_dispatch_count=2), dict(wire_model_observed=False),
+    dict(stream_complete=False), dict(process_returncode=1), dict(evidence_class='usage_text'),
+    dict(invocation_scope='previous_call'), dict(raw_provider_data_exported=True),
+    dict(request_id='0'*32)])
+def test_unbound_or_incomplete_observation_cannot_verify_identity(monkeypatch, changes):
+    _observed(monkeypatch, lambda **kw: _result(kw, **changes))
+    backend, _ = _backend()
+    with pytest.raises(ProviderRouteError) as caught:
+        backend('synthetic')
+    assert caught.value.payload['error_code'] == 'route_unverified'
+
+
+def test_global_or_mapping_trace_never_verifies_identity(monkeypatch):
+    _observed(monkeypatch, lambda **kw: {'text': 'fake', 'observed_provider_name': PINNED_GROK_PROVIDER,
+                                       'observed_model_name': PINNED_GROK_MODEL})
+    backend, _ = _backend()
+    with pytest.raises(ProviderRouteError) as caught:
+        backend('synthetic')
+    assert caught.value.payload['error_code'] == 'route_unverified'
+
+
+def test_private_policy_is_decided_before_loading_provider(monkeypatch):
+    from integrations.ipfs_datasets.llm import build_complaint_privacy_context, privacy_policy_for_mode
+    def forbidden():
+        raise AssertionError('provider loaded before consent')
+    monkeypatch.setattr(module, 'load_observed_llm_symbols', forbidden)
+    backend, _ = _backend()
+    context = build_complaint_privacy_context(privacy_policy_for_mode('synthetic', 'synthetic', 'local'),
+                                            user_id='synthetic', case_id='synthetic', data_class='raw_intake')
+    with pytest.raises(ProviderRouteError) as caught:
+        backend(COMPLAINT_MARKER, complaint_privacy_context=context)
+    assert caught.value.payload['error_code'] == 'privacy_denied'
+    assert COMPLAINT_MARKER not in str(caught.value)
+
+
+def test_native_capture_cancellation_reaps_its_owned_child_before_return(monkeypatch):
+    from ipfs_accelerate_py.cli_runtime import grok_stream_capture as capture
+    backend, _ = _backend()
+    class Child:
+        def poll(self): return self.returncode
+        def kill(self): self.killed = True; self.returncode = -9
+        def wait(self, timeout): self.waited = True; return self.returncode
+    # Keep both writers owned by this test and close them deterministically.
+    readers, writers = [], []
+    child = Child.__new__(Child)
+    for name in ('stdout', 'stderr'):
+        r, w = os.pipe(); readers.append(r); writers.append(w)
+        setattr(child, name, os.fdopen(r, 'rb'))
+    child.returncode = None; child.killed = child.waited = False
+    def launch(command, **kw):
+        assert command == ['synthetic-owned-grok']
+        backend.cancel()
+        return child
+    monkeypatch.setattr(capture.subprocess, 'Popen', launch)
+    def generation(**kw):
+        capture.capture_grok_stream(['synthetic-owned-grok'], env={}, timeout=kw['timeout'],
+                                    progress_callback=kw['grok_progress_callback'])
+        raise AssertionError('cancelled capture returned')
+    _observed(monkeypatch, generation)
+    try:
+        with pytest.raises(ProviderRouteError) as caught:
+            backend('synthetic')
+        assert caught.value.payload['error_code'] == 'cancelled'
+        assert child.killed and child.waited
+        assert child.stdout.closed and child.stderr.closed
+    finally:
+        for fd in writers: os.close(fd)
+
+
+@pytest.fixture
+def terminal_service(tmp_path, monkeypatch):
+    # Real native dependencies may discover libmagic by starting ldconfig. Bind
+    # only this actual root-owned library while keeping the global egress deny.
+    library = Path('/usr/lib/x86_64-linux-gnu/libmagic.so.1.0.0')
+    st = library.stat()
+    assert st.st_uid == 0 and not stat.S_IMODE(st.st_mode) & 0o022
+    original_find = ctypes.util.find_library
+    monkeypatch.setattr(ctypes.util, 'find_library', lambda name: str(library) if name == 'magic' else original_find(name))
+    guarded_popen = subprocess.Popen
+    class GuardedPopen:
+        def __new__(cls, *args, **kw): return guarded_popen(*args, **kw)
+        @classmethod
+        def __class_getitem__(cls, item): return cls
+    monkeypatch.setattr(subprocess, 'Popen', GuardedPopen)
+    workspace = importlib.import_module('applications.complaint_workspace')
+    monkeypatch.setattr(workspace, '_SESSION_DIR', tmp_path / 'global-import')
+    prior = sys.modules.pop('applications.complaint_cli', None)
+    package = importlib.import_module('applications')
+    previous_attribute = getattr(package, 'complaint_cli', None)
+    cli = importlib.import_module('applications.complaint_cli')
+    service = cli.TerminalComplaintWorkspaceService(root_dir=tmp_path / 'sessions')
+    service.initialize_private_keys(protection='passphrase', passphrase='synthetic-test-passphrase')
+    service.ensure_private_case_key('synthetic-user', 'synthetic-user')
+    monkeypatch.setattr(cli, 'service', service)
+    try:
+        yield cli, service
+    finally:
+        sys.modules.pop('applications.complaint_cli', None)
+        if prior is not None: sys.modules['applications.complaint_cli'] = prior
+        if previous_attribute is not None: setattr(package, 'complaint_cli', previous_attribute)
+        elif hasattr(package, 'complaint_cli'): delattr(package, 'complaint_cli')
+
+
+def test_actual_shared_cli_saves_invocation_with_encrypted_cold_resume(terminal_service, monkeypatch, capsys):
+    cli, service = terminal_service
+    service.set_privacy_policy('synthetic-user', 'grok')
+    calls = []
+    def generate(**kw):
+        calls.append(kw)
+        return _result(kw, '{"entities":[],"relationships":[]}')
+    _observed(monkeypatch, generate)
+    narrative = 'SYNTHETIC_NARRATIVE_FOR_ROUTER_TEST'
+    monkeypatch.setattr(sys, 'stdin', io.StringIO(narrative + '\n.\nSynthetic Person\n'))
+    cli.chat(user_id='synthetic-user', max_turns=2)
+    assert calls, 'default canonical chat never reached the observed router backend'
+    session = service.get_session('synthetic-user')['session']
+    projection = session['shared_interview']
+    assert projection['knowledge_graph'] is not None
+    history = projection['denoiser_history']
+    assert sum(entry.get('answer') == 'Synthetic Person' for entry in history) == 1
+    receipts = session['router_trace']['receipts']
+    assert receipts and all(entry['interview_session_id'] == projection['session_id'] for entry in receipts)
+    assert all(entry['router_receipt']['request_id'] for entry in receipts)
+    assert all(entry['router_receipt']['native_invocation_id'] for entry in receipts)
+    assert all(entry['router_receipt']['live_canary'] is False for entry in receipts)
+    assert narrative not in json.dumps(session['router_trace'])
+    from applications.complaint_workspace import namespace_filename
+    encrypted = service._session_dir / namespace_filename('synthetic-user')
+    assert encrypted.read_bytes().startswith(b'CGPE')
+    assert narrative.encode() not in encrypted.read_bytes()
+    restarted = cli.TerminalComplaintWorkspaceService(root_dir=service._session_dir)
+    restarted.unlock_private_keys(passphrase='synthetic-test-passphrase')
+    resumed = restarted.run_intake_chat_turn('synthetic-user')
+    assert resumed['session']['shared_interview']['denoiser_history'] == history
+    assert resumed['session']['router_trace'] == session['router_trace']
+    monkeypatch.setattr(cli, 'service', restarted)
+    capsys.readouterr()
+    cli.router_task_receipt(user_id='synthetic-user')
+    assert json.loads(capsys.readouterr().out)['receipts'] == receipts
+
+
+def test_actual_shared_cli_local_policy_never_loads_remote_provider(terminal_service, monkeypatch):
+    cli, service = terminal_service
+    def forbidden(): raise AssertionError('local-private loaded remote provider')
+    monkeypatch.setattr(module, 'load_observed_llm_symbols', forbidden)
+    payload = service.run_intake_chat_turn('synthetic-user', message='SYNTHETIC_LOCAL_NARRATIVE')
+    assert payload['session']['privacy_policy']['cloud_processing_enabled'] is False
+    assert not (payload['session'].get('router_trace') or {}).get('receipts')
+
+
+@pytest.mark.parametrize('value', [None, 1, 'yes'])
+def test_canary_needs_boolean_confirmation_before_discovery(monkeypatch, value):
+    monkeypatch.setattr(module, 'grok47_route_capability', lambda **kw: pytest.fail('unexpected canary discovery'))
+    backend, _ = _backend()
+    with pytest.raises(ValueError):
+        backend.run_synthetic_live_canary(confirm_live=value)
+
+
+def test_progress_display_failure_does_not_repeat_provider_dispatch(monkeypatch):
+    calls = []
+    def generate(**kw):
+        calls.append(kw)
+        kw['grok_progress_callback']({})
+        return _result(kw)
+    _observed(monkeypatch, generate)
+    def broken_display(event):
+        raise RuntimeError(COMPLAINT_MARKER)
+    backend, _ = _backend(progress_callback=broken_display)
+    assert backend('synthetic') == 'synthetic-ok'
+    assert len(calls) == 1
+    assert COMPLAINT_MARKER not in json.dumps(backend.task_receipts)

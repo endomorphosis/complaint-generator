@@ -87,7 +87,7 @@ except ModuleNotFoundError:
 from complaint_generator.legacy_session_migration import migrate_legacy_session
 from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
 
-from .complaint_workspace import ComplaintWorkspaceService, WorkspaceAuthorizationDenied, WorkspacePersistenceError
+from .complaint_workspace import ComplaintWorkspaceService, WorkspaceAuthorizationDenied, WorkspacePersistenceError, _state_case_id
 
 
 DEFAULT_UI_UX_SCREENSHOT_TARGET = "playwright/tests/complaint-flow.spec.js"
@@ -96,7 +96,57 @@ DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
 
 
 app = typer.Typer(help="Unified complaint workspace CLI.")
-service = ComplaintWorkspaceService()
+class TerminalComplaintWorkspaceService(ComplaintWorkspaceService):
+    """Keep the canonical interview and its encrypted transaction, with a traced backend.
+
+    The superclass still owns admission, graph/cache construction and transitions.
+    Trace receipts are attached to the state already being saved by that request;
+    diagnostics never reload and overwrite a concurrently changed session.
+    """
+
+    def _mediator_for_shared_interview(self, user_id: str, case_id: str):
+        mediator = super()._mediator_for_shared_interview(user_id, case_id)
+        from backends.llm_router_backend import load_terminal_router_backend
+        if not hasattr(mediator, "_terminal_router_backend"):
+            backend = load_terminal_router_backend(str(Path(__file__).resolve().parents[1] / "config.llm_router.json"))
+            mediator.backends = [backend]
+            mediator._terminal_router_backend = backend
+        return mediator
+
+    def apply_shared_interview(self, state, **kwargs):
+        receipt = super().apply_shared_interview(state, **kwargs)
+        user_id = str(state.get("user_id") or "")
+        mediator = self._interview_mediators.get((user_id, _state_case_id(state, user_id)))
+        backend = getattr(mediator, "_terminal_router_backend", None)
+        if backend is not None:
+            from copy import deepcopy
+            projection = state.get("shared_interview") or {}
+            previous = state.get("router_trace") or {}
+            stored = list(previous.get("receipts") or [])
+            known = {(item.get("router_receipt") or {}).get("request_id") for item in stored}
+            # Only real calls/errors enter history. Cold resume preserves the
+            # original invocation association rather than inventing a dispatch.
+            for item in backend.task_receipts:
+                if item.get("request_id") and item["request_id"] in known:
+                    continue
+                if item in [entry.get("router_receipt") for entry in stored]:
+                    continue
+                entry = {"router_receipt": deepcopy(item),
+                         "interview_session_id": projection.get("session_id"),
+                         "interview_revision": projection.get("session_revision")}
+                stored.append(entry)
+                if item.get("request_id"):
+                    known.add(item["request_id"])
+            if backend.task_receipts:
+                state["router_trace"] = {"diagnostics": backend.sanitized_session_diagnostics(),
+                                         "receipts": stored[-32:]}
+            elif not previous:
+                state["router_trace"] = {"diagnostics": backend.sanitized_session_diagnostics(), "receipts": []}
+            receipt["router_diagnostics"] = deepcopy((state.get("router_trace") or {}).get("diagnostics") or {})
+        return receipt
+
+
+service = TerminalComplaintWorkspaceService()
 
 
 def _emit_workspace_failure(error: Exception) -> None:
@@ -338,6 +388,9 @@ def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
 
     while True:
         _require_readable_session(payload)
+        trace = (payload.get("session") or {}).get("router_trace") or {}
+        if trace.get("diagnostics"):
+            typer.echo("Router diagnostics: " + json.dumps(trace["diagnostics"], sort_keys=True))
         typer.echo(str(payload.get("message") or "").strip())
         inquiry = dict(payload.get("inquiry") or {})
         if not inquiry:
@@ -1012,27 +1065,29 @@ def provider_diagnostics(user_id: str = "demo-user") -> None:
 
 
 @app.command("router-session-diagnostics")
-def router_session_diagnostics(config_path: str = "config.llm_router.json", backend_id: str = "llm-router-grok-4.7") -> None:
-    from backends.llm_router_backend import router_session_diagnostics_payload
-
-    _print(router_session_diagnostics_payload(config_path, backend_id))
+@_workspace_command_boundary
+def router_session_diagnostics(user_id: str = "demo-user") -> None:
+    """Read the actual case's encrypted diagnostics without probing a provider."""
+    session = service.get_session(user_id)["session"]
+    _print((session.get("router_trace") or {}).get("diagnostics") or {"status": "not_dispatched", "prompt_logged": False})
 
 
 @app.command("router-task-receipt")
-def router_task_receipt(config_path: str = "config.llm_router.json", backend_id: str = "llm-router-grok-4.7") -> None:
-    from backends.llm_router_backend import router_task_receipt_payload
-
-    _print(router_task_receipt_payload(config_path, backend_id))
+@_workspace_command_boundary
+def router_task_receipt(user_id: str = "demo-user") -> None:
+    session = service.get_session(user_id)["session"]
+    _print({"session_retained": True, "receipts": (session.get("router_trace") or {}).get("receipts") or []})
 
 
 @app.command("router-live-canary")
+@_workspace_command_boundary
 def router_live_canary(config_path: str = "config.llm_router.json", backend_id: str = "llm-router-grok-4.7", confirm_live: bool = False) -> None:
     """Opt-in synthetic canary. It does not read or send complaint sessions."""
 
     from backends.llm_router_backend import load_terminal_router_backend
 
     backend = load_terminal_router_backend(config_path, backend_id)
-    _print(backend.run_synthetic_live_canary(confirm_live=bool(confirm_live)))
+    _print(backend.run_synthetic_live_canary(confirm_live=confirm_live))
 
 
 @app.command("docket-view")
