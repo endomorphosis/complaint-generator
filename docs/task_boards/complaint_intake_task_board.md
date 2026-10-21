@@ -352,7 +352,7 @@ Implementation instructions:
 
 ## CIMP-FACT-04 Keep factual, authority and requirement graph namespaces separate
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.facts
