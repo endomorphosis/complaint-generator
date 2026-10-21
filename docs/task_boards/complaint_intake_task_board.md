@@ -743,7 +743,7 @@ Implementation instructions:
 
 ## CIMP-PRIV-002 Replace lossy user filenames and enforce per-user per-case authorization
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.privacy
