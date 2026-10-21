@@ -439,6 +439,92 @@ def view_workspace_dataset(
     )
 
 
+def get_draft_proof_report(
+    user_id: Optional[str],
+    *,
+    state_code: Optional[str] = None,
+    allow_live_scrape_fallback: bool = False,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).get_draft_proof_report(
+        user_id,
+        state_code=state_code,
+        allow_live_scrape_fallback=allow_live_scrape_fallback,
+    )
+
+
+def render_draft_proof_report(
+    user_id: Optional[str],
+    *,
+    state_code: Optional[str] = None,
+    claim_id: str = "",
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).render_draft_proof_report(
+        user_id, state_code=state_code, claim_id=claim_id,
+    )
+
+
+def pin_draft_proof_report(
+    user_id: Optional[str],
+    *,
+    state_code: Optional[str] = None,
+    claim_id: str = "",
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).pin_draft_proof_report(
+        user_id, state_code=state_code, claim_id=claim_id,
+    )
+
+
+def score_draft_quality(
+    user_id: Optional[str],
+    *,
+    state_code: Optional[str] = None,
+    persist: bool = True,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).score_draft_quality(
+        user_id, state_code=state_code, persist=persist,
+    )
+
+
+def improve_draft(
+    user_id: Optional[str],
+    *,
+    state_code: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    config_path: Optional[str] = None,
+    backend_id: Optional[str] = None,
+    max_suggestions: int = 3,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).improve_draft(
+        user_id,
+        state_code=state_code,
+        provider=provider,
+        model=model,
+        config_path=config_path,
+        backend_id=backend_id,
+        max_suggestions=max_suggestions,
+    )
+
+
+def get_proof_history(
+    user_id: Optional[str],
+    *,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).get_proof_history(user_id)
+
+
 def generate_complaint(
     user_id: Optional[str],
     *,
@@ -954,6 +1040,12 @@ __all__ = [
     "export_complaint_docx",
     "analyze_complaint_output",
     "get_formal_diagnostics",
+    "get_draft_proof_report",
+    "render_draft_proof_report",
+    "pin_draft_proof_report",
+    "score_draft_quality",
+    "improve_draft",
+    "get_proof_history",
     "get_filing_provenance",
     "get_provider_diagnostics",
     "get_packaged_docket_operator_dashboard",

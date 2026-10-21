@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import ast
 import inspect
 import json
 import os
 import re
 import shutil
 import subprocess
-import sys
 import threading
 import tomllib
 import uuid
@@ -234,17 +234,6 @@ def _prefer_checkout(repo_root: Path, name: str) -> Path:
     if external.exists():
         return external
     return repo_root / name
-
-
-def _ensure_local_ipfs_datasets_path() -> None:
-    repo_root = Path(__file__).resolve().parent.parent
-    candidate = _prefer_checkout(repo_root, "ipfs_datasets_py")
-    candidate_text = str(candidate)
-    if candidate.is_dir() and candidate_text not in sys.path:
-        sys.path.insert(0, candidate_text)
-
-
-_ensure_local_ipfs_datasets_path()
 
 
 DEFAULT_USER_ID = "did:key:anonymous"
@@ -539,6 +528,9 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "mike-status",
     "sync-mike-draft",
     "draft-proof-report",
+    "get-draft-proof-report",
+    "render-draft-proof-report",
+    "pin-draft-proof-report",
     "score-draft-quality",
     "improve-draft",
     "proof-history",
@@ -588,6 +580,8 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "getMikeIntegrationStatus",
     "syncMikeFinalDraft",
     "getDraftProofReport",
+    "renderDraftProofReport",
+    "pinDraftProofReport",
     "scoreDraftQuality",
     "improveDraft",
     "getProofHistory",
@@ -783,7 +777,7 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
     },
     "draft_proof_report": {
         "package_export": "get_draft_proof_report",
-        "cli_command": "get-draft-proof-report",
+        "cli_command": "draft-proof-report",
         "mcp_tool": "complaint.get_draft_proof_report",
         "browser_sdk_method": "getDraftProofReport",
     },
@@ -1215,12 +1209,13 @@ def _resolve_llm_draft_backend_candidates(
         if not provider_key or provider_key in seen:
             continue
         seen.add(provider_key)
-        candidates.append(
-            _resolve_llm_draft_backend(
-                fallback_provider,
-                requested_model or None,
-            )
+        candidate = _resolve_llm_draft_backend(
+            fallback_provider,
+            requested_model or None,
         )
+        # An internal default is a selected provider, not an explicit request.
+        candidate["requested_provider"] = None
+        candidates.append(candidate)
     return candidates or [_resolve_llm_draft_backend(provider, model)]
 
 
@@ -1958,7 +1953,11 @@ def _looks_like_formal_complaint_candidate(body: str) -> bool:
 
 def generate_decentralized_id() -> Dict[str, Any]:
     try:
-        from ipfs_datasets_py.processors.auth.ucan import UCANManager
+        from integrations.ipfs_datasets.loader import import_attr_optional
+
+        UCANManager, error = import_attr_optional("ipfs_datasets_py.processors.auth.ucan", "UCANManager")
+        if UCANManager is None:
+            raise ImportError(str(error or "UCANManager unavailable"))
 
         manager = UCANManager.get_instance()
         if manager.initialize():
@@ -3550,11 +3549,110 @@ class ComplaintWorkspaceService:
             "mike_logic": deepcopy(((current_draft.get("sync_metadata") or {}).get("logic_review") or {})),
         }
 
+    @classmethod
+    def _tooling_contract_source_members(cls) -> Dict[str, Set[str]]:
+        """Inspect shipped interfaces without importing CLI or executing SDK code."""
+
+        root = cls._repo_root()
+        unavailable_sources: Set[str] = set()
+
+        def source(relative_path: str) -> str:
+            try:
+                return (root / relative_path).read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                unavailable_sources.add(relative_path)
+                return ""
+
+        trees: Dict[str, ast.Module] = {}
+
+        def python_tree(relative_path: str) -> ast.Module:
+            if relative_path in trees:
+                return trees[relative_path]
+            try:
+                tree = ast.parse(source(relative_path))
+            except SyntaxError:
+                unavailable_sources.add(relative_path)
+                tree = ast.Module(body=[], type_ignores=[])
+            trees[relative_path] = tree
+            return tree
+
+        def declared_members(relative_path: str) -> Set[str]:
+            members: Set[str] = set()
+            for node in python_tree(relative_path).body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    members.add(node.name)
+                elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                    members.update(alias.asname or alias.name for alias in node.names)
+            return members
+
+        package_exports: Set[str] = set()
+        package_bindings: Set[str] = set()
+        for node in python_tree("complaint_generator/__init__.py").body:
+            if isinstance(node, ast.ImportFrom) and node.module:
+                module_path = (
+                    ("complaint_generator/" if node.level == 1 else "")
+                    + node.module.replace(".", "/") + ".py"
+                )
+                members = declared_members(module_path)
+                package_bindings.update(
+                    alias.asname or alias.name for alias in node.names if alias.name in members
+                )
+            if not isinstance(node, ast.Assign):
+                continue
+            targets = {target.id for target in node.targets if isinstance(target, ast.Name)}
+            if "__all__" in targets:
+                try:
+                    package_exports.update(
+                        value for value in ast.literal_eval(node.value) if isinstance(value, str)
+                    )
+                except (TypeError, ValueError):
+                    pass
+            elif "_LAZY_EXPORTS" in targets:
+                try:
+                    lazy_exports = ast.literal_eval(node.value)
+                    for name, (module_name, member_name) in lazy_exports.items():
+                        module_path = (
+                            "complaint_generator/" + module_name[1:].replace(".", "/") + ".py"
+                            if module_name.startswith(".")
+                            else module_name.replace(".", "/") + ".py"
+                        )
+                        if member_name in declared_members(module_path):
+                            package_bindings.add(name)
+                except (AttributeError, TypeError, ValueError):
+                    pass
+        cli_commands: Set[str] = set()
+        for node in python_tree("applications/complaint_cli.py").body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for decorator in node.decorator_list:
+                if (
+                    isinstance(decorator, ast.Call)
+                    and isinstance(decorator.func, ast.Attribute)
+                    and isinstance(decorator.func.value, ast.Name)
+                    and decorator.func.value.id == "app"
+                    and decorator.func.attr == "command"
+                    and decorator.args
+                    and isinstance(decorator.args[0], ast.Constant)
+                    and isinstance(decorator.args[0].value, str)
+                ):
+                    cli_commands.add(decorator.args[0].value)
+        sdk_methods = [
+            set(re.findall(r"(?m)^    (?:async )?([A-Za-z_$][\w$]*)\s*\(", source(path)))
+            for path in ("static/complaint_mcp_sdk.js", "static/complaint_mcp_sdk.mjs")
+        ]
+        return {
+            "package_exports": package_exports & package_bindings,
+            "cli_commands": cli_commands,
+            "browser_sdk_methods": sdk_methods[0] & sdk_methods[1],
+            "unavailable_sources": unavailable_sources,
+        }
+
     def get_tooling_contract(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         mcp_tools = [tool.get("name") for tool in list(self.list_mcp_tools().get("tools") or []) if tool.get("name")]
-        package_exports = list(_PACKAGE_EXPORT_CONTRACT)
-        cli_commands = list(_CLI_COMMAND_CONTRACT)
-        browser_sdk_methods = list(_BROWSER_SDK_METHOD_CONTRACT)
+        available = self._tooling_contract_source_members()
+        package_exports = [name for name in _PACKAGE_EXPORT_CONTRACT if name in available["package_exports"]]
+        cli_commands = [name for name in _CLI_COMMAND_CONTRACT if name in available["cli_commands"]]
+        browser_sdk_methods = [name for name in _BROWSER_SDK_METHOD_CONTRACT if name in available["browser_sdk_methods"]]
         core_flow_steps: List[Dict[str, Any]] = []
         missing_exposures: List[str] = []
         for step_id, mapping in _CORE_FLOW_CONTRACT.items():
@@ -3583,6 +3681,10 @@ class ComplaintWorkspaceService:
             "core_flow_steps": core_flow_steps,
             "missing_exposures": missing_exposures,
             "all_core_flow_steps_exposed": not missing_exposures,
+            "surface_inventory": {
+                "status": "unknown" if available["unavailable_sources"] else "verified",
+                "unavailable_sources": sorted(available["unavailable_sources"]),
+            },
         }
         if user_id:
             try:
@@ -4345,7 +4447,11 @@ class ComplaintWorkspaceService:
             if str(os.getenv("COMPLAINT_PROVIDER_DIAGNOSTICS_CHECK_SECRETS", "") or "").strip() != "1":
                 return ""
             try:
-                from ipfs_datasets_py.mcp_server.secrets_vault import get_secrets_vault
+                from integrations.ipfs_datasets.loader import import_attr_optional
+
+                get_secrets_vault, error = import_attr_optional("ipfs_datasets_py.mcp_server.secrets_vault", "get_secrets_vault")
+                if get_secrets_vault is None:
+                    raise ImportError(str(error or "secrets vault unavailable"))
 
                 vault = get_secrets_vault()
                 for name in names:

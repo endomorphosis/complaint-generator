@@ -10,17 +10,20 @@ If the submodule is not installed, a lightweight pure-Python fallback is provide
 so the lib module is always importable.
 """
 
+from integrations.ipfs_datasets.loader import import_module_optional
+
 try:
-    from ipfs_datasets_py.knowledge_graphs.migration.formats import (
-        MigrationFormat,
-        NodeData,
-        RelationshipData,
-        SchemaData,
-        GraphData,
-        register_format,
-        registered_formats,
-    )
-except ImportError:
+    _formats, _formats_error = import_module_optional("ipfs_datasets_py.knowledge_graphs.migration.formats")
+    if _formats is None:
+        raise ImportError(str(_formats_error or "graph migration formats unavailable"))
+    MigrationFormat = _formats.MigrationFormat
+    NodeData = _formats.NodeData
+    RelationshipData = _formats.RelationshipData
+    SchemaData = _formats.SchemaData
+    GraphData = _formats.GraphData
+    register_format = _formats.register_format
+    registered_formats = _formats.registered_formats
+except (ImportError, AttributeError):
     # --- Lightweight fallback (no external dependencies) ---
     import json
     from dataclasses import dataclass, field

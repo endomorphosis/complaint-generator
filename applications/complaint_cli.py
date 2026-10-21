@@ -739,6 +739,77 @@ def sync_mike_draft(
     )
 
 
+@app.command("get-draft-proof-report")
+@app.command("draft-proof-report")
+def draft_proof_report(
+    user_id: str = "demo-user",
+    state_code: Optional[str] = None,
+    allow_live_scrape_fallback: bool = False,
+) -> None:
+    _print(service.get_draft_proof_report(
+        user_id,
+        state_code=state_code,
+        allow_live_scrape_fallback=allow_live_scrape_fallback,
+    ))
+
+
+@app.command("render-draft-proof-report")
+def render_draft_proof_report(
+    user_id: str = "demo-user",
+    state_code: Optional[str] = None,
+    claim_id: str = "",
+) -> None:
+    _print(service.render_draft_proof_report(
+        user_id, state_code=state_code, claim_id=claim_id,
+    ))
+
+
+@app.command("pin-draft-proof-report")
+def pin_draft_proof_report(
+    user_id: str = "demo-user",
+    state_code: Optional[str] = None,
+    claim_id: str = "",
+) -> None:
+    _print(service.pin_draft_proof_report(
+        user_id, state_code=state_code, claim_id=claim_id,
+    ))
+
+
+@app.command("score-draft-quality")
+def score_draft_quality(
+    user_id: str = "demo-user",
+    state_code: Optional[str] = None,
+    persist: bool = True,
+) -> None:
+    _print(service.score_draft_quality(user_id, state_code=state_code, persist=persist))
+
+
+@app.command("improve-draft")
+def improve_draft(
+    user_id: str = "demo-user",
+    state_code: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    config_path: Optional[str] = None,
+    backend_id: Optional[str] = None,
+    max_suggestions: int = 3,
+) -> None:
+    _print(service.improve_draft(
+        user_id,
+        state_code=state_code,
+        provider=provider,
+        model=model,
+        config_path=config_path,
+        backend_id=backend_id,
+        max_suggestions=max_suggestions,
+    ))
+
+
+@app.command("proof-history")
+def proof_history(user_id: str = "demo-user") -> None:
+    _print(service.get_proof_history(user_id))
+
+
 @app.command("export-packet")
 def export_packet(user_id: str = "demo-user") -> None:
     _print(service.export_complaint_packet(user_id))

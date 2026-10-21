@@ -582,7 +582,7 @@ def test_document_template_exists_and_targets_document_endpoints():
     assert "resolveSectionReviewUrl" in content
     assert "getSectionReviewLinkMap" in content
     assert "renderSectionClaimLinks" in content
-    assert "renderFilingChecklist(items, manualReviewClaims, pendingReviewClaims)" in content
+    assert "renderFilingChecklist(items, manualReviewClaims, pendingReviewClaims, reviewLinks = {})" in content
     assert "Section Review</a>" in content
     assert "renderReviewLinks" in content
     assert "review_links" in content

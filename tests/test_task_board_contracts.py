@@ -1,6 +1,19 @@
 from pathlib import Path
+import importlib.util
+import sys
 
-from scripts import validate_task_boards
+
+def _local_script(name):
+    path = Path(__file__).resolve().parents[1] / "scripts" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"complaint_{name}", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+validate_task_boards = _local_script("validate_task_boards")
+render_board = _local_script("render_supervisor_markdown_board").render_board
 
 
 def test_supervisor_task_board_and_backlog_docs_are_machine_readable() -> None:
@@ -151,3 +164,74 @@ def test_markdown_projection_rejects_duplicate_outputs(tmp_path: Path) -> None:
         "ipfs_supervisor_task_board.md:6: Outputs contains duplicate entry "
         "'docs/PAYLOAD_CONTRACTS.md'"
     ) in errors
+
+
+def test_markdown_cannot_complete_a_task_that_still_requires_validation(tmp_path: Path) -> None:
+    board = {"tasks": [{
+        "task_id": "VERIFY-ONE", "title": "Verify behavior", "status": "validation_required",
+        "source_doc": "docs/contract.md", "depends_on": [],
+    }]}
+    target = tmp_path / "board.md"
+    target.write_text(render_board(board).replace("- Status: todo", "- Status: completed"))
+    errors = validate_task_boards._validate_markdown_projection(board, markdown_path=target, repo_root=tmp_path)
+    assert any("missing line '- Status: todo' for SUP-VERIFY-ONE" in error for error in errors)
+
+
+def test_conflicting_status_lines_cannot_hide_a_false_completion(tmp_path: Path) -> None:
+    board = {"tasks": [{
+        "task_id": "VERIFY-ONE", "title": "Verify behavior", "status": "validation_required",
+        "source_doc": "docs/contract.md", "depends_on": [],
+    }]}
+    target = tmp_path / "board.md"
+    target.write_text(render_board(board).replace("- Status: todo", "- Status: completed\n- Status: todo"))
+    errors = validate_task_boards._validate_markdown_projection(board, markdown_path=target, repo_root=tmp_path)
+    assert any("missing line '- Status: todo' for SUP-VERIFY-ONE" in error for error in errors)
+
+
+def test_case_insensitive_duplicate_status_cannot_hide_a_false_completion(tmp_path: Path) -> None:
+    board = {"tasks": [{
+        "task_id": "VERIFY-ONE", "title": "Verify behavior", "status": "validation_required",
+        "source_doc": "docs/contract.md", "depends_on": [],
+    }]}
+    target = tmp_path / "board.md"
+    target.write_text(render_board(board).replace("- Status: todo", "- status: completed\n- Status: todo"))
+    errors = validate_task_boards._validate_markdown_projection(board, markdown_path=target, repo_root=tmp_path)
+    assert any("missing line '- Status: todo' for SUP-VERIFY-ONE" in error for error in errors)
+
+
+def test_projection_rejects_tasks_absent_from_the_canonical_board(tmp_path: Path) -> None:
+    board = {"tasks": [{
+        "task_id": "VERIFY-ONE", "title": "Verify behavior", "status": "validation_required",
+        "source_doc": "docs/contract.md", "depends_on": [],
+    }]}
+    target = tmp_path / "board.md"
+    target.write_text(render_board(board) + "\n## SUP-UNTRACKED Unexpected work\n\n- Status: todo\n")
+    errors = validate_task_boards._validate_markdown_projection(board, markdown_path=target, repo_root=tmp_path)
+    assert "board.md: unexpected markdown task SUP-UNTRACKED" in errors
+
+
+def test_malformed_dependency_metadata_does_not_crash_projection_validation(tmp_path: Path) -> None:
+    board = {"tasks": [{
+        "task_id": "VERIFY-ONE", "title": "Verify behavior", "status": "validation_required",
+        "source_doc": "docs/contract.md", "depends_on": [],
+    }]}
+    target = tmp_path / "board.md"
+    target.write_text(render_board(board))
+    board["tasks"][0]["depends_on"] = None
+    assert validate_task_boards._validate_markdown_projection(board, markdown_path=target, repo_root=tmp_path) == []
+
+
+def test_markdown_validates_dependencies_inside_their_own_section(tmp_path: Path) -> None:
+    board = {"tasks": [
+        {"task_id": "VERIFY-ONE", "title": "First", "status": "complete", "source_doc": "docs/one.md", "depends_on": []},
+        {"task_id": "VERIFY-TWO", "title": "Second", "status": "validation_required", "source_doc": "docs/two.md", "depends_on": ["VERIFY-ONE"]},
+    ]}
+    target = tmp_path / "board.md"
+    rendered = render_board(board)
+    # Put the second task's expected dependency in the first section only.
+    sections = rendered.split("## SUP-VERIFY-TWO")
+    sections[0] = sections[0].replace("- Depends on: \n", "- Depends on: SUP-VERIFY-ONE\n")
+    sections[1] = sections[1].replace("- Depends on: SUP-VERIFY-ONE\n", "- Depends on: \n")
+    target.write_text("## SUP-VERIFY-TWO".join(sections))
+    errors = validate_task_boards._validate_markdown_projection(board, markdown_path=target, repo_root=tmp_path)
+    assert any("for SUP-VERIFY-TWO" in error and "Depends on: SUP-VERIFY-ONE" in error for error in errors)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import tempfile
@@ -127,17 +128,26 @@ def _persist_nodes_through_client(graph_id: str, graph_payload: Dict[str, Any]) 
         if graph_target is None:
             raise ImportError(str(error or "GraphTarget unavailable"))
         client = _graph_client()
-        target = graph_target(tenant="complaint-generator", graph_id=str(graph_id or "complaint"), branch="main")
+        identifier = str(graph_id or "complaint")
+        # Adapter ids contain colons; GraphTarget accepts at most 64 slug
+        # characters. Hash non-slugs so distinct adapter ids cannot collide.
+        client_graph_id = identifier if re.fullmatch(r"[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?", identifier) else (
+            "graph-" + hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:48]
+        )
+        target = graph_target(tenant="complaint-generator", graph_id=client_graph_id, branch="main")
+        mutations = {
+            "entities": list(graph_payload.get("entities") or []),
+            "relationships": list(graph_payload.get("relationships") or []),
+        }
+        write_identity = json.dumps([identifier, mutations], sort_keys=True, default=str)
+        write_key = "write-" + hashlib.sha256(write_identity.encode("utf-8")).hexdigest()
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always", DeprecationWarning)
-            client.create(target, idempotency_key=f"create-{graph_id}", raise_on_error=False)
+            client.create(target, idempotency_key=f"create-{client_graph_id}", raise_on_error=False)
             written = client.write(
                 target,
-                idempotency_key=f"write-{graph_id}-{len(graph_payload.get('entities') or [])}",
-                params={
-                    "entities": list(graph_payload.get("entities") or []),
-                    "relationships": list(graph_payload.get("relationships") or []),
-                },
+                idempotency_key=write_key,
+                params=mutations,
                 raise_on_error=False,
             )
         for item in caught:

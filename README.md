@@ -129,6 +129,26 @@ Complaint workspace now also includes a Mike handoff/sync bridge:
 
 [Mike Integration Operator Playbook →](docs/MIKE_INTEGRATION_PLAYBOOK.md)
 
+### Alignment taskboard monitoring
+
+The formal alignment plan is `docs/task_boards/complaint_alignment_formal_work_plan.json`.
+Run `python scripts/run_alignment_watchdog.py --watch --max-cycles 0` to keep
+polling its execution board until every local source check passes. Runtime
+receipts are saved in `.complaint_workspace/supervisor/alignment_execution_state.json`.
+The watchdog serializes claims, bounds checker execution, retries transient
+failures, and revalidates receipts after source changes. Operator pauses and
+manual task blocks remain in effect. Exhausted failures stay visible until
+their inputs are repaired. These receipts describe local alignment checks;
+they do not attest to a running Grok campaign or to the older IPFS backlog.
+
+The workflow backlog lives in `docs/task_boards/ipfs_supervisor_task_board.json`.
+Its Markdown projection keeps tasks that require validation pending. Check
+their agreement with `python scripts/validate_task_boards.py`, and regenerate
+the projection with `python scripts/render_supervisor_markdown_board.py` after
+updating the JSON. The browser workflow regression is
+`python scripts/run_claim_support_review_regression.py --browser on --network off`.
+The focused alignment and recovery tests run with `python scripts/validate_alignment.py`.
+
 ### 🧠 GraphRAG Ontology Optimization
 
 Knowledge-graph-powered document analysis and reasoning:
