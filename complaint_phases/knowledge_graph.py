@@ -10,9 +10,21 @@ import logging
 import math
 import re
 import os
-from typing import TYPE_CHECKING, Dict, List, Optional, Any, Mapping, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Any, Mapping, Sequence, Set, Tuple
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, UTC
+
+from integrations.ipfs_datasets.types import (
+    DEFAULT_USER_ASSERTION_EXTRACTOR_VERSION,
+    USER_ASSERTION_CONTRACT_VERSION,
+    UserAssertionEnvelope,
+    build_user_assertion_envelope,
+    graph_entity_from_payload,
+    graph_relationship_from_payload,
+    locate_unique_byte_span,
+    user_assertion_from_mapping,
+)
+from integrations.ipfs_datasets.types import GraphEntity, GraphRelationship
 
 if TYPE_CHECKING:
     from integrations.ipfs_datasets.graphs import GraphPersistence, GraphQuery
@@ -38,6 +50,361 @@ def _merge_provenance(*records: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
             else:
                 merged[str(key)] = value
     return merged
+
+
+_CALLER_CONTEXT_FIELDS = (
+    "source_kind",
+    "source_id",
+    "message_id",
+    "document_id",
+    "assertion_status",
+    "extractor_version",
+    "source_hash",
+    "jurisdiction",
+    "actor",
+    "name",
+    "event_date",
+)
+
+_PLACEHOLDER_LABELS = {
+    "employer",
+    "complainant",
+    "landlord",
+    "property management",
+    "organization",
+    "employment discrimination claim",
+    "housing discrimination claim",
+    "discrimination claim",
+    "accommodation request",
+    "denial/refusal claim",
+    "retaliation claim",
+    "termination claim",
+    "complaint claim",
+    "email communication",
+    "text messages",
+    "letter",
+    "notice",
+    "application",
+    "receipt",
+    "lease",
+    "voicemail",
+    "meeting notes",
+    "contract",
+    "agreement",
+    "estimate",
+    "invoice",
+    "change order",
+    "work order",
+    "warranty",
+    "screening criteria",
+    "policy",
+    "photos",
+    "video",
+    "payment record",
+    "bank statement",
+    "hearing or appeal process event",
+    "written notice or communication event",
+    "agency/employer response event",
+    "protected activity event",
+    "adverse action event",
+    "retaliation causation link",
+}
+
+_NON_USER_RECORD_TYPES = frozenset({"model_suggestion", "inferred_claim_label", "legal_text"})
+
+
+def _clean_context_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _is_exact_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _normalize_span_payload(raw: Any, source_text: str) -> Optional[Dict[str, Any]]:
+    """Normalize a span to UTF-8 byte offsets. Character spans must say so."""
+    if not isinstance(raw, Mapping):
+        return None
+    start = raw.get("start")
+    end = raw.get("end")
+    if not _is_exact_int(start) or not _is_exact_int(end):
+        return {"start": start, "end": end, "text": raw.get("text")}
+    unit = _clean_context_text(raw.get("unit")).lower() or "byte"
+    if unit in {"char", "chars", "character", "characters"}:
+        if not isinstance(source_text, str):
+            return {"start": start, "end": end, "text": raw.get("text")}
+        if start < 0 or end < start or end > len(source_text):
+            return {"start": start, "end": end, "text": raw.get("text"), "unit": "char"}
+        start = len(source_text[:start].encode("utf-8"))
+        end = len(source_text[:end].encode("utf-8"))
+    payload: Dict[str, Any] = {"start": start, "end": end}
+    if "text" in raw and raw.get("text") is not None:
+        payload["text"] = raw.get("text")
+    return payload
+
+
+def _span_identity(payload: Mapping[str, Any]) -> Tuple[Any, Any, str]:
+    text = payload.get("text")
+    return (payload.get("start"), payload.get("end"), "" if text is None else str(text))
+
+
+def merge_caller_source_context(
+    *records: Optional[Mapping[str, Any]],
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Merge caller-supplied source context. Conflicting values stay unresolved."""
+    merged: Dict[str, Any] = {}
+    deficiencies: List[str] = []
+    source_texts: List[str] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        supplied_text = record.get("source_text")
+        if isinstance(supplied_text, str) and supplied_text != "":
+            if supplied_text not in source_texts:
+                source_texts.append(supplied_text)
+        for key in _CALLER_CONTEXT_FIELDS:
+            if key not in record:
+                continue
+            cleaned = _clean_context_text(record.get(key))
+            if not cleaned:
+                continue
+            current = merged.get(key)
+            if current is None:
+                merged[key] = cleaned
+            elif current != cleaned:
+                deficiencies.append("ambiguous_source_context")
+    if len(source_texts) == 1:
+        merged["source_text"] = source_texts[0]
+    elif len(source_texts) > 1:
+        deficiencies.append("ambiguous_source_context")
+    return merged, sorted(set(deficiencies))
+
+
+def _record_type_for_extraction(record: Mapping[str, Any]) -> str:
+    """Classify extractor output before it can become a user assertion."""
+    attributes = record.get("attributes") if isinstance(record.get("attributes"), Mapping) else {}
+    explicit = _clean_context_text(
+        record.get("record_type") or attributes.get("record_type") or ""
+    )
+    origin = _clean_context_text(record.get("origin") or attributes.get("origin") or "").lower()
+    entity_type = _clean_context_text(record.get("type") or record.get("entity_type") or "").lower()
+    if explicit in _NON_USER_RECORD_TYPES:
+        return explicit
+    if origin in {"model", "llm"}:
+        return "model_suggestion"
+    if entity_type == "claim" or explicit == "claim":
+        return "inferred_claim_label"
+    if entity_type in {"legal", "authority", "statute", "regulation", "case_law", "legal_text"}:
+        return "legal_text"
+    label = _clean_context_text(record.get("name") or "").lower()
+    if label in _PLACEHOLDER_LABELS:
+        return "model_suggestion"
+    if entity_type == "evidence":
+        return "model_suggestion"
+    if origin in {"heuristic", "heuristic_label"} and entity_type != "fact" and entity_type != "date" and entity_type != "person" and entity_type != "organization":
+        return "model_suggestion"
+    relation_origin = _clean_context_text(record.get("origin") or "").lower()
+    if record.get("relation_type") or record.get("type") and record.get("source_id") and record.get("target_id"):
+        if relation_origin in {"heuristic", "model", "llm"}:
+            return "model_suggestion"
+    return ""
+
+
+def _subject_key_for_record(record: Mapping[str, Any], span_text: str) -> str:
+    attributes = record.get("attributes") if isinstance(record.get("attributes"), Mapping) else {}
+    parts = [
+        _clean_context_text(record.get("type") or record.get("entity_type") or record.get("relation_type") or ""),
+        _clean_context_text(attributes.get("predicate_family") or attributes.get("fact_type") or record.get("relation_type") or ""),
+        span_text or _clean_context_text(record.get("name") or ""),
+    ]
+    return "|".join(part for part in parts if part)
+
+
+def _candidate_spans(record: Mapping[str, Any], source_text: str) -> List[Dict[str, Any]]:
+    attributes = record.get("attributes") if isinstance(record.get("attributes"), Mapping) else {}
+    provenance = record.get("provenance") if isinstance(record.get("provenance"), Mapping) else {}
+    spans: List[Dict[str, Any]] = []
+    seen: Set[Tuple[Any, Any, str]] = set()
+    for raw in (
+        record.get("source_span"),
+        attributes.get("source_span"),
+        provenance.get("source_span"),
+    ):
+        normalized = _normalize_span_payload(raw, source_text)
+        if not normalized:
+            continue
+        identity = _span_identity(normalized)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        spans.append(normalized)
+    return spans
+
+
+def envelope_for_extracted_record(
+    record: Mapping[str, Any],
+    *,
+    source_text: str,
+    caller_context: Optional[Mapping[str, Any]] = None,
+    context_deficiencies: Sequence[str] = (),
+    role: str = "",
+) -> UserAssertionEnvelope:
+    """Build a validated envelope. Extractor status and confidence cannot assert a fact."""
+    context = dict(caller_context or {})
+    attributes = record.get("attributes") if isinstance(record.get("attributes"), Mapping) else {}
+    extra = list(context_deficiencies)
+    supplied_source_text = context.get("source_text")
+    if isinstance(supplied_source_text, str) and supplied_source_text not in ("", source_text):
+        extra.append("ambiguous_source_context")
+    spans = _candidate_spans(record, source_text)
+    selected_span: Optional[Dict[str, Any]] = None
+    if len(spans) > 1:
+        extra.append("ambiguous_source_span")
+    elif len(spans) == 1:
+        selected_span = spans[0]
+    else:
+        description = _clean_context_text(attributes.get("description") or "")
+        if description:
+            lookup = locate_unique_byte_span(source_text, description)
+            if lookup.deficiency == "" and lookup.start is not None and lookup.end is not None:
+                selected_span = {"start": lookup.start, "end": lookup.end, "text": lookup.text}
+            elif lookup.deficiency == "ambiguous_source_span":
+                extra.append("ambiguous_source_span")
+    span_text = ""
+    if selected_span and isinstance(selected_span.get("text"), str):
+        span_text = selected_span["text"]
+    elif selected_span and _is_exact_int(selected_span.get("start")) and _is_exact_int(selected_span.get("end")):
+        sliced = source_text.encode("utf-8")[selected_span["start"]:selected_span["end"]]
+        try:
+            span_text = sliced.decode("utf-8")
+        except UnicodeDecodeError:
+            span_text = ""
+    forced_type = _record_type_for_extraction(record)
+    relation_type = _clean_context_text(record.get("relation_type") or "")
+    if relation_type and _clean_context_text(record.get("origin") or "").lower() in {"heuristic", "model", "llm"}:
+        forced_type = forced_type or "model_suggestion"
+    confidence_value = record.get("confidence")
+    parsed_confidence: Optional[float]
+    if confidence_value is None or confidence_value == "":
+        parsed_confidence = None
+    else:
+        parsed_confidence = float(confidence_value)
+    return build_user_assertion_envelope(
+        source_text=source_text,
+        source_kind=_clean_context_text(context.get("source_kind")),
+        source_id=_clean_context_text(context.get("source_id")),
+        message_id=_clean_context_text(context.get("message_id")),
+        document_id=_clean_context_text(context.get("document_id")),
+        assertion_status=_clean_context_text(context.get("assertion_status")),
+        extractor_version=_clean_context_text(context.get("extractor_version")),
+        source_hash=_clean_context_text(context.get("source_hash")),
+        source_span=selected_span,
+        record_type=forced_type,
+        origin=_clean_context_text(record.get("origin") or ""),
+        role=role or _clean_context_text(record.get("type") or record.get("relation_type") or ""),
+        subject_key=_subject_key_for_record(record, span_text),
+        confidence=parsed_confidence,
+        legal_hit=bool(record.get("legal_hit") or attributes.get("legal_hit") or context.get("legal_hit")),
+        jurisdiction=_clean_context_text(context.get("jurisdiction")),
+        actor=_clean_context_text(context.get("actor")),
+        name=_clean_context_text(context.get("name")),
+        event_date=_clean_context_text(context.get("event_date")),
+        extra_deficiencies=extra,
+    )
+
+
+def _resolve_graph_endpoint(
+    record: Mapping[str, Any],
+    graph: "KnowledgeGraph",
+    key_to_id: Mapping[str, str],
+    id_field: str,
+    key_field: str,
+) -> str:
+    """Resolve a graph node id. Message and document ids are not endpoints."""
+    extractor_key = _clean_context_text(record.get(key_field))
+    if extractor_key and extractor_key in key_to_id:
+        return key_to_id[extractor_key]
+    raw = _clean_context_text(record.get(id_field))
+    if raw and raw in graph.entities:
+        return raw
+    return ""
+
+
+def entity_to_graph_entity(entity: "Entity") -> GraphEntity:
+    assertion = {}
+    provenance = dict(entity.provenance or {})
+    nested = provenance.get("user_assertion")
+    if isinstance(nested, Mapping):
+        assertion = dict(nested)
+    return GraphEntity(
+        entity_id=entity.id,
+        entity_type=entity.type,
+        name=entity.name,
+        confidence=float(entity.confidence),
+        attributes=dict(entity.attributes or {}),
+        provenance=provenance,
+        assertion=assertion,
+    )
+
+
+def graph_entity_to_entity(payload: GraphEntity | Mapping[str, Any]) -> "Entity":
+    graph_entity = payload if isinstance(payload, GraphEntity) else graph_entity_from_payload(payload)
+    provenance = dict(graph_entity.provenance)
+    if graph_entity.assertion:
+        provenance["user_assertion"] = dict(graph_entity.assertion)
+    return Entity(
+        id=graph_entity.entity_id,
+        type=graph_entity.entity_type,
+        name=graph_entity.name,
+        attributes=dict(graph_entity.attributes),
+        confidence=float(graph_entity.confidence),
+        provenance=provenance,
+    )
+
+
+def relationship_to_graph_relationship(relationship: "Relationship") -> GraphRelationship:
+    provenance = dict(relationship.provenance or {})
+    nested = provenance.get("user_assertion")
+    assertion = dict(nested) if isinstance(nested, Mapping) else {}
+    return GraphRelationship(
+        relationship_id=relationship.id,
+        source_id=relationship.source_id,
+        target_id=relationship.target_id,
+        relation_type=relationship.relation_type,
+        confidence=float(relationship.confidence),
+        attributes=dict(relationship.attributes or {}),
+        provenance=provenance,
+        assertion=assertion,
+    )
+
+
+def graph_relationship_to_relationship(payload: GraphRelationship | Mapping[str, Any]) -> "Relationship":
+    graph_relationship = (
+        payload if isinstance(payload, GraphRelationship) else graph_relationship_from_payload(payload)
+    )
+    provenance = dict(graph_relationship.provenance)
+    if graph_relationship.assertion:
+        provenance["user_assertion"] = dict(graph_relationship.assertion)
+    return Relationship(
+        id=graph_relationship.relationship_id,
+        source_id=graph_relationship.source_id,
+        target_id=graph_relationship.target_id,
+        relation_type=graph_relationship.relation_type,
+        attributes=dict(graph_relationship.attributes),
+        confidence=float(graph_relationship.confidence),
+        provenance=provenance,
+    )
+
+
+def assertion_from_provenance(provenance: Optional[Mapping[str, Any]]) -> Optional[UserAssertionEnvelope]:
+    if not isinstance(provenance, Mapping):
+        return None
+    payload = provenance.get("user_assertion")
+    if not isinstance(payload, Mapping) or not payload.get("contract_version"):
+        return None
+    return user_assertion_from_mapping(payload)
 
 
 @dataclass
@@ -1132,44 +1499,173 @@ class KnowledgeGraphBuilder:
             return selected
         return scored[:1] if scored else []
     
-    def build_from_text(self, text: str) -> KnowledgeGraph:
+    def build_from_text(
+        self,
+        text: str,
+        *,
+        source_context: Optional[Mapping[str, Any]] = None,
+        provenance: Optional[Mapping[str, Any]] = None,
+        extractor_provenance: Optional[Mapping[str, Any]] = None,
+        extracted_entities: Optional[Sequence[Mapping[str, Any]]] = None,
+        extracted_relationships: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> KnowledgeGraph:
         """
         Build a knowledge graph from complaint text.
-        
+
+        Caller source context and extractor provenance are carried onto each
+        entity and edge as a versioned assertion envelope. Relationship
+        source_id and target_id stay graph node ids. A missing or conflicting
+        user source does not become an asserted fact.
+
         Args:
             text: The complaint text to analyze
-            
+
         Returns:
             A KnowledgeGraph instance
         """
+        source_text = text or ""
+        caller_context, context_deficiencies = merge_caller_source_context(
+            source_context,
+            provenance,
+            extractor_provenance,
+        )
         graph = KnowledgeGraph()
-        
-        # Extract entities
-        entities = self._extract_entities(text)
+        stored_context = {
+            key: value
+            for key, value in caller_context.items()
+            if key in set(_CALLER_CONTEXT_FIELDS)
+        }
+        preserved_extractor = _merge_provenance(provenance, extractor_provenance)
+        graph.metadata["provenance"] = _merge_provenance(
+            graph.provenance,
+            {
+                "user_assertion_contract": {
+                    "contract_version": USER_ASSERTION_CONTRACT_VERSION,
+                    "extractor_version": (
+                        _clean_context_text(caller_context.get("extractor_version"))
+                        or DEFAULT_USER_ASSERTION_EXTRACTOR_VERSION
+                    ),
+                    "source_context": stored_context,
+                },
+                "extractor": preserved_extractor,
+            },
+        )
+
+        entities: List[Dict[str, Any]] = []
+        for entity_data in self._extract_entities(source_text):
+            if isinstance(entity_data, Mapping):
+                entities.append(dict(entity_data))
+        for raw_entity in extracted_entities or []:
+            if not isinstance(raw_entity, Mapping):
+                continue
+            prepared = dict(raw_entity)
+            entity_name = _clean_context_text(prepared.get("name"))
+            entity_type = _clean_context_text(prepared.get("type"))
+            if not entity_name or not entity_type:
+                continue
+            prepared["name"] = entity_name
+            prepared["type"] = entity_type
+            prepared.setdefault("origin", "user")
+            entities.append(prepared)
+
+        entity_key_to_id: Dict[str, str] = {}
         for entity_data in entities:
+            envelope = envelope_for_extracted_record(
+                entity_data,
+                source_text=source_text,
+                caller_context=caller_context,
+                context_deficiencies=context_deficiencies,
+                role=_clean_context_text(entity_data.get("type")) or "entity",
+            )
+            raw_extractor = entity_data.get("provenance") if isinstance(entity_data.get("provenance"), Mapping) else {}
+            provenance_payload: Dict[str, Any] = {"user_assertion": envelope.as_dict()}
+            carried_extractor = _merge_provenance(preserved_extractor, raw_extractor)
+            if carried_extractor:
+                provenance_payload["extractor"] = carried_extractor
+            attributes = entity_data.get("attributes") if isinstance(entity_data.get("attributes"), Mapping) else {}
+            raw_confidence = entity_data.get("confidence", 0.8)
             entity = Entity(
                 id=self._get_entity_id(),
-                type=entity_data['type'],
-                name=entity_data['name'],
-                attributes=entity_data.get('attributes', {}),
-                confidence=entity_data.get('confidence', 0.8),
-                source='complaint'
+                type=str(entity_data.get("type") or ""),
+                name=str(entity_data.get("name") or ""),
+                attributes=dict(attributes),
+                confidence=float(0.8 if raw_confidence is None else raw_confidence),
+                source=str(entity_data.get("source") or "complaint"),
+                provenance=provenance_payload,
             )
             graph.add_entity(entity)
-        
-        # Extract relationships
-        relationships = self._extract_relationships(text, graph)
-        for rel_data in relationships:
-            rel = Relationship(
-                id=self._get_relationship_id(),
-                source_id=rel_data['source_id'],
-                target_id=rel_data['target_id'],
-                relation_type=rel_data['type'],
-                attributes=rel_data.get('attributes', {}),
-                confidence=rel_data.get('confidence', 0.8),
-                source='complaint'
+            extractor_key = _clean_context_text(entity_data.get("extractor_key"))
+            if extractor_key:
+                entity_key_to_id[extractor_key] = entity.id
+
+        relationships: List[Dict[str, Any]] = []
+        for rel_data in self._extract_relationships(source_text, graph):
+            if isinstance(rel_data, Mapping):
+                relationships.append(dict(rel_data))
+        for raw_relationship in extracted_relationships or []:
+            if not isinstance(raw_relationship, Mapping):
+                continue
+            prepared_relationship = dict(raw_relationship)
+            prepared_relationship.setdefault("origin", "user")
+            source_endpoint = _resolve_graph_endpoint(
+                prepared_relationship,
+                graph,
+                entity_key_to_id,
+                "source_id",
+                "source_key",
             )
-            graph.add_relationship(rel)
+            target_endpoint = _resolve_graph_endpoint(
+                prepared_relationship,
+                graph,
+                entity_key_to_id,
+                "target_id",
+                "target_key",
+            )
+            if not source_endpoint or not target_endpoint:
+                continue
+            prepared_relationship["source_id"] = source_endpoint
+            prepared_relationship["target_id"] = target_endpoint
+            if prepared_relationship.get("type") and not prepared_relationship.get("relation_type"):
+                prepared_relationship["relation_type"] = prepared_relationship.get("type")
+            relationships.append(prepared_relationship)
+
+        for rel_data in relationships:
+            source_endpoint = _clean_context_text(rel_data.get("source_id"))
+            target_endpoint = _clean_context_text(rel_data.get("target_id"))
+            if source_endpoint not in graph.entities or target_endpoint not in graph.entities:
+                continue
+            relation_type = _clean_context_text(rel_data.get("type") or rel_data.get("relation_type"))
+            if not relation_type:
+                continue
+            relationship_record = dict(rel_data)
+            relationship_record["relation_type"] = relation_type
+            relationship_record["type"] = relation_type
+            envelope = envelope_for_extracted_record(
+                relationship_record,
+                source_text=source_text,
+                caller_context=caller_context,
+                context_deficiencies=context_deficiencies,
+                role=relation_type,
+            )
+            raw_extractor = rel_data.get("provenance") if isinstance(rel_data.get("provenance"), Mapping) else {}
+            provenance_payload = {"user_assertion": envelope.as_dict()}
+            carried_extractor = _merge_provenance(preserved_extractor, raw_extractor)
+            if carried_extractor:
+                provenance_payload["extractor"] = carried_extractor
+            attributes = rel_data.get("attributes") if isinstance(rel_data.get("attributes"), Mapping) else {}
+            raw_confidence = rel_data.get("confidence", 0.8)
+            graph.add_relationship(
+                Relationship(
+                    id=self._get_relationship_id(),
+                    source_id=source_endpoint,
+                    target_id=target_endpoint,
+                    relation_type=relation_type,
+                    attributes=dict(attributes),
+                    confidence=float(0.8 if raw_confidence is None else raw_confidence),
+                    source=str(rel_data.get("source") or "complaint"),
+                    provenance=provenance_payload,
+                )
+            )
 
         if self.actor_critic_enabled:
             entity_scores = [
@@ -1219,6 +1715,14 @@ class KnowledgeGraphBuilder:
             etype = (entity.get("type") or "").strip()
             if not name or not etype:
                 return
+            if not isinstance(entity.get("source_span"), Mapping) and etype.lower() in {"date", "person", "organization"}:
+                lookup = locate_unique_byte_span(text or "", name)
+                if lookup.deficiency == "" and lookup.start is not None and lookup.end is not None:
+                    entity["source_span"] = {
+                        "start": lookup.start,
+                        "end": lookup.end,
+                        "text": lookup.text,
+                    }
             key = (etype.lower(), name.lower())
             if key in seen:
                 return
@@ -1459,12 +1963,20 @@ class KnowledgeGraphBuilder:
             event_date = _extract_event_date_reference(sentence)
             if event_date:
                 attributes['event_date_or_range'] = event_date
-            add_entity({
+            fact_record: Dict[str, Any] = {
                 'type': 'fact',
                 'name': f"{name_prefix}: {short_description(sentence, 60)}",
                 'attributes': attributes,
                 'confidence': confidence,
-            })
+            }
+            span_lookup = locate_unique_byte_span(text or "", sentence)
+            if span_lookup.deficiency == "" and span_lookup.start is not None and span_lookup.end is not None:
+                fact_record["source_span"] = {
+                    "start": span_lookup.start,
+                    "end": span_lookup.end,
+                    "text": span_lookup.text,
+                }
+            add_entity(fact_record)
 
         protected_activity_event_count = 0
         adverse_action_event_count = 0
@@ -2150,7 +2662,10 @@ class KnowledgeGraphBuilder:
                 if not isinstance(rel, dict):
                     continue
                 if rel.get('source_id') and rel.get('target_id') and rel.get('type'):
-                    relationships.append(rel)
+                    model_rel = dict(rel)
+                    model_rel["origin"] = "model"
+                    model_rel["record_type"] = "model_suggestion"
+                    relationships.append(model_rel)
         
         unique_relationships = {}
         for rel in relationships:
@@ -2162,7 +2677,11 @@ class KnowledgeGraphBuilder:
                 unique_relationships[key] = rel
 
         deduped_relationships = list(unique_relationships.values())
-        return self._apply_relationship_actor_critic(text, graph, deduped_relationships)
+        prepared = self._apply_relationship_actor_critic(text, graph, deduped_relationships)
+        for relationship in prepared:
+            if isinstance(relationship, dict):
+                relationship.setdefault("origin", "heuristic")
+        return prepared
     
     def _llm_extract_entities(self, text: str) -> List[Dict[str, Any]]:
         """Extract and validate graph entities with the mediator's LLM backend.
@@ -2227,7 +2746,9 @@ Complaint text (JSON string):
             if entity_type not in allowed_types or not name:
                 continue
             attributes = candidate.get("attributes")
-            entities.append({
+            model_provenance = candidate.get("provenance") if isinstance(candidate.get("provenance"), Mapping) else {}
+            model_span = candidate.get("source_span") if isinstance(candidate.get("source_span"), Mapping) else None
+            model_record: Dict[str, Any] = {
                 "type": entity_type,
                 "name": name,
                 "attributes": dict(attributes) if isinstance(attributes, Mapping) else {},
@@ -2235,7 +2756,14 @@ Complaint text (JSON string):
                     candidate.get("confidence"),
                     default=0.7,
                 ),
-            })
+                "origin": "model",
+                "record_type": "model_suggestion",
+            }
+            if model_provenance:
+                model_record["provenance"] = dict(model_provenance)
+            if model_span is not None:
+                model_record["source_span"] = dict(model_span)
+            entities.append(model_record)
         return entities
     
     def _llm_extract_relationships(self, text: str, graph: KnowledgeGraph) -> List[Dict[str, Any]]:

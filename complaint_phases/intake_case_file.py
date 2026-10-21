@@ -8,7 +8,9 @@ import calendar
 from datetime import UTC, datetime, timedelta
 from itertools import combinations
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping, Optional
+
+from integrations.ipfs_datasets.types import user_assertion_from_mapping
 
 from .intake_claim_registry import normalize_claim_type, refresh_required_elements, registry_for_claim_type
 
@@ -2585,6 +2587,79 @@ def build_candidate_claims(knowledge_graph) -> List[Dict[str, Any]]:
     return candidates
 
 
+def _user_assertion_payload(provenance: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(provenance, Mapping):
+        return None
+    payload = provenance.get("user_assertion")
+    if not isinstance(payload, Mapping) or not _normalize_text(payload.get("contract_version") or ""):
+        return None
+    return user_assertion_from_mapping(payload).as_dict()
+
+
+def _project_user_assertion(provenance: Any, *, legacy_ref: str) -> Dict[str, Any]:
+    """Project an assertion envelope. Records without one keep the legacy case-file shape."""
+    envelope_payload = _user_assertion_payload(provenance)
+    if envelope_payload is None:
+        return {
+            "source_kind": "knowledge_graph_entity",
+            "source_ref": legacy_ref,
+            "status": "accepted",
+            "source_span_refs": [],
+        }
+    envelope = user_assertion_from_mapping(envelope_payload)
+    identity = envelope.source_identity
+    source_kind = envelope.source_kind if envelope.is_asserted_user_fact else (envelope.record_type or envelope.source_kind or "unverified")
+    if envelope.is_asserted_user_fact:
+        status = envelope.assertion_status
+    elif envelope.record_type == "legal_text":
+        status = "legal_text"
+    elif envelope.record_type in {"model_suggestion", "inferred_claim_label"}:
+        status = "suggestion"
+    else:
+        status = envelope.assertion_status or "unverified"
+    span_refs: List[Dict[str, Any]] = []
+    if envelope.source_span_start is not None and envelope.source_span_end is not None:
+        span_refs.append(
+            {
+                "kind": "user_source_span",
+                "source_kind": source_kind,
+                "source_id": identity,
+                "start": envelope.source_span_start,
+                "end": envelope.source_span_end,
+                "source_hash": envelope.source_hash,
+                "text": envelope.source_span_text,
+                "assertion_status": status,
+                "stable_id": envelope.stable_id,
+            }
+        )
+    return {
+        "source_kind": source_kind,
+        "source_ref": identity if envelope.is_asserted_user_fact and identity else legacy_ref,
+        "status": status,
+        "assertion_status": status,
+        "extractor_version": envelope.extractor_version,
+        "stable_id": envelope.stable_id,
+        "source_hash": envelope.source_hash,
+        "source_id": envelope.source_id,
+        "message_id": envelope.message_id,
+        "document_id": envelope.document_id,
+        "source_span": {
+            "start": envelope.source_span_start,
+            "end": envelope.source_span_end,
+            "text": envelope.source_span_text,
+            "unit": "byte",
+        },
+        "source_span_refs": span_refs,
+        "user_assertion": envelope.as_dict(),
+        "record_type": envelope.record_type,
+        "contract_version": envelope.contract_version,
+        "jurisdiction": envelope.jurisdiction,
+        "actor": envelope.actor,
+        "asserted_name": envelope.name,
+        "asserted_event_date": envelope.event_date,
+    }
+
+
 def build_canonical_facts(knowledge_graph) -> List[Dict[str, Any]]:
     """Build initial canonical facts from fact entities already extracted into the graph."""
     if knowledge_graph is None:
@@ -2595,6 +2670,11 @@ def build_canonical_facts(knowledge_graph) -> List[Dict[str, Any]]:
         fact_text = _normalize_text(entity.attributes.get("description") or entity.name)
         if not fact_text:
             continue
+        provenance_projection = _project_user_assertion(getattr(entity, "provenance", {}), legacy_ref=entity.id)
+        existing_span_refs = _coerce_provenance_refs(entity.attributes.get("source_span_refs"))
+        provenance_projection["source_span_refs"] = _coerce_provenance_refs(
+            existing_span_refs + list(provenance_projection.get("source_span_refs") or [])
+        )
         canonical_facts.append(
             _normalize_canonical_fact_record(
                 {
@@ -2619,10 +2699,7 @@ def build_canonical_facts(knowledge_graph) -> List[Dict[str, Any]]:
                     "actor_ids": list(entity.attributes.get("actor_ids") or []),
                     "target_ids": list(entity.attributes.get("target_ids") or []),
                     "location": _normalize_text(entity.attributes.get("location") or "") or None,
-                    "source_kind": "knowledge_graph_entity",
-                    "source_ref": entity.id,
                     "confidence": float(entity.confidence),
-                    "status": "accepted",
                     "needs_corroboration": entity.confidence < 0.85,
                     "corroboration_priority": "high" if entity.confidence < 0.7 else "medium",
                     "materiality": "medium",
@@ -2630,12 +2707,73 @@ def build_canonical_facts(knowledge_graph) -> List[Dict[str, Any]]:
                     "event_support_refs": _unique_normalized_strings(entity.attributes.get("event_support_refs") or []),
                     "source_artifact_ids": _unique_normalized_strings(entity.attributes.get("source_artifact_ids") or []),
                     "testimony_record_ids": _unique_normalized_strings(entity.attributes.get("testimony_record_ids") or []),
-                    "source_span_refs": _coerce_provenance_refs(entity.attributes.get("source_span_refs")),
                     "contradiction_group_id": None,
+                    **provenance_projection,
                 }
             )
         )
     return canonical_facts
+
+
+def build_canonical_fact_edges(knowledge_graph) -> List[Dict[str, Any]]:
+    """Project graph edges with their assertion envelopes.
+
+    source_id and target_id stay node endpoints. User message and document
+    identity stays inside the assertion envelope.
+    """
+    if knowledge_graph is None:
+        return []
+    edges: List[Dict[str, Any]] = []
+    relationships = getattr(knowledge_graph, "relationships", {})
+    relationship_values = relationships.values() if isinstance(relationships, Mapping) else relationships
+    for relationship in relationship_values:
+        projection = _project_user_assertion(
+            getattr(relationship, "provenance", {}),
+            legacy_ref=str(getattr(relationship, "id", "") or ""),
+        )
+        edges.append(
+            {
+                "relationship_id": getattr(relationship, "id", ""),
+                "source_id": getattr(relationship, "source_id", ""),
+                "target_id": getattr(relationship, "target_id", ""),
+                "relation_type": getattr(relationship, "relation_type", ""),
+                "confidence": getattr(relationship, "confidence", None),
+                **projection,
+            }
+        )
+    return edges
+
+
+def restore_entity_from_canonical_fact(fact: Mapping[str, Any]):
+    """Rebuild a fact entity from a canonical projection without inventing fields."""
+    from complaint_phases.knowledge_graph import Entity
+
+    record = dict(fact or {})
+    assertion = record.get("user_assertion") if isinstance(record.get("user_assertion"), Mapping) else {}
+    attributes = {
+        "description": record.get("text") or "",
+        "fact_type": record.get("fact_type") or "general",
+        "predicate_family": record.get("predicate_family") or "",
+        "event_label": record.get("event_label") or "",
+        "event_id": record.get("event_id") or "",
+        "event_date_or_range": record.get("event_date_or_range") or "",
+        "source_span_refs": list(record.get("source_span_refs") or []),
+    }
+    if isinstance(record.get("sequence_index"), int):
+        attributes["sequence_index"] = record.get("sequence_index")
+    provenance: Dict[str, Any] = {}
+    if assertion:
+        provenance["user_assertion"] = dict(assertion)
+    confidence = record.get("confidence")
+    return Entity(
+        id=str(record.get("fact_id") or record.get("stable_id") or ""),
+        type="fact",
+        name=str(record.get("name") or record.get("text") or ""),
+        attributes=attributes,
+        confidence=float(0.0 if confidence is None else confidence),
+        source="complaint",
+        provenance=provenance,
+    )
 
 
 def build_proof_leads(knowledge_graph) -> List[Dict[str, Any]]:
