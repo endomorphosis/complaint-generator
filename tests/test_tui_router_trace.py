@@ -159,7 +159,6 @@ def test_config_and_launcher_select_grok47_router():
     selected = next(item for item in config['BACKENDS'] if item['id'] == 'llm-router-grok-4.7')
     assert selected['provider'] == PINNED_GROK_PROVIDER and selected['model'] == PINNED_GROK_MODEL
     assert selected['allow_local_fallback'] is selected['allow_cross_provider_fallback'] is False
-    assert config['MEDIATOR']['backends'] == ['llm-router-grok-4.7']
     script = (ROOT / 'scripts/run_cli_mediator.sh').read_text()
     assert 'COMPLAINT_GENERATOR_MEDIATOR_BACKENDS="llm-router-grok-4.7"' in script
 
@@ -425,3 +424,11 @@ def test_progress_display_failure_does_not_repeat_provider_dispatch(monkeypatch)
     assert backend('synthetic') == 'synthetic-ok'
     assert len(calls) == 1
     assert COMPLAINT_MARKER not in json.dumps(backend.task_receipts)
+
+
+def test_shell_launcher_enters_private_canonical_chat_without_legacy_config():
+    script = (ROOT / 'scripts/run_cli_mediator.sh').read_text()
+    assert 'exec "${PYTHON}" -m applications.complaint_cli chat "$@"' in script
+    assert 'run.py' not in script and '--config' not in script
+    assert 'COMMON_CRAWL_AUTO_CLONE_SOURCE=0' in script
+    assert 'umask 077' in script

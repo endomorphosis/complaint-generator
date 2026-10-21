@@ -101,7 +101,7 @@
         }
     ],
     "MEDIATOR": {
-        "backends": ["llm-router-grok-4.7"]
+        "backends": ["llm-router"]
     },
     "APPLICATION": {
         "type": {
