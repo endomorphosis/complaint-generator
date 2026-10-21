@@ -44,8 +44,14 @@ REASONING_EFFORT_ENV = "IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"
 ORCHESTRATION_DIR_ENV = "IPFS_ACCELERATE_AGENT_ORCHESTRATION_DIR"
 AUTOMATIC_RETRY_REARM_ENV = "IPFS_ACCELERATE_AGENT_AUTOMATIC_RETRY_REARM"
 WORKTREE_MARKER = ".complaint-worktree-root.json"
-_PRIVATE_PATHS = (".complaint_workspace", "data", "output", "statefiles", "exports", "secrets",
-                  ".env*", "*.key", "*.pem")
+_PRIVATE_ROOT_PATHS = (".complaint_workspace", "data", "output", "statefiles", "exports", "secrets",
+                       "evidence", "uploads", "attachments", ".env*", "*.key", "*.pem")
+# Native basename globs apply only at their explicit parent. Keep dependency
+# source available while denying its private data and Git reconstruction path.
+_PRIVATE_DEPENDENCY_ROOTS = ("external/ipfs_accelerate_py", "external/ipfs_datasets_py",
+                             "external/ipfs_kit_py")
+_PRIVATE_PATHS = (*_PRIVATE_ROOT_PATHS, *(f"{root}/{path}"
+                  for root in _PRIVATE_DEPENDENCY_ROOTS for path in (*_PRIVATE_ROOT_PATHS, ".git")))
 
 
 def default_state_dir(repo_root: Path) -> Path:
@@ -412,10 +418,13 @@ def _context_exclusions(context_exclude: Any = None) -> list[str]:
             raise ValueError("private exclusions must be bounded repository-relative paths")
         value = value.removeprefix("./")
         # Exact mandatory directories already cover all descendant patterns.
-        if any(value == item or value.startswith(item + "/") for item in _PRIVATE_PATHS[:6]):
+        if any(value == item or value.startswith(item + "/") for item in result
+               if "*" not in item and "?" not in item):
             continue
         if value not in result:
             result.append(value)
+    if len(result) > 64:
+        raise ValueError("private exclusions exceed the native 64-pattern bound")
     return result
 
 
@@ -513,8 +522,13 @@ def _private_runtime_checks(repo_root: Path, env: Mapping[str, str]) -> dict[str
     if env.get(REASONING_EFFORT_ENV) and getattr(grok_cli_runner, "GROK_REASONING_EFFORT_ENV", None) != REASONING_EFFORT_ENV:
         return {"ready": False, "native_enforcement_available": True,
                 "reason": "native_reasoning_effort_control_unavailable"}
-    patterns = validator(env[PRIVATE_PATHS_ENV])
-    resolver(base_env=dict(env), workspace=repo_root)
+    try:
+        patterns = validator(env[PRIVATE_PATHS_ENV])
+        resolver(base_env=dict(env), workspace=repo_root)
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError):
+        # No path names or exception text enter public readiness telemetry.
+        return {"ready": False, "native_enforcement_available": True,
+                "reason": "native_private_path_policy_invalid"}
     # Use native root-owned Docker, fixed local socket and cached image
     # qualification; a successful ambient `docker info` is insufficient.
     docker = grok_cli_runner._docker_isolation_binary()
@@ -544,6 +558,22 @@ def _private_runtime_checks(repo_root: Path, env: Mapping[str, str]) -> dict[str
             "base_image_id": base_image, "ordinary_task_image_id": ordinary_image,
             "host_architecture": architecture, "image_architecture": image_architecture,
             "reason": reason}
+
+
+def _auth_material_present(env: Mapping[str, str]) -> bool:
+    """Presence only; never read credential bytes or claim provider validation."""
+    if any(bool(env.get(key)) for key in (
+            "XAI_API_KEY", "ipfs_accelerate_py_XAI_API_KEY", "IPFS_ACCELERATE_PY_XAI_API_KEY",
+            "IPFS_DATASETS_PY_XAI_API_KEY")):
+        return True
+    auth_home = Path(env.get("GROK_HOME") or str(Path(env.get("HOME") or Path.home()) / ".grok"))
+    try:
+        entry = (auth_home / "auth.json").lstat()
+        return bool(stat.S_ISREG(entry.st_mode) and entry.st_uid == os.getuid()
+                    and entry.st_nlink == 1 and not entry.st_mode & 0o022
+                    and 0 < entry.st_size <= 1_048_576)
+    except OSError:
+        return False
 
 
 
@@ -665,15 +695,7 @@ def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: s
     board = _validate_board(repo_root, repo_root / BOARD_RELATIVE, spec)
     env = campaign_environment(repo_root, context_exclude=spec["execution_policy"].get("context_exclude"), state_dir=state_dir)
     grok = shutil.which(env.get("IPFS_ACCELERATE_AGENT_GROK_BIN") or "grok", path=env.get("PATH"))
-    auth_home = Path(env.get("GROK_HOME") or str(Path.home() / ".grok"))
-    auth_file = auth_home / "auth.json"
-    auth_present = any(bool(env.get(key)) for key in (
-        "XAI_API_KEY", "ipfs_accelerate_py_XAI_API_KEY", "IPFS_ACCELERATE_PY_XAI_API_KEY",
-        "IPFS_DATASETS_PY_XAI_API_KEY"))
-    try:
-        auth_present = auth_present or (auth_file.is_file() and auth_file.stat().st_size > 0)
-    except OSError:
-        pass
+    auth_present = _auth_material_present(env)
     privacy = _private_runtime_checks(repo_root, env)
     capacity = _worktree_capacity(repo_root, selected_root)
     return {"status": "ready" if grok and auth_present and privacy["ready"] and capacity["sufficient"] is not False else "not_ready",
@@ -1789,6 +1811,8 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
         if build_improvement_work_plan(spec).plan_id != record.get("plan_id"):
             raise RuntimeError("specification changed after the owned launch was prepared")
         effective = campaign_environment(repo_root, context_exclude=spec["execution_policy"].get("context_exclude"), state_dir=state_dir)
+        if not _auth_material_present(effective):
+            raise RuntimeError("auth_material_unavailable")
         os.environ.clear()
         os.environ.update(effective)
         _validate_board(repo_root, repo_root / BOARD_RELATIVE, spec)
