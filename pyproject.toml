@@ -50,6 +50,19 @@ dev = [
   "playwright>=1.53.0,<2.0.0",
   "pyright>=1.1.390",
 ]
+# Private artifact envelope (CIMP-PRIV-003).
+# The default dependency set already requires cryptography>=41.0.0.
+# Upstream ipfs_kit_py floors cryptography>=38.0.0. That floor is the Kit
+# library requirement, not the Kit package version, and it is not lowered here.
+# This extra documents the private-storage crypto contract without a second
+# broad install. OS keyring support is optional and is not pulled in by default
+# (user unlock and recovery are CIMP-PRIV-004).
+private-storage = [
+  "cryptography>=41.0.0",
+]
+keyring = [
+  "keyring>=24.2.0",
+]
 
 [project.scripts]
 complaint-generator = "complaint_generator.entrypoints:main"

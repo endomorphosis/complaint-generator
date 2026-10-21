@@ -19,6 +19,13 @@ newspaper3k>=0.2.8,<1.0.0
 readability-lxml>=0.8.0,<1.0.0
 lxml_html_clean>=0.4.0
 cryptography>=41.0.0
+# Private-storage contract (CIMP-PRIV-003): root stays on cryptography>=41.0.0.
+# external/ipfs_kit_py/requirements.txt floors cryptography>=38.0.0. That pin is
+# the Kit library requirement, not the Kit package version. Do not treat 38 as
+# a Kit release and do not lower this root pin to match it.
+# Optional extras, not installed by the lines in this file:
+#   complaint-generator[private-storage]  -> cryptography>=41.0.0 (already required)
+#   complaint-generator[keyring]          -> keyring>=24.2.0 (PRIV004; not a default)
 cffi>=1.16.0
 httpx>=0.28.1,<1.0.0
 cachetools>=5.3.0
