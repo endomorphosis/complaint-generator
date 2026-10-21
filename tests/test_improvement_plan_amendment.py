@@ -1,5 +1,6 @@
 """A pending scope amendment preserves actual native accounting and history."""
 
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,39 @@ def _git(root, *args):
                           check=True, timeout=20).stdout.strip()
 
 
+def _unamended_synthetic_spec(source):
+    """Undo only the two reviewed recipes in a copy of the test input.
+
+    Production plan progress and Git history must not determine a synthetic
+    fixture's starting contract. Partial or unfamiliar amendments are errors.
+    """
+    spec = deepcopy(compiler.validate_spec(source))
+    task = next(item for item in spec["tasks"] if item["id"] == amendment.TASK)
+    suffix = " " + amendment.BASELINE_TEST
+    guidance = "\n\n" + amendment.GUIDANCE
+    has_target = amendment.BASELINE_TEST in task["targets"]
+    has_validation = any(amendment.BASELINE_TEST in value for value in task["validation_commands"])
+    has_guidance = amendment.GUIDANCE in task["implementation_prompt"]
+    if has_target or has_validation or has_guidance:
+        if (task["targets"].count(amendment.BASELINE_TEST) != 1
+                or task["targets"][-1] != amendment.BASELINE_TEST
+                or len(task["validation_commands"]) != 1
+                or not task["validation_commands"][0].endswith(suffix)
+                or task["implementation_prompt"].count(amendment.GUIDANCE) != 1
+                or not task["implementation_prompt"].endswith(guidance)):
+            raise ValueError("synthetic source has an incomplete or unfamiliar TUI-02 amendment")
+        task["targets"].pop()
+        task["validation_commands"][0] = task["validation_commands"][0][:-len(suffix)]
+        task["implementation_prompt"] = task["implementation_prompt"][:-len(guidance)]
+    release = next(item for item in spec["tasks"] if item["id"] == "CIMP-REL-03")
+    original_dependencies = ["CIMP-REL-01", "CIMP-REL-02", "CIMP-OPS-06"]
+    if release["depends_on"] == original_dependencies + ["CIMP-TUI-12"]:
+        release["depends_on"] = original_dependencies
+    elif release["depends_on"] != original_dependencies:
+        raise ValueError("synthetic source has an unfamiliar release dependency amendment")
+    return compiler.validate_spec(spec)
+
+
 @pytest.fixture
 def stopped(tmp_path, monkeypatch):
     _, native = runner._native_modules(ROOT)
@@ -32,7 +66,7 @@ def stopped(tmp_path, monkeypatch):
          "commit", "--allow-empty", "-m", "Synthetic source revision")
     spec = root / compiler.SPEC_RELATIVE
     spec.parent.mkdir(parents=True)
-    spec.write_bytes((ROOT / compiler.SPEC_RELATIVE).read_bytes())
+    spec.write_text(json.dumps(_unamended_synthetic_spec(compiler.load_spec(ROOT / compiler.SPEC_RELATIVE))))
     generated = compiler.generate(spec, root)
     board = root / compiler.BOARD_RELATIVE
     board.write_text(board.read_text().replace("- Status: todo", "- Status: completed", 1))

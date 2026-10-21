@@ -10,9 +10,36 @@ from integrations.ipfs_accelerate import improvement_plan as compiler
 from integrations.ipfs_accelerate import improvement_recovery as recovery
 from integrations.ipfs_accelerate import improvement_release_amendment as amendment
 from integrations.ipfs_accelerate import improvement_runner as runner
-from tests.test_improvement_plan_amendment import stopped, _apply as apply_prior, _change_native, _git, _state
+from tests.test_improvement_plan_amendment import (
+    stopped, _apply as apply_prior, _change_native, _git, _state, _unamended_synthetic_spec,
+)
 
 pytestmark = [pytest.mark.no_auto_llm, pytest.mark.no_auto_network, pytest.mark.no_auto_heavy]
+
+
+@pytest.mark.parametrize('narrative_applied',[False,True])
+@pytest.mark.parametrize('release_applied',[False,True])
+def test_synthetic_fixture_is_independent_of_both_reviewed_source_amendments(narrative_applied,release_applied):
+    source=compiler.load_spec(Path(__file__).resolve().parents[1]/compiler.SPEC_RELATIVE)
+    baseline=_unamended_synthetic_spec(source)
+    candidate=prior.amended_spec(baseline) if narrative_applied else deepcopy(baseline)
+    if release_applied:
+        candidate=amendment.amended_spec(candidate)
+    before=deepcopy(candidate)
+    assert _unamended_synthetic_spec(candidate)==baseline
+    assert candidate==before
+
+
+@pytest.mark.parametrize('partial',['target','validation','guidance'])
+def test_synthetic_normalization_rejects_partial_unreviewed_recipe(partial):
+    source=compiler.load_spec(Path(__file__).resolve().parents[1]/compiler.SPEC_RELATIVE)
+    baseline=_unamended_synthetic_spec(source)
+    task=next(item for item in baseline['tasks'] if item['id']==prior.TASK)
+    if partial=='target':task['targets'].append(prior.BASELINE_TEST)
+    elif partial=='validation':task['validation_commands'][0]+=' '+prior.BASELINE_TEST
+    else:task['implementation_prompt']+='\n\n'+prior.GUIDANCE
+    with pytest.raises(ValueError,match='incomplete or unfamiliar'):
+        _unamended_synthetic_spec(baseline)
 
 
 @pytest.fixture
