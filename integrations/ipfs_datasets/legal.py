@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import calendar
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .loader import import_attr_optional, run_async_compat
@@ -206,18 +208,492 @@ _stream_ipfs_state_laws_async, _ipfs_stream_state_laws_error = import_attr_optio
 )
 
 
-def _resolve_state_code(value: Optional[str], *, default: str = "OR") -> str:
+# Explicit state names. Unrecognized or missing text stays unresolved.
+_EXPLICIT_STATE_NAMES = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "district of columbia": "DC", "florida": "FL", "georgia": "GA", "hawaii": "HI",
+    "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+    "vermont": "VT", "virginia": "VA", "washington": "WA", "west virginia": "WV",
+    "wisconsin": "WI", "wyoming": "WY",
+}
+_FEDERAL_JURISDICTION_TOKENS = {
+    "federal",
+    "federal court",
+    "federal law",
+    "us",
+    "u.s.",
+    "u.s",
+    "united states",
+    "united states of america",
+}
+UNKNOWN_LEGAL_CONTEXT = "unknown"
+DATE_ROLE_APPLICABLE_LAW = "applicable_law_date"
+DATE_ROLE_EVENT = "event_date"
+DATE_ROLE_FILING_REFERENCE = "filing_reference_date"
+DATE_ROLE_CORPUS_RETRIEVAL = "corpus_retrieval_date"
+LEGAL_DATE_ROLES = (
+    DATE_ROLE_APPLICABLE_LAW,
+    DATE_ROLE_EVENT,
+    DATE_ROLE_FILING_REFERENCE,
+    DATE_ROLE_CORPUS_RETRIEVAL,
+)
+_MONTH_NAME_TO_NUMBER = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+}
+_UNCERTAIN_DATE_RE = re.compile(
+    r"\b(?:about|around|approximately|approx\.?|sometime|some time|early|late|mid|"
+    r"spring|summer|fall|autumn|winter|unclear|roughly)\b",
+    re.IGNORECASE,
+)
+def _resolve_state_code(value: Optional[str], *, default: Optional[str] = None) -> str:
+    """Resolve an explicit state code.
+
+    Missing and unrecognized values stay unresolved. Callers must pass ``default``
+    themselves; Oregon is never implied.
+    """
     state = str(value or "").strip()
+    fallback = str(default or "").strip().upper()
     if not state:
-        return default
+        return fallback
     if len(state) == 2 and state.isalpha():
-        return state.upper()
-    state_map = _state_code_map if isinstance(_state_code_map, dict) else {}
+        code = state.upper()
+        if code in {"US", "FD"}:
+            return fallback
+        return code
+    state_map = dict(_EXPLICIT_STATE_NAMES)
+    if isinstance(_state_code_map, dict):
+        for code, name in _state_code_map.items():
+            label = str(name or "").strip().lower()
+            if label:
+                state_map.setdefault(label, str(code).upper())
     lowered = state.lower()
-    for code, name in state_map.items():
-        if lowered == str(name or "").strip().lower():
-            return str(code).upper()
-    return default
+    if lowered in state_map:
+        return state_map[lowered]
+    return fallback
+
+
+def resolve_explicit_jurisdiction(value: Optional[str]) -> str:
+    """Return a jurisdiction only when the caller stated one.
+
+    Unresolved text stays ``unknown``. Federal law is selected only from an
+    explicit federal or United States token, never as a fallback.
+    """
+    text = " ".join(str(value or "").split())
+    if not text:
+        return UNKNOWN_LEGAL_CONTEXT
+    lowered = text.lower().rstrip(".")
+    if lowered in _FEDERAL_JURISDICTION_TOKENS:
+        return "federal"
+    state_code = _resolve_state_code(text)
+    if state_code:
+        return state_code
+    return UNKNOWN_LEGAL_CONTEXT
+
+
+def _calendar_month_bounds(year: int, month: int) -> tuple[str, str]:
+    last_day = calendar.monthrange(year, month)[1]
+    return f"{year:04d}-{month:02d}-01", f"{year:04d}-{month:02d}-{last_day:02d}"
+
+
+def _parse_explicit_legal_date(value: str) -> Dict[str, Any]:
+    """Parse a date the user actually stated. Uncertain wording stays a range."""
+    raw = " ".join(str(value or "").split())
+    parsed: Dict[str, Any] = {
+        "raw_text": raw,
+        "precise_date": None,
+        "start_date": None,
+        "end_date": None,
+        "granularity": "unknown",
+        "precision": "unknown",
+        "is_range": False,
+        "is_uncertain": False,
+    }
+    if not raw:
+        parsed["is_uncertain"] = True
+        return parsed
+    if _UNCERTAIN_DATE_RE.search(raw):
+        parsed.update({
+            "granularity": "uncertain_range",
+            "precision": "uncertain_range",
+            "is_range": True,
+            "is_uncertain": True,
+        })
+        return parsed
+
+    month_names = "|".join(_MONTH_NAME_TO_NUMBER)
+    range_match = re.search(
+        rf"\b(?:from\s+)?(.+?)\s+(?:to|through|until|-)\s+(.+)$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if range_match and range_match.group(1).strip() and range_match.group(2).strip():
+        start = _parse_explicit_legal_date(range_match.group(1).strip())
+        end = _parse_explicit_legal_date(range_match.group(2).strip())
+        if start.get("precision") != "unknown" or end.get("precision") != "unknown":
+            parsed.update({
+                "start_date": start.get("start_date") or start.get("precise_date"),
+                "end_date": end.get("end_date") or end.get("precise_date"),
+                "granularity": "range",
+                "precision": "range",
+                "is_range": True,
+                "is_uncertain": bool(start.get("is_uncertain") or end.get("is_uncertain")),
+            })
+            return parsed
+
+    iso_match = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", raw)
+    if iso_match:
+        year, month, day = (int(item) for item in iso_match.groups())
+        iso_date = f"{year:04d}-{month:02d}-{day:02d}"
+        parsed.update({
+            "precise_date": iso_date,
+            "start_date": iso_date,
+            "end_date": iso_date,
+            "granularity": "day",
+            "precision": "day",
+        })
+        return parsed
+
+    month_day_year = re.search(
+        rf"\b({month_names})\s+(\d{{1,2}}),\s*(\d{{4}})\b",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if month_day_year:
+        month = _MONTH_NAME_TO_NUMBER[month_day_year.group(1).lower()]
+        day = int(month_day_year.group(2))
+        year = int(month_day_year.group(3))
+        iso_date = f"{year:04d}-{month:02d}-{day:02d}"
+        parsed.update({
+            "precise_date": iso_date,
+            "start_date": iso_date,
+            "end_date": iso_date,
+            "granularity": "day",
+            "precision": "day",
+        })
+        return parsed
+
+    month_year = re.search(rf"\b({month_names})\s+(\d{{4}})\b", raw, flags=re.IGNORECASE)
+    if month_year:
+        month = _MONTH_NAME_TO_NUMBER[month_year.group(1).lower()]
+        year = int(month_year.group(2))
+        start_date, end_date = _calendar_month_bounds(year, month)
+        parsed.update({
+            "start_date": start_date,
+            "end_date": end_date,
+            "granularity": "month",
+            "precision": "month",
+            "is_range": True,
+        })
+        return parsed
+
+    year_match = re.search(r"\b(19\d{2}|20\d{2}|21\d{2})\b", raw)
+    if year_match:
+        year = int(year_match.group(1))
+        parsed.update({
+            "start_date": f"{year:04d}-01-01",
+            "end_date": f"{year:04d}-12-31",
+            "granularity": "year",
+            "precision": "year",
+            "is_range": True,
+        })
+        return parsed
+    return parsed
+
+
+def classify_legal_date(value: Any, *, role: str) -> Dict[str, Any]:
+    """Classify one legal date role without collapsing other roles into it."""
+    if role not in LEGAL_DATE_ROLES:
+        raise ValueError(f"unsupported legal date role: {role}")
+    if isinstance(value, dict) and str(value.get("role") or "") == role:
+        raw_value = value.get("raw_text")
+    else:
+        raw_value = value
+    classified = _parse_explicit_legal_date(str(raw_value or ""))
+    classified["role"] = role
+    return classified
+
+
+def empty_legal_context() -> Dict[str, Any]:
+    """Legal context before the user supplies jurisdiction or dates."""
+    return {
+        "status": UNKNOWN_LEGAL_CONTEXT,
+        "jurisdiction": UNKNOWN_LEGAL_CONTEXT,
+        "jurisdiction_explicit": False,
+        "applicable_law_date": classify_legal_date("", role=DATE_ROLE_APPLICABLE_LAW),
+        "event_date": classify_legal_date("", role=DATE_ROLE_EVENT),
+        "event_dates": [],
+        "filing_reference_date": classify_legal_date("", role=DATE_ROLE_FILING_REFERENCE),
+        "corpus_retrieval_date": classify_legal_date("", role=DATE_ROLE_CORPUS_RETRIEVAL),
+        "selected_rule_applicability": UNKNOWN_LEGAL_CONTEXT,
+        "proof_state": UNKNOWN_LEGAL_CONTEXT,
+        "dependent_proof": [],
+        "context_revision": 0,
+        "changed_fields": [],
+        "questions": [],
+    }
+
+
+def _date_raw(record: Any) -> str:
+    if not isinstance(record, dict):
+        return ""
+    return " ".join(str(record.get("raw_text") or "").split())
+
+
+def apply_legal_context_update(
+    previous: Optional[Dict[str, Any]],
+    updates: Optional[Dict[str, Any]] = None,
+    *,
+    dependent_proof: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Merge explicit context. A real change invalidates old rule and proof state."""
+    current = dict(previous or empty_legal_context())
+    if not isinstance(current.get("applicable_law_date"), dict):
+        current = empty_legal_context()
+    proposed = dict(updates or {})
+    changed: List[str] = []
+
+    if "jurisdiction" in proposed:
+        resolved = resolve_explicit_jurisdiction(proposed.get("jurisdiction"))
+        prior = str(current.get("jurisdiction") or UNKNOWN_LEGAL_CONTEXT)
+        prior_blank = prior == UNKNOWN_LEGAL_CONTEXT
+        selected_before = _context_has_selected_state(current, dependent_proof)
+        if resolved != prior and (not prior_blank or selected_before):
+            changed.append("jurisdiction")
+        current["jurisdiction"] = resolved
+        current["jurisdiction_explicit"] = resolved != UNKNOWN_LEGAL_CONTEXT
+
+    for role in LEGAL_DATE_ROLES:
+        if role not in proposed:
+            continue
+        classified = classify_legal_date(proposed.get(role), role=role)
+        prior_raw = _date_raw(current.get(role))
+        new_raw = _date_raw(classified)
+        if prior_raw and new_raw != prior_raw:
+            changed.append(role)
+        elif not prior_raw and new_raw and _context_has_selected_state(current, dependent_proof):
+            changed.append(role)
+        current[role] = classified
+
+    if "event_dates" in proposed:
+        event_dates = []
+        for item in proposed.get("event_dates") or []:
+            event_dates.append(classify_legal_date(item, role=DATE_ROLE_EVENT))
+        prior_event_raws = [_date_raw(item) for item in (current.get("event_dates") or []) if _date_raw(item)]
+        new_event_raws = [_date_raw(item) for item in event_dates if _date_raw(item)]
+        if prior_event_raws and prior_event_raws != new_event_raws:
+            changed.append("event_dates")
+        current["event_dates"] = event_dates
+        if len(event_dates) == 1:
+            current["event_date"] = event_dates[0]
+
+    if changed:
+        current["context_revision"] = int(current.get("context_revision") or 0) + 1
+        current["changed_fields"] = changed
+        prior_applicability = str(current.get("selected_rule_applicability") or UNKNOWN_LEGAL_CONTEXT)
+        if prior_applicability not in {"", UNKNOWN_LEGAL_CONTEXT}:
+            current["selected_rule_applicability"] = "invalidated"
+            current["invalidated_rule_applicability"] = prior_applicability
+        else:
+            current["selected_rule_applicability"] = UNKNOWN_LEGAL_CONTEXT
+        proof_items = list(dependent_proof if dependent_proof is not None else current.get("dependent_proof") or [])
+        invalidated_proof: List[Dict[str, Any]] = []
+        for item in proof_items:
+            if not isinstance(item, dict):
+                continue
+            proof_state = str(item.get("proof_state") or item.get("status") or UNKNOWN_LEGAL_CONTEXT).strip().lower()
+            updated_item = dict(item)
+            if proof_state not in {"", UNKNOWN_LEGAL_CONTEXT}:
+                updated_item["proof_state"] = "invalidated"
+                updated_item["invalidated_by"] = "legal_context_change"
+                updated_item["invalidated_from_proof_state"] = proof_state
+            invalidated_proof.append(updated_item)
+        current["dependent_proof"] = invalidated_proof
+        prior_proof = str(current.get("proof_state") or UNKNOWN_LEGAL_CONTEXT).strip().lower()
+        if prior_proof not in {"", UNKNOWN_LEGAL_CONTEXT}:
+            current["proof_state"] = "invalidated"
+        else:
+            current["proof_state"] = UNKNOWN_LEGAL_CONTEXT
+    else:
+        current["changed_fields"] = []
+        if dependent_proof is not None:
+            current["dependent_proof"] = [dict(item) for item in dependent_proof if isinstance(item, dict)]
+
+    jurisdiction = str(current.get("jurisdiction") or UNKNOWN_LEGAL_CONTEXT)
+    current["status"] = UNKNOWN_LEGAL_CONTEXT if jurisdiction == UNKNOWN_LEGAL_CONTEXT else "explicit"
+    current["questions"] = questions_for_legal_context(current)
+    return current
+
+
+def _context_has_selected_state(context: Dict[str, Any], dependent_proof: Optional[List[Dict[str, Any]]]) -> bool:
+    applicability = str(context.get("selected_rule_applicability") or UNKNOWN_LEGAL_CONTEXT).strip().lower()
+    proof_state = str(context.get("proof_state") or UNKNOWN_LEGAL_CONTEXT).strip().lower()
+    if applicability not in {"", UNKNOWN_LEGAL_CONTEXT} or proof_state not in {"", UNKNOWN_LEGAL_CONTEXT}:
+        return True
+    for item in dependent_proof or context.get("dependent_proof") or []:
+        if not isinstance(item, dict):
+            continue
+        state = str(item.get("proof_state") or item.get("status") or UNKNOWN_LEGAL_CONTEXT).strip().lower()
+        if state not in {"", UNKNOWN_LEGAL_CONTEXT}:
+            return True
+    return False
+
+
+def questions_for_legal_context(
+    context: Optional[Dict[str, Any]],
+    *,
+    selecting_rules: bool = False,
+) -> List[Dict[str, Any]]:
+    """Questions to ask the user. Missing context is not filled in for them."""
+    legal_context = context if isinstance(context, dict) else empty_legal_context()
+    questions: List[Dict[str, Any]] = []
+    jurisdiction = str(legal_context.get("jurisdiction") or UNKNOWN_LEGAL_CONTEXT)
+    if jurisdiction == UNKNOWN_LEGAL_CONTEXT:
+        questions.append({
+            "question_id": "legal_context.jurisdiction",
+            "field": "jurisdiction",
+            "prompt": (
+                "Which jurisdiction's law applies? Name the state or say federal. "
+                "Unresolved jurisdiction stays unknown; Oregon and federal court are not assumed."
+            ),
+            "reason": "unresolved_jurisdiction",
+        })
+    event_dates = [
+        item for item in (legal_context.get("event_dates") or [])
+        if isinstance(item, dict) and _date_raw(item)
+    ]
+    event_date = legal_context.get("event_date") if isinstance(legal_context.get("event_date"), dict) else {}
+    if not event_dates and not _date_raw(event_date):
+        questions.append({
+            "question_id": "legal_context.event_dates",
+            "field": "event_date",
+            "prompt": (
+                "What dates or date ranges are relevant to the events? "
+                "If you know only a range, give the range. A single day will not be invented."
+            ),
+            "reason": "missing_event_dates",
+        })
+    if selecting_rules and not _date_raw(legal_context.get("applicable_law_date")):
+        questions.append({
+            "question_id": "legal_context.applicable_law_date",
+            "field": "applicable_law_date",
+            "prompt": "What date should be used to decide which version of the law applies?",
+            "reason": "missing_applicable_law_date",
+        })
+    if selecting_rules and not _date_raw(legal_context.get("filing_reference_date")):
+        questions.append({
+            "question_id": "legal_context.filing_reference_date",
+            "field": "filing_reference_date",
+            "prompt": "What filing or reference date should be kept separate from the event date?",
+            "reason": "missing_filing_reference_date",
+        })
+    return questions
+
+
+def select_requirement_applicability(
+    requirement: Optional[Dict[str, Any]],
+    legal_context: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Select a requirement only against explicit jurisdiction and date roles.
+
+    Implicit Oregon or federal selection is refused. Missing context stays unknown.
+    """
+    requirement_record = requirement if isinstance(requirement, dict) else {}
+    context = legal_context if isinstance(legal_context, dict) else empty_legal_context()
+    jurisdiction = resolve_explicit_jurisdiction(context.get("jurisdiction"))
+    requirement_jurisdiction = resolve_explicit_jurisdiction(
+        requirement_record.get("jurisdiction") or requirement_record.get("state")
+    )
+    applicable_law_date = context.get("applicable_law_date") if isinstance(context.get("applicable_law_date"), dict) else {}
+    if jurisdiction == UNKNOWN_LEGAL_CONTEXT or requirement_jurisdiction == UNKNOWN_LEGAL_CONTEXT:
+        return {
+            "applicability": UNKNOWN_LEGAL_CONTEXT,
+            "selected": False,
+            "reason": "unresolved_legal_context",
+            "jurisdiction": UNKNOWN_LEGAL_CONTEXT if jurisdiction == UNKNOWN_LEGAL_CONTEXT else jurisdiction,
+            "requirement_jurisdiction": requirement_jurisdiction,
+            "context_revision": int(context.get("context_revision") or 0),
+        }
+    if jurisdiction != requirement_jurisdiction:
+        return {
+            "applicability": UNKNOWN_LEGAL_CONTEXT,
+            "selected": False,
+            "reason": "jurisdiction_not_selected",
+            "jurisdiction": jurisdiction,
+            "requirement_jurisdiction": requirement_jurisdiction,
+            "context_revision": int(context.get("context_revision") or 0),
+        }
+    if not _date_raw(applicable_law_date):
+        return {
+            "applicability": UNKNOWN_LEGAL_CONTEXT,
+            "selected": False,
+            "reason": "missing_applicable_law_date",
+            "jurisdiction": jurisdiction,
+            "requirement_jurisdiction": requirement_jurisdiction,
+            "context_revision": int(context.get("context_revision") or 0),
+        }
+    stored_revision = requirement_record.get("context_revision")
+    current_revision = int(context.get("context_revision") or 0)
+    if stored_revision is not None and int(stored_revision) != current_revision:
+        return {
+            "applicability": "invalidated",
+            "selected": False,
+            "reason": "stale_legal_context",
+            "jurisdiction": jurisdiction,
+            "requirement_jurisdiction": requirement_jurisdiction,
+            "context_revision": current_revision,
+        }
+    return {
+        "applicability": "selected",
+        "selected": True,
+        "reason": "explicit_context",
+        "jurisdiction": jurisdiction,
+        "requirement_jurisdiction": requirement_jurisdiction,
+        "applicable_law_date": applicable_law_date,
+        "event_date": context.get("event_date"),
+        "filing_reference_date": context.get("filing_reference_date"),
+        "corpus_retrieval_date": context.get("corpus_retrieval_date"),
+        "context_revision": current_revision,
+    }
+
+
+def legal_requirement_search_plan(
+    program: Optional[Dict[str, Any]],
+    *,
+    state: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Decide authority searches without implying Oregon or federal law."""
+    program_record = program if isinstance(program, dict) else {}
+    families = {
+        str(family or "").strip()
+        for family in (program_record.get("authority_families") or [])
+        if str(family or "").strip()
+    }
+    jurisdiction = resolve_explicit_jurisdiction(state or program_record.get("jurisdiction"))
+    state_code = jurisdiction if jurisdiction not in {UNKNOWN_LEGAL_CONTEXT, "federal"} else ""
+    search_federal = jurisdiction == "federal"
+    search_state = bool(state_code)
+    include_all = not families
+    return {
+        "jurisdiction": jurisdiction,
+        "state_code": state_code,
+        "context_status": UNKNOWN_LEGAL_CONTEXT if jurisdiction == UNKNOWN_LEGAL_CONTEXT else "explicit",
+        "selected_rule_applicability": UNKNOWN_LEGAL_CONTEXT if jurisdiction == UNKNOWN_LEGAL_CONTEXT else "unselected",
+        "search_us_code": search_federal and (include_all or "statute" in families),
+        "search_federal_register": search_federal and (include_all or "regulation" in families),
+        "search_state_laws": search_state and (include_all or "statute" in families),
+        "search_state_administrative_rules": search_state and (include_all or "administrative_rule" in families),
+        "search_case_law": search_federal and (include_all or "case_law" in families or "docket_material" in families),
+        "authority_families": sorted(families),
+    }
 
 LEGAL_SOURCE_AVAILABILITY = {
     "federal_statutes": _search_us_code_async is not None,
@@ -875,6 +1351,17 @@ def search_state_laws(
     allow_live_scrape_fallback: bool = True,
 ) -> List[Dict[str, Any]]:
     state_code = _resolve_state_code(state)
+    if not state_code:
+        _set_last_legal_search_diagnostic(
+            "search_state_laws",
+            {
+                "search_key": "search_state_laws",
+                "final_status": "unknown_jurisdiction",
+                "state_code": "",
+                "context_status": UNKNOWN_LEGAL_CONTEXT,
+            },
+        )
+        return []
     diagnostics = _build_hf_search_diagnostic(
         search_key="search_state_laws",
         query=query,
@@ -1012,6 +1499,17 @@ def search_state_administrative_rules(
     allow_live_scrape_fallback: bool = True,
 ) -> List[Dict[str, Any]]:
     state_code = _resolve_state_code(state)
+    if not state_code:
+        _set_last_legal_search_diagnostic(
+            "search_state_administrative_rules",
+            {
+                "search_key": "search_state_administrative_rules",
+                "final_status": "unknown_jurisdiction",
+                "state_code": "",
+                "context_status": UNKNOWN_LEGAL_CONTEXT,
+            },
+        )
+        return []
     diagnostics = _build_hf_search_diagnostic(
         search_key="search_state_administrative_rules",
         query=query,
@@ -1228,6 +1726,7 @@ def constrain_assertions_to_corpus(
     grounded: List[Dict[str, Any]] = []
     ungrounded: List[Dict[str, Any]] = []
     details: List[Dict[str, Any]] = []
+    explicit_jurisdiction = resolve_explicit_jurisdiction(state)
 
     for index, assertion in enumerate(assertions or []):
         assertion_id = str(assertion.get("assertion_id") or assertion.get("id") or f"a-{index + 1}")
@@ -1239,27 +1738,46 @@ def constrain_assertions_to_corpus(
 
         corpus_hits: List[Dict[str, Any]] = []
 
-        # 1. Try US Code
-        try:
-            hits = search_us_code(text, max_results=max_results_per_assertion)
-            corpus_hits.extend(hits or [])
-        except Exception:
-            pass
+        # Unresolved jurisdiction does not select federal or Oregon law.
+        if explicit_jurisdiction == UNKNOWN_LEGAL_CONTEXT:
+            details.append({
+                "assertion_id": assertion_id,
+                "text": text,
+                "grounded": False,
+                "applicability": UNKNOWN_LEGAL_CONTEXT,
+                "reason": "unresolved_legal_context",
+                "corpus_hits": [],
+            })
+            ungrounded.append({
+                **assertion,
+                "grounded": False,
+                "applicability": UNKNOWN_LEGAL_CONTEXT,
+                "corpus_hits": [],
+            })
+            continue
 
-        # 2. Try Federal Register if still empty
-        if not corpus_hits:
+        # 1. Federal statutes only when federal jurisdiction was stated.
+        if explicit_jurisdiction == "federal":
+            try:
+                hits = search_us_code(text, max_results=max_results_per_assertion)
+                corpus_hits.extend(hits or [])
+            except Exception:
+                pass
+
+        # 2. Federal Register only for an explicit federal jurisdiction.
+        if explicit_jurisdiction == "federal" and not corpus_hits:
             try:
                 hits = search_federal_register(text, max_results=max_results_per_assertion)
                 corpus_hits.extend(hits or [])
             except Exception:
                 pass
 
-        # 3. Try state laws if a state is provided and still empty
-        if not corpus_hits and state:
+        # 3. State laws only for an explicit state code.
+        if not corpus_hits and explicit_jurisdiction not in {UNKNOWN_LEGAL_CONTEXT, "federal"}:
             try:
                 hits = search_state_laws(
                     text,
-                    state=state,
+                    state=explicit_jurisdiction,
                     max_results=max_results_per_assertion,
                     allow_live_scrape_fallback=allow_live_scrape_fallback,
                 )
@@ -1304,6 +1822,9 @@ def constrain_assertions_to_corpus(
         "ungrounded_count": len(ungrounded),
         "total_assertion_count": total,
         "corpus_coverage_percent": corpus_coverage_percent,
+        "jurisdiction": explicit_jurisdiction,
+        "context_status": UNKNOWN_LEGAL_CONTEXT if explicit_jurisdiction == UNKNOWN_LEGAL_CONTEXT else "explicit",
+        "selected_rule_applicability": UNKNOWN_LEGAL_CONTEXT,
     }
 
 
@@ -1326,9 +1847,9 @@ def search_legal_authority_program(
         for family in (program.get("authority_families") or [])
         if str(family or "").strip()
     }
-    jurisdiction = str(program.get("jurisdiction") or "").strip()
-    state_code = _resolve_state_code(state or jurisdiction)
-    include_all = not families
+    plan = legal_requirement_search_plan(program, state=state)
+    jurisdiction = str(plan["jurisdiction"])
+    state_code = str(plan["state_code"])
 
     results: Dict[str, List[Dict[str, Any]]] = {
         "statutes": [],
@@ -1339,16 +1860,17 @@ def search_legal_authority_program(
         "docket_materials": [],
     }
 
-    if include_all or "statute" in families:
+    if plan["search_us_code"]:
         results["statutes"] = search_us_code(query, max_results=max_results)
+    if plan["search_state_laws"]:
         results["state_statutes"] = search_state_laws(query, state=state_code, max_results=max_results)
-    if include_all or "regulation" in families:
+    if plan["search_federal_register"]:
         results["regulations"] = search_federal_register(query, max_results=max_results)
-    if include_all or "administrative_rule" in families:
+    if plan["search_state_administrative_rules"]:
         results["administrative_rules"] = search_state_administrative_rules(query, state=state_code, max_results=max_results)
-    if include_all or "case_law" in families:
+    if plan["search_case_law"] and ("case_law" in families or not families):
         results["case_law"] = search_recap_documents(query, max_results=max_results)
-    if include_all or "docket_material" in families:
+    if plan["search_case_law"] and ("docket_material" in families or not families):
         results["docket_materials"] = search_recap_documents(query, max_results=max_results)
 
     flat_results = [
@@ -1375,6 +1897,8 @@ def search_legal_authority_program(
             "authority_intent": str(program.get("authority_intent") or ""),
             "jurisdiction": jurisdiction,
             "state_code": state_code,
+            "context_status": plan["context_status"],
+            "selected_rule_applicability": plan["selected_rule_applicability"],
         },
     )
 
@@ -1391,4 +1915,13 @@ __all__ = [
     "search_state_administrative_rules",
     "search_legal_authority_program",
     "constrain_assertions_to_corpus",
+    "UNKNOWN_LEGAL_CONTEXT",
+    "LEGAL_DATE_ROLES",
+    "resolve_explicit_jurisdiction",
+    "classify_legal_date",
+    "empty_legal_context",
+    "apply_legal_context_update",
+    "questions_for_legal_context",
+    "select_requirement_applicability",
+    "legal_requirement_search_plan",
 ]
