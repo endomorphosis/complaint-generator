@@ -89,6 +89,13 @@ def run_intake_chat_turn(
     service: Optional[ComplaintWorkspaceService] = None,
     root_dir: Optional[str | Path] = None,
 ) -> dict[str, Any]:
+    """Advance one intake turn and return the next typed inquiry.
+
+    The first turn stores ``message`` on ``original_complaint`` (versioned
+    narrative and revisions). Later structured ``question_id`` answers stay in
+    ``intake_answers``. API and MCP callers use this same service transition.
+    """
+
     return _resolve_service(service, root_dir=root_dir).run_intake_chat_turn(
         user_id,
         message=message,

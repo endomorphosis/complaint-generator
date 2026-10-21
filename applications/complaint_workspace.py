@@ -461,6 +461,120 @@ _CLAIM_ELEMENTS: List[Dict[str, str]] = [
 ]
 DEFAULT_INTAKE_QUESTIONS: List[Dict[str, str]] = deepcopy(_INTAKE_QUESTIONS)
 DEFAULT_CLAIM_ELEMENTS: List[Dict[str, str]] = deepcopy(_CLAIM_ELEMENTS)
+ORIGINAL_COMPLAINT_QUESTION_ID = "original_complaint"
+ORIGINAL_COMPLAINT_SCHEMA = "complaint-generator.original-complaint.v1"
+INTAKE_SESSION_SCHEMA = "complaint-generator.intake-session.v2"
+_NARRATIVE_INQUIRY: Dict[str, str] = {
+    "id": ORIGINAL_COMPLAINT_QUESTION_ID,
+    "label": "Complaint narrative",
+    "prompt": "What happened?",
+    "placeholder": "Describe the events in your own words",
+}
+
+
+def _empty_original_complaint() -> Dict[str, Any]:
+    return {
+        "schema_version": ORIGINAL_COMPLAINT_SCHEMA,
+        "text": "",
+        "revision": 0,
+        "revisions": [],
+    }
+
+
+def migrate_original_complaint(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Add the versioned narrative without rewriting a saved seven-field session.
+
+    Existing ``intake_answers`` keys and values stay as stored. A missing or
+    unversioned narrative becomes ``original_complaint`` and is not copied
+    from ``party_name``.
+    """
+
+    answers = state.get("intake_answers")
+    if not isinstance(answers, dict):
+        state["intake_answers"] = {}
+    current = state.get("original_complaint")
+    if isinstance(current, str):
+        text = current.strip()
+        state["original_complaint"] = {
+            "schema_version": ORIGINAL_COMPLAINT_SCHEMA,
+            "text": text,
+            "revision": 1 if text else 0,
+            "revisions": (
+                [
+                    {
+                        "revision": 1,
+                        "text": text,
+                        "captured_at": str(state.get("updated_at") or ""),
+                        "source": "legacy_string",
+                    }
+                ]
+                if text
+                else []
+            ),
+        }
+    elif isinstance(current, dict):
+        text = str(current.get("text") or "").strip()
+        revisions = current.get("revisions")
+        if not isinstance(revisions, list):
+            revisions = []
+        else:
+            revisions = [item for item in revisions if isinstance(item, dict)]
+        try:
+            revision = int(current.get("revision") or 0)
+        except (TypeError, ValueError):
+            revision = 0
+        if text and revision <= 0:
+            revision = len(revisions) or 1
+        if text and not revisions:
+            revisions = [
+                {
+                    "revision": revision or 1,
+                    "text": text,
+                    "captured_at": str(current.get("captured_at") or state.get("updated_at") or ""),
+                    "source": "legacy_object",
+                }
+            ]
+            revision = revision or 1
+        current["schema_version"] = ORIGINAL_COMPLAINT_SCHEMA
+        current["text"] = text
+        current["revision"] = revision
+        current["revisions"] = revisions
+        state["original_complaint"] = current
+    else:
+        state["original_complaint"] = _empty_original_complaint()
+    state["intake_session_schema"] = INTAKE_SESSION_SCHEMA
+    return state
+
+
+def _narrative_record(state: Dict[str, Any]) -> Dict[str, Any]:
+    migrate_original_complaint(state)
+    record = state.get("original_complaint")
+    if not isinstance(record, dict):
+        record = _empty_original_complaint()
+        state["original_complaint"] = record
+    return record
+
+
+def _structured_answers_present(state: Dict[str, Any]) -> bool:
+    answers = state.get("intake_answers") or {}
+    if not isinstance(answers, dict):
+        return False
+    return any(str(answers.get(question["id"]) or "").strip() for question in _INTAKE_QUESTIONS)
+
+
+def _narrative_is_open(state: Dict[str, Any]) -> bool:
+    """Ask for the story only at the start of a session that has no structured answers.
+
+    Saved seven-field sessions stay on their next structured question. The
+    narrative can still be revised by passing its own question id.
+    """
+
+    record = _narrative_record(state)
+    if int(record.get("revision") or 0) > 0 or str(record.get("text") or "").strip():
+        return False
+    if _structured_answers_present(state):
+        return False
+    return True
 _CLAIM_TYPE_LABELS: Dict[str, str] = {
     "retaliation": "Retaliation",
     "employment_discrimination": "Employment Discrimination",
@@ -2321,6 +2435,8 @@ def _default_state(user_id: str) -> Dict[str, Any]:
         "updated_at": _utc_now(),
         "claim_type": _normalize_claim_type("retaliation"),
         "case_synopsis": "",
+        "intake_session_schema": INTAKE_SESSION_SCHEMA,
+        "original_complaint": _empty_original_complaint(),
         "intake_answers": {},
         "intake_history": [],
         "evidence": {"testimony": [], "documents": []},
@@ -2459,12 +2575,19 @@ class ComplaintWorkspaceRequestHandlers:
     ) -> Dict[str, Any]:
         workspace = self.workspace
         state = self._load_state(user_id)
-        target_question = (
-            workspace._question_by_id(question_id)
-            if question_id
-            else workspace._next_question(state.get("intake_answers") or {})
+        normalized_question_id = str(question_id or "").strip()
+        narrative_turn = normalized_question_id == ORIGINAL_COMPLAINT_QUESTION_ID or (
+            not normalized_question_id and _narrative_is_open(state)
         )
-        if question_id and target_question is None:
+        if narrative_turn:
+            target_question = dict(_NARRATIVE_INQUIRY)
+        else:
+            target_question = (
+                workspace._question_by_id(normalized_question_id)
+                if normalized_question_id
+                else workspace._next_question(state.get("intake_answers") or {})
+            )
+        if normalized_question_id and target_question is None:
             raise ValueError(f"Unknown intake question_id: {question_id}")
 
         accepted_answer: Optional[Dict[str, Any]] = None
@@ -2503,15 +2626,41 @@ class ComplaintWorkspaceRequestHandlers:
         if normalized_message:
             if target_question is None:
                 raise ValueError("The intake flow is already complete for this session.")
-            answer_map = state.setdefault("intake_answers", {})
-            history = state.setdefault("intake_history", [])
-            answer_map[target_question["id"]] = normalized_message
-            accepted_answer = {
-                "question_id": target_question["id"],
-                "answer": normalized_message,
-                "captured_at": self._timestamp(),
-            }
-            history.append(deepcopy(accepted_answer))
+            if narrative_turn:
+                record = _narrative_record(state)
+                revision = int(record.get("revision") or 0) + 1
+                captured_at = self._timestamp()
+                revisions = list(record.get("revisions") or [])
+                revisions.append(
+                    {
+                        "revision": revision,
+                        "text": normalized_message,
+                        "captured_at": captured_at,
+                        "source": "intake_chat",
+                    }
+                )
+                record["schema_version"] = ORIGINAL_COMPLAINT_SCHEMA
+                record["text"] = normalized_message
+                record["revision"] = revision
+                record["revisions"] = revisions
+                state["original_complaint"] = record
+                accepted_answer = {
+                    "question_id": ORIGINAL_COMPLAINT_QUESTION_ID,
+                    "answer": normalized_message,
+                    "captured_at": captured_at,
+                    "kind": "narrative",
+                    "revision": revision,
+                }
+            else:
+                answer_map = state.setdefault("intake_answers", {})
+                history = state.setdefault("intake_history", [])
+                answer_map[target_question["id"]] = normalized_message
+                accepted_answer = {
+                    "question_id": target_question["id"],
+                    "answer": normalized_message,
+                    "captured_at": self._timestamp(),
+                }
+                history.append(deepcopy(accepted_answer))
 
         workspace._save_state(state)
         payload = workspace._build_intake_chat_payload(
@@ -3500,6 +3649,7 @@ class ComplaintWorkspaceService:
         payload.setdefault("case_synopsis", "")
         payload.setdefault("intake_answers", {})
         payload.setdefault("intake_history", [])
+        migrate_original_complaint(payload)
         payload.setdefault("evidence", {"testimony": [], "documents": []})
         payload.setdefault("document_annotations", [])
         payload.setdefault("annotation_knowledge_graph", {"entities": [], "relationships": []})
@@ -3618,6 +3768,10 @@ class ComplaintWorkspaceService:
             else "Core claim elements already have at least some recorded support."
         )
         guidance = {
+            "original_complaint": {
+                "why_this_matters": "The original complaint is the complainant's story. It stays separate from the structured name, party, and element answers.",
+                "how_to_answer": "Describe what happened in plain language. You can use more than one line, paste a file, or revise this narrative later without changing your name.",
+            },
             "party_name": {
                 "why_this_matters": "This anchors who the complaint belongs to across the CLI, web workspace, and later evidence collection.",
                 "how_to_answer": "Use the name that should appear in the complaint caption or intake record.",
@@ -3664,11 +3818,25 @@ class ComplaintWorkspaceService:
         answers = state.get("intake_answers") or {}
         review = self._build_review(state)
         questions = self._build_question_status(answers)
-        active_question = self._question_by_id(requested_question_id) if requested_question_id else self._next_question(answers)
+        requested_id = str(requested_question_id or "").strip()
+        if requested_id == ORIGINAL_COMPLAINT_QUESTION_ID or (not requested_id and _narrative_is_open(state)):
+            active_question = dict(_NARRATIVE_INQUIRY)
+        elif requested_id:
+            active_question = self._question_by_id(requested_id)
+        else:
+            active_question = self._next_question(answers)
         answered_count = len([item for item in questions if item.get("is_answered")])
         total_questions = len(questions)
+        narrative_record = _narrative_record(state)
         if active_question:
-            lead_in = "Let's start with the basics." if answered_count == 0 else "I have that. Next:" if accepted_answer else "Next question:"
+            if active_question["id"] == ORIGINAL_COMPLAINT_QUESTION_ID:
+                lead_in = "Let's start with the basics. Describe your complaint in plain language."
+            elif answered_count == 0 and not str(narrative_record.get("text") or "").strip():
+                lead_in = "Let's start with the basics."
+            elif accepted_answer:
+                lead_in = "I have that. Next:"
+            else:
+                lead_in = "Next question:"
             message = f"{lead_in} {active_question['prompt']}"
             explanation = self._build_intake_chat_explanation(active_question, state)
         else:
@@ -3690,13 +3858,24 @@ class ComplaintWorkspaceService:
                 "label": active_question["label"],
                 "prompt": active_question["prompt"],
                 "placeholder": active_question.get("placeholder") or "",
+                "kind": "narrative" if active_question["id"] == ORIGINAL_COMPLAINT_QUESTION_ID else "structured",
             }
             if active_question
             else None,
+            "original_complaint": deepcopy(narrative_record),
             "explanation": explanation,
             "accepted_answer": deepcopy(accepted_answer) if accepted_answer else None,
             "questions": questions,
-            "next_question": self._next_question(answers),
+            "next_question": (
+                {
+                    "id": active_question["id"],
+                    "label": active_question["label"],
+                    "prompt": active_question["prompt"],
+                    "placeholder": active_question.get("placeholder") or "",
+                }
+                if active_question
+                else self._next_question(answers)
+            ),
             "review": review,
             "case_synopsis": self._build_case_synopsis(state),
             "session": deepcopy(state),
@@ -3704,6 +3883,8 @@ class ComplaintWorkspaceService:
                 "answered_question_count": answered_count,
                 "total_question_count": total_questions,
                 "is_complete": active_question is None,
+                "narrative_captured": bool(str(narrative_record.get("text") or "").strip()),
+                "narrative_revision": int(narrative_record.get("revision") or 0),
                 "remaining_question_ids": [item["id"] for item in _INTAKE_QUESTIONS if not str(answers.get(item["id"]) or "").strip()],
             },
         }
