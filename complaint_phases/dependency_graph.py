@@ -8,6 +8,7 @@ Used to ensure all elements of a claim are properly supported.
 import json
 import logging
 import re
+from copy import deepcopy
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, UTC
@@ -2938,7 +2939,9 @@ class DependencyGraphBuilder:
                 for req_data in requirements:
                     requirement_provenance = req_data.get('provenance') if isinstance(req_data.get('provenance'), dict) else {}
                     req_node = DependencyNode(
-                        id=self._get_namespaced_node_id('legal_requirement'),
+                        id=self._get_namespaced_node_id('legal_requirement', {
+                            'claim_type': claim_type, 'requirement': req_data,
+                        }),
                         node_type=NodeType.LEGAL_ELEMENT,
                         name=req_data.get('name', 'Unnamed Requirement'),
                         description=req_data.get('description', ''),
@@ -3134,11 +3137,13 @@ class DependencyGraphBuilder:
         self.node_counter += 1
         return f"node_{self.node_counter}"
 
-    def _get_namespaced_node_id(self, kind: str) -> str:
+    def _get_namespaced_node_id(self, kind: str, identity: Optional[Dict[str, Any]] = None) -> str:
         """Mint a node id that cannot collide with fact, claim, or link ids."""
         from integrations.ipfs_datasets.graphs import mint_graph_record_id
 
         self.node_counter += 1
+        if identity is not None:
+            return mint_graph_record_id(kind, json.dumps(identity, sort_keys=True, ensure_ascii=False, separators=(",", ":")))
         return mint_graph_record_id(kind, kind, str(self.node_counter))
     
     def _get_dependency_id(self) -> str:
@@ -3178,46 +3183,80 @@ class DependencyGraphBuilder:
         )
         fact_chain = dict(link["provenance_chains"][FACTUAL_ASSERTION_KIND])
         rule_chain = dict(link["provenance_chains"]["rule"])
-        if factual_assertion_id not in graph.nodes:
+        fact_text = factual_name or factual_assertion_id
+        if link["assertion_verified"]:
+            # The flag verifies only the immutable assertion's content. A local
+            # alias or caller display label cannot introduce another assertion.
+            from integrations.ipfs_datasets.types import user_assertion_from_mapping
+            asserted_text = user_assertion_from_mapping(fact_chain["user_assertion"]).source_span_text
+            if factual_name and " ".join(factual_name.split()) != " ".join(asserted_text.split()):
+                raise ValueError("factual label differs from the verified assertion span")
+            fact_text = asserted_text
+        fact_ref = link["factual_assertion_id"]
+        rule_kind = record_kind_from_id(rule_id)
+        # Validate both endpoints and any replay BEFORE mutating the graph.
+        for endpoint, expected_type, expected_kind, chain in (
+            (fact_ref, NodeType.FACT, FACTUAL_ASSERTION_KIND, fact_chain),
+            (rule_id, NodeType.LEGAL_ELEMENT, rule_kind, rule_chain),
+        ):
+            node = graph.nodes.get(endpoint)
+            if node is None:
+                continue
+            if node.node_type != expected_type or node.attributes.get("record_kind") != expected_kind:
+                raise ValueError("cross-graph endpoint has a conflicting type or namespace")
+            if node.attributes.get("provenance", {}) != chain:
+                raise ValueError("cross-graph endpoint has conflicting source provenance")
+        if fact_ref != factual_assertion_id and factual_assertion_id in graph.nodes:
+            node = graph.nodes[factual_assertion_id]
+            if node.node_type != NodeType.FACT or node.attributes.get("provenance", {}) != fact_chain:
+                raise ValueError("local factual endpoint is ambiguous or has conflicting provenance")
+        dependency_type = (
+            DependencyType.CONTRADICTS if link["link_type"] == "contradiction_link" else DependencyType.SUPPORTS
+        )
+        existing_dependency = graph.dependencies.get(link["link_id"])
+        if existing_dependency is not None and (
+            existing_dependency.source_id != fact_ref or existing_dependency.target_id != rule_id
+            or existing_dependency.dependency_type != dependency_type
+            or existing_dependency.required or existing_dependency.strength != 1.0
+        ):
+            raise ValueError("cross-graph link identity conflicts with an existing dependency")
+        existing_links = graph.metadata.get("cross_graph_links", [])
+        if not isinstance(existing_links, list):
+            raise ValueError("invalid cross-graph link registry")
+        previous = [item for item in existing_links if isinstance(item, dict) and item.get("link_id") == link["link_id"]]
+        if any(item != link for item in previous):
+            raise ValueError("cross-graph link replay changed provenance")
+        if fact_ref not in graph.nodes:
             graph.add_node(DependencyNode(
-                id=factual_assertion_id,
+                id=fact_ref,
                 node_type=NodeType.FACT,
-                name=factual_name or factual_assertion_id,
+                name=fact_text,
                 attributes={
                     "record_kind": FACTUAL_ASSERTION_KIND,
-                    "provenance": fact_chain,
+                    "source_entity_id": factual_assertion_id,
+                    "assertion_verified": link["assertion_verified"],
+                    "provenance": deepcopy(fact_chain),
                 },
             ))
-        else:
-            graph.nodes[factual_assertion_id].attributes.setdefault("provenance", fact_chain)
         if rule_id not in graph.nodes:
             graph.add_node(DependencyNode(
                 id=rule_id,
                 node_type=NodeType.LEGAL_ELEMENT,
                 name=rule_name or rule_id,
                 attributes={
-                    "record_kind": record_kind_from_id(rule_id),
+                    "record_kind": rule_kind,
                     "about_complainant": False,
-                    "provenance": rule_chain,
+                    "provenance": deepcopy(rule_chain),
                 },
             ))
-        else:
-            graph.nodes[rule_id].attributes.setdefault("provenance", rule_chain)
-        dependency_type = (
-            DependencyType.CONTRADICTS if link["link_type"] == "contradiction_link" else DependencyType.SUPPORTS
-        )
         graph.add_dependency(Dependency(
             id=link["link_id"],
-            source_id=factual_assertion_id,
+            source_id=fact_ref,
             target_id=rule_id,
             dependency_type=dependency_type,
             required=False,
             strength=1.0,
         ))
-        stored = dict(link)
-        stored["provenance_chains"] = {
-            FACTUAL_ASSERTION_KIND: fact_chain,
-            "rule": rule_chain,
-        }
-        graph.metadata.setdefault("cross_graph_links", []).append(stored)
-        return stored
+        if not previous:
+            graph.metadata.setdefault("cross_graph_links", []).append(deepcopy(link))
+        return deepcopy(link)

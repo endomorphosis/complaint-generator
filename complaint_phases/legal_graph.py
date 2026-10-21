@@ -470,7 +470,10 @@ class LegalGraphBuilder:
             
             for req_data in requirements:
                 req_element = LegalElement(
-                    id=self._get_element_id('legal_requirement'),
+                    id=self._get_element_id('legal_requirement', {
+                        'statute': {key: value for key, value in statute_elem.to_dict().items() if key != 'id'}, 'requirement': req_data,
+                        'claim_types': sorted(claim_types),
+                    }),
                     element_type='legal_requirement',
                     name=req_data['name'],
                     description=req_data.get('description', ''),
@@ -535,7 +538,7 @@ class LegalGraphBuilder:
         
         for req_data in procedural_reqs:
             element = LegalElement(
-                id=self._get_element_id('legal_requirement'),
+                id=self._get_element_id('legal_requirement', {'jurisdiction': jurisdiction, 'requirement': req_data}),
                 element_type='procedural_requirement',
                 name=req_data['name'],
                 description=req_data['description'],
@@ -584,7 +587,7 @@ class LegalGraphBuilder:
         
         return requirements
     
-    def _get_element_id(self, element_type: str = "") -> str:
+    def _get_element_id(self, element_type: str = "", identity: Optional[Dict[str, Any]] = None) -> str:
         """Generate a unique element ID in that record's namespace."""
         self.element_counter += 1
         prefix = {
@@ -595,6 +598,9 @@ class LegalGraphBuilder:
             "legal_requirement": "legal_requirement",
         }.get(element_type)
         if prefix:
+            if identity is not None:
+                from integrations.ipfs_datasets.graphs import mint_graph_record_id
+                return mint_graph_record_id(prefix, json.dumps(identity, sort_keys=True, ensure_ascii=False, separators=(",", ":")))
             return f"{prefix}:{self.element_counter}"
         return f"legal_elem_{self.element_counter}"
 
@@ -612,7 +618,11 @@ class LegalGraphBuilder:
         text = str(payload.get("text") or payload.get("name") or payload.get("description") or "").strip()
         provenance = payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
         return LegalElement(
-            id=self._get_element_id(kind),
+            id=self._get_element_id(kind, {
+                "text": text, "source_passage_id": payload.get("passage_id") or payload.get("source_id") or "",
+                "citation": payload.get("citation") or "", "jurisdiction": payload.get("jurisdiction") or "",
+                "provenance": provenance,
+            }),
             element_type=kind,
             name=(text or kind)[: self._MAX_RULE_NAME_LENGTH],
             description=text,
@@ -712,7 +722,11 @@ class LegalGraphBuilder:
             ).strip()
 
             node = LegalElement(
-                id=self._get_element_id('authority_source'),
+                id=self._get_element_id('authority_source', {
+                    'source_authority_id': raw_id, 'name': name, 'citation': citation,
+                    'jurisdiction': jurisdiction, 'authority_family': authority_family,
+                    'provenance': authority.get('provenance') if isinstance(authority.get('provenance'), dict) else {},
+                }),
                 element_type='authority_source',
                 name=name,
                 citation=citation,
@@ -902,7 +916,10 @@ class LegalGraphBuilder:
                 metadata = candidate.get('metadata', {}) if isinstance(candidate.get('metadata'), dict) else {}
                 grounded_rule = metadata.get('grounded_rule', {}) if isinstance(metadata.get('grounded_rule'), dict) else {}
             rule_node = LegalElement(
-                id=self._get_element_id('rule_candidate'),
+                id=self._get_element_id('rule_candidate', {
+                    'source_authority_node': authority_node_id, 'rule_text': rule_text, 'rule_type': rule_type,
+                    'provenance': candidate.get('provenance') if isinstance(candidate.get('provenance'), dict) else {},
+                }),
                 element_type='rule_candidate',
                 name=rule_text[:self._MAX_RULE_NAME_LENGTH],
                 description=rule_text,

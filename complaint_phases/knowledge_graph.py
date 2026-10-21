@@ -442,7 +442,8 @@ def _validated_graph_provenance(provenance, *, record_type="", name="", attribut
     attrs = attributes if isinstance(attributes, Mapping) else {}
     classification = _record_type_for_extraction({"type": record_type, "name": name,
         "attributes": attrs, "origin": "model" if source in {"model", "inference", "llm"} else ""})
-    if source in {"legal", "law"}:
+    from integrations.ipfs_datasets.graphs import source_is_legal_norm
+    if source_is_legal_norm({"type": record_type, "source_kind": source, "attributes": attrs, "provenance": result}):
         classification = "legal_text"
     if classification and envelope.record_type != classification:
         envelope = replace(envelope, record_type=classification, source_kind=classification,
@@ -571,9 +572,22 @@ class KnowledgeGraph:
     
     def add_entity(self, entity: Entity) -> str:
         """Add an entity to the graph."""
+        existing = self.entities.get(entity.id)
+        if existing is not None:
+            self._assert_compatible_entity_domains(existing, entity)
         self.entities[entity.id] = entity
         self._update_metadata()
         return entity.id
+
+    @staticmethod
+    def _assert_compatible_entity_domains(left: Entity, right: Entity) -> None:
+        """Legacy local IDs cannot authorize overwriting a different domain."""
+        from integrations.ipfs_datasets.graphs import source_is_legal_norm, legal_namespace_kind
+        left_record = {"type": left.type, "source_kind": left.source, "attributes": left.attributes, "provenance": left.provenance}
+        right_record = {"type": right.type, "source_kind": right.source, "attributes": right.attributes, "provenance": right.provenance}
+        left_legal, right_legal = source_is_legal_norm(left_record), source_is_legal_norm(right_record)
+        if left_legal != right_legal or (left_legal and legal_namespace_kind(left_record) != legal_namespace_kind(right_record)):
+            raise ValueError("local entity ID is shared by incompatible graph domains")
     
     def add_relationship(self, relationship: Relationship) -> str:
         """Add a relationship to the graph."""
@@ -932,6 +946,10 @@ class KnowledgeGraph:
     
     def merge_with(self, other_graph: 'KnowledgeGraph'):
         """Merge another knowledge graph into this one."""
+        # Check before any mutation, including confidence/provenance updates.
+        for entity in other_graph.entities.values():
+            if entity.id in self.entities:
+                self._assert_compatible_entity_domains(self.entities[entity.id], entity)
         for entity in other_graph.entities.values():
             if entity.id not in self.entities:
                 self.add_entity(entity)
@@ -1648,10 +1666,12 @@ class KnowledgeGraphBuilder:
             source_is_legal_norm,
         )
 
-        legal_passage = source_is_legal_norm(caller_context)
+        legal_source = {"metadata": source_context or {}, "provenance": provenance or {}, "attributes": extractor_provenance or {}}
+        legal_passage = source_is_legal_norm(legal_source) or source_is_legal_norm(caller_context)
         entity_key_to_id: Dict[str, str] = {}
         for entity_data in entities:
-            if legal_passage:
+            entity_is_legal = legal_passage or source_is_legal_norm(entity_data)
+            if entity_is_legal:
                 entity_data = dict(entity_data)
                 entity_data["type"] = "legal_text"
                 entity_data["origin"] = "legal"
@@ -1672,8 +1692,8 @@ class KnowledgeGraphBuilder:
                 provenance_payload["extractor"] = carried_extractor
             attributes = entity_data.get("attributes") if isinstance(entity_data.get("attributes"), Mapping) else {}
             raw_confidence = entity_data.get("confidence", 0.8)
-            if legal_passage:
-                passage_kind = legal_namespace_kind({**dict(caller_context), **entity_data})
+            if entity_is_legal:
+                passage_kind = legal_namespace_kind({"metadata": legal_source, "attributes": entity_data, **dict(caller_context)})
                 attributes = dict(attributes)
                 attributes["record_kind"] = passage_kind
                 attributes["about_complainant"] = False

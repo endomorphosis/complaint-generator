@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import warnings
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Protocol, TypedDict, runtime_checkable
 
@@ -262,10 +263,17 @@ def _canonical_graph_content(graph_payload: Mapping[str, Any]) -> Dict[str, Any]
     relationships.sort(
         key=lambda item: str(item.get("id") or item.get("relationship_id") or "")
     )
-    return {
+    content = {
         "entities": entities,
         "relationships": relationships,
     }
+    # A declared domain changes the meaning of otherwise identical nodes. Keep
+    # legacy unlabelled hashes, but bind explicit (including nested) domains.
+    labels = _label_set(graph_payload)
+    identity_labels = sorted(labels & (_LEGAL_NORM_LABELS | _USER_TESTIMONY_LABELS))
+    if identity_labels:
+        content["namespace_identity"] = identity_labels
+    return content
 
 
 def _graph_content_hash(graph_payload: Mapping[str, Any]) -> str:
@@ -415,6 +423,9 @@ _USER_TESTIMONY_LABELS = frozenset({
     "testimony",
     "user",
     "user_testimony",
+    "user_statement",
+    "user_document",
+    "user_uploaded_document",
     "complainant",
     "interview",
     "factual_assertion",
@@ -427,7 +438,7 @@ def record_kind_from_id(record_id: str) -> str:
     """Return the namespace prefix of a graph id, or an empty string."""
     text = str(record_id or "").strip()
     prefix, separator, _rest = text.partition(":")
-    if separator and prefix in DISTINCT_GRAPH_RECORD_KINDS:
+    if separator and _rest.strip() and prefix in DISTINCT_GRAPH_RECORD_KINDS:
         return prefix
     return ""
 
@@ -437,14 +448,22 @@ def mint_graph_record_id(kind: str, *parts: str) -> str:
     normalized_kind = str(kind or "").strip()
     if normalized_kind not in DISTINCT_GRAPH_RECORD_KINDS:
         raise ValueError(f"unknown graph record kind: {normalized_kind}")
-    minted = _stable_identifier(normalized_kind, *parts)
-    if not minted:
+    values = [str(part) for part in parts]
+    if not any(value.strip() for value in values):
         raise ValueError("graph record id requires at least one non-empty part")
-    return minted
+    encoded = json.dumps([normalized_kind, values], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return f"{normalized_kind}:{hashlib.sha256(encoded).hexdigest()}"
 
 
-def _label_set(record: Mapping[str, Any]) -> set:
+def _label_set(record: Mapping[str, Any], _seen=None, _depth=0) -> set:
+    """Inspect only known provenance containers, with bounded cyclic traversal."""
     labels: set = set()
+    if not isinstance(record, Mapping) or _depth > 8:
+        return labels
+    seen = set() if _seen is None else _seen
+    if id(record) in seen:
+        return labels
+    seen.add(id(record))
     for key in (
         "resolution_namespace",
         "namespace",
@@ -462,6 +481,16 @@ def _label_set(record: Mapping[str, Any]) -> set:
         value = record.get(key)
         if isinstance(value, str) and value.strip():
             labels.add(value.strip().lower())
+    if record.get("legal_passage") is True:
+        labels.add("legal_passage")
+    for key in ("id", "entity_id", "fact_id", "rule_id"):
+        kind = record_kind_from_id(record.get(key))
+        if kind:
+            labels.add(kind)
+    for key in ("attributes", "provenance", "user_assertion", "metadata", "source_passage", "extractor"):
+        nested = record.get(key)
+        if isinstance(nested, Mapping):
+            labels.update(_label_set(nested, seen, _depth + 1))
     return labels
 
 
@@ -476,6 +505,19 @@ def source_is_legal_norm(record: Optional[Mapping[str, Any]]) -> bool:
 
 def legal_namespace_kind(record: Optional[Mapping[str, Any]]) -> str:
     """Pick the legal namespace for a passage. Never returns a factual kind."""
+    record = record if isinstance(record, Mapping) else {}
+    # A requirement's inherited rule provenance does not make the requirement
+    # itself a rule. Explicit current-record taxonomy precedes ancestry labels.
+    aliases = {"rule": RULE_CANDIDATE_KIND, "requirement": LEGAL_REQUIREMENT_KIND,
+               "procedural_requirement": LEGAL_REQUIREMENT_KIND}
+    for scope in (record, record.get("attributes"), record.get("metadata")):
+        if not isinstance(scope, Mapping):
+            continue
+        for key in ("record_kind", "namespace", "passage_role", "element_type", "record_type", "type"):
+            label = str(scope.get(key) or "").strip().lower()
+            kind = aliases.get(label, label)
+            if kind in {AUTHORITY_SOURCE_KIND, RULE_CANDIDATE_KIND, LEGAL_REQUIREMENT_KIND}:
+                return kind
     labels = _label_set(record or {})
     if labels & {RULE_CANDIDATE_KIND, "rule"}:
         return RULE_CANDIDATE_KIND
@@ -488,7 +530,7 @@ def _resolution_namespace(entity: Mapping[str, Any]) -> str:
     labels = _label_set(entity)
     if labels & _LEGAL_NORM_LABELS:
         return "legal_norm"
-    if labels & _USER_TESTIMONY_LABELS:
+    if labels & (_USER_TESTIMONY_LABELS | {"user_statement", "document", "evidence"}):
         return "user_testimony"
     return "world"
 
@@ -496,7 +538,14 @@ def _resolution_namespace(entity: Mapping[str, Any]) -> str:
 def _resolution_namespaces_compatible(left: str, right: str) -> bool:
     if left == right:
         return True
-    return {left, right} == {"user_testimony", "world"}
+    return False
+
+
+def _record_domain(record: Mapping[str, Any]) -> str:
+    """Domain separation for resolution/query, independent of a display label."""
+    if source_is_legal_norm(record):
+        return legal_namespace_kind(record)
+    return _resolution_namespace(record)
 
 
 def build_namespaced_support_link(
@@ -514,23 +563,49 @@ def build_namespaced_support_link(
     """
     factual_id = str(factual_assertion_id or "").strip()
     normalized_rule_id = str(rule_id or "").strip()
-    if record_kind_from_id(factual_id) != FACTUAL_ASSERTION_KIND:
-        raise ValueError("support links require a factual_assertion id")
+    supplied_prefix = factual_id.partition(":")[0]
+    if (not factual_id or record_kind_from_id(factual_id) not in {"", FACTUAL_ASSERTION_KIND}
+            or (supplied_prefix in DISTINCT_GRAPH_RECORD_KINDS and record_kind_from_id(factual_id) != FACTUAL_ASSERTION_KIND)):
+        raise ValueError("factual endpoint cannot use another record namespace")
+    factual_chain = deepcopy(dict(factual_provenance or {}))
+    rule_chain = deepcopy(dict(rule_provenance or {}))
+    if source_is_legal_norm(factual_chain):
+        raise ValueError("legal provenance cannot be a factual endpoint")
+    # Local graph IDs remain unchanged. A verified immutable assertion supplies
+    # the source-bound external namespace used only by the cross-graph link.
+    # source_entity_id is a local alias, not proof of any additional content.
+    from .types import user_assertion_from_mapping
+    raw_assertion = factual_chain.get("user_assertion")
+    asserted = user_assertion_from_mapping(raw_assertion) if isinstance(raw_assertion, Mapping) else None
+    source_entity_id = factual_id
+    if asserted is not None:
+        if not asserted.is_asserted_user_fact:
+            raise ValueError("support endpoint contains an unverified user assertion")
+        canonical_id = mint_graph_record_id(FACTUAL_ASSERTION_KIND, asserted.stable_id)
+        if record_kind_from_id(factual_id) == FACTUAL_ASSERTION_KIND and factual_id != canonical_id:
+            raise ValueError("factual endpoint does not match its assertion identity")
+        factual_id = canonical_id
+    elif record_kind_from_id(factual_id) != FACTUAL_ASSERTION_KIND:
+        raise ValueError("local factual endpoint requires a verified user assertion")
     if record_kind_from_id(normalized_rule_id) not in _RULE_ID_KINDS:
         raise ValueError("support links require a rule_candidate or legal_requirement id")
+    if _label_set(rule_chain) & _USER_TESTIMONY_LABELS and not source_is_legal_norm(rule_chain):
+        raise ValueError("user provenance cannot be the legal rule endpoint")
     normalized_relation = str(relation or "supports").strip().lower()
+    if normalized_relation not in {"supports", "support", "support_link", "contradicts", "contradiction", "contradiction_link"}:
+        raise ValueError("unsupported cross-graph relation")
     link_kind = (
         CONTRADICTION_LINK_KIND
         if normalized_relation in {"contradicts", "contradiction", "contradiction_link"}
         else SUPPORT_LINK_KIND
     )
-    factual_chain = dict(factual_provenance or {})
-    rule_chain = dict(rule_provenance or {})
     return {
         "link_id": mint_graph_record_id(link_kind, factual_id, normalized_rule_id, link_kind),
         "link_type": link_kind,
         "relation": "contradicts" if link_kind == CONTRADICTION_LINK_KIND else "supports",
         "factual_assertion_id": factual_id,
+        "source_entity_id": source_entity_id,
+        "assertion_verified": bool(asserted is not None and asserted.is_asserted_user_fact),
         "rule_id": normalized_rule_id,
         "provenance_chains": {
             FACTUAL_ASSERTION_KIND: factual_chain,
@@ -731,7 +806,7 @@ def _fact_dedup_key(fact: Dict[str, Any]) -> str:
     text = " ".join(str(fact.get("text") or "").lower().split())
     claim_element_id = str(fact.get("claim_element_id") or "")
     claim_element_text = " ".join(str(fact.get("claim_element_text") or "").lower().split())
-    return "|".join([claim_element_id, claim_element_text, text])
+    return json.dumps([_record_domain(fact), claim_element_id, claim_element_text, text], separators=(",", ":"))
 
 
 def _fact_matches_filters(fact: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
@@ -778,6 +853,8 @@ def _cluster_semantically_similar_results(results: List[Dict[str, Any]]) -> List
                 and str(cluster.get("claim_element_text") or "") == str(result.get("claim_element_text") or "")
             )
             if not same_element:
+                continue
+            if _record_domain(cluster) != _record_domain(result):
                 continue
             if _texts_semantically_similar(str(cluster.get("text") or ""), str(result.get("text") or "")):
                 matched_cluster = cluster
@@ -1477,10 +1554,13 @@ def resolve_duplicate_entities(
         eid = str(entity.get("entity_id") or entity.get("id") or "")
         source_kind = str(entity.get("source_kind") or "unknown")
         namespace = _resolution_namespace(entity)
+        domain = _record_domain(entity)
 
         matched: Optional[Dict[str, Any]] = None
         for cluster in clusters:
             if not _resolution_namespaces_compatible(cluster["resolution_namespace"], namespace):
+                continue
+            if cluster["resolution_kind"] != domain:
                 continue
             if _texts_semantically_similar(cluster["canonical_name"], name):
                 matched = cluster
@@ -1492,6 +1572,7 @@ def resolve_duplicate_entities(
                     "canonical_entity_id": eid or _stable_identifier("entity", name, namespace),
                     "canonical_name": name,
                     "resolution_namespace": namespace,
+                    "resolution_kind": domain,
                     "source_kinds": [source_kind] if source_kind else [],
                     "entity_ids": [eid] if eid else [],
                     "names": [name] if name else [],
@@ -1516,6 +1597,17 @@ def resolve_duplicate_entities(
             }
         )
 
+    # Legacy IDs are not globally namespaced. Preserve them as source IDs and
+    # prevent a dictionary overwrite when distinct domains reused the same ID.
+    counts: Dict[str, int] = {}
+    for cluster in clusters:
+        cid = cluster["canonical_entity_id"]
+        counts[cid] = counts.get(cid, 0) + 1
+    for cluster in clusters:
+        if counts[cluster["canonical_entity_id"]] > 1:
+            cluster["canonical_entity_id"] = "resolved:" + hashlib.sha256(json.dumps(
+                [cluster["resolution_kind"], cluster["canonical_name"], sorted(cluster["entity_ids"])],
+                ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
     entity_map: Dict[str, Dict[str, Any]] = {c["canonical_entity_id"]: c for c in clusters}
     merged_count = sum(len(c["absorbed"]) for c in clusters)
 
