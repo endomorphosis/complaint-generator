@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import os
+
+# Legal discovery may use installed NLP assets, but must never bootstrap or
+# download them during an optional backend import or a bounded corpus lookup.
+os.environ["IPFS_DATASETS_PY_AUTO_NLTK_DOWNLOAD"] = "0"
+
+import asyncio
 import calendar
-from datetime import date, datetime
+import hashlib
+import math
+from datetime import date, datetime, timezone
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .loader import import_attr_optional, run_async_compat
 from .types import with_adapter_metadata
@@ -189,6 +198,12 @@ _search_state_law_corpus_async, _state_law_corpus_error = import_attr_optional(
     "ipfs_datasets_py.processors.legal_scrapers.legal_dataset_api",
     "search_state_law_corpus_from_parameters",
 )
+# Bounded-only API resolution occurs inside the owned worker deadline.
+_search_us_code_corpus_async, _us_code_corpus_error = None, None
+# Bounded-only API resolution occurs inside the owned worker deadline.
+_search_federal_register_corpus_async, _federal_register_corpus_error = None, None
+# Bounded-only API resolution occurs inside the owned worker deadline.
+_search_court_rules_corpus_async, _court_rules_corpus_error = None, None
 _scrape_state_laws_async, _state_laws_scrape_error = import_attr_optional(
     "ipfs_datasets_py.processors.legal_scrapers.legal_dataset_api",
     "scrape_state_laws_from_parameters",
@@ -726,6 +741,18 @@ def legal_requirement_search_plan(
         "authority_families": sorted(families),
     }
 
+
+def _plan_searches_court_rules(plan: Dict[str, Any], families: set[str]) -> bool:
+    """Court rules are opt-in and stay off the LAW01 plan equality contract.
+
+    An empty family list must not start a corpus call. Request labels are not
+    proof that a returned row matches the requested jurisdiction.
+    """
+    jurisdiction = str(plan.get("jurisdiction") or "")
+    state_code = str(plan.get("state_code") or "")
+    explicit = jurisdiction == "federal" or bool(state_code)
+    return explicit and "court_rule" in families
+
 LEGAL_SOURCE_AVAILABILITY = {
     "federal_statutes": _search_us_code_async is not None,
     "federal_regulations": _search_federal_register_async is not None,
@@ -749,7 +776,37 @@ LEGAL_SCRAPERS_ERROR = (
     or _state_laws_scrape_error
     or _state_admin_rules_scrape_error
     or _state_code_map_error
+    or _us_code_corpus_error
+    or _federal_register_corpus_error
+    or _court_rules_corpus_error
 )
+
+# Bounded corpus lookup. These labels are request intent only; a returned row
+# still has to carry its own source jurisdiction, passage, and provenance.
+CORPUS_FAMILY_US_CODE = "us_code"
+CORPUS_FAMILY_STATE_STATUTE = "state_statute"
+CORPUS_FAMILY_STATE_ADMIN = "state_administrative_rule"
+CORPUS_FAMILY_FEDERAL_REGISTER = "federal_register"
+CORPUS_FAMILY_COURT_RULE = "court_rule"
+BOUNDED_CORPUS_FAMILIES = (
+    CORPUS_FAMILY_US_CODE,
+    CORPUS_FAMILY_STATE_STATUTE,
+    CORPUS_FAMILY_STATE_ADMIN,
+    CORPUS_FAMILY_FEDERAL_REGISTER,
+    CORPUS_FAMILY_COURT_RULE,
+)
+RETRIEVAL_MODE_CACHE = "cache"
+RETRIEVAL_MODE_OFFLINE = "offline"
+RETRIEVAL_MODE_LIVE = "live"
+BOUNDED_RETRIEVAL_MODES = (
+    RETRIEVAL_MODE_CACHE,
+    RETRIEVAL_MODE_OFFLINE,
+    RETRIEVAL_MODE_LIVE,
+)
+_BOUNDED_RESULT_CAP = 25
+_BOUNDED_TIMEOUT_CAP_SECONDS = 30.0
+_SNIPPET_CHAR_CAP = 320
+UNKNOWN_PROVENANCE = "unknown"
 
 # Environment variable that enables the IPFS streaming live-lookup pass.
 # Set to "1", "true", "yes", or "on" to allow search_state_laws to attempt
@@ -1859,6 +1916,973 @@ def constrain_assertions_to_corpus(
     }
 
 
+def _bounded_envelope(
+    *,
+    status: str,
+    family: str,
+    retrieval_mode: str,
+    capability: str = "",
+    error_code: str = "",
+    error_message: str = "",
+    timeout_seconds: Optional[float] = None,
+    attempted_backends: Optional[List[str]] = None,
+    results: Optional[List[Dict[str, Any]]] = None,
+    network_used: Optional[bool] = False,
+    setup_invoked: bool = False,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "status": status,
+        "source_family": family,
+        "retrieval_mode": retrieval_mode,
+        "capability": capability,
+        "error_code": error_code,
+        "error_message": error_message,
+        "timeout_seconds": timeout_seconds,
+        "attempted_backends": list(attempted_backends or []),
+        "results": list(results or []),
+        "result_count": len(results or []),
+        "bounded": capability != "cleanup_unconfirmed",
+        "network_used": network_used,
+        "setup_invoked": bool(setup_invoked),
+        "applicability": UNKNOWN_LEGAL_CONTEXT,
+        "selected_rule_applicability": UNKNOWN_LEGAL_CONTEXT,
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+# Fixed code is executed in isolated child interpreters; query/vector data travels
+# only over stdin. The manager is a Linux subreaper, not an application-wide
+# signal handler or subreaper. It owns cleanup of the actual upstream call tree.
+_CORPUS_CALL_SOURCE = r"""
+import asyncio, ctypes, importlib, json, os, signal, sys
+request = json.loads(sys.stdin.buffer.read(1048577))
+if request.get('schema') != 'complaint-legal-corpus-call@1': raise SystemExit(2)
+# Match the actual manager around PDEATHSIG, including ancestor-subreaper
+# adoption; checking only getppid()==1 would miss that case.
+manager = request.get('expected_manager_pid')
+if type(manager) is not int or manager <= 1 or os.getppid() != manager: raise SystemExit(2)
+if ctypes.CDLL(None).prctl(1, signal.SIGKILL, 0, 0, 0) != 0: raise SystemExit(2)
+if os.getppid() != manager: raise SystemExit(2)
+roots = request['roots']
+if not isinstance(roots,list) or not all(isinstance(p,str) for p in roots): raise SystemExit(2)
+sys.path[:0] = roots
+apis = {
+ 'us_code_corpus': ('ipfs_datasets_py.processors.legal_scrapers.legal_dataset_api','search_us_code_corpus_from_parameters',False),
+ 'state_statute_corpus': ('ipfs_datasets_py.processors.legal_scrapers.legal_dataset_api','search_state_law_corpus_from_parameters',False),
+ 'state_admin_corpus': ('ipfs_datasets_py.processors.legal_scrapers.legal_dataset_api','search_state_law_corpus_from_parameters',False),
+ 'federal_register_corpus': ('ipfs_datasets_py.processors.legal_scrapers.legal_dataset_api','search_federal_register_corpus_from_parameters',False),
+ 'court_rules_corpus': ('ipfs_datasets_py.processors.legal_scrapers.legal_dataset_api','search_court_rules_corpus_from_parameters',False),
+ 'federal_register_direct': ('ipfs_datasets_py.processors.legal_scrapers.federal_scrapers.federal_register_scraper','search_federal_register',True),
+ 'local_us_code_index': ('ipfs_datasets_py.processors.legal_scrapers.federal_scrapers.us_code_scraper','search_us_code',True),
+}
+try:
+ module, attribute, keywords = apis[request['api']]
+ target = getattr(importlib.import_module(module), attribute)
+ value = target(**request['parameters']) if keywords else target(request['parameters'])
+ if not asyncio.iscoroutine(value): raise TypeError()
+ result = asyncio.run(value)
+ encoded = json.dumps(result, ensure_ascii=True, allow_nan=False, separators=(',',':')).encode()
+ if len(encoded)>524288: raise ValueError()
+ sys.stdout.buffer.write(encoded);sys.stdout.buffer.flush()
+except (ImportError, AttributeError, FileNotFoundError):
+ sys.stdout.buffer.write(b'{"status":"unavailable","error":"legal_backend_unavailable"}');sys.stdout.buffer.flush()
+except BaseException:
+ sys.stdout.buffer.write(b'{"status":"error","error":"legal_backend_failed"}');sys.stdout.buffer.flush()
+"""
+_CORPUS_MANAGER_SOURCE = r"""
+import ctypes, errno, json, os, selectors, signal, subprocess, sys, time
+# This isolated manager, never the application process, adopts orphaned call descendants.
+if sys.platform != 'linux': raise SystemExit(2)
+libc = ctypes.CDLL(None, use_errno=True)
+if libc.prctl(36, 1, 0, 0, 0) != 0: raise SystemExit(2)
+request = json.loads(sys.stdin.buffer.read(1048577))
+call_source = CALL_SOURCE_LITERAL
+cancelled = False
+process = None
+cleanup_confirmed = False
+def cancel(_signal, _frame):
+ global cancelled
+ cancelled = True
+signal.signal(signal.SIGTERM,cancel)
+signal.signal(signal.SIGINT,cancel)
+def cleanup():
+ # First stop the sole call group. Then reap its adopted descendants, including
+ # an upstream subprocess left behind when an AnyIO worker's parent exits.
+ if process is not None:
+  try: os.killpg(process.pid,signal.SIGKILL)
+  except ProcessLookupError: pass
+  except OSError: return False
+  try: process.wait(timeout=.25)
+  except subprocess.TimeoutExpired: return False
+ deadline=time.monotonic()+.75
+ while time.monotonic()<deadline:
+  try:
+   children=[int(p) for p in open('/proc/self/task/'+str(os.getpid())+'/children').read().split()]
+  except (OSError,ValueError): return False
+  for pid in children:
+   # A direct, unreaped child cannot have its PID reused until this manager waits.
+   try: os.kill(pid,signal.SIGKILL)
+   except ProcessLookupError: pass
+  try:
+   while True:
+    pid,_=os.waitpid(-1,os.WNOHANG)
+    if pid==0: break
+  except ChildProcessError:
+   return True
+  time.sleep(.005)
+ return False
+result={'outcome':'error','cleanup_confirmed':False}
+try:
+ deadline=time.monotonic()+float(request['timeout_seconds'])
+ call=dict(request['call']);call['expected_manager_pid']=os.getpid()
+ raw=json.dumps(call,ensure_ascii=True,allow_nan=False,separators=(',',':')).encode()
+ process=subprocess.Popen([sys.executable,'-I','-c',call_source],stdin=subprocess.PIPE,
+  stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=dict(os.environ),process_group=0)
+ process.stdin.write(raw);process.stdin.close()
+ selector=selectors.DefaultSelector()
+ for stream in (process.stdout,process.stderr):
+  os.set_blocking(stream.fileno(),False);selector.register(stream,selectors.EVENT_READ)
+ output=bytearray();total=0
+ outcome='ok'
+ while selector.get_map():
+  if cancelled: outcome='cancelled';break
+  remaining=deadline-time.monotonic()
+  if remaining<=0: outcome='timeout';break
+  for key,_ in selector.select(min(.02,remaining)):
+   chunk=os.read(key.fileobj.fileno(),65536)
+   if not chunk: selector.unregister(key.fileobj);continue
+   total+=len(chunk)
+   if total>524288: outcome='output_limit';break
+   if key.fileobj is process.stdout: output.extend(chunk)
+  if outcome!='ok':break
+ result={'outcome':outcome,'cleanup_confirmed':False}
+ if outcome=='ok':
+  try:result['payload']=json.loads(output)
+  except (ValueError,UnicodeError):result={'outcome':'error','cleanup_confirmed':False}
+except BaseException:
+ result={'outcome':'error','cleanup_confirmed':False}
+finally:
+ cleanup_confirmed=cleanup()
+ result['cleanup_confirmed']=cleanup_confirmed
+ if result.get('outcome')=='ok' and process is not None and process.returncode!=0:
+  result={'outcome':'error','cleanup_confirmed':cleanup_confirmed}
+ if not cleanup_confirmed:result={'outcome':'cleanup_unconfirmed','cleanup_confirmed':False}
+ for stream in (() if process is None else (process.stdin,process.stdout,process.stderr)):
+  try:stream.close()
+  except (OSError,ValueError):pass
+ sys.stdout.write(json.dumps(result,ensure_ascii=True,allow_nan=False,separators=(',',':')))
+ sys.stdout.flush()
+"""
+
+def _owned_corpus_roots() -> List[str]:
+    import site
+    import sys
+    from pathlib import Path
+    from .loader import get_repo_paths
+    paths = get_repo_paths()
+    roots = []
+    # Prefer the first-party vendored-source registry even on a cold process.
+    # Installed copies must not silently replace an absent vendored dependency.
+    registered = {"ipfs_datasets_py": paths.ipfs_datasets_repo,
+                  "ipfs_accelerate_py": paths.ipfs_accelerate_repo,
+                  "ipfs_kit_py": paths.ipfs_kit_repo}
+    datasets_present = False
+    for package, candidate in registered.items():
+        root = Path(candidate).resolve() if candidate is not None else None
+        if root is not None and (root / package / "__init__.py").is_file():
+            roots.append(str(root))
+            datasets_present = datasets_present or package == "ipfs_datasets_py"
+            continue
+        # A source qualification may explicitly import another checked-out
+        # dependency. Accept that source checkout, never an installed package.
+        loaded = sys.modules.get(package)
+        source = getattr(loaded, "__file__", None)
+        if source:
+            root = Path(source).resolve().parent.parent
+            if root.name == package and (root / ".git").exists() and (root / package / "__init__.py").is_file():
+                roots.append(str(root))
+                datasets_present = datasets_present or package == "ipfs_datasets_py"
+    if not datasets_present:
+        return []
+    for root in site.getsitepackages():
+        if Path(root).is_dir() and root not in roots:
+            roots.append(root)
+    return roots
+
+
+def _run_owned_deadline(api: str, parameters: Dict[str, Any], timeout_seconds: float) -> tuple[str, Any]:
+    """Bound cold imports, an upstream call, output and its descendant cleanup.
+
+    Unsupported custody is unavailable. In particular an async wrapper is not
+    treated as cancellation of an upstream blocking subprocess.
+    """
+    import json
+    import os
+    import signal
+    import subprocess
+    import sys
+    if sys.platform != "linux":
+        return "custody_unavailable", None
+    roots = _owned_corpus_roots()
+    if not roots:
+        return "custody_unavailable", None
+    call = {"schema": "complaint-legal-corpus-call@1", "api": api,
+            "parameters": parameters, "roots": roots}
+    try:
+        encoded = json.dumps({"call": call, "timeout_seconds": timeout_seconds},
+                             ensure_ascii=True, allow_nan=False).encode()
+    except (TypeError, ValueError, UnicodeError):
+        return "invalid_parameters", None
+    if len(encoded) > 1048576:
+        return "invalid_parameters", None
+    environment = {key: os.environ[key] for key in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL") if key in os.environ}
+    environment.update({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+                        "COMMON_CRAWL_AUTO_CLONE_SOURCE": "0", "IPFS_DATASETS_PY_MINIMAL_IMPORTS": "1",
+                        "IPFS_DATASETS_PY_AUTO_NLTK_DOWNLOAD": "0",
+                        "PYTHONDONTWRITEBYTECODE": "1"})
+    source = _CORPUS_MANAGER_SOURCE.replace("CALL_SOURCE_LITERAL", repr(_CORPUS_CALL_SOURCE), 1)
+    process = None
+    try:
+        process = subprocess.Popen([sys.executable, "-I", "-c", source],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            env=environment, start_new_session=True)
+        output, _ = process.communicate(encoded, timeout=timeout_seconds + 1.5)
+        if process.returncode != 0 or len(output) > 600000:
+            return "cleanup_unconfirmed", None
+        result = json.loads(output)
+        if not isinstance(result, dict) or result.get("cleanup_confirmed") is not True:
+            return "cleanup_unconfirmed", None
+        outcome = result.get("outcome")
+        return (outcome, result.get("payload")) if outcome in {"ok", "timeout", "cancelled", "output_limit", "error"} else ("error", None)
+    except subprocess.TimeoutExpired:
+        # The manager handles SIGTERM by cancelling the owned call and reaping.
+        process.send_signal(signal.SIGTERM)
+        try:
+            process.communicate(timeout=1.5)
+        except subprocess.TimeoutExpired:
+            process.kill(); process.wait(timeout=.25)
+        return "cleanup_unconfirmed", None
+    except BaseException as exc:
+        if process is not None and process.poll() is None:
+            process.send_signal(signal.SIGTERM)
+            try:process.communicate(timeout=1.5)
+            except subprocess.TimeoutExpired:
+                process.kill(); process.wait(timeout=.25)
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        return ("cleanup_unconfirmed" if process is not None else "custody_unavailable"), None
+
+
+def _sha256_text(value: str) -> str:
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _clip_snippet(value: str) -> str:
+    text = str(value or "").strip()
+    if len(text) <= _SNIPPET_CHAR_CAP:
+        return text
+    return text[:_SNIPPET_CHAR_CAP].rstrip()
+
+
+def _independent_text(item: Dict[str, Any], *keys: str) -> tuple[str, bool]:
+    """Return a source string only when the field is an actual string.
+
+    Non-strings are corrupted provenance, not empty values we may invent.
+    """
+    for key in keys:
+        if key not in item:
+            continue
+        value = item.get(key)
+        if isinstance(value, str):
+            return value.strip(), False
+        if value is None:
+            continue
+        return "", True
+    return "", False
+
+
+def normalize_corpus_candidate(
+    item: Any,
+    *,
+    source_family: str,
+    retrieval_mode: str,
+    requested_jurisdiction: str = "",
+    requested_state: str = "",
+    publication_filter: Optional[Dict[str, str]] = None,
+    retrieved_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Normalize one corpus row without treating the request as proof."""
+    retrieved = retrieved_at or datetime.now(timezone.utc).isoformat()
+    base = {
+        "source_family": source_family,
+        "source_type": source_family,
+        "uri": "",
+        "uri_status": "missing",
+        "citation": "",
+        "citation_status": "missing",
+        "content_hash": "",
+        "content_hash_scope": "unavailable",
+        "corpus_id": None,
+        "corpus_version": None,
+        "cid": None,
+        "retrieved_at": retrieved,
+        "source_passage": "",
+        "snippet": "",
+        "passage_status": "missing",
+        "jurisdiction": UNKNOWN_LEGAL_CONTEXT,
+        "jurisdiction_status": UNKNOWN_PROVENANCE,
+        "publication_date": None,
+        "publication_date_status": UNKNOWN_PROVENANCE,
+        "effective_date": None,
+        "effective_date_status": UNKNOWN_PROVENANCE,
+        "provenance_status": "missing",
+        "applicability": UNKNOWN_LEGAL_CONTEXT,
+        "candidate_status": "candidate",
+        "retrieval_mode": retrieval_mode,
+        "publication_filter_is_not_effective_date": bool(publication_filter),
+    }
+    if not isinstance(item, dict):
+        base["provenance_status"] = "corrupted"
+        return base
+
+    corrupted = False
+    passage, passage_bad = _independent_text(item, "source_passage", "text", "content", "full_text", "section_text")
+    snippet, snippet_bad = _independent_text(item, "snippet", "summary", "excerpt")
+    corrupted = corrupted or passage_bad or snippet_bad
+    if passage:
+        base["source_passage"] = passage
+        base["passage_status"] = "full_text"
+        base["content_hash"] = _sha256_text(passage)
+        base["content_hash_scope"] = "source_passage"
+        clipped = _clip_snippet(snippet or passage)
+        if clipped == passage and len(passage) > _SNIPPET_CHAR_CAP:
+            clipped = passage[:_SNIPPET_CHAR_CAP].rstrip()
+        if clipped == passage:
+            # A snippet must stay distinct from the full passage.
+            base["snippet"] = ""
+        else:
+            base["snippet"] = clipped
+    elif snippet:
+        base["snippet"] = _clip_snippet(snippet)
+        base["passage_status"] = "snippet_only"
+        base["content_hash"] = _sha256_text(base["snippet"])
+        base["content_hash_scope"] = "snippet"
+        base["source_passage"] = ""
+
+    uri, uri_bad = _independent_text(item, "uri", "url", "source_url", "html_url", "absolute_url")
+    generated, generated_bad = _independent_text(item, "generated_url", "reference_url")
+    corrupted = corrupted or uri_bad or generated_bad
+    if uri:
+        base["uri"] = uri
+        base["uri_status"] = "source"
+    elif generated:
+        base["uri"] = generated
+        base["uri_status"] = "unverified_generated"
+
+    citation, citation_bad = _independent_text(
+        item, "citation", "document_number", "section_number", "rule_number", "identifier"
+    )
+    corrupted = corrupted or citation_bad
+    if citation:
+        base["citation"] = citation
+        base["citation_status"] = "source"
+
+    for source_key, target_key in (
+        ("corpus_id", "corpus_id"),
+        ("hf_dataset_id", "corpus_id"),
+        ("dataset_id", "corpus_id"),
+    ):
+        value = item.get(source_key)
+        if isinstance(value, str) and value.strip() and base["corpus_id"] is None:
+            base["corpus_id"] = value.strip()
+        elif source_key in item and value not in (None, "") and not isinstance(value, str):
+            corrupted = True
+    version = item.get("corpus_version", item.get("release", item.get("revision")))
+    if isinstance(version, str) and version.strip():
+        base["corpus_version"] = version.strip()
+    elif version not in (None, ""):
+        corrupted = True
+    cid = item.get("cid")
+    if isinstance(cid, str) and cid.strip():
+        base["cid"] = cid.strip()
+    elif cid not in (None, ""):
+        corrupted = True
+
+    supplied_hash = item.get("content_hash")
+    if isinstance(supplied_hash, str) and supplied_hash.strip():
+        if base["content_hash"] and supplied_hash.strip() != base["content_hash"]:
+            corrupted = True
+            base["content_hash_mismatch"] = True
+    elif supplied_hash not in (None, ""):
+        corrupted = True
+
+    row_jurisdiction, jurisdiction_bad = _independent_text(item, "jurisdiction", "state", "state_code")
+    corrupted = corrupted or jurisdiction_bad
+    if row_jurisdiction:
+        resolved = resolve_explicit_jurisdiction(row_jurisdiction)
+        base["jurisdiction"] = resolved
+        requested = resolve_explicit_jurisdiction(requested_state or requested_jurisdiction)
+        if requested == UNKNOWN_LEGAL_CONTEXT:
+            base["jurisdiction_status"] = "source"
+        elif resolved != requested:
+            base["jurisdiction_status"] = "mismatch"
+        else:
+            base["jurisdiction_status"] = "source"
+    else:
+        base["jurisdiction_status"] = UNKNOWN_PROVENANCE
+
+    publication, publication_bad = _independent_text(item, "publication_date", "published")
+    corrupted = corrupted or publication_bad
+    if publication:
+        base["publication_date"] = publication
+        base["publication_date_status"] = "source"
+    effective, effective_bad = _independent_text(item, "effective_date")
+    corrupted = corrupted or effective_bad
+    if effective:
+        base["effective_date"] = effective
+        base["effective_date_status"] = "source"
+    elif publication_filter:
+        base["effective_date_status"] = "not_publication_date"
+
+    if item.get("provenance") is not None and not isinstance(item.get("provenance"), dict):
+        corrupted = True
+    base["provenance_status"] = "corrupted" if corrupted else "present"
+    if not any((base["uri"], base["citation"], base["source_passage"], base["snippet"], base["cid"])):
+        if not corrupted:
+            base["provenance_status"] = "missing"
+    return base
+
+
+def _cache_key(family: str, query: str, jurisdiction: str, state: str) -> str:
+    return "|".join(
+        (
+            family,
+            str(query or "").strip().lower(),
+            str(jurisdiction or "").strip().lower(),
+            str(state or "").strip().upper(),
+        )
+    )
+
+
+def _normalize_cached_rows(
+    rows: Any,
+    *,
+    family: str,
+    retrieval_mode: str,
+    requested_jurisdiction: str,
+    requested_state: str,
+    max_results: int,
+) -> List[Dict[str, Any]]:
+    if not isinstance(rows, list):
+        return []
+    normalized: List[Dict[str, Any]] = []
+    for item in rows:
+        if len(normalized) >= max_results:
+            break
+        candidate = normalize_corpus_candidate(
+            item,
+            source_family=family,
+            retrieval_mode=retrieval_mode,
+            requested_jurisdiction=requested_jurisdiction,
+            requested_state=requested_state,
+            retrieved_at=item.get("retrieved_at") if isinstance(item, dict) and isinstance(item.get("retrieved_at"), str) else None,
+        )
+        normalized.append(candidate)
+    return normalized
+
+
+def _vector_parameters_ready(
+    *,
+    query_vector: Any,
+    collection_name: Optional[str],
+    contains_private_facts: bool,
+    privacy_policy_accepted: bool,
+) -> Optional[str]:
+    if not isinstance(query_vector, list) or not query_vector:
+        return "query_vector_required"
+    if not str(collection_name or "").strip():
+        return "collection_name_required"
+    if contains_private_facts and not privacy_policy_accepted:
+        return "privacy_policy_required"
+    return None
+
+
+def lookup_bounded_legal_corpus(
+    *,
+    source_family: str,
+    query: str = "",
+    retrieval_mode: str = "",
+    jurisdiction: Optional[str] = None,
+    state: Optional[str] = None,
+    max_results: int = 5,
+    timeout_seconds: float = 5.0,
+    collection_name: Optional[str] = None,
+    query_vector: Optional[List[float]] = None,
+    index_path: Optional[str] = None,
+    offline_cache: Optional[Dict[str, Any]] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    live_backend: str = "corpus",
+    titles: Optional[List[str]] = None,
+    contains_private_facts: bool = True,
+    privacy_policy_accepted: bool = False,
+    court_jurisdiction: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Look up legal corpus candidates without implicit setup, scrape, or jurisdiction.
+
+    ``cache`` reads only ``offline_cache``. ``offline`` reads that cache and a
+    caller-supplied local US Code JSONL index. ``live`` calls one verified
+    parameter-dictionary corpus API, or the Federal Register keyword API when
+    ``live_backend`` is ``direct``. Missing assets return a typed unavailable
+    envelope. Request labels are not copied onto rows as proof of jurisdiction,
+    applicability, or effective date.
+    """
+    family = str(source_family or "").strip()
+    mode = str(retrieval_mode or "").strip().lower()
+    if type(max_results) is not int or not 0 <= max_results <= _BOUNDED_RESULT_CAP:
+        return _bounded_envelope(status="unavailable", family=family, retrieval_mode=mode,
+            capability="invalid_result_limit", error_code="invalid_result_limit")
+    bounded_results = max_results
+    if type(contains_private_facts) is not bool or type(privacy_policy_accepted) is not bool:
+        return _bounded_envelope(status="unavailable", family=family, retrieval_mode=mode,
+            capability="invalid_privacy_policy", error_code="invalid_privacy_policy")
+    if family not in BOUNDED_CORPUS_FAMILIES:
+        return _bounded_envelope(
+            status="unavailable",
+            family=family,
+            retrieval_mode=mode,
+            capability="unknown_source_family",
+            error_code="unknown_source_family",
+            error_message="source_family is not a bounded corpus adapter",
+        )
+    if mode not in BOUNDED_RETRIEVAL_MODES:
+        return _bounded_envelope(
+            status="unavailable",
+            family=family,
+            retrieval_mode=mode,
+            capability="retrieval_mode_required",
+            error_code="retrieval_mode_required",
+            error_message="retrieval_mode must be cache, offline, or live",
+        )
+    try:
+        timeout_value = float(timeout_seconds)
+    except (TypeError, ValueError):
+        timeout_value = 0.0
+    if not math.isfinite(timeout_value) or timeout_value <= 0 or timeout_value > _BOUNDED_TIMEOUT_CAP_SECONDS:
+        return _bounded_envelope(
+            status="unavailable",
+            family=family,
+            retrieval_mode=mode,
+            capability="invalid_timeout",
+            error_code="invalid_timeout",
+            error_message="timeout_seconds must be within the owned deadline cap",
+            timeout_seconds=timeout_value if math.isfinite(timeout_value) else None,
+        )
+
+    requested_jurisdiction = resolve_explicit_jurisdiction(jurisdiction)
+    requested_state = _resolve_state_code(state) if state else ""
+    if family in {CORPUS_FAMILY_STATE_STATUTE, CORPUS_FAMILY_STATE_ADMIN} and not requested_state:
+        return _bounded_envelope(
+            status="unavailable",
+            family=family,
+            retrieval_mode=mode,
+            capability="explicit_state_required",
+            error_code="explicit_state_required",
+            error_message="state statute and administrative lookups require an explicit state",
+            timeout_seconds=timeout_value,
+        )
+    court_scope = str(court_jurisdiction or "").strip().lower()
+    if family == CORPUS_FAMILY_COURT_RULE:
+        if court_scope not in {"federal", "state", "both"}:
+            return _bounded_envelope(
+                status="unavailable",
+                family=family,
+                retrieval_mode=mode,
+                capability="court_jurisdiction_required",
+                error_code="court_jurisdiction_required",
+                error_message="court rules require jurisdiction federal, state, or both",
+                timeout_seconds=timeout_value,
+            )
+        if court_scope == "state" and not requested_state:
+            return _bounded_envelope(
+                status="unavailable",
+                family=family,
+                retrieval_mode=mode,
+                capability="explicit_state_required",
+                error_code="explicit_state_required",
+                error_message="state court rules require an explicit state",
+                timeout_seconds=timeout_value,
+            )
+
+    cache_rows = None
+    if isinstance(offline_cache, dict):
+        cache_rows = offline_cache.get(
+            _cache_key(family, query, requested_jurisdiction if requested_jurisdiction != UNKNOWN_LEGAL_CONTEXT else "", requested_state)
+        )
+    if mode == RETRIEVAL_MODE_CACHE:
+        if not isinstance(offline_cache, dict):
+            return _bounded_envelope(
+                status="unavailable",
+                family=family,
+                retrieval_mode=mode,
+                capability="offline_cache_missing",
+                error_code="offline_cache_missing",
+                error_message="cache lookup requires an explicit offline cache",
+                timeout_seconds=timeout_value,
+            )
+        results = _normalize_cached_rows(
+            cache_rows,
+            family=family,
+            retrieval_mode=mode,
+            requested_jurisdiction=jurisdiction or "",
+            requested_state=requested_state,
+            max_results=bounded_results,
+        )
+        return _bounded_envelope(
+            status="success" if results else "empty",
+            family=family,
+            retrieval_mode=mode,
+            capability="offline_cache",
+            timeout_seconds=timeout_value,
+            attempted_backends=["offline_cache"],
+            results=results,
+        )
+
+    if mode == RETRIEVAL_MODE_OFFLINE:
+        if isinstance(cache_rows, list) and cache_rows:
+            results = _normalize_cached_rows(
+                cache_rows,
+                family=family,
+                retrieval_mode=mode,
+                requested_jurisdiction=jurisdiction or "",
+                requested_state=requested_state,
+                max_results=bounded_results,
+            )
+            return _bounded_envelope(
+                status="success" if results else "empty",
+                family=family,
+                retrieval_mode=mode,
+                capability="offline_cache",
+                timeout_seconds=timeout_value,
+                attempted_backends=["offline_cache"],
+                results=results,
+            )
+        if family == CORPUS_FAMILY_US_CODE:
+            return _lookup_local_us_code(
+                query=query,
+                index_path=index_path,
+                titles=titles,
+                max_results=bounded_results,
+                timeout_seconds=timeout_value,
+            )
+        return _bounded_envelope(
+            status="unavailable",
+            family=family,
+            retrieval_mode=mode,
+            capability="offline_asset_missing",
+            error_code="offline_asset_missing",
+            error_message="no local cache or index is available for this family",
+            timeout_seconds=timeout_value,
+            attempted_backends=["offline_cache"],
+        )
+
+    vector_block = _vector_parameters_ready(
+        query_vector=query_vector,
+        collection_name=collection_name,
+        contains_private_facts=contains_private_facts,
+        privacy_policy_accepted=privacy_policy_accepted,
+    )
+    publication_filter = {}
+    if start_date:
+        publication_filter["start_date"] = str(start_date)
+    if end_date:
+        publication_filter["end_date"] = str(end_date)
+
+    if family == CORPUS_FAMILY_FEDERAL_REGISTER and live_backend == "direct":
+        if contains_private_facts and not privacy_policy_accepted:
+            return _bounded_envelope(
+                status="unavailable",
+                family=family,
+                retrieval_mode=mode,
+                capability="privacy_policy_required",
+                error_code="privacy_policy_required",
+                error_message="live Federal Register search refuses private case facts without a privacy policy",
+                timeout_seconds=timeout_value,
+            )
+        if _search_federal_register_async is None:
+            return _bounded_envelope(
+                status="unavailable",
+                family=family,
+                retrieval_mode=mode,
+                capability="federal_register_direct_unavailable",
+                error_code="backend_unavailable",
+                error_message="Federal Register direct API is not importable",
+                timeout_seconds=timeout_value,
+            )
+
+        direct_parameters = dict(keywords=query, start_date=start_date, end_date=end_date,
+            limit=bounded_results, fetch_all=False, max_pages=1, request_timeout=timeout_value)
+
+        return _finish_live_call(
+            family=family,
+            parameters=direct_parameters,
+            timeout_seconds=timeout_value,
+            backend="federal_register_direct",
+            requested_jurisdiction=jurisdiction or "",
+            requested_state=requested_state,
+            max_results=bounded_results,
+            publication_filter=publication_filter or None,
+            extra={
+                "date_filter_role": "publication",
+                "date_filter_is_effective_date": False,
+            },
+        )
+
+    if vector_block:
+        return _bounded_envelope(
+            status="unavailable",
+            family=family,
+            retrieval_mode=mode,
+            capability=vector_block,
+            error_code=vector_block,
+            error_message="live corpus search was not started",
+            timeout_seconds=timeout_value,
+        )
+
+    parameters: Dict[str, Any] = {
+        "collection_name": str(collection_name),
+        "query_vector": list(query_vector or []),
+        "top_k": bounded_results,
+        "auto_setup_venv": False,
+        "chunk_lookup_enabled": False,
+    }
+    backend_name = ""
+    if family == CORPUS_FAMILY_US_CODE:
+        backend_name = "us_code_corpus"
+        capability = "us_code_corpus_unavailable"
+    elif family == CORPUS_FAMILY_STATE_STATUTE:
+        backend_name = "state_statute_corpus"
+        capability = "state_law_corpus_unavailable"
+        parameters["state"] = requested_state
+        parameters["hf_dataset_id"] = DEFAULT_STATE_LAWS_DATASET_ID
+        parameters["hf_dataset_ids"] = [DEFAULT_STATE_LAWS_DATASET_ID]
+        parameters["enrich_with_cases"] = False
+    elif family == CORPUS_FAMILY_STATE_ADMIN:
+        caller = _search_state_law_corpus_async
+        backend_name = "state_admin_corpus"
+        capability = "state_law_corpus_unavailable"
+        parameters["state"] = requested_state
+        parameters["hf_dataset_id"] = DEFAULT_STATE_ADMIN_RULES_DATASET_ID
+        parameters["hf_dataset_ids"] = [DEFAULT_STATE_ADMIN_RULES_DATASET_ID]
+        parameters["enrich_with_cases"] = False
+    elif family == CORPUS_FAMILY_FEDERAL_REGISTER:
+        backend_name = "federal_register_corpus"
+        capability = "federal_register_corpus_unavailable"
+    else:
+        backend_name = "court_rules_corpus"
+        capability = "court_rules_corpus_unavailable"
+        parameters["jurisdiction"] = court_scope
+        parameters["enrich_with_cases"] = False
+        if court_scope == "state":
+            parameters["state"] = requested_state
+
+    if parameters.get("auto_setup_venv") is not False:
+        return _bounded_envelope(
+            status="unavailable",
+            family=family,
+            retrieval_mode=mode,
+            capability="setup_refused",
+            error_code="setup_refused",
+            timeout_seconds=timeout_value,
+        )
+
+    return _finish_live_call(
+        family=family,
+        parameters=parameters,
+        timeout_seconds=timeout_value,
+        backend=backend_name,
+        requested_jurisdiction=jurisdiction or "",
+        requested_state=requested_state,
+        max_results=bounded_results,
+        publication_filter=publication_filter or None,
+        extra={"request_parameters": {key: value for key, value in parameters.items()
+            if key in {"top_k", "auto_setup_venv", "chunk_lookup_enabled", "state", "hf_dataset_id", "hf_dataset_ids", "enrich_with_cases", "jurisdiction"}}},
+    )
+
+
+def _lookup_local_us_code(
+    *,
+    query: str,
+    index_path: Optional[str],
+    titles: Optional[List[str]],
+    max_results: int,
+    timeout_seconds: float,
+) -> Dict[str, Any]:
+    from pathlib import Path
+
+    family = CORPUS_FAMILY_US_CODE
+    if not index_path:
+        return _bounded_envelope(
+            status="unavailable",
+            family=family,
+            retrieval_mode=RETRIEVAL_MODE_OFFLINE,
+            capability="local_us_code_index_missing",
+            error_code="local_index_missing",
+            error_message="offline US Code lookup requires an explicit local JSONL index path",
+            timeout_seconds=timeout_seconds,
+        )
+    path = Path(index_path).expanduser()
+    if not path.is_file():
+        return _bounded_envelope(
+            status="unavailable",
+            family=family,
+            retrieval_mode=RETRIEVAL_MODE_OFFLINE,
+            capability="local_us_code_index_missing",
+            error_code="local_index_missing",
+            error_message="local US Code index is absent; scrape and setup were not started",
+            timeout_seconds=timeout_seconds,
+            attempted_backends=["local_us_code_index"],
+            extra={"scrape_invoked": False},
+        )
+    if _search_us_code_async is None:
+        return _bounded_envelope(
+            status="unavailable",
+            family=family,
+            retrieval_mode=RETRIEVAL_MODE_OFFLINE,
+            capability="us_code_local_api_unavailable",
+            error_code="backend_unavailable",
+            error_message="local US Code search API is not importable",
+            timeout_seconds=timeout_seconds,
+        )
+
+    return _finish_live_call(
+        family=family,
+        parameters=dict(query=query, titles=list(titles) if titles else None,
+                        max_results=max_results, index_path=str(path)),
+        timeout_seconds=timeout_seconds,
+        backend="local_us_code_index",
+        requested_jurisdiction="federal",
+        requested_state="",
+        max_results=max_results,
+        publication_filter=None,
+        network_used=False,
+        retrieval_mode=RETRIEVAL_MODE_OFFLINE,
+    )
+
+
+def _finish_live_call(
+    *,
+    family: str,
+    parameters: Dict[str, Any],
+    timeout_seconds: float,
+    backend: str,
+    requested_jurisdiction: str,
+    requested_state: str,
+    max_results: int,
+    publication_filter: Optional[Dict[str, str]],
+    extra: Optional[Dict[str, Any]] = None,
+    network_used: Optional[bool] = None,
+    retrieval_mode: str = RETRIEVAL_MODE_LIVE,
+) -> Dict[str, Any]:
+    outcome, payload = _run_owned_deadline(backend, parameters, timeout_seconds)
+    if outcome == "timeout":
+        return _bounded_envelope(
+            status="timeout",
+            family=family,
+            retrieval_mode=retrieval_mode,
+            capability="deadline_exceeded",
+            error_code="timeout",
+            error_message="Legal corpus lookup exceeded its owned deadline.",
+            timeout_seconds=timeout_seconds,
+            attempted_backends=[backend],
+            network_used=network_used,
+            extra=extra,
+        )
+    if outcome in {"custody_unavailable", "cleanup_unconfirmed", "invalid_parameters", "cancelled", "output_limit"}:
+        return _bounded_envelope(
+            status="unavailable",
+            family=family,
+            retrieval_mode=retrieval_mode,
+            capability=outcome,
+            error_code=outcome,
+            error_message="Legal corpus lookup is unavailable.",
+            timeout_seconds=timeout_seconds,
+            attempted_backends=[backend],
+            extra=extra,
+        )
+    if outcome == "error":
+        return _bounded_envelope(
+            status="error",
+            family=family,
+            retrieval_mode=retrieval_mode,
+            capability="backend_error",
+            error_code="backend_error",
+            error_message="Legal corpus lookup failed.",
+            timeout_seconds=timeout_seconds,
+            attempted_backends=[backend],
+            network_used=network_used,
+            extra=extra,
+        )
+    if not isinstance(payload, dict):
+        return _bounded_envelope(
+            status="error",
+            family=family,
+            retrieval_mode=retrieval_mode,
+            capability="backend_error",
+            error_code="malformed_payload",
+            error_message="corpus backend returned a non-dict payload",
+            timeout_seconds=timeout_seconds,
+            attempted_backends=[backend],
+            network_used=network_used,
+            extra=extra,
+        )
+    status = payload.get("status")
+    if status == "unavailable":
+        return _bounded_envelope(status="unavailable", family=family, retrieval_mode=retrieval_mode,
+            capability="backend_unavailable", error_code="backend_unavailable",
+            error_message="Legal corpus backend or asset is unavailable.", timeout_seconds=timeout_seconds,
+            attempted_backends=[backend], network_used=network_used, extra=extra)
+    if type(status) is not str or status not in {"success", "partial_success"} or (status == "success" and payload.get("error")):
+        return _bounded_envelope(
+            status="error",
+            family=family,
+            retrieval_mode=retrieval_mode,
+            capability="backend_error",
+            error_code="backend_error",
+            error_message="Legal corpus lookup failed." if payload.get("error") or status == "error" else "",
+            timeout_seconds=timeout_seconds,
+            attempted_backends=[backend],
+            network_used=network_used,
+            extra=extra,
+        )
+    items = _extract_payload_items(payload, "results", "documents", "hits", "data")
+    results = [
+        normalize_corpus_candidate(
+            item,
+            source_family=family,
+            retrieval_mode=retrieval_mode,
+            requested_jurisdiction=requested_jurisdiction,
+            requested_state=requested_state,
+            publication_filter=publication_filter,
+        )
+        for item in items[:max_results]
+    ]
+    return _bounded_envelope(
+        status=("partial_success" if status == "partial_success" else "success") if results else "empty",
+        family=family,
+        retrieval_mode=retrieval_mode,
+        capability=backend,
+        timeout_seconds=timeout_seconds,
+        attempted_backends=[backend],
+        results=results,
+        network_used=network_used,
+        extra=extra,
+    )
+
+
 def search_legal_authority_program(
     program: Dict[str, Any],
     *,
@@ -1889,20 +2913,40 @@ def search_legal_authority_program(
         "administrative_rules": [],
         "case_law": [],
         "docket_materials": [],
+        "court_rules": [],
     }
 
-    if plan["search_us_code"]:
-        results["statutes"] = search_us_code(query, max_results=max_results)
-    if plan["search_state_laws"]:
-        results["state_statutes"] = search_state_laws(query, state=state_code, max_results=max_results)
-    if plan["search_federal_register"]:
-        results["regulations"] = search_federal_register(query, max_results=max_results)
-    if plan["search_state_administrative_rules"]:
-        results["administrative_rules"] = search_state_administrative_rules(query, state=state_code, max_results=max_results)
+    diagnostics = {}
+    selected = [
+        ("statutes", CORPUS_FAMILY_US_CODE, plan["search_us_code"]),
+        ("state_statutes", CORPUS_FAMILY_STATE_STATUTE, plan["search_state_laws"]),
+        ("regulations", CORPUS_FAMILY_FEDERAL_REGISTER, plan["search_federal_register"]),
+        ("administrative_rules", CORPUS_FAMILY_STATE_ADMIN, plan["search_state_administrative_rules"]),
+        ("court_rules", CORPUS_FAMILY_COURT_RULE, _plan_searches_court_rules(plan, families)),
+    ]
+    for bucket, family, enabled in selected:
+        if not enabled:
+            continue
+        envelope = lookup_bounded_legal_corpus(
+            source_family=family, query=query,
+            retrieval_mode=program.get("retrieval_mode", RETRIEVAL_MODE_OFFLINE),
+            jurisdiction=jurisdiction, state=state_code or None,
+            court_jurisdiction=program.get("court_jurisdiction") or ("federal" if jurisdiction == "federal" else "state"),
+            max_results=max_results, timeout_seconds=program.get("timeout_seconds", 5.0),
+            collection_name=program.get("collection_name"), query_vector=program.get("query_vector"),
+            index_path=program.get("index_path"), offline_cache=program.get("offline_cache"),
+            start_date=program.get("start_date"), end_date=program.get("end_date"),
+            contains_private_facts=program.get("contains_private_facts", True),
+            privacy_policy_accepted=program.get("privacy_policy_accepted", False))
+        results[bucket] = list(envelope.get("results") or [])
+        diagnostics[bucket] = {key: envelope.get(key) for key in
+            ("status", "capability", "error_code", "retrieval_mode", "applicability")}
+    # Explicit case/docket discovery retains its separate, established route.
     if plan["search_case_law"] and ("case_law" in families or not families):
         results["case_law"] = search_recap_documents(query, max_results=max_results)
     if plan["search_case_law"] and ("docket_material" in families or not families):
         results["docket_materials"] = search_recap_documents(query, max_results=max_results)
+    court_rules_diagnostics = diagnostics.get("court_rules")
 
     flat_results = [
         item
@@ -1930,6 +2974,8 @@ def search_legal_authority_program(
             "state_code": state_code,
             "context_status": plan["context_status"],
             "selected_rule_applicability": plan["selected_rule_applicability"],
+            "court_rules_diagnostics": court_rules_diagnostics,
+            "corpus_diagnostics": diagnostics,
         },
     )
 
@@ -1955,4 +3001,10 @@ __all__ = [
     "questions_for_legal_context",
     "select_requirement_applicability",
     "legal_requirement_search_plan",
+    "lookup_bounded_legal_corpus",
+    "normalize_corpus_candidate",
+    "BOUNDED_CORPUS_FAMILIES",
+    "RETRIEVAL_MODE_CACHE",
+    "RETRIEVAL_MODE_OFFLINE",
+    "RETRIEVAL_MODE_LIVE",
 ]
