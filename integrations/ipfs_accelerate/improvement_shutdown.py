@@ -168,6 +168,85 @@ def _events(state_dir: Path, started_at: float, *, worktree_root: Path | None = 
     return workspaces, hashlib.sha256(raw).hexdigest()
 
 
+def _sealed_managed_session_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[str, Any]) -> None:
+    """Observe retained native markers after an independently performed fence.
+
+    The native record stores the original parent PID, not its start ticks.
+    Bind it to the same-boot launch and a strictly later child birth; neither
+    numeric PID may currently exist, including as a different process birth.
+    This verifier never signals, removes markers or manufactures a heartbeat.
+    """
+    from . import improvement_runner as runner
+    from .improvement_recovery import _owned_bytes
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as native
+
+    parent = record['identity']
+    pid_path = state_dir / f'{runner.STATE_PREFIX}_managed_daemon.pid'
+    identity_path = native.supervised_child_identity_path(pid_path)
+    def markers():
+        result = {}
+        for path in (pid_path, identity_path):
+            first = path.lstat()
+            raw = _owned_bytes(path, 65_536, legacy_group_write=True)
+            last = path.lstat()
+            fields = ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+            key = tuple(getattr(first, name) for name in fields)
+            if key != tuple(getattr(last, name) for name in fields):
+                raise ValueError('retained native daemon marker changed during read')
+            result[path] = (raw, key)
+        return result
+
+    snapshot = markers()
+    before = {path: value[0] for path, value in snapshot.items()}
+    payload = json.loads(before[identity_path])
+    identity = native.SupervisedChildIdentity.from_dict(payload)
+    if identity is None or identity.to_dict() != payload:
+        raise ValueError('retained native daemon identity is invalid')
+    birth = identity.process_birth
+    current = native.read_process_birth(os.getpid())
+    repo = Path(context['repo_root'])
+    entrypoint = repo / 'integrations/ipfs_accelerate/improvement_runner.py'
+    scope = {'repo_root': str(repo), 'state_dir': str(state_dir),
+             'state_prefix': runner.STATE_PREFIX, 'todo_path': record['board_path'],
+             'daemon_entrypoint': str(entrypoint)}
+    # This is the ordinary command emitted for the existing first-party
+    # native_argv profile. No alternative entrypoint or extra option is admitted.
+    command = (record['argv'][0], str(entrypoint), '--interval', '10.0',
+        '--todo-path', record['board_path'], '--state-dir', str(state_dir),
+        '--task-prefix', runner.TASK_PREFIX, '--board-namespace', 'complaint-intake-improvement',
+        '--state-prefix', runner.STATE_PREFIX, '--max-task-attempts', '3',
+        '--task-source-kind', 'legacy-markdown', '--authority-mode', 'legacy_markdown',
+        '--validation-max-workers', '1', '--merge-target-branch', record['merge_target'],
+        '--merge-queue-dir', str(state_dir / 'merge-queue'), '--implement',
+        '--implementation-timeout', str(float(runner.TIMEOUT_SECONDS)),
+        '--worktree-root', context['worktree_root'],
+        '--worktree-submodule-path', 'external/ipfs_datasets_py',
+        '--task-shard-count', '1', '--task-shard-index', '0')
+    if (dict(identity.owner_scope) != scope or identity.command != command
+            or before[pid_path] != f'{birth.pid}\n'.encode('ascii')
+            or birth.parent_pid != parent['pid'] or birth.pid == parent['pid']
+            or current is None or current.boot_id != parent['boot_id']
+            or birth.boot_id != parent['boot_id']
+            or birth.start_time_ticks <= parent['start_ticks']
+            or not context['started_at'] <= _timestamp(identity.created_at) <= time.time()):
+        raise ValueError('retained native daemon is not bound to this launch')
+
+    def absent(pid):
+        try:
+            (Path('/proc') / str(pid)).stat()
+        except FileNotFoundError:
+            return True
+        return False
+
+    if (not absent(parent['pid']) or not absent(birth.pid)
+            or native.supervised_child_identity_liveness(identity) is not native.OwnerLiveness.DEAD
+            or not native._supervised_child_identity_session_quiesced(identity)):
+        raise ValueError('retained native daemon session is not proven absent')
+    if (snapshot != markers() or not absent(parent['pid']) or not absent(birth.pid)
+            or not native._supervised_child_identity_session_quiesced(identity)):
+        raise ValueError('retained native daemon custody changed during observation')
+
+
 def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[str, Any], supplied: bool) -> None:
     from . import improvement_runner as runner
     from .improvement_recovery import _object
@@ -178,11 +257,14 @@ def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[
     if supplied:
         return
     heartbeat = _object(state_dir / 'complaint_intake_supervisor_status.json', legacy_group_write=True)
-    if (heartbeat.get('status') != 'stopped' or heartbeat.get('repo_root') != context['repo_root']
-            or heartbeat.get('supervisor_pid') != birth['pid']
-            or _timestamp(heartbeat.get('updated_at')) < context['started_at']
-            or (heartbeat.get('managed_daemon_cleanup') or {}).get('quiesced') is not True):
+    if (heartbeat.get('repo_root') != context['repo_root'] or heartbeat.get('supervisor_pid') != birth['pid']
+            or _timestamp(heartbeat.get('updated_at')) < context['started_at']):
         raise ValueError('historical campaign lacks current owned shutdown evidence')
+    if heartbeat.get('status') == 'stopped' and (heartbeat.get('managed_daemon_cleanup') or {}).get('quiesced') is True:
+        return
+    if heartbeat.get('status') != 'termination_blocked':
+        raise ValueError('historical campaign lacks current owned shutdown evidence')
+    _sealed_managed_session_closed(state_dir, record, context)
 
 
 def close_campaign_containers(state_dir: Path, record: Mapping[str, Any], *, parent_quiesced: bool = False,

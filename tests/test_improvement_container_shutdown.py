@@ -1,4 +1,4 @@
-"""Real ownership files with fake Docker; no daemon/provider is launched."""
+"""Owned shutdown contracts; one inert native child, never a provider or Docker."""
 
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -21,6 +21,66 @@ pytestmark = [pytest.mark.no_auto_llm, pytest.mark.no_auto_network, pytest.mark.
 IMAGE = 'sha256:' + 'a' * 64
 CONTAINER = 'b' * 64
 OTHER_CONTAINER = 'c' * 64
+_REAL_PROCESS_IDENTITY = runner.process_identity
+
+# The one real-process control launches only this private inert wrapper and its
+# one fixed worker. The wrapper uses the actual public native identity writer
+# and launcher; all networking and every other subprocess are denied first.
+SEALED_ORPHAN_WORKER = 'import time\ntime.sleep(45)\n'
+SEALED_ORPHAN_WRAPPER = r'''
+import json, os, pathlib, socket, sys, time
+config = pathlib.Path(os.environ.pop('COMPLAINT_SHUTDOWN_FIXTURE_CONFIG'))
+data = json.loads(config.read_text())
+repo = pathlib.Path(data['repo'])
+assert repo == pathlib.Path.cwd() and config.parent == repo.parent
+command = data['command']
+def audit(event, args):
+    if event == 'socket.__new__' and args[1] in (socket.AF_INET, socket.AF_INET6):
+        raise PermissionError('synthetic_shutdown_network_denied')
+    if event in ('socket.connect','socket.sendto','socket.getaddrinfo','socket.gethostbyname','socket.gethostbyaddr','socket.getnameinfo'):
+        raise PermissionError('synthetic_shutdown_network_denied')
+    if event == 'subprocess.Popen' and (list(args[1]) != command or args[2] != str(repo)):
+        raise PermissionError('synthetic_shutdown_process_denied')
+sys.addaudithook(audit)
+sys.path[:0] = data['roots']
+from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as native
+record = data['record']
+birth = native.read_process_birth(os.getpid())
+assert birth and os.getsid(0) == os.getpid() == os.getpgrp()
+record['identity'] = {'pid':birth.pid,'start_ticks':birth.start_time_ticks,
+    'boot_id':birth.boot_id,'session':os.getsid(0),'process_group':os.getpgrp(),
+    'argv':[sys.executable,*sys.argv]}
+assert record['argv'] == record['identity']['argv']
+record['started_at'] = time.time()
+record['status'] = 'starting'
+state = pathlib.Path(record['state_dir'])
+def write(name, value):
+    path = state / name
+    path.write_text(json.dumps(value,sort_keys=True))
+    path.chmod(0o600)
+write('launcher.json',record)
+# A separate kernel clock tick makes the child-after-parent rule deterministic.
+time.sleep(.04)
+scope = {'repo_root':str(repo),'state_dir':str(state),'state_prefix':'complaint_intake',
+    'todo_path':record['board_path'],'daemon_entrypoint':command[1]}
+pid_path = state / 'complaint_intake_managed_daemon.pid'
+identity_path = native.supervised_child_identity_path(pid_path)
+env = dict(os.environ)
+env.update({native.SUPERVISED_CHILD_IDENTITY_PATH_ENV:str(identity_path),
+    native.SUPERVISED_CHILD_OWNER_SCOPE_ENV:json.dumps(scope,sort_keys=True)})
+child = native.launch_supervised_child(native.SupervisedChildSpec(repo_root=repo,
+    command=tuple(command),log_path=state/'inert-daemon.log',child_pid_path=pid_path,
+    env=env,start_new_session=True))
+identity = native.load_supervised_child_identity(identity_path)
+assert identity and identity.process_birth.parent_pid == os.getpid()
+write('complaint_intake_supervisor_status.json',{'status':'termination_blocked',
+    'repo_root':str(repo),'supervisor_pid':os.getpid(),
+    'updated_at':identity.created_at,'daemon_pid':child.pid,
+    'last_recycle_reason':'workspace_container_present','restart_count':0})
+write('inert-ready.json',{'pid':child.pid,'identity_record_id':identity.record_id,
+    'birth':identity.process_birth.to_dict(),
+    'native_origin':str(pathlib.Path(native.__file__).resolve()),'guard_active':True})
+'''
 
 
 def stamp(value):
@@ -430,3 +490,231 @@ def test_stopped_legacy_launch_can_choose_new_root_without_changing_old_epoch_hi
     assert not (target / runner.WORKTREE_MARKER).exists()  # Doctor is read-only.
     assert original == {name: (campaign.state / name).read_bytes() for name in original}
     assert campaign.workspace.is_dir()
+
+
+def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heartbeat(campaign, monkeypatch):
+    """One real sealed daemon/fence; reused or unknown custody stays refused."""
+    import ctypes
+    from dataclasses import replace
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as native
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import core
+    from integrations.ipfs_accelerate import improvement_recovery as recovery
+
+    monkeypatch.setattr(runner, 'process_identity', _REAL_PROCESS_IDENTITY)
+    root, state, repo = campaign.state.parent, campaign.state, campaign.repo
+    for name in ('scripts', 'integrations/ipfs_accelerate'):
+        (repo / name).mkdir(parents=True, exist_ok=True)
+    repo.chmod(0o700)
+    worker = repo / 'integrations/ipfs_accelerate/improvement_runner.py'
+    wrapper = repo / 'scripts/run_complaint_improvement_supervisor.py'
+    worker.write_text(SEALED_ORPHAN_WORKER); worker.chmod(0o600)
+    wrapper.write_text(SEALED_ORPHAN_WRAPPER); wrapper.chmod(0o600)
+    command = [sys.executable, str(worker), '--interval', '10.0',
+        '--todo-path', campaign.record['board_path'], '--state-dir', str(state),
+        '--task-prefix', runner.TASK_PREFIX, '--board-namespace', 'complaint-intake-improvement',
+        '--state-prefix', runner.STATE_PREFIX, '--max-task-attempts', '3',
+        '--task-source-kind', 'legacy-markdown', '--authority-mode', 'legacy_markdown',
+        '--validation-max-workers', '1', '--merge-target-branch', campaign.record['merge_target'],
+        '--merge-queue-dir', str(state / 'merge-queue'), '--implement',
+        '--implementation-timeout', str(float(runner.TIMEOUT_SECONDS)),
+        '--worktree-root', str(state / 'worktrees'),
+        '--worktree-submodule-path', 'external/ipfs_datasets_py',
+        '--task-shard-count', '1', '--task-shard-index', '0']
+    config = root / 'sealed-orphan-config.json'
+    config.write_text(json.dumps({'repo': str(repo), 'record': campaign.record,
+        'command': command, 'roots': [str(Path(__file__).resolve().parents[1]),
+                                    str(Path(native.__file__).resolve().parents[3])]}))
+    config.chmod(0o600)
+    home, temporary = root / 'private-home', root / 'private-temporary'
+    home.mkdir(mode=0o700); temporary.mkdir(mode=0o700)
+    env = {key: os.environ[key] for key in ('PATH', 'LANG', 'LC_ALL') if key in os.environ}
+    env.update({'HOME': str(home), 'TMPDIR': str(temporary),
+        'COMPLAINT_SHUTDOWN_FIXTURE_CONFIG': str(config),
+        'COMMON_CRAWL_AUTO_CLONE_SOURCE': '0', 'IPFS_DATASETS_PY_AUTO_NLTK_DOWNLOAD': '0',
+        'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1',
+        'IPFS_DATASETS_PY_MINIMAL_IMPORTS': '1', 'PYTHONDONTWRITEBYTECODE': '1',
+        'IPFS_ACCELERATE_META_INDEX_DUCKDB': '', 'IPFS_ACCELERATE_META_INDEX_DUCKLAKE': '',
+        'IPFS_ACCELERATE_AGENT_ORCHESTRATION_DIR': str(state / 'control-plane')})
+    # Adopt only this fixture's orphan so the real public native fence can
+    # reap it deterministically, independently of PID1's reaping policy.
+    libc = ctypes.CDLL(None, use_errno=True)
+    previous = ctypes.c_int()
+    assert libc.prctl(37, ctypes.byref(previous), 0, 0, 0) == 0
+    assert libc.prctl(36, 1, 0, 0, 0) == 0
+    parent = child = None
+    pid_path = state / 'complaint_intake_managed_daemon.pid'
+    sidecar = native.supervised_child_identity_path(pid_path)
+    try:
+        error_fd = os.open(root / 'inert-wrapper.stderr', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(error_fd, 'wb') as errors:
+            parent = subprocess.Popen(campaign.record['argv'], cwd=repo, env=env,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors,
+                start_new_session=True)
+            assert parent.wait(timeout=15) == 0
+        record = json.loads((state / 'launcher.json').read_text())
+        identity = native.load_supervised_child_identity(sidecar)
+        assert identity is not None and identity.process_birth.parent_pid == parent.pid
+        assert record['identity']['pid'] == parent.pid and not (Path('/proc') / str(parent.pid)).exists()
+        assert record['status'] == 'starting'
+        ready = json.loads((state / 'inert-ready.json').read_text())
+        assert ready['guard_active'] is True and ready['identity_record_id'] == identity.record_id
+        assert ready['birth'] == identity.process_birth.to_dict()
+        assert ready['native_origin'] == str(Path(native.__file__).resolve())
+        child = native.SupervisedChild(pid=identity.process_birth.pid, command=identity.command,
+            log_path=state / 'inert-daemon.log', child_pid_path=pid_path, identity_path=sidecar,
+            identity_record_id=identity.record_id, identity_process_birth=identity.process_birth,
+            owned_process_group_id=identity.process_birth.pid)
+        context = shutdown._context(state, record)
+        assert context is not None
+        heartbeat = state / 'complaint_intake_supervisor_status.json'
+        original = {path: path.read_bytes() for path in (sidecar, pid_path, heartbeat)}
+        original_modes = {path: path.stat().st_mode & 0o777 for path in original}
+        with pytest.raises(ValueError, match='not proven absent'):
+            shutdown._parent_closed(state, record, context, False)
+        assert native.supervised_child_identity_liveness(identity) is native.OwnerLiveness.ALIVE
+        assert native.terminate_supervised_child(child, grace_seconds=.1, clear_pid_file=False) is True
+        try:
+            os.waitpid(child.pid, 0)
+        except ChildProcessError:
+            pass
+        assert not (Path('/proc') / str(child.pid)).exists()
+        assert original == {path: path.read_bytes() for path in original}
+
+        def save_identity(value):
+            if value == identity:
+                sidecar.write_bytes(original[sidecar]); pid_path.write_bytes(original[pid_path])
+                sidecar.chmod(original_modes[sidecar]); pid_path.chmod(original_modes[pid_path])
+                return
+            sidecar.write_text(json.dumps(value.to_dict())); sidecar.chmod(0o600)
+            pid_path.write_text(f'{value.process_birth.pid}\n'); pid_path.chmod(0o600)
+
+        mutations = [
+            replace(identity, owner_scope={**identity.owner_scope, 'state_dir': str(root / 'foreign')}, record_id=''),
+            replace(identity, command=(*identity.command, '--foreign-option'), record_id=''),
+            replace(identity, created_at=stamp(record['started_at'] - 1), record_id=''),
+            replace(identity, process_birth=replace(identity.process_birth, parent_pid=os.getpid()), record_id=''),
+            replace(identity, process_birth=replace(identity.process_birth, boot_id='foreign-boot'), record_id=''),
+            replace(identity, process_birth=replace(identity.process_birth,
+                start_time_ticks=record['identity']['start_ticks']), record_id=''),
+        ]
+        for value in mutations:
+            save_identity(value)
+            with pytest.raises(ValueError): shutdown._parent_closed(state, record, context, False)
+        # A real unrelated live process is the sentinel for a reused numeric
+        # child PID. Native DEAD-by-birth alone must never authorize closure.
+        sentinel = native.read_process_birth(os.getpid())
+        reused = replace(identity, process_birth=replace(identity.process_birth,
+            pid=os.getpid(), start_time_ticks=identity.process_birth.start_time_ticks), record_id='')
+        save_identity(reused)
+        assert native.supervised_child_identity_liveness(reused) is native.OwnerLiveness.DEAD
+        with pytest.raises(ValueError, match='not proven absent'):
+            shutdown._parent_closed(state, record, context, False)
+        assert native.read_process_birth(os.getpid()) == sentinel
+        save_identity(identity)
+        # A reused launcher PID also remains unavailable, even though its old
+        # recorded birth differs from the live unrelated sentinel.
+        launcher_path = state / 'launcher.json'
+        original_launcher = launcher_path.read_bytes()
+        reused_parent = deepcopy(record)
+        reused_parent['identity'].update(pid=os.getpid(), start_ticks=sentinel.start_time_ticks + 1,
+            session=os.getpid(), process_group=os.getpid())
+        launcher_path.write_text(json.dumps(reused_parent))
+        reused_heartbeat = json.loads(original[heartbeat])
+        reused_heartbeat['supervisor_pid'] = os.getpid()
+        heartbeat.write_text(json.dumps(reused_heartbeat))
+        save_identity(replace(identity, process_birth=replace(identity.process_birth,
+            parent_pid=os.getpid()), record_id=''))
+        with pytest.raises(ValueError, match='not proven absent'):
+            shutdown._parent_closed(state, reused_parent, shutdown._context(state, reused_parent), False)
+        launcher_path.write_bytes(original_launcher)
+        heartbeat.write_bytes(original[heartbeat])
+        save_identity(identity)
+        with monkeypatch.context() as denied:
+            denied.setattr(core, '_process_identity_snapshot', lambda: SimpleNamespace(available=False, processes={}))
+            with pytest.raises(ValueError, match='not proven absent'):
+                shutdown._parent_closed(state, record, context, False)
+        with monkeypatch.context() as denied:
+            denied.setattr(core, '_process_identity_snapshot', lambda: SimpleNamespace(available=True,
+                processes={os.getpid(): ('S', 1, child.pid, child.pid, str(sentinel.start_time_ticks))}))
+            with pytest.raises(ValueError, match='not proven absent'):
+                shutdown._parent_closed(state, record, context, False)
+        actual_session_check = native._supervised_child_identity_session_quiesced
+        with monkeypatch.context() as racing:
+            def changed_marker(value):
+                pid_path.write_text('1\n')
+                return actual_session_check(value)
+            racing.setattr(native, '_supervised_child_identity_session_quiesced', changed_marker)
+            with pytest.raises(ValueError, match='custody changed'):
+                shutdown._parent_closed(state, record, context, False)
+        save_identity(identity)
+        sidecar.write_text('{}')
+        with pytest.raises(ValueError, match='identity is invalid'):
+            shutdown._parent_closed(state, record, context, False)
+        save_identity(identity)
+        retained = sidecar.with_suffix('.retained')
+        sidecar.rename(retained)
+        with pytest.raises(OSError): shutdown._parent_closed(state, record, context, False)
+        sidecar.symlink_to(retained)
+        with pytest.raises((OSError, ValueError)): shutdown._parent_closed(state, record, context, False)
+        sidecar.unlink(); retained.rename(sidecar)
+        shutdown._parent_closed(state, record, context, False)
+        assert heartbeat.read_bytes() == original[heartbeat]
+        # Use the ordinary public stop path after the independent native fence.
+        # Docker is fake/empty; it must generate its own fresh closure receipt.
+        fake = FakeDocker()
+        docker_runtime = SimpleNamespace(_docker_isolation_binary=lambda: '/trusted/native/docker',
+            _docker_ordinary_task_toolchain_image_id=lambda *_a, **_k: IMAGE,
+            _docker_control_env=lambda: {'PATH': '/usr/bin'})
+        monkeypatch.setattr(shutdown, '_native_runtime', lambda: docker_runtime)
+        monkeypatch.setattr(shutdown.subprocess, 'run', fake)
+        result = runner.stop(state, timeout=0)
+        assert result['status'] == 'stopped' and result['signalled'] is False
+        stopped_record = json.loads((state / 'launcher.json').read_text())
+        assert stopped_record['status'] == 'stopped'
+        assert heartbeat.read_bytes() == original[heartbeat]
+        assert json.loads((state / shutdown.RECEIPT_NAME).read_text())['quiesced'] is True
+        assert fake.effects == [] and fake.ps_count == 2
+        assert recovery._campaign_process_argv(command, repo_root=repo, state_dir=state)
+        for unrelated in ([sys.executable, str(root / 'foreign/improvement_runner.py'), *command[2:]],
+                          ['bash', '-lc', ' '.join(command)],
+                          [*command, '--state-dir', str(state)],
+                          [part if part != str(state) else str(root / 'foreign-state') for part in command]):
+            assert not recovery._campaign_process_argv(unrelated, repo_root=repo, state_dir=state)
+        # A complete process inventory must also catch another actual custom
+        # daemon command outside the retained leader's now-absent session.
+        # No third actor is launched: this negative supplies only a closed,
+        # synthetic read-only /proc observation to the existing scan.
+        real_path = Path
+        def inventory(argv):
+            class Entry:
+                name = '991125'
+                def stat(self):
+                    return SimpleNamespace(st_uid=os.getuid())
+                def __truediv__(self, key):
+                    assert key == 'cmdline'
+                    return SimpleNamespace(read_bytes=lambda: ('\0'.join(argv) + '\0').encode())
+            return SimpleNamespace(iterdir=lambda: iter([Entry()]))
+        with monkeypatch.context() as extra:
+            extra.setattr(recovery, 'Path', lambda value: inventory(command) if str(value) == '/proc' else real_path(value))
+            with pytest.raises(ValueError, match='old campaign daemon/provider processes remain'):
+                recovery._assert_processes_absent(state, state / 'worktrees', stopped_record, {}, json.loads(original[heartbeat]))
+        with monkeypatch.context() as unrelated:
+            unrelated.setattr(recovery, 'Path', lambda value: inventory(['bash', '-lc', ' '.join(command)])
+                if str(value) == '/proc' else real_path(value))
+            assert recovery._assert_processes_absent(state, state / 'worktrees', stopped_record, {},
+                json.loads(original[heartbeat]))['matching_processes'] == 0
+        projection = recovery._assert_processes_absent(state, state / 'worktrees', stopped_record, {},
+            json.loads(original[heartbeat]))
+        assert projection == {'old_births_alive': False, 'matching_processes': 0, 'native_shutdown_quiesced': True}
+        assert original == {path: path.read_bytes() for path in original}
+    finally:
+        if parent is not None and parent.poll() is None:
+            parent.kill(); parent.wait(timeout=3)
+        if child is not None and native.supervised_child_identity_liveness(identity) is native.OwnerLiveness.ALIVE:
+            if 'original' in locals():
+                sidecar.write_bytes(original[sidecar]); pid_path.write_bytes(original[pid_path])
+            native.terminate_supervised_child(child, grace_seconds=.1, clear_pid_file=False)
+        if child is not None:
+            try: os.waitpid(child.pid, os.WNOHANG)
+            except ChildProcessError: pass
+        assert libc.prctl(36, previous.value, 0, 0, 0) == 0

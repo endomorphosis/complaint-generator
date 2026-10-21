@@ -159,9 +159,21 @@ def _assert_processes_absent(old_state: Path, workspace: Path, launcher: Mapping
         ticks = identity.get("start_ticks", identity.get("start_time_ticks"))
         if current and current.get("boot_id") == identity.get("boot_id") and current.get("start_ticks") == ticks:
             raise ValueError("an old campaign owner is still alive")
+    sealed_fallback = None
     if (launcher.get("status") != "stopped" or heartbeat.get("status") != "stopped"
             or (heartbeat.get("managed_daemon_cleanup") or {}).get("quiesced") is not True):
-        raise ValueError("native owned shutdown evidence is required")
+        if launcher.get("status") != "stopped" or heartbeat.get("status") != "termination_blocked":
+            raise ValueError("native owned shutdown evidence is required")
+        from .improvement_shutdown import _context, _parent_closed
+        paths = (old_state / "launcher.json", old_state / "complaint_intake_supervisor_status.json")
+        before = {path: _owned_bytes(path, legacy_group_write=path == paths[1]) for path in paths}
+        if json.loads(before[paths[0]]) != launcher or json.loads(before[paths[1]]) != heartbeat:
+            raise ValueError("native shutdown files differ from supplied observations")
+        context = _context(old_state, launcher)
+        if context is None:
+            raise ValueError("full owned native shutdown context is required")
+        _parent_closed(old_state, launcher, context, False)
+        sealed_fallback = (before, context)
     matches = []
     for directory in Path("/proc").iterdir():
         if not directory.name.isdecimal() or int(directory.name) == os.getpid():
@@ -178,21 +190,39 @@ def _assert_processes_absent(old_state: Path, workspace: Path, launcher: Mapping
             raise ValueError("owned process argv exceeds recovery inspection bound")
         argv = raw.decode(errors="replace").split("\0")
         joined = " ".join(argv)
-        relevant = _campaign_process_argv(argv)
+        raw_repo = launcher.get('repo_root')
+        repo_root = Path(raw_repo) if isinstance(raw_repo, str) and Path(raw_repo).is_absolute() else None
+        relevant = _campaign_process_argv(argv, repo_root=repo_root, state_dir=old_state)
         if relevant and (str(old_state) in joined or str(workspace) in joined):
             matches.append(int(directory.name))
     if matches:
         raise ValueError("old campaign daemon/provider processes remain")
+    if sealed_fallback is not None:
+        before, context = sealed_fallback
+        if any(_owned_bytes(path, legacy_group_write=path == paths[1]) != raw for path, raw in before.items()):
+            raise ValueError("native shutdown files changed during process inventory")
+        _parent_closed(old_state, launcher, context, False)
     return {"old_births_alive": False, "matching_processes": 0, "native_shutdown_quiesced": True}
 
 
-def _campaign_process_argv(argv: list[str]) -> bool:
+def _campaign_process_argv(argv: list[str], *, repo_root: Path | None = None,
+                           state_dir: Path | None = None) -> bool:
     """Match executable/module tokens, never Python text inside a parent shell."""
     modules = {
         "ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon",
         "ipfs_accelerate_py.agent_supervisor.runtime.grok_cli_runner",
         "ipfs_accelerate_py.agent_supervisor.grok_cli_runner",
     }
+    if repo_root is not None and state_dir is not None and len(argv) > 2:
+        from .improvement_plan import BOARD_RELATIVE
+        expected = {'--todo-path': str(repo_root / BOARD_RELATIVE), '--state-dir': str(state_dir)}
+        if (re.fullmatch(r'python(?:\d+(?:\.\d+)*)?', Path(argv[0]).name)
+                and argv[1] == str(repo_root / 'integrations/ipfs_accelerate/improvement_runner.py')
+                and all(argv.count(flag) == 1 and argv.index(flag) + 1 < len(argv)
+                    and argv[argv.index(flag) + 1] == value
+                    and not any(item.startswith(flag + '=') for item in argv)
+                    for flag, value in expected.items())):
+            return True
     return bool(argv and (Path(argv[0]).name in {"grok", "grok-build"}
         or any(item in modules for item in argv)
         or ("_run" in argv and "--owner-token" in argv)))
