@@ -179,6 +179,10 @@ The guarded `improvement_recovery.prepare_false_capacity_epoch` helper preserves
 the original quarantine and consumed attempts while preparing fresh native
 state after a verified false capacity diagnosis. Diagnostic validation of a
 quarantined candidate does not complete its task or authorize reusing it.
+The launcher disables automatic retry-budget resets and prepares the pinned
+datasets source before validation, including tasks that edit only first-party
+files. Operational task instructions are carried in compiled advisory metadata;
+they do not change acceptance, edit scope, routing, or completion authority.
 
 ### 🧠 GraphRAG Ontology Optimization
 

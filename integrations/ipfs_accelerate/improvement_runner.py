@@ -40,6 +40,7 @@ _LOGGER = logging.getLogger(__name__)
 PRIVATE_PATHS_ENV = "IPFS_ACCELERATE_AGENT_GROK_PRIVATE_PATHS_JSON"
 REASONING_EFFORT_ENV = "IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"
 ORCHESTRATION_DIR_ENV = "IPFS_ACCELERATE_AGENT_ORCHESTRATION_DIR"
+AUTOMATIC_RETRY_REARM_ENV = "IPFS_ACCELERATE_AGENT_AUTOMATIC_RETRY_REARM"
 _PRIVATE_PATHS = (".complaint_workspace", "data", "output", "statefiles", "exports", "secrets",
                   ".env*", "*.key", "*.pem")
 
@@ -169,6 +170,8 @@ def campaign_environment(repo_root: Path, ambient: Mapping[str, str] | None = No
             env.pop(key, None)
     env.update({
         "IPFS_ACCELERATE_AGENT_IMPLEMENTATION_PROVIDER": "grok",
+        AUTOMATIC_RETRY_REARM_ENV: "0",
+        "IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS": "external/ipfs_datasets_py",
         "IPFS_ACCELERATE_AGENT_GROK_MODEL": MODEL,
         "IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS": "32",
         "IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT": "medium",
@@ -214,6 +217,12 @@ def _branch(repo_root: Path) -> str:
 
 def _private_runtime_checks(repo_root: Path, env: Mapping[str, str]) -> dict[str, Any]:
     from ipfs_accelerate_py.agent_supervisor.runtime import grok_cli_runner
+    if env.get(AUTOMATIC_RETRY_REARM_ENV) == "0":
+        from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+        rearm_control = getattr(native, "automatic_retry_rearm_enabled", None)
+        if (getattr(native, "AUTOMATIC_RETRY_REARM_ENV", None) != AUTOMATIC_RETRY_REARM_ENV
+                or not callable(rearm_control) or rearm_control(env) is not False):
+            return {"ready": False, "reason": "native_retry_budget_control_unavailable"}
     supported = getattr(grok_cli_runner, "GROK_PRIVATE_PATHS_VERSION", 0) >= 1
     validator = getattr(grok_cli_runner, "validate_grok_private_path_patterns", None)
     resolver = getattr(grok_cli_runner, "_grok_private_workspace_paths", None)
@@ -272,6 +281,9 @@ def native_argv(board_path: Path, state_dir: Path, merge_target: str) -> list[st
         "--max-task-attempts", "3", "--max-restarts", "5", "--validation-max-workers", "1",
         "--task-shard-count", "1", "--task-shard-index", "0",
         "--worktree-root", str(state_dir / "worktrees"), "--merge-target-branch", merge_target,
+        # The workspace imports datasets during pytest collection. This pinned
+        # source is required even for tasks that edit only first-party files.
+        "--worktree-submodule-path", "external/ipfs_datasets_py",
         "--merge-queue-dir", str(state_dir / "merge-queue"),
         "--llm-merge-resolver-command", "",
         "--no-worktree-reconciliation", "--no-worktree-reconciliation-preflight",
@@ -599,8 +611,26 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         (last_started_age is not None and last_started_age <= since_start))
     provider_evidence = _provider_event_evidence(events_path, task_id=str(native_state.get("active_task_id") or native_state.get("last_implementation_task_id") or ""),
                                                started_at=now - since_start) if claim_verified else None
+    shutdown = _read_json(state_dir / "container_shutdown.json")
+    full_launch = record.get("schema_version") == "complaint-improvement-launcher@1"
+    shutdown_verified = bool(
+        full_launch and shutdown.get("schema") == "complaint-improvement-container-shutdown@1"
+        and shutdown.get("repo_root") == record.get("repo_root") == str(repo_root)
+        and shutdown.get("state_dir") == record.get("state_dir") == str(state_dir)
+        and shutdown.get("plan_id") == record.get("plan_id")
+        and shutdown.get("started_at") == record.get("started_at")
+        and isinstance(record.get("owner_token"), str)
+        and shutdown.get("owner_token_sha256") == hashlib.sha256(record["owner_token"].encode()).hexdigest()
+        and shutdown.get("quiesced") is True and shutdown.get("status") == "stopped"
+        and shutdown.get("completion_authority") is False
+        and shutdown.get("provider_callback_settled") is False
+        and shutdown.get("attempt_refunded") is False
+    )
     if not owned:
-        health = "identity_mismatch" if identity and process_identity(identity.get("pid")) else "stopped"
+        if identity and process_identity(identity.get("pid")):
+            health = "identity_mismatch"
+        else:
+            health = "stop_incomplete" if full_launch and not shutdown_verified else "stopped"
     elif board.get("read_error"):
         health = "board_error"
     elif native_state.get("read_error") or heartbeat.get("read_error"):
@@ -665,6 +695,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
                                    if value.get("read_error")},
             "native_state": {key: native_state[key] for key in keys if key in native_state},
             "native_state_source": state_source,
+            "container_shutdown_verified": shutdown_verified,
+            "container_shutdown": {key: shutdown[key] for key in ("status", "quiesced", "reason") if key in shutdown},
             "native_heartbeat": {key: heartbeat[key] for key in ("status", "updated_at", "supervisor_pid", "daemon_pid", "supervisor_pid_alive", "daemon_pid_alive", "restart_count", "last_recycle_reason", "last_exit_code", "worker_phase", "worker_phase_age_seconds", "last_agentic_maintenance_phase", "supervisor_maintenance") if key in heartbeat},
             "native_strategy": {key: strategy[key] for key in ("blocked_tasks", "deprioritized_tasks", "focus_tracks") if key in strategy},
             "board": board, "events_tail": _tail(events_path), "supervisor_events_tail": _tail(supervisor_events),
@@ -719,8 +751,16 @@ def stop(state_dir: Path, *, timeout: float = 15.0) -> dict[str, Any]:
     with _lock(state_dir):
         path = state_dir / "launcher.json"
         record = _read_json(path)
+        from .improvement_shutdown import close_campaign_containers
         if not owns_process(record):
-            return {"status": "not_owned_or_stopped", "signalled": False}
+            containers = close_campaign_containers(state_dir, record)
+            if not containers["applicable"]:
+                return {"status": "not_owned_or_stopped", "signalled": False}
+            if containers["quiesced"]:
+                record.update(status="stopped", stopped_at=time.time())
+                _atomic_json(path, record)
+            return {"status": containers["status"], "signalled": False,
+                    "container_shutdown": containers, "manual_holds_preserved": True}
         identity = record["identity"]
         children = _descendants(identity)
         _signal_birth(identity, signal.SIGTERM)
@@ -750,11 +790,12 @@ def stop(state_dir: Path, *, timeout: float = 15.0) -> dict[str, Any]:
         while any(birth_alive(item) for item in [identity, *children]) and time.monotonic() < deadline:
             time.sleep(0.05)
         remaining = [item["pid"] for item in [identity, *children] if birth_alive(item)]
-        outcome = "stop_incomplete" if remaining else "stopped"
+        containers = close_campaign_containers(state_dir, record, parent_quiesced=not remaining)
+        outcome = "stop_incomplete" if remaining or (containers["applicable"] and not containers["quiesced"]) else "stopped"
         record.update(status=outcome, stopped_at=time.time())
         _atomic_json(path, record)
         return {"status": outcome, "signalled": True, "pid": identity["pid"], "remaining_pids": remaining,
-                "manual_holds_preserved": True}
+                "container_shutdown": containers, "manual_holds_preserved": True}
 
 
 def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, merge_target: str) -> int:

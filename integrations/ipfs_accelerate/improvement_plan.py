@@ -233,7 +233,8 @@ def _render_board(spec: Mapping[str, Any], plan_id: str) -> str:
             f"- Validation: {'; '.join(task['validation_commands'])}",
             f"- Acceptance: {' '.join(task['acceptance'])}",
             "- Implementation provider: grok", "- Provider role: grok-only", "- Model: grok-4.7",
-            "- Router: ipfs_accelerate_py.llm_router", "- Provider fallback: disabled", "",
+            "- Router: ipfs_accelerate_py.llm_router", "- Provider fallback: disabled",
+            "- Runtime guidance: " + " ".join(task["implementation_prompt"].splitlines()), "",
             "Implementation instructions:", "",
             *("> " + line for line in task["implementation_prompt"].splitlines()), "",
         ])

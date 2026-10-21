@@ -84,6 +84,8 @@ def test_explicit_environment_removes_ambient_routes_and_pins_model():
         "IMPLEMENTATION_DAEMON_COMMAND": "unexpected-provider", "GROK_MODEL": "old-model",
         "TODO_DAEMON_LLM_ALLOW_CROSS_PROVIDER_FALLBACK": "1",
         "IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT": "high",
+        runner.AUTOMATIC_RETRY_REARM_ENV: "1",
+        "IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS": "external/ambient-unrelated",
     })
     assert environment["IPFS_ACCELERATE_AGENT_IMPLEMENTATION_PROVIDER"] == "grok"
     assert environment["GROK_MODEL"] == environment["TODO_DAEMON_LLM_MODEL"] == "grok-4.7"
@@ -91,6 +93,8 @@ def test_explicit_environment_removes_ambient_routes_and_pins_model():
     assert environment["TODO_DAEMON_LLM_ALLOW_LOCAL_FALLBACK"] == "0"
     assert environment["IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS"] == "32"
     assert environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "medium"
+    assert environment[runner.AUTOMATIC_RETRY_REARM_ENV] == "0"
+    assert environment["IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS"] == "external/ipfs_datasets_py"
     assert environment["HOME"] == "/preserved/user"
     assert environment["XAI_API_KEY"] == "fixture-secret"
     assert json.loads(environment[runner.PRIVATE_PATHS_ENV]) == list(runner._PRIVATE_PATHS)
@@ -165,6 +169,7 @@ def test_real_native_parser_and_config_accept_explicit_bounded_campaign(campaign
     assert config.merge_target_branch == "local-campaign"
     assert not config.worktree_reconciliation_enabled
     assert config.worktree_root == state / "worktrees"
+    assert tuple(config.worktree_submodule_paths) == ("external/ipfs_datasets_py",)
 
 
 def test_native_task_parser_sees_entire_dag_and_grok_route(campaign):
@@ -224,6 +229,14 @@ def test_preflight_rejects_ignored_reasoning_configuration(campaign, monkeypatch
     assert not result["ready"]
     assert result["reason"] == "native_reasoning_effort_control_unavailable"
 
+
+
+def test_preflight_rejects_native_that_ignores_automatic_budget_reset_policy(campaign, monkeypatch):
+    _, native = runner._native_modules(ROOT)
+    monkeypatch.delattr(native, "AUTOMATIC_RETRY_REARM_ENV", raising=False)
+    result = runner._private_runtime_checks(ROOT, runner.campaign_environment(ROOT))
+    assert not result["ready"]
+    assert result["reason"] == "native_retry_budget_control_unavailable"
 
 def test_privacy_preflight_validates_policy_and_bounded_docker_readiness(campaign, monkeypatch):
     from ipfs_accelerate_py.agent_supervisor.runtime import grok_cli_runner
@@ -576,6 +589,30 @@ def test_selected_claim_without_attempt_clock_has_bounded_wait(campaign, monkeyp
     runner._atomic_json(state / "launcher.json", record)
     result = runner.status(root, spec, state)
     assert result["status"] == "no_progress"
+
+
+@pytest.mark.parametrize("proof", ["missing", "wrong_owner", "wrong_plan", "unquiesced", "verified"])
+def test_dead_full_launcher_requires_bound_container_shutdown_proof(campaign, monkeypatch, proof):
+    root, spec, state, record = _status_fixture(campaign, monkeypatch)
+    record.update(schema_version="complaint-improvement-launcher@1", repo_root=str(root),
+                  state_dir=str(state), plan_id=campaign[3]["receipt"]["plan_id"])
+    runner._atomic_json(state / "launcher.json", record)
+    monkeypatch.setattr(runner, "process_identity", lambda _pid: None)
+    if proof != "missing":
+        receipt = {"schema": "complaint-improvement-container-shutdown@1", "repo_root": str(root),
+                   "state_dir": str(state), "plan_id": record["plan_id"], "started_at": record["started_at"],
+                   "owner_token_sha256": runner.hashlib.sha256(record["owner_token"].encode()).hexdigest(),
+                   "quiesced": proof != "unquiesced", "status": "stopped", "completion_authority": False,
+                   "provider_callback_settled": False, "attempt_refunded": False}
+        if proof == "wrong_owner":
+            receipt["owner_token_sha256"] = "0" * 64
+        if proof == "wrong_plan":
+            receipt["plan_id"] = "another-plan"
+        runner._atomic_json(state / "container_shutdown.json", receipt)
+    result = runner.status(root, spec, state)
+    assert result["status"] == ("stopped" if proof == "verified" else "stop_incomplete")
+    assert result["container_shutdown_verified"] is (proof == "verified")
+    assert not result["owned_process_alive"]
 
 def test_status_handles_malformed_owner_and_native_receipts(campaign):
     root, spec, state, _ = campaign

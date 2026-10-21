@@ -21,6 +21,7 @@ Implementation tasks begin pending. Completion requires behavioral validation ev
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker. The provider container deliberately has a minimal qualified toolchain; the supervisor runs the required behavioral validation with its provisioned host interpreter. If UI imports are unavailable inside the worker container, report that limitation and preserve the tests for the host validator. Do not vendor dependencies, weaken assertions or mark a failed check passed to compensate.
 - Retry guidance: Two attempts are spent: the first reached the deadline without artifacts; the second reached the turn limit while debugging unavailable container dependencies. Produce one small PTY smoke plus a fresh-service resume check and an honest receipt, rather than a broad eight-test characterization suite. Read docs/task_boards/complaint_intake_baseline_audit.json for known defect observations. Use a TemporaryDirectory and redirect applications.complaint_workspace._SESSION_DIR before importing applications.complaint_cli, whose module-level service eagerly creates storage. In the controlled PTY Python child, invoke the real applications.complaint_cli.chat(user_id=synthetic_id, max_turns=2) command function with integer arguments; do not debug the dependency-free fallback argument parser or change product behavior in this baseline task. Install synthetic socket/provider guards before application imports and allow only the controlled PTY Python child. Restore parent module globals with monkeypatch and avoid retaining a singleton bound to a deleted temporary directory. Stop after writing the bounded test module and receipt; mark validation pending until the provisioned host runs it. The minimal worker container lacks full application dependencies. Preserve inherited PYTHONPATH, which includes the qualified pytest toolchain; replacing it with only . or /tmp hides that toolchain. On missing application dependencies, finish with validation pending rather than installing, vendoring, mocking away or repeatedly troubleshooting them. Finish with a concise completion message once the files are written so the ordinary successful exit triggers host validation. Do not read, copy or reuse artifacts from prior quarantined worktrees. Private-directory permission errors mean the worker masks are working.
 
 Implementation instructions:
@@ -44,7 +45,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
-- Runtime guidance: Reuse the existing run_intake_chat_turn(message, question_id) transition so API/MCP wrappers inherit the narrative change without editing undeclared protocol files. Inspect applications/complaint_workspace.py: _default_state, ComplaintWorkspaceRequestHandlers.run_intake_chat_turn, ComplaintWorkspaceService._load_state and _build_intake_chat_payload; applications/complaint_cli.py: chat; complaint_generator/workspace.py: run_intake_chat_turn. Preserve old seven-answer sessions with an explicit migration; keep the new narrative inquiry distinct from party_name. Implement only this transition, not the later graph interview engine. Preserve inherited PYTHONPATH for the qualified worker tools. Full application validation runs on the provisioned host after the worker finishes; report missing local app dependencies and finish the bounded edits rather than installing or vendoring dependencies.
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker. Reuse the existing run_intake_chat_turn(message, question_id) transition so API/MCP wrappers inherit the narrative change without editing undeclared protocol files. Inspect applications/complaint_workspace.py: _default_state, ComplaintWorkspaceRequestHandlers.run_intake_chat_turn, ComplaintWorkspaceService._load_state and _build_intake_chat_payload; applications/complaint_cli.py: chat; complaint_generator/workspace.py: run_intake_chat_turn. Preserve old seven-answer sessions with an explicit migration; keep the new narrative inquiry distinct from party_name. Implement only this transition, not the later graph interview engine. Preserve inherited PYTHONPATH for the qualified worker tools. Full application validation runs on the provisioned host after the worker finishes; report missing local app dependencies and finish the bounded edits rather than installing or vendoring dependencies.
 
 Implementation instructions:
 
@@ -67,6 +68,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -89,6 +91,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -111,6 +114,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -133,6 +137,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -155,6 +160,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -177,6 +183,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -199,6 +206,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -221,6 +229,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -243,6 +252,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -265,6 +275,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -287,6 +298,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -309,6 +321,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -331,6 +344,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -353,6 +367,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -375,6 +390,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -397,6 +413,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -419,6 +436,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -441,6 +459,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -463,6 +482,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -485,6 +505,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -507,6 +528,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -529,6 +551,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -551,6 +574,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -573,6 +597,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -595,6 +620,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -617,6 +643,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -639,6 +666,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -661,6 +689,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -683,6 +712,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -705,6 +735,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -727,6 +758,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -749,6 +781,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -771,6 +804,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -793,6 +827,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -815,6 +850,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -837,6 +873,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -859,6 +896,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -881,6 +919,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -903,6 +942,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -925,6 +965,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -947,6 +988,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -969,6 +1011,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -991,6 +1034,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1013,6 +1057,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1035,6 +1080,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1057,6 +1103,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1079,6 +1126,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1101,6 +1149,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1123,6 +1172,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1145,6 +1195,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1167,6 +1218,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1189,6 +1241,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1211,6 +1264,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1233,6 +1287,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1255,6 +1310,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 
@@ -1277,6 +1333,7 @@ Implementation instructions:
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Runtime guidance: Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.
 
 Implementation instructions:
 

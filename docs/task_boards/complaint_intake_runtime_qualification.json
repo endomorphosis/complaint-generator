@@ -163,20 +163,58 @@
       "errors": 0,
       "skipped": 0,
       "scope": "Fresh epoch preserves native quarantine and two consumed attempts; real native next-attempt API returns three."
+    },
+    {
+      "receipt": "/tmp/complaint-timeout-telemetry-native-tests.xml",
+      "sha256": "fc78505b258cc64c2f7907425ea2a128e90940ba77c58b5db70fbb289d754efd",
+      "tests": 66,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Timeout elapsed/progress telemetry, deadline and process fencing."
+    },
+    {
+      "receipt": "/tmp/complaint_native_advisory_guidance_validation.xml",
+      "sha256": "6f3d3f24bc7743347f69a8cc7f0f54ce572859b86708135c068ae5741099f7fc",
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Actual compiler/prompt delivery, policy binding and retained retry diagnostics."
+    },
+    {
+      "receipt": "/tmp/complaint-retry-policy-qualified.xml",
+      "sha256": "c72b5976d3a34d52f6e83c2778751914300c98a3bbf1d38408ed887f07ade11b",
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Strict campaign automatic-rearm opt-out with actual native state/queue accounting."
+    },
+    {
+      "receipt": "/tmp/complaint_maintenance_final_tests.xml",
+      "sha256": "706c05267a158d0196798eeb36e5cba4601364b91fef1d31193d079b945d4328",
+      "tests": 149,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Final plan projection, launch/stop/status ownership and Docker shutdown; all Docker effects in tests are faked."
     }
   ],
   "implementation_tasks_completed_by_these_checks": 0,
   "scope": "Provisioning and startup-path qualification with source and synthetic fixtures. The full implementation taskboard is still pending; native supervisor progress must be observed separately.",
   "first_party_source_sha256": {
-    "integrations/ipfs_accelerate/improvement_plan.py": "56f374730873c86bf3e3b6eb1f2fdaac030cb44620800546bb9c7f09abf5cc0f",
-    "integrations/ipfs_accelerate/improvement_runner.py": "3c9ff255a3f02d6cf1a4ea3ac8d00894035bddb42715a5a0bf35adc5c37302a2",
+    "integrations/ipfs_accelerate/improvement_plan.py": "034a30d5f23e5dec606fa7ff09c3bd27921bcbab527bd1d8103b45beab8f9781",
+    "integrations/ipfs_accelerate/improvement_runner.py": "a7048dd2e02769989fbf04ebfa6d580a3833e238d7ac5c611e9aab478afb3ea8",
     "scripts/run_complaint_improvement_supervisor.py": "15001fbfc39617a8e913de3a7446d77a63d90e05b062fcb4f6154fbdd2d20238",
-    "tests/test_improvement_plan_contract.py": "38d0d7cbffa4a11dfcbdc9f1f99bf32583d959064352e75540e3b853873f8910",
-    "tests/test_improvement_runner.py": "11123576f0fd4f4c0128ed330349181d655b568a13ffb9ae7d241575af550178",
+    "tests/test_improvement_plan_contract.py": "6762acd147fe139426d9ec999b43f9fde30670293cb7b8b4fd3b75d45b1407ea",
+    "tests/test_improvement_runner.py": "19d3d0d49a99da754b6ab96e94146f23f23e1273a6a13159b36af957b0f7e58b",
     "integrations/ipfs_accelerate/improvement_recovery.py": "e19fd0cbdd43a74423d2d207b46ac86820c0d85ca2020484e3ea28c95601946f",
     "tests/conftest.py": "f0df011325b871b074247d4fc10ce890898eb719379e22e506cd6accd5f99473",
     "tests/test_improvement_recovery_epoch.py": "6ee990236e6830cfcf301f9b136a06b67124e239cb4f91573c7b4a8cd7865b8b",
-    "tests/test_optional_upstream_collection.py": "b8527dc963b4007aacc2af3202dd375b5be0fe5ae81e211e71e6dd1e4d3cef1d"
+    "tests/test_optional_upstream_collection.py": "b8527dc963b4007aacc2af3202dd375b5be0fe5ae81e211e71e6dd1e4d3cef1d",
+    "integrations/ipfs_accelerate/improvement_shutdown.py": "ad3632c138d9fbf6fbc730d847afa33ad0031b46186c32d0859ee4ffdf794393",
+    "tests/test_improvement_container_shutdown.py": "2d1730d54471aee730e3fc606ed0627dd3f0c0539ae4825917847c28c5e0f30b"
   },
   "doctor": {
     "status": "ready",
@@ -335,5 +373,49 @@
     "provider_started": false,
     "receipt_sha256": "5c1febbc35754c2ba3223f3e85b4563a0b7c4e979d58b8269fae814122a188b9",
     "receipt_path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/recovery_epoch.json"
+  },
+  "native_current_maintenance_commit": "85c2b0621063da4bd14093579e3c1c4ba2bb366e",
+  "monitored_recovery_maintenance": {
+    "automatic_retry_rearm": false,
+    "lifetime_spent_attempts": 4,
+    "attempt_refunded": false,
+    "old_quarantine_released": false,
+    "callback_outcome": "unknown",
+    "source_edit_authority_unchanged": true,
+    "mandatory_validation_source": "external/ipfs_datasets_py at recorded root gitlink",
+    "instructions_delivered_as": "bounded source-bound advisory metadata",
+    "receipts": {
+      "accounting": {
+        "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/lifetime_attempt_accounting_correction_20261021.json",
+        "sha256": "7498d81464b0972141e18e840994e89228aad468f479b35b5598dfac27cdd5d6",
+        "schema": "complaint-lifetime-attempt-accounting-correction@1"
+      },
+      "orphan_container_fence": {
+        "path": "/tmp/complaint_owned_orphan_container_fence.json",
+        "sha256": "b62513e21d46752cddbbb867739c0556e1d6281e7a3aad04da1e88956d173355",
+        "schema": "complaint-owned-orphan-container-fence@1"
+      },
+      "verified_shutdown": {
+        "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/container_shutdown.json",
+        "sha256": "66c02fa48011029937766ffb9dd5b6629cd78f5d22c78ff6e93dc2d600a589e6",
+        "schema": "complaint-improvement-container-shutdown@1"
+      }
+    },
+    "native_rearm_legacy_comparison": "/tmp/complaint_retry_rearm_baseline_comparison.json",
+    "new_legacy_failure_identities": 0,
+    "task_completion_authority": false
+  },
+  "independent_unquarantined_candidate_validation": {
+    "candidate_commit": "4c43bf2cd66c7dc76c35c6af890fbec2b64f26a4",
+    "quarantined": false,
+    "validation_receipt": "/tmp/complaint-tui01-independent-20261021-07vbse3r/native_sealed_validation.json",
+    "junit": "/tmp/complaint-tui01-independent-20261021-07vbse3r/required_cases.xml",
+    "collected": 3,
+    "passed": 2,
+    "failed": 1,
+    "skipped": 0,
+    "reason": "PTY smoke exceeded fixed15s before any transcript; investigation pending, deadline unchanged.",
+    "native_merge_attempted": false,
+    "task_completed": false
   }
 }

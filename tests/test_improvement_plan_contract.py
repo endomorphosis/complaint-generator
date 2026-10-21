@@ -106,7 +106,8 @@ def test_generate_produces_real_native_markdown_tasks_without_claiming_completio
 
     parsed = parse_markdown_field_board(Path(result["board_path"]).read_text(encoding="utf-8"))
     assert [item["task_id"] for item in parsed["tasks"]] == [item["id"] for item in spec["tasks"]]
-    for task in parsed["tasks"]:
+    for task, source_task in zip(parsed["tasks"], spec["tasks"]):
+        assert task["runtime_guidance"] == " ".join(source_task["implementation_prompt"].splitlines())
         assert task["status"] == "todo"
         assert task["completion"] == "validation"
         assert task["provider_role"] == "grok-only"
