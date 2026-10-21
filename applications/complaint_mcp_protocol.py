@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-from .complaint_workspace import ComplaintWorkspaceService, WorkspaceAccess, workspace_access_scope
+from .complaint_workspace import ComplaintWorkspaceService, WorkspaceAccess, WorkspaceAuthorizationDenied, workspace_access_scope
 
 
 JSONRPC_VERSION = "2.0"
@@ -743,10 +743,11 @@ def _handle_jsonrpc_message(
                 },
             )
         except Exception as exc:
+            message = "authorization_denied" if isinstance(exc, WorkspaceAuthorizationDenied) else "workspace_operation_failed"
             return _success(
                 request_id,
                 {
-                    "content": [{"type": "text", "text": str(exc)}],
+                    "content": [{"type": "text", "text": message}],
                     "isError": True,
                 },
             )

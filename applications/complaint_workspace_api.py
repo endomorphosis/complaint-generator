@@ -391,6 +391,10 @@ def create_complaint_workspace_router(
                         return await fn(*guard_args, **guard_kwargs)
                     except WorkspaceAuthorizationDenied:
                         raise HTTPException(status_code=403, detail="authorization_denied") from None
+                    except HTTPException:
+                        raise
+                    except Exception:
+                        raise HTTPException(status_code=500, detail="workspace_operation_failed") from None
 
                 return method_registrar(path, *args, **kwargs)(guarded)
 
@@ -906,6 +910,8 @@ def create_complaint_workspace_router(
             return workspace.call_mcp_tool(request.tool_name, request.arguments)
         except WorkspaceAuthorizationDenied:
             return {"ok": False, "error": "authorization_denied", "isError": True}
+        except Exception:
+            return {"ok": False, "error": "workspace_operation_failed", "isError": True}
 
     @router.post("/api/complaint-workspace/mcp/rpc")
     async def call_jsonrpc(request: JsonRpcRequest, http_request: Request) -> Response:

@@ -6,6 +6,7 @@ Synthetic principals only. No live model, network, keyring, daemon, or real comp
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -116,7 +117,10 @@ def test_colliding_legacy_slugs_do_not_share_namespace_or_data(tmp_path: Path) -
 def test_legacy_owner_mismatch_is_not_deserialized_or_overwritten(tmp_path: Path) -> None:
     root = tmp_path / "sessions"
     alice = _service(root, WorkspaceAccess.authenticated(ALICE, case_id=ALICE))
-    legacy = _plant_legacy(alice, "someone-else", MARKER)
+    legacy = _plant_legacy(alice, ALICE, MARKER)
+    payload = json.loads(legacy.read_text())
+    payload["user_id"] = "someone-else"
+    legacy.write_text(json.dumps(payload))
     before = legacy.read_bytes()
     opened = alice.get_session(ALICE)
     assert opened["session"]["intake_answers"] == {}
@@ -199,7 +203,10 @@ def test_traversal_and_symlink_escape_do_not_read_or_write(tmp_path: Path) -> No
     assert MARKER not in str(symlink_read.value)
     assert secret.read_text(encoding="utf-8") == MARKER
 
-    escape = root / "escape"
+    namespace.unlink()
+    alice.write_contained_workspace_file(ALICE, "owned-note.txt", b"owned-note")
+    private_root = root / 'private-files' / f'p-{principal_namespace(ALICE)}' / f'c-{principal_namespace(ALICE)}'
+    escape = private_root / "escape"
     escape.symlink_to(outside, target_is_directory=True)
     with pytest.raises(WorkspaceAuthorizationDenied):
         alice.read_contained_workspace_file(ALICE, "escape/secret.txt")
@@ -346,3 +353,177 @@ def test_http_mcp_and_facade_authorization(tmp_path: Path, monkeypatch: pytest.M
     assert MARKER not in json.dumps(second)
     listed = local_client.get("/api/complaint-workspace/mcp/tools")
     assert listed.status_code == 200
+
+
+@pytest.mark.parametrize('transport', ['http', 'mcp', 'rpc', 'service'])
+def test_contained_files_cannot_read_or_overwrite_another_principal(tmp_path, transport):
+    root = tmp_path / 'sessions'
+    alice = _service(root, WorkspaceAccess.authenticated(ALICE, case_id=ALICE))
+    bob = _service(root, WorkspaceAccess.authenticated(BOB, case_id=BOB))
+    bob.submit_intake_answers(BOB, {'party_name': OTHER_MARKER})
+    target = bob._session_path(BOB)
+    original = target.read_bytes()
+    client = _client(alice, _registry())
+    headers = {'Authorization': 'Bearer token-alice'}
+    for operation in ['read', 'write']:
+        args = {'user_id': ALICE, 'relative_name': target.name, 'content': 'overwrite'}
+        if transport == 'service':
+            with pytest.raises(WorkspaceAuthorizationDenied):
+                if operation == 'read':
+                    alice.read_contained_workspace_file(ALICE, target.name)
+                else:
+                    alice.write_contained_workspace_file(ALICE, target.name, b'overwrite')
+        elif transport == 'http':
+            if operation == 'read':
+                response = client.get('/api/complaint-workspace/contained-file', params=args, headers=headers)
+            else:
+                response = client.post('/api/complaint-workspace/contained-file', json=args, headers=headers)
+            assert response.status_code == 403
+            assert OTHER_MARKER not in response.text
+        elif transport == 'mcp':
+            response = client.post('/api/complaint-workspace/mcp/call', headers=headers,
+                json={'tool_name': f'complaint.{operation}_contained_file', 'arguments': args})
+            assert response.json()['isError'] is True
+            assert response.json()['error'] == 'authorization_denied'
+        else:
+            response = client.post('/api/complaint-workspace/mcp/rpc', headers=headers,
+                json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                      'params': {'name': f'complaint.{operation}_contained_file', 'arguments': args}})
+            assert response.json()['result']['isError'] is True
+            assert response.json()['result']['content'][0]['text'] == 'authorization_denied'
+        assert target.read_bytes() == original
+
+
+def test_same_filename_and_case_denials_preserve_scoped_artifacts(tmp_path):
+    root = tmp_path / 'sessions'
+    alice = _service(root, WorkspaceAccess.authenticated(ALICE, case_id=ALICE))
+    bob = _service(root, WorkspaceAccess.authenticated(BOB, case_id=BOB))
+    alice.write_contained_workspace_file(ALICE, 'nested/note.txt', MARKER.encode())
+    bob.write_contained_workspace_file(BOB, 'nested/note.txt', OTHER_MARKER.encode())
+    fresh_alice = _service(root, WorkspaceAccess.authenticated(ALICE, case_id=ALICE))
+    assert fresh_alice.read_contained_workspace_file(ALICE, 'nested/note.txt') == MARKER.encode()
+    assert bob.read_contained_workspace_file(BOB, 'nested/note.txt') == OTHER_MARKER.encode()
+    wrong_case = _service(root, WorkspaceAccess.authenticated(ALICE, case_id='foreign-case'))
+    with pytest.raises(WorkspaceAuthorizationDenied):
+        wrong_case.read_contained_workspace_file(ALICE, 'nested/note.txt')
+    with pytest.raises(WorkspaceAuthorizationDenied):
+        wrong_case.write_contained_workspace_file(ALICE, 'nested/note.txt', b'overwrite')
+    assert fresh_alice.read_contained_workspace_file(ALICE, 'nested/note.txt') == MARKER.encode()
+    assert bob.read_contained_workspace_file(BOB, 'nested/note.txt') == OTHER_MARKER.encode()
+    assert not (root / 'nested').exists()
+
+
+@pytest.mark.parametrize('mutation', ['root_symlink', 'root_ancestor_symlink', 'root_replaced', 'private_parent_symlink', 'leaf_hardlink'])
+def test_private_file_directory_and_inode_boundaries_refuse_before_mutation(tmp_path, mutation):
+    root, outside = tmp_path / 'sessions', tmp_path / 'outside'
+    outside.mkdir()
+    secret = outside / 'note.txt'; secret.write_text(MARKER)
+    if mutation == 'root_symlink':
+        root.symlink_to(outside, target_is_directory=True)
+        with pytest.raises(WorkspaceAuthorizationDenied):
+            _service(root, WorkspaceAccess.authenticated(ALICE))
+    elif mutation == 'root_ancestor_symlink':
+        alias = tmp_path / 'alias'; alias.symlink_to(outside, target_is_directory=True)
+        with pytest.raises(WorkspaceAuthorizationDenied):
+            _service(alias / 'sessions', WorkspaceAccess.authenticated(ALICE))
+        assert not (outside / 'sessions').exists()
+    else:
+        alice = _service(root, WorkspaceAccess.authenticated(ALICE, case_id=ALICE))
+        alice.write_contained_workspace_file(ALICE, 'note.txt', b'owned-note')
+        artifact = root / 'private-files' / f'p-{principal_namespace(ALICE)}' / f'c-{principal_namespace(ALICE)}' / 'note.txt'
+        if mutation == 'root_replaced':
+            root.rename(tmp_path / 'preserved-original')
+            root.symlink_to(outside, target_is_directory=True)
+        elif mutation == 'private_parent_symlink':
+            artifact.parent.rename(artifact.parent.with_name('preserved-original'))
+            artifact.parent.symlink_to(outside, target_is_directory=True)
+        else:
+            artifact.unlink(); os.link(secret, artifact)
+        with pytest.raises(WorkspaceAuthorizationDenied):
+            alice.read_contained_workspace_file(ALICE, 'note.txt')
+        with pytest.raises(WorkspaceAuthorizationDenied):
+            alice.write_contained_workspace_file(ALICE, 'note.txt', b'overwrite')
+    assert secret.read_text() == MARKER
+
+
+@pytest.mark.parametrize('record', [{}, {'user_id': BOB, 'case_id': BOB}, ['invalid'], 'invalid-json'])
+def test_unowned_or_invalid_namespaced_record_is_not_relabelled_or_replaced(tmp_path, record):
+    alice = _service(tmp_path, WorkspaceAccess.authenticated(ALICE, case_id=ALICE))
+    target = alice._session_path(ALICE)
+    target.write_text(json.dumps(record) if record != 'invalid-json' else '{')
+    original = target.read_bytes()
+    with pytest.raises(WorkspaceAuthorizationDenied):
+        alice.get_session(ALICE)
+    with pytest.raises(WorkspaceAuthorizationDenied):
+        alice._save_state({'user_id': ALICE, 'case_id': ALICE, 'intake_answers': {}})
+    assert target.read_bytes() == original
+
+
+@pytest.mark.parametrize('path', [
+    '/docket-dataset/metadata', '/docket-dataset/graph', '/docket-dataset/view',
+    '/docket-dataset/search', '/workspace-dataset/view', '/workspace-dataset/search',
+    '/workspace-dataset/graph', '/packaged-docket/view',
+    '/packaged-docket/operator-dashboard', '/packaged-docket/operator-dashboard-report',
+])
+@pytest.mark.parametrize('authenticated', [False, True])
+def test_path_only_http_readers_refuse_before_backend_or_foreign_file_access(tmp_path, monkeypatch, path, authenticated):
+    service = _service(tmp_path / 'sessions', WorkspaceAccess.trusted_local())
+    foreign = tmp_path / 'foreign.json'; foreign.write_text(MARKER)
+    original = foreign.read_bytes()
+    def backend_forbidden(*args, **kwargs):
+        pytest.fail('unauthorized reader reached dataset backend')
+    monkeypatch.setattr(service, '_load_docket_dataset_payload', backend_forbidden)
+    monkeypatch.setattr(service, '_load_workspace_dataset_payload', backend_forbidden)
+    client = _client(service, _registry())
+    response = client.get('/api/complaint-workspace' + path,
+        params={'input_path': str(foreign), 'manifest_path': str(foreign), 'input_type': 'json', 'query': 'synthetic'},
+        headers={'Authorization': 'Bearer token-alice'} if authenticated else {})
+    assert response.status_code == 403
+    assert response.json()['detail'] == 'authorization_denied'
+    assert MARKER not in response.text and str(foreign) not in response.text
+    assert foreign.read_bytes() == original
+
+
+@pytest.mark.parametrize('tool,args', [
+    ('complaint.get_docket_dataset_metadata', {'input_path': '/foreign/private.json'}),
+    ('complaint.search_email_duckdb', {'index_path': '/foreign/private.duckdb', 'query': 'synthetic'}),
+    ('complaint.get_workspace_data_schema', {'manifest_path': '/foreign/manifest.json'}),
+    ('complaint.migrate_legacy_workspace_data', {'output_dir': '/foreign/output'}),
+    ('complaint.review_generated_exports', {'artifact_dir': '/foreign/exports'}),
+    ('complaint.review_ui', {'screenshot_dir': '/foreign/screenshots'}),
+    ('complaint.review_ui', {'screenshot_paths': ['/foreign/private.png']}),
+])
+def test_mcp_host_path_capability_is_not_granted_by_authentication(tmp_path, tool, args):
+    service = _service(tmp_path, WorkspaceAccess.authenticated(ALICE, case_id=ALICE))
+    with pytest.raises(WorkspaceAuthorizationDenied):
+        service.call_mcp_tool(tool, {'user_id': ALICE, **args})
+
+
+def test_explicit_local_dataset_operator_and_public_corpus_discovery_remain_available(tmp_path, monkeypatch):
+    service = _service(tmp_path, WorkspaceAccess.trusted_local())
+    payload = {'dataset_id': 'synthetic-public', 'documents': [], 'metadata': {'source': 'public-legal'}}
+    monkeypatch.setattr(service, '_load_docket_dataset_payload', lambda *a, **k: payload)
+    assert service.get_docket_dataset_graph('/operator-selected/public.json', input_type='json')['dataset_id'] == 'synthetic-public'
+    monkeypatch.setattr(service, 'search_corpus', lambda *a, **k: {'public_corpus': True})
+    from applications.complaint_workspace import workspace_access_scope
+    with workspace_access_scope(WorkspaceAccess.unauthenticated()):
+        assert service.call_mcp_tool('complaint.search_corpus', {'query': 'public law'}) == {'public_corpus': True}
+
+
+def test_transport_errors_never_echo_backend_private_paths_or_values(tmp_path, monkeypatch):
+    service = _service(tmp_path, WorkspaceAccess.trusted_local())
+    def fail(*a, **k):
+        raise RuntimeError(MARKER + '/foreign/private/path')
+    monkeypatch.setattr(service, 'read_contained_workspace_file', fail)
+    client = _client(service, _registry())
+    headers = {'Authorization': 'Bearer token-alice'}
+    response = client.get('/api/complaint-workspace/contained-file', params={'relative_name': 'note.txt'}, headers=headers)
+    assert response.status_code == 500 and response.json()['detail'] == 'workspace_operation_failed'
+    assert MARKER not in response.text and '/foreign/private/path' not in response.text
+    for endpoint, payload in [
+        ('/mcp/call', {'tool_name': 'complaint.read_contained_file', 'arguments': {'relative_name': 'note.txt'}}),
+        ('/mcp/rpc', {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': 'complaint.read_contained_file', 'arguments': {'relative_name': 'note.txt'}}}),
+    ]:
+        response = client.post('/api/complaint-workspace' + endpoint, json=payload, headers=headers)
+        assert 'workspace_operation_failed' in response.text
+        assert MARKER not in response.text and '/foreign/private/path' not in response.text

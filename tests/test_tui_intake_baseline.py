@@ -396,7 +396,9 @@ def _run_pty(
 
 
 def _session_path(session_dir: Path, user_id: str) -> Path:
-    return session_dir / f"{user_id}.json"
+    from applications.complaint_workspace import namespace_filename
+
+    return session_dir / namespace_filename(user_id)
 
 
 def _load_session(path: Path) -> dict:
@@ -623,12 +625,11 @@ def test_receipt_records_gaps_independently_of_baseline_smoke(monkeypatch: pytes
         raw_text = session_path.read_text(encoding="utf-8")
         if not raw_text.startswith("{"):
             _fail("session storage is not plaintext JSON")
-        control = session_dir / "permission-control.txt"
-        control.write_text("x", encoding="utf-8")
         session_mode = session_path.stat().st_mode & 0o777
-        control_mode = control.stat().st_mode & 0o777
-        if session_mode != control_mode:
-            _fail("session file permissions were changed from a normal plaintext write")
+        # The historical baseline receipt describes its original umask writer.
+        # PRIV002 now restricts access while encryption remains a separate gap.
+        if session_mode != 0o600:
+            _fail("session file permissions are not owner-only 0600")
         if "ciphertext" in raw_text.lower() or "encrypted_payload" in raw_text:
             _fail("session file unexpectedly used an encryption envelope")
 

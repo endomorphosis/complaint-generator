@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import threading
 import tempfile
@@ -965,8 +966,10 @@ class WorkspaceAuthorizer:
     """
 
     def __call__(self, requirement: AuthorizationRequirement, context: WorkspaceDispatchContext) -> bool:
-        if not isinstance(requirement, AuthorizationRequirement) or not requirement.protected:
-            return not isinstance(requirement, AuthorizationRequirement)
+        if not isinstance(requirement, AuthorizationRequirement):
+            return False
+        if not requirement.protected:
+            return True
         attributes = context.attributes
         trust = str(attributes.get("trust") or "")
         requested_user = attributes.get("user_id")
@@ -1036,6 +1039,13 @@ _PUBLIC_MCP_TOOLS = frozenset(
     }
 )
 _LEGACY_MAP_NAME = "legacy-namespace-map.json"
+_MCP_HOST_PATH_ARGUMENTS = frozenset({
+    "input_path", "manifest_path", "statefile_path", "evidence_db_path",
+    "legal_authority_db_path", "claim_support_db_path", "index_path", "paths",
+    "artifact_path", "artifact_dir", "output_dir", "output_path", "evidence_root",
+    "duckdb_output_dir", "screenshot_dir", "screenshot_paths", "config_path", "gmail_oauth_client_secrets",
+    "gmail_oauth_token_cache",
+})
 
 
 def principal_namespace(principal_id: str) -> str:
@@ -2728,8 +2738,14 @@ class ComplaintWorkspaceService:
         authorizer: Optional[WorkspaceAuthorizer] = None,
     ) -> None:
         base_dir = Path(root_dir) if root_dir is not None else _SESSION_DIR
-        self._session_dir = base_dir
-        self._session_dir.mkdir(parents=True, exist_ok=True)
+        self._session_dir = Path(os.path.abspath(base_dir))
+        if self._session_dir.resolve() != self._session_dir:
+            raise WorkspaceAuthorizationDenied()
+        self._session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        root_stat = self._session_dir.lstat()
+        if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != os.getuid():
+            raise WorkspaceAuthorizationDenied()
+        self._session_directory_identity = (root_stat.st_dev, root_stat.st_ino)
         self._last_draft_refinement_error: Optional[str] = None
         self._default_access = access if access is not None else WorkspaceAccess.trusted_local()
         self._authorizer = authorizer or WorkspaceAuthorizer()
@@ -2795,21 +2811,54 @@ class ComplaintWorkspaceService:
     def _legacy_session_path(self, user_id: str) -> Path:
         return self._session_dir / self._legacy_filename(user_id)
 
-    def _open_relative(self, relative: str, flags: int, mode: int = 0o600) -> int:
+    def _open_session_directory(self) -> int:
+        try:
+            if self._session_dir.resolve() != self._session_dir:
+                raise WorkspaceAuthorizationDenied()
+            descriptor = os.open(self._session_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            metadata = os.fstat(descriptor)
+            if ((metadata.st_dev, metadata.st_ino) != self._session_directory_identity
+                    or metadata.st_uid != os.getuid()):
+                os.close(descriptor)
+                raise WorkspaceAuthorizationDenied()
+            return descriptor
+        except OSError:
+            raise WorkspaceAuthorizationDenied() from None
+
+    def _require_local_filesystem_access(self) -> None:
+        """Host paths are operator capabilities, not remote resource identifiers.
+
+        Dataset/manifests and legacy import/export adapters can traverse more
+        than their first file. Until they expose an owner-bound storage handle,
+        only an explicitly unbound local operator may give them host paths.
+        """
+        access = self._effective_access()
+        if access.trust != "trusted_local" or access.principal_id or access.case_id:
+            raise WorkspaceAuthorizationDenied()
+        self._check_access(None, ability="filesystem")
+
+    def _open_relative(self, relative: str, flags: int, mode: int = 0o600, *,
+                       root_fd: Optional[int] = None, create_parents: bool = False) -> int:
         if not isinstance(relative, str) or not relative or relative.startswith("/") or "\\" in relative or "\x00" in relative:
             raise WorkspaceAuthorizationDenied()
         parts = [part for part in relative.split("/") if part != ""]
         if not parts or any(part in {".", ".."} for part in parts):
             raise WorkspaceAuthorizationDenied()
-        root_fd = os.open(self._session_dir, os.O_RDONLY | os.O_DIRECTORY)
+        root_fd = self._open_session_directory() if root_fd is None else os.dup(root_fd)
         current = -1
         close_current = False
         try:
             for index, part in enumerate(parts):
                 last = index == len(parts) - 1
-                open_flags = os.O_NOFOLLOW | (flags if last else (os.O_RDONLY | os.O_DIRECTORY))
+                parent_fd = root_fd if not close_current else current
+                if not last and create_parents:
+                    try:
+                        os.mkdir(part, mode=0o700, dir_fd=parent_fd)
+                    except FileExistsError:
+                        pass
+                open_flags = os.O_NOFOLLOW | os.O_NONBLOCK | (flags if last else (os.O_RDONLY | os.O_DIRECTORY))
                 try:
-                    opened = os.open(part, open_flags, mode if last else 0, dir_fd=root_fd if not close_current else current)
+                    opened = os.open(part, open_flags, mode if last else 0, dir_fd=parent_fd)
                 except OSError as exc:
                     if exc.errno in {errno.ELOOP, errno.ENOTDIR, errno.EPERM}:
                         raise WorkspaceAuthorizationDenied() from None
@@ -2818,6 +2867,10 @@ class ComplaintWorkspaceService:
                     os.close(current)
                 current = opened
                 close_current = True
+            metadata = os.fstat(current)
+            if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1
+                    or metadata.st_uid != os.getuid()):
+                raise WorkspaceAuthorizationDenied()
             owned = current
             current = -1
             close_current = False
@@ -2840,10 +2893,14 @@ class ComplaintWorkspaceService:
         finally:
             os.close(fd)
 
-    def _write_bytes_nofollow(self, relative: str, payload: bytes) -> None:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-        fd = self._open_relative(relative, flags)
+    def _write_bytes_nofollow(self, relative: str, payload: bytes, *,
+                              root_fd: Optional[int] = None, create_parents: bool = False) -> None:
+        # Validate the opened inode before truncation, including hard-link and
+        # special-file refusal. Opening with O_TRUNC would already damage it.
+        fd = self._open_relative(relative, os.O_WRONLY | os.O_CREAT,
+                                 root_fd=root_fd, create_parents=create_parents)
         try:
+            os.ftruncate(fd, 0)
             view = memoryview(payload)
             while view:
                 written = os.write(fd, view)
@@ -2851,7 +2908,7 @@ class ComplaintWorkspaceService:
         finally:
             os.close(fd)
 
-    def _read_json_file(self, filename: str) -> Optional[Dict[str, Any]]:
+    def _read_json_file(self, filename: str, *, strict: bool = False) -> Optional[Dict[str, Any]]:
         try:
             raw = self._read_bytes_nofollow(filename)
         except FileNotFoundError:
@@ -2859,8 +2916,12 @@ class ComplaintWorkspaceService:
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
+            if strict:
+                raise WorkspaceAuthorizationDenied() from None
             return None
         if not isinstance(payload, dict):
+            if strict:
+                raise WorkspaceAuthorizationDenied()
             return None
         return payload
 
@@ -2900,10 +2961,8 @@ class ComplaintWorkspaceService:
 
     def _prepare_loaded_state(self, payload: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         owner = payload.get("user_id")
-        if owner is not None and str(owner) != user_id:
+        if not isinstance(owner, str) or owner != user_id:
             raise WorkspaceAuthorizationDenied()
-        if owner is None:
-            payload["user_id"] = user_id
         record_case = _state_case_id(payload, user_id)
         self._check_access(user_id, ability="read", record_case_id=record_case)
         expected_case = _REQUEST_CASE.get() or self._effective_access().case_id
@@ -2933,7 +2992,7 @@ class ComplaintWorkspaceService:
             raise WorkspaceAuthorizationDenied()
 
     def _load_owned_payload(self, user_id: str) -> Optional[Dict[str, Any]]:
-        namespaced = self._read_json_file(self._namespace_filename(user_id))
+        namespaced = self._read_json_file(self._namespace_filename(user_id), strict=True)
         if namespaced is not None:
             return self._prepare_loaded_state(namespaced, user_id)
         slug = self._legacy_filename(user_id)
@@ -2948,13 +3007,32 @@ class ComplaintWorkspaceService:
         self._record_legacy_owner(slug, user_id)
         return self._prepare_loaded_state(legacy, user_id)
 
+    def _private_file_relative(self, user_id: Optional[str], relative_name: str, *, ability: str) -> str:
+        resolved = self._check_access(user_id, ability=ability)
+        state = self._load_state(resolved)
+        case_id = _state_case_id(state, resolved)
+        if (not isinstance(relative_name, str) or not relative_name or relative_name.startswith("/")
+                or "\\" in relative_name or "\x00" in relative_name
+                or any(part in {"", ".", "..", _LEGACY_MAP_NAME}
+                       or re.fullmatch(r"p-[0-9a-f]{64}\.json", part)
+                       for part in relative_name.split("/"))):
+            raise WorkspaceAuthorizationDenied()
+        return f"private-files/p-{principal_namespace(resolved)}/c-{principal_namespace(case_id)}/{relative_name}"
+
     def read_contained_workspace_file(self, user_id: Optional[str], relative_name: str) -> bytes:
-        self._check_access(user_id, ability="read")
-        return self._read_bytes_nofollow(str(relative_name or ""))
+        relative = self._private_file_relative(user_id, relative_name, ability="read")
+        try:
+            return self._read_bytes_nofollow(relative)
+        except OSError:
+            raise WorkspaceAuthorizationDenied() from None
 
     def write_contained_workspace_file(self, user_id: Optional[str], relative_name: str, content: bytes) -> Dict[str, Any]:
         resolved = self._check_access(user_id, ability="write")
-        self._write_bytes_nofollow(str(relative_name or ""), bytes(content or b""))
+        relative = self._private_file_relative(resolved, relative_name, ability="write")
+        try:
+            self._write_bytes_nofollow(relative, bytes(content or b""), create_parents=True)
+        except OSError:
+            raise WorkspaceAuthorizationDenied() from None
         return {"user_id": resolved, "relative_name": str(relative_name or ""), "written": True, "at_rest_protection": "plaintext_pending"}
 
     def remember_private_reference(
@@ -3068,20 +3146,23 @@ class ComplaintWorkspaceService:
         self._check_access(user_id, ability="write", record_case_id=record_case)
         _apply_effective_privacy_policy(state, user_id)
         filename = self._namespace_filename(user_id)
-        destination = self._session_dir / filename
-        if destination.is_symlink():
-            raise WorkspaceAuthorizationDenied()
+        # A direct save must not overwrite a record with a foreign identity.
+        existing = self._read_json_file(filename, strict=True)
+        if existing is not None:
+            self._prepare_loaded_state(existing, user_id)
+            if _state_case_id(existing, user_id) != record_case:
+                raise WorkspaceAuthorizationDenied()
         temp_name = f".{filename}.{uuid.uuid4().hex}.tmp"
-        temp_path = self._session_dir / temp_name
+        root_fd = self._open_session_directory()
         try:
-            self._write_bytes_nofollow(temp_name, json.dumps(state, indent=2, sort_keys=True).encode("utf-8"))
-            os.replace(temp_path, destination)
+            self._write_bytes_nofollow(temp_name, json.dumps(state, indent=2, sort_keys=True).encode("utf-8"), root_fd=root_fd)
+            os.replace(temp_name, filename, src_dir_fd=root_fd, dst_dir_fd=root_fd)
         finally:
-            if temp_path.exists():
-                try:
-                    temp_path.unlink()
-                except OSError:
-                    pass
+            try:
+                os.unlink(temp_name, dir_fd=root_fd)
+            except FileNotFoundError:
+                pass
+            os.close(root_fd)
         return state
 
     def _build_question_status(self, answers: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -4741,6 +4822,8 @@ class ComplaintWorkspaceService:
         legal_authority_db_path: Optional[str | Path] = None,
         claim_support_db_path: Optional[str | Path] = None,
     ) -> Dict[str, Any]:
+        if any(value is not None for value in (manifest_path, statefile_path, evidence_db_path, legal_authority_db_path, claim_support_db_path)):
+            self._require_local_filesystem_access()
         from complaint_generator.data_migration import inspect_workspace_data_schema
 
         resolved_user_id = str(user_id or DEFAULT_USER_ID)
@@ -4772,6 +4855,7 @@ class ComplaintWorkspaceService:
         package_name: Optional[str] = None,
         include_car: bool = True,
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         from complaint_generator.data_migration import migrate_legacy_workspace_data
 
         resolved_user_id = str(user_id or DEFAULT_USER_ID)
@@ -5756,6 +5840,8 @@ class ComplaintWorkspaceService:
         backend_id: Optional[str] = None,
         notes: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if artifact_path or artifact_dir:
+            self._require_local_filesystem_access()
         from .ui_review import review_complaint_export_artifacts
 
         artifact_metadata: List[Dict[str, Any]] = []
@@ -6069,6 +6155,7 @@ class ComplaintWorkspaceService:
         note_title: Optional[str] = None,
         source: Optional[str] = "dashboard-chat-upload",
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         return await self.request_handlers.upload_local_evidence_files(
             user_id,
             files=files,
@@ -6456,6 +6543,7 @@ class ComplaintWorkspaceService:
         checkpoint_name: Optional[str] = None,
         uid_window_size: Optional[int] = None,
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         async def _run_import() -> Dict[str, Any]:
             from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
@@ -6522,6 +6610,7 @@ class ComplaintWorkspaceService:
         bm25_search_query: Optional[str] = None,
         bm25_search_limit: int = 20,
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         async def _run_pipeline() -> Dict[str, Any]:
             from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
@@ -6570,6 +6659,7 @@ class ComplaintWorkspaceService:
         bm25_k1: float = 1.2,
         bm25_b: float = 0.75,
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
         search_email_duckdb_corpus_upstream = load_legal_symbol("search_email_duckdb_corpus", module="email_pipeline")
@@ -6592,6 +6682,7 @@ class ComplaintWorkspaceService:
         kind: str = "document",
         evidence_root: Optional[str] = None,
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         from complaint_generator.local_evidence_import import import_local_evidence
 
         return import_local_evidence(
@@ -8904,12 +8995,12 @@ class ComplaintWorkspaceService:
     def reset_session(self, user_id: Optional[str]) -> Dict[str, Any]:
         return self.request_handlers.reset_session(user_id)
 
-    @staticmethod
-    def _resolve_docket_path(path_value: str | Path) -> str:
+    def _resolve_docket_path(self, path_value: str | Path) -> str:
+        self._require_local_filesystem_access()
         return str(Path(str(path_value)).expanduser().resolve())
 
-    @staticmethod
-    def _resolve_workspace_dataset_path(path_value: str | Path) -> str:
+    def _resolve_workspace_dataset_path(self, path_value: str | Path) -> str:
+        self._require_local_filesystem_access()
         return str(Path(str(path_value)).expanduser().resolve())
 
     def _load_workspace_dataset_payload(
@@ -10275,6 +10366,7 @@ class ComplaintWorkspaceService:
         }
 
     def get_packaged_docket_operator_dashboard(self, manifest_path: str | Path) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         from integrations.ipfs_datasets.legal_data import get_packaged_docket_operator_dashboard
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
@@ -10291,6 +10383,7 @@ class ComplaintWorkspaceService:
         *,
         report_format: str = "parsed",
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         from integrations.ipfs_datasets.legal_data import load_packaged_docket_operator_dashboard_report
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
@@ -10317,6 +10410,7 @@ class ComplaintWorkspaceService:
         chain_until_satisfied: bool = True,
         attach_refreshed_packets: bool = False,
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
         execute_packaged_docket_proof_revalidation_queue = load_legal_symbol(
@@ -10352,6 +10446,7 @@ class ComplaintWorkspaceService:
         execution_top_k: int = 10,
         chain_until_satisfied: bool = True,
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
         persist_packaged_docket_proof_revalidation_queue = load_legal_symbol(
@@ -10624,6 +10719,8 @@ class ComplaintWorkspaceService:
 
     def call_mcp_tool(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         args = dict(arguments or {})
+        if any(args.get(key) not in (None, "", []) for key in _MCP_HOST_PATH_ARGUMENTS):
+            self._require_local_filesystem_access()
         if tool_name not in _PUBLIC_MCP_TOOLS:
             resolved = self._resolve_user_id(args.get("user_id"))
             case_id = args.get("case_id")

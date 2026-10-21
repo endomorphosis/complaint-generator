@@ -592,15 +592,15 @@ def test_loaded_foreign_identity_cannot_transfer_cloud_consent(tmp_path, spies):
     state["privacy_policy"] = llm.privacy_policy_for_mode("foreign-user", "foreign-case", "grok")
     state["draft"] = {"title": "Synthetic", "body": MARKER}
     service._session_path("selected-user").write_text(json.dumps(state))
-    selected = service._load_state("selected-user")
-    assert selected["user_id"] == "selected-user"
-    assert selected["privacy_policy_load"]["admitted"] is False
-    assert selected["privacy_policy"]["cloud_processing_enabled"] is False
-    assert service._refine_draft_with_llm_router(selected, selected["draft"], provider="grok_cli", model="grok-4.7") is None
-    _assert_quiet(spies, {"reason": service._last_draft_refinement_error})
-    assert service.set_privacy_policy("selected-user", "local")["updated"] is True
+    original = service._session_path("selected-user").read_bytes()
+    from applications.complaint_workspace import WorkspaceAuthorizationDenied
+    with pytest.raises(WorkspaceAuthorizationDenied, match="^authorization_denied$"):
+        service._load_state("selected-user")
+    with pytest.raises(WorkspaceAuthorizationDenied, match="^authorization_denied$"):
+        service.set_privacy_policy("selected-user", "local")
+    assert service._session_path("selected-user").read_bytes() == original
+    _assert_quiet(spies, {"reason": "authorization_denied"})
     assert not service._session_path("foreign-user").exists()
-    assert service._load_state("selected-user")["privacy_policy"]["processing_mode"] == "local_private"
 
 
 def test_draft_backend_error_receipt_cannot_quote_private_case(tmp_path, monkeypatch):
