@@ -1249,7 +1249,7 @@ Implementation instructions:
 
 ## CIMP-OPS-06 Exercise actual supervisor startup, monitored task progress, restart and resume
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.supervision
