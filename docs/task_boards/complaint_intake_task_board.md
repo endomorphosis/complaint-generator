@@ -490,7 +490,7 @@ Implementation instructions:
 
 ## CIMP-LAW-05 Gate rule use by temporal authority and legal treatment status
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.law
