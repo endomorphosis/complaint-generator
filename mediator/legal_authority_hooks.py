@@ -26,12 +26,14 @@ from integrations.ipfs_datasets.types import (
     CaseAuthority,
     CaseFact,
     LegalSearchProgram,
+    ProvenanceRecord,
     RuleCandidate,
 )
 from integrations.ipfs_datasets.legal import (
     LEGAL_SCRAPERS_AVAILABLE,
     LEGAL_SOURCE_AVAILABILITY,
     get_last_legal_search_diagnostic,
+    lookup_bounded_legal_corpus,
     search_federal_register,
     search_recap_documents,
     search_state_administrative_rules,
@@ -441,20 +443,10 @@ class LegalAuthoritySearchHook:
             'source_availability': dict(LEGAL_SOURCE_AVAILABILITY),
         }
 
-        for bucket_name, search_key in (
-            ('state_statutes', 'search_state_laws'),
-            ('administrative_rules', 'search_state_administrative_rules'),
-        ):
-            diagnostic = get_last_legal_search_diagnostic(search_key)
-            if not diagnostic:
-                continue
-            if str(diagnostic.get('query') or '') != str(query or ''):
-                continue
-            diagnostic_state = str(diagnostic.get('state_code') or '').strip().upper()
-            requested_state = str(state or '').strip().upper()
-            if requested_state and diagnostic_state and diagnostic_state != requested_state:
-                continue
-            diagnostics[bucket_name] = diagnostic
+        # Default Mediator list-returning calls publish only this query's
+        # actual bounded outcomes, never stale module-global legacy diagnostics.
+        if getattr(self, '_bounded_diagnostic_query', None) == query:
+            diagnostics.update(getattr(self, '_bounded_diagnostics', {}))
 
         return diagnostics
     def _http_get_json(self, url: str, *, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -836,203 +828,49 @@ class LegalAuthoritySearchHook:
         return self._dedupe_authority_rows(filtered, max_results=max_results)
     
     def search_us_code(self, query: str, title: Optional[str] = None,
-                      max_results: int = 10) -> List[Dict[str, Any]]:
-        """
-        Search the US Code for relevant statutes.
-        
-        Args:
-            query: Search query (e.g., "civil rights", "employment discrimination")
-            title: Optional US Code title to narrow search
-            max_results: Maximum number of results to return
-            
-        Returns:
-            List of statute dictionaries with citation, text, and metadata
-        """
-        if not LEGAL_SCRAPERS_AVAILABLE or search_us_code is None:
-            self.mediator.log('legal_authority_unavailable', 
-                search_type='us_code', query=query)
-            return self._dedupe_authority_rows(
-                self._search_federal_statutes_fallback(query, max_results=max_results)
-                + self._search_oregon_statutes_fallback(query, max_results=max_results),
-                max_results=max_results,
-            )
-        
-        try:
-            # Use LLM to generate search terms if needed
-            search_terms = self._generate_search_terms(query)
-            
-            results = []
-            for term in search_terms[:3]:  # Limit to top 3 terms
-                try:
-                    statute_results = search_us_code(term, max_results=max_results)
-                    if statute_results:
-                        results.extend(
-                            {
-                                **statute,
-                                'source': statute.get('source', 'us_code'),
-                            }
-                            for statute in statute_results
-                            if isinstance(statute, dict)
-                        )
-                except Exception as e:
-                    self.mediator.log('legal_authority_search_error',
-                        search_type='us_code', term=term, error=str(e))
-            
-            fallback_results: List[Dict[str, Any]] = self._search_federal_statutes_fallback(query, max_results=max_results)
-            if (
-                'oregon' in str(query or '').lower()
-                or 'ors' in str(query or '').lower()
-                or 'clackamas' in str(query or '').lower()
-            ) or not results:
-                fallback_results.extend(self._search_oregon_statutes_fallback(query, max_results=max_results))
+                      max_results: int = 10, **lookup_options: Any) -> List[Dict[str, Any]]:
+        """Return explicit bounded federal candidates; no generated search terms."""
+        return self._bounded_authority_rows('us_code', query, max_results,
+            titles=[title] if title else None, **lookup_options)
 
-            combined = self._dedupe_authority_rows(
-                list(results) + list(fallback_results),
-                max_results=max_results,
-            )
+    def search_federal_register(self, query: str, start_date: Optional[str] = None,
+                               end_date: Optional[str] = None, max_results: int = 10,
+                               **lookup_options: Any) -> List[Dict[str, Any]]:
+        return self._bounded_authority_rows('federal_register', query, max_results,
+            start_date=start_date, end_date=end_date, **lookup_options)
 
-            self.mediator.log('legal_authority_search',
-                search_type='us_code', query=query, found=len(combined))
-            
-            return combined
-            
-        except Exception as e:
-            self.mediator.log('legal_authority_search_error',
-                search_type='us_code', error=str(e))
-            return []
-    
-    def search_federal_register(self, query: str, 
-                               start_date: Optional[str] = None,
-                               end_date: Optional[str] = None,
-                               max_results: int = 10) -> List[Dict[str, Any]]:
-        """
-        Search the Federal Register for regulations and notices.
-        
-        Args:
-            query: Search query
-            start_date: Optional start date (YYYY-MM-DD)
-            end_date: Optional end date (YYYY-MM-DD)
-            max_results: Maximum number of results
-            
-        Returns:
-            List of Federal Register documents
-        """
-        if not LEGAL_SCRAPERS_AVAILABLE or search_federal_register is None:
-            self.mediator.log('legal_authority_unavailable',
-                search_type='federal_register', query=query)
-            return self._search_ecfr_fallback(query, max_results=max_results)
-        
-        try:
-            results = search_federal_register(
-                query=query,
-                start_date=start_date,
-                end_date=end_date,
-                max_results=max_results
-            )
+    def search_state_laws(self, query: str, state: Optional[str] = None,
+                          max_results: int = 10, allow_live_scrape_fallback: bool = False,
+                          **lookup_options: Any) -> List[Dict[str, Any]]:
+        # A historical scraper opt-in is not authority to set up or scrape.
+        return self._bounded_authority_rows('state_statute', query, max_results,
+            state=state, **lookup_options)
 
-            filtered = self._filter_regulation_results(query, results, max_results=max_results)
-            fallback_results: List[Dict[str, Any]] = []
-            query_lower = str(query or '').lower()
-            if (
-                not filtered
-                or 'cfr' in query_lower
-                or 'voucher' in query_lower
-                or 'hud' in query_lower
-                or 'housing' in query_lower
-            ):
-                fallback_results = self._search_ecfr_fallback(query, max_results=max_results)
-            combined_rows = (
-                fallback_results + filtered
-                if ('cfr' in query_lower or bool(_extract_cfr_sections(query)))
-                else filtered + fallback_results
-            )
-            combined = self._dedupe_authority_rows(
-                combined_rows,
-                max_results=max_results,
-            )
-            
-            self.mediator.log('legal_authority_search',
-                search_type='federal_register', query=query, found=len(combined))
-            
-            return combined
-            
-        except Exception as e:
-            self.mediator.log('legal_authority_search_error',
-                search_type='federal_register', error=str(e))
-            return []
+    def search_administrative_law(self, query: str, state: Optional[str] = None,
+                                  max_results: int = 10, allow_live_scrape_fallback: bool = False,
+                                  **lookup_options: Any) -> List[Dict[str, Any]]:
+        return self._bounded_authority_rows('state_administrative_rule', query, max_results,
+            state=state, **lookup_options)
 
-    def search_state_laws(self, query: str,
-                          state: Optional[str] = None,
-                          max_results: int = 10,
-                          allow_live_scrape_fallback: bool = False) -> List[Dict[str, Any]]:
-        """Search state statutory law via the ipfs legal adapter."""
-        if search_state_laws is None:
-            self.mediator.log('legal_authority_unavailable',
-                search_type='state_law', query=query)
-            return []
+    def _bounded_authority_rows(self, family: str, query: str, max_results: int,
+                                **lookup_options: Any) -> List[Dict[str, Any]]:
+        options = dict(lookup_options)
+        options.setdefault('retrieval_mode', 'offline')
+        envelope = self.lookup_bounded_corpus(source_family=family, query=query,
+            max_results=max_results, **options)
+        if getattr(self, '_bounded_diagnostic_query', None) != query:
+            self._bounded_diagnostic_query = query
+            self._bounded_diagnostics = {}
+        bucket = {'us_code':'statutes','state_statute':'state_statutes',
+            'federal_register':'regulations','state_administrative_rule':'administrative_rules'}[family]
+        diagnostic = {key: envelope.get(key) for key in
+            ('status','capability','error_code','retrieval_mode','applicability')}
+        if envelope.get('status') in {'unavailable','error','timeout'}:
+            diagnostic.update(warning_code=envelope.get('error_code') or 'backend_unavailable',
+                warning_message='Legal corpus search is unavailable; intake can continue.')
+        self._bounded_diagnostics[bucket] = diagnostic
+        return list(envelope.get('results') or [])
 
-        try:
-            results = search_state_laws(
-                query=query,
-                state=state,
-                max_results=max_results,
-                allow_live_scrape_fallback=allow_live_scrape_fallback,
-            )
-
-            self.mediator.log('legal_authority_search',
-                search_type='state_law', query=query, state=state, found=len(results))
-
-            self._log_hf_coverage_warning(
-                search_type='state_law',
-                query=query,
-                state=state,
-                results=results,
-                diagnostic_key='search_state_laws',
-            )
-
-            return results
-
-        except Exception as e:
-            self.mediator.log('legal_authority_search_error',
-                search_type='state_law', error=str(e), state=state)
-            return []
-
-    def search_administrative_law(self, query: str,
-                                  state: Optional[str] = None,
-                                  max_results: int = 10,
-                                  allow_live_scrape_fallback: bool = False) -> List[Dict[str, Any]]:
-        """Search state administrative rules via the ipfs legal adapter."""
-        if not LEGAL_SCRAPERS_AVAILABLE or search_state_administrative_rules is None:
-            self.mediator.log('legal_authority_unavailable',
-                search_type='administrative_law', query=query)
-            return []
-
-        try:
-            results = search_state_administrative_rules(
-                query=query,
-                state=state,
-                max_results=max_results,
-                allow_live_scrape_fallback=allow_live_scrape_fallback,
-            )
-
-            self.mediator.log('legal_authority_search',
-                search_type='administrative_law', query=query, state=state, found=len(results))
-
-            self._log_hf_coverage_warning(
-                search_type='administrative_law',
-                query=query,
-                state=state,
-                results=results,
-                diagnostic_key='search_state_administrative_rules',
-            )
-
-            return results
-
-        except Exception as e:
-            self.mediator.log('legal_authority_search_error',
-                search_type='administrative_law', error=str(e), state=state)
-            return []
-    
     def search_case_law(self, query: str, jurisdiction: Optional[str] = None,
                        max_results: int = 10) -> List[Dict[str, Any]]:
         """
@@ -1331,103 +1169,85 @@ Return only the search terms, one per line."""
     
     def search_all_sources(self, query: str, claim_type: Optional[str] = None,
                           jurisdiction: Optional[str] = None,
-                          authority_families: Optional[List[str]] = None) -> Dict[str, List[Dict[str, Any]]]:
+                          authority_families: Optional[List[str]] = None,
+                          **lookup_options: Any) -> Dict[str, Any]:
+        """Actual mediator discovery path, offline unless explicitly configured.
+
+        Retrieved candidates never choose a jurisdiction or applicability. Cases,
+        dockets and web archival discovery require their separate explicit APIs.
         """
-        Search all available legal sources for authorities.
-        
-        Args:
-            query: Search query
-            claim_type: Optional claim type to focus search
-            jurisdiction: Optional jurisdiction filter
-            
-        Returns:
-            Dictionary with results from each source type
-        """
-        normalized_families = {
-            str(family or '').strip()
-            for family in (authority_families or [])
-            if str(family or '').strip()
-        }
-        include_statutes = not normalized_families or bool(normalized_families & {'statute'})
-        include_regulations = not normalized_families or bool(
-            normalized_families & {'regulation', 'administrative_rule'}
-        )
-        include_case_law = not normalized_families or bool(normalized_families & {'case_law'})
-        include_web_archives = not normalized_families or bool(
-            normalized_families & {'agency_guidance', 'administrative_rule'}
-        )
-        state_code = jurisdiction if isinstance(jurisdiction, str) and len(jurisdiction.strip()) == 2 else jurisdiction
-
-        results = {
-            'statutes': [],
-            'state_statutes': [],
-            'regulations': [],
-            'administrative_rules': [],
-            'case_law': [],
-            'web_archives': []
-        }
-
-        if include_statutes:
-            results['statutes'] = self.search_us_code(query, max_results=5)
-            results['state_statutes'] = self.search_state_laws(
-                query,
-                state=state_code,
-                max_results=5,
-                allow_live_scrape_fallback=False,
-            )
-            if not results['statutes']:
-                results['statutes'] = self._search_oregon_statutes_fallback(query, max_results=5)
-
-        if include_regulations:
-            results['regulations'] = self.search_federal_register(query, max_results=5)
-            results['administrative_rules'] = self.search_administrative_law(
-                query,
-                state=state_code,
-                max_results=5,
-                allow_live_scrape_fallback=False,
-            )
-
-        if include_case_law:
-            results['case_law'] = self.search_case_law(query, jurisdiction, max_results=5)
-
-        if include_web_archives:
-            legal_domains = ['law.cornell.edu', 'law.justia.com', 'findlaw.com']
-            for domain in legal_domains:
-                try:
-                    web_results = self.search_web_archives(domain, query=query, max_results=3)
-                    results['web_archives'].extend(web_results)
-                except Exception as exc:
-                    # Archive domains are independent, so preserve results from
-                    # healthy domains while making the degraded search visible.
-                    self.mediator.log(
-                        'legal_authority_search_error',
-                        search_type='web_archive',
-                        domain=domain,
-                        query=query,
-                        error_type=type(exc).__name__,
-                        error=str(exc),
-                    )
-        
-        total_found = sum(len(v) for v in results.values())
-        self.mediator.log('legal_authority_search_all',
-            query=query,
-            total_found=total_found,
-            authority_families=sorted(normalized_families),
-            searched_sources={
-                'statutes': include_statutes,
-                'state_statutes': include_statutes,
-                'regulations': include_regulations,
-                'administrative_rules': include_regulations,
-                'case_law': include_case_law,
-                'web_archives': include_web_archives,
-            })
-
-        results['search_diagnostics'] = self._collect_search_diagnostics(
-            query=query,
-            state=state_code,
-        )
-        
+        from integrations.ipfs_datasets.legal import resolve_explicit_jurisdiction
+        resolved = resolve_explicit_jurisdiction(jurisdiction)
+        families = set(authority_families or ('statute', 'regulation', 'administrative_rule', 'court_rule'))
+        results = {key: [] for key in ('statutes', 'state_statutes', 'regulations',
+            'administrative_rules', 'court_rules', 'case_law', 'web_archives')}
+        diagnostics = {'source_availability': dict(LEGAL_SOURCE_AVAILABILITY)}
+        if resolved != 'unknown':
+            selection = [('statutes', 'us_code', 'statute' in families and resolved == 'federal'),
+                ('state_statutes', 'state_statute', 'statute' in families and resolved != 'federal'),
+                ('regulations', 'federal_register', 'regulation' in families and resolved == 'federal'),
+                ('administrative_rules', 'state_administrative_rule',
+                    'administrative_rule' in families and resolved != 'federal'),
+                ('court_rules', 'court_rule', 'court_rule' in families)]
+            for bucket, family, enabled in selection:
+                if not enabled: continue
+                options = dict(lookup_options)
+                options.setdefault('retrieval_mode', 'offline')
+                options.update(jurisdiction=resolved, state=None if resolved == 'federal' else resolved)
+                if family == 'court_rule':
+                    options.setdefault('court_jurisdiction', 'federal' if resolved == 'federal' else 'state')
+                envelope = self.lookup_bounded_corpus(source_family=family, query=query,
+                    max_results=5, **options)
+                results[bucket] = list(envelope.get('results') or [])
+                diagnostics[bucket] = {key: envelope.get(key) for key in
+                    ('status', 'capability', 'error_code', 'retrieval_mode', 'applicability')}
+        results['search_diagnostics'] = diagnostics
+        self.mediator.log('legal_authority_search_all', total_found=sum(len(v) for v in results.values() if isinstance(v,list)),
+            context_status='unknown' if resolved == 'unknown' else 'explicit')
         return results
+
+    def lookup_bounded_corpus(self, **kwargs: Any) -> Dict[str, Any]:
+        """Bounded corpus lookup.
+
+        This path does not add Oregon or federal fallback rows. An unavailable
+        backend returns the adapter envelope so intake can continue.
+        """
+        try:
+            envelope = lookup_bounded_legal_corpus(**kwargs)
+        except Exception as exc:
+            envelope = {
+                'status': 'error',
+                'source_family': str(kwargs.get('source_family') or ''),
+                'retrieval_mode': str(kwargs.get('retrieval_mode') or ''),
+                'capability': 'backend_error',
+                'error_code': 'backend_error',
+                'error_message': 'Legal corpus lookup failed.',
+                'results': [],
+                'result_count': 0,
+                'bounded': True,
+                'network_used': False,
+                'setup_invoked': False,
+                'applicability': 'unknown',
+                'selected_rule_applicability': 'unknown',
+            }
+        if not isinstance(envelope, dict):
+            envelope = {
+                'status': 'error',
+                'error_code': 'malformed_payload',
+                'results': [],
+                'result_count': 0,
+                'applicability': 'unknown',
+            }
+        self.mediator.log(
+            'legal_corpus_candidate_lookup',
+            search_type=str(envelope.get('source_family') or ''),
+            status=str(envelope.get('status') or ''),
+            capability=str(envelope.get('capability') or ''),
+            error_code=str(envelope.get('error_code') or ''),
+            found=int(envelope.get('result_count') or 0),
+            retrieval_mode=str(envelope.get('retrieval_mode') or ''),
+        )
+        return envelope
 
 
 class LegalAuthorityStorageHook:
@@ -2670,7 +2490,9 @@ class LegalAuthorityStorageHook:
                 treatment_date=str(record.get('treatment_date') or ''),
                 explanation=str(record.get('treatment_explanation') or ''),
                 metadata=metadata,
-                provenance=build_provenance(**(record.get('provenance') or {})),
+                # This is a stored ProvenanceRecord, including its separate
+                # assertion envelope, rather than input to the source builder.
+                provenance=ProvenanceRecord(**(record.get('provenance') or {})),
             ).as_dict()
             edges.append(edge)
         return edges

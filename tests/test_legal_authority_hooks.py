@@ -134,132 +134,67 @@ class TestLegalAuthoritySearchHook:
             pytest.skip(f"Test requires dependencies: {e}")
 
     def test_search_all_sources_filters_by_authority_families(self):
-        """Authority-family filtering should skip unrelated source searches."""
-        try:
-            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
-
-            mock_mediator = Mock()
-            mock_mediator.log = Mock()
-            mock_mediator.query_backend = Mock(return_value="test query")
-
-            hook = LegalAuthoritySearchHook(mock_mediator)
-            hook.search_us_code = Mock(return_value=[{'citation': '42 U.S.C. § 1983'}])
-            hook.search_state_laws = Mock(return_value=[{'citation': 'ORS 90.385'}])
-            hook.search_federal_register = Mock(return_value=[{'title': 'EEOC rule'}])
-            hook.search_administrative_law = Mock(return_value=[{'citation': 'OAR 839-003-0001'}])
-            hook.search_case_law = Mock(return_value=[{'citation': 'Smith v. Example'}])
-            hook.search_web_archives = Mock(return_value=[{'url': 'https://law.cornell.edu/example'}])
-
-            results = hook.search_all_sources(
-                'test query',
-                authority_families=['statute', 'regulation'],
-            )
-
-            hook.search_us_code.assert_called_once_with('test query', max_results=5)
-            hook.search_state_laws.assert_called_once_with(
-                'test query',
-                state=None,
-                max_results=5,
-                allow_live_scrape_fallback=False,
-            )
-            hook.search_federal_register.assert_called_once_with('test query', max_results=5)
-            hook.search_administrative_law.assert_called_once_with(
-                'test query',
-                state=None,
-                max_results=5,
-                allow_live_scrape_fallback=False,
-            )
-            hook.search_case_law.assert_not_called()
-            hook.search_web_archives.assert_not_called()
-            assert results['statutes'] == [{'citation': '42 U.S.C. § 1983'}]
-            assert results['state_statutes'] == [{'citation': 'ORS 90.385'}]
-            assert results['regulations'] == [{'title': 'EEOC rule'}]
-            assert results['administrative_rules'] == [{'citation': 'OAR 839-003-0001'}]
-            assert results['case_law'] == []
-            assert results['web_archives'] == []
-            assert 'search_diagnostics' in results
-        except ImportError as e:
-            pytest.skip(f"Test requires dependencies: {e}")
+        """Explicit federal discovery admits only requested bounded families."""
+        from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+        mediator = Mock()
+        hook = LegalAuthoritySearchHook(mediator)
+        statute = {'source_family':'us_code','citation':'42 U.S.C. § 1983',
+            'uri':'https://uscode.house.gov/example','applicability':'unknown'}
+        regulation = {'source_family':'federal_register','citation':'89 FR 100',
+            'uri':'https://www.federalregister.gov/example','applicability':'unknown'}
+        def lookup(**options):
+            row = statute if options['source_family']=='us_code' else regulation
+            return {'status':'success','results':[row],'applicability':'unknown'}
+        hook.lookup_bounded_corpus = Mock(side_effect=lookup)
+        hook.search_case_law = Mock(side_effect=AssertionError('unrequested case search'))
+        hook.search_web_archives = Mock(side_effect=AssertionError('unrequested archive search'))
+        result = hook.search_all_sources('test query',jurisdiction='federal',
+            authority_families=['statute','regulation'])
+        assert [c.kwargs['source_family'] for c in hook.lookup_bounded_corpus.call_args_list] == ['us_code','federal_register']
+        assert all(c.kwargs['retrieval_mode']=='offline' and c.kwargs['jurisdiction']=='federal'
+            for c in hook.lookup_bounded_corpus.call_args_list)
+        assert result['statutes']==[statute] and result['regulations']==[regulation]
+        assert result['state_statutes']==result['administrative_rules']==result['case_law']==result['web_archives']==[]
+        hook.search_case_law.assert_not_called();hook.search_web_archives.assert_not_called()
+        assert result['search_diagnostics']['statutes']['status']=='success'
+        assert result['statutes'][0]['applicability']==result['regulations'][0]['applicability']=='unknown'
 
     def test_search_state_laws_logs_hf_coverage_warning_when_dataset_has_no_state_rows(self):
-        try:
-            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
-
-            mock_mediator = Mock()
-            mock_mediator.log = Mock()
-            mock_mediator.query_backend = Mock(return_value='test query')
-
-            hook = LegalAuthoritySearchHook(mock_mediator)
-            mock_mediator.log.reset_mock()
-
-            diagnostic = {
-                'warning_code': 'hf_state_rows_missing',
-                'warning_message': 'Hugging Face dataset justicedao/ipfs_state_laws does not currently expose rows for requested state OR.',
-                'state_code': 'OR',
-                'hf_dataset_id': 'justicedao/ipfs_state_laws',
-            }
-
-            with patch('mediator.legal_authority_hooks.search_state_laws', return_value=[]):
-                with patch('mediator.legal_authority_hooks.get_last_legal_search_diagnostic', return_value=diagnostic):
-                    results = hook.search_state_laws(
-                        'tenant retaliation',
-                        state='OR',
-                        max_results=5,
-                        allow_live_scrape_fallback=False,
-                    )
-
-            assert results == []
-            assert any(
-                call.args and call.args[0] == 'legal_authority_warning'
-                and call.kwargs.get('warning_code') == 'hf_state_rows_missing'
-                and call.kwargs.get('state') == 'OR'
-                for call in mock_mediator.log.call_args_list
-            )
-        except ImportError as e:
-            pytest.skip(f"Test requires dependencies: {e}")
+        """Historical warning case: use current bounded capability, never stale globals."""
+        from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+        mediator=Mock();hook=LegalAuthoritySearchHook(mediator);mediator.log.reset_mock()
+        envelope={'status':'unavailable','capability':'offline_asset_missing','error_code':'offline_asset_missing',
+            'retrieval_mode':'offline','results':[],'result_count':0,'source_family':'state_statute','applicability':'unknown'}
+        with patch('mediator.legal_authority_hooks.lookup_bounded_legal_corpus',return_value=envelope) as bounded:
+            with patch('mediator.legal_authority_hooks.get_last_legal_search_diagnostic',
+                    side_effect=AssertionError('stale global diagnostic consulted')) as stale:
+                result=hook.search_state_laws('tenant retaliation',state='OR',max_results=5,
+                    allow_live_scrape_fallback=False)
+                diagnostic=hook._collect_search_diagnostics(query='tenant retaliation',state='OR')
+        assert result==[];stale.assert_not_called()
+        bounded.assert_called_once_with(source_family='state_statute',query='tenant retaliation',
+            max_results=5,state='OR',retrieval_mode='offline')
+        assert diagnostic['state_statutes']['status']=='unavailable'
+        assert diagnostic['state_statutes']['error_code']=='offline_asset_missing'
+        assert diagnostic['state_statutes']['applicability']=='unknown'
+        assert diagnostic['state_statutes']['warning_code']=='offline_asset_missing'
+        assert any(c.args and c.args[0]=='legal_corpus_candidate_lookup'
+            and c.kwargs.get('error_code')=='offline_asset_missing' for c in mediator.log.call_args_list)
+        assert not any(c.kwargs.get('warning_code')=='hf_state_rows_missing' for c in mediator.log.call_args_list)
 
     def test_search_federal_register_uses_ecfr_fallback(self):
-        """Regulation search should fall back to eCFR when scraper results are unavailable."""
-        try:
-            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
-
-            mock_mediator = Mock()
-            mock_mediator.log = Mock()
-            mock_mediator.query_backend = Mock(return_value="test query")
-
-            hook = LegalAuthoritySearchHook(mock_mediator)
-            ecfr_payload = {
-                'results': [
-                    {
-                        'hierarchy': {
-                            'title': '24',
-                            'part': '982',
-                            'subpart': 'L',
-                            'section': '982.555',
-                        },
-                        'headings': {
-                            'part': 'Section 8 Tenant-Based Assistance: Housing Choice Voucher Program',
-                            'section': 'Informal hearing for participant.',
-                        },
-                        'full_text_excerpt': '<strong>24</strong> CFR 982.555 governs informal hearing procedures for participants.',
-                        'score': 0.98,
-                    }
-                ]
-            }
-            mock_response = Mock()
-            mock_response.raise_for_status = Mock()
-            mock_response.json = Mock(return_value=ecfr_payload)
-
-            with patch('mediator.legal_authority_hooks.search_federal_register', new=None):
-                with patch('mediator.legal_authority_hooks.requests.get', return_value=mock_response):
-                    results = hook.search_federal_register('24 CFR 982.555 housing voucher hearing', max_results=5)
-
-            assert results
-            assert results[0]['source'] == 'ecfr'
-            assert results[0]['citation'] == '24 C.F.R. § 982.555'
-            assert 'Informal hearing' in results[0]['title']
-        except ImportError as e:
-            pytest.skip(f"Test requires dependencies: {e}")
+        """Historical fallback case: missing bounded assets cannot initiate eCFR or HTTP."""
+        from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+        hook=LegalAuthoritySearchHook(Mock())
+        hook._search_ecfr_fallback=Mock(side_effect=AssertionError('implicit eCFR fallback'))
+        with patch('mediator.legal_authority_hooks.requests.get',side_effect=AssertionError('implicit HTTP')) as http:
+            result=hook.search_federal_register('24 CFR 982.555 housing voucher hearing',max_results=5,
+                jurisdiction='federal')
+        assert result==[];http.assert_not_called();hook._search_ecfr_fallback.assert_not_called()
+        diagnostic=hook._collect_search_diagnostics(query='24 CFR 982.555 housing voucher hearing',state=None)
+        assert diagnostic['regulations']['status']=='unavailable'
+        assert diagnostic['regulations']['error_code']=='offline_asset_missing'
+        assert diagnostic['regulations']['applicability']=='unknown'
 
     def test_search_case_law_uses_courtlistener_fallback(self):
         """Case-law search should fall back to CourtListener when RECAP is unavailable."""
@@ -299,54 +234,43 @@ class TestLegalAuthoritySearchHook:
             pytest.skip(f"Test requires dependencies: {e}")
 
     def test_search_all_sources_adds_oregon_statute_fallback(self):
-        """Broad source search should add Oregon state statutes when federal statutes are empty."""
-        try:
-            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
-
-            mock_mediator = Mock()
-            mock_mediator.log = Mock()
-            mock_mediator.query_backend = Mock(return_value="test query")
-
-            hook = LegalAuthoritySearchHook(mock_mediator)
-            hook.search_us_code = Mock(return_value=[])
-            hook.search_federal_register = Mock(return_value=[])
-            hook.search_case_law = Mock(return_value=[])
-            hook.search_web_archives = Mock(return_value=[])
-            hook._search_oregon_statutes_fallback = Mock(return_value=[{'citation': 'ORS 659A.145', 'source': 'oregon_public_law'}])
-
-            results = hook.search_all_sources('Oregon housing authority reasonable accommodation', jurisdiction='or')
-
-            assert results['statutes'] == [{'citation': 'ORS 659A.145', 'source': 'oregon_public_law'}]
-            hook._search_oregon_statutes_fallback.assert_called_once_with(
-                'Oregon housing authority reasonable accommodation',
-                max_results=5,
-            )
-        except ImportError as e:
-            pytest.skip(f"Test requires dependencies: {e}")
+        """Historical fallback case: explicit Oregon rows stay in the bounded state bucket."""
+        from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+        hook=LegalAuthoritySearchHook(Mock())
+        row={'source_family':'state_statute','citation':'ORS 659A.145',
+            'uri':'https://www.oregonlegislature.gov/example','jurisdiction':'OR','applicability':'unknown'}
+        hook.lookup_bounded_corpus=Mock(return_value={'status':'success','results':[row],'applicability':'unknown'})
+        hook._search_oregon_statutes_fallback=Mock(side_effect=AssertionError('implicit live fallback'))
+        result=hook.search_all_sources('Oregon housing authority reasonable accommodation',
+            jurisdiction='or',authority_families=['statute'])
+        assert result['statutes']==[] and result['state_statutes']==[row]
+        hook.lookup_bounded_corpus.assert_called_once_with(source_family='state_statute',
+            query='Oregon housing authority reasonable accommodation',max_results=5,retrieval_mode='offline',jurisdiction='OR',state='OR')
+        hook._search_oregon_statutes_fallback.assert_not_called()
+        assert result['state_statutes'][0]['applicability']=='unknown'
 
     def test_search_us_code_uses_federal_statute_fallback(self):
-        """Statute search should return official U.S. Code fallbacks for housing queries."""
-        try:
-            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
-
-            mock_mediator = Mock()
-            mock_mediator.log = Mock()
-            mock_mediator.query_backend = Mock(return_value="test query")
-
-            hook = LegalAuthoritySearchHook(mock_mediator)
-            mock_response = Mock()
-            mock_response.raise_for_status = Mock()
-            mock_response.text = '<html><head><title>42 U.S.C. § 3604 - Discrimination in the sale or rental of housing</title></head></html>'
-
-            with patch('mediator.legal_authority_hooks.search_us_code', new=None):
-                with patch('mediator.legal_authority_hooks.requests.get', return_value=mock_response):
-                    results = hook.search_us_code('fair housing reasonable accommodation voucher', max_results=5)
-
-            assert results
-            assert results[0]['source'] == 'uscode_house'
-            assert any(row['citation'] == '42 U.S.C. § 3604(f)(3)(B)' for row in results)
-        except ImportError as e:
-            pytest.skip(f"Test requires dependencies: {e}")
+        """Historical fallback case: explicit cached source provenance needs no HTTP."""
+        import hashlib
+        from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+        hook=LegalAuthoritySearchHook(Mock())
+        hook._search_federal_statutes_fallback=Mock(side_effect=AssertionError('implicit federal fallback'))
+        query='fair housing reasonable accommodation voucher'
+        passage='Synthetic public statutory passage concerning reasonable accommodation.'
+        row={'citation':'42 U.S.C. § 3604(f)(3)(B)','uri':'https://uscode.house.gov/example',
+            'text':passage,'jurisdiction':'federal','corpus_id':'synthetic-uscode'}
+        with patch('mediator.legal_authority_hooks.requests.get',side_effect=AssertionError('implicit HTTP')) as http:
+            result=hook.search_us_code(query,max_results=5,retrieval_mode='cache',jurisdiction='federal',
+                offline_cache={'us_code|'+query+'|federal|':[row]})
+        http.assert_not_called();hook._search_federal_statutes_fallback.assert_not_called()
+        assert len(result)==1 and result[0]['source_family']=='us_code'
+        assert result[0]['citation']=='42 U.S.C. § 3604(f)(3)(B)'
+        assert result[0]['uri']==row['uri'] and result[0]['source_passage']==passage
+        assert result[0]['content_hash_scope']=='source_passage'
+        assert result[0]['content_hash']=='sha256:'+hashlib.sha256(passage.encode('utf-8')).hexdigest()
+        assert result[0]['jurisdiction']=='federal' and result[0]['jurisdiction_status']=='source'
+        assert result[0]['effective_date']is None and result[0]['effective_date_status']=='unknown'
+        assert result[0]['corpus_id']=='synthetic-uscode' and result[0]['applicability']=='unknown'
 
     def test_search_web_archives_uses_agency_guidance_fallback(self):
         """Web-archive search should fall back to curated HUD guidance when archive search is unavailable."""
