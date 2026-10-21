@@ -1180,7 +1180,7 @@ Implementation instructions:
 
 ## CIMP-OPS-03 Detect stalled workers and repair eligible dead claims with bounded native recovery
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.supervision
