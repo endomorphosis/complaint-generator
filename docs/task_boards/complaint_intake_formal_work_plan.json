@@ -1229,7 +1229,7 @@
       "contract_version": 1,
       "fallback_check_ids": [
         "python -m pytest -q --run-llm --run-network --run-heavy tests/test_intake_release_gate.py",
-        "python scripts/validate_complaint_intake.py"
+        "python scripts/validate_complaint_intake.py --phase pre-admission"
       ],
       "freshness_seconds": null,
       "kind": "test",
@@ -1242,7 +1242,7 @@
         "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
         "validation_commands": [
           "python -m pytest -q --run-llm --run-network --run-heavy tests/test_intake_release_gate.py",
-          "python scripts/validate_complaint_intake.py"
+          "python scripts/validate_complaint_intake.py --phase pre-admission"
         ]
       },
       "minimum_code_assurance": "unverified",
@@ -2792,11 +2792,11 @@
       "provider": "grok_cli",
       "router": "ipfs_accelerate_py.llm_router"
     },
-    "spec_sha256": "1356f3cc134585daf099b2450292958e7827ddc42ec51023f63597c41990d73a",
+    "spec_sha256": "ef33f47b8d77611533e045a8b10430cf4e1c34c710bf717b9aecc3dc5dab3299",
     "title": "Graph-driven private complaint intake: terminal interview, applicable law, formal reasoning and durable encrypted state"
   },
   "norms": [],
-  "plan_id": "baguqeerala4o6db5s4ayyqzdu5zplc5taefubba67q2azd36eulxqhlys2ea",
+  "plan_id": "baguqeerazpmdxshp56ijft7f6agjywb5u6hflpwl565jyhadvuvwy4y2lpzq",
   "preconditions": [],
   "repository_tree_id": "",
   "schema": "ipfs_accelerate_py/agent-supervisor/formal-work-plan@1",
@@ -5980,7 +5980,8 @@
       "depends_on": [
         "CIMP-OPS-06",
         "CIMP-REL-01",
-        "CIMP-REL-02"
+        "CIMP-REL-02",
+        "CIMP-TUI-12"
       ],
       "effect_ids": [],
       "event_ids": [],
@@ -5995,7 +5996,7 @@
           "Every required task/goal/subgoal completion is backed by receipts and remaining blocked/deferred work is reported accurately. No status-only or source-substring completion."
         ],
         "completion": "validation",
-        "implementation_prompt": "Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.",
+        "implementation_prompt": "Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.\n\nImplement explicit release-checker phases. The reviewed validation command uses --phase pre-admission: require genuine accepted evidence for all 57 other tasks including CIMP-TUI-12, run bounded mandatory offline suites on the candidate source with live-provider/network guards, and validate this checker's own behavior. Record release_qualified=false, self_completion_pending=true and CIMP-REL-03 as pending; never mark self complete or fabricate receipts. Default and --phase post-completion must strictly require all 58 actual native task completions and goal/subgoal evidence, with no unresolved required work. Only run that final audit after the genuine native merge/completion callback; only it may report release qualified. Preserve the committed pre-admission report and write any final report as a separate owned runtime artifact bound to real integration proof. Keep hash scopes explicit without a self-referential future commit hash, avoid recursive self-validation, and report optional live checks honestly. Missing, held, stale, skipped or unknown required evidence fails closed. This phase distinction waives no acceptance requirement and grants no completion, refund, callback or additional output authority.",
         "implementation_provider": "grok",
         "model": "grok-4.7",
         "outputs": [
@@ -6024,7 +6025,7 @@
         "title": "Qualify release evidence and prove the taskboard has no unresolved required work",
         "validation_commands": [
           "python -m pytest -q --run-llm --run-network --run-heavy tests/test_intake_release_gate.py",
-          "python scripts/validate_complaint_intake.py"
+          "python scripts/validate_complaint_intake.py --phase pre-admission"
         ]
       },
       "precondition_ids": [],

@@ -271,6 +271,15 @@
       "errors": 0,
       "skipped": 0,
       "scope": "Pending-only chained release contract amendment with explicit honest pre-admission; fixture independent of existing production plan amendments."
+    },
+    {
+      "receipt": "/tmp/complaint-current-v3-plan-contract-20261021.xml",
+      "sha256": "72e7ee5536b3b080985d33d44930671d5f0852f0e030944df2643aa5a0ea674e",
+      "tests": 52,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Current actual amended v3 specification/formal-plan/taskboard contract and preserved completed baseline."
     }
   ],
   "implementation_tasks_completed_by_these_checks": 0,
@@ -581,7 +590,8 @@
     "receipt": "/tmp/complaint_rel03_release_gate_audit.json",
     "sha256": "feccbb85096769df3c82b931d0b5ca55f1e111cba965939c14978a2776f4f22f",
     "required_followup": "Add TUI-12 to REL-03 dependency closure before release dispatch; retain truthful separate pre-admission and post-completion audits.",
-    "resolved": false
+    "resolved": true,
+    "resolution": "Applied exact pending-only dependency+pre-admission contract amendment; strict post-completion all58 proof remains mandatory and release is unqualified until then."
   },
   "live_native_private_low_effort_canary": {
     "schema_version": "complaint-grok-private-low-canary@1",
@@ -778,7 +788,7 @@
     "completed": 2,
     "pending": 56,
     "total": 58,
-    "state": "stopped_for_pending_plan_amendment",
+    "state": "ready_to_restart_after_reviewed_pending_amendment",
     "source": "actual native merged completion bindings and legacy taskboard"
   },
   "pending_task_runtime_guidance": {
@@ -786,5 +796,52 @@
     "all58_identities_and_statuses_preserved": true,
     "source_only": true,
     "provider_dispatched": false
+  },
+  "pending_release_contract_amendment": {
+    "receipt": "/tmp/complaint-release-dependency-plan-amendment-20261021-bic8yj0s/result.json",
+    "sha256": "85829fa5ad3ae2f9cd6a742b051e35450b231b45e7778972db61264d51eacbcb",
+    "old_plan_id": "baguqeerala4o6db5s4ayyqzdu5zplc5taefubba67q2azd36eulxqhlys2ea",
+    "new_plan_id": "baguqeerazpmdxshp56ijft7f6agjywb5u6hflpwl565jyhadvuvwy4y2lpzq",
+    "task_id": "CIMP-REL-03",
+    "added_dependency": "CIMP-TUI-12",
+    "new_validation_commands": [
+      "python -m pytest -q --run-llm --run-network --run-heavy tests/test_intake_release_gate.py",
+      "python scripts/validate_complaint_intake.py --phase pre-admission"
+    ],
+    "all58_cids_preserved": true,
+    "same_epoch": true,
+    "unchanged_native_accounting": true,
+    "preserved_attempts": {
+      "implementation_attempts": {
+        "CIMP-FACT-01": 1,
+        "CIMP-TUI-01": 4
+      },
+      "implementation_attempts_by_cid": {
+        "baguqeeravyogbhzg42p3bprnbbjpnbcjv2zpfp3jrqyzxld6vvgsrxmjks3a": 1,
+        "baguqeeraxq775q25gtjritvqbbfcnryzpodeib3cn6dayanky4hrvo6the7q": 4
+      }
+    },
+    "task_completion_authority": false,
+    "release_qualified": false,
+    "strict_all58_post_completion_audit_required": true
+  },
+  "post_amendment_readiness": {
+    "status": "ready",
+    "plan_id": "baguqeerazpmdxshp56ijft7f6agjywb5u6hflpwl565jyhadvuvwy4y2lpzq",
+    "completed": 2,
+    "pending": 56,
+    "ready_task_ids": [
+      "CIMP-TUI-02",
+      "CIMP-FACT-02",
+      "CIMP-FACT-03",
+      "CIMP-FACT-04",
+      "CIMP-LAW-01",
+      "CIMP-PRIV-001",
+      "CIMP-ROUTE-01",
+      "CIMP-OPS-01"
+    ],
+    "auth_presence_only": true,
+    "paid_calls_for_doctor": 0,
+    "live_low_effort_canary_qualified_separately": true
   }
 }

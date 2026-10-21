@@ -2618,11 +2618,12 @@
       "depends_on": [
         "CIMP-REL-01",
         "CIMP-REL-02",
-        "CIMP-OPS-06"
+        "CIMP-OPS-06",
+        "CIMP-TUI-12"
       ],
       "goal_id": "goal.release",
       "id": "CIMP-REL-03",
-      "implementation_prompt": "Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.",
+      "implementation_prompt": "Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.\n\nImplement explicit release-checker phases. The reviewed validation command uses --phase pre-admission: require genuine accepted evidence for all 57 other tasks including CIMP-TUI-12, run bounded mandatory offline suites on the candidate source with live-provider/network guards, and validate this checker's own behavior. Record release_qualified=false, self_completion_pending=true and CIMP-REL-03 as pending; never mark self complete or fabricate receipts. Default and --phase post-completion must strictly require all 58 actual native task completions and goal/subgoal evidence, with no unresolved required work. Only run that final audit after the genuine native merge/completion callback; only it may report release qualified. Preserve the committed pre-admission report and write any final report as a separate owned runtime artifact bound to real integration proof. Keep hash scopes explicit without a self-referential future commit hash, avoid recursive self-validation, and report optional live checks honestly. Missing, held, stale, skipped or unknown required evidence fails closed. This phase distinction waives no acceptance requirement and grants no completion, refund, callback or additional output authority.",
       "priority": "P0",
       "source_candidate_id": "REL-03",
       "subgoal_id": "subgoal.release.acceptance-documentation",
@@ -2639,7 +2640,7 @@
       "title": "Qualify release evidence and prove the taskboard has no unresolved required work",
       "validation_commands": [
         "python -m pytest -q --run-llm --run-network --run-heavy tests/test_intake_release_gate.py",
-        "python scripts/validate_complaint_intake.py"
+        "python scripts/validate_complaint_intake.py --phase pre-admission"
       ]
     }
   ],
