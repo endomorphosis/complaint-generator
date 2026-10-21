@@ -236,6 +236,112 @@ def _shutdown_verified(record: Mapping[str, Any], shutdown: Mapping[str, Any], r
     )
 
 
+def _admission_docker_runtime():
+    from ipfs_accelerate_py.agent_supervisor.runtime import grok_cli_runner
+    return grok_cli_runner
+
+
+def _observe_campaign_containers(repo_root: Path, state_dir: Path, worktree_root: Path,
+                                 record: Mapping[str, Any], shutdown: Mapping[str, Any]) -> bool:
+    """Observe complete Docker inventory without acquiring shutdown authority.
+
+    A known stopped worker may remain after an explicit non-removing stop. All
+    other containers touching this campaign require operator reconciliation.
+    Admission never stops, removes, signals, or updates historical evidence.
+    """
+    from .improvement_shutdown import _CID, _INSPECT, _timestamp, MAX_INSPECT_BYTES
+    deadline = time.monotonic() + 25.0
+    scopes = {repo_root, state_dir, worktree_root}
+    if _full_launch_record(record):
+        scopes.add(recorded_worktree_root(record, state_dir)[0])
+    retained = shutdown.get("containers", [])
+    if not isinstance(retained, list):
+        return False
+    try:
+        native = _admission_docker_runtime()
+        docker = native._docker_isolation_binary()
+        if not docker:
+            return False
+        with tempfile.TemporaryDirectory(prefix="complaint-docker-admission-config-") as temporary:
+            command = [docker, "--host=unix:///var/run/docker.sock", "--config", temporary]
+
+            def run(arguments):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ValueError("Docker admission deadline exceeded")
+                result = subprocess.run(command + arguments, stdin=subprocess.DEVNULL, text=True,
+                    capture_output=True, timeout=min(5.0, remaining), check=False, env=native._docker_control_env())
+                if (len(result.stdout or "") > MAX_INSPECT_BYTES
+                        or len(result.stderr or "") > MAX_INSPECT_BYTES):
+                    raise ValueError("Docker admission observation exceeds bound")
+                return result
+
+            def inventory():
+                result = run(["ps", "-a", "--no-trunc", "--format", "{{.ID}}"])
+                identifiers = result.stdout.splitlines()
+                if (result.returncode or len(identifiers) > 128 or len(set(identifiers)) != len(identifiers)
+                        or any(not _CID.fullmatch(value) for value in identifiers)):
+                    raise ValueError("complete Docker inventory unavailable")
+                return identifiers
+
+            def relevant(value):
+                mounts, directory = value.get("Mounts"), value.get("WorkingDir")
+                if (not isinstance(mounts, list) or len(mounts) > 256 or not isinstance(directory, str)
+                        or any(not isinstance(mount, dict) for mount in mounts)):
+                    raise ValueError("Docker workspace observation unavailable")
+                # WorkingDir belongs to the container namespace; only its
+                # descendants count. Bind sources are host paths and overlap
+                # in either direction, including an ancestor mounted writable.
+                if directory and Path(directory).is_absolute() and any(Path(directory).is_relative_to(scope) for scope in scopes):
+                    return True
+                for mount in mounts:
+                    if not isinstance(mount.get("Type"), str) or not mount["Type"]:
+                        raise ValueError("Docker mount type unavailable")
+                    if mount.get("Type") != "bind":
+                        continue
+                    source = mount.get("Source")
+                    if not isinstance(source, str) or not Path(source).is_absolute():
+                        raise ValueError("Docker bind source unavailable")
+                    source_path = Path(source).resolve()
+                    if any(source_path.is_relative_to(scope) or scope.is_relative_to(source_path) for scope in scopes):
+                        return True
+                return False
+
+            def known_stopped(value):
+                image = value.get("Image")
+                if (not isinstance(image, str) or not image.startswith("sha256:")
+                        or not _CID.fullmatch(image[7:]) or _timestamp(value.get("Created")) > time.time()):
+                    return False
+                state = value.get("State")
+                if (not isinstance(state, dict) or state.get("Running") is not False
+                        or type(state.get("Pid")) is not int or state["Pid"] != 0
+                        or state.get("Restarting") is not False or state.get("Paused") is not False
+                        or state.get("Status") not in {"exited", "dead", "created"}):
+                    return False
+                return any(isinstance(item, dict) and item.get("container_id") == value["Id"]
+                    and item.get("created") == value.get("Created") and item.get("image_id") == value.get("Image")
+                    and item.get("workspace") == value.get("WorkingDir") and item.get("quiesced") is True
+                    and item.get("removed") is False for item in retained)
+
+            # Re-observe both identity and state after the first complete pass.
+            # A newly arriving orphan or a retained worker restarting refuses.
+            for _pass in range(2):
+                for identifier in inventory():
+                    result = run(["inspect", "--format", _INSPECT, identifier])
+                    if result.returncode:
+                        if identifier not in inventory():
+                            continue
+                        return False
+                    value = json.loads(result.stdout)
+                    if not isinstance(value, dict) or value.get("Id") != identifier:
+                        return False
+                    if relevant(value) and not known_stopped(value):
+                        return False
+        return True
+    except (OSError, ValueError, TypeError, RuntimeError, subprocess.TimeoutExpired):
+        return False
+
+
 def _select_worktree_root(repo_root: Path, state_dir: Path, record: Mapping[str, Any],
                           requested: Path | None) -> tuple[Path, dict[str, Any] | None]:
     previous, binding = recorded_worktree_root(record, state_dir)
@@ -598,26 +704,41 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
             if full_launch and not _campaign_tuple_matches(previous, repo_root, spec_path, state_dir):
                 return _stop_incomplete(state_dir, "live_campaign_mismatch")
             return {"status": "already_running", "pid": previous["identity"]["pid"], "state_dir": str(state_dir)}
+        shutdown_path = state_dir / "container_shutdown.json"
+        shutdown = {}
+        shutdown_raw = None
         if full_launch:
-            # A dead PID is not evidence that private Docker workers are gone.
-            # Keep the retained receipt until the same proof status uses is current
-            # and a fresh bounded closure observation agrees.
-            if not _shutdown_verified(previous, _read_json(state_dir / "container_shutdown.json"), repo_root, state_dir):
+            # Campaign identity is required for stopped owners as well as live
+            # ones. Cached closure never grants a different campaign ownership.
+            if not _campaign_tuple_matches(previous, repo_root, spec_path, state_dir):
+                return _stop_incomplete(state_dir, "stopped_campaign_mismatch")
+            from .improvement_shutdown import _context, _parent_closed
+            from .improvement_recovery import _owned_bytes
+            try:
+                context = _context(state_dir, previous)
+                if context is None:
+                    return _stop_incomplete(state_dir, "launcher_receipt_unverified")
+                _parent_closed(state_dir, previous, context, False)
+                shutdown_raw = _owned_bytes(shutdown_path)
+                shutdown = json.loads(shutdown_raw)
+            except (OSError, ValueError, TypeError, KeyError):
                 return _stop_incomplete(state_dir, "shutdown_proof_unverified")
-            from .improvement_shutdown import close_campaign_containers
-            containers = close_campaign_containers(state_dir, previous)
-            current = _read_json(owner_path)
-            if current != previous or current.get("read_error"):
-                return _stop_incomplete(state_dir, "ownership_changed_during_closure")
-            if owns_process(current):
-                if not _campaign_tuple_matches(current, repo_root, spec_path, state_dir):
-                    return _stop_incomplete(state_dir, "live_campaign_mismatch")
-                return {"status": "already_running", "pid": current["identity"]["pid"], "state_dir": str(state_dir)}
-            shutdown = _read_json(state_dir / "container_shutdown.json")
-            if (not containers.get("applicable") or not containers.get("quiesced")
-                    or containers.get("status") != "stopped"
-                    or not _shutdown_verified(current, shutdown, repo_root, state_dir)):
-                return _stop_incomplete(state_dir, "container_closure_unverified")
+            if not isinstance(shutdown, dict) or not _shutdown_verified(previous, shutdown, repo_root, state_dir):
+                return _stop_incomplete(state_dir, "shutdown_proof_unverified")
+        # A missing owner cannot hide orphaned workers. This observation has
+        # no authority to call the explicit stop helper or rewrite its receipt.
+        if not _observe_campaign_containers(repo_root, state_dir, selected_root, previous, shutdown):
+            return _stop_incomplete(state_dir, "container_closure_unverified")
+        if _read_json(owner_path) != previous:
+            return _stop_incomplete(state_dir, "ownership_changed_during_observation")
+        if full_launch:
+            try:
+                if _owned_bytes(shutdown_path) != shutdown_raw:
+                    return _stop_incomplete(state_dir, "shutdown_proof_changed_during_observation")
+                _parent_closed(state_dir, previous, context, False)
+                recorded_worktree_root(previous, state_dir)
+            except (OSError, ValueError, TypeError, KeyError):
+                return _stop_incomplete(state_dir, "ownership_changed_during_observation")
         # A missing/edited owner receipt cannot authorize a duplicate runner.
         for candidate in Path("/proc").iterdir():
             if candidate.name.isdigit():

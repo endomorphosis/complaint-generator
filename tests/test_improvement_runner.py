@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from integrations.ipfs_accelerate import improvement_runner as runner
+import integrations.ipfs_accelerate.improvement_runner as runner
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -397,7 +397,7 @@ def _full_owner(root, spec, state, plan_id):
             "argv": argv, "owner_token": token, "started_at": runner.time.time() - 30,
             "status": "starting", "repo_root": str(root), "spec_path": str(spec),
             "state_dir": str(state), "merge_target": "campaign",
-            "board_path": str(root / "docs/complaint_intake_improvement_board.md"),
+            "board_path": str(root / "docs/task_boards/complaint_intake_task_board.md"),
             "plan_id": plan_id, "provider": "grok_cli", "model": "grok-4.7", "allow_fallback": False}
 
 
@@ -417,6 +417,198 @@ def _refuse_effects(monkeypatch):
     monkeypatch.setattr(runner, "prepare", lambda *a, **k: pytest.fail("prepare"))
 
 
+class _AdmissionDocker:
+    """Execute real admission/old shutdown logic against inert Docker transport."""
+
+    identifier = "a" * 64
+    image = "sha256:" + "b" * 64
+
+    def __init__(self, row=None, failure=None):
+        self.rows = {} if row is None else {self.identifier: row}
+        self.failure = failure
+        self.calls = []
+        self.effects = []
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append(list(argv))
+        assert argv[0] == "/trusted/native/docker"
+        assert "--host=unix:///var/run/docker.sock" in argv
+        assert "--config" in argv
+        assert kwargs["stdin"] is runner.subprocess.DEVNULL
+        assert kwargs["env"] == {"PATH": "/usr/bin", "HOME": "/nonexistent"}
+        assert kwargs["timeout"] > 0
+        offset = argv.index("--config") + 2
+        operation, args = argv[offset], argv[offset + 1:]
+        if self.failure == "timeout":
+            raise runner.subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        if operation == "ps":
+            identifiers = list(self.rows)
+            if self.failure == "inventory":
+                return SimpleNamespace(returncode=1, stdout="", stderr="unavailable")
+            if self.failure == "duplicate":
+                identifiers += identifiers
+            elif self.failure == "invalid_id":
+                identifiers = ["short-untrusted-id"]
+            elif self.failure == "oversized":
+                identifiers = [f"{index:064x}" for index in range(129)]
+            return SimpleNamespace(returncode=0, stdout="\n".join(identifiers), stderr="")
+        if operation == "inspect":
+            if self.failure == "inspection" or args[-1] not in self.rows:
+                return SimpleNamespace(returncode=1, stdout="", stderr="unavailable")
+            value = "not-json" if self.failure == "malformed" else json.dumps(self.rows[args[-1]])
+            return SimpleNamespace(returncode=0, stdout=value, stderr="")
+        self.effects.append((operation, args[-1]))
+        if operation == "stop":
+            self.rows[args[-1]]["State"].update(Running=False, Pid=0, Status="exited")
+        elif operation == "rm":
+            self.rows.pop(args[-1], None)
+        else:
+            pytest.fail("unexpected Docker effect")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+
+def _admission_transport(monkeypatch, row=None, *, failure=None):
+    from integrations.ipfs_accelerate import improvement_shutdown as shutdown
+    fake = _AdmissionDocker(row, failure)
+    runtime = SimpleNamespace(_docker_isolation_binary=lambda: "/trusted/native/docker",
+                              _docker_ordinary_task_toolchain_image_id=lambda *a, **k: fake.image,
+                              _docker_control_env=lambda: {"PATH": "/usr/bin", "HOME": "/nonexistent"})
+    monkeypatch.setattr(shutdown, "_native_runtime", lambda: runtime)
+    monkeypatch.setattr(runner, "_admission_docker_runtime", lambda: runtime)
+    monkeypatch.setattr(runner.subprocess, "run", fake)
+    return fake
+
+
+def _admission_fixture(campaign, monkeypatch, *, row_kind="live", failure=None):
+    from integrations.ipfs_accelerate import improvement_shutdown as shutdown
+    root, spec, state, generated = campaign
+    state.mkdir(mode=0o700)
+    record = _full_owner(root, spec, state, generated["receipt"]["plan_id"])
+    record.update(status="stopped", board_path=str(root / "docs/task_boards/complaint_intake_task_board.md"))
+    runner._atomic_json(state / "launcher.json", record)
+    runner._atomic_json(state / "container_shutdown.json", _shutdown_receipt(record))
+    runner._atomic_json(state / "complaint_intake_supervisor_status.json", {
+        "status": "stopped", "repo_root": str(root), "supervisor_pid": record["identity"]["pid"],
+        "updated_at": datetime.now(timezone.utc).isoformat(), "managed_daemon_cleanup": {"quiesced": True},
+    })
+    workspace = state / "worktrees" / "workspace_admission_01"
+    workspace.mkdir(parents=True, mode=0o700)
+    created = datetime.fromtimestamp(record["started_at"] + 5, timezone.utc).isoformat()
+    event = {"type": "implementation_started", "timestamp": created,
+             "event_id": "sha256:" + "c" * 64, "canonical_task_cid": "b" + "a" * 50,
+             "task_id": "CIMP-TUI-01", "attempt": 1, "worktree_path": str(workspace)}
+    (state / "complaint_intake_events.jsonl").write_text(json.dumps(event) + "\n")
+    row = {"Id": _AdmissionDocker.identifier, "Image": _AdmissionDocker.image, "Created": created,
+           "Name": "/ipfs-accelerate-grok-123-" + "d" * 32, "WorkingDir": str(workspace),
+           "Label": "true", "Mounts": [{"Type": "bind", "Source": str(workspace),
+                                           "Destination": str(workspace), "RW": True}],
+           "State": {"Running": True, "Pid": 991121, "Status": "running", "Restarting": False, "Paused": False}}
+    if row_kind == "unknown":
+        row["State"]["Running"] = "false"
+    elif row_kind == "stopped":
+        row["State"].update(Running=False, Pid=0, Status="exited")
+    elif row_kind == "ancestor":
+        row["WorkingDir"] = "/unrelated/workspace"
+        row["Mounts"][0]["Source"] = str(state)
+    elif row_kind == "unrelated":
+        row["WorkingDir"] = str(root.parent / "unrelated-campaign" / "workspace_01")
+        row["Mounts"][0]["Source"] = row["WorkingDir"]
+    fake = _admission_transport(monkeypatch, None if row_kind == "empty" else row, failure=failure)
+    monkeypatch.setattr(runner, "process_identity", lambda _pid: None)
+    monkeypatch.setattr(runner, "_signal_birth", lambda *a, **k: pytest.fail("admission signalled owner"))
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **k: pytest.fail("admission launched provider"))
+    prepared = []
+    monkeypatch.setattr(runner, "prepare", lambda *a: prepared.append(True) or {"board_path": record["board_path"]})
+    monkeypatch.setattr(runner, "doctor", lambda *a, **k: {"status": "not_ready"})
+    return root, spec, state, record, fake, prepared
+
+
+@pytest.mark.parametrize("kind,failure", [("live", None), ("unknown", None), ("stopped", None),
+                         ("ancestor", None), ("live", "inspection"), ("live", "malformed"), ("live", "timeout"),
+                         ("live", "inventory"), ("live", "duplicate"), ("live", "invalid_id"), ("live", "oversized")])
+def test_start_observes_real_container_seam_without_stopping_or_rewriting(campaign, monkeypatch, kind, failure):
+    root, spec, state, record, fake, prepared = _admission_fixture(campaign, monkeypatch, row_kind=kind, failure=failure)
+    originals = {name: (state / name).read_bytes() for name in ("launcher.json", "container_shutdown.json", "complaint_intake_events.jsonl")}
+    result = runner.start(root, spec, state)
+    assert fake.effects == [], "start must not stop or remove a live/unknown/stopped orphan"
+    assert result["status"] == "stop_incomplete" and result["signalled"] is False
+    assert not prepared
+    assert all((state / name).read_bytes() == raw for name, raw in originals.items())
+
+
+def test_missing_owner_cannot_hide_a_live_container_from_start(campaign, monkeypatch):
+    root, spec, state, record, fake, prepared = _admission_fixture(campaign, monkeypatch)
+    (state / "launcher.json").unlink()
+    result = runner.start(root, spec, state)
+    assert result["status"] == "stop_incomplete"
+    assert not prepared and not fake.effects and fake.calls
+    assert not (state / "launcher.json").exists()
+
+
+def test_dead_mismatched_spec_refuses_before_container_observation(campaign, monkeypatch):
+    root, spec, state, record, fake, prepared = _admission_fixture(campaign, monkeypatch)
+    other_spec = spec.with_name("different-campaign.json")
+    other_spec.write_bytes(spec.read_bytes())
+    originals = {name: (state / name).read_bytes() for name in ("launcher.json", "container_shutdown.json")}
+    result = runner.start(root, other_spec, state)
+    assert result["status"] == "stop_incomplete" and not fake.calls and not fake.effects and not prepared
+    assert all((state / name).read_bytes() == raw for name, raw in originals.items())
+
+
+@pytest.mark.parametrize("kind", ["empty", "unrelated"])
+def test_real_empty_or_unrelated_inventory_preserves_shutdown_evidence(campaign, monkeypatch, kind):
+    root, spec, state, record, fake, prepared = _admission_fixture(campaign, monkeypatch, row_kind=kind)
+    original = (state / "container_shutdown.json").read_bytes()
+    result = runner.start(root, spec, state)
+    assert result["status"] == "not_ready" and prepared == [True]
+    assert fake.calls and not fake.effects
+    assert (state / "container_shutdown.json").read_bytes() == original
+
+
+@pytest.mark.parametrize("changed", [None, "container_id", "created", "image_id", "workspace", "removed", "quiesced"])
+def test_only_exact_previously_retained_stopped_container_can_admit(campaign, monkeypatch, changed):
+    root, spec, state, record, fake, prepared = _admission_fixture(campaign, monkeypatch, row_kind="stopped")
+    row = fake.rows[fake.identifier]
+    item = {"container_id": row["Id"], "created": row["Created"], "image_id": row["Image"],
+            "workspace": row["WorkingDir"], "quiesced": True, "removed": False}
+    if changed:
+        item[changed] = not item[changed] if isinstance(item[changed], bool) else "different"
+    runner._atomic_json(state / "container_shutdown.json", _shutdown_receipt(record, containers=[item]))
+    original = (state / "container_shutdown.json").read_bytes()
+    result = runner.start(root, spec, state)
+    assert result["status"] == ("not_ready" if changed is None else "stop_incomplete")
+    assert prepared == ([True] if changed is None else [])
+    assert not fake.effects and fake.calls
+    assert (state / "container_shutdown.json").read_bytes() == original
+
+
+def test_same_birth_changed_command_never_acquires_admission(campaign, monkeypatch):
+    root, spec, state, record, fake, prepared = _admission_fixture(campaign, monkeypatch, row_kind="empty")
+    changed = {**record["identity"], "argv": ["unrelated-command"]}
+    monkeypatch.setattr(runner, "process_identity", lambda pid: changed if pid == changed["pid"] else None)
+    result = runner.start(root, spec, state)
+    assert result["status"] == "stop_incomplete" and not prepared and not fake.calls and not fake.effects
+
+
+@pytest.mark.parametrize("artifact", ["launcher.json", "container_shutdown.json"])
+def test_receipt_change_during_inventory_refuses_without_replacing_it(campaign, monkeypatch, artifact):
+    root, spec, state, record, fake, prepared = _admission_fixture(campaign, monkeypatch, row_kind="empty")
+    original_run = runner.subprocess.run
+    changed = (state / artifact).read_bytes().replace(b"test-owner", b"new--owner")
+    if changed == (state / artifact).read_bytes():
+        changed = changed.replace(b'"quiesced": true', b'"quiesced": false')
+
+    def observe(*args, **kwargs):
+        result = original_run(*args, **kwargs)
+        (state / artifact).write_bytes(changed)
+        return result
+
+    monkeypatch.setattr(runner.subprocess, "run", observe)
+    result = runner.start(root, spec, state)
+    assert result["status"] == "stop_incomplete" and not prepared and not fake.effects
+    assert (state / artifact).read_bytes() == changed
+
+
 def test_duplicate_start_returns_existing_owned_process(tmp_path, monkeypatch):
     record = _owner(tmp_path)
     runner._atomic_json(tmp_path / "launcher.json", record)
@@ -427,6 +619,7 @@ def test_duplicate_start_returns_existing_owned_process(tmp_path, monkeypatch):
 
 
 def test_start_spawns_detached_but_reports_starting_not_running(tmp_path, monkeypatch):
+    _admission_transport(monkeypatch)
     observations = {}
     current = {}
     monkeypatch.setattr(runner, "process_identity", lambda pid: current.get(pid))
@@ -463,59 +656,39 @@ def test_live_receipt_mismatch_cannot_reuse_or_signal(campaign, monkeypatch, fie
 
 @pytest.mark.parametrize("proof", ["missing", "stale", "unknown", "live_container"])
 def test_dead_full_receipt_without_closure_cannot_launch_or_overwrite(campaign, monkeypatch, proof):
-    root, spec, state, generated = campaign
-    state.mkdir(mode=0o700)
-    record = _full_owner(root, spec, state, generated["receipt"]["plan_id"])
-    runner._atomic_json(state / "launcher.json", record)
+    root, spec, state, record, fake, prepared = _admission_fixture(
+        campaign, monkeypatch, row_kind="live" if proof == "live_container" else "empty",
+        failure="inspection" if proof == "unknown" else None)
+    # An inspection error requires a visible container, rather than an empty
+    # successful inventory which legitimately needs no per-container query.
+    if proof == "unknown":
+        fake.rows[fake.identifier] = {"Id": fake.identifier}
     original = (state / "launcher.json").read_bytes()
-    if proof != "missing":
-        receipt = _shutdown_receipt(record)
-        if proof == "stale":
-            receipt["started_at"] = record["started_at"] - 5
-        runner._atomic_json(state / "container_shutdown.json", receipt)
-        evidence = (state / "container_shutdown.json").read_bytes()
-    monkeypatch.setattr(runner, "process_identity", lambda pid: None)
-    calls = []
-
-    def close(state_dir, owned, **kwargs):
-        calls.append(owned["owner_token"])
-        if proof == "unknown":
-            return {"applicable": True, "quiesced": False, "status": "stop_incomplete", "reason": "inspection_unavailable"}
-        if proof == "live_container":
-            return {"applicable": True, "quiesced": False, "status": "stop_incomplete", "reason": "owned_worker_running"}
-        pytest.fail("closure observation")
-
-    monkeypatch.setattr("integrations.ipfs_accelerate.improvement_shutdown.close_campaign_containers", close)
+    if proof == "missing":
+        (state / "container_shutdown.json").unlink()
+    elif proof == "stale":
+        runner._atomic_json(state / "container_shutdown.json", _shutdown_receipt(record, started_at=record["started_at"] - 5))
+    evidence = (state / "container_shutdown.json").read_bytes() if proof != "missing" else None
     _refuse_effects(monkeypatch)
     result = runner.start(root, spec, state)
     assert result["status"] == "stop_incomplete" and result["signalled"] is False
+    assert not prepared and not fake.effects
     assert (state / "launcher.json").read_bytes() == original
     if proof in {"missing", "stale"}:
-        assert result["reason"] == "shutdown_proof_unverified" and calls == []
-        if proof == "stale":
-            assert (state / "container_shutdown.json").read_bytes() == evidence
+        assert result["reason"] == "shutdown_proof_unverified" and fake.calls == []
     else:
-        assert result["reason"] == "container_closure_unverified" and calls == [record["owner_token"]]
+        assert result["reason"] == "container_closure_unverified" and fake.calls
+    if evidence is not None:
+        assert (state / "container_shutdown.json").read_bytes() == evidence
 
 
 def test_exact_quiesced_receipt_permits_one_detached_launch(campaign, monkeypatch):
-    root, spec, state, generated = campaign
-    state.mkdir(mode=0o700)
-    record = _full_owner(root, spec, state, generated["receipt"]["plan_id"])
-    runner._atomic_json(state / "launcher.json", record)
-    runner._atomic_json(state / "container_shutdown.json", _shutdown_receipt(record))
+    root, spec, state, record, fake, prepared = _admission_fixture(campaign, monkeypatch, row_kind="empty")
+    evidence = (state / "container_shutdown.json").read_bytes()
     current = {}
     monkeypatch.setattr(runner, "process_identity", lambda pid: current.get(pid))
-    monkeypatch.setattr(runner, "prepare", lambda *a: {"board_path": record["board_path"]})
     monkeypatch.setattr(runner, "doctor", lambda *a, **k: {"status": "ready", "merge_target": "campaign", "native_plan_id": record["plan_id"]})
     observations = {}
-    closes = []
-
-    def close(state_dir, owned, **kwargs):
-        closes.append(owned["plan_id"])
-        return {"applicable": True, "quiesced": True, "status": "stopped", "completion_authority": False}
-
-    monkeypatch.setattr("integrations.ipfs_accelerate.improvement_shutdown.close_campaign_containers", close)
 
     def spawn(argv, **kwargs):
         observations.update(kwargs)
@@ -524,7 +697,7 @@ def test_exact_quiesced_receipt_permits_one_detached_launch(campaign, monkeypatc
 
     monkeypatch.setattr(runner.subprocess, "Popen", spawn)
     result = runner.start(root, spec, state)
-    assert closes == [record["plan_id"]]
+    assert prepared == [True] and fake.calls and not fake.effects
     assert result["status"] == "starting" and result["progress_verified"] is False
     assert observations["stdin"] is runner.subprocess.DEVNULL and observations["cwd"] == root
     assert observations["start_new_session"] is True
@@ -532,6 +705,7 @@ def test_exact_quiesced_receipt_permits_one_detached_launch(campaign, monkeypatc
     assert retained["owner_token"] != record["owner_token"]
     assert retained["repo_root"] == str(root) and retained["plan_id"] == record["plan_id"]
     assert runner.owns_process(retained)
+    assert (state / "container_shutdown.json").read_bytes() == evidence
 
 
 def test_duplicate_start_and_pid_reuse_preserve_unrelated_campaign(campaign, monkeypatch):
@@ -556,6 +730,7 @@ def test_duplicate_start_and_pid_reuse_preserve_unrelated_campaign(campaign, mon
 
 
 def test_unready_start_never_launches(tmp_path, monkeypatch):
+    _admission_transport(monkeypatch)
     monkeypatch.setattr(runner, "prepare", lambda *a: {})
     monkeypatch.setattr(runner, "doctor", lambda *a: {"status": "not_ready"})
     monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **k: pytest.fail("unready launch"))
@@ -1049,6 +1224,7 @@ def test_doctor_refuses_known_insufficient_checkout_space_without_provider(campa
 
 
 def test_configured_start_and_owned_reentry_preserve_root_epoch_and_native_contract(campaign, monkeypatch):
+    _admission_transport(monkeypatch)
     root, spec, state, generated = campaign
     state.mkdir(mode=0o700)
     target = root.parent / (root.name + '-dedicated-storage')
