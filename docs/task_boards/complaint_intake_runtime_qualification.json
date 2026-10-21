@@ -283,7 +283,7 @@
     }
   ],
   "implementation_tasks_completed_by_these_checks": 0,
-  "scope": "Implementation continues:17 of58 native tasks completed,41 pending. Ordinary source corrections grant no additional completion or attempt authority.",
+  "scope": "Implementation continues:19 of58 native tasks completed,39 pending. Ordinary source corrections grant no additional completion or attempt authority.",
   "first_party_source_sha256": {
     "integrations/ipfs_accelerate/improvement_plan.py": "034a30d5f23e5dec606fa7ff09c3bd27921bcbab527bd1d8103b45beab8f9781",
     "integrations/ipfs_accelerate/improvement_runner.py": "a7048dd2e02769989fbf04ebfa6d580a3833e238d7ac5c611e9aab478afb3ea8",
@@ -785,15 +785,15 @@
     }
   },
   "current_campaign_progress": {
-    "completed": 17,
-    "pending": 41,
+    "completed": 19,
+    "pending": 39,
     "total": 58,
-    "state": "stopped_ready_to_continue_after_ops01_ops02_tui10_corrections",
-    "observed_at": "2026-10-21T15:20:51.541838+00:00",
+    "state": "stopped_ready_to_continue_after_route02_ops03_corrections",
+    "observed_at": "2026-10-21T16:40:58.585793+00:00",
     "release_qualified": false,
     "continue_until_all58_completed": true,
-    "cached_native_completed": 16,
-    "source": "Committed taskboard17, three source-bound original native callbacks, and exact retained cached projection16; ordinary next pass owns projection refresh."
+    "cached_native_completed": 18,
+    "source": "Committed taskboard19, two source-bound original native callbacks, and exact retained cached projection18; ordinary next pass owns projection refresh."
   },
   "pending_task_runtime_guidance": {
     "receipt": "/tmp/complaint-pending-guidance-install-20261021-63nbl1nl/receipt.json",
@@ -1370,6 +1370,52 @@
       "native_host_log": {
         "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/implementation_logs/cimp-tui-10-attempt-1-f2086c55637d24469ae9d04468564bfd.log",
         "sha256": "6894801ac2c77d2fc8bac0bbbd641c139e6ee70c0a8caa819d1a80eea9945bcc"
+      },
+      "sealed_native_validation_passed": true,
+      "native_board_completion": true,
+      "durable_queue_completion_verified": true,
+      "original_provider_dispatched": true,
+      "original_attempt_consumed": true,
+      "corrective_qualification_grants_completion": false
+    },
+    {
+      "task_id": "CIMP-ROUTE-02",
+      "task_cid": "baguqeeravctyxdpjwljsct7wbkweefpi46ci7yuxy5ny3ttogxyjad2as2ha",
+      "event_id": "sha256:52d0aa0b1cd7be7a0a4f16cba2ea7d92ffd81599268a17204c8deba6aa010032",
+      "native_events": {
+        "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/complaint_intake_events.jsonl",
+        "sha256": "88f675c4945a8b76703fc594c8b546b12bc026e118a7c7331ef81d2e8765c980"
+      },
+      "provider_candidate": "fb8743b6767fd164395b9e041e202f2728f286a3",
+      "integration_commit": "b0b7bea04b947a86f865d6634a0f5c2b34af90ff",
+      "request_id": "1792596992547653502-991866-945de979281e",
+      "native_required_passed": 19,
+      "native_host_log": {
+        "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/implementation_logs/cimp-route-02-attempt-1-432b7ad3c94fd68ec698c8ece9bec167.log",
+        "sha256": "9f23862f5e28eef1abb60d6f59d3d97e25c1d1e3c88a82121dc96841f6b3ee5a"
+      },
+      "sealed_native_validation_passed": true,
+      "native_board_completion": true,
+      "durable_queue_completion_verified": true,
+      "original_provider_dispatched": true,
+      "original_attempt_consumed": true,
+      "corrective_qualification_grants_completion": false
+    },
+    {
+      "task_id": "CIMP-OPS-03",
+      "task_cid": "baguqeera72ddeqgzqpr4e67jw4jwjvdlv43co226xbdethjfa55h4bh5ugua",
+      "event_id": "sha256:387681cde1654fac0994e8948878ecf029f0e85c6792490bd2c5e53b945cc5be",
+      "native_events": {
+        "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/complaint_intake_events.jsonl",
+        "sha256": "88f675c4945a8b76703fc594c8b546b12bc026e118a7c7331ef81d2e8765c980"
+      },
+      "provider_candidate": "92f0ea6e7932300613cd7ff12341014c2e8e71e6",
+      "integration_commit": "97ad40ad0fcf1173abd339c1e5283efafe7d0b87",
+      "request_id": "1792597958664379237-991866-b7f08dd37b5c",
+      "native_required_passed": 41,
+      "native_host_log": {
+        "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/implementation_logs/cimp-ops-03-attempt-1-c9993a54fa0ff6b2061bdc0fe9f9fc31.log",
+        "sha256": "e0ec20badb9ef83a3656e89bf09c89c43bc4797ac401987bfb6c76d12318a38b"
       },
       "sealed_native_validation_passed": true,
       "native_board_completion": true,
@@ -2339,6 +2385,17 @@
       "continue_until_all58_completed": true,
       "cached_native_completed": 12,
       "source": "Committed taskboard14, durable source-bound native callbacks for FACT03 and TUI03, and exact retained cached projection12; ordinary next pass owns projection refresh."
+    },
+    {
+      "completed": 17,
+      "pending": 41,
+      "total": 58,
+      "state": "stopped_ready_to_continue_after_ops01_ops02_tui10_corrections",
+      "observed_at": "2026-10-21T15:20:51.541838+00:00",
+      "release_qualified": false,
+      "continue_until_all58_completed": true,
+      "cached_native_completed": 16,
+      "source": "Committed taskboard17, three source-bound original native callbacks, and exact retained cached projection16; ordinary next pass owns projection refresh."
     }
   ],
   "dur002_tui02_source_corrections_after_native_completion": {
@@ -3241,6 +3298,177 @@
       "Native task completions remain historical original callbacks; corrective application qualification grants no additional task or retry authority.",
       "The already published future-only B/C native changes remain uninstalled in this epoch; runtime source remains A.",
       "41 of58 tasks remain, and release qualification remains false."
+    ]
+  },
+  "route02_ops03_source_corrections_after_native_completion": {
+    "installation": {
+      "path": "/tmp/complaint-route02-ops03-install-publish-20261021-9og5uhiu/installed.json",
+      "sha256": "f68f4086b955305f4a71e7b61d8251d1743cb4308a4eda64c737a5a4dae0bad8"
+    },
+    "combined_current_source_qualification": {
+      "path": "/tmp/complaint-ops19-final-current-v2-20261021-6bxfpiwm/bound_source_receipt.json",
+      "sha256": "fefed5a58f95e90584d981969f1bf7d2fb0cf3aaf7c7e1fba6d2c5ba86356715"
+    },
+    "qualified_source_commit": "116e0ed1301ad473b476082038bab29e2d967604",
+    "native_completions": [
+      {
+        "task_id": "CIMP-ROUTE-02",
+        "task_cid": "baguqeeravctyxdpjwljsct7wbkweefpi46ci7yuxy5ny3ttogxyjad2as2ha",
+        "event_id": "sha256:52d0aa0b1cd7be7a0a4f16cba2ea7d92ffd81599268a17204c8deba6aa010032",
+        "native_events": {
+          "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/complaint_intake_events.jsonl",
+          "sha256": "88f675c4945a8b76703fc594c8b546b12bc026e118a7c7331ef81d2e8765c980"
+        },
+        "provider_candidate": "fb8743b6767fd164395b9e041e202f2728f286a3",
+        "integration_commit": "b0b7bea04b947a86f865d6634a0f5c2b34af90ff",
+        "request_id": "1792596992547653502-991866-945de979281e",
+        "native_required_passed": 19,
+        "native_host_log": {
+          "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/implementation_logs/cimp-route-02-attempt-1-432b7ad3c94fd68ec698c8ece9bec167.log",
+          "sha256": "9f23862f5e28eef1abb60d6f59d3d97e25c1d1e3c88a82121dc96841f6b3ee5a"
+        },
+        "sealed_native_validation_passed": true,
+        "native_board_completion": true,
+        "durable_queue_completion_verified": true,
+        "original_provider_dispatched": true,
+        "original_attempt_consumed": true,
+        "corrective_qualification_grants_completion": false
+      },
+      {
+        "task_id": "CIMP-OPS-03",
+        "task_cid": "baguqeera72ddeqgzqpr4e67jw4jwjvdlv43co226xbdethjfa55h4bh5ugua",
+        "event_id": "sha256:387681cde1654fac0994e8948878ecf029f0e85c6792490bd2c5e53b945cc5be",
+        "native_events": {
+          "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/complaint_intake_events.jsonl",
+          "sha256": "88f675c4945a8b76703fc594c8b546b12bc026e118a7c7331ef81d2e8765c980"
+        },
+        "provider_candidate": "92f0ea6e7932300613cd7ff12341014c2e8e71e6",
+        "integration_commit": "97ad40ad0fcf1173abd339c1e5283efafe7d0b87",
+        "request_id": "1792597958664379237-991866-b7f08dd37b5c",
+        "native_required_passed": 41,
+        "native_host_log": {
+          "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/implementation_logs/cimp-ops-03-attempt-1-c9993a54fa0ff6b2061bdc0fe9f9fc31.log",
+          "sha256": "e0ec20badb9ef83a3656e89bf09c89c43bc4797ac401987bfb6c76d12318a38b"
+        },
+        "sealed_native_validation_passed": true,
+        "native_board_completion": true,
+        "durable_queue_completion_verified": true,
+        "original_provider_dispatched": true,
+        "original_attempt_consumed": true,
+        "corrective_qualification_grants_completion": false
+      }
+    ],
+    "stopped_native_preimage": {
+      "path": "/tmp/complaint-after-ops03-boundary-native-preimage-20261021-bkwu11pg/receipt.json",
+      "sha256": "d781623419570cdb341ff16755eeab1ca00c4b9096c5e53b77388141b40ee88d"
+    },
+    "native_supervisor_commit": "b646cddfe895991f64afae2f2aef4c359ceaa9bf",
+    "native_publication_ref": "refs/heads/codex/complaint-intake-grok-only-20261021",
+    "native_ref_commit": "b646cddfe895991f64afae2f2aef4c359ceaa9bf",
+    "unrelated_native_main_unchanged": "e227152f7ae3cbd404c5da22f21d4b5612ebef2b",
+    "runtime_revision_unchanged": "sha256:cce0c30aa68db00389e06bd352b5441ee10252d8ae917986bf49f3295d9e5a8a",
+    "native_authority_files10_unchanged": {
+      "ipfs_accelerate_py/agent_supervisor/merge/workspace_quarantine.py": {
+        "sha256": "5a470ee8265f8d7b18daa44d2f0075569aaca287ff194a046823d6f576860b03",
+        "git_blob": "9bd5a2aa75828e46b42d2826457d1ee16cf59ad0",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/merge/worktree_lifecycle.py": {
+        "sha256": "b7f8508b4b4b50d5bc259c186b55c4c6f87e938d99689a913383a8a35130249f",
+        "git_blob": "3eddcaf0f95b8abbba3679df6cf8ecd677c01d57",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/rescue/recovery_diagnostics.py": {
+        "sha256": "3a9f10aebcbb0271cbd9f993c1b8b9d21bcd5b78aa7bca5ad658aabf645f5f4d",
+        "git_blob": "1dda05f2477f64e13afbd7d88158de70fa20b8b6",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/rescue/supervisor_watchdog.py": {
+        "sha256": "bd3ea780d15a324f659e9116d3d2b3af7a656d9c5caabfa06a80548e5a1b4dc7",
+        "git_blob": "733e47d6215a51f897a42b99450f24689dd41921",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/current_incident_adjudication.py": {
+        "sha256": "e40f64adf8da98e08556a639e247b03f2369f51c3fe3cb43939afb1455be209c",
+        "git_blob": "717121f82b8a979ab384c1d441ca839fdf259630",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py": {
+        "sha256": "f5a2a70434fe9f294375f3a28a83afae76c5afeb1892dd54844eeba55ae9a0ed",
+        "git_blob": "2e97474b47ec1653c2c7ee993f797ddd53fe7507",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_supervisor.py": {
+        "sha256": "6ded241c546fbc813ea3d3d4462aa795df566ea492440241b6506f6d0e707ac7",
+        "git_blob": "e753376e9461d86145f2ea98f14a85a9e9d54a2c",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/portal_task_state_control_plane.py": {
+        "sha256": "183326a143f3bf2c597d26947edf66e0859619de30aebc4716bb5bb0f21a9dd7",
+        "git_blob": "e01d2dd14e8ca107f9bbfbca87adf56184a2dd90",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/supervisor_loop.py": {
+        "sha256": "350e33ddbf94649c23a2408fb14cd2539f3ddd014e01e0b2146cce2c700e5221",
+        "git_blob": "b8b142e970051d00ff588bc59bf00cc0237be6be",
+        "mode": 436,
+        "git_mode": "100644"
+      },
+      "ipfs_accelerate_py/agent_supervisor/todo_daemon/supervisor_runtime.py": {
+        "sha256": "71e3fe8ba91ae923ff8d547c4f407ff1af18ec164e741cee4835b0ae9ce19427",
+        "git_blob": "af6a19fb60e0890e5f771d6a6ac06d430b27726e",
+        "mode": 436,
+        "git_mode": "100644"
+      }
+    },
+    "source_scope": [
+      "applications/complaint_workspace.py",
+      "backends/llm_router_backend.py",
+      "complaint_phases/knowledge_graph.py",
+      "integrations/ipfs_accelerate/improvement_runner.py",
+      "integrations/ipfs_datasets/llm.py",
+      "mediator/mediator.py",
+      "tests/test_improvement_recovery.py",
+      "tests/test_improvement_recovery_boundary.py",
+      "tests/test_intake_router_boundary.py",
+      "tests/test_intake_router_integration.py",
+      "tests/test_intake_router_requests.py",
+      "tests/test_intake_router_semantics.py",
+      "tests/test_tui_router_trace.py",
+      "tests/test_tui_shared_interview.py"
+    ],
+    "combined_corrective_cases_passed": 576,
+    "combined_corrective_zero_skips_failures_errors": true,
+    "original_declared_native_passed": {
+      "CIMP-ROUTE-02": 19,
+      "CIMP-OPS-03": 41
+    },
+    "board_completed": 19,
+    "board_pending": 39,
+    "cached_native_completed": 18,
+    "ordinary_next_pass_may_rederive_completed19": true,
+    "full_native_state_taskboard_attempts_holds_and_old_history_unchanged": true,
+    "old_settlement_journal": {
+      "path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/ordinary-incident-adjudications/901fc6a204914b365a769a688fca9175a1d4e0cbcb9399257fdd6cb32b126712.json",
+      "sha256": "c3f404c4a3a584ab31e540d86e5ba93223cc6d30d64b5e9ba573982864a32701"
+    },
+    "provider_dispatched": false,
+    "attempt_refunded": false,
+    "completion_authority": false,
+    "release_qualified": false,
+    "limits": [
+      "Corrective cases use isolated synthetic data and explicitly fenced providers/network; they do not prove live model availability or legal sufficiency.",
+      "Native task completions remain historical original callbacks; corrective application qualification grants no additional task or retry authority.",
+      "The already published future-only B/C native changes remain uninstalled in this epoch; runtime source remains A.",
+      "39 of58 tasks remain, and release qualification remains false."
     ]
   }
 }
