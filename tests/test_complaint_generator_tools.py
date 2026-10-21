@@ -486,13 +486,18 @@ def test_intake_chat_turn_is_exposed_across_cli_mcp_and_api(monkeypatch, tmp_pat
     assert mcp_turn["accepted_answer"]["question_id"] == "opposing_party"
     assert mcp_turn["next_question"]["id"] == "protected_activity"
 
+    from applications.complaint_workspace import PrincipalRegistry
+
+    registry = PrincipalRegistry()
+    registry.register("synthetic-chat-token", "chat-user", case_id="chat-user")
     app = FastAPI()
-    attach_complaint_workspace_routes(app, service)
+    attach_complaint_workspace_routes(app, service, principal_registry=registry)
     from fastapi.testclient import TestClient
 
     client = TestClient(app)
     response = client.post(
         "/api/complaint-workspace/intake-chat",
+        headers={"Authorization": "Bearer synthetic-chat-token"},
         json={
             "user_id": "chat-user",
             "message": "Reported discrimination to HR",
