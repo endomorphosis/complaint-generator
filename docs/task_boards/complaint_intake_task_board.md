@@ -1042,7 +1042,7 @@ Implementation instructions:
 
 ## CIMP-ROUTE-01 Verify pinned Grok4.7 routing and publish a no-secret capability/canary receipt
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.router
