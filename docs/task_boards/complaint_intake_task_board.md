@@ -214,7 +214,7 @@ Implementation instructions:
 
 ## CIMP-TUI-10 Trace explicit Grok 4.7 router selection in the terminal
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.router
