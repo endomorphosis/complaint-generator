@@ -149,6 +149,30 @@ updating the JSON. The browser workflow regression is
 `python scripts/run_claim_support_review_regression.py --browser on --network off`.
 The focused alignment and recovery tests run with `python scripts/validate_alignment.py`.
 
+The next intake improvement program is specified in
+`docs/task_boards/complaint_intake_improvement_spec.json`: 10 goals, 29 subgoals,
+and 58 dependency-linked implementation tasks. Its native supervisor contract
+is `docs/task_boards/complaint_intake_formal_work_plan.json`; the executable
+projection is `docs/task_boards/complaint_intake_task_board.md`.
+The baseline audit records a working terminal pause/resume flow and the remaining
+gaps in graph-driven questioning, truthful stopping, and encrypted persistence.
+
+Use `python scripts/run_complaint_improvement_supervisor.py prepare`, then
+`doctor`, `start`, and `status` to prepare and monitor the native supervisor.
+`stop` terminates only the campaign's owned process tree. Runtime files live
+outside the repository and retain process birth identities. The campaign pins
+Grok 4.7 through `ipfs_accelerate_py.llm_router`, disables provider fallback,
+and uses source code and synthetic fixtures with private data paths masked in
+Docker. Its native catalogs are isolated from other campaigns. `doctor` checks
+the cached, source-qualified execution image; AMD64 provisioning instructions
+live in `external/ipfs_accelerate_py/containers/external-agent/ordinary-task-toolchain/amd64/README.md`.
+The first task characterizes the actual terminal interface; subsequent tasks
+connect user-sourced factual graphs, independently sourced legal requirements,
+bounded formal reasoning, and private durable storage. Pending implementation
+tasks and open formal trace obligations are not completion evidence. A task
+claim and a live provider invocation are reported separately. Synthetic live
+qualification receipts are in `docs/task_boards/complaint_intake_runtime_qualification.json`.
+
 ### 🧠 GraphRAG Ontology Optimization
 
 Knowledge-graph-powered document analysis and reasoning:

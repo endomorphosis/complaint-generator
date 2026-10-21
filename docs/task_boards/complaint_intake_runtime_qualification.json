@@ -1,0 +1,146 @@
+{
+  "schema_version": "complaint-generator/intake-runtime-qualification@1",
+  "native_supervisor_commit": "2fbc97d602616e9a8b74ba1cbff1750289141801",
+  "provider": {
+    "router": "ipfs_accelerate_py.llm_router",
+    "provider": "grok_cli",
+    "model": "grok-4.7",
+    "allow_fallback": false
+  },
+  "live_llm_router_canary": {
+    "provider": "grok_cli",
+    "model": "grok-4.7",
+    "route": "ipfs_accelerate_py.llm_router.generate_text",
+    "ok": true,
+    "answer": "COMPLAINT_GROK_47_READY",
+    "seconds": 6.029
+  },
+  "live_native_private_runner_canary": {
+    "schema_version": "complaint-grok-private-canary@1",
+    "provider": "grok_cli",
+    "model": "grok-4.7",
+    "native_runner": true,
+    "private_policy_present": true,
+    "synthetic_only": true,
+    "returncode": 0,
+    "ok": true,
+    "seconds": 9.958,
+    "answer": "PRIVATE_GROK_47_READY",
+    "stream_fragments_reassembled": true,
+    "model_usage": {
+      "grok-4.7-build": {
+        "inputTokens": 2433,
+        "outputTokens": 48,
+        "cacheReadInputTokens": 2304,
+        "cacheCreationInputTokens": 0,
+        "modelCalls": 1,
+        "costUSD": 0.00214404
+      }
+    }
+  },
+  "native_docker_private_mask_probe": {
+    "schema_version": "complaint-private-docker-probe@1",
+    "ok": true,
+    "native_command_builder": true,
+    "model_invoked": false,
+    "synthetic_fixture_only": true,
+    "private_file_unreadable": true,
+    "tracked_git_recovery_blocked": true,
+    "source_read_write_available": true,
+    "host_fixture_intact": true,
+    "base_image": "sha256:6277ab668b2ad3c3ab851d370faa1690d324b30db29d342527f61fed28f20f36",
+    "returncode": 0,
+    "stderr": ""
+  },
+  "ordinary_amd64_qualification": "external/ipfs_accelerate_py/containers/external-agent/ordinary-task-toolchain/amd64/evidence/20261021/runtime-report.json",
+  "test_receipts": [
+    {
+      "receipt": "/tmp/complaint_explicit_grok_after.xml",
+      "sha256": "31982e5d5b57243d9f5c9a3c0f6818beaa6c31e0648b802c6c20d449f890e038",
+      "tests": 28,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "receipt": "/tmp/complaint_native_private_paths_fresh.xml",
+      "sha256": "ede333223db368ce12b440f568145977b8ff47de7c0853bcb42eb0e864ac9f18",
+      "tests": 66,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "receipt": "/tmp/complaint_native_private_supported_rules.xml",
+      "sha256": "dd12e7d9743a4f08a36ecf7b256e268a5a3a23e10911def629bc7c224f303cf2",
+      "tests": 33,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "receipt": "/tmp/complaint_ordinary_amd64_validation.xml",
+      "sha256": "9b82a1374721d93599e83c83fbc1c9f884e2f01ce61da082df0c44eae3e47f60",
+      "tests": 60,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "receipt": "/tmp/complaint_improvement_final.xml",
+      "sha256": "e7a22468c8e816fb49765a174d14ee6efc548629ca05a79376ce0fcb5bc24fe7",
+      "tests": 100,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "implementation_tasks_completed_by_these_checks": 0,
+  "scope": "Provisioning and startup-path qualification with source and synthetic fixtures. The full implementation taskboard is still pending; native supervisor progress must be observed separately.",
+  "first_party_source_sha256": {
+    "integrations/ipfs_accelerate/improvement_plan.py": "56f374730873c86bf3e3b6eb1f2fdaac030cb44620800546bb9c7f09abf5cc0f",
+    "integrations/ipfs_accelerate/improvement_runner.py": "821b56210c8c8e94adc2f0d05ba4fcdb134eade72b1d67a719a0ded4360786a4",
+    "scripts/run_complaint_improvement_supervisor.py": "15001fbfc39617a8e913de3a7446d77a63d90e05b062fcb4f6154fbdd2d20238",
+    "tests/test_improvement_plan_contract.py": "38d0d7cbffa4a11dfcbdc9f1f99bf32583d959064352e75540e3b853873f8910",
+    "tests/test_improvement_runner.py": "0bb5e2a069f2845e958580856843be65ae89bd3ee7826de52e829b9175bac6d5"
+  },
+  "doctor": {
+    "status": "ready",
+    "native_plan_id": "baguqeerakleiqcwujifxiu7k5qbsbiki6p2e4bmuiq32agqtwkckzzgri25a",
+    "provider": "grok_cli",
+    "model": "grok-4.7",
+    "allow_fallback": false,
+    "privacy": {
+      "base_image_id": "sha256:6277ab668b2ad3c3ab851d370faa1690d324b30db29d342527f61fed28f20f36",
+      "docker_ready": true,
+      "host_architecture": "amd64",
+      "image_architecture": "amd64",
+      "native_enforcement_available": true,
+      "ordinary_task_image_id": "sha256:d361dafa5fd1c89981325f789ce45f918848bfa912ce35dbea486db95e0479cf",
+      "private_path_patterns": [
+        "*.key",
+        "*.pem",
+        ".complaint_workspace",
+        ".env*",
+        "data",
+        "exports",
+        "output",
+        "secrets",
+        "statefiles"
+      ],
+      "ready": true,
+      "reason": "ready"
+    },
+    "board": {
+      "completed": 0,
+      "count": 58,
+      "manual_hold_task_ids": [],
+      "ready_task_ids": [
+        "CIMP-TUI-01"
+      ],
+      "status_counts": {
+        "todo": 58
+      }
+    }
+  }
+}
