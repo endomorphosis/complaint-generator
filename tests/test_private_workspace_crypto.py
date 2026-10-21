@@ -9,8 +9,6 @@ claimed here.
 from __future__ import annotations
 
 import hashlib
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -257,7 +255,7 @@ def test_nonce_header_and_version_tamper_fail() -> None:
         open_private_artifact(_flip(envelope, 0), binding=_binding(), key=KEY_A, expected_key_id=KEY_ID_A)
     assert header.value.reason == "malformed"
     versioned = bytearray(envelope)
-    versioned[4] = 2
+    versioned[4] = SCHEMA_VERSION + 1
     with pytest.raises(PrivateArtifactIntegrityError) as version:
         open_private_artifact(bytes(versioned), binding=_binding(), key=KEY_A, expected_key_id=KEY_ID_A)
     assert version.value.reason == "unsupported_version"
@@ -522,54 +520,107 @@ def test_kit_probe_and_upstream_fixture_do_not_replace_first_party(tmp_path: Pat
 
 
 def _upstream_kit_fixture_qualification() -> dict[str, object]:
-    """Run the referenced Kit AES fixture in its package tree and report honestly."""
+    """Record scope only: upstream compatibility is run and reported separately.
 
-    report: dict[str, object] = {
+    Kit parent conftest bootstraps IPFS services. A crypto unit test must not
+    launch that nested suite or hide its failure in a passing outer assertion.
+    """
+    return {
         "fixture": str(UPSTREAM_FIXTURE),
         "fixture_present": UPSTREAM_FIXTURE.is_file(),
         "passed": False,
-        "status": "absent",
+        "status": "separate_qualification_required" if UPSTREAM_FIXTURE.is_file() else "absent",
         "skipped": None,
         "returncode": None,
         "substitutes_first_party": False,
     }
-    if not UPSTREAM_FIXTURE.is_file():
-        return report
-    kit_root = REPO_ROOT / "external" / "ipfs_kit_py"
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            str(UPSTREAM_FIXTURE.relative_to(kit_root)),
-            "-p",
-            "no:cacheprovider",
-        ],
-        cwd=str(kit_root),
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    output = f"{completed.stdout}\n{completed.stderr}".lower()
-    report["returncode"] = completed.returncode
-    skipped = " skipped" in output or output.strip().endswith("skipped")
-    if completed.returncode != 0 and ("no tests ran" in output or "error" in output and "passed" not in output):
-        report["status"] = "uncollected" if "collected 0" in output or "no tests ran" in output else "failed"
-        report["skipped"] = 1 if skipped else 0
-        return report
-    if skipped or "skipped" in output:
-        report["status"] = "skipped"
-        report["skipped"] = 1
-        report["passed"] = False
-        return report
-    if completed.returncode == 0 and "passed" in output:
-        report["status"] = "passed"
-        report["passed"] = True
-        report["skipped"] = 0
-        return report
-    report["status"] = "failed"
-    report["passed"] = False
-    report["skipped"] = 0
-    return report
+
+
+@pytest.mark.parametrize('expected', [None, KEY_ID_A, 'case-key-b'])
+def test_routing_key_id_tamper_is_authenticated_even_without_optional_expectation(expected) -> None:
+    envelope = bytearray(seal_private_artifact(SENTINEL, binding=_binding(), key=KEY_A, key_id=KEY_ID_A))
+    # The same-length alternative is structurally valid and uses the SAME key;
+    # only cryptographic binding of the routing header detects substitution.
+    envelope[6:6 + len(KEY_ID_A)] = b'case-key-b'
+    with pytest.raises(PrivateArtifactIntegrityError):
+        open_private_artifact(bytes(envelope), binding=_binding(), key=KEY_A, expected_key_id=expected)
+
+
+@pytest.mark.parametrize('version', [True, 1.0, 2.0, '2'])
+def test_schema_version_requires_exact_supported_integer(version) -> None:
+    with pytest.raises(PrivateArtifactIntegrityError, match='unsupported_version'):
+        PrivateArtifactBinding('tenant-a', 'case-a', 'intake-note', 'rev-1', 'tenant-a', schema_version=version)
+
+
+def test_v1_real_crypto_fixture_is_explicitly_unsupported_without_plaintext_migration() -> None:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    fields = ['private-artifact-aad', '1', 'tenant-a', 'case-a', 'tenant-a', 'intake-note', 'rev-1']
+    legacy_aad = b''.join(len(field.encode()).to_bytes(4, 'big') + field.encode() for field in fields)
+    nonce = bytes(range(12))  # Fixed synthetic legacy fixture only.
+    ciphertext = AESGCM(KEY_A).encrypt(nonce, SENTINEL, legacy_aad)
+    header = ENVELOPE_MAGIC + bytes((1, len(KEY_ID_A))) + KEY_ID_A.encode()
+    legacy = header + nonce + ciphertext
+    assert AESGCM(KEY_A).decrypt(nonce, ciphertext, legacy_aad) == SENTINEL
+    with pytest.raises(PrivateArtifactIntegrityError, match='unsupported_version'):
+        open_private_artifact(legacy, binding=_binding(), key=KEY_A, expected_key_id=KEY_ID_A)
+
+
+@pytest.mark.parametrize('failure', ['rng_oserror', 'rng_unsupported', 'backend_constructor', 'backend_encrypt'])
+def test_crypto_capability_failure_is_typed_sanitized_and_writes_nothing(tmp_path, monkeypatch, failure) -> None:
+    import traceback
+    import integrations.private_storage as private
+    from cryptography.exceptions import UnsupportedAlgorithm
+    secret_error = 'SYNTHETIC_SECRET_ERROR /private/case/keypath'
+    observed = {'backend': [], 'replicate': [], 'journal': []}
+    class Backend:
+        def add_bytes(self, data, **kwargs):
+            observed['backend'].append(data)
+            raise AssertionError('crypto failure reached storage')
+    if failure.startswith('rng_'):
+        def unavailable(_size):
+            if failure == 'rng_oserror':
+                raise OSError(secret_error)
+            raise NotImplementedError(secret_error)
+        monkeypatch.setattr(private.os, 'urandom', unavailable)
+    else:
+        class UnavailableAES:
+            def __init__(self, _key):
+                if failure == 'backend_constructor':
+                    raise UnsupportedAlgorithm(secret_error)
+            def encrypt(self, *args):
+                raise UnsupportedAlgorithm(secret_error)
+        monkeypatch.setattr(private, 'load_aesgcm', lambda: UnavailableAES)
+    with pytest.raises(PrivateCryptoCapabilityError) as caught:
+        store_private_artifact(SENTINEL, access=_access(), tenant_id='tenant-a', case_id='case-a',
+            artifact_kind='intake-note', revision='rev-1', key=KEY_A, key_id=KEY_ID_A,
+            backend=Backend(), replicate=observed['replicate'].append, journal=observed['journal'].append)
+    assert caught.value.recoverable is True and caught.value.code == 'private_crypto_unavailable'
+    assert secret_error not in str(caught.value)
+    assert secret_error not in ''.join(traceback.format_exception(caught.value))
+    assert observed == {'backend': [], 'replicate': [], 'journal': []}
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_decrypt_backend_unavailable_is_not_misreported_as_corrupt_ciphertext(monkeypatch) -> None:
+    import integrations.private_storage as private
+    from cryptography.exceptions import UnsupportedAlgorithm
+    envelope = seal_private_artifact(SENTINEL, binding=_binding(), key=KEY_A, key_id=KEY_ID_A)
+    class UnavailableAES:
+        def __init__(self, _key):
+            pass
+        def decrypt(self, *args):
+            raise UnsupportedAlgorithm('SYNTHETIC_SECRET_BACKEND_ERROR')
+    monkeypatch.setattr(private, 'load_aesgcm', lambda: UnavailableAES)
+    with pytest.raises(PrivateCryptoCapabilityError) as caught:
+        open_private_artifact(envelope, binding=_binding(), key=KEY_A, expected_key_id=KEY_ID_A)
+    assert caught.value.recoverable and 'SYNTHETIC_SECRET_BACKEND_ERROR' not in str(caught.value)
+
+
+def test_first_party_suite_never_runs_nested_upstream_process(monkeypatch) -> None:
+    import subprocess
+    def forbidden(*args, **kwargs):
+        pytest.fail('first-party unit test launched upstream subprocess')
+    monkeypatch.setattr(subprocess, 'run', forbidden)
+    report = _upstream_kit_fixture_qualification()
+    assert report['passed'] is False
+    assert report['status'] in {'absent', 'separate_qualification_required'}

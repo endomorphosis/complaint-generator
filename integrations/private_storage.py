@@ -43,7 +43,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
 SCHEMA_NAME = "private-artifact-aad"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+ENVELOPE_AAD_DOMAIN = b"complaint-generator/private-artifact/AES-256-GCM/header@2\x00"
 ENVELOPE_MAGIC = b"CGPE"
 NONCE_BYTES = 12
 TAG_BYTES = 16
@@ -154,7 +155,7 @@ class PrivateArtifactBinding:
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        if self.schema_version != SCHEMA_VERSION:
+        if type(self.schema_version) is not int or self.schema_version != SCHEMA_VERSION:
             raise PrivateArtifactIntegrityError("unsupported_version")
         for label in (
             self.tenant_id,
@@ -201,6 +202,16 @@ def canonical_associated_data(binding: PrivateArtifactBinding) -> bytes:
     return b"".join(chunks)
 
 
+
+def _envelope_associated_data(binding: PrivateArtifactBinding, header: bytes) -> bytes:
+    """Version2 binds exact routing bytes as well as the caller's case context.
+
+    Version1 did not authenticate key_id. It is rejected, never silently opened
+    with the new scheme; no persisted-session migration is claimed here.
+    """
+    return ENVELOPE_AAD_DOMAIN + len(header).to_bytes(4, "big") + header + canonical_associated_data(binding)
+
+
 def cryptography_available() -> bool:
     try:
         load_aesgcm()
@@ -217,10 +228,28 @@ def load_aesgcm() -> Any:
     except Exception as exc:
         raise PrivateCryptoCapabilityError(
             "AES-256-GCM is unavailable because the cryptography package cannot be imported"
-        ) from exc
+        ) from None
     if AESGCM is None:
         raise PrivateCryptoCapabilityError("AES-256-GCM is unavailable")
     return AESGCM
+
+
+
+def _aesgcm_context(key: bytes) -> Any:
+    try:
+        return load_aesgcm()(key)
+    except Exception:
+        raise PrivateCryptoCapabilityError("AES-256-GCM backend unavailable") from None
+
+
+def _unsupported_crypto_operation(error: Exception) -> bool:
+    if isinstance(error, (ImportError, NotImplementedError, PrivateCryptoCapabilityError)):
+        return True
+    try:
+        from cryptography.exceptions import UnsupportedAlgorithm
+    except Exception:
+        return False
+    return isinstance(error, UnsupportedAlgorithm)
 
 
 def _require_data_key(key: bytes) -> bytes:
@@ -306,23 +335,23 @@ def seal_private_artifact(
         raise PrivateArtifactIntegrityError("oversized")
     key_bytes = _require_data_key(key)
     key_id_raw = _require_key_id(key_id)
-    aesgcm_cls = load_aesgcm()
-    nonce = os.urandom(NONCE_BYTES)
-    if len(nonce) != NONCE_BYTES:
-        raise PrivateCryptoCapabilityError("AES-256-GCM nonce source failed")
-    associated = canonical_associated_data(binding)
+    cipher = _aesgcm_context(key_bytes)
     try:
-        ciphertext = aesgcm_cls(key_bytes).encrypt(nonce, payload, associated)
-    except PrivateCryptoCapabilityError:
-        raise
-    except Exception as exc:
-        raise PrivateCryptoCapabilityError("AES-256-GCM encrypt failed") from exc
+        nonce = os.urandom(NONCE_BYTES)
+    except Exception:
+        raise PrivateCryptoCapabilityError("AES-256-GCM secure nonce source unavailable") from None
+    if not isinstance(nonce, bytes) or len(nonce) != NONCE_BYTES:
+        raise PrivateCryptoCapabilityError("AES-256-GCM nonce source failed")
+    header = ENVELOPE_MAGIC + bytes((SCHEMA_VERSION, len(key_id_raw))) + key_id_raw
+    associated = _envelope_associated_data(binding, header)
+    try:
+        ciphertext = cipher.encrypt(nonce, payload, associated)
+    except Exception:
+        raise PrivateCryptoCapabilityError("AES-256-GCM encrypt failed") from None
     if not isinstance(ciphertext, (bytes, bytearray)) or len(ciphertext) < TAG_BYTES:
         raise PrivateCryptoCapabilityError("AES-256-GCM encrypt returned no ciphertext")
     envelope = b"".join((
-        ENVELOPE_MAGIC,
-        bytes((SCHEMA_VERSION, len(key_id_raw))),
-        key_id_raw,
+        header,
         nonce,
         bytes(ciphertext),
     ))
@@ -344,14 +373,15 @@ def open_private_artifact(
     if expected_key_id is not None and parsed["key_id"] != expected_key_id:
         raise PrivateArtifactIntegrityError("authentication_failed")
     key_bytes = _require_data_key(key)
-    aesgcm_cls = load_aesgcm()
-    associated = canonical_associated_data(binding)
+    cipher = _aesgcm_context(key_bytes)
+    header = bytes(envelope)[:6 + len(parsed["key_id"].encode("ascii"))]
+    associated = _envelope_associated_data(binding, header)
     try:
-        plaintext = aesgcm_cls(key_bytes).decrypt(parsed["nonce"], parsed["ciphertext"], associated)
-    except PrivateCryptoCapabilityError:
-        raise
+        plaintext = cipher.decrypt(parsed["nonce"], parsed["ciphertext"], associated)
     except Exception as exc:
-        raise PrivateArtifactIntegrityError("authentication_failed") from exc
+        if _unsupported_crypto_operation(exc):
+            raise PrivateCryptoCapabilityError("AES-256-GCM decrypt unavailable") from None
+        raise PrivateArtifactIntegrityError("authentication_failed") from None
     if not isinstance(plaintext, (bytes, bytearray)):
         raise PrivateArtifactIntegrityError("authentication_failed")
     return bytes(plaintext)
