@@ -1264,6 +1264,18 @@ class PhaseManager:
         self.phase_data[phase][key] = value
         self._refresh_phase_derived_state(phase)
         logger.debug("Updated %s data: %s = %s", phase.value, key, value)
+
+    def record_verified_dependency_refresh(self, graph: Any, report: Dict[str, Any]) -> Dict[str, Any]:
+        """Store a scoped dependency refresh and the legal-source gaps it left visible."""
+        intake = self.phase_data[ComplaintPhase.INTAKE]
+        intake["dependency_graph"] = graph
+        refresh_report = dict(report or {})
+        intake["verified_dependency_refresh"] = refresh_report
+        metadata = getattr(graph, "metadata", {}) if graph is not None else {}
+        gaps = list(metadata.get("legal_source_gaps") or []) if isinstance(metadata, dict) else []
+        intake["legal_context_source_gaps"] = gaps
+        self._refresh_phase_derived_state(ComplaintPhase.INTAKE)
+        return refresh_report
     
     def get_phase_data(self, phase: ComplaintPhase, key: str = None) -> Any:
         """Get data for a specific phase."""
