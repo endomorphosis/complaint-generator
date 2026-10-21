@@ -1134,7 +1134,7 @@ Implementation instructions:
 
 ## CIMP-OPS-01 Ingest native goals/subgoals/tasks and reconcile taskboard projection without losing progress
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.supervision
