@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
+import warnings
+from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Protocol, TypedDict, runtime_checkable
 
 from .loader import import_module_optional
@@ -52,6 +56,110 @@ GRAPHS_ERROR = (
 )
 
 _GRAPH_SNAPSHOT_REGISTRY: Dict[str, Dict[str, Any]] = {}
+_GRAPH_CLIENT: Any = None
+_GRAPH_CLIENT_VERSIONS: Dict[str, str] = {}
+
+
+def _graph_query_contract(graph_id: Optional[str]) -> Dict[str, Any]:
+    contract = _graph_client_contract()
+    if _knowledge_graphs_module is not None:
+        contract["client_api_version"] = contract.get("client_api_version") or str(
+            getattr(_knowledge_graphs_module, "CLIENT_API_VERSION", "") or ""
+        )
+        contract["contract_version"] = contract.get("contract_version") or str(
+            getattr(_knowledge_graphs_module, "CONTRACT_VERSION", "") or ""
+        )
+    contract["graph_persist_path"] = "knowledge_graphs.Client"
+    contract["queried_graph_id"] = str(graph_id or "")
+    try:
+        _graph_client()
+        contract.update(_graph_client_contract())
+    except Exception as exc:
+        contract["client_error"] = str(exc)
+    return contract
+
+
+def _graph_client_contract() -> Dict[str, Any]:
+    versions = dict(_GRAPH_CLIENT_VERSIONS)
+    return {
+        "graph_persist_path": "knowledge_graphs.Client",
+        "client_api_version": versions.get("client_api_version") or "",
+        "contract_version": versions.get("contract_version") or "",
+    }
+
+
+def _graph_client() -> Any:
+    global _GRAPH_CLIENT, _GRAPH_CLIENT_VERSIONS
+    if _GRAPH_CLIENT is not None:
+        return _GRAPH_CLIENT
+    from .loader import import_module_optional
+
+    module, error = import_module_optional("ipfs_datasets_py.knowledge_graphs")
+    if module is None:
+        raise ImportError(str(error or "knowledge_graphs unavailable"))
+    client_cls = getattr(module, "Client", None)
+    graph_target = getattr(module, "GraphTarget", None)
+    if client_cls is None or graph_target is None:
+        raise ImportError("knowledge_graphs.Client is unavailable")
+    catalog_root = os.environ.get("COMPLAINT_GENERATOR_GRAPH_CATALOG", "").strip()
+    catalog = Path(catalog_root) if catalog_root else Path(tempfile.mkdtemp(prefix="complaint-kg-"))
+    catalog.mkdir(parents=True, exist_ok=True)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DeprecationWarning)
+        client = client_cls.open(catalog / "catalog", storage_path=catalog / "store", raise_on_error=False)
+    for item in caught:
+        message = str(item.message)
+        if "GraphEngine" in message or "GraphDatabase" in message:
+            warnings.warn(message, DeprecationWarning, stacklevel=2)
+    _GRAPH_CLIENT = client
+    _GRAPH_CLIENT_VERSIONS = {
+        "client_api_version": str(getattr(module, "CLIENT_API_VERSION", "") or ""),
+        "contract_version": str(getattr(module, "CONTRACT_VERSION", "") or ""),
+    }
+    return client
+
+
+def _persist_nodes_through_client(graph_id: str, graph_payload: Dict[str, Any]) -> Dict[str, Any]:
+    contract = _graph_client_contract()
+    try:
+        from .loader import import_attr_optional
+
+        graph_target, error = import_attr_optional("ipfs_datasets_py.knowledge_graphs", "GraphTarget")
+        if graph_target is None:
+            raise ImportError(str(error or "GraphTarget unavailable"))
+        client = _graph_client()
+        identifier = str(graph_id or "complaint")
+        # Adapter ids contain colons; GraphTarget accepts at most 64 slug
+        # characters. Hash non-slugs so distinct adapter ids cannot collide.
+        client_graph_id = identifier if re.fullmatch(r"[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?", identifier) else (
+            "graph-" + hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:48]
+        )
+        target = graph_target(tenant="complaint-generator", graph_id=client_graph_id, branch="main")
+        mutations = {
+            "entities": list(graph_payload.get("entities") or []),
+            "relationships": list(graph_payload.get("relationships") or []),
+        }
+        write_identity = json.dumps([identifier, mutations], sort_keys=True, default=str)
+        write_key = "write-" + hashlib.sha256(write_identity.encode("utf-8")).hexdigest()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", DeprecationWarning)
+            client.create(target, idempotency_key=f"create-{client_graph_id}", raise_on_error=False)
+            written = client.write(
+                target,
+                idempotency_key=write_key,
+                params=mutations,
+                raise_on_error=False,
+            )
+        for item in caught:
+            message = str(item.message)
+            if "GraphEngine" in message or "GraphDatabase" in message:
+                warnings.warn(message, DeprecationWarning, stacklevel=2)
+        contract.update(_graph_client_contract())
+        contract["client_write_ok"] = bool(getattr(written, "ok", False) or getattr(written, "status", "") == "success")
+    except Exception as exc:
+        contract["client_write_ok"] = False
+        contract["client_error"] = str(exc)
+    return contract
 
 
 class GraphProvenance(TypedDict, total=False):
@@ -889,6 +997,7 @@ def query_graph_support(
         for item in limited_results
     ]
 
+    graph_contract = _graph_query_contract(graph_id)
     payload = with_adapter_metadata(
         GraphSupportResult(
             status="available-fallback" if KNOWLEDGE_GRAPHS_AVAILABLE else "unavailable",
@@ -929,6 +1038,7 @@ def query_graph_support(
         ),
         implementation_status="fallback" if facts or KNOWLEDGE_GRAPHS_AVAILABLE else "unavailable",
         extra_metadata={
+            **graph_contract,
             "graph_id": query["graph_id"],
             "graph_version": query["graph_version"],
             "query_filters": query["filters"],
@@ -1002,6 +1112,7 @@ def persist_graph_snapshot(
     }
 
     if persistence is None:
+        client_contract = _persist_nodes_through_client(stable_graph_id, request)
         existing_snapshot = _GRAPH_SNAPSHOT_REGISTRY.get(stable_graph_id)
         local_created = existing_snapshot is None and not existing_graph
         local_reused = existing_snapshot is not None or existing_graph
@@ -1009,6 +1120,7 @@ def persist_graph_snapshot(
             {
                 "persistence_scope": "adapter_memory",
                 "backend_storage_available": _graph_storage_module is not None,
+                **client_contract,
             }
         )
         snapshot_record = {
@@ -1054,6 +1166,8 @@ def persist_graph_snapshot(
                 "graph_version": request["graph_version"],
                 "snapshot_id": request["snapshot_id"],
                 "content_hash": request["content_hash"],
+                **client_contract,
+                "persistence_scope": "adapter_memory",
             },
         )
     else:

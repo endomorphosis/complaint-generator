@@ -1,11 +1,12 @@
 """Focused validation for the standalone knowledge-graph format fallback."""
 
-import builtins
 import importlib.util
 import sys
 from pathlib import Path
 
 import pytest
+
+from integrations.ipfs_datasets import loader as loader_module
 
 
 MODULE_PATH = Path(__file__).parents[1] / "lib" / "knowledge_graph_formats.py"
@@ -15,14 +16,11 @@ MODULE_PATH = Path(__file__).parents[1] / "lib" / "knowledge_graph_formats.py"
 def fallback_formats(monkeypatch):
     """Load the shim while making the optional upstream package unavailable."""
 
-    original_import = builtins.__import__
+    def unavailable_formats(module_name):
+        assert module_name == "ipfs_datasets_py.knowledge_graphs.migration.formats"
+        return None, ImportError("ipfs_datasets_py intentionally unavailable")
 
-    def import_without_ipfs_datasets(name, *args, **kwargs):
-        if name == "ipfs_datasets_py" or name.startswith("ipfs_datasets_py."):
-            raise ImportError("ipfs_datasets_py intentionally unavailable")
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", import_without_ipfs_datasets)
+    monkeypatch.setattr(loader_module, "import_module_optional", unavailable_formats)
     module_name = "_ref_135_knowledge_graph_formats_fallback"
     spec = importlib.util.spec_from_file_location(module_name, MODULE_PATH)
     assert spec is not None and spec.loader is not None

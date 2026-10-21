@@ -19,6 +19,11 @@ class CapabilityDefinition:
     adapter_module: str
     contract_family: str
     install_extra: str
+    owner: str = "ipfs_datasets_py"
+    bridge: str = ""
+    public_adapter: str = ""
+    canonical_modules: str = ""
+    deprecated_upstream: str = ""
 
 
 # This is the canonical adapter-group contract.  It is deliberately independent
@@ -28,24 +33,50 @@ class CapabilityDefinition:
 CAPABILITY_DEFINITIONS = (
     CapabilityDefinition(
         "llm_router",
-        "ipfs_datasets_py.llm_router",
-        "integrations.ipfs_datasets.llm",
+        "ipfs_accelerate_py.llm_router",
+        "integrations.ipfs_accelerate.routers",
         "generation",
         "api",
+        owner="ipfs_accelerate_py",
+        bridge="ipfs_datasets_py.llm_router",
+        public_adapter="integrations.ipfs_datasets.llm",
+    ),
+    CapabilityDefinition(
+        "embeddings_router",
+        "ipfs_accelerate_py.embeddings_router",
+        "integrations.ipfs_accelerate.routers",
+        "retrieval",
+        "api",
+        owner="ipfs_accelerate_py",
+        bridge="ipfs_datasets_py.embeddings_router",
+        public_adapter="integrations.ipfs_datasets.vector_store",
     ),
     CapabilityDefinition(
         "multimodal_router",
-        "ipfs_datasets_py.multimodal_router",
-        "integrations.ipfs_datasets.multimodal",
+        "ipfs_accelerate_py.multimodal_router",
+        "integrations.ipfs_accelerate.routers",
         "generation",
         "api",
+        owner="ipfs_accelerate_py",
+        bridge="ipfs_datasets_py.multimodal_router",
+        public_adapter="integrations.ipfs_datasets.multimodal",
+    ),
+    CapabilityDefinition(
+        "agent_supervisor",
+        "ipfs_accelerate_py.agent_supervisor",
+        "integrations.ipfs_accelerate.supervisor",
+        "supervision",
+        "",
+        owner="ipfs_accelerate_py",
     ),
     CapabilityDefinition(
         "ipfs_storage",
-        "ipfs_datasets_py.ipfs_backend_router",
+        "ipfs_kit_py",
         "integrations.ipfs_datasets.storage",
         "storage",
         "ipld",
+        owner="ipfs_kit_py",
+        bridge="ipfs_datasets_py.ipfs_backend_router",
     ),
     CapabilityDefinition(
         "web_archiving",
@@ -83,6 +114,20 @@ CAPABILITY_DEFINITIONS = (
         "knowledge_graphs",
     ),
     CapabilityDefinition(
+        "legal_data",
+        "ipfs_datasets_py.processors.legal_data",
+        "integrations.ipfs_datasets.legal_data",
+        "legal",
+        "scraping",
+    ),
+    CapabilityDefinition(
+        "multimedia",
+        "ipfs_datasets_py.processors.multimedia",
+        "integrations.ipfs_datasets.multimedia",
+        "documents",
+        "file_conversion",
+    ),
+    CapabilityDefinition(
         "graphrag",
         "ipfs_datasets_py.optimizers.graphrag",
         "integrations.ipfs_datasets.graphrag",
@@ -95,6 +140,8 @@ CAPABILITY_DEFINITIONS = (
         "integrations.ipfs_datasets.logic",
         "validation",
         "logic",
+        canonical_modules="logic.fol,logic.deontic,logic.integration,logic.external_provers,logic.TDFOL",
+        deprecated_upstream="logic.tools",
     ),
     CapabilityDefinition(
         "policy_rules",
@@ -127,6 +174,11 @@ CAPABILITY_GROUP_KEYS = CAPABILITY_NAMES
 def _probe_capability(definition: CapabilityDefinition) -> CapabilityStatus:
     module, error = import_module_optional(definition.module_path)
     available = module is not None
+    if not available and definition.name == "ipfs_storage" and definition.bridge:
+        bridge_module, bridge_error = import_module_optional(definition.bridge)
+        available = bridge_module is not None
+        if not available and error is None:
+            error = bridge_error
     if not available and error is None:
         # Optional import helpers normally return a typed error.  Synthesize one
         # if an alternate implementation returns ``(None, None)`` so degraded
@@ -142,17 +194,24 @@ def _probe_capability(definition: CapabilityDefinition) -> CapabilityStatus:
         module_name=definition.module_path,
         capability=definition.name,
         install_extra=definition.install_extra,
+        package_name=definition.owner,
     )
     return CapabilityStatus(
         status="available" if available else "degraded",
         available=available,
         module_path=definition.module_path,
         degraded_reason=diagnostic["degraded_reason"],
+        provider=definition.owner,
         details={
             "capability": definition.name,
             "adapter_module": definition.adapter_module,
             "contract_family": definition.contract_family,
             "install_extra": definition.install_extra,
+            "owner": definition.owner,
+            "bridge": definition.bridge,
+            "public_adapter": definition.public_adapter,
+            "canonical_modules": definition.canonical_modules,
+            "deprecated_upstream": definition.deprecated_upstream,
             **diagnostic,
         },
     )

@@ -99,7 +99,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: Operators can move from intake to proof review to drafting impact in one workflow. Unresolved elements expose visible next actions. Document generation consumes validated support state.
 - Source doc: docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md
 - Canonical task id: CSR-M6
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-IE-B0 Timeline ledger foundation
 
@@ -281,7 +281,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: Support strength, missing premises, and contradictions surface before drafting for at least one complaint workflow.
 - Source doc: docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md
 - Canonical task id: IPFS-M3
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-IPFS-M4 Operator productization
 
@@ -295,7 +295,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: Operators can inspect coverage, contradictions, provenance, and queued enrichment work without raw tables.
 - Source doc: docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md
 - Canonical task id: IPFS-M4
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-IPFS-M5 Drafting and filing readiness
 
@@ -309,7 +309,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: At least one complaint workflow emits a filing draft with explicit readiness and warning metadata. Operators can move from support review into drafting without losing provenance.
 - Source doc: docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md
 - Canonical task id: IPFS-M5
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-TEMP-T0 Canonical temporal registry
 
@@ -337,7 +337,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: Claim-level temporal summaries are reproducible from one graph assembly path. Temporal readiness traces to fact and relation IDs. Temporal warnings align with graph issues.
 - Source doc: docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md
 - Canonical task id: TEMP-T1
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-TEMP-T2 Legal temporal rule profiles
 
@@ -351,7 +351,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: At least one claim type evaluates chronology against an explicit rule profile. Proof failures identify missing events, ordering relations, or legal-window violations. Rule-profile evaluation is independent of HTML rendering.
 - Source doc: docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md
 - Canonical task id: TEMP-T2
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-TEMP-T3 Theorem export and proof bundles
 
@@ -365,7 +365,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: Theorem exports are reproducible from persisted proof bundles. Operator formula previews come from the same bundle used for proof execution. Proof failures identify concrete missing facts or relations.
 - Source doc: docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md
 - Canonical task id: TEMP-T3
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-TEMP-T4 Temporal contradiction and follow-up planner
 
@@ -379,7 +379,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: Each blocking temporal issue yields explicit next action. Operators can see the affected rule or fact. Follow-up planning distinguishes temporal gaps from non-temporal missingness.
 - Source doc: docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md
 - Canonical task id: TEMP-T4
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-TEMP-T5 Review, drafting, and optimization integration
 
@@ -393,7 +393,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: Operators can move from summary metrics to concrete chronology blockers. Drafting surfaces do not overstate readiness when timing rules are unproved. Review and document flows consume the same temporal proof payloads.
 - Source doc: docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md
 - Canonical task id: TEMP-T5
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-TEMP-T6 Regression and gold-case enforcement
 
@@ -407,7 +407,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: Chronology regressions fail on payload drift and UI drift. At least one gold case proves sufficient ordering and one fails for an explainable temporal reason.
 - Source doc: docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md
 - Canonical task id: TEMP-T6
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-CONTRACT-PAYLOADS Payload contract validation and fixture hygiene
 

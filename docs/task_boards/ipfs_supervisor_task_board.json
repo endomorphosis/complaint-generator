@@ -1,7 +1,7 @@
 {
   "schema_version": "complaint-generator.supervisor_task_board.v1",
   "generated_for": "ipfs_accelerate_py_agent_supervisor",
-  "updated_at": "2026-07-20",
+  "updated_at": "2026-10-20",
   "purpose": "Canonical machine-readable board for coordinating the complaint-generator IPFS datasets, claim-support review, intake/evidence, payload-contract, and temporal-proof backlogs with an external agent supervisor or daemon.",
   "source_documents": [
     "docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md",
@@ -217,7 +217,7 @@
       "task_id": "CSR-M6",
       "title": "Operator productization and document handoff",
       "source_doc": "docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md",
-      "status": "validation_required",
+      "status": "complete",
       "priority": "P1",
       "depends_on": [
         "CSR-M5"
@@ -238,7 +238,16 @@
       "validation_commands": [
         "python -m pytest tests/test_document_pipeline.py -q",
         "python -m pytest tests/test_review_api.py -q"
-      ]
+      ],
+      "completed_at": "2026-10-20T20:23:28.524039+00:00",
+      "completion_evidence": {
+        "kind": "pytest_module_superset",
+        "report": ".complaint_workspace/supervisor/ipfs_backlog_validation.xml",
+        "report_sha256": "4b59c65e30b6c62de81f1772a6bf2935b0a2c3dd1c04346be324a52c3b549755",
+        "manifest": ".complaint_workspace/supervisor/ipfs_backlog_validation_manifest.json",
+        "passed": 406,
+        "optional_live_provider_tests_deselected": 2
+      }
     },
     {
       "task_id": "IE-B0",
@@ -508,7 +517,7 @@
       "task_id": "IPFS-M3",
       "title": "Support-quality and validation layer",
       "source_doc": "docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md",
-      "status": "validation_required",
+      "status": "complete",
       "priority": "P1",
       "depends_on": [
         "IPFS-M2"
@@ -529,13 +538,40 @@
         "python -m pytest tests/test_m3_graphrag_quality_scoring.py -q",
         "python -m pytest tests/test_ipfs_logic_adapter.py -q",
         "python -m pytest tests/test_m5_legal_proof_contradiction_engine.py -q"
-      ]
+      ],
+      "completed_at": "2026-10-20T20:38:04.648970+00:00",
+      "completion_evidence": {
+        "kind": "pytest_module_superset",
+        "report": ".complaint_workspace/supervisor/ipfs_backlog_validation.xml",
+        "report_sha256": "4b59c65e30b6c62de81f1772a6bf2935b0a2c3dd1c04346be324a52c3b549755",
+        "manifest": ".complaint_workspace/supervisor/ipfs_backlog_validation_manifest.json",
+        "passed": 406,
+        "optional_live_provider_tests_deselected": 2,
+        "operator_surface_regressions": {
+          "package_surface_validation": {
+            "report": ".complaint_workspace/supervisor/package_surface_validation.xml",
+            "sha256": "cdf62f7d7c83748a10756ff5182becd4a7055254252f07ff178aa9122bd37987",
+            "tests": 16,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "operator_surface_validation": {
+            "report": ".complaint_workspace/supervisor/operator_surface_validation.xml",
+            "sha256": "c9390f4c896ab51ff67f092aa79a0b94f4ded6cd3d5e191c3f260b6b710ef474",
+            "tests": 18,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      }
     },
     {
       "task_id": "IPFS-M4",
       "title": "Operator productization",
       "source_doc": "docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md",
-      "status": "validation_required",
+      "status": "complete",
       "priority": "P1",
       "depends_on": [
         "IPFS-M3"
@@ -553,13 +589,22 @@
       "validation_commands": [
         "python -m pytest tests/test_review_api.py -q",
         "python -m pytest tests/test_web_evidence_hooks.py tests/test_claim_support_hooks.py tests/test_review_api.py -q"
-      ]
+      ],
+      "completed_at": "2026-10-20T20:23:28.524039+00:00",
+      "completion_evidence": {
+        "kind": "pytest_module_superset",
+        "report": ".complaint_workspace/supervisor/ipfs_backlog_validation.xml",
+        "report_sha256": "4b59c65e30b6c62de81f1772a6bf2935b0a2c3dd1c04346be324a52c3b549755",
+        "manifest": ".complaint_workspace/supervisor/ipfs_backlog_validation_manifest.json",
+        "passed": 406,
+        "optional_live_provider_tests_deselected": 2
+      }
     },
     {
       "task_id": "IPFS-M5",
       "title": "Drafting and filing readiness",
       "source_doc": "docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md",
-      "status": "validation_required",
+      "status": "complete",
       "priority": "P0",
       "depends_on": [
         "IPFS-M4"
@@ -582,7 +627,34 @@
         "python -m pytest tests/test_document_pipeline.py -q",
         "python -m pytest tests/test_claim_support_review_template.py -q",
         "python -m pytest tests/test_review_api.py -q"
-      ]
+      ],
+      "completed_at": "2026-10-20T20:38:04.648996+00:00",
+      "completion_evidence": {
+        "kind": "pytest_module_superset",
+        "report": ".complaint_workspace/supervisor/ipfs_backlog_validation.xml",
+        "report_sha256": "4b59c65e30b6c62de81f1772a6bf2935b0a2c3dd1c04346be324a52c3b549755",
+        "manifest": ".complaint_workspace/supervisor/ipfs_backlog_validation_manifest.json",
+        "passed": 406,
+        "optional_live_provider_tests_deselected": 2,
+        "operator_surface_regressions": {
+          "package_surface_validation": {
+            "report": ".complaint_workspace/supervisor/package_surface_validation.xml",
+            "sha256": "cdf62f7d7c83748a10756ff5182becd4a7055254252f07ff178aa9122bd37987",
+            "tests": 16,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "operator_surface_validation": {
+            "report": ".complaint_workspace/supervisor/operator_surface_validation.xml",
+            "sha256": "c9390f4c896ab51ff67f092aa79a0b94f4ded6cd3d5e191c3f260b6b710ef474",
+            "tests": 18,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      }
     },
     {
       "task_id": "TEMP-T0",
@@ -610,7 +682,7 @@
       "task_id": "TEMP-T1",
       "title": "Claim-scoped temporal graph assembly",
       "source_doc": "docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md",
-      "status": "validation_required",
+      "status": "complete",
       "priority": "P0",
       "depends_on": [
         "TEMP-T0"
@@ -629,13 +701,22 @@
         "python -m pytest tests/test_t1_t3_temporal_next_steps.py -q",
         "python -m pytest tests/test_claim_support_hooks.py tests/test_mediator_three_phase.py -q",
         "python -m pytest tests/test_review_api.py -q"
-      ]
+      ],
+      "completed_at": "2026-10-20T20:23:28.524039+00:00",
+      "completion_evidence": {
+        "kind": "pytest_module_superset",
+        "report": ".complaint_workspace/supervisor/ipfs_backlog_validation.xml",
+        "report_sha256": "4b59c65e30b6c62de81f1772a6bf2935b0a2c3dd1c04346be324a52c3b549755",
+        "manifest": ".complaint_workspace/supervisor/ipfs_backlog_validation_manifest.json",
+        "passed": 406,
+        "optional_live_provider_tests_deselected": 2
+      }
     },
     {
       "task_id": "TEMP-T2",
       "title": "Legal temporal rule profiles",
       "source_doc": "docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md",
-      "status": "validation_required",
+      "status": "complete",
       "priority": "P0",
       "depends_on": [
         "TEMP-T1"
@@ -653,13 +734,22 @@
       "validation_commands": [
         "python -m pytest tests/test_claim_support_hooks.py -q",
         "python -m pytest tests/test_review_api.py -q"
-      ]
+      ],
+      "completed_at": "2026-10-20T20:23:28.524039+00:00",
+      "completion_evidence": {
+        "kind": "pytest_module_superset",
+        "report": ".complaint_workspace/supervisor/ipfs_backlog_validation.xml",
+        "report_sha256": "4b59c65e30b6c62de81f1772a6bf2935b0a2c3dd1c04346be324a52c3b549755",
+        "manifest": ".complaint_workspace/supervisor/ipfs_backlog_validation_manifest.json",
+        "passed": 406,
+        "optional_live_provider_tests_deselected": 2
+      }
     },
     {
       "task_id": "TEMP-T3",
       "title": "Theorem export and proof bundles",
       "source_doc": "docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md",
-      "status": "validation_required",
+      "status": "complete",
       "priority": "P0",
       "depends_on": [
         "TEMP-T2"
@@ -677,13 +767,22 @@
       "validation_commands": [
         "python -m pytest tests/test_claim_support_hooks.py tests/test_review_api.py -q",
         "python -m pytest tests/test_claim_support_review_dashboard_flow.py -q"
-      ]
+      ],
+      "completed_at": "2026-10-20T20:23:28.524039+00:00",
+      "completion_evidence": {
+        "kind": "pytest_module_superset",
+        "report": ".complaint_workspace/supervisor/ipfs_backlog_validation.xml",
+        "report_sha256": "4b59c65e30b6c62de81f1772a6bf2935b0a2c3dd1c04346be324a52c3b549755",
+        "manifest": ".complaint_workspace/supervisor/ipfs_backlog_validation_manifest.json",
+        "passed": 406,
+        "optional_live_provider_tests_deselected": 2
+      }
     },
     {
       "task_id": "TEMP-T4",
       "title": "Temporal contradiction and follow-up planner",
       "source_doc": "docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md",
-      "status": "validation_required",
+      "status": "complete",
       "priority": "P1",
       "depends_on": [
         "TEMP-T3"
@@ -702,13 +801,22 @@
       "validation_commands": [
         "python -m pytest tests/test_mediator_three_phase.py tests/test_intake_status.py -q",
         "python -m pytest tests/test_claim_support_review_dashboard_flow.py -q"
-      ]
+      ],
+      "completed_at": "2026-10-20T20:23:28.524039+00:00",
+      "completion_evidence": {
+        "kind": "pytest_module_superset",
+        "report": ".complaint_workspace/supervisor/ipfs_backlog_validation.xml",
+        "report_sha256": "4b59c65e30b6c62de81f1772a6bf2935b0a2c3dd1c04346be324a52c3b549755",
+        "manifest": ".complaint_workspace/supervisor/ipfs_backlog_validation_manifest.json",
+        "passed": 406,
+        "optional_live_provider_tests_deselected": 2
+      }
     },
     {
       "task_id": "TEMP-T5",
       "title": "Review, drafting, and optimization integration",
       "source_doc": "docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md",
-      "status": "validation_required",
+      "status": "complete",
       "priority": "P1",
       "depends_on": [
         "TEMP-T4"
@@ -728,13 +836,23 @@
       "validation_commands": [
         "python -m pytest tests/test_claim_support_review_dashboard_flow.py tests/test_claim_support_review_playwright_smoke.py -q",
         "python -m pytest tests/test_claim_support_review_template.py -q"
-      ]
+      ],
+      "completed_at": "2026-10-20T20:44:30.027484+00:00",
+      "completion_evidence": {
+        "kind": "pytest_module_superset",
+        "report": ".complaint_workspace/supervisor/ipfs_regression_validation.xml",
+        "report_sha256": "83f57b9dce5e416fb1e5fc4cde4851f52d6c6a4635910eb1732eb9b998d3942c",
+        "required_module_skips": 0,
+        "total_passed": 357,
+        "additional_gated_package_tests_skipped": 16,
+        "gated_package_tests_verified_separately": ".complaint_workspace/supervisor/package_surface_validation.xml"
+      }
     },
     {
       "task_id": "TEMP-T6",
       "title": "Regression and gold-case enforcement",
       "source_doc": "docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md",
-      "status": "validation_required",
+      "status": "complete",
       "priority": "P0",
       "depends_on": [
         "TEMP-T5"
@@ -756,7 +874,22 @@
       "validation_commands": [
         "python -m pytest tests/test_claim_support_hooks.py tests/test_review_api.py tests/test_claim_support_review_dashboard_flow.py tests/test_claim_support_review_playwright_smoke.py tests/test_mediator_three_phase.py tests/test_intake_status.py -q",
         "python scripts/run_claim_support_review_regression.py --browser on"
-      ]
+      ],
+      "completed_at": "2026-10-20T20:48:22.173239+00:00",
+      "completion_evidence": {
+        "kind": "complete_regression_driver",
+        "receipt": ".complaint_workspace/supervisor/ipfs_regression_driver_receipt.json",
+        "receipt_sha256": "2d17246e043858e1dd490945812451b4a34130ef9d264712398af770700573e8",
+        "exit_code": 0,
+        "python_report": ".complaint_workspace/supervisor/ipfs_regression_validation.xml",
+        "python_report_sha256": "83f57b9dce5e416fb1e5fc4cde4851f52d6c6a4635910eb1732eb9b998d3942c",
+        "python_passed": 357,
+        "python_skipped": 16,
+        "skipped_package_tests_verified_separately": ".complaint_workspace/supervisor/package_surface_validation.xml",
+        "node_passed": 34,
+        "driver_log": ".complaint_workspace/supervisor/ipfs_regression_validation.log",
+        "driver_log_sha256": "6b45d2e8b07507455e4bbb6f73845621bcf6945dd64da1570d9c29933d4f704e"
+      }
     },
     {
       "task_id": "CONTRACT-PAYLOADS",

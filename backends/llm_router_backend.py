@@ -6,6 +6,7 @@ import random
 import time
 import threading
 
+from integrations.ipfs_accelerate.routers import COMPLAINT_PROVIDER_ALIASES
 from integrations.ipfs_datasets.llm import (
     LLM_ROUTER_AVAILABLE,
     generate_text_via_router as generate_text,
@@ -14,16 +15,7 @@ from integrations.ipfs_datasets.llm import (
 
 logger = logging.getLogger(__name__)
 
-_PROVIDER_ALIASES = {
-    'local': 'local_hf',
-    'local_hf': 'local_hf',
-    'hf': 'local_hf',
-    'huggingface': 'hf_inference_api',
-    'p2p': 'p2p_task_queue',
-    'p2p_task': 'p2p_task_queue',
-    'remote_queue': 'p2p_task_queue',
-    'task_queue': 'p2p_task_queue',
-}
+_PROVIDER_ALIASES = COMPLAINT_PROVIDER_ALIASES
 
 _PROVIDER_ENV_KEYS = (
     'IPFS_DATASETS_PY_LLM_PROVIDER',

@@ -17,17 +17,28 @@ import anyio
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
+from integrations.ipfs_datasets.legal_data import load_legal_symbol
+from integrations.ipfs_datasets.loader import import_failure_message
 
 
 def _require_ipfs_attr(module_name: str, attr_name: str, label: str):
-    value, error = import_attr_optional(module_name, attr_name)
-    if value is not None:
-        return value
-    raise ImportError(
-        f"Unable to import ipfs_datasets_py {label}: "
-        f"{import_failure_message(error) or f'missing {attr_name}'}"
+    try:
+        return load_legal_symbol(attr_name, module=module_name)
+    except ImportError as error:
+        raise ImportError(
+            f"Unable to import ipfs_datasets_py {label}: "
+            f"{import_failure_message(error) or f'missing {attr_name}'}"
+        ) from error
+
+
+async def run_gmail_duckdb_pipeline(**kwargs):
+    """Load the upstream-owned pipeline only when a daemon cycle runs."""
+    pipeline = _require_ipfs_attr(
+        "email_pipeline",
+        "run_gmail_duckdb_pipeline",
+        "Gmail DuckDB pipeline",
     )
+    return await pipeline(**kwargs)
 
 
 _STOP_REQUESTED = False
@@ -68,9 +79,18 @@ def _pid_is_running(pid: int) -> bool:
     return True
 
 
+def _json_default(value: Any) -> str:
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False, default=_json_default),
+        encoding="utf-8",
+    )
 
 
 def _build_progress_summary(args: argparse.Namespace) -> dict[str, Any]:
@@ -343,7 +363,16 @@ def _add_shared_pipeline_args(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run a resumable Gmail-to-DuckDB daemon.")
+    parser = argparse.ArgumentParser(
+        description="Run a resumable Gmail-to-DuckDB daemon.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Ingestion options for run/start include:\n"
+            "  --uid-range-span\n"
+            "  --duckdb-build-every-batches\n"
+            "Use run --help or start --help for the full option list."
+        ),
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser("run", help="Run the Gmail DuckDB daemon in the foreground.")
@@ -378,7 +407,7 @@ def _resolve_credentials(args: argparse.Namespace, parser: argparse.ArgumentPars
             parser.error("--gmail-oauth-client-secrets is required when --use-gmail-oauth is enabled.")
         return gmail_user, ""
     resolve_gmail_credentials = _require_ipfs_attr(
-        "ipfs_datasets_py.processors.legal_data.email_auth",
+        "email_auth",
         "resolve_gmail_credentials",
         "Gmail credential resolver",
     )
@@ -395,15 +424,10 @@ def _resolve_credentials(args: argparse.Namespace, parser: argparse.ArgumentPars
 
 
 async def _run_cycle(args: argparse.Namespace) -> dict[str, Any]:
-    run_gmail_duckdb_pipeline = _require_ipfs_attr(
-        "ipfs_datasets_py.processors.legal_data.email_pipeline",
-        "run_gmail_duckdb_pipeline",
-        "Gmail DuckDB pipeline",
-    )
     return await run_gmail_duckdb_pipeline(
         user_id=args.user_id,
         addresses=args.addresses,
-        collect_all_messages=bool(args.collect_all_messages),
+        collect_all_messages=bool(getattr(args, "collect_all_messages", False)),
         claim_element_id=args.claim_element_id,
         folder=args.folder,
         folders=args.scan_folder,
@@ -577,14 +601,15 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
 def _build_run_command(args: argparse.Namespace, *, pid_file: Path, status_file: Path, log_file: Path) -> tuple[list[str], dict[str, str]]:
     cmd = [
         sys.executable,
-        str(Path(__file__).resolve()),
+        "-m",
+        "scripts.gmail_duckdb_daemon",
         "run",
         "--user-id",
         args.user_id,
     ]
     for address in list(args.addresses or []):
         cmd.extend(["--address", address])
-    if args.collect_all_messages:
+    if getattr(args, "collect_all_messages", False):
         cmd.append("--collect-all-messages")
     cmd.extend(["--claim-element-id", args.claim_element_id])
     cmd.extend(["--folder", args.folder])

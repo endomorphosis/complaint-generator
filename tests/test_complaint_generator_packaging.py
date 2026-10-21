@@ -203,5 +203,5 @@ def test_stdio_mcp_server_responds_with_initialize_and_tool_payload(monkeypatch,
 
     lines = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
     assert lines[0]["result"]["serverInfo"]["name"] == "complaint-workspace-mcp"
-    assert lines[0]["result"]["protocolVersion"] == "2026-03-22"
+    assert lines[0]["result"]["protocolVersion"] == "2025-06-18"
     assert any(tool["name"] == "complaint.generate_complaint" for tool in lines[1]["result"]["tools"])

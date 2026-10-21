@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import backends
+import pytest
 from typer.testing import CliRunner
 
 try:
@@ -74,6 +75,16 @@ from applications import complaint_cli as applications_cli_module
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def _fake_implicit_export_review(monkeypatch):
+    """Package flows exercise export plumbing without invoking a provider."""
+
+    monkeypatch.setattr(
+        "applications.ui_review.review_complaint_output_with_llm_router",
+        lambda *_args, **_kwargs: {"review": {}, "backend": {}},
+    )
 
 
 def _script_path(script_name: str) -> Path:

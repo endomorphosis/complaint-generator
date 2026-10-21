@@ -4037,7 +4037,7 @@
             `;
         }
 
-        function renderFilingChecklist(items, manualReviewClaims, pendingReviewClaims) {
+        function renderFilingChecklist(items, manualReviewClaims, pendingReviewClaims, reviewLinks = {}) {
             const values = Array.isArray(items) ? items.filter((item) => item && typeof item === 'object') : [];
             if (!values.length) {
                 return '';
@@ -5014,7 +5014,7 @@
                 ${renderArtifacts(payload.artifacts || {})}
                 <div class="draft-shell">
                     ${renderReadiness(readiness, draft.exhibits || [], reviewLinks, readinessIntakeCaseSummary, chronologyBlockerSummary, builderSummary)}
-                    ${renderFilingChecklist(filingChecklist, manualReviewClaims, pendingReviewClaims)}
+                    ${renderFilingChecklist(filingChecklist, manualReviewClaims, pendingReviewClaims, reviewLinks)}
                     ${renderOptimizationReport(optimizationReport, reviewLinks)}
                     <div class="court-header">${escapeHtml(draft.court_header || '')}</div>
                     <div class="caption-block">

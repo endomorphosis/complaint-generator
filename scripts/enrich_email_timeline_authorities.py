@@ -3,20 +3,18 @@ from __future__ import annotations
 import argparse
 import json
 
-from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
+from integrations.ipfs_datasets.legal_data import load_legal_symbol
+from integrations.ipfs_datasets.loader import import_failure_message
 
 
 def _require_enrich_email_timeline_authorities():
-    enrich_email_timeline_authorities, error = import_attr_optional(
-        "ipfs_datasets_py.processors.legal_data.email_authority_enrichment",
-        "enrich_email_timeline_authorities",
-    )
-    if enrich_email_timeline_authorities is not None:
-        return enrich_email_timeline_authorities
-    raise ImportError(
-        "Unable to import ipfs_datasets_py email authority enrichment: "
-        f"{import_failure_message(error) or 'missing enrich_email_timeline_authorities'}"
-    )
+    try:
+        return load_legal_symbol("enrich_email_timeline_authorities", module="email_authority_enrichment")
+    except ImportError as error:
+        raise ImportError(
+            "Unable to import ipfs_datasets_py email authority enrichment: "
+            f"{import_failure_message(error) or 'missing enrich_email_timeline_authorities'}"
+        ) from error
 
 
 def build_parser() -> argparse.ArgumentParser:

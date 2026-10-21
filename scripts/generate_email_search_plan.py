@@ -3,21 +3,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
-from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
+from integrations.ipfs_datasets.legal_data import load_legal_symbol
+from integrations.ipfs_datasets.loader import import_failure_message
 
 
 def _require_generate_email_search_plan():
-    generate_email_search_plan, error = import_attr_optional(
-        "ipfs_datasets_py.processors.legal_data.email_relevance",
-        "generate_email_search_plan",
-    )
-    if generate_email_search_plan is not None:
-        return generate_email_search_plan
-    raise ImportError(
-        "Unable to import ipfs_datasets_py email relevance planner: "
-        f"{import_failure_message(error) or 'missing generate_email_search_plan'}"
-    )
+    try:
+        return load_legal_symbol("generate_email_search_plan", module="email_relevance")
+    except ImportError as error:
+        raise ImportError(
+            "Unable to import ipfs_datasets_py email relevance planner: "
+            f"{import_failure_message(error) or 'missing generate_email_search_plan'}"
+        ) from error
 
 
 def build_parser() -> argparse.ArgumentParser:

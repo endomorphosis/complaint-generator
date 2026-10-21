@@ -10,15 +10,14 @@ import shutil
 import threading
 from typing import Any, Dict, Mapping, Optional
 
-from .loader import import_attr_optional
+from integrations.ipfs_accelerate.routers import load_llm_symbols, normalize_accelerate_provider
 from .types import with_adapter_metadata
 
 
 logger = logging.getLogger(__name__)
 
 
-generate_text, _error = import_attr_optional("ipfs_datasets_py.llm_router", "generate_text")
-get_last_generation_trace, _trace_error = import_attr_optional("ipfs_datasets_py.llm_router", "get_last_generation_trace")
+generate_text, get_last_generation_trace, _error = load_llm_symbols()
 LLM_ROUTER_AVAILABLE = generate_text is not None
 LLM_ROUTER_ERROR = _error
 
@@ -563,13 +562,14 @@ def _prepare_generate_text_call(
 	call_options = dict(kwargs)
 	if _is_huggingface_router_request(provider, call_options):
 		return _build_huggingface_router_request(prompt, provider, model_name, call_options)
+	mapped_provider = normalize_accelerate_provider(provider)
 	metadata = {
 		"requested_provider_name": provider or "",
-		"effective_provider_name": provider or "",
+		"effective_provider_name": mapped_provider or "",
 		"effective_model_name": str(model_name or ""),
 		"router_base_url": "",
 	}
-	return str(provider or ""), model_name, call_options, {}, metadata
+	return str(mapped_provider or ""), model_name, call_options, {}, metadata
 
 
 @contextmanager

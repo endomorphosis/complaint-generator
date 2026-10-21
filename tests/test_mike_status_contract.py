@@ -1,6 +1,10 @@
-import subprocess
 import re
+import subprocess
 from pathlib import Path
+
+import pytest
+
+pytestmark = [pytest.mark.no_auto_heavy]
 
 from complaint_generator.workspace import (
     build_mike_handoff as package_build_mike_handoff,
@@ -218,6 +222,26 @@ def test_mike_handoff_exposes_router_grounding_logic_and_submodule_contracts(tmp
         r"[0-9a-f]{40}",
         handoff_payload["compatibility_target_matrix"]["submodule_shas"]["ipfs_datasets_py_origin_main_commit"],
     )
+    for sha_key in (
+        "ipfs_accelerate_py_commit",
+        "ipfs_accelerate_py_origin_main_commit",
+        "ipfs_kit_py_commit",
+        "ipfs_kit_py_origin_main_commit",
+    ):
+        assert re.fullmatch(
+            r"[0-9a-f]{40}",
+            handoff_payload["compatibility_target_matrix"]["submodule_shas"][sha_key],
+        )
+    mike_integration = handoff_payload["mike_integration"]
+    assert mike_integration["transport"] == "mcp_connector"
+    assert mike_integration["tools"] == [
+        "complaint.generate_grounded_text",
+        "complaint.search_corpus",
+        "complaint.get_handoff",
+        "complaint.sync_draft",
+    ]
+    assert mike_integration["connector_url"].endswith("/api/complaint-workspace/mcp/rpc")
+    assert handoff_payload["submodule_inventory"]["strategy"]["mike"] == "external/mike@origin/main"
     assert "grounding_mode" in payload["sync_contract"]["optional_fields"]
     assert "assertion_annotations" in payload["sync_contract"]["optional_fields"]
     assert "authority_links" in payload["sync_contract"]["optional_fields"]

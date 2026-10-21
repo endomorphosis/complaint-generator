@@ -5,20 +5,18 @@ import argparse
 import json
 from pathlib import Path
 
-from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
+from integrations.ipfs_datasets.legal_data import load_legal_symbol
+from integrations.ipfs_datasets.loader import import_failure_message
 
 
 def _require_build_email_seed_plan():
-    build_email_seed_plan, error = import_attr_optional(
-        "ipfs_datasets_py.processors.legal_data.email_seed_planner",
-        "build_email_seed_plan",
-    )
-    if build_email_seed_plan is not None:
-        return build_email_seed_plan
-    raise ImportError(
-        "Unable to import ipfs_datasets_py email seed planner: "
-        f"{import_failure_message(error) or 'missing build_email_seed_plan'}"
-    )
+    try:
+        return load_legal_symbol("build_email_seed_plan", module="email_seed_planner")
+    except ImportError as error:
+        raise ImportError(
+            "Unable to import ipfs_datasets_py email seed planner: "
+            f"{import_failure_message(error) or 'missing build_email_seed_plan'}"
+        ) from error
 
 
 def build_parser() -> argparse.ArgumentParser:

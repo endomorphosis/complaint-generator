@@ -5,12 +5,15 @@ from fastapi.responses import HTMLResponse
 from .fastapi_compat import attach_router_routes
 
 
-_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-_SDK_PLAYGROUND_TEMPLATE = (
-    Path(__file__).resolve().parent.parent
-    / "ipfs_datasets_py"
-    / "ipfs_accelerate_py"
-    / "SDK_PLAYGROUND_PREVIEW.html"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_TEMPLATES_DIR = _REPO_ROOT / "templates"
+_SDK_PLAYGROUND_CANDIDATES = (
+    _REPO_ROOT / "external" / "ipfs_accelerate_py" / "SDK_PLAYGROUND_PREVIEW.html",
+    _REPO_ROOT / "ipfs_datasets_py" / "ipfs_accelerate_py" / "SDK_PLAYGROUND_PREVIEW.html",
+)
+_SDK_PLAYGROUND_TEMPLATE = next(
+    (candidate for candidate in _SDK_PLAYGROUND_CANDIDATES if candidate.exists()),
+    _SDK_PLAYGROUND_CANDIDATES[0],
 )
 
 

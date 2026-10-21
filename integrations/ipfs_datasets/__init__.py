@@ -1,3 +1,5 @@
+"""Lazy adapter exports that leave optional providers uninitialized."""
+
 from __future__ import annotations
 
 from importlib import import_module
@@ -153,3 +155,7 @@ def __getattr__(name: str) -> Any:
     value = getattr(module, attribute_name)
     globals()[name] = value
     return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

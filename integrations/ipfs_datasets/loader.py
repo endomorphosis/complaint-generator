@@ -17,6 +17,15 @@ class RepoPaths:
     repo_root: Path
     ipfs_datasets_repo: Path
     ipfs_accelerate_repo: Path
+    ipfs_kit_repo: Path | None = None
+    mike_repo: Path | None = None
+
+
+def _first_present(candidates: tuple[Path, ...]) -> Path:
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 
 @dataclass(frozen=True)
@@ -45,12 +54,37 @@ class ImportFailure:
 @lru_cache(maxsize=1)
 def get_repo_paths() -> RepoPaths:
     repo_root = Path(__file__).resolve().parents[2]
-    ipfs_datasets_repo = repo_root / "ipfs_datasets_py"
-    ipfs_accelerate_repo = ipfs_datasets_repo / "ipfs_accelerate_py"
+    external = repo_root / "external"
+    ipfs_datasets_repo = _first_present(
+        (
+            external / "ipfs_datasets_py",
+            repo_root / "ipfs_datasets_py",
+        )
+    )
+    ipfs_accelerate_repo = _first_present(
+        (
+            external / "ipfs_accelerate_py",
+            ipfs_datasets_repo / "ipfs_accelerate_py",
+        )
+    )
+    ipfs_kit_repo = _first_present(
+        (
+            external / "ipfs_kit_py",
+            ipfs_datasets_repo / "ipfs_kit_py",
+        )
+    )
+    mike_repo = _first_present(
+        (
+            external / "mike",
+            repo_root / "mike",
+        )
+    )
     return RepoPaths(
         repo_root=repo_root,
         ipfs_datasets_repo=ipfs_datasets_repo,
         ipfs_accelerate_repo=ipfs_accelerate_repo,
+        ipfs_kit_repo=ipfs_kit_repo,
+        mike_repo=mike_repo,
     )
 
 
@@ -73,6 +107,7 @@ def _candidate_ipfs_source_roots() -> list[Path]:
 
 
 def _package_dir_for_root(package_root: str) -> Path | None:
+    paths = get_repo_paths()
     candidates: list[Path] = []
     if package_root == "ipfs_datasets_py":
         for source_root in _candidate_ipfs_source_roots():
@@ -87,9 +122,14 @@ def _package_dir_for_root(package_root: str) -> Path | None:
             )
     elif package_root == "ipfs_accelerate_py":
         candidates = [
-            source_root / "ipfs_accelerate_py" / "ipfs_accelerate_py"
-            for source_root in _candidate_ipfs_source_roots()
+            paths.ipfs_accelerate_repo / "ipfs_accelerate_py",
+            *[
+                source_root / "ipfs_accelerate_py" / "ipfs_accelerate_py"
+                for source_root in _candidate_ipfs_source_roots()
+            ],
         ]
+    elif package_root == "ipfs_kit_py" and paths.ipfs_kit_repo is not None:
+        candidates = [paths.ipfs_kit_repo / "ipfs_kit_py"]
 
     for candidate in candidates:
         if (candidate / "__init__.py").exists():
@@ -141,7 +181,7 @@ def _prime_repo_package(package_root: str) -> None:
 
 def ensure_import_paths(module_name: str = "", missing_module_name: str = "") -> RepoPaths:
     paths = get_repo_paths()
-    for package_root in ("ipfs_datasets_py", "ipfs_accelerate_py"):
+    for package_root in ("ipfs_datasets_py", "ipfs_accelerate_py", "ipfs_kit_py"):
         if _matches_package_root(module_name, package_root) or _matches_package_root(missing_module_name, package_root):
             _prime_repo_package(package_root)
     return paths
@@ -151,7 +191,7 @@ def _should_retry_with_repo_paths(module_name: str, error: ModuleNotFoundError) 
     missing_module_name = str(getattr(error, "name", "") or "")
     return any(
         _matches_package_root(value, package_root)
-        for package_root in ("ipfs_datasets_py", "ipfs_accelerate_py")
+        for package_root in ("ipfs_datasets_py", "ipfs_accelerate_py", "ipfs_kit_py")
         for value in (module_name, missing_module_name)
         if value
     )

@@ -4,12 +4,11 @@ from __future__ import annotations
 import argparse
 import json
 
-from integrations.ipfs_datasets.loader import ensure_import_paths
 
-ensure_import_paths(module_name="ipfs_datasets_py.processors.legal_data.email_workspace")
+from complaint_generator.email_graphrag import build_email_graphrag_artifacts
+from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
-from ipfs_datasets_py.processors.legal_data.email_workspace import import_local_eml_directory
-from ipfs_datasets_py.processors.legal_data.email_corpus import build_email_graphrag_artifacts
+import_local_eml_directory = load_legal_symbol("import_local_eml_directory", module="email_workspace")
 
 
 def build_parser() -> argparse.ArgumentParser:

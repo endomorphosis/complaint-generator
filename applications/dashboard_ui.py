@@ -35,18 +35,22 @@ class DashboardFixtures:
     dashboard_subsection_index: tuple[dict[str, Any], ...]
 
 
-_IPFS_DATASETS_TEMPLATES_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "ipfs_datasets_py"
-    / "ipfs_datasets_py"
-    / "templates"
+def _first_present(candidates: tuple[Path, ...]) -> Path:
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+_COMPLAINT_REPO_ROOT = Path(__file__).resolve().parent.parent
+_IPFS_DATASETS_REPO = _first_present(
+    (
+        _COMPLAINT_REPO_ROOT / "external" / "ipfs_datasets_py",
+        _COMPLAINT_REPO_ROOT / "ipfs_datasets_py",
+    )
 )
-_IPFS_DATASETS_STATIC_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "ipfs_datasets_py"
-    / "ipfs_datasets_py"
-    / "static"
-)
+_IPFS_DATASETS_TEMPLATES_DIR = _IPFS_DATASETS_REPO / "ipfs_datasets_py" / "templates"
+_IPFS_DATASETS_STATIC_DIR = _IPFS_DATASETS_REPO / "ipfs_datasets_py" / "static"
 
 _COMPLAINT_DASHBOARD_LINKS = [
     ("Start", "/"),

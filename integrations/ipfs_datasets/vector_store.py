@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from integrations.ipfs_accelerate.routers import load_embedding_symbols
+
 from .loader import import_attr_optional, import_module_optional, import_failure_message
 from .types import with_adapter_metadata
 
@@ -16,25 +18,19 @@ else:
     _numpy_error = None
 
 
-_embeddings_router_module, _embeddings_module_error = import_module_optional(
-    "ipfs_datasets_py.embeddings_router"
-)
-EmbeddingsRouter, _embeddings_error = import_attr_optional(
-    "ipfs_datasets_py.embeddings_router",
-    "EmbeddingsRouter",
-)
-embed_text, _embed_text_error = import_attr_optional(
-    "ipfs_datasets_py.embeddings_router",
-    "embed_text",
-)
-embed_texts, _embed_texts_error = import_attr_optional(
-    "ipfs_datasets_py.embeddings_router",
-    "embed_texts",
-)
-embed_texts_batched, _embed_texts_batched_error = import_attr_optional(
-    "ipfs_datasets_py.embeddings_router",
-    "embed_texts_batched",
-)
+(
+    embed_text,
+    embed_texts,
+    embed_texts_batched,
+    EmbeddingsRouter,
+    _embeddings_router_module,
+    _embeddings_symbol_error,
+) = load_embedding_symbols()
+_embeddings_module_error = _embeddings_symbol_error
+_embeddings_error = _embeddings_symbol_error
+_embed_text_error = _embeddings_symbol_error if embed_text is None else None
+_embed_texts_error = _embeddings_symbol_error if embed_texts is None else None
+_embed_texts_batched_error = _embeddings_symbol_error if embed_texts_batched is None else None
 _vector_stores_module, _vector_stores_error = import_module_optional(
     "ipfs_datasets_py.vector_stores"
 )

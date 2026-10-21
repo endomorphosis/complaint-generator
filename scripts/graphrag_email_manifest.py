@@ -4,11 +4,8 @@ from __future__ import annotations
 import argparse
 import json
 
-from integrations.ipfs_datasets.loader import ensure_import_paths
 
-ensure_import_paths(module_name="ipfs_datasets_py.processors.legal_data.email_corpus")
-
-from ipfs_datasets_py.processors.legal_data.email_corpus import (
+from complaint_generator.email_graphrag import (
     build_email_graphrag_artifacts,
     search_email_graphrag_duckdb,
 )

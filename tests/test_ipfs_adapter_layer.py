@@ -91,7 +91,10 @@ from integrations.ipfs_datasets.storage import LocalCacheIPFSBackend, ensure_ipf
 from mediator.integrations import adapter as mediator_adapter_module
 
 
-pytestmark = pytest.mark.no_auto_network
+pytestmark = [
+    pytest.mark.no_auto_network,
+    pytest.mark.no_auto_heavy,
+]
 
 
 def test_loader_discovers_nested_provider_layout(tmp_path: Path):
@@ -184,11 +187,12 @@ def test_capability_registry_exposes_common_contract_fields():
 
     for name, status in capabilities.items():
         payload = status.as_dict()
-        assert payload["provider"] == "ipfs_datasets_py"
-        assert payload["module_path"].startswith("ipfs_datasets_py")
+        assert payload["provider"] in {"ipfs_datasets_py", "ipfs_accelerate_py", "ipfs_kit_py"}
+        assert payload["module_path"].split(".", 1)[0] in {"ipfs_datasets_py", "ipfs_accelerate_py", "ipfs_kit_py"}
+        assert payload["details"]["owner"] == payload["provider"]
         assert payload["details"]["capability"] == name
         assert "error_type" in payload["details"]
-        assert payload["details"]["adapter_module"].startswith("integrations.ipfs_datasets")
+        assert payload["details"]["adapter_module"].startswith(("integrations.ipfs_datasets", "integrations.ipfs_accelerate"))
         assert payload["details"]["contract_family"]
 
 
@@ -202,6 +206,11 @@ def test_capability_registry_keys_are_stable_across_runtime_modes():
         "details",
     }
     detail_keys = {
+        "owner",
+        "bridge",
+        "public_adapter",
+        "canonical_modules",
+        "deprecated_upstream",
         "capability",
         "adapter_module",
         "contract_family",
@@ -296,7 +305,11 @@ def test_startup_payload_reuses_canonical_capability_summary_contract():
 
     assert startup_payload["capability_report"]["capabilities"] == startup_payload["capabilities"]
     assert startup_payload["capability_report"]["status"] in {"available", "degraded"}
-    assert all(payload["provider"] == "ipfs_datasets_py" for payload in startup_payload["capabilities"].values())
+    assert all(
+        payload["provider"] in {"ipfs_datasets_py", "ipfs_accelerate_py", "ipfs_kit_py"}
+        and payload["details"]["owner"] == payload["provider"]
+        for payload in startup_payload["capabilities"].values()
+    )
 
 
 def test_search_us_code_normalizes_results():
@@ -2010,10 +2023,11 @@ def test_storage_wrappers_expose_canonical_operation_metadata():
 def test_storage_backend_reports_unavailable_when_kubo_cli_missing():
     fake_backend = type('KuboCLIBackend', (), {'_cmd': 'ipfs'})()
 
-    with patch('integrations.ipfs_datasets.storage.get_ipfs_backend', return_value=fake_backend):
-        with patch('integrations.ipfs_datasets.storage.shutil.which', return_value=None):
-            stored = store_bytes(b'complaint text', pin_content=False)
-            backend_status = storage_backend_status()
+    with patch.dict('os.environ', {'IPFS_DATASETS_PY_KUBO_CMD': '', 'KUBO_CMD': ''}):
+        with patch('integrations.ipfs_datasets.storage.get_ipfs_backend', return_value=fake_backend):
+            with patch('integrations.ipfs_datasets.storage.shutil.which', return_value=None):
+                stored = store_bytes(b'complaint text', pin_content=False)
+                backend_status = storage_backend_status()
 
     assert stored['status'] == 'unavailable'
     assert 'missing ipfs CLI binary' in stored['metadata']['degraded_reason']
@@ -2032,7 +2046,7 @@ def test_storage_backend_auto_discovers_repo_local_kubo_install(tmp_path: Path):
     (bin_dir / 'ipfs').write_text('#!/bin/sh\nexit 0\n')
     (repo_dir / 'config').write_text('{}')
 
-    with patch.dict('os.environ', {}, clear=False):
+    with patch.dict('os.environ', {'IPFS_DATASETS_PY_KUBO_CMD': '', 'KUBO_CMD': ''}, clear=False):
         with patch('integrations.ipfs_datasets.storage._repo_local_ipfs_kit_root', return_value=local_root):
             with patch('integrations.ipfs_datasets.storage.get_ipfs_backend', return_value=fake_backend):
                 with patch('integrations.ipfs_datasets.storage.shutil.which', return_value=None):

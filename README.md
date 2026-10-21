@@ -46,7 +46,6 @@ Comprehensive support for:
 - Criminal Defense, Tax Law
 - Intellectual Property, Environmental Law
 - Probate & Estate
-- **DEI Policy Analysis** (Special focus)
 
 Each type includes 390+ domain keywords, 90+ legal patterns, and automated decision trees.
 
@@ -130,6 +129,26 @@ Complaint workspace now also includes a Mike handoff/sync bridge:
 
 [Mike Integration Operator Playbook →](docs/MIKE_INTEGRATION_PLAYBOOK.md)
 
+### Alignment taskboard monitoring
+
+The formal alignment plan is `docs/task_boards/complaint_alignment_formal_work_plan.json`.
+Run `python scripts/run_alignment_watchdog.py --watch --max-cycles 0` to keep
+polling its execution board until every local source check passes. Runtime
+receipts are saved in `.complaint_workspace/supervisor/alignment_execution_state.json`.
+The watchdog serializes claims, bounds checker execution, retries transient
+failures, and revalidates receipts after source changes. Operator pauses and
+manual task blocks remain in effect. Exhausted failures stay visible until
+their inputs are repaired. These receipts describe local alignment checks;
+they do not attest to a running Grok campaign or to the older IPFS backlog.
+
+The workflow backlog lives in `docs/task_boards/ipfs_supervisor_task_board.json`.
+Its Markdown projection keeps tasks that require validation pending. Check
+their agreement with `python scripts/validate_task_boards.py`, and regenerate
+the projection with `python scripts/render_supervisor_markdown_board.py` after
+updating the JSON. The browser workflow regression is
+`python scripts/run_claim_support_review_regression.py --browser on --network off`.
+The focused alignment and recovery tests run with `python scripts/validate_alignment.py`.
+
 ### 🧠 GraphRAG Ontology Optimization
 
 Knowledge-graph-powered document analysis and reasoning:
@@ -152,7 +171,7 @@ Knowledge-graph-powered document analysis and reasoning:
 # Clone and setup
 git clone https://github.com/endomorphosis/complaint-generator.git
 cd complaint-generator
-git submodule update --init --recursive
+git submodule update --init external/ipfs_accelerate_py external/ipfs_datasets_py external/ipfs_kit_py external/mike
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
@@ -174,12 +193,12 @@ export COMPLAINT_MIKE_BASE_URL="http://localhost:3000"
 Initialize the submodule, then install and run the Mike services:
 
 ```bash
-git submodule update --init --recursive
-npm install --prefix mike/backend
-npm install --prefix mike/frontend
+git submodule update --init external/mike
+npm install --prefix external/mike/backend
+npm install --prefix external/mike/frontend
 # Run these in separate terminals
-npm run dev --prefix mike/backend
-npm run dev --prefix mike/frontend
+npm run dev --prefix external/mike/backend
+npm run dev --prefix external/mike/frontend
 ```
 
 Then open `http://localhost:3000` for the Mike interface.
@@ -813,12 +832,14 @@ complaint-generator/
 
 **Submodule not initialized:**
 ```bash
-git submodule update --init --recursive
+git submodule update --init external/ipfs_accelerate_py external/ipfs_datasets_py external/ipfs_kit_py external/mike
 ```
+
+Leave nested submodules inside those checkouts uninitialized. `git submodule update --init --recursive` from the complaint-generator root pulls older nested pins.
 
 **Import errors:**
 ```bash
-export PYTHONPATH="${PYTHONPATH}:$(pwd)/ipfs_datasets_py"
+export PYTHONPATH="${PYTHONPATH}:$(pwd)/external/ipfs_datasets_py:$(pwd)/external/ipfs_accelerate_py:$(pwd)/external/ipfs_kit_py"
 ```
 
 **Database locked:**
@@ -828,17 +849,18 @@ rm statefiles/*.duckdb-wal
 
 ---
 
-## 🤖 Mike LLM Router Patch
+## 🤖 Mike MCP connector
 
-The Mike editor is monkey-patched at handoff time to route **all text generation requests** through the workspace `llm_router` rather than issuing calls directly.
+Mike stays the editor. Complaint-generator does not rewrite Mike's TypeScript LLM client. `apply_mike_llm_router_patch(handoff_payload)` still stamps `mike-llm-router-patch-v1` onto the handoff JSON for older readers. That stamp does not intercept Mike's own model calls.
 
-### How it works
+Grounded drafting uses the complaint MCP connector. `build_mike_handoff()` sets `mike_integration.transport` to `mcp_connector`, a connector URL (`COMPLAINT_MCP_CONNECTOR_URL`, default `http://localhost:8000/api/complaint-workspace/mcp/rpc`), and these tools:
 
-1. `apply_mike_llm_router_patch(handoff_payload)` is called from `ComplaintWorkspace.build_mike_handoff()`.
-2. The patch adds a `mike_llm_patch` block to the handoff payload that declares `workspace_llm_router_owns_generation: true` and enforces all `narrow_adapter_boundary` policy flags.
-3. Every MCP call from Mike's frontend that would normally call an external model is intercepted and re-routed through `integrations/mike/llm_patch.py → get_router_generate_fn()` → `generate_text_with_metadata()`.
+- `complaint.generate_grounded_text`
+- `complaint.search_corpus`
+- `complaint.get_handoff`
+- `complaint.sync_draft`
 
-See `integrations/mike/llm_patch.py` and `integrations/mike/__init__.py`.
+Register that connector in Mike's user MCP connectors. Inference goes through `integrations/ipfs_accelerate/routers.py`. Content-addressed storage goes through `integrations/ipfs_datasets/storage.py`, which can use `ipfs_kit_py` when `COMPLAINT_GENERATOR_ENABLE_IPFS_KIT` is set. Knowledge graphs, legal datasets, multimedia, and logic stay behind `integrations/ipfs_datasets/`.
 
 ---
 

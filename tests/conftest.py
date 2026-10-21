@@ -147,9 +147,12 @@ def _candidate_ipfs_dataset_roots(repo_root: str) -> list[str]:
     candidates: list[str] = []
     current = root
     while True:
-        candidate = os.path.join(current, "ipfs_datasets_py")
-        if candidate not in candidates:
-            candidates.append(candidate)
+        for candidate in (
+            os.path.join(current, "external", "ipfs_datasets_py"),
+            os.path.join(current, "ipfs_datasets_py"),
+        ):
+            if candidate not in candidates:
+                candidates.append(candidate)
         parent = os.path.dirname(current)
         if parent == current:
             break
@@ -263,8 +266,10 @@ def pytest_configure() -> None:
                 if name == "ipfs_datasets_py" or name.startswith("ipfs_datasets_py."):
                     sys.modules.pop(name, None)
 
-    # Vendored dependency layout: ipfs_accelerate_py/ipfs_accelerate_py/
-    accelerate_repo_root = os.path.join(submodule_root, "ipfs_accelerate_py")
+    # Sibling checkout under external/, with the older nested layout as a fallback.
+    external_accelerate = os.path.join(repo_root, "external", "ipfs_accelerate_py")
+    nested_accelerate = os.path.join(submodule_root, "ipfs_accelerate_py")
+    accelerate_repo_root = external_accelerate if os.path.isdir(external_accelerate) else nested_accelerate
     if os.path.isdir(accelerate_repo_root) and accelerate_repo_root not in sys.path:
         sys.path.insert(0, accelerate_repo_root)
 
@@ -304,6 +309,11 @@ def pytest_collection_modifyitems(config, items):
             or "test_run_hacc_grounded_pipeline_cli" in path
             or "test_adversarial_harness" in path
             or "test_multimodal_router_backend" in path
+            or "test_accelerate_router_facade" in path
+            or "test_agent_supervisor_jobs" in path
+            or "test_complaint_supervisor_cli" in path
+            or "test_multimedia_adapter" in path
+            or "test_ipfs_kit_storage_adapter" in path
         ):
             file_cache[path] = (False, False, False)
             return file_cache[path]
