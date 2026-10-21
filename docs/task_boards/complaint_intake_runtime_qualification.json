@@ -1,6 +1,6 @@
 {
   "schema_version": "complaint-generator/intake-runtime-qualification@1",
-  "native_supervisor_commit": "2fbc97d602616e9a8b74ba1cbff1750289141801",
+  "native_supervisor_commit": "c442675c5d639000fd25ebf2b74314c7e18d408e",
   "provider": {
     "router": "ipfs_accelerate_py.llm_router",
     "provider": "grok_cli",
@@ -785,11 +785,14 @@
     }
   },
   "current_campaign_progress": {
-    "completed": 2,
-    "pending": 56,
+    "completed": 5,
+    "pending": 53,
     "total": 58,
-    "state": "ready_to_restart_after_reviewed_pending_amendment",
-    "source": "actual native merged completion bindings and legacy taskboard"
+    "state": "stopped_for_qualified_source_maintenance",
+    "observed_at": "2026-10-21T06:41:43.451117+00:00",
+    "source": "Actual native merged completion events and taskboard; corrections do not add completions.",
+    "release_qualified": false,
+    "continue_until_all58_completed": true
   },
   "pending_task_runtime_guidance": {
     "receipt": "/tmp/complaint-pending-guidance-install-20261021-63nbl1nl/receipt.json",
@@ -843,5 +846,301 @@
     "auth_presence_only": true,
     "paid_calls_for_doctor": 0,
     "live_low_effort_canary_qualified_separately": true
+  },
+  "completion_git_lock_recovery": {
+    "receipt": "/tmp/complaint_completion_git_lock_qualification.json",
+    "sha256": "dd00c6110d276445e07e48151f9afbe8b9c8954b15f341e8492380941742b174",
+    "qualified_commit": "8736e4b586f065c4eed57e58b8420e2420d5ad4b",
+    "applied_commit": "c442675c5d639000fd25ebf2b74314c7e18d408e",
+    "final_contracts_passed": 67,
+    "surrounding_regressions_passed": 169,
+    "skipped": 0,
+    "scope": "Future ordinary completion-only Git contention continuation; no provider or merge replay.",
+    "ambiguous_publication_response_loss": "explicit_pending_without_native_journal_proof"
+  },
+  "private_policy_corrective_qualification": {
+    "receipt": "/tmp/complaint-private-policy-correction-qualification-20261021.json",
+    "sha256": "367cff21f89237ba73d32ab571478d9de9dad970ac3bf3b4629f3e5ed20256de",
+    "qualified_commit": "423ea4507a764b4428a18e9952e97de2df210da1",
+    "applied_commit": "afa158847aa118487c183214efedf677c9537c8a",
+    "private_policy_cases_passed": 30,
+    "skipped": 0,
+    "accepted_source_negative_failures_reproduced": 20,
+    "compatibility_passed": 30,
+    "compatibility_failed": 3,
+    "known_baseline_failure_identities": [
+      "tests.test_ipfs_llm_accelerate_diagnostics::test_accelerate_router_preserves_fallback_reason",
+      "tests.test_ipfs_llm_huggingface_router::test_generate_text_with_metadata_reports_missing_openai_key",
+      "tests.test_workspace_legacy_intake_sanitization::test_generate_complaint_sanitizes_legacy_intake_noise"
+    ],
+    "introduced_compatibility_failures": [],
+    "separate_task_completion_claimed": false,
+    "tenant_authorization_and_encryption": "remain_required_future_tasks"
+  },
+  "qualified_source_repair_installation": {
+    "receipt": "/tmp/complaint-qualified-source-repairs-20261021-qafjtmlt/receipt.json",
+    "sha256": "40628a294df2bb0ee953d7396ab9ca4645672e672e3e52db1fa1da4b8f415b5c"
+  },
+  "remaining_runtime_advice_installation": {
+    "receipt": "/tmp/complaint-remaining-runtime-advice-20261021-ggozrvcl/receipt.json",
+    "sha256": "d6c922dccc02be75a1f03cbf44cd6db0fcb5fa34901a28dd551e77e303278a22"
+  },
+  "current_corrective_installation": {
+    "receipt": "/tmp/complaint-current-corrective-installation-20261021-v32vx7ic/receipt.json",
+    "sha256": "f51e1b0d5f5fe7427c1df95ab7ef48fb89d79712f3f785c4d9d4d55c81ee7183"
+  },
+  "current_corrective_commits": [
+    {
+      "name": "LAW01 context/proof/discovery correction",
+      "qualified_commit": "b7c2fa48168118071e58fc472f151d1505ab4ca8",
+      "applied_commit": "301a219e018b90830eb6de7ac6564fbe9ee5b467",
+      "targets": [
+        "complaint_phases/intake_case_file.py",
+        "integrations/ipfs_datasets/legal.py",
+        "tests/test_explicit_legal_context.py"
+      ],
+      "required_junit": [
+        {
+          "path": "/tmp/complaint-law01-publication-required-20261021-hnvgf710/cases.xml",
+          "sha256": "68f99986988e819f9a3133d1d531f778b88b4caf768246c97dfce9deee35e199",
+          "cases": 70
+        },
+        {
+          "path": "/tmp/complaint-law01-publication-compatibility-20261021-7sqkj31v/cases.xml",
+          "sha256": "9f04165d8575644f234da1986eb7ed3bbd0a3034467db54fdf4ac9bbc480d143",
+          "cases": 11
+        }
+      ]
+    },
+    {
+      "name": "Future-only64turn Grok profile",
+      "qualified_commit": "edace7c4028574a3963b9d8873d42cd4ca6a2a80",
+      "applied_commit": "0ec564972ba84dbaa73f45ddce1997273a767dbc",
+      "targets": [
+        "README.md",
+        "integrations/ipfs_accelerate/improvement_runner.py",
+        "tests/test_improvement_runner.py"
+      ],
+      "required_junit": [
+        {
+          "path": "/tmp/complaint-privacy-budget64-runner-20261021-xmzdqs2c/cases.xml",
+          "sha256": "794bdb053682c80daeb35cb1cc8fe4a2e39f6ca3b885a5328212f648b5a45751",
+          "cases": 66
+        }
+      ]
+    },
+    {
+      "name": "FACT04 domain and provenance correction",
+      "qualified_commit": "1cd822956c7a47e72bc3d601e3488e3240d4c206",
+      "applied_commit": "9bc0859bffe9d1256683f03ce74fc61ce1cf5027",
+      "targets": [
+        "integrations/ipfs_datasets/graphs.py",
+        "complaint_phases/knowledge_graph.py",
+        "complaint_phases/legal_graph.py",
+        "complaint_phases/dependency_graph.py",
+        "tests/test_intake_graph_provenance_contract.py"
+      ],
+      "required_junit": [
+        {
+          "path": "/tmp/complaint-fact04-host-qualification-20261021-v9c8mrsk/required_cases.xml",
+          "sha256": "7639dffc5e40c16fdbf37a9f812ad753e36e4ff8056b11914b2ff1407bd9945f",
+          "cases": 67
+        },
+        {
+          "path": "/tmp/complaint-fact04-compatibility-20261021-jp26il3g/required_cases.xml",
+          "sha256": "e863e6198d7ebc5cb7ca0f9e926cc58eb9e45a0857b10fd1db1ea77419693fc2",
+          "cases": 214
+        }
+      ]
+    },
+    {
+      "name": "FACT04 deserialized identity and verified-text replay correction",
+      "qualified_commit": "03d50c9ef45d9079a047ad6a7fb338d94b0d7929",
+      "applied_commit": "067e14e28179c725f2cbec5d5ee2c23a04f7b15a",
+      "targets": [
+        "complaint_phases/dependency_graph.py",
+        "tests/test_intake_graph_provenance_contract.py"
+      ],
+      "required_junit": [
+        {
+          "path": "/tmp/complaint-fact04-host-qualification-20261021-yw05d8xh/required_cases.xml",
+          "sha256": "464d0aee6eb15f2e691e85b50109ec0b94957a5851dd1a56a114939dde447745",
+          "cases": 72
+        },
+        {
+          "path": "/tmp/complaint-fact04-compatibility-20261021-2cfmsqai/required_cases.xml",
+          "sha256": "8735646ea96ef952b2c5f9a1755298785f1b2cc3015106efdc21abd940a348ba",
+          "cases": 214
+        }
+      ]
+    }
+  ],
+  "combined_current_source_validation": {
+    "receipt": "/tmp/complaint-privacy-intake-current-corrected-source-20261021-2y2qnz4g/receipt.json",
+    "sha256": "1e4af956fed53af76dadbadfaf7b4210cb3408967957a00dac4340d10e197ed2",
+    "passed": 262,
+    "skipped": 0,
+    "sealed_python": true,
+    "provider_dispatched": false,
+    "current_source_commit": "067e14e28179c725f2cbec5d5ee2c23a04f7b15a",
+    "scope": "Current integrated private-policy, explicit legal context, intake case file, graph provenance, graph support and adapter compatibility suites."
+  },
+  "future_worker_execution_profile": {
+    "receipt": "/tmp/complaint-budget64-profile-qualification-20261021.json",
+    "sha256": "ed83f1ffbf54069f8d61a658b0efc976d25166b8ffe9af9a955b0deabf5676d5",
+    "model": "grok-4.7",
+    "provider": "grok_cli",
+    "reasoning_effort": "low",
+    "max_turns": 64,
+    "hard_deadline_seconds": 900,
+    "idle_seconds": 180,
+    "max_attempts": 3,
+    "allow_local_fallback": false,
+    "allow_cross_provider_fallback": false,
+    "automatic_retry_rearm": false,
+    "runner_cases_passed": 66,
+    "skipped": 0,
+    "historical32turn_receipts_preserved": true
+  },
+  "native_completions_since_previous_qualification": [
+    {
+      "receipt": "/tmp/complaint-native-boundary-watch-20261021-b92eal9d/finished_event.json",
+      "sha256": "eb2a723eccdbbe2daa8c670a76ed048e6ac31c56015572609c22e6bb93752417",
+      "task_id": "CIMP-PRIV-001",
+      "task_cid": "baguqeeravlmoye5q6d52h2pt2k75wzjin7ybbcpooftqxphv76s2trbwca7q",
+      "attempt": 1,
+      "event_id": "sha256:e5102a22125a37cb4100f33d6be1d899cc56eb9355140c66bb55bec43a71afe2",
+      "sequence": 112,
+      "finished_at": "2026-10-21T05:44:56.933272+00:00",
+      "native_pipeline_returncode": 0,
+      "candidate_commit": "c47bde92e90c6612a1dea67313cf809706032724",
+      "integration_commit": "4eb4b81df94e7a3a8beab7b51d9863e96ea03dc8",
+      "merge_request_id": "1792561493456251190-2665130-dc7462472753",
+      "native_merged": true,
+      "native_queued": false,
+      "validation_passed": true,
+      "validation_returncode": 0,
+      "provider_returncode": 1,
+      "grok_turn_limit": {
+        "attempt": 1,
+        "attempt_refunded": false,
+        "baseline_ref": "af1711cd7d1b4f02ad119b48e1527310acc3be9b",
+        "branch": "implementation/cimp-priv-001-aad8ec13b0f0-attempt-1-1792560810",
+        "candidate_fingerprint": "sha256:ec4da6ae8ef162df9780fdfc07661aec8fad6ff93e44b8ce6feb8f4f805ba816",
+        "canonical_task_cid": "baguqeeravlmoye5q6d52h2pt2k75wzjin7ybbcpooftqxphv76s2trbwca7q",
+        "changed_paths": [
+          "applications/complaint_workspace.py",
+          "complaint_generator/workspace.py",
+          "integrations/ipfs_datasets/llm.py",
+          "tests/test_private_workspace_policy.py"
+        ],
+        "command_sha256": "cc267af3c388e5f7629cc6bea036668a412484d7088d8f09029dfb63243714f7",
+        "completion_authority": false,
+        "eligible": true,
+        "frame_count": 2558,
+        "implementation_commit": "c47bde92e90c6612a1dea67313cf809706032724",
+        "inspected_container_count": 0,
+        "log_sha256": "9ff8463099649428cf64e66c6f2287c5e82d1dcafb045330a4f4fbbc391626f6",
+        "log_size_bytes": 1972458,
+        "model": "grok-4.7",
+        "new_provider_authority": false,
+        "normal_merge_handoff": true,
+        "num_turns": 32,
+        "process_group_absent": true,
+        "process_reaped": true,
+        "provider": "grok_cli",
+        "provider_pid": 2680937,
+        "provider_returncode": 1,
+        "reason": "verified_grok_turn_limit_candidate",
+        "schema": "ipfs_accelerate_py/agent-supervisor/grok-turn-limit-observation@1",
+        "task_id": "CIMP-PRIV-001",
+        "terminal_reason": "max_turn_requests",
+        "validation_passed": true,
+        "workspace_containers_absent": true
+      },
+      "provider_attempt_refunded": false
+    },
+    {
+      "receipt": "/tmp/complaint-law01-boundary-watch-20261021-wyjzmy9_/finished_event.json",
+      "sha256": "b9eaf3d5280aa445956fe4216b6787a72e5d14c348f0fae356cabaf0ec156ef4",
+      "task_id": "CIMP-LAW-01",
+      "task_cid": "baguqeera7lzcd5z4yythqtubqj6uycw3g4zxknbag4fi7ot4ztb6qdfv2uoq",
+      "attempt": 1,
+      "event_id": "sha256:41fb127b44b26ed2ebeb3f994294191f2ced6de6ec27c7b41652ddb663e43191",
+      "sequence": 139,
+      "finished_at": "2026-10-21T05:57:39.905857+00:00",
+      "native_pipeline_returncode": 0,
+      "candidate_commit": "d8025f1423687c7870b67276d6e2b5c8be732cbe",
+      "integration_commit": "22f9acffc35e672ce7ab8900049f3019c19aca2b",
+      "merge_request_id": "1792562256481066647-2665130-f8e5b7b7c425",
+      "native_merged": true,
+      "native_queued": false,
+      "validation_passed": true,
+      "validation_returncode": 0,
+      "provider_attempt_refunded": false
+    },
+    {
+      "receipt": "/tmp/complaint-fact04-boundary-watch-20261021-8wbouqeb/finished_event.json",
+      "sha256": "8c3cf2cd3de59223bf0bf5a6f3f184826e244d720c656710f4b0ce1a04b791c6",
+      "task_id": "CIMP-FACT-04",
+      "task_cid": "baguqeera6ub6wpkx3pcbckqoiqy7mhcmxzfmeo24zb7urjtkqco6lzbxl5uq",
+      "attempt": 1,
+      "event_id": "sha256:f3d4aef7500a99a6c5f277da2136e37b18ec5802d368ad19ab6c2087c5b74a0d",
+      "sequence": 167,
+      "finished_at": "2026-10-21T06:07:11.217564+00:00",
+      "native_pipeline_returncode": 0,
+      "candidate_commit": "b64d4f8387a88d7e1f32d99e27e841bb2d69c92b",
+      "integration_commit": "402344d0da06bd520658da782b8f066988b6330f",
+      "merge_request_id": "1792562827647672176-2665130-d714134fdf06",
+      "native_merged": true,
+      "native_queued": false,
+      "validation_passed": true,
+      "validation_returncode": 0,
+      "provider_returncode": 1,
+      "grok_turn_limit": {
+        "attempt": 1,
+        "attempt_refunded": false,
+        "baseline_ref": "66c7e37a76061a9251867e4cfaed2dc5eeca05d3",
+        "branch": "implementation/cimp-fact-04-f503eb3d57db-attempt-1-1792562274",
+        "candidate_fingerprint": "sha256:4281f9faef158981e36631ada845a96081795492cadc7a1f1df24e39bdab2546",
+        "canonical_task_cid": "baguqeera6ub6wpkx3pcbckqoiqy7mhcmxzfmeo24zb7urjtkqco6lzbxl5uq",
+        "changed_paths": [
+          "complaint_phases/dependency_graph.py",
+          "complaint_phases/knowledge_graph.py",
+          "complaint_phases/legal_graph.py",
+          "integrations/ipfs_datasets/graphs.py",
+          "tests/test_intake_graph_provenance_contract.py"
+        ],
+        "command_sha256": "d17d4513f544d74388d8cdc7fc69df5da9957a7d82b7fbd17adc1d837d2aacd8",
+        "completion_authority": false,
+        "eligible": true,
+        "frame_count": 871,
+        "implementation_commit": "b64d4f8387a88d7e1f32d99e27e841bb2d69c92b",
+        "inspected_container_count": 0,
+        "log_sha256": "00c3b924cf7d7f2620e13f9f6c85e44beb70f25d766f3c2a56f97425da5a3cb2",
+        "log_size_bytes": 1424621,
+        "model": "grok-4.7",
+        "new_provider_authority": false,
+        "normal_merge_handoff": true,
+        "num_turns": 32,
+        "process_group_absent": true,
+        "process_reaped": true,
+        "provider": "grok_cli",
+        "provider_pid": 2847711,
+        "provider_returncode": 1,
+        "reason": "verified_grok_turn_limit_candidate",
+        "schema": "ipfs_accelerate_py/agent-supervisor/grok-turn-limit-observation@1",
+        "task_id": "CIMP-FACT-04",
+        "terminal_reason": "max_turn_requests",
+        "validation_passed": true,
+        "workspace_containers_absent": true
+      },
+      "provider_attempt_refunded": false
+    }
+  ],
+  "current_plan_id": "baguqeerazpmdxshp56ijft7f6agjywb5u6hflpwl565jyhadvuvwy4y2lpzq",
+  "all53_pending_task_budget_advice_installation": {
+    "receipt": "/tmp/complaint-remaining-runtime-advice-20261021-svckbvkc/receipt.json",
+    "sha256": "1c8b5511ed861c5ef109d11a9c13735938c282ec79c41cd9e24e9c9f720c876f"
   }
 }
