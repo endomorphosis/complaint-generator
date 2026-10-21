@@ -43,8 +43,12 @@ SEVEN_FIELDS = (
 )
 
 
-def _service(tmp_path: Path) -> ComplaintWorkspaceService:
-    return ComplaintWorkspaceService(root_dir=tmp_path / "sessions")
+def _service(tmp_path: Path, *users: str) -> ComplaintWorkspaceService:
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "sessions")
+    service.initialize_private_keys(protection="passphrase", passphrase="synthetic-narrative-fixture-passphrase")
+    for user_id in users:
+        service.ensure_private_case_key(user_id, user_id)
+    return service
 
 
 def _assert_narrative_then_name(payload: dict, narrative: str) -> None:
@@ -65,7 +69,7 @@ def _assert_narrative_then_name(payload: dict, narrative: str) -> None:
 
 
 def test_chat_starts_with_plain_language_narrative(tmp_path: Path) -> None:
-    service = _service(tmp_path)
+    service = _service(tmp_path, "narrative-open")
     opening = service.run_intake_chat_turn("narrative-open")
     inquiry = opening.get("inquiry") or {}
     assert inquiry.get("question_id") == "original_complaint"
@@ -76,10 +80,13 @@ def test_chat_starts_with_plain_language_narrative(tmp_path: Path) -> None:
 
 
 def test_housing_narrative_never_becomes_party_name(tmp_path: Path) -> None:
-    service = _service(tmp_path)
+    service = _service(tmp_path, "housing-user")
     payload = service.run_intake_chat_turn("housing-user", message=HOUSING)
     _assert_narrative_then_name(payload, HOUSING)
-    saved = json.loads((tmp_path / "sessions" / namespace_filename("housing-user")).read_text(encoding="utf-8"))
+    encoded = (tmp_path / "sessions" / namespace_filename("housing-user")).read_bytes()
+    protected = encoded.startswith(b"CGPE") and HOUSING.encode() not in encoded
+    assert protected, "session writer exposed narrative plaintext"
+    saved = service.get_session("housing-user")["session"]
     assert saved["intake_answers"].get("party_name") in (None, "")
     assert saved["original_complaint"]["text"] == HOUSING
     assert HOUSING not in json.dumps(saved["intake_answers"])
@@ -88,7 +95,7 @@ def test_housing_narrative_never_becomes_party_name(tmp_path: Path) -> None:
 
 
 def test_saved_seven_field_session_migrates_without_rewriting_answers(tmp_path: Path) -> None:
-    service = _service(tmp_path)
+    service = _service(tmp_path, "legacy-seven")
     user_id = "legacy-seven"
     answers = {field: f"saved-{field}" for field in SEVEN_FIELDS}
     legacy = {
@@ -101,6 +108,10 @@ def test_saved_seven_field_session_migrates_without_rewriting_answers(tmp_path: 
     session_dir = tmp_path / "sessions"
     target = session_dir / namespace_filename(user_id)
     target.write_text(json.dumps(legacy), encoding="utf-8")
+    original_bytes = target.read_bytes()
+    migrated = service.migrate_legacy_private_session(user_id)
+    assert migrated["complete"] is True and migrated["private_session_verified"] is True
+    assert migrated["cleanup_performed"] is False and migrated["source_bytes_preserved"] is True
 
     loaded = service.get_session(user_id)
     session = loaded.get("session") or {}
@@ -115,13 +126,17 @@ def test_saved_seven_field_session_migrates_without_rewriting_answers(tmp_path: 
     follow = service.run_intake_chat_turn(user_id)
     assert (follow.get("inquiry") or None) is None
     assert str(follow.get("message") or "").startswith("Intake complete")
-    persisted = json.loads(target.read_text(encoding="utf-8"))
+    assert target.read_bytes() == original_bytes
+    successor = target.with_name(target.name + ".cgpe").read_bytes()
+    protected = successor.startswith(b"CGPE") and b"saved-party_name" not in successor
+    assert protected, "legacy successor was not encrypted separately"
+    persisted = service.get_session(user_id)["session"]
     assert persisted["intake_answers"] == answers
     assert persisted["original_complaint"]["text"] == ""
 
 
 def test_multiline_answer_revisions_stay_distinct(tmp_path: Path) -> None:
-    service = _service(tmp_path)
+    service = _service(tmp_path, "revision-user")
     user_id = "revision-user"
     narrative = "Line one of the complaint.\nLine two stays in the narrative."
     first = service.run_intake_chat_turn(user_id, message=narrative)
@@ -188,10 +203,10 @@ def test_file_and_stdin_narrative_does_not_run_commands(monkeypatch: pytest.Monk
 
 def test_package_api_and_mcp_share_narrative_transition(tmp_path: Path) -> None:
     root = tmp_path / "sessions"
-    package_turn = run_intake_chat_turn("package-user", message=HOUSING, root_dir=root)
+    service = _service(tmp_path, "package-user", "mcp-user", "api-user")
+    package_turn = run_intake_chat_turn("package-user", message=HOUSING, service=service)
     _assert_narrative_then_name(package_turn, HOUSING)
 
-    service = ComplaintWorkspaceService(root_dir=root)
     opening = service.call_mcp_tool("complaint.run_intake_chat_turn", {"user_id": "mcp-user"})
     assert (opening.get("inquiry") or {}).get("question_id") == "original_complaint"
     mcp_turn = service.call_mcp_tool(

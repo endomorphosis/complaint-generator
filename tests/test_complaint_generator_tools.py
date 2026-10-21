@@ -449,10 +449,12 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
 def test_intake_chat_turn_is_exposed_across_cli_mcp_and_api(monkeypatch, tmp_path):
     runner = CliRunner()
     service = ComplaintWorkspaceService(root_dir=tmp_path / "intake-chat-sessions")
+    service.initialize_private_keys(protection="passphrase", passphrase="synthetic-wrapper-fixture-passphrase")
+    service.ensure_private_case_key("chat-user", "chat-user")
     monkeypatch.setattr(complaint_cli_impl, "service", service)
 
     first_turn = _invoke_cli(runner, "chat-turn", "--user-id", "chat-user")
-    assert first_turn["inquiry"]["question_id"] == "party_name"
+    assert first_turn["inquiry"]["question_id"] == "original_complaint"
     assert first_turn["accepted_answer"] is None
 
     cli_turn = _invoke_cli(
@@ -461,8 +463,13 @@ def test_intake_chat_turn_is_exposed_across_cli_mcp_and_api(monkeypatch, tmp_pat
         "--user-id",
         "chat-user",
         "--message",
-        "Jordan Example",
+        "My employer retaliated after I reported discrimination.",
     )
+    assert cli_turn["accepted_answer"]["question_id"] == "original_complaint"
+    assert cli_turn["next_question"]["id"] == "party_name"
+    assert cli_turn["session"]["intake_answers"].get("party_name") in {None, ""}
+    cli_turn = _invoke_cli(runner, "chat-turn", "--user-id", "chat-user",
+        "--message", "Jordan Example", "--question-id", "party_name")
     assert cli_turn["accepted_answer"]["question_id"] == "party_name"
     assert cli_turn["next_question"]["id"] == "opposing_party"
 

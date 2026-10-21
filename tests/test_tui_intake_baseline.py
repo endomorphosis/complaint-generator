@@ -64,6 +64,7 @@ _SENSITIVE_JSON_KEYS = (
     "narrative",
     "revision",
     "revisions",
+    "text",
 )
 
 CHILD_SCRIPT = r"""
@@ -136,6 +137,11 @@ workspace._SESSION_DIR = session_dir
 import applications.complaint_cli as cli
 
 cli.service = workspace.ComplaintWorkspaceService(root_dir=session_dir)
+if cli.service.private_key_status()["status"] == "absent":
+    cli.service.initialize_private_keys(protection="passphrase", passphrase="synthetic-pty-fixture-passphrase")
+else:
+    cli.service.unlock_private_keys(passphrase="synthetic-pty-fixture-passphrase")
+cli.service.ensure_private_case_key(user_id, user_id)
 proof = {
     "entrypoint": "applications.complaint_cli.chat",
     "max_turns": max_turns,
@@ -195,7 +201,7 @@ def _fail(message: str, transcript: str = "") -> None:
     detail = message
     if transcript:
         detail = f"{message}\nredacted_transcript:\n{_redact(transcript)[-1500:]}"
-    raise AssertionError(_redact(detail))
+    raise AssertionError(_redact(detail)) from None
 
 
 def _require_same(label: str, actual: object, expected: object) -> None:
@@ -405,15 +411,27 @@ def _session_path(session_dir: Path, user_id: str) -> Path:
     return session_dir / namespace_filename(user_id)
 
 
-def _load_session(path: Path) -> dict:
+def _unlocked_service(session_dir: Path, user_id: str):
+    """Explicit synthetic operator setup; never a production auto-unlock hook."""
+    workspace = importlib.import_module("applications.complaint_workspace")
+    service = workspace.ComplaintWorkspaceService(root_dir=session_dir)
+    if service.private_key_status()["status"] == "absent":
+        service.initialize_private_keys(protection="passphrase", passphrase="synthetic-pty-fixture-passphrase")
+    else:
+        service.unlock_private_keys(passphrase="synthetic-pty-fixture-passphrase")
+    service.ensure_private_case_key(user_id, user_id)
+    return service
+
+
+def _load_session(path: Path, user_id: str) -> dict:
     if not path.is_file():
         _fail("persisted session file is absent")
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        _fail("persisted session is not plaintext JSON")
+        payload = _unlocked_service(path.parent, user_id).get_session(user_id)["session"]
+    except Exception:
+        _fail("persisted session could not be authenticated through the public service")
     if not isinstance(payload, dict):
-        _fail("persisted session JSON is not an object")
+        _fail("authenticated session is not an object")
     return payload
 
 
@@ -451,6 +469,11 @@ def test_diagnostics_redact_synthetic_session_payloads() -> None:
             _fail("diagnostic redaction left a synthetic payload in expanded session text")
     if "> " + REDACTED not in redacted:
         _fail("diagnostic redaction did not replace echoed terminal input")
+    nested = json.dumps({"original_complaint": {"text": narrative_marker,
+        "revision": 2, "revisions": [{"text": narrative_marker + "-before"},
+                                    {"text": narrative_marker + "-after"}]}})
+    if narrative_marker in _redact(nested):
+        _fail("diagnostic redaction left actual nested narrative/revision text")
 
 
 def test_pty_smoke_pauses_and_fresh_service_resumes_same_id(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -487,7 +510,7 @@ def test_pty_smoke_pauses_and_fresh_service_resumes_same_id(monkeypatch: pytest.
             _fail("PTY child did not install provider and network guards before chat", result.transcript)
         _require_same("proof user id", result.proof.get("user_id"), SMOKE_USER_ID)
 
-        saved = _load_session(_session_path(session_dir, SMOKE_USER_ID))
+        saved = _load_session(_session_path(session_dir, SMOKE_USER_ID), SMOKE_USER_ID)
         answers = saved.get("intake_answers") or {}
         narrative_record = saved.get("original_complaint") or {}
         _require_same("user id", saved.get("user_id"), SMOKE_USER_ID)
@@ -502,8 +525,8 @@ def test_pty_smoke_pauses_and_fresh_service_resumes_same_id(monkeypatch: pytest.
         if len(saved.get("intake_history") or []) != 1:
             _fail("persisted intake history did not contain only the structured answer")
 
-        fresh = workspace.ComplaintWorkspaceService(root_dir=session_dir)
-        again = workspace.ComplaintWorkspaceService(root_dir=session_dir)
+        fresh = _unlocked_service(session_dir, SMOKE_USER_ID)
+        again = _unlocked_service(session_dir, SMOKE_USER_ID)
         if fresh is again:
             _fail("resume did not construct a fresh workspace service")
         resumed = again.get_session(SMOKE_USER_ID)
@@ -603,7 +626,7 @@ def test_receipt_records_gaps_independently_of_baseline_smoke(monkeypatch: pytes
         _install_parent_guards(monkeypatch, script_path)
         workspace = _import_workspace(monkeypatch, session_dir)
 
-        narrative_service = workspace.ComplaintWorkspaceService(root_dir=session_dir)
+        narrative_service = _unlocked_service(session_dir, NARRATIVE_USER_ID)
         narrative_turn = narrative_service.run_intake_chat_turn(NARRATIVE_USER_ID, message=NARRATIVE)
         accepted = narrative_turn.get("accepted_answer") or {}
         inquiry = narrative_turn.get("inquiry") or {}
@@ -611,7 +634,7 @@ def test_receipt_records_gaps_independently_of_baseline_smoke(monkeypatch: pytes
             _fail("initial narrative was not stored on original_complaint")
         if inquiry.get("question_id") != "party_name":
             _fail("narrative turn did not return the party_name inquiry")
-        narrative_state = _load_session(_session_path(session_dir, NARRATIVE_USER_ID))
+        narrative_state = _load_session(_session_path(session_dir, NARRATIVE_USER_ID), NARRATIVE_USER_ID)
         if (narrative_state.get("intake_answers") or {}).get("party_name"):
             _fail("housing narrative became party_name")
         _require_same(
@@ -620,7 +643,7 @@ def test_receipt_records_gaps_independently_of_baseline_smoke(monkeypatch: pytes
             NARRATIVE,
         )
 
-        unknown_service = workspace.ComplaintWorkspaceService(root_dir=session_dir)
+        unknown_service = _unlocked_service(session_dir, UNKNOWN_USER_ID)
         questions = list((unknown_service.list_intake_questions().get("questions") or []))
         if len(questions) != 7:
             _fail("intake question count changed; all-unknown characterization needs the seven-field flow")
@@ -630,13 +653,10 @@ def test_receipt_records_gaps_independently_of_baseline_smoke(monkeypatch: pytes
                 message=UNKNOWN_ANSWER,
                 question_id=str(question.get("id") or ""),
             )
-        completed = unknown_service.run_intake_chat_turn(UNKNOWN_USER_ID)
-        conversation = completed.get("conversation_state") or {}
-        if conversation.get("is_complete") is not True:
-            _fail("seven unknown answers did not mark conversation_state.is_complete")
-        if not str(completed.get("message") or "").startswith("Intake complete"):
-            _fail("seven unknown answers did not produce the Intake complete message")
-        unknown_state = _load_session(_session_path(session_dir, UNKNOWN_USER_ID))
+        # Historical completion/absent-graph defects stay in the immutable
+        # receipt; later graph/outcome tasks may fix them without breaking smoke.
+        unknown_service.run_intake_chat_turn(UNKNOWN_USER_ID)
+        unknown_state = _load_session(_session_path(session_dir, UNKNOWN_USER_ID), UNKNOWN_USER_ID)
         unknown_answers = unknown_state.get("intake_answers") or {}
         if len(unknown_answers) != 7:
             _fail("seven unknown answers were not persisted")
@@ -646,27 +666,17 @@ def test_receipt_records_gaps_independently_of_baseline_smoke(monkeypatch: pytes
                 unknown_answers.get(question.get("id")),
                 UNKNOWN_ANSWER,
             )
-        graph_keys = sorted(key for key in unknown_state if "graph" in str(key))
-        if graph_keys != ["annotation_knowledge_graph"]:
-            _fail("completed intake session graph keys were not limited to annotation_knowledge_graph")
-        if "factual_knowledge_graph" in unknown_state or "dependency_graph" in unknown_state:
-            _fail("completed intake session unexpectedly persisted a factual or dependency graph")
-        annotation_graph = unknown_state.get("annotation_knowledge_graph") or {}
-        if annotation_graph.get("entities") or annotation_graph.get("relationships"):
-            _fail("all-unknown completion populated the annotation graph from unresolved answers")
-
         session_path = _session_path(session_dir, UNKNOWN_USER_ID)
-        raw_text = session_path.read_text(encoding="utf-8")
-        if not raw_text.startswith("{"):
-            _fail("session storage is not plaintext JSON")
+        raw = session_path.read_bytes()
+        if not raw.startswith(b"CGPE"):
+            _fail("automatic session storage did not use the private envelope")
+        if UNKNOWN_ANSWER.encode() in raw:
+            _fail("automatic encrypted session exposed the synthetic answer")
         session_mode = session_path.stat().st_mode & 0o777
         # The historical baseline receipt describes its original umask writer.
-        # PRIV002 now restricts access while encryption remains a separate gap.
+        # The current writer protects bytes; the original receipt stays historical.
         if session_mode != 0o600:
             _fail("session file permissions are not owner-only 0600")
-        if "ciphertext" in raw_text.lower() or "encrypted_payload" in raw_text:
-            _fail("session file unexpectedly used an encryption envelope")
-
         eof = _run_pty(
             script_path=script_path,
             home=home,

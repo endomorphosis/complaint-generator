@@ -166,11 +166,17 @@ def test_workspace_cli_is_exposed_through_package_entrypoint(monkeypatch, tmp_pa
 
 def test_package_exposes_shared_intake_chat_turn_wrapper(tmp_path):
     service = ComplaintWorkspaceService(root_dir=tmp_path / "workspace-chat-sessions")
+    service.initialize_private_keys(protection="passphrase", passphrase="synthetic-package-fixture-passphrase")
+    service.ensure_private_case_key("pkg-chat-user", "pkg-chat-user")
 
     opening = run_intake_chat_turn("pkg-chat-user", service=service)
-    assert opening["inquiry"]["question_id"] == "party_name"
+    assert opening["inquiry"]["question_id"] == "original_complaint"
     assert opening["accepted_answer"] is None
 
+    narrative = run_intake_chat_turn("pkg-chat-user", message="My employer retaliated after a report.", service=service)
+    assert narrative["accepted_answer"]["question_id"] == "original_complaint"
+    assert narrative["next_question"]["id"] == "party_name"
+    assert narrative["session"]["intake_answers"].get("party_name") in {None, ""}
     follow_up = run_intake_chat_turn("pkg-chat-user", message="Jordan Example", service=service)
     assert follow_up["accepted_answer"]["question_id"] == "party_name"
     assert follow_up["next_question"]["id"] == "opposing_party"
