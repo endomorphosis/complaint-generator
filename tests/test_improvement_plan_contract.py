@@ -325,3 +325,88 @@ def test_runtime_hold_owner_and_receipt_stay_byte_identical(tmp_path, spec):
     assert tasks["CIMP-TUI-01"].metadata["claim"] == "claim-42"
     assert tasks["CIMP-TUI-02"].status == "completed"
     assert tasks["CIMP-TUI-02"].metadata["completion receipt"] == "baguqeerareceiptreference"
+
+
+def test_new_board_native_parse_failure_writes_neither_artifact(tmp_path, spec, monkeypatch):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+    path = _write_spec(tmp_path, spec)
+    def unavailable(*args, **kwargs):
+        raise ValueError('synthetic_native_parse_unavailable')
+    monkeypatch.setattr(native, 'parse_task_text', unavailable)
+    with pytest.raises(ValueError, match='synthetic_native_parse_unavailable'):
+        generate(path, tmp_path)
+    assert not (tmp_path / PLAN_RELATIVE).exists()
+    assert not (tmp_path / BOARD_RELATIVE).exists()
+
+
+def test_new_board_is_actually_native_parsed_before_ingestion(tmp_path, spec, monkeypatch):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+    original = native.parse_task_text
+    observed = []
+    def tracked(text, **kwargs):
+        observed.append((text, kwargs))
+        return original(text, **kwargs)
+    monkeypatch.setattr(native, 'parse_task_text', tracked)
+    result = generate(_write_spec(tmp_path, spec), tmp_path)
+    assert observed
+    text = Path(result['board_path']).read_text()
+    assert any(raw == text and kwargs['path'] == tmp_path / BOARD_RELATIVE
+               and kwargs['task_header_prefix'] == '## CIMP-' for raw, kwargs in observed)
+    assert result['receipt']['execution_started'] is False
+    assert result['receipt']['tasks_completed_by_ingestion'] == 0
+
+
+def test_new_board_native_validation_loss_is_rejected_before_write(tmp_path, spec, monkeypatch):
+    from dataclasses import replace
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+    original = native.parse_task_text
+    def lossy(text, **kwargs):
+        tasks = original(text, **kwargs)
+        return [replace(tasks[0], validation=[]), *tasks[1:]]
+    monkeypatch.setattr(native, 'parse_task_text', lossy)
+    with pytest.raises(ValueError, match='projection'):
+        generate(_write_spec(tmp_path, spec), tmp_path)
+    assert not (tmp_path / PLAN_RELATIVE).exists()
+    assert not (tmp_path / BOARD_RELATIVE).exists()
+
+
+def _create_winner_during_board_staging(monkeypatch, root, winner):
+    from integrations.ipfs_accelerate import improvement_plan as compiler
+    original = compiler.tempfile.mkstemp
+    board = root / BOARD_RELATIVE
+    def interleaved(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if kwargs.get('prefix', '').startswith(board.name + '.') and not board.exists():
+            board.write_bytes(winner)
+        return result
+    monkeypatch.setattr(compiler.tempfile, 'mkstemp', interleaved)
+
+
+def test_initial_board_creation_preserves_concurrent_same_plan_hold(tmp_path, spec, monkeypatch):
+    from integrations.ipfs_accelerate import improvement_plan as compiler
+    path = _write_spec(tmp_path, spec)
+    plan = build_improvement_work_plan(spec)
+    winner = compiler._render_board(spec, plan.plan_id).replace(
+        '- Status: todo', '- Status: in_progress\n- Manual hold: true\n- Owner: concurrent-worker\n- Completion receipt: retained', 1,
+    ).encode()
+    _create_winner_during_board_staging(monkeypatch, tmp_path, winner)
+    result = generate(path, tmp_path)
+    assert (tmp_path / BOARD_RELATIVE).read_bytes() == winner
+    assert result['receipt']['board_preserved'] is True
+    assert result['receipt']['tasks_completed_by_ingestion'] == 0
+
+
+def test_initial_board_different_plan_winner_preserves_prior_plan(tmp_path, spec, monkeypatch):
+    from integrations.ipfs_accelerate import improvement_plan as compiler
+    path = _write_spec(tmp_path, spec)
+    plan = build_improvement_work_plan(spec)
+    winner = compiler._render_board(spec, plan.plan_id).replace(
+        f'<!-- plan_id: {plan.plan_id} -->', '<!-- plan_id: unrelated-reviewed-plan -->', 1,
+    ).encode()
+    prior = b'prior formal artifact must remain byte-identical\n'
+    (tmp_path / PLAN_RELATIVE).write_bytes(prior)
+    _create_winner_during_board_staging(monkeypatch, tmp_path, winner)
+    with pytest.raises(ValueError, match='migrate explicitly'):
+        generate(path, tmp_path)
+    assert (tmp_path / BOARD_RELATIVE).read_bytes() == winner
+    assert (tmp_path / PLAN_RELATIVE).read_bytes() == prior

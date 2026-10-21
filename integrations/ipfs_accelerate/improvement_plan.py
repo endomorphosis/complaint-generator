@@ -301,6 +301,48 @@ def _require_matching_projection(existing_text: str, spec: Mapping[str, Any], pl
         )
 
 
+
+def _require_emitted_projection(text: str, spec: Mapping[str, Any], root: Path) -> None:
+    """Validate the actual native projection before publishing a new board."""
+    tasks = _parsed_projection(text, root)
+    if set(tasks) != {item["id"] for item in spec["tasks"]}:
+        raise ValueError("rendered native projection differs from the specification")
+    for item in spec["tasks"]:
+        task = tasks[item["id"]]
+        metadata = {
+            "goal": item["goal_id"], "subgoal": item["subgoal_id"],
+            "submodules": ", ".join(item.get("submodules", [])),
+            "implementation provider": "grok", "provider role": "grok-only",
+            "model": _PROVIDER["model"], "router": _PROVIDER["router"],
+            "provider fallback": "disabled",
+        }
+        if (task.title != item["title"] or task.priority != item["priority"]
+                or task.outputs != item["targets"] or task.depends_on != item["depends_on"]
+                or task.validation != item["validation_commands"]
+                or task.acceptance != " ".join(item["acceptance"])
+                or task.completion != "validation"
+                or any(task.metadata.get(key, "") != value for key, value in metadata.items())):
+            raise ValueError(f"rendered native projection differs for {item['id']}")
+
+
+def _atomic_create(path: Path, content: str) -> bool:
+    """Publish complete bytes only if another creator has not won the path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
 def _atomic_write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
@@ -334,9 +376,15 @@ def generate(spec_path: Path | str, repo_root: Path | str) -> dict[str, Any]:
     if restored.plan_id != plan.plan_id:
         raise ValueError("native plan round trip changed identity")
     validation = FormalPlanValidator().validate(restored)
+    rendered = _render_board(spec, plan.plan_id)
+    _require_emitted_projection(rendered, spec, root)
     plan_path, board_path = root / PLAN_RELATIVE, root / BOARD_RELATIVE
     marker = f"<!-- plan_id: {plan.plan_id} -->"
     board_preserved = board_path.exists()
+    if not board_preserved:
+        # Hard-link publication is atomic and cannot replace a concurrent
+        # creator's held/owned board. Validate that winner before writing plan.
+        board_preserved = not _atomic_create(board_path, rendered)
     if board_preserved:
         existing = board_path.read_text(encoding="utf-8")
         headings = re.findall(r"^## (CIMP-[A-Za-z0-9_.:-]+)(?:\s|$)", existing, re.MULTILINE)
@@ -349,8 +397,6 @@ def generate(spec_path: Path | str, repo_root: Path | str) -> dict[str, Any]:
     # The board is not touched at all when it already exists, so a concurrent
     # daemon can keep changing its statuses without a compiler overwrite race.
     _atomic_write(plan_path, json.dumps(document, indent=2, sort_keys=True) + "\n")
-    if not board_preserved:
-        _atomic_write(board_path, _render_board(spec, plan.plan_id))
     receipt = {
         "schema_version": "complaint-generator/improvement-plan-ingestion@1",
         "plan_id": plan.plan_id, "native_roundtrip": True, "native_contract_ingested": True,
