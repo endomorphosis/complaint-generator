@@ -598,16 +598,20 @@ def generate_text_via_router(
 	model_name: Optional[str] = None,
 	**kwargs: Any,
 ) -> str:
-	if generate_text is None:
-		raise RuntimeError(LLM_ROUTER_ERROR or "llm_router unavailable")
 	privacy_context = kwargs.pop("complaint_privacy_context", None)
 	privacy_block = _privacy_context_block_reason(
 		privacy_context,
 		provider=provider,
 		model_name=model_name,
+		options=kwargs,
 	)
 	if privacy_block:
 		raise RuntimeError(privacy_block)
+	if generate_text is None:
+		raise RuntimeError("private_generation_unavailable" if privacy_context is not None else (LLM_ROUTER_ERROR or "llm_router unavailable"))
+	if privacy_context is not None:
+		provider, model_name = PRIVACY_GROK_PROVIDER, PRIVACY_GROK_MODEL
+		kwargs = _private_generation_options(kwargs)
 	effective_provider, effective_model_name, call_options, env_overrides, _ = _prepare_generate_text_call(
 		prompt,
 		provider=provider,
@@ -620,14 +624,19 @@ def generate_text_via_router(
 		env_overrides=env_overrides,
 	)
 	if preflight_error:
-		raise RuntimeError(preflight_error)
-	with _temporary_env(env_overrides):
-		return generate_text(
-			prompt=prompt,
-			provider=effective_provider or None,
-			model_name=effective_model_name,
-			**call_options,
-		)
+		raise RuntimeError("private_generation_preflight_unavailable" if privacy_context is not None else preflight_error)
+	try:
+		with _temporary_env(env_overrides):
+			return generate_text(
+				prompt=prompt,
+				provider=effective_provider or None,
+				model_name=effective_model_name,
+				**call_options,
+			)
+	except Exception:
+		if privacy_context is not None:
+			raise RuntimeError("private_generation_failed") from None
+		raise
 
 
 def generate_text_with_metadata(
@@ -637,43 +646,39 @@ def generate_text_with_metadata(
 	model_name: Optional[str] = None,
 	**kwargs: Any,
 ) -> Dict[str, Any]:
-	if generate_text is None:
-		return with_adapter_metadata(
-			{
-				"status": "unavailable",
-				"text": "",
-				"prompt": prompt,
-				"provider_name": provider or "",
-				"model_name": model_name or "",
-			},
-			operation="generate_text",
-			backend_available=False,
-			degraded_reason=LLM_ROUTER_ERROR,
-			implementation_status="unavailable",
-		)
-
 	privacy_context = kwargs.pop("complaint_privacy_context", None)
 	privacy_block = _privacy_context_block_reason(
 		privacy_context,
 		provider=provider,
 		model_name=model_name,
+		options=kwargs,
 	)
 	if privacy_block:
 		return with_adapter_metadata(
+			{"status": "error", "text": "", "provider_name": provider or "",
+			 "model_name": model_name or "", "error": privacy_block,
+			 "privacy_decision": "denied", "dispatch": "none"},
+			operation="generate_text", backend_available=generate_text is not None,
+			implementation_status="available" if generate_text is not None else "unavailable",
+		)
+	if generate_text is None:
+		return with_adapter_metadata(
 			{
-				"status": "error",
+				"status": "unavailable",
 				"text": "",
+				**({"prompt": prompt} if privacy_context is None else {}),
 				"provider_name": provider or "",
 				"model_name": model_name or "",
-				"error": privacy_block,
-				"privacy_decision": "denied",
-				"dispatch": "none",
 			},
 			operation="generate_text",
-			backend_available=True,
-			implementation_status="available",
+			backend_available=False,
+			degraded_reason="private_generation_unavailable" if privacy_context is not None else LLM_ROUTER_ERROR,
+			implementation_status="unavailable",
 		)
 
+	if privacy_context is not None:
+		provider, model_name = PRIVACY_GROK_PROVIDER, PRIVACY_GROK_MODEL
+		kwargs = _private_generation_options(kwargs)
 	effective_provider, effective_model_name, call_options, env_overrides, metadata = _prepare_generate_text_call(
 		prompt,
 		provider=provider,
@@ -690,12 +695,12 @@ def generate_text_with_metadata(
 			{
 				"status": "error",
 				"text": "",
-				"prompt": prompt,
+				**({"prompt": prompt} if privacy_context is None else {}),
 				"provider_name": provider or "",
 				"model_name": model_name or "",
 				**metadata,
-				"error": preflight_error,
-				"availability_hint": preflight_error,
+				"error": "private_generation_preflight_unavailable" if privacy_context is not None else preflight_error,
+				"availability_hint": "private_generation_preflight_unavailable" if privacy_context is not None else preflight_error,
 			},
 			operation="generate_text",
 			backend_available=True,
@@ -715,11 +720,11 @@ def generate_text_with_metadata(
 			{
 				"status": "error",
 				"text": "",
-				"prompt": prompt,
+				**({"prompt": prompt} if privacy_context is None else {}),
 				"provider_name": provider or "",
 				"model_name": model_name or "",
 				**metadata,
-				"error": str(exc),
+				"error": "private_generation_failed" if privacy_context is not None else str(exc),
 			},
 			operation="generate_text",
 			backend_available=True,
@@ -730,7 +735,7 @@ def generate_text_with_metadata(
 		{
 			"status": "available",
 			"text": text,
-			"prompt": prompt,
+			**({"prompt": prompt} if privacy_context is None else {}),
 			"provider_name": provider or "",
 			"model_name": model_name or "",
 			**metadata,
@@ -767,11 +772,11 @@ def llm_router_status(
 				"probe_performed": False,
 				"dispatch": "none",
 				"static_capability_only": True,
-				"error": str(LLM_ROUTER_ERROR or "llm_router unavailable"),
+				"error": "private_generation_unavailable" if privacy_context is not None else str(LLM_ROUTER_ERROR or "llm_router unavailable"),
 			},
 			operation="llm_router_status",
 			backend_available=False,
-			degraded_reason=LLM_ROUTER_ERROR,
+			degraded_reason="private_generation_unavailable" if privacy_context is not None else LLM_ROUTER_ERROR,
 			implementation_status="unavailable",
 		)
 
@@ -800,6 +805,7 @@ def llm_router_status(
 			privacy_context,
 			provider=provider,
 			model_name=model_name,
+			options=kwargs,
 		)
 	if privacy_block:
 		return with_adapter_metadata(
@@ -821,6 +827,8 @@ def llm_router_status(
 			implementation_status="available",
 		)
 
+	provider, model_name = PRIVACY_GROK_PROVIDER, PRIVACY_GROK_MODEL
+	kwargs = _private_generation_options(kwargs)
 	effective_provider, effective_model_name, _, env_overrides, metadata = _prepare_generate_text_call(
 		prompt or "HACC llm_router health check",
 		provider=provider,
@@ -839,7 +847,7 @@ def llm_router_status(
 		"effective_provider_name": effective_provider or "",
 		"effective_model_name": effective_model_name or "",
 		"probe_performed": False,
-		"error": preflight_error or "",
+		"error": "private_generation_preflight_unavailable" if preflight_error else "",
 		**metadata,
 	}
 
@@ -1034,14 +1042,14 @@ def _policy_rejection_reason(raw: Any, *, user_id: str, case_id: str) -> Optiona
 	data_classes = raw.get("data_classes")
 	if not isinstance(data_classes, Mapping):
 		return PRIVACY_DENIAL_MALFORMED
-	if list(data_classes.get("private") or []) != [class_id for class_id, _description in PRIVATE_DATA_CLASSES]:
+	if not isinstance(data_classes.get("private"), list) or data_classes["private"] != [class_id for class_id, _description in PRIVATE_DATA_CLASSES]:
 		return PRIVACY_DENIAL_MALFORMED
-	if list(data_classes.get("public") or []) != [PUBLIC_LEGAL_SOURCE_CLASS[0]]:
+	if not isinstance(data_classes.get("public"), list) or data_classes["public"] != [PUBLIC_LEGAL_SOURCE_CLASS[0]]:
 		return PRIVACY_DENIAL_MALFORMED
 	agent_context = raw.get("agent_context")
 	if not isinstance(agent_context, Mapping) or agent_context.get("fixtures_only") is not True:
 		return PRIVACY_DENIAL_MALFORMED
-	if list(agent_context.get("excluded_path_classes") or []) != ["session", "evidence", "export", "secret"]:
+	if not isinstance(agent_context.get("excluded_path_classes"), list) or agent_context["excluded_path_classes"] != ["session", "evidence", "export", "secret"]:
 		return PRIVACY_DENIAL_MALFORMED
 	return None
 
@@ -1120,6 +1128,7 @@ def _privacy_context_block_reason(
 	*,
 	provider: Optional[str],
 	model_name: Optional[str],
+	options: Optional[Mapping[str, Any]] = None,
 ) -> Optional[str]:
 	"""Return a stable denial code, or None when this call may reach preparation.
 
@@ -1155,7 +1164,28 @@ def _privacy_context_block_reason(
 		return PRIVACY_DENIAL_CLOUD_DISABLED
 	if not exact_grok:
 		return PRIVACY_DENIAL_SCOPE
+	if options and any(key not in _PRIVATE_GENERATION_OPTIONS and value is not None for key, value in options.items()):
+		return PRIVACY_DENIAL_SCOPE
 	return None
+
+
+# Private calls are one pinned generation, not a configurable dispatch route.
+# Opaque providers, allocation sessions, custom commands, routing URLs and
+# trace destinations cannot inherit case consent.
+_PRIVATE_GENERATION_OPTIONS = frozenset({
+	"temperature", "max_tokens", "max_output_tokens", "timeout", "stop",
+	"top_p", "top_k", "frequency_penalty", "presence_penalty", "seed",
+	"response_format", "grok_max_turns",
+	"allow_local_fallback", "allow_cross_provider_fallback",
+})
+
+
+def _private_generation_options(options: Mapping[str, Any]) -> Dict[str, Any]:
+	return {
+		**{key: value for key, value in options.items() if key in _PRIVATE_GENERATION_OPTIONS},
+		"allow_local_fallback": False,
+		"allow_cross_provider_fallback": False,
+	}
 
 
 __all__ = [

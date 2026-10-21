@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import socket
 import subprocess
+import traceback
 from pathlib import Path
 
 import pytest
@@ -33,6 +35,7 @@ class _Spy:
         self.architecture = 0
         self.provider = 0
         self.socket = 0
+        self.socket_stacks: list[str] = []
         self.process = 0
         self.backend = 0
         self.prompts: list[str] = []
@@ -42,6 +45,11 @@ class _Spy:
 @pytest.fixture
 def spies(monkeypatch: pytest.MonkeyPatch) -> _Spy:
     import integrations.ipfs_datasets.llm as llm
+    # urllib3 checks IPv6 support by binding a loopback socket at import.
+    # Bootstrap that dependency before measuring the guarded call boundaries;
+    # all socket/provider/preparation assertions below remain strict.
+    if importlib.util.find_spec("urllib3") is not None:
+        import urllib3.util.connection
 
     spy = _Spy()
     original_prepare = llm._prepare_generate_text_call
@@ -62,6 +70,7 @@ def spies(monkeypatch: pytest.MonkeyPatch) -> _Spy:
 
     def _socket(*args, **kwargs):
         spy.socket += 1
+        spy.socket_stacks.append("".join(traceback.format_stack(limit=8)))
         raise AssertionError("socket opened")
 
     def _popen(*args, **kwargs):
@@ -83,7 +92,7 @@ def _assert_quiet(spy: _Spy, payload: object) -> None:
     assert spy.prepare == 0
     assert spy.architecture == 0
     assert spy.provider == 0
-    assert spy.socket == 0
+    assert spy.socket == 0, "\n".join(spy.socket_stacks)
     assert spy.process == 0
 
 
@@ -394,6 +403,7 @@ def test_grok_opt_in_is_exact_and_does_not_fall_back(
     assert spies.architecture == 0
     assert spies.socket == 0
     assert spies.process == 0
+
     assert allowed["status"] == "available"
     assert MARKER not in json.dumps({key: value for key, value in allowed.items() if key != "prompt"})
 
@@ -437,3 +447,190 @@ def test_grok_opt_in_is_exact_and_does_not_fall_back(
     assert bare_probe["error"] == "privacy_denied:cloud_processing_disabled"
     assert spies.socket == 0
     assert spies.process == 0
+
+
+@pytest.mark.parametrize("override", [
+    {"base_url": "https://router.huggingface.co/v1", "arch_router_routes": [{"model": "other-model", "name": "other"}]},
+    {"provider_instance": object()},
+    {"deps": object()},
+    {"allocation_path": "api"},
+    {"grok_cli_cmd": ["grok", "--model", "grok-4"]},
+])
+def test_cloud_consent_cannot_redirect_private_dispatch(spies, monkeypatch, override):
+    import integrations.ipfs_datasets.llm as llm
+
+    monkeypatch.setenv("HF_TOKEN", TOKEN)
+    context = llm.build_complaint_privacy_context(
+        llm.privacy_policy_for_mode("route-user", "route-case", "grok"),
+        user_id="route-user", case_id="route-case", data_class="raw_intake")
+    denied = llm.generate_text_with_metadata(MARKER, provider="grok_cli",
+        model_name="grok-4.7", complaint_privacy_context=context, **override)
+    _assert_quiet(spies, denied)
+    assert denied["privacy_decision"] == "denied"
+    assert denied["dispatch"] == "none"
+
+
+def test_private_grok_dispatch_explicitly_disables_both_fallbacks(monkeypatch):
+    import integrations.ipfs_datasets.llm as llm
+
+    calls = []
+    def provider(**kwargs):
+        calls.append(kwargs)
+        return "synthetic output"
+    monkeypatch.setattr(llm, "generate_text", provider)
+    context = llm.build_complaint_privacy_context(
+        llm.privacy_policy_for_mode("pin-user", "pin-case", "grok"),
+        user_id="pin-user", case_id="pin-case", data_class="raw_intake")
+    result = llm.generate_text_with_metadata(MARKER, provider="grok_cli",
+        model_name="grok-4.7", complaint_privacy_context=context,
+        allow_local_fallback=True, allow_cross_provider_fallback=True)
+    assert result["status"] == "available"
+    assert len(calls) == 1
+    assert calls[0]["provider"] == "grok_cli" and calls[0]["model_name"] == "grok-4.7"
+    assert calls[0]["allow_local_fallback"] is False
+    assert calls[0]["allow_cross_provider_fallback"] is False
+
+
+def test_private_failure_uses_native_router_without_model_or_provider_retry(monkeypatch):
+    import integrations.ipfs_datasets.llm as llm
+    import ipfs_accelerate_py.llm_router as router
+    from types import SimpleNamespace
+
+    calls = []
+    class Primary:
+        def generate(self, prompt, *, model_name=None, **kwargs):
+            calls.append(("grok_cli", model_name))
+            raise RuntimeError(MARKER + TOKEN)
+    class Fallback:
+        def generate(self, *args, **kwargs):
+            calls.append(("fallback", "other-model"))
+            return "fallback must not run"
+    def get_provider(name, **kwargs):
+        assert name == "grok_cli"
+        return Primary()
+    def optional():
+        calls.append(("fallback-discovery", ""))
+        return iter([("openrouter", Fallback())])
+    monkeypatch.setattr(router, "get_default_router_deps", lambda: SimpleNamespace())
+    monkeypatch.setattr(router, "get_llm_provider", get_provider)
+    monkeypatch.setattr(router, "_iter_unpinned_optional_providers", optional)
+    monkeypatch.setattr(router, "_response_cache_enabled", lambda: False)
+    monkeypatch.setattr(llm, "generate_text", router.generate_text)
+    context = llm.build_complaint_privacy_context(
+        llm.privacy_policy_for_mode("native-user", "native-case", "grok"),
+        user_id="native-user", case_id="native-case", data_class="raw_intake")
+    result = llm.generate_text_with_metadata(MARKER, provider="grok_cli",
+        model_name="grok-4.7", complaint_privacy_context=context)
+    assert calls == [("grok_cli", "grok-4.7")]
+    assert result["status"] == "error" and result["error"] == "private_generation_failed"
+    assert MARKER not in json.dumps(result) and TOKEN not in json.dumps(result)
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "preflight", "provider"])
+def test_private_error_receipts_never_quote_prompt_or_backend_error(monkeypatch, failure):
+    import integrations.ipfs_datasets.llm as llm
+
+    context = llm.build_complaint_privacy_context(
+        llm.privacy_policy_for_mode("error-user", "error-case", "grok"),
+        user_id="error-user", case_id="error-case", data_class="drafts_proofs")
+    if failure == "unavailable":
+        monkeypatch.setattr(llm, "generate_text", None)
+        monkeypatch.setattr(llm, "LLM_ROUTER_ERROR", MARKER + TOKEN)
+    else:
+        def provider(**kwargs):
+            raise RuntimeError("provider echoed " + kwargs["prompt"] + TOKEN)
+        monkeypatch.setattr(llm, "generate_text", provider)
+        if failure == "preflight":
+            monkeypatch.setattr(llm, "_provider_preflight_error", lambda **kwargs: MARKER + TOKEN)
+    result = llm.generate_text_with_metadata(MARKER, provider="grok_cli",
+        model_name="grok-4.7", complaint_privacy_context=context)
+    assert result["status"] in {"error", "unavailable"}
+    assert "prompt" not in result
+    assert MARKER not in json.dumps(result) and TOKEN not in json.dumps(result)
+
+
+@pytest.mark.parametrize("field", ["private", "public", "excluded_path_classes"])
+@pytest.mark.parametrize("malformed", [1, True, {"unexpected": "value"}])
+def test_malformed_nested_consent_is_denied_without_parser_crash(field, malformed):
+    from integrations.ipfs_datasets.llm import inspect_privacy_policy, privacy_policy_for_mode
+
+    policy = privacy_policy_for_mode("bad-user", "bad-case", "grok")
+    if field == "excluded_path_classes":
+        policy["agent_context"][field] = malformed
+    else:
+        policy["data_classes"][field] = malformed
+    result = inspect_privacy_policy(policy, user_id="bad-user", case_id="bad-case")
+    assert result["admitted"] is False
+    assert result["cloud_processing_enabled"] is False
+
+
+def test_workspace_backend_config_cannot_replace_its_private_context(tmp_path, monkeypatch):
+    import integrations.ipfs_datasets.llm as llm
+    import applications.ui_review as review
+    calls = []
+    monkeypatch.setattr(llm, "generate_text", lambda **kwargs: calls.append(kwargs) or "unused")
+    forged = llm.build_complaint_privacy_context(
+        llm.privacy_policy_for_mode("other-user", "other-case", "grok"),
+        user_id="other-user", case_id="other-case", data_class="public_legal_source_graph")
+    monkeypatch.setattr(review, "_load_backend_kwargs", lambda *a, **k: {
+        "id": "synthetic", "complaint_privacy_context": forged})
+    service = _service(tmp_path)
+    _seed_draft(service, "local-user", MARKER)
+    generated = service.generate_complaint("local-user", use_llm=True,
+        provider="grok_cli", model="grok-4.7")
+    assert calls == []
+    assert generated["draft"]["draft_fallback_reason"] == "privacy_denied:cloud_processing_disabled"
+
+
+def test_loaded_foreign_identity_cannot_transfer_cloud_consent(tmp_path, spies):
+    import integrations.ipfs_datasets.llm as llm
+
+    service = _service(tmp_path)
+    state = service._load_state("selected-user")
+    state["user_id"] = "foreign-user"
+    state["case_id"] = "foreign-case"
+    state["privacy_policy"] = llm.privacy_policy_for_mode("foreign-user", "foreign-case", "grok")
+    state["draft"] = {"title": "Synthetic", "body": MARKER}
+    service._session_path("selected-user").write_text(json.dumps(state))
+    selected = service._load_state("selected-user")
+    assert selected["user_id"] == "selected-user"
+    assert selected["privacy_policy_load"]["admitted"] is False
+    assert selected["privacy_policy"]["cloud_processing_enabled"] is False
+    assert service._refine_draft_with_llm_router(selected, selected["draft"], provider="grok_cli", model="grok-4.7") is None
+    _assert_quiet(spies, {"reason": service._last_draft_refinement_error})
+    assert service.set_privacy_policy("selected-user", "local")["updated"] is True
+    assert not service._session_path("foreign-user").exists()
+    assert service._load_state("selected-user")["privacy_policy"]["processing_mode"] == "local_private"
+
+
+def test_draft_backend_error_receipt_cannot_quote_private_case(tmp_path, monkeypatch):
+    import applications.ui_review as review
+
+    def fail(*args, **kwargs):
+        raise RuntimeError(MARKER + TOKEN)
+    monkeypatch.setattr(review, "_load_backend_kwargs", fail)
+    service = _service(tmp_path)
+    service.set_privacy_policy("draft-error", "grok")
+    state = service._load_state("draft-error")
+    assert service._refine_draft_with_llm_router(state, {"body": MARKER}, provider="grok_cli", model="grok-4.7") is None
+    assert service._last_draft_refinement_error == "private_generation_failed"
+
+
+@pytest.mark.parametrize("entrypoint", ["string", "probe"])
+def test_other_private_generation_errors_have_stable_receipts(monkeypatch, entrypoint):
+    import integrations.ipfs_datasets.llm as llm
+
+    def fail(**kwargs):
+        raise RuntimeError(kwargs["prompt"] + TOKEN)
+    monkeypatch.setattr(llm, "generate_text", fail)
+    context = llm.build_complaint_privacy_context(
+        llm.privacy_policy_for_mode("receipt-user", "receipt-case", "grok"),
+        user_id="receipt-user", case_id="receipt-case", data_class="raw_intake")
+    if entrypoint == "string":
+        with pytest.raises(RuntimeError, match="^private_generation_failed$"):
+            llm.generate_text_via_router(MARKER, provider="grok_cli", model_name="grok-4.7", complaint_privacy_context=context)
+    else:
+        result = llm.llm_router_status(provider="grok_cli", model_name="grok-4.7",
+            perform_probe=True, prompt=MARKER, complaint_privacy_context=context)
+        assert result["probe_status"] == "error"
+        assert MARKER not in json.dumps(result) and TOKEN not in json.dumps(result)

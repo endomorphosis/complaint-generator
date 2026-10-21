@@ -2487,7 +2487,7 @@ class ComplaintWorkspaceService:
             return _default_state(user_id)
         if not isinstance(payload, dict):
             return _default_state(user_id)
-        payload.setdefault("user_id", user_id)
+        payload["user_id"] = user_id
         payload["claim_type"] = _normalize_claim_type(payload.get("claim_type"))
         payload.setdefault("case_synopsis", "")
         payload.setdefault("intake_answers", {})
@@ -2503,7 +2503,10 @@ class ComplaintWorkspaceService:
         payload.setdefault("ui_readiness", None)
         payload.setdefault("case_id", user_id)
         payload.setdefault("privacy_notice_shown", False)
-        _apply_effective_privacy_policy(payload, str(payload.get("user_id") or user_id))
+        # Serialized identity fields cannot transfer another workspace's cloud
+        # consent to the record selected by the caller. This binds policy only;
+        # tenant authorization remains a separate requirement.
+        _apply_effective_privacy_policy(payload, user_id)
         payload.setdefault(
             "mike_integration",
             {
@@ -3368,8 +3371,8 @@ class ComplaintWorkspaceService:
             backend = LLMRouterBackend(**backend_kwargs)
             prompt = self._build_formal_complaint_generation_prompt(state, base_draft)
             raw_response = self._invoke_llm_draft_backend_with_timeout(backend, prompt)
-        except Exception as exc:
-            self._last_draft_refinement_error = str(exc) or "llm_router refinement failed"
+        except Exception:
+            self._last_draft_refinement_error = "private_generation_failed"
             return None
 
         parsed = _parse_json_object(raw_response)
@@ -8224,8 +8227,8 @@ class ComplaintWorkspaceService:
                 if revised and len(revised) > _MIN_REVISED_DRAFT_LENGTH:
                     improved_body = revised
                     applied_suggestions.append(suggestion)
-            except Exception as exc:
-                llm_errors.append(f"{dimension}: {exc}")
+            except Exception:
+                llm_errors.append("private_generation_failed")
 
         improved = bool(applied_suggestions)
         if improved:
