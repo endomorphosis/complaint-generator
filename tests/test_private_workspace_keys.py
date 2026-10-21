@@ -265,11 +265,12 @@ def test_workspace_unlock_is_not_remote_consent_and_supervisor_can_continue(tmp_
     from applications.complaint_workspace import ComplaintWorkspaceService
 
     service = ComplaintWorkspaceService(tmp_path / "workspace")
-    before = service.get_privacy_policy("user-a")
     created = service.initialize_private_keys(protection="passphrase", passphrase=PASSPHRASE)
     assert created["unlocked"] is True
     assert created["cloud_processing_enabled"] is False
     assert created["unlock_is_remote_consent"] is False
+    service.ensure_private_case_key("user-a", "user-a")
+    before = service.get_privacy_policy("user-a")
     after = service.get_privacy_policy("user-a")
     assert after["policy"] == before["policy"]
     assert after["policy"].get("cloud_processing_enabled") in {False, None} or after["load"].get("cloud_processing_enabled") is False
@@ -289,6 +290,7 @@ def test_workspace_unlock_is_not_remote_consent_and_supervisor_can_continue(tmp_
     opened = restarted.unlock_private_keys(passphrase=PASSPHRASE)
     assert opened["unlocked"] is True
     assert opened["unlock_is_remote_consent"] is False
+    assert restarted.get_privacy_policy("user-a")["policy"] == before["policy"]
     ensured = restarted.ensure_private_case_key(TENANT, CASE)
     assert ensured["data_key_id"].startswith("d-")
     assert PASSPHRASE not in json.dumps({key: value for key, value in ensured.items() if key != "data_key_id"})
@@ -603,8 +605,8 @@ def test_scoped_user_uses_own_case_without_foreign_count_or_consent_change(owner
     from applications.complaint_workspace import WorkspaceAccess, workspace_access_scope
 
     service = owner_key_workspace
-    before = service.get_privacy_policy(TENANT)
     with workspace_access_scope(WorkspaceAccess.authenticated(TENANT, case_id=CASE)):
+        before = service.get_privacy_policy(TENANT)
         receipt = service.ensure_private_case_key(TENANT, CASE)
         assert "case_count" not in receipt
         provider = service.private_key_provider()
@@ -612,7 +614,7 @@ def test_scoped_user_uses_own_case_without_foreign_count_or_consent_change(owner
         assert key_id == receipt["data_key_id"]
         sealed = seal_private_artifact(b"owned-private-bytes", binding=_binding(), key=key, key_id=key_id)
         assert open_private_artifact(sealed, binding=_binding(), key=key, expected_key_id=key_id) == b"owned-private-bytes"
-    assert service.get_privacy_policy(TENANT)["policy"] == before["policy"]
+        assert service.get_privacy_policy(TENANT)["policy"] == before["policy"]
 
 
 def test_retained_workspace_provider_rechecks_request_before_any_lookup(
