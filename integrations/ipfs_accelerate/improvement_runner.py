@@ -306,6 +306,9 @@ def campaign_environment(repo_root: Path, ambient: Mapping[str, str] | None = No
         "IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS": "external/ipfs_datasets_py",
         # Bound retained prepared checkouts in this campaign, without reclaiming leases.
         "IPFS_ACCELERATE_AGENT_WORKTREE_POOL_MAX_ENTRIES": "1",
+        # Optional Common Crawl tooling must not clone an unrelated HEAD into
+        # an intentionally uninitialized, pinned dependency during validation.
+        "COMMON_CRAWL_AUTO_CLONE_SOURCE": "0",
         "IPFS_ACCELERATE_AGENT_GROK_MODEL": MODEL,
         "IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS": "64",
         "IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT": "low",
