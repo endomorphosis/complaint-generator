@@ -467,7 +467,7 @@ Implementation instructions:
 
 ## CIMP-LAW-04 Extract source-bound legal rule candidates and promote verified requirements
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.law
