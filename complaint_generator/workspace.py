@@ -5,6 +5,7 @@ from applications.complaint_workspace import (
     ComplaintWorkspaceService,
     DEFAULT_CLAIM_ELEMENTS,
     DEFAULT_INTAKE_QUESTIONS,
+    WorkspaceAccess,
     generate_decentralized_id,
 )
 
@@ -13,12 +14,16 @@ def _resolve_service(
     service: Optional[ComplaintWorkspaceService] = None,
     *,
     root_dir: Optional[str | Path] = None,
+    access: Optional[WorkspaceAccess] = None,
 ) -> ComplaintWorkspaceService:
     if service is not None:
         return service
+    # Ordinary CLI and TUI callers are local operators. Ownership is explicit
+    # trusted-local and does not install an external identity provider.
+    local_access = access if access is not None else WorkspaceAccess.trusted_local()
     if root_dir is not None:
-        return ComplaintWorkspaceService(root_dir=Path(root_dir))
-    return ComplaintWorkspaceService()
+        return ComplaintWorkspaceService(root_dir=Path(root_dir), access=local_access)
+    return ComplaintWorkspaceService(access=local_access)
 
 
 def create_identity(

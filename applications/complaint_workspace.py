@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import contextvars
+import errno
 import inspect
 import json
 import os
@@ -15,11 +17,14 @@ import zipfile
 import hashlib
 import hmac
 from base64 import b64encode
+from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Set
+from types import MappingProxyType
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Protocol, Set
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
@@ -848,6 +853,254 @@ def _utc_now() -> str:
 def _slugify_user_id(user_id: str) -> str:
     normalized = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(user_id or DEFAULT_USER_ID).strip())
     return normalized.strip("-") or DEFAULT_USER_ID
+
+
+class WorkspaceAuthorizationDenied(PermissionError):
+    """Private workspace operation refused for this principal or case.
+
+    The message is a stable code. It must not echo session contents, markers,
+    paths, or caller-supplied identifiers.
+    """
+
+    code = "authorization_denied"
+
+    def __init__(self) -> None:
+        super().__init__("authorization_denied")
+
+
+class AuthorizationRequirement:
+    """Resource/ability admission record.
+
+    Mirrors the transport-neutral shape of
+    ``ipfs_kit_py`` ``AuthorizationRequirement.protected(resource, ability)``
+    without importing storage services. It does not authenticate a token or
+    infer case ownership.
+    """
+
+    def __init__(self, resource: str, ability: str, *, protected: bool = True) -> None:
+        self.resource = str(resource or "")
+        self.ability = str(ability or "")
+        self.protected = bool(protected)
+
+    @classmethod
+    def protected(cls, resource: str, ability: str) -> "AuthorizationRequirement":
+        return cls(resource, ability, protected=True)
+
+    @classmethod
+    def public(cls, resource: str, ability: str) -> "AuthorizationRequirement":
+        return cls(resource, ability, protected=False)
+
+
+@dataclass(frozen=True)
+class WorkspaceDispatchContext:
+    """Transport-neutral principal context shared by service, facade, HTTP, and MCP.
+
+    Compatible with ``ipfs_kit_py.core.service_router.DispatchContext``:
+    ``principal`` is a non-empty string or None, and ``attributes`` is a mapping.
+    """
+
+    principal: Optional[str] = None
+    attributes: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.principal is not None and (not isinstance(self.principal, str) or not self.principal):
+            raise ValueError("principal must be a non-empty string or None")
+        if not isinstance(self.attributes, Mapping):
+            raise ValueError("dispatch context attributes must be a mapping")
+        object.__setattr__(self, "attributes", MappingProxyType(dict(self.attributes)))
+
+
+@dataclass(frozen=True)
+class WorkspaceAccess:
+    """Authenticated principal binding. A supplied user id is not authorization."""
+
+    trust: str
+    principal_id: Optional[str] = None
+    case_id: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.trust not in {"trusted_local", "authenticated", "unauthenticated"}:
+            raise ValueError("unsupported workspace trust")
+        if self.trust == "authenticated" and not self.principal_id:
+            raise ValueError("authenticated workspace access requires a principal")
+
+    @staticmethod
+    def trusted_local(principal_id: Optional[str] = None, case_id: Optional[str] = None) -> "WorkspaceAccess":
+        """Explicit local operator ownership. ``principal_id`` None selects the requested local id."""
+
+        return WorkspaceAccess("trusted_local", principal_id or None, case_id or None)
+
+    @staticmethod
+    def authenticated(principal_id: str, case_id: Optional[str] = None) -> "WorkspaceAccess":
+        return WorkspaceAccess("authenticated", str(principal_id), case_id or None)
+
+    @staticmethod
+    def unauthenticated() -> "WorkspaceAccess":
+        return WorkspaceAccess("unauthenticated", None, None)
+
+    def dispatch_context(self, *, user_id: Optional[str], case_id: Optional[str], ability: str) -> WorkspaceDispatchContext:
+        principal = self.principal_id if self.trust == "authenticated" else None
+        if self.trust == "trusted_local" and self.principal_id:
+            principal = self.principal_id
+        return WorkspaceDispatchContext(
+            principal=principal,
+            attributes={
+                "trust": self.trust,
+                "user_id": user_id,
+                "bound_principal": self.principal_id,
+                "case_id": case_id,
+                "bound_case_id": self.case_id,
+                "ability": ability,
+                "resource": "workspace.case",
+            },
+        )
+
+
+class WorkspaceAuthorizer:
+    """Admit a protected workspace operation for the bound principal and case.
+
+    A client-supplied user id is an identifier. Trusted-local admission must be
+    an explicit ``trusted_local`` trust value. This object does not accept a
+    process-wide bearer token as case ownership.
+    """
+
+    def __call__(self, requirement: AuthorizationRequirement, context: WorkspaceDispatchContext) -> bool:
+        if not isinstance(requirement, AuthorizationRequirement) or not requirement.protected:
+            return not isinstance(requirement, AuthorizationRequirement)
+        attributes = context.attributes
+        trust = str(attributes.get("trust") or "")
+        requested_user = attributes.get("user_id")
+        requested_case = attributes.get("case_id")
+        bound_case = attributes.get("bound_case_id")
+        if requested_case is not None and bound_case is not None and str(requested_case) != str(bound_case):
+            return False
+        record_case = attributes.get("record_case_id")
+        if record_case is not None and bound_case is not None and str(record_case) != str(bound_case):
+            return False
+        if record_case is not None and requested_case is not None and str(record_case) != str(requested_case):
+            return False
+        if trust == "trusted_local":
+            bound = attributes.get("bound_principal")
+            if bound and requested_user is not None and str(requested_user) != str(bound):
+                return False
+            return True
+        if trust != "authenticated" or not context.principal:
+            return False
+        if requested_user is None or str(requested_user) != context.principal:
+            return False
+        return True
+
+
+class PrincipalRegistry:
+    """Injectable bearer-token to principal map. Tokens are not interchangeable."""
+
+    def __init__(self) -> None:
+        self._tokens: Dict[str, WorkspaceAccess] = {}
+
+    def register(self, token: str, principal_id: str, *, case_id: Optional[str] = None) -> None:
+        normalized = str(token or "").strip()
+        if not normalized:
+            raise ValueError("principal token is required")
+        self._tokens[normalized] = WorkspaceAccess.authenticated(principal_id, case_id=case_id)
+
+    def resolve(self, token: Optional[str]) -> Optional[WorkspaceAccess]:
+        normalized = str(token or "").strip()
+        if not normalized:
+            return None
+        return self._tokens.get(normalized)
+
+
+_REQUEST_ACCESS: contextvars.ContextVar[Optional[WorkspaceAccess]] = contextvars.ContextVar(
+    "complaint_workspace_access",
+    default=None,
+)
+_REQUEST_CASE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "complaint_workspace_case",
+    default=None,
+)
+_REQUEST_CID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "complaint_workspace_cid",
+    default=None,
+)
+_REQUEST_STORAGE_KEY: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "complaint_workspace_storage_key",
+    default=None,
+)
+
+_PUBLIC_MCP_TOOLS = frozenset(
+    {
+        "complaint.create_identity",
+        "complaint.list_intake_questions",
+        "complaint.list_claim_elements",
+        "complaint.search_corpus",
+    }
+)
+_LEGACY_MAP_NAME = "legacy-namespace-map.json"
+
+
+def principal_namespace(principal_id: str) -> str:
+    """Stable collision-resistant namespace for an exact principal identity."""
+
+    material = str(principal_id if principal_id is not None else "").encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
+
+
+def namespace_filename(principal_id: str) -> str:
+    return f"p-{principal_namespace(principal_id)}.json"
+
+
+@contextmanager
+def workspace_access_scope(access: Optional[WorkspaceAccess]) -> Iterator[None]:
+    token = _REQUEST_ACCESS.set(access)
+    try:
+        yield
+    finally:
+        _REQUEST_ACCESS.reset(token)
+
+
+@contextmanager
+def _workspace_reference_scope(
+    *,
+    case_id: Optional[str] = None,
+    cid: Optional[str] = None,
+    storage_key: Optional[str] = None,
+) -> Iterator[None]:
+    case_token = _REQUEST_CASE.set(None if case_id is None or str(case_id).strip() == "" else str(case_id))
+    cid_token = _REQUEST_CID.set(None if cid is None or str(cid).strip() == "" else str(cid))
+    key_token = _REQUEST_STORAGE_KEY.set(
+        None if storage_key is None or str(storage_key).strip() == "" else str(storage_key)
+    )
+    try:
+        yield
+    finally:
+        _REQUEST_CASE.reset(case_token)
+        _REQUEST_CID.reset(cid_token)
+        _REQUEST_STORAGE_KEY.reset(key_token)
+
+
+def _bearer_token_from_headers(headers: Mapping[str, str]) -> str:
+    authorization = str(headers.get("authorization") or headers.get("Authorization") or "")
+    if authorization.startswith("Bearer "):
+        return authorization[7:].strip()
+    return ""
+
+
+def access_from_http_headers(
+    headers: Mapping[str, str],
+    *,
+    principal_registry: Optional[PrincipalRegistry] = None,
+    trusted_local: bool = False,
+) -> WorkspaceAccess:
+    """Resolve request trust. A generic bearer or supplied user id is not a principal."""
+
+    token = _bearer_token_from_headers(headers)
+    if principal_registry is not None and token:
+        resolved = principal_registry.resolve(token)
+        if resolved is not None:
+            return resolved
+    if trusted_local:
+        return WorkspaceAccess.trusted_local()
+    return WorkspaceAccess.unauthenticated()
 
 
 def _split_lines(value: Optional[str]) -> List[str]:
@@ -2467,27 +2720,313 @@ class ComplaintWorkspaceRequestHandlers:
 
 
 class ComplaintWorkspaceService:
-    def __init__(self, root_dir: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        root_dir: Optional[Path] = None,
+        *,
+        access: Optional[WorkspaceAccess] = None,
+        authorizer: Optional[WorkspaceAuthorizer] = None,
+    ) -> None:
         base_dir = Path(root_dir) if root_dir is not None else _SESSION_DIR
         self._session_dir = base_dir
         self._session_dir.mkdir(parents=True, exist_ok=True)
         self._last_draft_refinement_error: Optional[str] = None
+        self._default_access = access if access is not None else WorkspaceAccess.trusted_local()
+        self._authorizer = authorizer or WorkspaceAuthorizer()
         self.request_handlers = ComplaintWorkspaceRequestHandlers(self)
 
+    def _effective_access(self) -> WorkspaceAccess:
+        current = _REQUEST_ACCESS.get()
+        if current is not None:
+            return current
+        return self._default_access
+
+    def _resolve_user_id(self, user_id: Optional[str]) -> str:
+        access = self._effective_access()
+        supplied = str(user_id).strip() if user_id is not None and str(user_id).strip() else ""
+        if access.trust == "authenticated":
+            if not supplied:
+                return str(access.principal_id or "")
+            return supplied
+        if access.trust == "trusted_local":
+            if not supplied:
+                return str(access.principal_id or DEFAULT_USER_ID)
+            return supplied
+        return supplied or DEFAULT_USER_ID
+
+    def _check_access(
+        self,
+        user_id: Optional[str],
+        *,
+        ability: str,
+        case_id: Optional[str] = None,
+        record_case_id: Optional[str] = None,
+    ) -> str:
+        access = self._effective_access()
+        resolved_user = self._resolve_user_id(user_id)
+        explicit_case = _REQUEST_CASE.get()
+        selected_case = case_id if case_id is not None else explicit_case
+        if selected_case is None:
+            selected_case = access.case_id
+        context = access.dispatch_context(user_id=resolved_user, case_id=selected_case, ability=ability)
+        if record_case_id is not None:
+            attributes = dict(context.attributes)
+            attributes["record_case_id"] = record_case_id
+            context = WorkspaceDispatchContext(principal=context.principal, attributes=attributes)
+        requirement = AuthorizationRequirement.protected("workspace.case", ability)
+        admitted = False
+        try:
+            admitted = bool(self._authorizer(requirement, context))
+        except Exception:
+            admitted = False
+        if not admitted:
+            raise WorkspaceAuthorizationDenied()
+        return resolved_user
+
+    def _namespace_filename(self, user_id: str) -> str:
+        return namespace_filename(user_id)
+
+    def _legacy_filename(self, user_id: str) -> str:
+        return f"{_slugify_user_id(user_id)}.json"
+
     def _session_path(self, user_id: str) -> Path:
-        return self._session_dir / f"{_slugify_user_id(user_id)}.json"
+        return self._session_dir / self._namespace_filename(user_id)
+
+    def _legacy_session_path(self, user_id: str) -> Path:
+        return self._session_dir / self._legacy_filename(user_id)
+
+    def _open_relative(self, relative: str, flags: int, mode: int = 0o600) -> int:
+        if not isinstance(relative, str) or not relative or relative.startswith("/") or "\\" in relative or "\x00" in relative:
+            raise WorkspaceAuthorizationDenied()
+        parts = [part for part in relative.split("/") if part != ""]
+        if not parts or any(part in {".", ".."} for part in parts):
+            raise WorkspaceAuthorizationDenied()
+        root_fd = os.open(self._session_dir, os.O_RDONLY | os.O_DIRECTORY)
+        current = -1
+        close_current = False
+        try:
+            for index, part in enumerate(parts):
+                last = index == len(parts) - 1
+                open_flags = os.O_NOFOLLOW | (flags if last else (os.O_RDONLY | os.O_DIRECTORY))
+                try:
+                    opened = os.open(part, open_flags, mode if last else 0, dir_fd=root_fd if not close_current else current)
+                except OSError as exc:
+                    if exc.errno in {errno.ELOOP, errno.ENOTDIR, errno.EPERM}:
+                        raise WorkspaceAuthorizationDenied() from None
+                    raise
+                if close_current:
+                    os.close(current)
+                current = opened
+                close_current = True
+            owned = current
+            current = -1
+            close_current = False
+            return owned
+        finally:
+            if close_current and current >= 0:
+                os.close(current)
+            os.close(root_fd)
+
+    def _read_bytes_nofollow(self, relative: str) -> bytes:
+        fd = self._open_relative(relative, os.O_RDONLY)
+        try:
+            chunks: List[bytes] = []
+            while True:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks)
+        finally:
+            os.close(fd)
+
+    def _write_bytes_nofollow(self, relative: str, payload: bytes) -> None:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        fd = self._open_relative(relative, flags)
+        try:
+            view = memoryview(payload)
+            while view:
+                written = os.write(fd, view)
+                view = view[written:]
+        finally:
+            os.close(fd)
+
+    def _read_json_file(self, filename: str) -> Optional[Dict[str, Any]]:
+        try:
+            raw = self._read_bytes_nofollow(filename)
+        except FileNotFoundError:
+            return None
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return payload
+
+    def _read_legacy_map(self) -> Dict[str, Any]:
+        payload = self._read_json_file(_LEGACY_MAP_NAME)
+        if not isinstance(payload, dict):
+            return {"version": 1, "entries": {}}
+        entries = payload.get("entries")
+        if not isinstance(entries, dict):
+            payload["entries"] = {}
+        payload.setdefault("version", 1)
+        return payload
+
+    def _write_legacy_map(self, payload: Dict[str, Any]) -> None:
+        body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+        self._write_bytes_nofollow(_LEGACY_MAP_NAME, body)
+
+    def _record_legacy_owner(self, slug: str, owner: str) -> None:
+        mapping = self._read_legacy_map()
+        entries = dict(mapping.get("entries") or {})
+        current = entries.get(slug)
+        if isinstance(current, dict) and str(current.get("owner") or "") not in {"", owner}:
+            return
+        if isinstance(current, dict) and str(current.get("owner") or "") == owner:
+            return
+        entries[slug] = {"owner": owner, "namespace": principal_namespace(owner)}
+        mapping["entries"] = entries
+        self._write_legacy_map(mapping)
+
+    def _legacy_owner_conflict(self, slug: str, owner: str) -> bool:
+        entries = dict(self._read_legacy_map().get("entries") or {})
+        current = entries.get(slug)
+        if not isinstance(current, dict):
+            return False
+        recorded = str(current.get("owner") or "")
+        return bool(recorded) and recorded != owner
+
+    def _prepare_loaded_state(self, payload: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+        owner = payload.get("user_id")
+        if owner is not None and str(owner) != user_id:
+            raise WorkspaceAuthorizationDenied()
+        if owner is None:
+            payload["user_id"] = user_id
+        record_case = _state_case_id(payload, user_id)
+        self._check_access(user_id, ability="read", record_case_id=record_case)
+        expected_case = _REQUEST_CASE.get() or self._effective_access().case_id
+        if expected_case is not None and str(record_case) != str(expected_case):
+            raise WorkspaceAuthorizationDenied()
+        self._assert_bound_references(payload, record_case)
+        payload["claim_type"] = _normalize_claim_type(payload.get("claim_type"))
+        return payload
+
+    def _assert_bound_references(self, payload: Mapping[str, Any], record_case: str) -> None:
+        cid = _REQUEST_CID.get()
+        storage_key = _REQUEST_STORAGE_KEY.get()
+        if cid is None and storage_key is None:
+            return
+        references = [item for item in list(payload.get("private_references") or []) if isinstance(item, Mapping)]
+
+        def _matches(item: Mapping[str, Any]) -> bool:
+            if str(item.get("case_id") or record_case) != str(record_case):
+                return False
+            if cid is not None and str(item.get("cid") or "") != cid:
+                return False
+            if storage_key is not None and str(item.get("storage_key") or "") != storage_key:
+                return False
+            return True
+
+        if not any(_matches(item) for item in references):
+            raise WorkspaceAuthorizationDenied()
+
+    def _load_owned_payload(self, user_id: str) -> Optional[Dict[str, Any]]:
+        namespaced = self._read_json_file(self._namespace_filename(user_id))
+        if namespaced is not None:
+            return self._prepare_loaded_state(namespaced, user_id)
+        slug = self._legacy_filename(user_id)
+        if self._legacy_owner_conflict(slug, user_id):
+            return None
+        legacy = self._read_json_file(slug)
+        if legacy is None:
+            return None
+        legacy_owner = legacy.get("user_id")
+        if legacy_owner is None or str(legacy_owner) != user_id:
+            return None
+        self._record_legacy_owner(slug, user_id)
+        return self._prepare_loaded_state(legacy, user_id)
+
+    def read_contained_workspace_file(self, user_id: Optional[str], relative_name: str) -> bytes:
+        self._check_access(user_id, ability="read")
+        return self._read_bytes_nofollow(str(relative_name or ""))
+
+    def write_contained_workspace_file(self, user_id: Optional[str], relative_name: str, content: bytes) -> Dict[str, Any]:
+        resolved = self._check_access(user_id, ability="write")
+        self._write_bytes_nofollow(str(relative_name or ""), bytes(content or b""))
+        return {"user_id": resolved, "relative_name": str(relative_name or ""), "written": True, "at_rest_protection": "plaintext_pending"}
+
+    def remember_private_reference(
+        self,
+        user_id: Optional[str],
+        *,
+        cid: Optional[str] = None,
+        storage_key: Optional[str] = None,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        resolved = self._resolve_user_id(user_id)
+        with _workspace_reference_scope(case_id=case_id):
+            state = self._load_state(resolved)
+        record_case = _state_case_id(state, resolved)
+        if case_id is not None and str(case_id) != record_case:
+            raise WorkspaceAuthorizationDenied()
+        if not cid and not storage_key:
+            raise WorkspaceAuthorizationDenied()
+        references = [item for item in list(state.get("private_references") or []) if isinstance(item, dict)]
+        references.append(
+            {
+                "cid": None if cid is None else str(cid),
+                "storage_key": None if storage_key is None else str(storage_key),
+                "case_id": record_case,
+            }
+        )
+        state["private_references"] = references
+        self._save_state(state)
+        return {
+            "user_id": resolved,
+            "case_id": record_case,
+            "stored": True,
+            "at_rest_protection": "plaintext_pending",
+        }
+
+    def resolve_private_reference(
+        self,
+        user_id: Optional[str],
+        *,
+        case_id: Optional[str] = None,
+        cid: Optional[str] = None,
+        storage_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        resolved = self._resolve_user_id(user_id)
+        with _workspace_reference_scope(case_id=case_id, cid=cid, storage_key=storage_key):
+            state = self._load_state(resolved)
+        return {
+            "user_id": str(state.get("user_id") or resolved),
+            "case_id": _state_case_id(state, resolved),
+            "cid": None if cid is None else str(cid),
+            "storage_key": None if storage_key is None else str(storage_key),
+            "admitted": True,
+            "at_rest_protection": "plaintext_pending",
+        }
 
     def _load_state(self, user_id: str) -> Dict[str, Any]:
-        path = self._session_path(user_id)
-        if not path.exists():
-            return _default_state(user_id)
+        resolved_user = self._check_access(user_id, ability="read")
         try:
-            payload = json.loads(path.read_text())
-        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-            return _default_state(user_id)
-        if not isinstance(payload, dict):
-            return _default_state(user_id)
-        payload["user_id"] = user_id
+            loaded = self._load_owned_payload(resolved_user)
+        except WorkspaceAuthorizationDenied:
+            raise
+        except OSError:
+            raise WorkspaceAuthorizationDenied() from None
+        if loaded is None:
+            loaded = _default_state(resolved_user)
+            record_case = _state_case_id(loaded, resolved_user)
+            self._check_access(resolved_user, ability="read", record_case_id=record_case)
+            expected_case = _REQUEST_CASE.get() or self._effective_access().case_id
+            if expected_case is not None and str(record_case) != str(expected_case):
+                raise WorkspaceAuthorizationDenied()
+            self._assert_bound_references(loaded, record_case)
+        payload = loaded
         payload["claim_type"] = _normalize_claim_type(payload.get("claim_type"))
         payload.setdefault("case_synopsis", "")
         payload.setdefault("intake_answers", {})
@@ -2525,15 +3064,24 @@ class ComplaintWorkspaceService:
         state["updated_at"] = _utc_now()
         user_id = str(state.get("user_id") or DEFAULT_USER_ID)
         state["user_id"] = user_id
+        record_case = _state_case_id(state, user_id)
+        self._check_access(user_id, ability="write", record_case_id=record_case)
         _apply_effective_privacy_policy(state, user_id)
-        path = self._session_path(user_id)
-        temp_path = path.with_name(f"{path.name}.tmp")
+        filename = self._namespace_filename(user_id)
+        destination = self._session_dir / filename
+        if destination.is_symlink():
+            raise WorkspaceAuthorizationDenied()
+        temp_name = f".{filename}.{uuid.uuid4().hex}.tmp"
+        temp_path = self._session_dir / temp_name
         try:
-            temp_path.write_text(json.dumps(state, indent=2, sort_keys=True))
-            os.replace(temp_path, path)
+            self._write_bytes_nofollow(temp_name, json.dumps(state, indent=2, sort_keys=True).encode("utf-8"))
+            os.replace(temp_path, destination)
         finally:
             if temp_path.exists():
-                temp_path.unlink()
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
         return state
 
     def _build_question_status(self, answers: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -3641,8 +4189,17 @@ class ComplaintWorkspaceService:
             },
         }
 
-    def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
-        return self.request_handlers.get_session(user_id)
+    def get_session(self, user_id: Optional[str] = None, case_id: Optional[str] = None) -> Dict[str, Any]:
+        resolved = self._resolve_user_id(user_id)
+
+        def _run() -> Dict[str, Any]:
+            self._check_access(resolved, ability="read", case_id=case_id)
+            return self.request_handlers.get_session(resolved)
+
+        if case_id is None:
+            return _run()
+        with _workspace_reference_scope(case_id=case_id):
+            return _run()
 
     def build_mediator_prompt(self, user_id: Optional[str]) -> Dict[str, Any]:
         session = self.get_session(user_id)
@@ -10066,7 +10623,52 @@ class ComplaintWorkspaceService:
         }
 
     def call_mcp_tool(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        args = arguments or {}
+        args = dict(arguments or {})
+        if tool_name not in _PUBLIC_MCP_TOOLS:
+            resolved = self._resolve_user_id(args.get("user_id"))
+            case_id = args.get("case_id")
+            selected_case = None if case_id is None or str(case_id).strip() == "" else str(case_id)
+            cid_value = args.get("cid") if args.get("cid") is not None else args.get("content_id")
+            key_value = args.get("storage_key") if args.get("storage_key") is not None else args.get("key")
+            track_reference = tool_name == "complaint.resolve_private_reference" or cid_value is not None or key_value is not None
+            self._check_access(resolved, ability="read", case_id=selected_case)
+            args["user_id"] = resolved
+            with _workspace_reference_scope(
+                case_id=selected_case,
+                cid=None if not track_reference or cid_value is None else str(cid_value),
+                storage_key=None if not track_reference or key_value is None else str(key_value),
+            ):
+                return self._dispatch_mcp_tool(tool_name, args)
+        return self._dispatch_mcp_tool(tool_name, args)
+
+    def _dispatch_mcp_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        if tool_name == "complaint.read_contained_file":
+            data = self.read_contained_workspace_file(args.get("user_id"), str(args.get("relative_name") or ""))
+            return {
+                "content_b64": b64encode(data).decode("ascii"),
+                "at_rest_protection": "plaintext_pending",
+            }
+        if tool_name == "complaint.write_contained_file":
+            raw_content = args.get("content")
+            if isinstance(raw_content, str):
+                payload = raw_content.encode("utf-8")
+            else:
+                payload = bytes(raw_content or b"")
+            return self.write_contained_workspace_file(args.get("user_id"), str(args.get("relative_name") or ""), payload)
+        if tool_name == "complaint.remember_private_reference":
+            return self.remember_private_reference(
+                args.get("user_id"),
+                cid=args.get("cid") or args.get("content_id"),
+                storage_key=args.get("storage_key") or args.get("key"),
+                case_id=args.get("case_id"),
+            )
+        if tool_name == "complaint.resolve_private_reference":
+            return self.resolve_private_reference(
+                args.get("user_id"),
+                case_id=args.get("case_id"),
+                cid=args.get("cid") or args.get("content_id"),
+                storage_key=args.get("storage_key") or args.get("key"),
+            )
         if tool_name == "complaint.create_identity":
             return generate_decentralized_id()
         if tool_name == "complaint.list_intake_questions":
@@ -10074,7 +10676,7 @@ class ComplaintWorkspaceService:
         if tool_name == "complaint.list_claim_elements":
             return self.list_claim_elements()
         if tool_name == "complaint.start_session":
-            return self.get_session(args.get("user_id"))
+            return self.get_session(args.get("user_id"), case_id=args.get("case_id"))
         if tool_name == "complaint.submit_intake":
             return self.submit_intake_answers(args.get("user_id"), args.get("answers") or {})
         if tool_name == "complaint.run_intake_chat_turn":
