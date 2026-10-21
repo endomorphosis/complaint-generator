@@ -38,6 +38,7 @@ STALL_SECONDS = 180
 TIMEOUT_SECONDS = 900
 _LOGGER = logging.getLogger(__name__)
 PRIVATE_PATHS_ENV = "IPFS_ACCELERATE_AGENT_GROK_PRIVATE_PATHS_JSON"
+REASONING_EFFORT_ENV = "IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"
 ORCHESTRATION_DIR_ENV = "IPFS_ACCELERATE_AGENT_ORCHESTRATION_DIR"
 _PRIVATE_PATHS = (".complaint_workspace", "data", "output", "statefiles", "exports", "secrets",
                   ".env*", "*.key", "*.pem")
@@ -170,6 +171,7 @@ def campaign_environment(repo_root: Path, ambient: Mapping[str, str] | None = No
         "IPFS_ACCELERATE_AGENT_IMPLEMENTATION_PROVIDER": "grok",
         "IPFS_ACCELERATE_AGENT_GROK_MODEL": MODEL,
         "IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS": "32",
+        "IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT": "medium",
         "IPFS_ACCELERATE_PY_GROK_CLI_MODEL": MODEL,
         "ipfs_accelerate_py_GROK_CLI_MODEL": MODEL,
         "GROK_CLI_MODEL": MODEL, "GROK_MODEL": MODEL,
@@ -219,6 +221,9 @@ def _private_runtime_checks(repo_root: Path, env: Mapping[str, str]) -> dict[str
     if not supported:
         return {"ready": False, "native_enforcement_available": False,
                 "reason": "native_private_path_enforcement_unavailable"}
+    if env.get(REASONING_EFFORT_ENV) and getattr(grok_cli_runner, "GROK_REASONING_EFFORT_ENV", None) != REASONING_EFFORT_ENV:
+        return {"ready": False, "native_enforcement_available": True,
+                "reason": "native_reasoning_effort_control_unavailable"}
     patterns = validator(env[PRIVATE_PATHS_ENV])
     resolver(base_env=dict(env), workspace=repo_root)
     # Use native root-owned Docker, fixed local socket and cached image

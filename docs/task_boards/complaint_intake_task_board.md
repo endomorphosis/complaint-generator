@@ -21,6 +21,7 @@ Implementation tasks begin pending. Completion requires behavioral validation ev
 - Model: grok-4.7
 - Router: ipfs_accelerate_py.llm_router
 - Provider fallback: disabled
+- Retry guidance: The first attempt inspected source until its hard deadline without writing artifacts. Use the audited terminal path directly. Import applications.complaint_workspace, redirect its _SESSION_DIR to a TemporaryDirectory, then import applications.complaint_cli because its module-level service eagerly initializes storage. Install synthetic socket/provider guards before application imports and allow exactly the controlled PTY Python child. Reuse docs/task_boards/complaint_intake_baseline_audit.json for observed baseline behavior and defect classifications. Produce the bounded test module and receipt first, then use available validation; the provisioned host validator supplies full dependencies. Keep this task focused on terminal characterization. Private-directory permission errors mean the worker masks are working.
 
 Implementation instructions:
 

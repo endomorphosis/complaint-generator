@@ -83,12 +83,14 @@ def test_explicit_environment_removes_ambient_routes_and_pins_model():
         "IPFS_ACCELERATE_AGENT_PRODUCTION_PROVIDER_POLICY": "independent-review",
         "IMPLEMENTATION_DAEMON_COMMAND": "unexpected-provider", "GROK_MODEL": "old-model",
         "TODO_DAEMON_LLM_ALLOW_CROSS_PROVIDER_FALLBACK": "1",
+        "IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT": "high",
     })
     assert environment["IPFS_ACCELERATE_AGENT_IMPLEMENTATION_PROVIDER"] == "grok"
     assert environment["GROK_MODEL"] == environment["TODO_DAEMON_LLM_MODEL"] == "grok-4.7"
     assert environment["TODO_DAEMON_LLM_ALLOW_CROSS_PROVIDER_FALLBACK"] == "0"
     assert environment["TODO_DAEMON_LLM_ALLOW_LOCAL_FALLBACK"] == "0"
     assert environment["IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS"] == "32"
+    assert environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "medium"
     assert environment["HOME"] == "/preserved/user"
     assert environment["XAI_API_KEY"] == "fixture-secret"
     assert json.loads(environment[runner.PRIVATE_PATHS_ENV]) == list(runner._PRIVATE_PATHS)
@@ -139,9 +141,11 @@ def test_private_policy_survives_actual_native_daemon_and_provider_environment(c
     )
     child_environment = observations[0]
     assert child_environment[runner.PRIVATE_PATHS_ENV] == policy[runner.PRIVATE_PATHS_ENV]
+    assert child_environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "medium"
     monkeypatch.setattr(runner.os, "environ", child_environment)
     provider_environment = daemon.PortalImplementationDaemon._implementation_untrusted_process_environment()
     assert provider_environment[runner.PRIVATE_PATHS_ENV] == policy[runner.PRIVATE_PATHS_ENV]
+    assert provider_environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "medium"
     assert provider_environment["IPFS_ACCELERATE_AGENT_IMPLEMENTATION_PROVIDER"] == "grok"
 
 
@@ -211,6 +215,14 @@ def test_privacy_preflight_rejects_native_without_enforcement(campaign, monkeypa
     monkeypatch.setattr(grok_cli_runner, "GROK_PRIVATE_PATHS_VERSION", 0, raising=False)
     result = runner._private_runtime_checks(ROOT, runner.campaign_environment(ROOT))
     assert not result["ready"] and not result["native_enforcement_available"]
+
+
+def test_preflight_rejects_ignored_reasoning_configuration(campaign, monkeypatch):
+    from ipfs_accelerate_py.agent_supervisor.runtime import grok_cli_runner
+    monkeypatch.delattr(grok_cli_runner, "GROK_REASONING_EFFORT_ENV", raising=False)
+    result = runner._private_runtime_checks(ROOT, runner.campaign_environment(ROOT))
+    assert not result["ready"]
+    assert result["reason"] == "native_reasoning_effort_control_unavailable"
 
 
 def test_privacy_preflight_validates_policy_and_bounded_docker_readiness(campaign, monkeypatch):
