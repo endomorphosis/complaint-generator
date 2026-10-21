@@ -17,8 +17,15 @@ export PATH="${ROOT_DIR}/.venv/bin:${PATH}"
 export TMPDIR="${TEMP_ROOT}"
 export COMPLAINT_GENERATOR_TMPDIR="${TEMP_ROOT}"
 export COMPLAINT_GENERATOR_APPLICATION_TYPE="cli"
-export COMPLAINT_GENERATOR_MEDIATOR_BACKENDS="llm-router-codex"
+export COMPLAINT_GENERATOR_MEDIATOR_BACKENDS="llm-router-grok-4.7"
+export COMPLAINT_GENERATOR_ROUTER_PROGRESS=1
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONWARNINGS="ignore::SyntaxWarning"
 
-exec "${VENV_PYTHON}" "${ROOT_DIR}/run.py" --config "${CONFIG_PATH}"
+if [[ -x "${VENV_PYTHON}" ]]; then
+	PYTHON="${VENV_PYTHON}"
+else
+	PYTHON="$(command -v python3)"
+fi
+
+exec "${PYTHON}" "${ROOT_DIR}/run.py" --config "${CONFIG_PATH}"
