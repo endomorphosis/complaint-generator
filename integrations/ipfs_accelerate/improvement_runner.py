@@ -574,6 +574,17 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     heartbeat_owner = heartbeat.get("supervisor_pid")
     daemon_identity = process_identity(heartbeat.get("daemon_pid"))
     daemon_alive = bool(daemon_identity and daemon_identity.get("ppid") == identity.get("pid"))
+    startup_maintenance = (
+        heartbeat_status in {"agentic_maintenance_started", "agentic_maintenance_completed"}
+        and since_start <= STARTUP_SECONDS and not heartbeat.get("daemon_pid")
+        and not heartbeat.get("last_agentic_maintenance_error")
+    )
+    maintenance_ready = False
+    if heartbeat_status in {"agentic_maintenance_started", "agentic_maintenance_completed"} and daemon_alive:
+        from ipfs_accelerate_py.agent_supervisor.todo_daemon.supervisor_activity import observe_supervisor_activity
+        maintenance_ready = observe_supervisor_activity(
+            heartbeat, now=datetime.fromtimestamp(now, timezone.utc), heartbeat_max_age_seconds=120,
+        ).phase_ready
     last_started_age = _timestamp_age(native_state.get("last_implementation_started_at"), now)
     claim_verified = owned and current_state and bool(native_state.get("active_task_id") or
         (last_started_age is not None and last_started_age <= since_start))
@@ -591,6 +602,10 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "heartbeat_identity_mismatch"
     elif heartbeat_age is not None and heartbeat_age > 120:
         health = "stalled"
+    elif heartbeat_age is not None and startup_maintenance:
+        health = "starting"
+    elif heartbeat_age is not None and maintenance_ready:
+        health = "active" if active else "maintenance"
     elif heartbeat_age is not None and heartbeat_status not in {"running", "starting", "restarting", "recycling"}:
         health = "daemon_failed"
     elif heartbeat_age is not None and heartbeat_status == "running" and (heartbeat.get("daemon_pid_alive") is False or not daemon_alive):
@@ -634,7 +649,7 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
                                    if value.get("read_error")},
             "native_state": {key: native_state[key] for key in keys if key in native_state},
             "native_state_source": state_source,
-            "native_heartbeat": {key: heartbeat[key] for key in ("status", "updated_at", "supervisor_pid", "daemon_pid", "supervisor_pid_alive", "daemon_pid_alive", "restart_count", "last_recycle_reason", "last_exit_code", "worker_phase", "worker_phase_age_seconds") if key in heartbeat},
+            "native_heartbeat": {key: heartbeat[key] for key in ("status", "updated_at", "supervisor_pid", "daemon_pid", "supervisor_pid_alive", "daemon_pid_alive", "restart_count", "last_recycle_reason", "last_exit_code", "worker_phase", "worker_phase_age_seconds", "last_agentic_maintenance_phase", "supervisor_maintenance") if key in heartbeat},
             "native_strategy": {key: strategy[key] for key in ("blocked_tasks", "deprioritized_tasks", "focus_tracks") if key in strategy},
             "board": board, "events_tail": _tail(events_path), "supervisor_events_tail": _tail(supervisor_events),
             "launcher_log_tail": _tail(state_dir / "launcher.log"),

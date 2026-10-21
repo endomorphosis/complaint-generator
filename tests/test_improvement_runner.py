@@ -426,6 +426,23 @@ def test_status_honors_actual_native_heartbeat_and_child_liveness(campaign, monk
     assert runner.status(root, spec, state)["status"] == expected
 
 
+@pytest.mark.parametrize("native_status,age,expected", [
+    ("agentic_maintenance_started", 10, "starting"),
+    ("agentic_maintenance_completed", 10, "starting"),
+    ("agentic_maintenance_failed", 10, "daemon_failed"),
+    ("agentic_maintenance_started", 100, "daemon_failed"),
+])
+def test_status_bounds_native_startup_maintenance_without_child(campaign, monkeypatch, native_status, age, expected):
+    root, spec, state, record = _status_fixture(campaign, monkeypatch)
+    record["started_at"] = runner.time.time() - age
+    runner._atomic_json(state / "launcher.json", record)
+    heartbeat_path = state / f"{runner.STATE_PREFIX}_supervisor_status.json"
+    heartbeat = json.loads(heartbeat_path.read_text())
+    heartbeat.update(status=native_status, daemon_pid=None, daemon_pid_alive=False)
+    runner._atomic_json(heartbeat_path, heartbeat)
+    assert runner.status(root, spec, state)["status"] == expected
+
+
 def test_only_native_provider_start_event_verifies_provider_execution(campaign, monkeypatch):
     root, spec, state, _ = _status_fixture(campaign, monkeypatch, native_state={"active_task_id": "CIMP-TUI-01"})
     events = state / f"{runner.STATE_PREFIX}_events.jsonl"

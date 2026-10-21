@@ -93,16 +93,25 @@
       "failures": 0,
       "errors": 0,
       "skipped": 0
+    },
+    {
+      "receipt": "/tmp/complaint_improvement_runner_validation.xml",
+      "sha256": "1d1d15aaf95612a113dc66ecbba421447a5ed7a5afcead3cf97ec9cc499b0de3",
+      "tests": 52,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Final status reader including bounded native startup maintenance; earlier combined100 test receipt predates this narrow change."
     }
   ],
   "implementation_tasks_completed_by_these_checks": 0,
   "scope": "Provisioning and startup-path qualification with source and synthetic fixtures. The full implementation taskboard is still pending; native supervisor progress must be observed separately.",
   "first_party_source_sha256": {
     "integrations/ipfs_accelerate/improvement_plan.py": "56f374730873c86bf3e3b6eb1f2fdaac030cb44620800546bb9c7f09abf5cc0f",
-    "integrations/ipfs_accelerate/improvement_runner.py": "821b56210c8c8e94adc2f0d05ba4fcdb134eade72b1d67a719a0ded4360786a4",
+    "integrations/ipfs_accelerate/improvement_runner.py": "9d4aecbaadafd68256c3bab4ed2f1fb6d619bca7a05754fdc067ad203bdcad49",
     "scripts/run_complaint_improvement_supervisor.py": "15001fbfc39617a8e913de3a7446d77a63d90e05b062fcb4f6154fbdd2d20238",
     "tests/test_improvement_plan_contract.py": "38d0d7cbffa4a11dfcbdc9f1f99bf32583d959064352e75540e3b853873f8910",
-    "tests/test_improvement_runner.py": "0bb5e2a069f2845e958580856843be65ae89bd3ee7826de52e829b9175bac6d5"
+    "tests/test_improvement_runner.py": "b8c6ec3b8284dab3c8576c09bdd8dfac7db149da1a83ef55b1400eca27da8484"
   },
   "doctor": {
     "status": "ready",
