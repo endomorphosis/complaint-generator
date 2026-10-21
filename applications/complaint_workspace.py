@@ -2954,6 +2954,8 @@ class ComplaintWorkspaceService:
             self._read_bytes_nofollow(base + ".cgpe")
         except FileNotFoundError:
             return base
+        except WorkspaceAuthorizationDenied:
+            raise
         except OSError:
             raise WorkspacePersistenceError("Private session storage is unavailable.", code="read_error", public_status="unavailable") from None
         return base + ".cgpe"
@@ -3019,6 +3021,8 @@ class ComplaintWorkspaceService:
             raise WorkspacePersistenceError("Private encryption is unavailable.", code="private_crypto_unavailable", public_status="unavailable") from None
         except PrivateStorageError:
             raise WorkspacePersistenceError("Private session authentication failed.", code="authentication_failed", public_status="recoverable") from None
+        except WorkspaceAuthorizationDenied:
+            raise
         except OSError:
             raise WorkspacePersistenceError("Private session storage is unavailable; existing bytes were preserved.", code="write_error", public_status="unavailable") from None
         finally:
@@ -3158,6 +3162,8 @@ class ComplaintWorkspaceService:
             if temporary.read_bytes() != payload:
                 raise WorkspacePersistenceError("Filing readback failed.", code="readback_mismatch", public_status="recoverable")
             os.replace(temporary, dest)
+        except WorkspaceAuthorizationDenied:
+            raise
         except OSError:
             raise WorkspacePersistenceError("Filing output is unavailable.", code="write_error", public_status="unavailable") from None
         finally:
@@ -3637,6 +3643,8 @@ class ComplaintWorkspaceService:
             raw = self._read_bytes_nofollow(filename)
         except FileNotFoundError:
             raw = None
+        except WorkspaceAuthorizationDenied:
+            raise
         except OSError:
             raise WorkspacePersistenceError("Private session storage is unavailable.", code="read_error", public_status="unavailable") from None
         if raw is not None:
@@ -3721,6 +3729,8 @@ class ComplaintWorkspaceService:
             existing_raw = self._read_bytes_nofollow(filename)
         except FileNotFoundError:
             existing_raw = None
+        except WorkspaceAuthorizationDenied:
+            raise
         except OSError as exc:
             raise WorkspacePersistenceError("session unreadable", code="read_error", public_status="unavailable") from exc
         if existing_raw is not None and not existing_raw.startswith(b"CGPE"):
