@@ -421,7 +421,7 @@ Implementation instructions:
 
 ## CIMP-LAW-02 Add bounded corpus adapters for legal sources and court rules
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.law
