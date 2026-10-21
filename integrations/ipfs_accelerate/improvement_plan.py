@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 
 SPEC_RELATIVE = "docs/task_boards/complaint_intake_improvement_spec.json"
@@ -409,3 +409,284 @@ def generate(spec_path: Path | str, repo_root: Path | str) -> dict[str, Any]:
         "scope": "Native contract ingestion and bounded consistency only; no task implementation, test execution, provider invocation or completion evidence.",
     }
     return {"spec_path": str(spec_path), "plan_path": str(plan_path), "board_path": str(board_path), "receipt": receipt}
+
+
+EVIDENCE_SCHEMA = "complaint-generator/improvement-evidence@1"
+READINESS_SCHEMA = "complaint-generator/improvement-readiness@1"
+EVIDENCE_LANES = ("unit_fake", "local_node_integration", "optional_real_provider_smoke")
+COMPLETING_LANE = "local_node_integration"
+SEALED_ENVIRONMENT_POLICY = {
+    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin",
+    "python": "/usr/bin/python3.12",
+    "home_directory_prefix": "ipfs-accelerate-validation-home-",
+    "xdg_cache_home": "$HOME/.cache",
+    "xdg_config_home": "$HOME/.config",
+    "xdg_data_home": "$HOME/.local/share",
+    "xdg_state_home": "$HOME/.local/state",
+}
+_PASSING = "passed"
+_SKIPPED_OUTCOMES = {"skipped", "xfailed"}
+_FAILED_OUTCOMES = {"failed", "error", "xpassed"}
+_MAX_BIND_FILES = 256
+
+
+def _digest(value: Any) -> str:
+    raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+def canonical_model_policy() -> dict[str, Any]:
+    """Return the only model policy that behavioral completion may bind."""
+
+    return {"router": _PROVIDER["router"], "provider": _PROVIDER["provider"],
+            "model": _PROVIDER["model"], "allow_fallback": False}
+
+
+def _safe_relative(root: Path, value: Any) -> Path | None:
+    if not isinstance(value, str) or not value.strip() or len(value) > 512:
+        return None
+    relative = Path(value)
+    if relative.is_absolute() or ".." in relative.parts or relative.as_posix() in {"", ".", "./"}:
+        return None
+    candidate = (root / relative).resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def bind_sources(repo_root: Path | str, relative_paths: Sequence[str]) -> dict[str, Any]:
+    """Hash declared outputs. Missing and empty paths stay explicit and unbound."""
+
+    root = Path(repo_root).resolve()
+    files: dict[str, Any] = {}
+    missing: list[str] = []
+    empty: list[str] = []
+    unbounded = False
+    for raw in relative_paths:
+        key = raw if isinstance(raw, str) else ""
+        path = _safe_relative(root, raw)
+        if path is None or not path.exists():
+            missing.append(key or "<invalid>")
+            files[key or "<invalid>"] = {"present": False, "sha256": "", "kind": "missing"}
+            continue
+        if path.is_file():
+            size = path.stat().st_size
+            if size <= 0:
+                empty.append(key)
+                files[key] = {"present": True, "sha256": "", "kind": "file", "empty": True}
+            else:
+                files[key] = {"present": True, "sha256": _hash_file(path), "kind": "file", "empty": False}
+            continue
+        if not path.is_dir():
+            missing.append(key)
+            files[key] = {"present": False, "sha256": "", "kind": "missing"}
+            continue
+        members: list[tuple[str, str]] = []
+        count = 0
+        for child in sorted(path.rglob("*")):
+            if not child.is_file():
+                continue
+            count += 1
+            if count > _MAX_BIND_FILES:
+                unbounded = True
+                break
+            if child.stat().st_size <= 0:
+                continue
+            members.append((child.relative_to(path).as_posix(), _hash_file(child)))
+        if unbounded:
+            files[key] = {"present": True, "sha256": "", "kind": "directory", "unbounded": True}
+            break
+        if not members:
+            empty.append(key)
+            files[key] = {"present": True, "sha256": "", "kind": "directory", "empty": True}
+        else:
+            files[key] = {"present": True, "sha256": _digest(members), "kind": "directory", "empty": False,
+                          "file_count": len(members)}
+    body = {"files": files, "missing": missing, "empty": empty, "unbounded": unbounded}
+    return {**body, "digest": "" if missing or empty or unbounded else _digest(files)}
+
+
+def _case_rows(value: Any) -> tuple[list[dict[str, str]] | None, str]:
+    if not isinstance(value, list):
+        return None, "required_case_results_missing"
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            return None, "required_case_results_malformed"
+        nodeid = item.get("nodeid")
+        outcome = item.get("outcome")
+        if not isinstance(nodeid, str) or not nodeid.strip() or len(nodeid) > 500 or any(c in nodeid for c in "\n\r"):
+            return None, "required_test_identity_malformed"
+        if not isinstance(outcome, str) or outcome not in {_PASSING, *_SKIPPED_OUTCOMES, *_FAILED_OUTCOMES}:
+            return None, "required_case_outcome_malformed"
+        if nodeid in seen:
+            return None, "duplicate_required_test_identity"
+        seen.add(nodeid)
+        rows.append({"nodeid": nodeid, "outcome": outcome})
+    return rows, ""
+
+
+def _environment_mismatch(observed: Any) -> str:
+    if not isinstance(observed, dict):
+        return "environment_policy_missing"
+    for key, expected in SEALED_ENVIRONMENT_POLICY.items():
+        if observed.get(key) != expected:
+            return "environment_policy_mismatch"
+    home = observed.get("HOME")
+    prefix = SEALED_ENVIRONMENT_POLICY["home_directory_prefix"]
+    if not isinstance(home, str) or Path(home).name.startswith(prefix) is False or home != home.strip():
+        return "environment_policy_mismatch"
+    return ""
+
+
+def _claimed_binding_stale(claimed: Any, fresh: Mapping[str, Any]) -> bool:
+    if claimed is None:
+        return False
+    if not isinstance(claimed, dict):
+        return True
+    files = claimed.get("files", claimed)
+    if not isinstance(files, dict):
+        return True
+    current = fresh.get("files", {})
+    if set(files) != set(current):
+        return True
+    for key, record in files.items():
+        expected = record.get("sha256") if isinstance(record, dict) else record
+        if not isinstance(expected, str) or expected != current[key].get("sha256"):
+            return True
+    return False
+
+
+def assess_behavioral_evidence(task: Mapping[str, Any], observation: Mapping[str, Any], *,
+                               source_binding: Mapping[str, Any],
+                               model_policy: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Decide whether one observation can complete a task. Rejection stays repairable.
+
+    Only a current-source local-node integration run can complete a task.
+    Unit fakes and optional real-provider smoke are recorded as different
+    lanes and never become completion.
+    """
+
+    policy = canonical_model_policy() if model_policy is None else dict(model_policy)
+    lane = observation.get("lane")
+    command = observation.get("command") if isinstance(observation.get("command"), str) else ""
+    cases, case_reason = _case_rows(observation.get("cases", []))
+    artifacts = observation.get("artifacts", [])
+    receipt: dict[str, Any] = {
+        "schema_version": EVIDENCE_SCHEMA,
+        "task_id": str(task.get("id") or ""),
+        "lane": lane if isinstance(lane, str) else "",
+        "admitted": False,
+        "completion": False,
+        "repairable": True,
+        "reason": "",
+        "command": command,
+        "environment_policy": {
+            "required": dict(SEALED_ENVIRONMENT_POLICY),
+            "observed": observation.get("environment") if isinstance(observation.get("environment"), dict) else {},
+        },
+        "model_policy": policy,
+        "source_binding": dict(source_binding),
+        "exit_status": observation.get("exit_status"),
+        "timed_out": bool(observation.get("timed_out")),
+        "collected_count": observation.get("collected_count"),
+        "required_cases": cases or [],
+        "artifacts": artifacts if isinstance(artifacts, list) else [],
+        "native_validation": {},
+    }
+
+    def reject(reason: str) -> dict[str, Any]:
+        receipt["reason"] = reason
+        return receipt
+
+    if lane not in EVIDENCE_LANES:
+        return reject("unknown_evidence_lane")
+    declared = task.get("validation_commands")
+    if not isinstance(declared, list) or command not in declared:
+        return reject("command_not_declared")
+    try:
+        from integrations.ipfs_datasets.loader import ensure_import_paths
+        ensure_import_paths("ipfs_accelerate_py.agent_supervisor")
+        from ipfs_accelerate_py.agent_supervisor.validation.validation_commands import (
+            classify_validation_command,
+        )
+        classified = classify_validation_command(command)
+    except Exception as exc:
+        receipt["native_validation"] = {"available": False, "error_type": type(exc).__name__}
+        return reject("native_validation_classifier_unavailable")
+    receipt["native_validation"] = {
+        "available": True,
+        "stage": classified.stage.label,
+        "verdict_kind": classified.effective_verdict_kind.value,
+        "command": classified.command,
+    }
+    if classified.effective_verdict_kind.value != "test":
+        return reject("command_not_behavioral_test")
+    if policy != canonical_model_policy():
+        return reject("model_policy_rejected")
+    if lane != "unit_fake":
+        mismatch = _environment_mismatch(observation.get("environment"))
+        if mismatch:
+            return reject(mismatch)
+    if receipt["timed_out"] is True:
+        return reject("subprocess_timeout")
+    exit_status = observation.get("exit_status")
+    if not isinstance(exit_status, int) or isinstance(exit_status, bool):
+        return reject("missing_exit_status")
+    if source_binding.get("unbounded") is True:
+        return reject("source_binding_unbounded")
+    if source_binding.get("missing") or source_binding.get("empty") or not source_binding.get("digest"):
+        return reject("missing_output")
+    if _claimed_binding_stale(observation.get("source_binding"), source_binding):
+        return reject("stale_source_hash")
+    if not isinstance(artifacts, list) or not artifacts:
+        return reject("missing_output")
+    for artifact in artifacts:
+        if not isinstance(artifact, dict) or artifact.get("present") is not True or not artifact.get("sha256"):
+            return reject("missing_output")
+        claimed = artifact.get("claimed_sha256")
+        if claimed is not None and claimed != artifact.get("sha256"):
+            return reject("stale_source_hash")
+    if cases is None:
+        return reject(case_reason or "required_case_results_missing")
+    collected = observation.get("collected_count")
+    if not isinstance(collected, int) or isinstance(collected, bool) or collected <= 0 or not cases:
+        return reject("zero_test_collection")
+    if collected != len(cases):
+        return reject("collection_identity_mismatch")
+    required = observation.get("required_nodeids")
+    if not isinstance(required, list) or not required:
+        return reject("missing_required_test_identities")
+    if len(set(required)) != len(required) or any(not isinstance(item, str) for item in required):
+        return reject("required_test_identity_malformed")
+    observed_ids = [row["nodeid"] for row in cases]
+    if any(item not in observed_ids for item in required):
+        return reject("missing_required_test_identity")
+    skipped = [row["nodeid"] for row in cases if row["outcome"] in _SKIPPED_OUTCOMES]
+    if skipped:
+        receipt["skipped_nodeids"] = skipped
+        return reject("skipped_required_case")
+    failed = [row["nodeid"] for row in cases if row["outcome"] in _FAILED_OUTCOMES]
+    if failed or exit_status != 0:
+        receipt["failed_nodeids"] = failed
+        return reject("failed_assertion")
+    if lane == "unit_fake":
+        return reject("unit_fake_is_not_current_source_completion")
+    if lane == "optional_real_provider_smoke":
+        return reject("optional_real_provider_smoke_is_not_completion")
+    receipt["admitted"] = True
+    receipt["completion"] = True
+    receipt["repairable"] = False
+    receipt["reason"] = "current_source_behavioral_evidence"
+    return receipt
