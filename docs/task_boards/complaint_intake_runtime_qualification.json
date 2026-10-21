@@ -208,6 +208,33 @@
       "errors": 0,
       "skipped": 0,
       "scope": "Pinned interrupted-task claim recovery: immutable forensic history, exact dead owner/lease, preserved lifetime accounting, manual holds and crash replay."
+    },
+    {
+      "receipt": "/tmp/complaint_plan_amendment_final.xml",
+      "sha256": "241e19a212ed16a71c1663b8ad52b3bc328a76f43aeee075b4792849e28547dd",
+      "tests": 29,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Pending narrative-task amendment, queue preservation and pointer/source binding; focused later refinements recorded separately."
+    },
+    {
+      "receipt": "/tmp/complaint_plan_amendment_leases.xml",
+      "sha256": "91104256dbb0c18c56f369a3363a3e276e0832435fac0b5a9d3b8249af8ad796",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Pending narrative-task amendment, queue preservation and pointer/source binding; focused later refinements recorded separately."
+    },
+    {
+      "receipt": "/tmp/complaint_plan_amendment_completion.xml",
+      "sha256": "67f30c12ec1ee13e0b901b940b469c555cc832bff7aa54e557fd2f5a498744b5",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Pending narrative-task amendment, queue preservation and pointer/source binding; focused later refinements recorded separately."
     }
   ],
   "implementation_tasks_completed_by_these_checks": 0,
@@ -218,12 +245,14 @@
     "scripts/run_complaint_improvement_supervisor.py": "15001fbfc39617a8e913de3a7446d77a63d90e05b062fcb4f6154fbdd2d20238",
     "tests/test_improvement_plan_contract.py": "6762acd147fe139426d9ec999b43f9fde30670293cb7b8b4fd3b75d45b1407ea",
     "tests/test_improvement_runner.py": "19d3d0d49a99da754b6ab96e94146f23f23e1273a6a13159b36af957b0f7e58b",
-    "integrations/ipfs_accelerate/improvement_recovery.py": "e19fd0cbdd43a74423d2d207b46ac86820c0d85ca2020484e3ea28c95601946f",
+    "integrations/ipfs_accelerate/improvement_recovery.py": "74f06497278a255630800a80e66c8dd3d4b8aeed37c5d0f56adc406152e86f77",
     "tests/conftest.py": "f0df011325b871b074247d4fc10ce890898eb719379e22e506cd6accd5f99473",
     "tests/test_improvement_recovery_epoch.py": "6ee990236e6830cfcf301f9b136a06b67124e239cb4f91573c7b4a8cd7865b8b",
     "tests/test_optional_upstream_collection.py": "b8527dc963b4007aacc2af3202dd375b5be0fe5ae81e211e71e6dd1e4d3cef1d",
     "integrations/ipfs_accelerate/improvement_shutdown.py": "ad3632c138d9fbf6fbc730d847afa33ad0031b46186c32d0859ee4ffdf794393",
-    "tests/test_improvement_container_shutdown.py": "2d1730d54471aee730e3fc606ed0627dd3f0c0539ae4825917847c28c5e0f30b"
+    "tests/test_improvement_container_shutdown.py": "2d1730d54471aee730e3fc606ed0627dd3f0c0539ae4825917847c28c5e0f30b",
+    "integrations/ipfs_accelerate/improvement_amendment.py": "cadfd87f6c17dcd28adcf079974db69d044b5edfb97aef07769ef20e5d47bf19",
+    "tests/test_improvement_plan_amendment.py": "0a4864239140222a14efe1f327d2c008999ea0843444d07b88fe1e0296cfad26"
   },
   "doctor": {
     "status": "ready",
@@ -482,5 +511,40 @@
     "completed_tasks": 1,
     "total_tasks": 58,
     "pending_tasks": 57
+  },
+  "pending_narrative_scope_amendment": {
+    "old_plan_id": "baguqeerakleiqcwujifxiu7k5qbsbiki6p2e4bmuiq32agqtwkckzzgri25a",
+    "new_plan_id": "baguqeerala4o6db5s4ayyqzdu5zplc5taefubba67q2azd36eulxqhlys2ea",
+    "old_task_cid": "baguqeeraqdpni4fq3t5l337ektn3zbhs53erbpc3jq5edjt4iveebvrcicea",
+    "new_task_cid": "baguqeerawnzn7voo3vglcdbxarnpen2pimtuqpkxj3rozw6apvcuxgccdbra",
+    "baseline_task_cid": "baguqeeraxq775q25gtjritvqbbfcnryzpodeib3cn6dayanky4hrvo6the7q",
+    "same_epoch": true,
+    "unchanged_native_accounting": true,
+    "preserved_attempts": {
+      "implementation_attempts": {
+        "CIMP-TUI-01": 4
+      },
+      "implementation_attempts_by_cid": {
+        "baguqeeraxq775q25gtjritvqbbfcnryzpodeib3cn6dayanky4hrvo6the7q": 4
+      }
+    },
+    "preserved_completed_task_ids": [],
+    "operator_result": {
+      "path": "/tmp/complaint-tui02-plan-amendment-20261021-nq_hcc6q/result.json",
+      "sha256": "4e237c1c3aec7035bc3562007e51e8c4997e32fe9d9989036bcf026ff092ac76"
+    },
+    "baseline_completion": {
+      "task_id": "CIMP-TUI-01",
+      "canonical_task_cid": "baguqeeraxq775q25gtjritvqbbfcnryzpodeib3cn6dayanky4hrvo6the7q",
+      "source": "native_completed_task_cid_bindings",
+      "queue_receipt_cid": "sha256:4e2e8dfda78d1a50a7f630ff400506dd745a54a2e90c967892ab62bc552ae60d"
+    },
+    "completion_basis": "Authoritative legacy board and settled versioned native merge completion binding; cached daemon completed_task_ids is stale until rescan and is preserved unchanged."
+  },
+  "release_gate_dependency_audit": {
+    "receipt": "/tmp/complaint_rel03_release_gate_audit.json",
+    "sha256": "feccbb85096769df3c82b931d0b5ca55f1e111cba965939c14978a2776f4f22f",
+    "required_followup": "Add TUI-12 to REL-03 dependency closure before release dispatch; retain truthful separate pre-admission and post-completion audits.",
+    "resolved": false
   }
 }

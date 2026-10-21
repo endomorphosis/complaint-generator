@@ -1400,7 +1400,7 @@
     {
       "contract_version": 1,
       "fallback_check_ids": [
-        "python -m pytest -q --run-llm --run-network --run-heavy tests/test_tui_narrative_capture.py"
+        "python -m pytest -q --run-llm --run-network --run-heavy tests/test_tui_narrative_capture.py tests/test_tui_intake_baseline.py"
       ],
       "freshness_seconds": null,
       "kind": "test",
@@ -1413,7 +1413,7 @@
         ],
         "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
         "validation_commands": [
-          "python -m pytest -q --run-llm --run-network --run-heavy tests/test_tui_narrative_capture.py"
+          "python -m pytest -q --run-llm --run-network --run-heavy tests/test_tui_narrative_capture.py tests/test_tui_intake_baseline.py"
         ]
       },
       "minimum_code_assurance": "unverified",
@@ -2792,11 +2792,11 @@
       "provider": "grok_cli",
       "router": "ipfs_accelerate_py.llm_router"
     },
-    "spec_sha256": "e214a77932c5d59bcaf712f38eb81a5e4901d41fc6b96cf30cab40c1c51af9b1",
+    "spec_sha256": "1356f3cc134585daf099b2450292958e7827ddc42ec51023f63597c41990d73a",
     "title": "Graph-driven private complaint intake: terminal interview, applicable law, formal reasoning and durable encrypted state"
   },
   "norms": [],
-  "plan_id": "baguqeerakleiqcwujifxiu7k5qbsbiki6p2e4bmuiq32agqtwkckzzgri25a",
+  "plan_id": "baguqeerala4o6db5s4ayyqzdu5zplc5taefubba67q2azd36eulxqhlys2ea",
   "preconditions": [],
   "repository_tree_id": "",
   "schema": "ipfs_accelerate_py/agent-supervisor/formal-work-plan@1",
@@ -6370,14 +6370,15 @@
           "Package/API/MCP wrappers expose the same typed narrative transition and return the resulting next inquiry."
         ],
         "completion": "validation",
-        "implementation_prompt": "Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.",
+        "implementation_prompt": "Implement only this bounded task on the provided source checkout and synthetic fixtures. Reuse the cited first-party adapters and verified submodule APIs. Preserve typed degraded/unavailable states. Do not read existing sessions, evidence, exports or secrets; do not send real complaint data to a provider. Do not weaken validation, mark unmet product criteria complete, push, deploy or mutate another campaign. Source-only characterization must label known deficiencies and may not claim the complete interview works. Required tests must collect and pass without silently skipping. Keep application awaiting_user distinct from a stalled development worker.\n\nMigrate the live TUI baseline tests alongside narrative capture: retain the historical baseline receipt byte-for-byte and validate its recorded history, but replace live assertions requiring known defects to persist. Exercise the new narrative-first contract through the real terminal while retaining the bounded PTY, pause/resume and diagnostic-redaction checks. Do not skip, xfail, mock the application or conditionally accept the old narrative-as-name bug. Later graph, outcome, interruption and privacy tasks own their desired behavioral regressions; historical gap observations are not current product requirements. This note grants no additional output or completion authority.",
         "implementation_provider": "grok",
         "model": "grok-4.7",
         "outputs": [
           "applications/complaint_workspace.py",
           "applications/complaint_cli.py",
           "complaint_generator/workspace.py",
-          "tests/test_tui_narrative_capture.py"
+          "tests/test_tui_narrative_capture.py",
+          "tests/test_tui_intake_baseline.py"
         ],
         "priority": "P0",
         "provider": {
@@ -6392,11 +6393,12 @@
           "applications/complaint_workspace.py",
           "applications/complaint_cli.py",
           "complaint_generator/workspace.py",
-          "tests/test_tui_narrative_capture.py"
+          "tests/test_tui_narrative_capture.py",
+          "tests/test_tui_intake_baseline.py"
         ],
         "title": "Capture complaint narrative separately from structured answers",
         "validation_commands": [
-          "python -m pytest -q --run-llm --run-network --run-heavy tests/test_tui_narrative_capture.py"
+          "python -m pytest -q --run-llm --run-network --run-heavy tests/test_tui_narrative_capture.py tests/test_tui_intake_baseline.py"
         ]
       },
       "precondition_ids": [],
