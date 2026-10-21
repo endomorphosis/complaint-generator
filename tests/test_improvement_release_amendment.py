@@ -42,6 +42,19 @@ def test_synthetic_normalization_rejects_partial_unreviewed_recipe(partial):
         _unamended_synthetic_spec(baseline)
 
 
+@pytest.mark.parametrize('partial',['phase','guidance','missing_edge'])
+def test_synthetic_normalization_rejects_incomplete_release_phase_recipe(partial):
+    source=compiler.load_spec(Path(__file__).resolve().parents[1]/compiler.SPEC_RELATIVE)
+    baseline=_unamended_synthetic_spec(source)
+    if partial=='missing_edge':baseline=amendment.amended_spec(baseline)
+    task=next(item for item in baseline['tasks'] if item['id']==amendment.TASK)
+    if partial=='phase':task['validation_commands'][1]=amendment.PRE_ADMISSION_COMMAND
+    elif partial=='guidance':task['implementation_prompt']+='\n\n'+amendment.GUIDANCE
+    else:task['depends_on'].remove(amendment.PREREQUISITE)
+    with pytest.raises(ValueError,match='incomplete release phase'):
+        _unamended_synthetic_spec(baseline)
+
+
 @pytest.fixture
 def nested(stopped):
     first = apply_prior(stopped)
@@ -102,6 +115,8 @@ def test_nested_amendment_adds_pending_release_dependency_with_all_cids_and_hist
     assert receipt['schema']==amendment.SCHEMA
     assert receipt['old_plan_id']!=receipt['new_plan_id']
     assert receipt['added_dependency']==amendment.PREREQUISITE
+    assert receipt['pre_admission_validation_command']==amendment.PRE_ADMISSION_COMMAND
+    assert receipt['post_completion_validation_command']==amendment.POST_COMPLETION_COMMAND
     assert receipt['changed_task_cid_ids']==[]  # Native semantic IDs exclude dependency edges.
     assert all(receipt[key] is False for key in prior._NO_AUTHORITY)
     assert receipt['preserved_attempts']['implementation_attempts']==before_state['implementation_attempts']
@@ -116,6 +131,9 @@ def test_nested_amendment_adds_pending_release_dependency_with_all_cids_and_hist
     after_tasks=prior._tasks(native,nested['root'],nested['board'].read_bytes())
     assert {key:task.canonical_task_cid for key,task in old_tasks.items()}=={key:task.canonical_task_cid for key,task in after_tasks.items()}
     assert after_tasks[amendment.TASK].depends_on==old_tasks[amendment.TASK].depends_on+[amendment.PREREQUISITE]
+    assert after_tasks[amendment.TASK].validation==[
+        old_tasks[amendment.TASK].validation[0],amendment.PRE_ADMISSION_COMMAND]
+    assert amendment.GUIDANCE in after_tasks[amendment.TASK].metadata['runtime guidance']
     assert after_tasks[prior.BASELINE_TASK].canonical_task_cid==prior.BASELINE_CID
     assert {key:task.status for key,task in old_tasks.items()}=={key:task.status for key,task in after_tasks.items()}
     after_blocks=prior._blocks(nested['board'].read_bytes())
@@ -142,7 +160,7 @@ def test_nested_amendment_adds_pending_release_dependency_with_all_cids_and_hist
 
 
 @pytest.mark.parametrize('damage',['prior_receipt','prior_snapshot','origin','quarantine','new_snapshot',
-    'current_spec','current_plan','current_board','pointer_prior_plan','pointer_origin_plan','pointer_path'])
+    'current_spec','current_plan','current_board','current_phase','pointer_prior_plan','pointer_origin_plan','pointer_path'])
 def test_nested_chain_rejects_changed_immutable_or_current_contract(nested,damage):
     apply(nested)
     pointer_path=nested['base']/'active_epoch.json'
@@ -157,12 +175,21 @@ def test_nested_chain_rejects_changed_immutable_or_current_contract(nested,damag
             'prior_snapshot':nested['prior_directory']/'old_board.snapshot',
             'origin':nested['state']/recovery.RECEIPT_NAME,'quarantine':nested['quarantine'],
             'new_snapshot':directory/'old_pointer.snapshot','current_spec':nested['spec'],
-            'current_plan':nested['root']/compiler.PLAN_RELATIVE,'current_board':nested['board']}[damage]
+            'current_plan':nested['root']/compiler.PLAN_RELATIVE,'current_board':nested['board'],
+            'current_phase':nested['board']}[damage]
         if damage=='current_plan':
             value=json.loads(target.read_text());value['metadata']['title']='Foreign formal contract'
             target.write_text(json.dumps(value))
         elif damage=='current_board':
             target.write_bytes(target.read_bytes().replace(b'- Depends on: ',b'- Depends on: UNKNOWN-001, ',1))
+        elif damage=='current_phase':
+            _,native=runner._native_modules(nested['root'])
+            before=prior._tasks(native,nested['root'],target.read_bytes())
+            target.write_bytes(target.read_bytes().replace(
+                amendment.PRE_ADMISSION_COMMAND.encode(),amendment.POST_COMPLETION_COMMAND.encode(),1))
+            after=prior._tasks(native,nested['root'],target.read_bytes())
+            assert before[amendment.TASK].canonical_task_cid==after[amendment.TASK].canonical_task_cid
+            assert before[amendment.TASK].validation!=after[amendment.TASK].validation
         else:target.write_bytes(target.read_bytes()+b'\n')
     with pytest.raises(ValueError,match='amendment|amended|original|plan binding'):
         resolve(nested)
@@ -243,8 +270,10 @@ def test_recipe_cannot_change_another_dependency_or_apply_twice(nested):
     spec=json.loads(nested['spec'].read_text())
     changed=amendment.amended_spec(spec)
     original=deepcopy(spec)
-    original['tasks']=[{**task,'depends_on':task['depends_on']+[amendment.PREREQUISITE]}
-        if task['id']==amendment.TASK else task for task in original['tasks']]
+    release=next(task for task in original['tasks'] if task['id']==amendment.TASK)
+    release['depends_on'].append(amendment.PREREQUISITE)
+    release['validation_commands'][1]=amendment.PRE_ADMISSION_COMMAND
+    release['implementation_prompt']+='\n\n'+amendment.GUIDANCE
     assert changed==compiler.validate_spec(original)
     with pytest.raises(ValueError,match='already applied'):
         amendment.amended_spec(changed)

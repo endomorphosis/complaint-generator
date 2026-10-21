@@ -1,4 +1,4 @@
-"""Stopped-campaign, pending-only REL03 -> TUI12 dependency amendment.
+"""Stopped-campaign amendment of REL03's prerequisite and admission phase.
 
 This second bounded recipe preserves the v1 recovery and v2 narrative receipts.
 It changes no native accounting, status, execution policy or completion evidence.
@@ -23,18 +23,48 @@ SCHEMA = "complaint-improvement-release-dependency-amendment@1"
 POINTER_SCHEMA = "complaint-improvement-active-epoch@3"
 TASK = "CIMP-REL-03"
 PREREQUISITE = "CIMP-TUI-12"
+SCRIPT_COMMAND = "python scripts/validate_complaint_intake.py"
+PRE_ADMISSION_COMMAND = SCRIPT_COMMAND + " --phase pre-admission"
+POST_COMPLETION_COMMAND = SCRIPT_COMMAND + " --phase post-completion"
+GUIDANCE = (
+    "Implement explicit release-checker phases. The reviewed validation command "
+    "uses --phase pre-admission: require genuine accepted evidence for all 57 "
+    "other tasks including CIMP-TUI-12, run bounded mandatory offline suites on "
+    "the candidate source with live-provider/network guards, and validate this "
+    "checker's own behavior. Record release_qualified=false, "
+    "self_completion_pending=true and CIMP-REL-03 as pending; never mark self "
+    "complete or fabricate receipts. Default and --phase post-completion must "
+    "strictly require all 58 actual native task completions and goal/subgoal "
+    "evidence, with no unresolved required work. Only run that final audit after "
+    "the genuine native merge/completion callback; only it may report release "
+    "qualified. Preserve the committed pre-admission report and write any final "
+    "report as a separate owned runtime artifact bound to real integration "
+    "proof. Keep hash scopes explicit without a self-referential future commit "
+    "hash, avoid recursive self-validation, and report optional live checks "
+    "honestly. Missing, held, stale, skipped or unknown required evidence fails "
+    "closed. This phase distinction waives no acceptance requirement and grants "
+    "no completion, refund, callback or additional output authority."
+)
 _OLD_DEPENDENCIES = ["CIMP-REL-01", "CIMP-REL-02", "CIMP-OPS-06"]
 _SNAPSHOTS = {"old_spec", "old_plan", "old_board", "old_pointer", "old_baseline_receipt",
               "prior_amendment_receipt", "origin_recovery", "new_spec", "new_plan", "new_board"}
 
 
 def amended_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
-    """Add exactly the reviewed missing prerequisite; never broaden task scope."""
+    """Repair prerequisite ordering and the explicit pre-completion checker call."""
     result = deepcopy(dict(spec))
     tasks = {task["id"]: task for task in result["tasks"]}
     if TASK not in tasks or PREREQUISITE not in tasks or tasks[TASK]["depends_on"] != _OLD_DEPENDENCIES:
         raise ValueError("pending release dependency recipe is absent or already applied")
-    tasks[TASK]["depends_on"].append(PREREQUISITE)
+    task = tasks[TASK]
+    if (len(task["validation_commands"]) != 2
+            or not task["validation_commands"][0].endswith("tests/test_intake_release_gate.py")
+            or task["validation_commands"][1] != SCRIPT_COMMAND
+            or GUIDANCE in task["implementation_prompt"]):
+        raise ValueError("pending release validation differs from the reviewed phase recipe")
+    task["depends_on"].append(PREREQUISITE)
+    task["validation_commands"][1] = PRE_ADMISSION_COMMAND
+    task["implementation_prompt"] += "\n\n" + GUIDANCE
     return compiler.validate_spec(result)
 
 
@@ -47,12 +77,21 @@ def _board_revision(raw: bytes, old_spec: Mapping[str, Any], new_spec: Mapping[s
         raise ValueError("release amendment board marker or task differs")
     old = next(task for task in old_spec["tasks"] if task["id"] == TASK)
     new = next(task for task in new_spec["tasks"] if task["id"] == TASK)
-    before, after = "- Depends on: " + ", ".join(old["depends_on"]), "- Depends on: " + ", ".join(new["depends_on"])
-    block = blocks[TASK].decode()
-    if block.splitlines().count(before) != 1:
-        raise ValueError("release board dependencies differ from the reviewed specification")
-    changed = block.replace(before + "\n", after + "\n", 1)
-    result = text.replace(block, changed, 1).replace(marker, f"<!-- plan_id: {new_id} -->", 1).encode()
+    original_block = blocks[TASK].decode()
+    block = original_block
+    for label, old_value, new_value in (
+            ("Depends on", ", ".join(old["depends_on"]), ", ".join(new["depends_on"])),
+            ("Validation", "; ".join(old["validation_commands"]), "; ".join(new["validation_commands"]))):
+        before, after = f"- {label}: {old_value}", f"- {label}: {new_value}"
+        if block.splitlines().count(before) != 1:
+            raise ValueError("release board contract differs from the reviewed specification")
+        block = block.replace(before + "\n", after + "\n", 1)
+    guidance = re.findall(r"^- Runtime guidance: (.*)$", block, re.MULTILINE)
+    if len(guidance) != 1 or len((guidance[0] + " " + GUIDANCE).encode()) > 8 * 1024:
+        raise ValueError("release amendment needs one bounded runtime guidance field")
+    changed = block.replace("- Runtime guidance: " + guidance[0] + "\n",
+        "- Runtime guidance: " + guidance[0] + " " + GUIDANCE + "\n", 1)
+    result = text.replace(original_block, changed, 1).replace(marker, f"<!-- plan_id: {new_id} -->", 1).encode()
     if any(prior._blocks(result)[key] != value for key, value in blocks.items() if key != TASK):
         raise ValueError("release amendment changed an unrelated task block")
     return result
@@ -117,7 +156,7 @@ def review_release_dependency_amendment(repo_root: Path, spec_path: Path, base_s
             or recovery._digest(raw["baseline_receipt"]) != baseline_receipt_sha256):
         raise ValueError("release task is not untouched pending or historical baseline differs")
     if (new_tasks[TASK].depends_on != _OLD_DEPENDENCIES + [PREREQUISITE]
-            or new_tasks[TASK].validation != old_tasks[TASK].validation
+            or new_tasks[TASK].validation != [old_tasks[TASK].validation[0], PRE_ADMISSION_COMMAND]
             or new_tasks[TASK].status != old_tasks[TASK].status):
         raise ValueError("native release amendment contract differs")
     return {"schema": SCHEMA, "repo_root": str(root), "state_dir": str(state),
@@ -125,6 +164,8 @@ def review_release_dependency_amendment(repo_root: Path, spec_path: Path, base_s
         "sha256": {key: recovery._digest(value) for key, value in raw.items()}, "task_id": TASK,
         "old_task_cid": old_tasks[TASK].canonical_task_cid, "new_task_cid": new_tasks[TASK].canonical_task_cid,
         "baseline_task_cid": prior.BASELINE_CID, "native_validation": validation,
+        "pre_admission_validation_command": PRE_ADMISSION_COMMAND,
+        "post_completion_validation_command": POST_COMPLETION_COMMAND,
         "added_dependency": PREREQUISITE, "changed_task_cid_ids": changed,
         "unchanged_task_cids": {key: task.canonical_task_cid for key, task in old_tasks.items() if key != TASK}}
 
@@ -142,7 +183,7 @@ def _assert_quiescent(root: Path, state: Path, reviewed: Mapping[str, Any]) -> d
 
 def apply_release_dependency_amendment(repo_root: Path, spec_path: Path, base_state_dir: Path,
                                        *, expected: Mapping[str, Any]) -> dict[str, Any]:
-    """CAS-publish only REL03's pending dependency; native state stays unchanged."""
+    """CAS-publish only REL03's pending recipe; native state stays unchanged."""
     root, spec_path, base = repo_root.resolve(), spec_path.resolve(), base_state_dir.resolve()
     state = recovery.resolve_active_epoch(root, spec_path, base)
     for path in (base, state):
@@ -245,6 +286,8 @@ def resolve_release_amended_epoch(root: Path, spec_path: Path, base: Path,
             or receipt.get("origin_plan_id") != pointer.get("origin_plan_id")
             or receipt.get("epoch") != pointer.get("epoch") or receipt.get("task_id") != TASK
             or receipt.get("added_dependency") != PREREQUISITE
+            or receipt.get("pre_admission_validation_command") != PRE_ADMISSION_COMMAND
+            or receipt.get("post_completion_validation_command") != POST_COMPLETION_COMMAND
             or receipt.get("baseline_task_cid") != prior.BASELINE_CID
             or receipt.get("same_epoch") is not True or receipt.get("unchanged_native_accounting") is not True
             or any(receipt.get(key) is not False for key in prior._NO_AUTHORITY)):

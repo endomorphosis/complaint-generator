@@ -49,6 +49,19 @@ def _unamended_synthetic_spec(source):
         task["implementation_prompt"] = task["implementation_prompt"][:-len(guidance)]
     release = next(item for item in spec["tasks"] if item["id"] == "CIMP-REL-03")
     original_dependencies = ["CIMP-REL-01", "CIMP-REL-02", "CIMP-OPS-06"]
+    from integrations.ipfs_accelerate import improvement_release_amendment as release_amendment
+    has_phase = release_amendment.PRE_ADMISSION_COMMAND in release["validation_commands"]
+    has_release_guidance = release_amendment.GUIDANCE in release["implementation_prompt"]
+    if has_phase or has_release_guidance:
+        suffix = "\n\n" + release_amendment.GUIDANCE
+        if (release["depends_on"] != original_dependencies + ["CIMP-TUI-12"]
+                or len(release["validation_commands"]) != 2
+                or release["validation_commands"][1] != release_amendment.PRE_ADMISSION_COMMAND
+                or release["implementation_prompt"].count(release_amendment.GUIDANCE) != 1
+                or not release["implementation_prompt"].endswith(suffix)):
+            raise ValueError("synthetic source has an incomplete release phase amendment")
+        release["validation_commands"][1] = release_amendment.SCRIPT_COMMAND
+        release["implementation_prompt"] = release["implementation_prompt"][:-len(suffix)]
     if release["depends_on"] == original_dependencies + ["CIMP-TUI-12"]:
         release["depends_on"] = original_dependencies
     elif release["depends_on"] != original_dependencies:
