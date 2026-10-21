@@ -2987,6 +2987,29 @@ def build_open_items(intake_case_file: Dict[str, Any]) -> List[Dict[str, Any]]:
         if staff_title_pattern.search(_normalize_text(fact_dict.get("text") or fact_dict.get("event_label") or "")):
             has_staff_title = True
 
+    legal_context = case_file.get("legal_context")
+    if not isinstance(legal_context, dict):
+        legal_context = refresh_explicit_legal_context(case_file)
+        case_file["legal_context"] = legal_context
+    for question in _coerce_list(legal_context.get("questions")):
+        question_dict = _coerce_dict(question)
+        question_id = _normalize_text(question_dict.get("question_id") or "")
+        if not question_id:
+            continue
+        _add_item(
+            {
+                "open_item_id": f"legal_context:{question_id}",
+                "kind": "legal_context_gap",
+                "blocking_level": "blocking" if question_dict.get("field") == "jurisdiction" else "important",
+                "section": "legal_context",
+                "reason": _normalize_text(question_dict.get("prompt") or "Legal context is unresolved."),
+                "next_question_strategy": f"ask_{_normalize_text(question_dict.get('field') or 'legal_context')}",
+                "recommended_support_kind": "intake_clarification",
+                "proof_path_status": "missing",
+                "question": question_dict,
+            }
+        )
+
     for claim in candidate_claims:
         claim_dict = _coerce_dict(claim)
         claim_type = _normalize_text(claim_dict.get("claim_type"))
@@ -3851,6 +3874,176 @@ def build_intake_sections(
     }
 
 
+def _legal_context_helpers():
+    from integrations.ipfs_datasets.legal import (
+        apply_legal_context_update,
+        classify_legal_date,
+        empty_legal_context,
+        questions_for_legal_context,
+        resolve_explicit_jurisdiction,
+    )
+    return {
+        "apply_legal_context_update": apply_legal_context_update,
+        "classify_legal_date": classify_legal_date,
+        "empty_legal_context": empty_legal_context,
+        "questions_for_legal_context": questions_for_legal_context,
+        "resolve_explicit_jurisdiction": resolve_explicit_jurisdiction,
+    }
+
+
+def extract_explicit_jurisdiction_from_text(text: Any) -> str:
+    """Read a jurisdiction only from explicit legal wording in the complaint."""
+    helpers = _legal_context_helpers()
+    raw = _normalize_text(text)
+    if not raw:
+        return "unknown"
+    federal_match = re.search(
+        r"\b(?:federal court|federal law|under federal law|jurisdiction\s*[: ]\s*federal)\b",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if federal_match:
+        return "federal"
+    labeled = re.search(r"\bjurisdiction\s*[: ]\s*([A-Za-z][A-Za-z .]{1,40})", raw, flags=re.IGNORECASE)
+    if labeled:
+        resolved = helpers["resolve_explicit_jurisdiction"](labeled.group(1).strip(" ."))
+        if resolved != "unknown":
+            return resolved
+    state_phrase = re.search(
+        r"\b(?:under|pursuant to|state of)\s+([A-Za-z][A-Za-z ]{1,30}?)\s+(?:law|statute|court)\b",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if state_phrase:
+        resolved = helpers["resolve_explicit_jurisdiction"](state_phrase.group(1).strip())
+        if resolved != "unknown":
+            return resolved
+    return "unknown"
+
+
+def _extract_labeled_legal_date(text: str, labels: tuple[str, ...], role: str) -> Dict[str, Any] | None:
+    helpers = _legal_context_helpers()
+    for label in labels:
+        match = re.search(rf"\b{label}\s*[: ]\s*([^.;\n]+)", text, flags=re.IGNORECASE)
+        if match:
+            return helpers["classify_legal_date"](match.group(1).strip(), role=role)
+    return None
+
+
+def derive_explicit_legal_context(intake_case_file: Dict[str, Any]) -> Dict[str, Any]:
+    """Build legal context from explicit user text and dated facts."""
+    helpers = _legal_context_helpers()
+    case_file = _coerce_dict(intake_case_file)
+    source_text = _normalize_text(case_file.get("source_complaint_text") or "")
+    context = helpers["empty_legal_context"]()
+    jurisdiction = extract_explicit_jurisdiction_from_text(source_text)
+    context["jurisdiction"] = jurisdiction
+    context["jurisdiction_explicit"] = jurisdiction != "unknown"
+    context["status"] = "unknown" if jurisdiction == "unknown" else "explicit"
+
+    applicable = _extract_labeled_legal_date(
+        source_text,
+        ("applicable law date", "law in effect on", "law applicable on"),
+        "applicable_law_date",
+    )
+    if applicable:
+        context["applicable_law_date"] = applicable
+    filing = _extract_labeled_legal_date(
+        source_text,
+        ("filing date", "filed on", "reference date"),
+        "filing_reference_date",
+    )
+    if filing:
+        context["filing_reference_date"] = filing
+    retrieval_raw = _normalize_text(
+        case_file.get("corpus_retrieved_at") or case_file.get("corpus_retrieval_date") or ""
+    )
+    if retrieval_raw:
+        context["corpus_retrieval_date"] = helpers["classify_legal_date"](
+            retrieval_raw,
+            role="corpus_retrieval_date",
+        )
+
+    event_dates: List[Dict[str, Any]] = []
+    for fact in _coerce_list(case_file.get("canonical_facts")):
+        if not isinstance(fact, dict):
+            continue
+        raw_event = _normalize_text(fact.get("event_date_or_range") or "")
+        if not raw_event:
+            continue
+        event_dates.append(helpers["classify_legal_date"](raw_event, role="event_date"))
+    context["event_dates"] = event_dates
+    if len(event_dates) == 1:
+        context["event_date"] = event_dates[0]
+    context["questions"] = helpers["questions_for_legal_context"](
+        context,
+        selecting_rules=bool(_coerce_list(case_file.get("candidate_claims"))),
+    )
+    return context
+
+
+def refresh_explicit_legal_context(intake_case_file: Dict[str, Any]) -> Dict[str, Any]:
+    """Recompute context and invalidate selected rules when the user changes it."""
+    helpers = _legal_context_helpers()
+    case_file = _coerce_dict(intake_case_file)
+    previous = case_file.get("legal_context")
+    if not isinstance(previous, dict):
+        previous = helpers["empty_legal_context"]()
+    derived = derive_explicit_legal_context(case_file)
+    overrides = _coerce_dict(case_file.get("legal_context_overrides"))
+    updates: Dict[str, Any] = {}
+    if _normalize_text(overrides.get("jurisdiction") or ""):
+        updates["jurisdiction"] = overrides.get("jurisdiction")
+    elif str(derived.get("jurisdiction") or "unknown") != "unknown":
+        updates["jurisdiction"] = derived.get("jurisdiction")
+    for role in ("applicable_law_date", "event_date", "filing_reference_date", "corpus_retrieval_date"):
+        if role in overrides and _normalize_text(overrides.get(role) or ""):
+            updates[role] = overrides.get(role)
+        else:
+            derived_record = derived.get(role)
+            derived_raw = _normalize_text(derived_record.get("raw_text") if isinstance(derived_record, dict) else "")
+            if derived_raw:
+                updates[role] = derived_record
+    if derived.get("event_dates"):
+        updates["event_dates"] = derived.get("event_dates")
+    proof = [
+        item for item in _coerce_list(case_file.get("proof_leads"))
+        if isinstance(item, dict)
+    ]
+    updated = helpers["apply_legal_context_update"](previous, updates, dependent_proof=proof)
+    updated["questions"] = helpers["questions_for_legal_context"](
+        updated,
+        selecting_rules=bool(_coerce_list(case_file.get("candidate_claims"))),
+    )
+    return updated
+
+
+def apply_explicit_legal_context(intake_case_file: Dict[str, Any], **updates: Any) -> Dict[str, Any]:
+    """Record user answers and drop rule applicability that depended on the old context."""
+    case_file = _coerce_dict(intake_case_file)
+    overrides = _coerce_dict(case_file.get("legal_context_overrides"))
+    for key, value in updates.items():
+        if value is not None:
+            overrides[key] = value
+    case_file["legal_context_overrides"] = overrides
+    case_file["legal_context"] = refresh_explicit_legal_context(case_file)
+    invalidated = {
+        str(item.get("lead_id") or item.get("proof_id") or ""): item
+        for item in _coerce_list(case_file["legal_context"].get("dependent_proof"))
+        if isinstance(item, dict)
+    }
+    refreshed_leads = []
+    for lead in _coerce_list(case_file.get("proof_leads")):
+        if not isinstance(lead, dict):
+            continue
+        lead_id = _normalize_text(lead.get("lead_id") or lead.get("proof_id") or "")
+        replacement = invalidated.get(lead_id)
+        refreshed_leads.append(replacement if replacement is not None else lead)
+    if refreshed_leads:
+        case_file["proof_leads"] = refreshed_leads
+    return case_file
+
+
 def build_intake_case_file(knowledge_graph, complaint_text: str = "") -> Dict[str, Any]:
     """Build the initial structured intake case file from current graph state."""
     candidate_claims = [
@@ -3937,6 +4130,7 @@ def build_intake_case_file(knowledge_graph, complaint_text: str = "") -> Dict[st
         "complainant_summary_confirmation": {},
         "source_complaint_text": normalized_complaint_text,
     }
+    intake_case_file["legal_context"] = refresh_explicit_legal_context(intake_case_file)
 
     open_items = build_open_items(intake_case_file)
     intake_case_file["open_items"] = open_items
@@ -4050,6 +4244,7 @@ def refresh_intake_case_file(intake_case_file: Dict[str, Any], knowledge_graph, 
     )
     case_file["harm_profile"] = build_harm_profile(_coerce_list(case_file.get("canonical_facts")))
     case_file["remedy_profile"] = build_remedy_profile(_coerce_list(case_file.get("canonical_facts")))
+    case_file["legal_context"] = refresh_explicit_legal_context(case_file)
     case_file["blocker_follow_up_summary"] = build_blocker_follow_up_summary(
         candidate_claims=_coerce_list(case_file.get("candidate_claims")),
         canonical_facts=_coerce_list(case_file.get("canonical_facts")),

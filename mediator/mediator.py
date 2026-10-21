@@ -13045,11 +13045,35 @@ class Mediator:
 		}
 	
 	def _determine_jurisdiction(self, legal_graph):
-		"""Determine jurisdiction from legal graph."""
-		elements = list(legal_graph.elements.values())
-		if elements:
-			return elements[0].jurisdiction
-		return 'federal'
+		"""Use only explicit element jurisdictions. Unresolved context stays unknown."""
+		from integrations.ipfs_datasets.legal import resolve_explicit_jurisdiction
+
+		elements = list(getattr(legal_graph, "elements", {}).values())
+		explicit = []
+		for element in elements:
+			resolved = resolve_explicit_jurisdiction(getattr(element, "jurisdiction", ""))
+			if resolved != "unknown":
+				explicit.append(resolved)
+		unique = sorted(set(explicit))
+		if len(unique) == 1:
+			return unique[0]
+		return "unknown"
+
+	def legal_context_questions(self, intake_case_file):
+		"""Questions for jurisdiction and event dates that are still unresolved."""
+		from complaint_phases.intake_case_file import refresh_explicit_legal_context
+
+		context = refresh_explicit_legal_context(intake_case_file if isinstance(intake_case_file, dict) else {})
+		return list(context.get("questions") or [])
+
+	def apply_explicit_legal_context(self, intake_case_file, **updates):
+		"""Store explicit legal context and invalidate dependent rule and proof state."""
+		from complaint_phases.intake_case_file import apply_explicit_legal_context
+
+		return apply_explicit_legal_context(
+			intake_case_file if isinstance(intake_case_file, dict) else {},
+			**updates,
+		)
 	
 	def _generate_statement_of_claim(self, kg, dg):
 		"""Generate short statement of claim."""
