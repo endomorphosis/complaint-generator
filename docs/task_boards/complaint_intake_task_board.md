@@ -720,7 +720,7 @@ Implementation instructions:
 
 ## CIMP-PRIV-001 Specify complaint data classes and executable privacy policy
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.privacy
