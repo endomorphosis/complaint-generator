@@ -244,6 +244,15 @@
       "errors": 0,
       "skipped": 0,
       "scope": "Future Grok4.7 implementation launches pin low reasoning; inherited higher effort cannot override the campaign."
+    },
+    {
+      "receipt": "/tmp/complaint_grok_turn_limit_final.xml",
+      "sha256": "1313d3ae6f652d7db27e277eb0b1def03244fad26cf904887f21181f60019d06",
+      "tests": 79,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scope": "Verified ordinary Grok max-turn terminal permits actual declared validation and normal merge handoff; failed/held/unknown candidates stay incomplete, and rawprovider exit1 remains explicit."
     }
   ],
   "implementation_tasks_completed_by_these_checks": 0,
@@ -421,7 +430,7 @@
     "receipt_sha256": "5c1febbc35754c2ba3223f3e85b4563a0b7c4e979d58b8269fae814122a188b9",
     "receipt_path": "/home/barberb/.cache/complaint-generator/campaigns/1ad725aac6e45c68/intake-improvement/epochs/capacity-classifier-fix-20261021/recovery_epoch.json"
   },
-  "native_current_maintenance_commit": "a83491becf7abc02071bef5ab590c2349ee30304",
+  "native_current_maintenance_commit": "2b1ab2cb180c4ff5110bf432f5301e3f6a4f0eb3",
   "monitored_recovery_maintenance": {
     "automatic_retry_rearm": false,
     "lifetime_spent_attempts": 4,
@@ -585,5 +594,55 @@
     "deadline_unchanged": true,
     "required_validation_unchanged": true,
     "task_completion_authority": false
+  },
+  "automatic_turn_limit_candidate_validation": {
+    "qualified_isolated_commit": "aa61335c2d8b82eab0152a674ca2994462c8733a",
+    "independent_review": true,
+    "raw_provider_returncode_preserved": 1,
+    "requires_waited_owned_process_and_docker_quiescence": true,
+    "requires_unchanged_original_protected_snapshot": true,
+    "requires_current_unheld_task_revision": true,
+    "normal_validation_and_merge_gates_required": true,
+    "new_provider_authority": false,
+    "attempt_refunded": false,
+    "quarantine_release_authority": false,
+    "actual_fact01_terminal_parser_only": "/tmp/complaint_fact01_turn_limit_parser_qualification.json",
+    "current_campaign_still_stopped": true
+  },
+  "fact01_first_native_admission": {
+    "receipt": "/tmp/complaint-fact01-native-reconciliation-20261021-lrfq2101/final_receipt.json",
+    "sha256": "84b006a34c1165aed0dcce96d5f627eda8c3c016fbefc41ee2fab2ab6061ced8",
+    "candidate": "f892d16fb7cefff152c2d49106b5b389c749a60e",
+    "native_required_cases": 53,
+    "native_skipped": 0,
+    "source_integration_commit": "bb09927878829a4291d4609f5c80310aa2063677",
+    "board_status": "todo",
+    "completion_succeeded": false,
+    "queue_state": "quarantined",
+    "reason": "Completion callback refused transient foreign index.lock; integration exists but no accepted native task completion binding.",
+    "spent_before": {
+      "by_cid": {
+        "baguqeeravyogbhzg42p3bprnbbjpnbcjv2zpfp3jrqyzxld6vvgsrxmjks3a": 1,
+        "baguqeeraxq775q25gtjritvqbbfcnryzpodeib3cn6dayanky4hrvo6the7q": 4
+      },
+      "by_id": {
+        "CIMP-FACT-01": 1,
+        "CIMP-TUI-01": 4
+      }
+    },
+    "spent_after": {
+      "by_cid": {
+        "baguqeeravyogbhzg42p3bprnbbjpnbcjv2zpfp3jrqyzxld6vvgsrxmjks3a": 1,
+        "baguqeeraxq775q25gtjritvqbbfcnryzpodeib3cn6dayanky4hrvo6the7q": 4
+      },
+      "by_id": {
+        "CIMP-FACT-01": 1,
+        "CIMP-TUI-01": 4
+      }
+    },
+    "old_quarantine_released": false,
+    "provider_dispatched": false,
+    "attempt_consumed": false,
+    "additional_edge_replay_repair_pending": true
   }
 }
