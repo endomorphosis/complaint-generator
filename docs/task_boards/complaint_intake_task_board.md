@@ -1226,7 +1226,7 @@ Implementation instructions:
 
 ## CIMP-OPS-05 Protect supervisor context and verify bounded provider/worktree behavior
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.supervision
