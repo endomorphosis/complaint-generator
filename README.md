@@ -161,7 +161,9 @@ Use `python scripts/run_complaint_improvement_supervisor.py prepare`, then
 `doctor`, `start`, and `status` to prepare and monitor the native supervisor.
 `stop` terminates only the campaign's owned process tree. Runtime files live
 outside the repository and retain process birth identities. The campaign pins
-Grok 4.7 with low reasoning through `ipfs_accelerate_py.llm_router`, disables provider fallback,
+Grok 4.7 with low reasoning through `ipfs_accelerate_py.llm_router`, allows up to
+64 model turns within a 900-second hard deadline and a 180-second idle limit,
+disables provider fallback,
 and uses source code and synthetic fixtures with private data paths masked in
 Docker. Its native catalogs are isolated from other campaigns. `doctor` checks
 the cached, source-qualified execution image; AMD64 provisioning instructions
