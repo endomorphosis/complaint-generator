@@ -1101,7 +1101,7 @@ def test_internal_entry_calls_actual_native_runner_contract_without_once(campaig
     monkeypatch.setattr(runner, "_private_runtime_checks", lambda *a: {"ready": True})
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor_runner as native_runner
     calls = []
-    monkeypatch.setattr(native_runner, "run_configured_portal_implementation_supervisor",
+    monkeypatch.setattr(runner, "_run_native_supervisor",
                         lambda argv, **kwargs: calls.append((argv, kwargs)))
     # Scope the environment mutation to this test; the child normally owns it.
     monkeypatch.setattr(runner.os, "environ", dict(os.environ))
@@ -1289,7 +1289,7 @@ def test_configured_start_and_owned_reentry_preserve_root_epoch_and_native_contr
     monkeypatch.setattr(runner.os, 'environ', dict(os.environ))
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor_runner as native_runner
     calls = []
-    monkeypatch.setattr(native_runner, 'run_configured_portal_implementation_supervisor', lambda argv, **kwargs: calls.append(argv))
+    monkeypatch.setattr(runner, '_run_native_supervisor', lambda argv, **kwargs: calls.append(argv))
     assert runner.run_internal(root, spec, state, record['owner_token'], 'campaign', worktree_root=target) == 0
     assert len(calls) == 1 and calls[0].count('--worktree-root') == 1
     assert calls[0][calls[0].index('--worktree-root') + 1] == str(target)
@@ -1645,3 +1645,166 @@ def test_kit_host_binding_rejects_unsafe_metadata_before_reader_import(tmp_path,
         runner._private_replica_kit_qualification(
             tmp_path / "candidate", tmp_path / "evidence-runs", {"id": "CIMP-DUR-005"}, {},
             campaign_state_dir=tmp_path)
+
+
+@pytest.mark.parametrize("damage", ["remove_test", "weaken_assertion", "change_fixture", "missing_module", "alias_module"])
+def test_existing_regression_definitions_cannot_be_silently_replaced(tmp_path, damage):
+    trusted, candidate = tmp_path / "trusted", tmp_path / "candidate"
+    for root in (trusted, candidate):
+        (root / "tests").mkdir(parents=True)
+    original = "def fixture():\n    return 3\n\nclass TestEarlier:\n    def test_preserved(self):\n        assert fixture() == 3\n"
+    (trusted / "tests/test_earlier.py").write_text(original)
+    path = candidate / "tests/test_earlier.py"
+    altered = original
+    if damage == "remove_test":
+        altered = "def test_new_only():\n    assert True\n"
+    elif damage == "weaken_assertion":
+        altered = original.replace("assert fixture() == 3", "assert True")
+    elif damage == "change_fixture":
+        altered = original.replace("return 3", "return 4")
+    if damage == "alias_module":
+        path.symlink_to(trusted / "tests/test_earlier.py")
+    elif damage != "missing_module":
+        path.write_text(altered)
+    with pytest.raises(ValueError, match="existing_behavioral_definition_changed"):
+        runner._preserve_existing_behavioral_definitions(candidate, ["tests/test_earlier.py"], trusted_root=trusted)
+
+
+def test_existing_test_class_can_gain_checks_without_losing_earlier_definitions(tmp_path):
+    trusted, candidate = tmp_path / "trusted", tmp_path / "candidate"
+    for root in (trusted, candidate):
+        (root / "tests").mkdir(parents=True)
+    original = "class TestEarlier:\n    def test_preserved(self):\n        assert 2 + 2 == 4\n"
+    (trusted / "tests/test_earlier.py").write_text(original)
+    (candidate / "tests/test_earlier.py").write_text(original + "\n    def test_added(self):\n        assert 3 + 3 == 6\n")
+    rows = runner._preserve_existing_behavioral_definitions(candidate, ["tests/test_earlier.py"], trusted_root=trusted)
+    assert len(rows) == 1 and rows[0]["preserved_definition_count"] == 2
+    assert rows[0]["trusted_sha256"] != rows[0]["candidate_sha256"]
+
+
+def test_new_behavioral_test_module_needs_no_invented_previous_suite(tmp_path):
+    trusted, candidate = tmp_path / "trusted", tmp_path / "candidate"
+    trusted.mkdir();(candidate / "tests").mkdir(parents=True)
+    (candidate / "tests/test_new.py").write_text("def test_new():\n    assert True\n")
+    assert runner._preserve_existing_behavioral_definitions(candidate, ["tests/test_new.py"], trusted_root=trusted) == []
+# Validation is allowed its own existing command deadline after the provider
+# returns. These cases exercise the real Native watchdog, including its early
+# provider-log check, while controlling the owned-child witness at the boundary.
+@pytest.fixture
+def validation_watchdog_case(tmp_path, monkeypatch):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as native
+    now = time.time()
+    stamp = lambda age: datetime.fromtimestamp(now - age, timezone.utc).isoformat()
+    workspace_root = tmp_path / "workspaces"
+    workspace = workspace_root / "owned"
+    workspace.mkdir(parents=True)
+    log = tmp_path / "provider.log"
+    log.write_text("provider returned before bounded validation\n")
+    os.utime(log, (now - 1000, now - 1000))
+    state = native.PortalTaskState()
+    for key, value in dict(active_phase="validating", implementation_in_progress=True,
+            active_task_id="CIMP-QUEST-04", active_task_key="quest04-key",
+            active_task_cid="bag-current-task", active_attempt=1,
+            last_implementation_task_id="CIMP-QUEST-04",
+            active_phase_started_at=stamp(100), last_implementation_started_at=stamp(1200),
+            last_implementation_finished_at="", active_worktree_path=str(workspace),
+            heartbeat_at=stamp(1000), last_progress_at=stamp(1000),
+            last_implementation_log_path=str(log)).items():
+        setattr(state, key, value)
+    cls = runner._validation_aware_supervisor_class(native.PortalImplementationSupervisor)
+    supervisor = object.__new__(cls)
+    supervisor._worktree_worker_phase = ""
+    supervisor._last_worktree_worker_seen_monotonic = None
+    supervisor.config = SimpleNamespace(repo_root=ROOT, state_dir=tmp_path,
+        state_path=tmp_path / "task_state.json", worktree_root=workspace_root,
+        stale_seconds=180, check_interval=30, implementation_log_stall_seconds=180, state_prefix="test")
+    monkeypatch.setattr(supervisor, "_implementation_watchdog_timeout_seconds", lambda: 900.0)
+    scope = {"repo_root": str(ROOT), "state_dir": str(tmp_path)}
+    birth = native.read_process_birth(os.getpid())
+    identity = SimpleNamespace(process_birth=birth, command=native.read_process_command_argv(os.getpid()), owner_scope=scope)
+    lease = dict(kind="implementation", lease_id="owned-lease", pid=os.getpid(),
+        task_id=state.active_task_id, canonical_task_key=state.active_task_key,
+        canonical_task_cid=state.active_task_cid, attempt=1, repo_root=str(ROOT), state_dir=str(tmp_path))
+    claim = dict(lease, kind=native.IMPLEMENTATION_TASK_CLAIM_LOCK_KIND,
+        lease_role=native.IMPLEMENTATION_DISPATCH_INTENT_LEASE_ROLE,
+        owner_process_birth=birth.to_dict(), state_path=str(supervisor.config.state_path))
+    claim["dispatch_authority_cid"] = native.PortalImplementationDaemon._implementation_dispatch_authority_cid(claim)
+    monkeypatch.setattr(supervisor, "_implementation_maintenance_lock_path", lambda: tmp_path / "lease")
+    monkeypatch.setattr(supervisor, "_task_dispatch_claim_path", lambda s: tmp_path / "claim")
+    monkeypatch.setattr(supervisor, "_managed_daemon_identity_path", lambda: tmp_path / "identity")
+    monkeypatch.setattr(supervisor, "_read_watchdog_authority", lambda p: lease if p.name == "lease" else claim)
+    monkeypatch.setattr(supervisor, "_managed_daemon_owner_scope", lambda: scope)
+    monkeypatch.setattr(supervisor, "_build_daemon_command", lambda: list(identity.command))
+    monkeypatch.setattr(native, "load_supervised_child_identity", lambda p: identity)
+    monkeypatch.setattr(native, "checkout_lock_repository_matches", lambda c, r: True)
+    monkeypatch.setattr(supervisor, "_active_validation_subprocess_exists", lambda: True)
+    return native, supervisor, state, lease, claim, identity, now
+
+
+def test_validation_watchdog_keeps_current_owned_tests_after_provider_deadline(validation_watchdog_case):
+    native, supervisor, state, lease, claim, identity, now = validation_watchdog_case
+    assert native.PortalImplementationSupervisor._implementation_attempt_is_active(supervisor, state, now_ts=now) is False
+    before = dict(vars(state))
+    assert supervisor._implementation_log_stall_reason(state, now_ts=now) == ""
+    assert supervisor.is_stuck(state, now_ts=now) == (False, "")
+    assert vars(state) == before
+
+
+@pytest.mark.parametrize("change", ["expired", "future", "other_phase", "wrong_task", "wrong_cid",
+    "wrong_attempt", "finished", "outside_worktree", "no_worker", "wrong_owner", "missing_claim"])
+def test_validation_watchdog_refuses_unowned_or_expired_window(validation_watchdog_case, monkeypatch, change, tmp_path):
+    native, supervisor, state, lease, claim, identity, now = validation_watchdog_case
+    if change == "expired": state.active_phase_started_at = datetime.fromtimestamp(now - 901, timezone.utc).isoformat()
+    elif change == "future": state.active_phase_started_at = datetime.fromtimestamp(now + 1, timezone.utc).isoformat()
+    elif change == "other_phase": state.active_phase = "implementing"
+    elif change == "wrong_task": claim["task_id"] = "CIMP-OTHER-01"
+    elif change == "wrong_cid": claim["canonical_task_cid"] = "bag-another-task"
+    elif change == "wrong_attempt": claim["attempt"] = 2
+    elif change == "finished": state.last_implementation_finished_at = datetime.fromtimestamp(now - 10, timezone.utc).isoformat()
+    elif change == "outside_worktree": state.active_worktree_path = str(tmp_path)
+    elif change == "no_worker": monkeypatch.setattr(supervisor, "_active_validation_subprocess_exists", lambda: False)
+    elif change == "wrong_owner": identity.owner_scope = {"state_dir": "/unrelated"}
+    elif change == "missing_claim": monkeypatch.setattr(supervisor, "_read_watchdog_authority", lambda p: None)
+    assert runner._owned_validation_window(supervisor, state, now_ts=now) is False
+    assert supervisor.is_stuck(state, now_ts=now)[0] is True
+
+
+def test_validation_watchdog_preserves_original_provider_window(validation_watchdog_case, monkeypatch):
+    native, supervisor, state, lease, claim, identity, now = validation_watchdog_case
+    state.last_implementation_started_at = datetime.fromtimestamp(now - 10, timezone.utc).isoformat()
+    def unexpected_probe(*args, **kwargs):
+        pytest.fail("a live provider attempt must use its original Native predicate")
+    monkeypatch.setattr(runner, "_owned_validation_window", unexpected_probe)
+    assert supervisor._implementation_attempt_is_active(state, now_ts=now) is True
+
+
+
+def test_validation_adapter_uses_native_configuration_and_exactly_one_native_loop(tmp_path, monkeypatch):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as native
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor_runner as lifecycle
+    construction = []
+    loops = []
+    instance = object()
+    def adapter_class(original):
+        assert original is native.PortalImplementationSupervisor
+        def construct(config):
+            construction.append(config)
+            return instance
+        return construct
+    def loop(supervisor, context, *, logger):
+        assert supervisor is instance
+        loops.append(context)
+        return "native-loop-result"
+    monkeypatch.setattr(runner, "_validation_aware_supervisor_class", adapter_class)
+    monkeypatch.setattr(lifecycle, "run_portal_implementation_supervisor", loop)
+    argv = runner.native_argv(ROOT / "docs/task_boards/complaint_intake_improvement.md", tmp_path, "main", worktree_root=tmp_path / "workspaces")
+    result = runner._run_native_supervisor(argv, repo_root=ROOT, logger=runner._LOGGER, daemon_script_path=Path(runner.__file__))
+    assert result == "native-loop-result" and len(construction) == len(loops) == 1
+    config, context = construction[0], loops[0]
+    assert context.config is config and context.parsed.once is False
+    assert config.repo_root == ROOT and config.state_dir == tmp_path
+    assert config.implementation_timeout == config.implementation_max_timeout == 900
+    assert config.max_task_attempts == 3 and config.max_restarts == 5
+    assert tuple(config.worktree_submodule_paths) == ("external/ipfs_datasets_py", "external/ipfs_kit_py")
+    assert context.state_path == config.state_path and context.events_path == config.events_path
+    assert context.daemon_events_path.parent == tmp_path

@@ -1908,6 +1908,101 @@ def stop(state_dir: Path, *, timeout: float = 15.0,
                 "container_shutdown": containers, "manual_holds_preserved": True}
 
 
+def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
+    """Observe a fixed validation deadline without refreshing any task clock.
+
+    The provider deadline starts before the proposal is returned. Validation
+    has its own existing command timeout. Only the current Native dispatch
+    owner, its matching task claims and its live test child can use that window.
+    """
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as native
+
+    if (state.active_phase != "validating" or not state.implementation_in_progress
+            or not state.active_task_id or not state.active_task_key or not state.active_task_cid
+            or state.last_implementation_task_id != state.active_task_id
+            or type(state.active_attempt) is not int or not 1 <= state.active_attempt <= 3):
+        return False
+    try:
+        started = native.parse_timestamp(state.active_phase_started_at)
+        provider_started = native.parse_timestamp(state.last_implementation_started_at)
+        finished = native.parse_timestamp(state.last_implementation_finished_at)
+        timeout = min(float(TIMEOUT_SECONDS), supervisor._implementation_watchdog_timeout_seconds())
+        if (started is None or provider_started is None or started < provider_started
+                or finished is not None and finished >= provider_started
+                or not 0 <= now_ts - started.timestamp() <= timeout):
+            return False
+        worktree_root = Path(supervisor.config.worktree_root).resolve(strict=True)
+        workspace = Path(state.active_worktree_path)
+        if (not workspace.is_absolute() or workspace.resolve(strict=True) != workspace
+                or workspace == worktree_root or not workspace.is_relative_to(worktree_root)):
+            return False
+        lease = supervisor._read_watchdog_authority(supervisor._implementation_maintenance_lock_path())
+        claim = supervisor._read_watchdog_authority(supervisor._task_dispatch_claim_path(state))
+        identity = native.load_supervised_child_identity(supervisor._managed_daemon_identity_path())
+        if lease is None or claim is None or identity is None:
+            return False
+        birth = native.ProcessBirthIdentity.from_dict(claim.get("owner_process_birth"))
+        expected = {"task_id": state.active_task_id,
+                    "canonical_task_key": state.active_task_key,
+                    "canonical_task_cid": state.active_task_cid,
+                    "attempt": state.active_attempt}
+        if (dict(identity.owner_scope) != supervisor._managed_daemon_owner_scope()
+                or tuple(identity.command) != tuple(supervisor._build_daemon_command())
+                or birth != identity.process_birth
+                or native.read_process_birth(birth.pid) != birth
+                or native.read_process_command_argv(birth.pid) != identity.command
+                or native.supervised_child_identity_liveness(identity) is not native.OwnerLiveness.ALIVE
+                or lease.get("kind") != "implementation"
+                or lease.get("lease_role") == "supervisor_maintenance"
+                or claim.get("kind") != native.IMPLEMENTATION_TASK_CLAIM_LOCK_KIND
+                or claim.get("lease_role") != native.IMPLEMENTATION_DISPATCH_INTENT_LEASE_ROLE
+                or not lease.get("lease_id") or not claim.get("lease_id")
+                or int(lease.get("pid") or 0) != birth.pid
+                or int(claim.get("pid") or 0) != birth.pid
+                or any(lease.get(key) != value or claim.get(key) != value for key, value in expected.items())
+                or Path(str(lease.get("repo_root") or "")).resolve() != supervisor.config.repo_root.resolve()
+                or Path(str(lease.get("state_dir") or "")).resolve() != supervisor.config.state_dir.resolve()
+                or Path(str(claim.get("state_dir") or "")).resolve() != supervisor.config.state_dir.resolve()
+                or Path(str(claim.get("state_path") or "")).resolve() != supervisor.config.state_path.resolve()
+                or not native.checkout_lock_repository_matches(claim, supervisor.config.repo_root)
+                or claim.get("dispatch_authority_cid") != native.PortalImplementationDaemon._implementation_dispatch_authority_cid(claim)):
+            return False
+        return bool(supervisor._active_validation_subprocess_exists())
+    except (OSError, TypeError, ValueError, AttributeError, KeyError):
+        return False
+
+
+def _validation_aware_supervisor_class(native_class):
+    class ValidationAwareSupervisor(native_class):
+        def _implementation_attempt_is_active(self, state, *, now_ts):
+            return (super()._implementation_attempt_is_active(state, now_ts=now_ts)
+                    or _owned_validation_window(self, state, now_ts=now_ts))
+    return ValidationAwareSupervisor
+
+
+def _run_native_supervisor(argv, *, repo_root, logger, daemon_script_path):
+    """Use Native configuration and run loop with the bounded phase predicate."""
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as native
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor_runner as lifecycle
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon_runner import implementation_state_artifact_paths
+
+    parsed = native.parse_args(list(argv))
+    lifecycle.configure_supervisor_logging(parsed)
+    config = native.supervisor_config_from_args(
+        parsed, repo_root=repo_root,
+        daemon_script_path=getattr(parsed, "daemon_script_path", None) or daemon_script_path,
+        worktree_submodule_paths=getattr(parsed, "worktree_submodule_path", None),
+    )
+    paths = implementation_state_artifact_paths(parsed.state_dir, parsed.state_prefix, supervisor_events=True)
+    context = lifecycle.ImplementationSupervisorRunContext(
+        parsed=parsed, config=config, state_path=config.state_path,
+        strategy_path=config.strategy_path, events_path=config.events_path,
+        daemon_events_path=paths["daemon_events_path"],
+    )
+    supervisor = _validation_aware_supervisor_class(native.PortalImplementationSupervisor)(config)
+    return lifecycle.run_portal_implementation_supervisor(supervisor, context, logger=logger)
+
+
 def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, merge_target: str, *, worktree_root: Path | None = None) -> int:
     # Refuse before creating even a lock file when storage cannot be observed.
     prospective_root, _ = recorded_worktree_root(_read_json(state_dir / "launcher.json"), state_dir)
@@ -1936,14 +2031,11 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
         if not privacy["ready"]:
             raise RuntimeError(privacy["reason"])
         _require_resource_capacity(repo_root, state_dir, selected_root, effective, stage="before_native_supervisor")
-        from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor_runner import (
-            run_configured_portal_implementation_supervisor,
-        )
         # Recheck the bound storage directory immediately before native admission.
         if recorded_worktree_root(record, state_dir) != (selected_root, root_binding):
             raise RuntimeError("worktree root changed before native admission")
         # No --once: this is the real native run_forever watchdog and daemon.
-        run_configured_portal_implementation_supervisor(
+        _run_native_supervisor(
             native_argv(repo_root / BOARD_RELATIVE, state_dir, merge_target, worktree_root=selected_root),
             repo_root=repo_root, logger=_LOGGER,
             daemon_script_path=Path(__file__).resolve(),
@@ -2274,6 +2366,62 @@ def _read_catalog(path, *, repo_root=None):
     return [n for n, _, _, _ in nodes], hashes
 
 
+def _preserve_existing_behavioral_definitions(root: Path, paths, *, trusted_root: Path | None = None):
+    """Keep installed test/helper definitions when a task adds behavioral checks.
+
+    The installed operator source supplies the baseline, outside the provider
+    checkout. This catches accidental replacement of earlier regression suites;
+    an intentional semantic migration requires separately reviewed maintenance.
+    Existing classes may gain methods while their earlier methods stay intact.
+    """
+    import ast
+    import copy
+
+    installed = trusted_root if trusted_root is not None else Path(__file__).resolve().parents[2]
+    records = []
+    def definitions(body, prefix=()):
+        rows = {}
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                key = prefix + (node.name,)
+                if key in rows:
+                    raise ValueError("existing_behavioral_definition_changed")
+                rows[key] = ast.dump(node, include_attributes=False)
+            elif isinstance(node, ast.ClassDef):
+                key = prefix + (node.name,)
+                header = copy.deepcopy(node)
+                header.body = []
+                if key in rows:
+                    raise ValueError("existing_behavioral_definition_changed")
+                rows[key] = ast.dump(header, include_attributes=False)
+                rows.update(definitions(node.body, key))
+        return rows
+    for relative in sorted(set(map(str, paths))):
+        name = Path(relative)
+        if not relative.startswith("tests/") or name.suffix != ".py":
+            continue
+        if name.is_absolute() or ".." in name.parts:
+            raise ValueError("existing_behavioral_definition_changed")
+        baseline, candidate = installed / name, Path(root) / name
+        if not baseline.exists() and not baseline.is_symlink():
+            continue
+        try:
+            for path in (baseline, candidate):
+                if path.is_symlink() or path.resolve(strict=True) != path or not path.is_file():
+                    raise ValueError("existing_behavioral_definition_changed")
+            original_bytes, candidate_bytes = baseline.read_bytes(), candidate.read_bytes()
+            original = definitions(ast.parse(original_bytes).body)
+            current = definitions(ast.parse(candidate_bytes).body)
+        except (OSError, SyntaxError, UnicodeError):
+            raise ValueError("existing_behavioral_definition_changed") from None
+        if any(current.get(name) != value for name, value in original.items()):
+            raise ValueError("existing_behavioral_definition_changed")
+        records.append({"path": relative, "trusted_sha256": hashlib.sha256(original_bytes).hexdigest(),
+                        "candidate_sha256": hashlib.sha256(candidate_bytes).hexdigest(),
+                        "preserved_definition_count": len(original)})
+    return records
+
+
 _PRIVATE_REPLICA_ACCEPTANCE = "tests/test_private_replica_acceptance.py"
 _PRIVATE_REPLICA_CAPABILITY_NODE = _PRIVATE_REPLICA_ACCEPTANCE + "::test_replica_api_capability_is_explicit"
 
@@ -2499,6 +2647,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     replica_binding = _private_replica_acceptance_binding(root, task, impacted)
     replica_capability = None
     replica_kit_before = None
+    preserved_behavioral_definitions = None
     release_script = (task.get("id") == "CIMP-REL-03" and
         observation_command == "python scripts/validate_complaint_intake.py --phase pre-admission" and
         task.get("validation_commands") in (
@@ -2554,6 +2703,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             artifacts.append({"path": str(path), "sha256": _hash_file(path)})
         return result, observation, _read_catalog(catalog, repo_root=root)
     try:
+        preserved_behavioral_definitions = _preserve_existing_behavioral_definitions(
+            root, [*extra, *impacted, *(context or {}).get("changed_paths", ())])
         replica_kit_before = _private_replica_kit_qualification(root, state_dir, task, before,
             campaign_state_dir=(context or {}).get("campaign_state_dir"))
         if release_script:
@@ -2617,7 +2768,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         if any(imported.get(p) != h for p, h in collected_hashes.items()):
             raise ValueError("stale_source_hash")
     except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
-        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable"} else "host_measurement_unavailable"
+        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed"} else "host_measurement_unavailable"
     try:
         if replica_binding != _private_replica_acceptance_binding(root, task, impacted):
             reason = "trusted_replica_acceptance_changed"
@@ -2637,6 +2788,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     imported.update(bootstrap_before)
     from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
     measured = {"schema": "complaint-owned-behavioral-measurement@1", "reason": reason,
+                "preserved_behavioral_definitions": preserved_behavioral_definitions,
                 "trusted_executor": {"module": str(getattr(runner, "__module__", "")), "qualname": str(getattr(runner, "__qualname__", "")),
                     "canonical_native_identity": runner is PortalImplementationDaemon._validation_command_runner,
                     "boundary": "trusted host code; returned sealed marker alone does not authenticate arbitrary callbacks"},
