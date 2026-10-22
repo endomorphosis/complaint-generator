@@ -44,9 +44,13 @@ tempfile, or fake encrypted-success path.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import stat
+import sys
+import threading
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -1454,6 +1458,978 @@ def read_unlock_passphrase(prompt: str = "Private key passphrase", *, getpass_fn
     return value
 
 
+# --- Joined revision WAL (CIMP-DUR-003) ------------------------------------
+# Ciphertext objects are sealed before any journal write. The Kit coordinator
+# stores the intent document in plaintext, so the intent carries only opaque
+# refs and stable ids. Local WAL commit is not a network pin.
+
+_REVISION_SCHEMA = "cg-revision-manifest-v1"
+_INTENT_SCHEMA = "cg-revision-intent-v1"
+_HEAD_NAME = "head.cgpe"
+_LOCK_NAME = ".owner.lock"
+_ROLE_NAMES = ("session", "fact_graph", "proof")
+_PROCESS_LOCKS: dict[str, threading.Lock] = {}
+_PROCESS_LOCK_GUARD = threading.Lock()
+
+
+def _process_lock(root: Path) -> threading.Lock:
+    """Serialize owners inside one process. flock alone does not block threads."""
+
+    key = str(root.resolve())
+    with _PROCESS_LOCK_GUARD:
+        lock = _PROCESS_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _PROCESS_LOCKS[key] = lock
+        return lock
+
+
+class PrivateRevisionError(PrivateStorageError):
+    """Joined session, fact-graph, and proof publication did not commit."""
+
+    code = "private_revision_error"
+    recoverable = True
+
+    def __init__(self, message: str, *, code: str, state: str = "recoverable") -> None:
+        super().__init__(message, code=code)
+        self.recoverable = True
+        self.state = state
+        self.committed = False
+        self.network_pinned = False
+
+
+class PrivateRevisionInterrupted(PrivateRevisionError):
+    """A crash boundary fired. Reopen and recover; do not treat this as commit."""
+
+    def __init__(self, boundary: str, transaction_id: str) -> None:
+        super().__init__(
+            f"revision transaction interrupted at {boundary}",
+            code="interrupted",
+            state="recoverable",
+        )
+        self.boundary = boundary
+        self.transaction_id = transaction_id
+
+
+@dataclass(frozen=True)
+class RevisionPublication:
+    """Outcome of one joined revision attempt or recovery pass."""
+
+    committed: bool
+    state: str
+    transaction_id: str
+    effect_id: str
+    revision: str | None
+    acknowledgement_mode: str | None
+    receipt_count: int
+    network_pinned: bool = False
+    local_only: bool = True
+    replayed: int = 0
+    rolled_back: int = 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "committed": self.committed,
+            "state": self.state,
+            "transaction_id": self.transaction_id,
+            "effect_id": self.effect_id,
+            "revision": self.revision,
+            "acknowledgement_mode": self.acknowledgement_mode,
+            "receipt_count": self.receipt_count,
+            "network_pinned": False,
+            "local_only": True,
+            "replication": "not_claimed",
+            "replayed": self.replayed,
+            "rolled_back": self.rolled_back,
+        }
+
+
+def _prefer_vendored_kit() -> None:
+    """Import WAL from the pinned submodule, not a broken site-packages copy."""
+
+    root = Path(__file__).resolve().parents[1] / "external" / "ipfs_kit_py"
+    if not (root / "ipfs_kit_py" / "core" / "wal" / "writer.py").is_file():
+        return
+    entry = str(root)
+    if entry in sys.path:
+        sys.path.remove(entry)
+    sys.path.insert(0, entry)
+    loaded = sys.modules.get("ipfs_kit_py")
+    loaded_file = Path(getattr(loaded, "__file__", "") or "")
+    if loaded is not None and root not in loaded_file.parents:
+        for name in list(sys.modules):
+            if name == "ipfs_kit_py" or name.startswith("ipfs_kit_py."):
+                del sys.modules[name]
+
+
+def _load_wal():
+    _prefer_vendored_kit()
+    try:
+        from ipfs_kit_py.core.wal.contracts import (
+            WALAcknowledgementMode,
+            WALCorruptionDisposition,
+            ack_requirements_for,
+        )
+        from ipfs_kit_py.core.wal.coordinator import (
+            WALTransactionCoordinator,
+            WALTransactionCrash,
+            WALTransactionError,
+        )
+        from ipfs_kit_py.core.wal.segments import recover_segment
+        from ipfs_kit_py.core.wal.writer import WALQueueFullError, WALWriterError
+    except Exception as exc:
+        raise PrivateRevisionError(
+            "Kit WAL is unavailable",
+            code="wal_unavailable",
+            state="unavailable",
+        ) from exc
+    return {
+        "WALAcknowledgementMode": WALAcknowledgementMode,
+        "WALCorruptionDisposition": WALCorruptionDisposition,
+        "ack_requirements_for": ack_requirements_for,
+        "WALTransactionCoordinator": WALTransactionCoordinator,
+        "WALTransactionCrash": WALTransactionCrash,
+        "WALTransactionError": WALTransactionError,
+        "recover_segment": recover_segment,
+        "WALQueueFullError": WALQueueFullError,
+        "WALWriterError": WALWriterError,
+    }
+
+
+def commit_acknowledged_by_receipt(result: Any) -> bool:
+    """True only when a real Kit receipt meets a durable acknowledgement mode.
+
+    Buffered and queued results are not commits. A caller-supplied ``durable``
+    flag is ignored; the receipt must satisfy ``ack_requirements_for``.
+    """
+
+    wal = _load_wal()
+    mode = getattr(result, "acknowledgement_mode", None)
+    receipt = getattr(result, "fsync_receipt", None)
+    if mode is None or receipt is None:
+        return False
+    requirements = wal["ack_requirements_for"](mode)
+    if not requirements.may_claim_committed:
+        return False
+    if not (requirements.requires_file_fsync and requirements.requires_parent_directory_fsync):
+        return False
+    try:
+        return bool(receipt.satisfies(requirements))
+    except Exception:
+        return False
+
+
+class _ReceiptWriter:
+    """Forward appends and keep only receipts the Kit writer actually returned."""
+
+    def __init__(self, writer: Any) -> None:
+        self._writer = writer
+        self.receipts: list[Any] = []
+
+    def append(self, *args: Any, **kwargs: Any) -> Any:
+        result = self._writer.append(*args, **kwargs)
+        if not commit_acknowledged_by_receipt(result):
+            raise PrivateRevisionError(
+                "WAL acknowledgement is not a durable commit receipt",
+                code="durability_unproven",
+                state="recoverable",
+            )
+        self.receipts.append(result)
+        return result
+
+    def close(self) -> None:
+        close = getattr(self._writer, "close", None)
+        if callable(close):
+            close()
+
+
+def _fsync_file(fd: int, fsync_file: Callable[[int], None] | None) -> None:
+    operation = fsync_file or os.fsync
+    try:
+        operation(fd)
+    except OSError as exc:
+        raise PrivateRevisionError(
+            "file fsync failed; revision was not published",
+            code="file_fsync_failed",
+            state="recoverable",
+        ) from exc
+
+
+def _fsync_directory(path: Path, fsync_directory: Callable[[int], None] | None) -> None:
+    """Fsync a directory. Opening the directory must succeed; failure is not success."""
+
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError as exc:
+        raise PrivateRevisionError(
+            "directory fsync could not be opened",
+            code="directory_fsync_failed",
+            state="unknown_durability",
+        ) from exc
+    try:
+        operation = fsync_directory or os.fsync
+        try:
+            operation(descriptor)
+        except OSError as exc:
+            raise PrivateRevisionError(
+                "directory fsync failed",
+                code="directory_fsync_failed",
+                state="unknown_durability",
+            ) from exc
+    finally:
+        os.close(descriptor)
+
+
+def _reject_symlink(path: Path) -> None:
+    if path.is_symlink():
+        raise PrivateRevisionError(
+            "revision journal path is a symlink",
+            code="journal_untrusted",
+            state="recoverable",
+        )
+
+
+def _opaque_ref(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _atomic_write(
+    directory: Path,
+    name: str,
+    payload: bytes,
+    *,
+    fsync_file: Callable[[int], None] | None,
+    fsync_directory: Callable[[int], None] | None,
+) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    temporary = directory / ("." + uuid.uuid4().hex + ".tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(temporary, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise PrivateRevisionError("short write", code="write_error", state="recoverable")
+            view = view[written:]
+        _fsync_file(descriptor, fsync_file)
+    except Exception:
+        os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+        raise
+    os.close(descriptor)
+    _fsync_directory(directory, fsync_directory)
+    os.replace(temporary, directory / name)
+    _fsync_directory(directory, fsync_directory)
+
+
+def _read_exact(path: Path) -> bytes | None:
+    if not path.exists():
+        return None
+    _reject_symlink(path)
+    return path.read_bytes()
+
+
+def _seal_role(
+    payload: bytes,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    kind: str,
+    revision: str,
+    key: bytes,
+    key_id: str,
+) -> bytes:
+    binding = PrivateArtifactBinding(
+        tenant_id=tenant_id,
+        case_id=case_id,
+        artifact_kind=kind,
+        revision=revision,
+        principal_id=principal_id,
+    )
+    return seal_private_artifact(payload, binding=binding, key=key, key_id=key_id)
+
+
+def _open_role(
+    envelope: bytes,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    kind: str,
+    revision: str,
+    key: bytes,
+    key_id: str,
+) -> bytes:
+    binding = PrivateArtifactBinding(
+        tenant_id=tenant_id,
+        case_id=case_id,
+        artifact_kind=kind,
+        revision=revision,
+        principal_id=principal_id,
+    )
+    return open_private_artifact(envelope, binding=binding, key=key, expected_key_id=key_id)
+
+
+def _manifest_bytes(document: Mapping[str, Any]) -> bytes:
+    return json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _open_manifest(
+    envelope: bytes,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    key: bytes,
+    key_id: str,
+) -> dict[str, Any]:
+    body = _open_role(
+        envelope,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        kind="revision-manifest",
+        revision=revision,
+        key=key,
+        key_id=key_id,
+    )
+    document = json.loads(body.decode("utf-8"))
+    if not isinstance(document, dict) or document.get("schema") != _REVISION_SCHEMA:
+        raise PrivateRevisionError("revision manifest is not authentic", code="corrupt_manifest", state="recoverable")
+    return document
+
+
+def _journal_text_issue(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    _reject_symlink(path)
+    data = path.read_bytes()
+    if not data:
+        return None
+    lines = data.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        last = index == len(lines) - 1
+        stripped = line.strip()
+        if not stripped:
+            if last:
+                continue
+            return "interior_invalid"
+        try:
+            value = json.loads(stripped.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            if last and not line.endswith(b"\n"):
+                return None
+            return "interior_invalid"
+        if not isinstance(value, dict):
+            return "interior_invalid"
+    return None
+
+
+def _segment_issue(path: Path) -> str | None:
+    wal = _load_wal()
+    recovery = wal["recover_segment"](
+        path,
+        disposition=wal["WALCorruptionDisposition"].BOUND_AND_REPORT,
+    )
+    if not recovery.tail_corrupt:
+        return None
+    original = path.read_bytes()
+    remainder = original[recovery.valid_bytes :]
+    if b"IWAL1" in remainder[1:]:
+        return "interior_invalid"
+    # A torn tail is recoverable by the Kit prefix reader. Interior damage is not.
+    if recovery.valid_bytes == 0 and len(original) > 8:
+        return "interior_invalid"
+    return None
+
+
+def inspect_revision_journal(repository: str | Path) -> str | None:
+    """Return a corruption code, or None when the journal is safe to replay.
+
+    This never truncates, quarantines, or rewrites journal bytes.
+    """
+
+    root = Path(repository)
+    before = _snapshot_bytes(root)
+    try:
+        wal_dir = root / "wal"
+        if wal_dir.exists() and wal_dir.is_symlink():
+            return "journal_untrusted"
+        for name in ("transaction-decisions.jsonl", "transaction-replay.jsonl"):
+            issue = _journal_text_issue(wal_dir / name)
+            if issue:
+                return issue
+        records = wal_dir / "records"
+        if records.is_symlink():
+            return "journal_untrusted"
+        if records.exists():
+            for path in sorted(records.iterdir()):
+                if not path.is_file() or path.is_symlink():
+                    continue
+                if path.suffix == ".corrupt":
+                    return "interior_invalid"
+                issue = _segment_issue(path)
+                if issue:
+                    return issue
+        return None
+    finally:
+        after = _snapshot_bytes(root)
+        if before != after:
+            raise PrivateRevisionError(
+                "journal inspection changed bytes",
+                code="journal_mutated",
+                state="recoverable",
+            )
+
+
+def _snapshot_bytes(root: Path) -> dict[str, bytes]:
+    found: dict[str, bytes] = {}
+    if not root.exists():
+        return found
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and not path.is_symlink():
+            found[str(path.relative_to(root))] = path.read_bytes()
+    return found
+
+
+def _acquire_lock(root: Path):
+    root.mkdir(parents=True, exist_ok=True)
+    os.chmod(root, 0o700)
+    lock_path = root / _LOCK_NAME
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(lock_path, flags, 0o600)
+    os.fchmod(descriptor, 0o600)
+    import fcntl
+
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+    except OSError as exc:
+        os.close(descriptor)
+        raise PrivateRevisionError(
+            "revision owner lock failed",
+            code="lock_unavailable",
+            state="recoverable",
+        ) from exc
+    return descriptor
+
+
+def _release_lock(descriptor: int) -> None:
+    import fcntl
+
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
+
+
+def _store_object(
+    root: Path,
+    payload: bytes,
+    *,
+    fsync_file: Callable[[int], None] | None,
+    fsync_directory: Callable[[int], None] | None,
+) -> str:
+    ref = _opaque_ref(payload)
+    directory = root / "o"
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / ref
+    if destination.exists():
+        if destination.read_bytes() != payload:
+            raise PrivateRevisionError("opaque object collision", code="object_collision", state="recoverable")
+        return ref
+    _atomic_write(directory, ref, payload, fsync_file=fsync_file, fsync_directory=fsync_directory)
+    return ref
+
+
+def _object_bytes(root: Path, ref: str) -> bytes:
+    if not isinstance(ref, str) or len(ref) != 64:
+        raise PrivateRevisionError("opaque ref rejected", code="bad_ref", state="recoverable")
+    path = root / "o" / ref
+    data = _read_exact(path)
+    if data is None or _opaque_ref(data) != ref:
+        raise PrivateRevisionError("opaque object missing", code="missing_object", state="recoverable")
+    return data
+
+
+def _open_head(
+    root: Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    revision_hint: str | None = None,
+) -> dict[str, Any] | None:
+    raw = _read_exact(root / _HEAD_NAME)
+    if raw is None:
+        return None
+    hints = []
+    if revision_hint:
+        hints.append(revision_hint)
+    pointer = _read_exact(root / "head.rev")
+    if pointer:
+        text = pointer.decode("utf-8", errors="replace").strip()
+        if text and text not in hints:
+            hints.append(text)
+    last_error: Exception | None = None
+    for hint in hints:
+        try:
+            return _open_manifest(
+                raw,
+                tenant_id=tenant_id,
+                case_id=case_id,
+                principal_id=principal_id,
+                revision=hint,
+                key=key,
+                key_id=key_id,
+            )
+        except PrivateStorageError as exc:
+            last_error = exc
+    if last_error is not None and not hints:
+        raise PrivateRevisionError(
+            "revision head has no revision pointer",
+            code="corrupt_manifest",
+            state="recoverable",
+        )
+    if last_error is not None:
+        raise PrivateRevisionError(
+            "revision head did not authenticate",
+            code="authentication_failed",
+            state="recoverable",
+        ) from last_error
+    return None
+
+
+def _publish_head(
+    root: Path,
+    envelope: bytes,
+    revision: str,
+    *,
+    fsync_file: Callable[[int], None] | None,
+    fsync_directory: Callable[[int], None] | None,
+) -> None:
+    _atomic_write(root, _HEAD_NAME, envelope, fsync_file=fsync_file, fsync_directory=fsync_directory)
+    _atomic_write(
+        root,
+        "head.rev",
+        revision.encode("utf-8"),
+        fsync_file=fsync_file,
+        fsync_directory=fsync_directory,
+    )
+
+
+def _intent_document(
+    *,
+    transaction_id: str,
+    effect_id: str,
+    expected_revision: str,
+    revision: str,
+    previous_head_ref: str,
+    manifest_ref: str,
+    objects: Mapping[str, str],
+) -> dict[str, str]:
+    document = {
+        "schema": _INTENT_SCHEMA,
+        "transaction_id": transaction_id,
+        "effect_id": effect_id,
+        "expected_revision": expected_revision,
+        "revision": revision,
+        "previous_head_ref": previous_head_ref,
+        "manifest_ref": manifest_ref,
+        "session_ref": objects["session"],
+        "fact_graph_ref": objects["fact_graph"],
+        "proof_ref": objects["proof"],
+    }
+    encoded = json.dumps(document)
+    forbidden = ("answer", "source_span", "passphrase", "plaintext", "/", "\\")
+    lowered = encoded.lower()
+    for token in forbidden:
+        if token in {"/", "\\"}:
+            continue
+        if token in lowered:
+            raise PrivateRevisionError("intent rejected sensitive field", code="intent_rejected", state="recoverable")
+    return document
+
+
+def _apply_intent(root: Path, intent: Mapping[str, Any], *, install: bool, fsync_file, fsync_directory) -> bool:
+    revision = str(intent.get("revision") or "")
+    effect_id = str(intent.get("effect_id") or "")
+    pointer = _read_exact(root / "head.rev")
+    current = pointer.decode("utf-8").strip() if pointer else ""
+    if install:
+        if current == revision:
+            return True
+        expected = str(intent.get("expected_revision") or "")
+        if current != expected and not (current == "" and expected in {"", "0"}):
+            return False
+        envelope = _object_bytes(root, str(intent["manifest_ref"]))
+        _publish_head(root, envelope, revision, fsync_file=fsync_file, fsync_directory=fsync_directory)
+        return True
+    if current != revision:
+        return True
+    previous = str(intent.get("previous_head_ref") or "")
+    expected = str(intent.get("expected_revision") or "")
+    if not previous:
+        head = root / _HEAD_NAME
+        rev = root / "head.rev"
+        if head.exists():
+            head.unlink()
+        if rev.exists():
+            rev.unlink()
+        _fsync_directory(root, fsync_directory)
+        return True
+    envelope = _object_bytes(root, previous)
+    _publish_head(root, envelope, expected, fsync_file=fsync_file, fsync_directory=fsync_directory)
+    return True
+
+
+def _identity_args(transaction_id: str | None, effect_id: str | None) -> tuple[str, str]:
+    transaction = str(transaction_id or "").strip() or uuid.uuid4().hex
+    effect = str(effect_id or "").strip() or uuid.uuid4().hex
+    for value in (transaction, effect):
+        if len(value) > 128 or any(char in value for char in "\n\r/\x00"):
+            raise PrivateRevisionError("unstable identifier rejected", code="bad_id", state="recoverable")
+    return transaction, effect
+
+
+def commit_private_revision(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    expected_revision: str | None,
+    session: bytes,
+    fact_graph: bytes,
+    proof: bytes,
+    transaction_id: str | None = None,
+    effect_id: str | None = None,
+    crash_injector: Callable[..., Any] | None = None,
+    writer: Any | None = None,
+    fsync_file: Callable[[int], None] | None = None,
+    fsync_directory: Callable[[int], None] | None = None,
+) -> RevisionPublication:
+    """Publish one answer revision across session, fact graph, and proof.
+
+    Objects are sealed first. The visible head changes only inside the effect,
+    after the intent is durable. ``network_pinned`` stays false.
+    """
+
+    wal = _load_wal()
+    root = Path(repository)
+    transaction_id, effect_id = _identity_args(transaction_id, effect_id)
+    process_lock = _process_lock(root)
+    process_lock.acquire()
+    lock = None
+    coordinator = None
+    inner = None
+    owns_writer = writer is None
+    try:
+        issue = inspect_revision_journal(root) if root.exists() else None
+        if issue:
+            raise PrivateRevisionError(
+                f"revision journal is corrupt ({issue}); original bytes were preserved",
+                code="journal_corrupt",
+                state="recoverable",
+            )
+        lock = _acquire_lock(root)
+        expected = "0" if expected_revision in {None, ""} else str(expected_revision)
+        pointer = _read_exact(root / "head.rev")
+        current = pointer.decode("utf-8").strip() if pointer else "0"
+        if current in {"",}:
+            current = "0"
+        if current != expected:
+            raise PrivateRevisionError(
+                "stale revision",
+                code="revision_conflict",
+                state="conflict",
+            )
+        head_raw = _read_exact(root / _HEAD_NAME)
+        if expected != "0":
+            current_manifest = _open_manifest(
+                head_raw or b"",
+                tenant_id=tenant_id,
+                case_id=case_id,
+                principal_id=principal_id,
+                revision=expected,
+                key=key,
+                key_id=key_id,
+            )
+            if current_manifest.get("effect_id") == effect_id and current_manifest.get("transaction_id") == transaction_id:
+                return RevisionPublication(
+                    True, "committed", transaction_id, effect_id, expected,
+                    wal["WALAcknowledgementMode"].WAL_FSYNC_PARENT.value, 0,
+                )
+        else:
+            if head_raw not in {None, b""}:
+                raise PrivateRevisionError("unexpected head", code="revision_conflict", state="conflict")
+        next_revision = str(int(expected) + 1) if expected.isdigit() else uuid.uuid4().hex
+        sealed = {}
+        for role, payload in (("session", session), ("fact_graph", fact_graph), ("proof", proof)):
+            sealed[role] = _seal_role(
+                payload,
+                tenant_id=tenant_id,
+                case_id=case_id,
+                principal_id=principal_id,
+                kind=role,
+                revision=next_revision,
+                key=key,
+                key_id=key_id,
+            )
+        previous_head_ref = ""
+        if head_raw:
+            previous_head_ref = _store_object(root, head_raw, fsync_file=fsync_file, fsync_directory=fsync_directory)
+        object_refs = {
+            role: _store_object(root, blob, fsync_file=fsync_file, fsync_directory=fsync_directory)
+            for role, blob in sealed.items()
+        }
+        manifest = {
+            "schema": _REVISION_SCHEMA,
+            "revision": next_revision,
+            "parent_revision": expected,
+            "transaction_id": transaction_id,
+            "effect_id": effect_id,
+            "objects": object_refs,
+        }
+        manifest_envelope = _seal_role(
+            _manifest_bytes(manifest),
+            tenant_id=tenant_id,
+            case_id=case_id,
+            principal_id=principal_id,
+            kind="revision-manifest",
+            revision=next_revision,
+            key=key,
+            key_id=key_id,
+        )
+        manifest_ref = _store_object(
+            root, manifest_envelope, fsync_file=fsync_file, fsync_directory=fsync_directory,
+        )
+        intent = _intent_document(
+            transaction_id=transaction_id,
+            effect_id=effect_id,
+            expected_revision=expected,
+            revision=next_revision,
+            previous_head_ref=previous_head_ref,
+            manifest_ref=manifest_ref,
+            objects=object_refs,
+        )
+        inner = writer
+        if inner is None:
+            inner = __import__(
+                "ipfs_kit_py.core.wal.writer", fromlist=["WALWriter"]
+            ).WALWriter(root / "wal" / "records")
+        bridge = _ReceiptWriter(inner)
+        coordinator = wal["WALTransactionCoordinator"](
+            root / "wal",
+            writer=bridge,
+            crash_injector=crash_injector,
+        )
+
+        def effect() -> bool:
+            return _apply_intent(
+                root, intent, install=True, fsync_file=fsync_file, fsync_directory=fsync_directory,
+            )
+
+        def compensate() -> bool:
+            return _apply_intent(
+                root, intent, install=False, fsync_file=fsync_file, fsync_directory=fsync_directory,
+            )
+
+        try:
+            result = coordinator.execute(
+                intent,
+                effect,
+                compensate,
+                transaction_id=transaction_id,
+                effect_id=effect_id,
+            )
+        except wal["WALTransactionCrash"] as exc:
+            raise PrivateRevisionInterrupted(str(getattr(exc, "args", ["crash"])[0]), transaction_id) from exc
+        except wal["WALQueueFullError"] as exc:
+            raise PrivateRevisionError("WAL backpressure", code="wal_backpressure", state="recoverable") from exc
+        except wal["WALWriterError"] as exc:
+            raise PrivateRevisionError("WAL writer is closed", code="wal_closed", state="recoverable") from exc
+        except wal["WALTransactionError"] as exc:
+            raise PrivateRevisionError(str(exc), code="transaction_failed", state="recoverable") from exc
+        except PrivateRevisionError:
+            raise
+        if not result.committed or not bridge.receipts:
+            raise PrivateRevisionError("commit receipt missing", code="durability_unproven", state="recoverable")
+        mode = bridge.receipts[-1].acknowledgement_mode
+        return RevisionPublication(
+            True,
+            "committed",
+            result.transaction_id,
+            result.effect_id,
+            next_revision,
+            getattr(mode, "value", str(mode)),
+            len(bridge.receipts),
+        )
+    finally:
+        if coordinator is not None:
+            coordinator.close()
+        if owns_writer and inner is not None:
+            inner.close()
+        if lock is not None:
+            _release_lock(lock)
+        process_lock.release()
+
+
+def recover_private_revision(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    fsync_file: Callable[[int], None] | None = None,
+    fsync_directory: Callable[[int], None] | None = None,
+) -> RevisionPublication:
+    """Replay a committed revision or compensate an open one. A second call is a no-op."""
+
+    wal = _load_wal()
+    root = Path(repository)
+    issue = inspect_revision_journal(root)
+    if issue:
+        raise PrivateRevisionError(
+            f"revision journal is corrupt ({issue}); original bytes were preserved",
+            code="journal_corrupt",
+            state="recoverable",
+        )
+    process_lock = _process_lock(root)
+    process_lock.acquire()
+    lock = _acquire_lock(root)
+    coordinator = None
+    writer = None
+    try:
+        writer = __import__(
+            "ipfs_kit_py.core.wal.writer", fromlist=["WALWriter"]
+        ).WALWriter(root / "wal" / "records")
+        bridge = _ReceiptWriter(writer)
+        coordinator = wal["WALTransactionCoordinator"](root / "wal", writer=bridge)
+
+        def replay(intent: Mapping[str, Any], effect_id: str) -> bool:
+            if str(intent.get("effect_id") or "") != effect_id:
+                return False
+            return _apply_intent(root, intent, install=True, fsync_file=fsync_file, fsync_directory=fsync_directory)
+
+        def rollback(intent: Mapping[str, Any], effect_id: str) -> bool:
+            if str(intent.get("effect_id") or "") != effect_id:
+                return False
+            return _apply_intent(root, intent, install=False, fsync_file=fsync_file, fsync_directory=fsync_directory)
+
+        try:
+            counts = coordinator.recover(replay, rollback)
+        except wal["WALTransactionError"] as exc:
+            raise PrivateRevisionError(str(exc), code="recovery_failed", state="recoverable") from exc
+        pointer = _read_exact(root / "head.rev")
+        revision = pointer.decode("utf-8").strip() if pointer else None
+        manifest = None
+        if revision:
+            try:
+                manifest = _open_head(
+                    root,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    principal_id=principal_id,
+                    key=key,
+                    key_id=key_id,
+                    revision_hint=revision,
+                )
+            except PrivateRevisionError:
+                raise
+        committed = bool(manifest) and counts["rolled_back"] == 0 and (
+            counts["replayed"] > 0 or revision is not None
+        )
+        # A rollback that restored a parent still has a head. Distinguish by
+        # whether this recovery invoked rollback.
+        if counts["rolled_back"]:
+            state = "compensated"
+            committed = False
+        elif manifest is None:
+            state = "compensated"
+            committed = False
+        else:
+            state = "committed"
+            committed = True
+        effect = str((manifest or {}).get("effect_id") or "")
+        transaction = str((manifest or {}).get("transaction_id") or "")
+        return RevisionPublication(
+            committed,
+            state,
+            transaction,
+            effect,
+            revision if committed or manifest else None,
+            wal["WALAcknowledgementMode"].WAL_FSYNC_PARENT.value if bridge.receipts else None,
+            len(bridge.receipts),
+            replayed=counts["replayed"],
+            rolled_back=counts["rolled_back"],
+        )
+    finally:
+        if coordinator is not None:
+            coordinator.close()
+        if writer is not None:
+            writer.close()
+        _release_lock(lock)
+        process_lock.release()
+
+
+def read_private_revision(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+) -> dict[str, Any] | None:
+    """Open the published head. Wrong key or case raises; nothing is rewritten."""
+
+    root = Path(repository)
+    if not (root / _HEAD_NAME).exists():
+        return None
+    manifest = _open_head(
+        root,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        key=key,
+        key_id=key_id,
+    )
+    if manifest is None:
+        return None
+    revision = str(manifest["revision"])
+    opened: dict[str, Any] = {"manifest": manifest, "revision": revision}
+    for role in _ROLE_NAMES:
+        ref = str((manifest.get("objects") or {})[role])
+        envelope = _object_bytes(root, ref)
+        opened[role] = _open_role(
+            envelope,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            principal_id=principal_id,
+            kind=role,
+            revision=revision,
+            key=key,
+            key_id=key_id,
+        )
+    opened["network_pinned"] = False
+    return opened
+
+
 def assert_store_isolated_from_exports(store_dir: str | Path, export_dir: str | Path) -> None:
     """Refuse to keep a key store inside or next to an encrypted export directory."""
 
@@ -1498,4 +2474,12 @@ __all__ = [
     "assert_store_isolated_from_exports",
     "read_unlock_passphrase",
     "task_key_receipt",
+    "PrivateRevisionError",
+    "PrivateRevisionInterrupted",
+    "RevisionPublication",
+    "commit_acknowledged_by_receipt",
+    "commit_private_revision",
+    "inspect_revision_journal",
+    "read_private_revision",
+    "recover_private_revision",
 ]

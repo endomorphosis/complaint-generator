@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import contextvars
 import errno
+import fcntl
 import inspect
 import json
 import os
@@ -3189,11 +3190,16 @@ class ComplaintWorkspaceService:
         state["at_rest_protection"] = "private_envelope"
         body = json.dumps(state, sort_keys=True).encode("utf-8")
         root_fd = self._open_session_directory()
-        temporary = f".{filename}.{uuid.uuid4().hex}.tmp"
+        temporary = "." + uuid.uuid4().hex + ".tmp"
+        lock_fd = -1
         try:
+            lock_flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
+            lock_fd = os.open(".session-write.lock", lock_flags, 0o600, dir_fd=root_fd)
+            os.fchmod(lock_fd, 0o600)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
             key_id, key = context["key_provider"].resolve(binding)
             envelope = seal_private_artifact(body, binding=binding, key=key, key_id=key_id)
-            self._write_bytes_nofollow(temporary, envelope, root_fd=root_fd)
+            self._write_bytes_nofollow(temporary, envelope, root_fd=root_fd, durable=True)
             staged = self._read_bytes_nofollow(temporary)
             if staged != envelope or open_private_artifact(staged, binding=binding, key=key, expected_key_id=key_id) != body:
                 raise WorkspacePersistenceError("Private session readback failed.", code="readback_mismatch", public_status="recoverable")
@@ -3206,6 +3212,7 @@ class ComplaintWorkspaceService:
             if context["key_provider"].resolve(binding) != (key_id, key):
                 raise WorkspacePersistenceError("Private workspace keys require unlock.", code="unlock_needed", public_status="unlock_needed")
             os.replace(temporary, filename, src_dir_fd=root_fd, dst_dir_fd=root_fd)
+            os.fsync(root_fd)
         except PrivateCryptoCapabilityError:
             raise WorkspacePersistenceError("Private encryption is unavailable.", code="private_crypto_unavailable", public_status="unavailable") from None
         except PrivateStorageError:
@@ -3219,8 +3226,154 @@ class ComplaintWorkspaceService:
                 os.unlink(temporary, dir_fd=root_fd)
             except FileNotFoundError:
                 pass
+            except OSError:
+                pass
+            if lock_fd >= 0:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(lock_fd)
             os.close(root_fd)
         return state
+
+    def joined_revision_repository(self) -> Path:
+        return self._session_dir / "joined-revisions"
+
+    def commit_joined_intake_revision(
+        self,
+        user_id: str,
+        *,
+        question_id: str,
+        answer: str,
+        transaction_id: str,
+        effect_id: str,
+        case_id: Optional[str] = None,
+        expected_revision: Optional[str] = None,
+        crash_injector: Any = None,
+        writer: Any = None,
+        fsync_file: Any = None,
+        fsync_directory: Any = None,
+    ) -> Dict[str, Any]:
+        """Commit one intake answer with its fact-graph edge and proof entry.
+
+        The three payloads are sealed before the Kit WAL intent is written.
+        The intent carries opaque ciphertext refs and the stable ids only.
+        """
+
+        from integrations.private_storage import commit_private_revision
+
+        resolved = self._check_access(user_id, ability="write", case_id=case_id)
+        context = self._private_artifact_context(resolved, case_id)
+        binding_case = context["case_id"]
+        state = self._load_state(resolved)
+        if str(state.get("user_id") or "") != resolved:
+            raise WorkspaceAuthorizationDenied()
+        if _state_case_id(state, resolved) != binding_case and state.get("missing_new_session") is not True:
+            if case_id is not None and _state_case_id(state, resolved) != binding_case:
+                raise WorkspaceAuthorizationDenied()
+        current = str(state.get("private_revision") or "0")
+        expected = "0" if expected_revision in {None, ""} else str(expected_revision)
+        if current != expected:
+            raise WorkspacePersistenceError(
+                "stale revision",
+                code="revision_conflict",
+                public_status="recoverable",
+            )
+        next_revision = str(int(expected) + 1)
+        answers = dict(state.get("intake_answers") or {})
+        history = [item for item in list(state.get("intake_history") or []) if isinstance(item, dict)]
+        if any(str(item.get("effect_id") or "") == effect_id for item in history):
+            raise WorkspacePersistenceError(
+                "effect already recorded",
+                code="duplicate_effect",
+                public_status="recoverable",
+            )
+        answers[str(question_id)] = str(answer)
+        history.append({
+            "question_id": str(question_id),
+            "answer": str(answer),
+            "effect_id": effect_id,
+            "transaction_id": transaction_id,
+        })
+        state["intake_answers"] = answers
+        state["intake_history"] = history
+        state["private_revision"] = next_revision
+        graph = state.get("annotation_knowledge_graph")
+        if not isinstance(graph, dict):
+            graph = {"entities": [], "relationships": []}
+        relationships = [item for item in list(graph.get("relationships") or []) if isinstance(item, dict)]
+        relationships.append({
+            "id": effect_id,
+            "kind": "intake-answer",
+            "question_id": str(question_id),
+            "revision": next_revision,
+        })
+        graph["relationships"] = relationships
+        state["annotation_knowledge_graph"] = graph
+        proofs = [item for item in list(state.get("proof_history") or []) if isinstance(item, dict)]
+        proofs.append({
+            "effect_id": effect_id,
+            "transaction_id": transaction_id,
+            "kind": "intake-revision",
+            "revision": next_revision,
+        })
+        state["proof_history"] = proofs
+        fact_document = {"relationships": relationships, "effect_id": effect_id, "revision": next_revision}
+        proof_document = {"entries": proofs, "effect_id": effect_id, "revision": next_revision}
+        from integrations.private_storage import PrivateArtifactBinding as _Binding
+        binding = _Binding(
+            tenant_id=resolved,
+            case_id=binding_case,
+            artifact_kind="session",
+            revision="session-v1",
+            principal_id=resolved,
+        )
+        key_id, key = context["key_provider"].resolve(binding)
+        publication = commit_private_revision(
+            self.joined_revision_repository(),
+            tenant_id=resolved,
+            case_id=binding_case,
+            principal_id=resolved,
+            key=key,
+            key_id=key_id,
+            expected_revision=expected,
+            session=json.dumps(state, sort_keys=True).encode("utf-8"),
+            fact_graph=json.dumps(fact_document, sort_keys=True).encode("utf-8"),
+            proof=json.dumps(proof_document, sort_keys=True).encode("utf-8"),
+            transaction_id=transaction_id,
+            effect_id=effect_id,
+            crash_injector=crash_injector,
+            writer=writer,
+            fsync_file=fsync_file,
+            fsync_directory=fsync_directory,
+        )
+        receipt = publication.as_dict()
+        receipt["network_pinned"] = False
+        receipt["question_id"] = str(question_id)
+        return receipt
+
+    def recover_joined_intake_revision(self, user_id: str, *, case_id: Optional[str] = None) -> Dict[str, Any]:
+        from integrations.private_storage import PrivateArtifactBinding, recover_private_revision
+
+        resolved = self._check_access(user_id, ability="write", case_id=case_id)
+        context = self._private_artifact_context(resolved, case_id)
+        binding = PrivateArtifactBinding(
+            tenant_id=resolved,
+            case_id=context["case_id"],
+            artifact_kind="session",
+            revision="session-v1",
+            principal_id=resolved,
+        )
+        key_id, key = context["key_provider"].resolve(binding)
+        publication = recover_private_revision(
+            self.joined_revision_repository(),
+            tenant_id=resolved,
+            case_id=context["case_id"],
+            principal_id=resolved,
+            key=key,
+            key_id=key_id,
+        )
+        return publication.as_dict()
 
     def _private_local_backend(self):
         from integrations.ipfs_datasets.storage import LocalCacheIPFSBackend
@@ -3557,7 +3710,8 @@ class ComplaintWorkspaceService:
             os.close(fd)
 
     def _write_bytes_nofollow(self, relative: str, payload: bytes, *,
-                              root_fd: Optional[int] = None, create_parents: bool = False) -> None:
+                              root_fd: Optional[int] = None, create_parents: bool = False,
+                              durable: bool = False) -> None:
         # Validate the opened inode before truncation, including hard-link and
         # special-file refusal. Opening with O_TRUNC would already damage it.
         fd = self._open_relative(relative, os.O_WRONLY | os.O_CREAT,
@@ -3568,6 +3722,8 @@ class ComplaintWorkspaceService:
             while view:
                 written = os.write(fd, view)
                 view = view[written:]
+            if durable:
+                os.fsync(fd)
         finally:
             os.close(fd)
 
