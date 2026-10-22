@@ -2009,3 +2009,79 @@ def test_orphan_recovery_retains_the_configured_validation_worker_and_time_budge
     assert scheduler.max_workers == 1 and scheduler.resource_budget == 1
     assert scheduler.default_timeout_seconds == 900
     assert scheduler.cache is original.cache
+
+
+@pytest.mark.parametrize("owner_alive", [False, True])
+def test_real_native_maintenance_handoff_reads_legacy_mode_without_stealing_live_owner(tmp_path, monkeypatch, owner_alive):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as native
+    cls = runner._validation_aware_supervisor_class(native.PortalImplementationSupervisor)
+    supervisor = object.__new__(cls)
+    supervisor.config = SimpleNamespace(repo_root=ROOT, state_dir=tmp_path, state_path=tmp_path / "state.json")
+    old = {"kind": "implementation", "pid": 991119, "lease_id": "ordinary-owned-lease", "repo_root": str(ROOT), "state_dir": str(tmp_path), "attempt": 3}
+    current = {"kind": "implementation", "pid": os.getpid(), "lease_id": "new-maintenance-lease", "repo_root": str(ROOT), "state_dir": str(tmp_path), "lease_role": "supervisor_maintenance"}
+    path = tmp_path / "implementation.lock"
+    path.write_text(json.dumps(old))
+    path.chmod(0o775)
+    before = path.read_bytes()
+    monkeypatch.setattr(supervisor, "_implementation_maintenance_lease_metadata", lambda: current)
+    def alive(pid):
+        assert pid == old["pid"]
+        return owner_alive
+    monkeypatch.setattr(native, "process_is_running", alive)
+    lease, guard = supervisor._acquire_implementation_maintenance_lease()
+    if owner_alive:
+        assert lease is None and guard["reason"] == "implementation_protected_path_attempt_active"
+        assert path.read_bytes() == before and path.stat().st_mode & 0o777 == 0o775
+    else:
+        assert lease == current and guard["reason"] == "implementation_maintenance_lease_acquired"
+        assert json.loads(path.read_text()) == current
+        supervisor._release_implementation_maintenance_lease(lease)
+        assert not path.exists()
+
+
+@pytest.mark.parametrize("damage", ["world_writable", "wrong_scope"])
+def test_real_native_maintenance_still_refuses_unproven_ordinary_lease(tmp_path, damage):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as native
+    supervisor = object.__new__(runner._validation_aware_supervisor_class(native.PortalImplementationSupervisor))
+    supervisor.config = SimpleNamespace(repo_root=ROOT, state_dir=tmp_path, state_path=tmp_path / "state.json")
+    path = tmp_path / "implementation.lock"
+    old = {"kind": "implementation", "pid": 991119, "lease_id": "legacy", "repo_root": str(ROOT if damage != "wrong_scope" else tmp_path), "state_dir": str(tmp_path)}
+    path.write_text(json.dumps(old))
+    path.chmod(0o777 if damage == "world_writable" else 0o775)
+    current = {"kind": "implementation", "pid": os.getpid(), "lease_id": "next", "repo_root": str(ROOT), "state_dir": str(tmp_path), "lease_role": "supervisor_maintenance"}
+    before = path.read_bytes()
+    lease, guard = supervisor._acquire_implementation_maintenance_lease_serialized(path, current)
+    assert lease is None and guard["reason"] == "implementation_maintenance_lease_owner_unproven"
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("blocked", [True, False])
+def test_startup_preflight_cannot_fall_through_to_worker_dispatch(blocked):
+    trace = []
+    class NativeSupervisor:
+        def run_once(self, *, include_refill=True):
+            assert include_refill is False
+            return {"maintenance_blocked": blocked, "reason": "synthetic_lease_scope"}
+        def _run_forever_loop(self):
+            trace.append("preflight")
+            self.run_once(include_refill=False)
+            trace.append("dispatch")
+            return "running"
+    supervisor = runner._validation_aware_supervisor_class(NativeSupervisor)()
+    if blocked:
+        with pytest.raises(RuntimeError, match="Native startup preflight blocked"):
+            supervisor._run_forever_loop()
+        assert trace == ["preflight"]
+    else:
+        assert supervisor._run_forever_loop() == "running"
+        assert trace == ["preflight", "dispatch"]
+
+
+def test_live_worker_maintenance_deferral_after_preflight_is_not_a_startup_failure():
+    outcomes = [{"maintenance_blocked": False}, {"maintenance_blocked": True, "reason": "implementation_protected_path_attempt_active"}]
+    class NativeSupervisor:
+        def run_once(self, **kwargs): return outcomes.pop(0)
+        def _run_forever_loop(self): return self.run_once(include_refill=False)
+    supervisor = runner._validation_aware_supervisor_class(NativeSupervisor)()
+    assert supervisor._run_forever_loop() == {"maintenance_blocked": False}
+    assert supervisor.run_once()["reason"] == "implementation_protected_path_attempt_active"

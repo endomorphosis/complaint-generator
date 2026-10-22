@@ -2047,6 +2047,24 @@ def _preserve_uncommitted_reconciliation_candidates(supervisor):
 
 def _validation_aware_supervisor_class(native_class):
     class ValidationAwareSupervisor(native_class):
+        @staticmethod
+        def _read_watchdog_authority(path):
+            # Native uses this reader for setup and maintenance admission as
+            # well as validation. Ordinary Native leases use its legacy mode.
+            return _read_validation_watchdog_authority(path)
+
+        def _run_forever_loop(self):
+            self._complaint_startup_preflight_pending = True
+            return super()._run_forever_loop()
+
+        def run_once(self, *, include_refill=True):
+            result = super().run_once(include_refill=include_refill)
+            if getattr(self, "_complaint_startup_preflight_pending", False):
+                if result.get("maintenance_blocked") is True:
+                    raise RuntimeError("Native startup preflight blocked: " + str(result.get("reason") or "maintenance unavailable"))
+                self._complaint_startup_preflight_pending = False
+            return result
+
         def _implementation_attempt_is_active(self, state, *, now_ts):
             return (super()._implementation_attempt_is_active(state, now_ts=now_ts)
                     or _owned_validation_window(self, state, now_ts=now_ts))
