@@ -53,6 +53,34 @@ def _route(obligation=None, **kwargs):
     return route_bound_legal_ir_proof(**payload)
 
 
+def _blocking_router_source(router_pid: Path, descendant_pid: Path | None = None) -> str:
+    """Test-only runner injection; the production API accepts no callbacks."""
+    from integrations.ipfs_datasets import logic
+
+    source = logic._PROOF_ROUTER_CALL_SOURCE
+    marker = "  router = LegalIRProofRouter(pipeline, policy=policy)"
+    assert source.count(marker) == 1
+    fork = ""
+    if descendant_pid is not None:
+        # The original child audit forbids fork. Only this fixed inert test
+        # callback enables it, so real manager adoption/reaping is exercised.
+        source = source.replace(",'os.fork','os.forkpty'", "")
+        fork = (
+            "   child = os.fork()\n"
+            "   if child == 0:\n"
+            f"    open({str(descendant_pid)!r},'w').write(str(os.getpid()))\n"
+            "    while True:time.sleep(.02)\n"
+        )
+    injected = (
+        "  def blocking_runner(request):\n"
+        f"   open({str(router_pid)!r},'w').write(str(os.getpid()))\n"
+        + fork
+        + "   while True:time.sleep(.02)\n"
+        + "  router = LegalIRProofRouter(pipeline, policy=policy, route_runners={'deterministic_syntax':blocking_runner})"
+    )
+    return source.replace(marker, injected, 1)
+
+
 def test_policy_uses_real_router_and_explicit_deadlines():
     routed = _route()
     policy = ProofRoutingPolicy(
@@ -77,6 +105,12 @@ def test_policy_uses_real_router_and_explicit_deadlines():
     assert LegalIRProofRouter.__name__ == "LegalIRProofRouter"
     assert routed["attempts"]
     assert {item["status"] for item in routed["attempts"]}
+    assert routed["process"]["isolated_no_site_bootstrap_verified"] is True
+    assert routed["process"]["request_transport"] == "sealed_parent_memfd"
+    assert routed["process"]["sealed_request_transport_verified"] is True
+    expected_flags = {key: 1 for key in ("no_site", "isolated", "ignore_environment", "dont_write_bytecode")}
+    assert routed["process"]["manager_bootstrap_flags"] == expected_flags
+    assert routed["process"]["worker_bootstrap_flags"] == expected_flags
 
 
 def test_empty_enabled_routes_do_not_enable_install_prone_native_flogic():
@@ -168,53 +202,30 @@ def test_missing_facts_stay_unknown_not_false():
 
 
 def test_outcome_distinctions_for_negative_proof_consistency_and_failure():
-    proved = _route(local_backend="proved")
-    refuted = _route(local_backend="disproved")
-    inconsistent = _route(local_backend="unsat_premises")
-    sat = _route(local_backend="sat")
-    reconstruction = _route(local_backend="reconstruction_failed")
+    # These names were synthetic production outcome selectors, not proofs.
+    selectors = ("proved", "disproved", "unsat_premises", "sat", "reconstruction_failed", "unavailable", "timeout")
+    rejected = [_route(local_backend=name) for name in selectors]
+    for row in rejected:
+        assert row["outcome"] == "unsupported"
+        assert row["reason"] == "untrusted_backend_selector"
+        assert row["backend_selector_rejected"] is True
+        assert row["substantive_trust_satisfied"] is False
+        assert row["entails_claim_element"] is False
+        assert row["theorem_failed_is_counterexample"] is False
+        assert row["consistency_is_entailment"] is False
+        assert row["unsat_proves_arbitrary_claim"] is False
+        assert row["process"] is None
     syntax = _route(
         LegalIRProofObligation(
-            obligation_id="bad-syntax",
-            statement="element_holds(notice",
-            kind="modal_well_formedness",
-            legal_ir_view="intake",
-            logic_family="unspecified",
-        ),
-        goal_statement="element_holds(notice",
-    )
-    unavailable = _route(local_backend="unavailable")
-    unsupported_timeout = _route(local_backend="timeout")
-
-    assert proved["outcome"] == "proved"
-    assert proved["native_trust"] == "kernel"
-    assert proved["substantive_trust_satisfied"] is True
-    assert proved["reason"] == "kernel_bound_to_goal"
-    assert refuted["outcome"] == "refuted"
-    assert refuted["theorem_failed_is_counterexample"] is True
-    assert refuted["native_status"] == "theorem_failed"
-    assert inconsistent["outcome"] == "inconsistent"
-    assert inconsistent["unsat_proves_arbitrary_claim"] is False
-    assert inconsistent["consistency_is_entailment"] is False
-    assert inconsistent["outcome"] != "refuted"
-    assert sat["outcome"] == "unknown"
-    assert sat["consistency_is_entailment"] is False
-    assert reconstruction["outcome"] == "unsupported"
-    assert reconstruction["theorem_failed_is_counterexample"] is False
-    assert reconstruction["reason"] == "theorem_failed_without_bound_negative_proof"
+            obligation_id="bad-syntax", statement="element_holds(notice", kind="modal_well_formedness",
+            legal_ir_view="intake", logic_family="unspecified"), goal_statement="element_holds(notice")
     assert syntax["outcome"] == "unsupported"
+    assert syntax["native_status"] == "theorem_failed"
+    assert syntax["reason"] == "theorem_failed_without_bound_negative_proof"
     assert syntax["outcome"] != "refuted"
-    assert unavailable["outcome"] == "unavailable"
-    assert unsupported_timeout["outcome"] == "timeout"
-    assert routed_outcomes(proved, refuted, inconsistent, sat, reconstruction, syntax, unavailable, unsupported_timeout) >= {
-        "proved",
-        "refuted",
-        "inconsistent",
-        "unknown",
-        "unsupported",
-        "timeout",
-        "unavailable",
-    }
+    assert syntax["substantive_trust_satisfied"] is False
+    assert syntax["process"]["actual_router_owned"] is True
+    assert syntax["process"]["process_group_reaped"] is True
 
 
 def routed_outcomes(*rows):
@@ -236,89 +247,218 @@ def test_stale_versions_do_not_reuse_a_kernel_proof():
     assert routed["versions"]["obligation_version"] == "ob-1"
 
 
-def test_managed_child_timeout_reaps_the_process_group(tmp_path: Path):
+def test_managed_child_timeout_reaps_the_process_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from integrations.ipfs_datasets import logic
+
+    router_pid = tmp_path / "router-pid"
+    monkeypatch.setattr(logic, "_PROOF_ROUTER_CALL_SOURCE", _blocking_router_source(router_pid))
     started = time.monotonic()
-    routed = _route(
-        managed_command=["/usr/bin/python3.12", "-c", "import time; time.sleep(30)"],
-        managed_state_directory=str(tmp_path / "timeout-state"),
-        managed_wall_time_seconds=0.4,
-        total_timeout_seconds=2.0,
-    )
+    routed = _route(managed_state_directory=str(tmp_path / "timeout-state"), total_timeout_seconds=2.0)
     elapsed = time.monotonic() - started
     assert routed["outcome"] == "timeout"
     assert routed["process"]["timed_out"] is True
     assert routed["process"]["process_group_reaped"] is True
     assert elapsed < 3.0
+    # This marker is written by a runner called inside the real native route().
+    assert router_pid.exists()
+    pid = int(router_pid.read_text())
+    assert routed["process"]["router_pid"] == pid
+    assert routed["process"]["actual_router_owned"] is True
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
 
 
-def test_managed_child_cancel_reaps_descendants(tmp_path: Path):
+def test_managed_child_cancel_reaps_descendants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from integrations.ipfs_datasets import logic
+
+    router_pid = tmp_path / "router-pid"
     grandchild = tmp_path / "grandchild-pid"
-    command = [
-        "/usr/bin/python3.12",
-        "-c",
-        (
-            "import os, signal, sys, time\n"
-            "path = sys.argv[1]\n"
-            "pid = os.fork()\n"
-            "if pid == 0:\n"
-            "    time.sleep(30)\n"
-            "    os._exit(0)\n"
-            "def stop(signum, frame):\n"
-            "    try:\n"
-            "        os.kill(pid, signal.SIGKILL)\n"
-            "    except OSError:\n"
-            "        pass\n"
-            "    try:\n"
-            "        os.waitpid(pid, 0)\n"
-            "    except OSError:\n"
-            "        pass\n"
-            "    os._exit(0)\n"
-            "signal.signal(signal.SIGTERM, stop)\n"
-            "open(path, 'w', encoding='utf-8').write(str(pid))\n"
-            "while True:\n"
-            "    time.sleep(0.05)\n"
-        ),
-        str(grandchild),
-    ]
+    monkeypatch.setattr(logic, "_PROOF_ROUTER_CALL_SOURCE", _blocking_router_source(router_pid, grandchild))
     cancel = threading.Event()
 
     def _cancel():
-        time.sleep(0.2)
+        deadline = time.monotonic() + 2.0
+        while not grandchild.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
         cancel.set()
 
-    threading.Thread(target=_cancel, daemon=True).start()
+    thread = threading.Thread(target=_cancel)
+    thread.start()
     started = time.monotonic()
-    routed = _route(
-        managed_command=command,
-        managed_state_directory=str(tmp_path / "cancel-state"),
-        managed_wall_time_seconds=5.0,
-        total_timeout_seconds=5.0,
-        cancellation_event=cancel,
-    )
+    routed = _route(managed_state_directory=str(tmp_path / "cancel-state"),
+                    total_timeout_seconds=5.0, cancellation_event=cancel)
     elapsed = time.monotonic() - started
+    thread.join(timeout=0.1)
     assert routed["outcome"] == "cancelled"
     assert routed["process"]["cancelled"] is True
     assert routed["process"]["process_group_reaped"] is True
     assert elapsed < 3.0
-    deadline = time.monotonic() + 1.5
-    while not grandchild.exists() and time.monotonic() < deadline:
-        time.sleep(0.02)
     assert grandchild.exists()
     child_pid = int(grandchild.read_text(encoding="utf-8"))
-    remaining = deadline - time.monotonic()
-    while remaining > 0:
-        try:
-            os.kill(child_pid, 0)
-        except ProcessLookupError:
-            break
-        time.sleep(0.05)
-        remaining = deadline - time.monotonic()
-    else:
-        raise AssertionError(f"descendant {child_pid} is still running")
     with pytest.raises(ProcessLookupError):
         os.kill(child_pid, 0)
+    assert router_pid.exists()
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(router_pid.read_text()), 0)
+    assert routed["process"]["router_tree_reaped"] is True
+    assert not thread.is_alive()
 
 
 def test_non_finite_deadline_is_rejected():
     with pytest.raises(ValueError):
         _route(total_timeout_seconds=float("inf"))
+
+
+def test_arbitrary_preliminary_command_cannot_supply_proof_or_execute(tmp_path: Path):
+    marker = tmp_path / "must-not-exist"
+    routed = _route(managed_command=["/usr/bin/python3.12", "-c", f"open({str(marker)!r},'w').write('unsafe')"])
+    assert routed["outcome"] == "unsupported"
+    assert routed["reason"] == "untrusted_process_command"
+    assert routed["managed_command_rejected"] is True
+    assert routed["entails_claim_element"] is False
+    assert routed["process"] is None
+    assert not marker.exists()
+
+
+def test_cancellation_before_routing_does_not_launch_an_actual_worker(tmp_path: Path):
+    cancel = threading.Event()
+    cancel.set()
+    root = tmp_path / "never-created"
+    routed = _route(cancellation_event=cancel, managed_state_directory=str(root))
+    assert routed["outcome"] == "cancelled"
+    assert routed["process"]["cancelled"] is True
+    assert routed["process"]["process_group_reaped"] is True
+    assert not root.exists()
+    assert routed["substantive_trust_satisfied"] is False
+
+
+def test_native_outcome_labels_without_checked_artifacts_do_not_mint_proof():
+    from integrations.ipfs_datasets import logic
+
+    common = dict(native_trust="kernel", native_reason="backend_counterexample", attempt_metadata=[],
+        missing_facts=[], versions_match=True, similarity_score=1.0, model_assertion="proved",
+        process={"process_group_reaped": True})
+    # Fixture results are inputs to a private classification test, never a
+    # selectable production prover or a claimed successful substantive proof.
+    proved_label = logic._classify_route(native_status="proved", **common)
+    failed_label = logic._classify_route(native_status="theorem_failed", **common)
+    assert proved_label["outcome"] == "unknown"
+    assert proved_label["substantive_trust_satisfied"] is False
+    assert failed_label["outcome"] == "unsupported"
+    assert failed_label["theorem_failed_is_counterexample"] is False
+    assert proved_label["consistency_is_entailment"] is False
+    assert failed_label["unsat_proves_arbitrary_claim"] is False
+
+
+def test_real_router_exception_is_typed_and_does_not_expose_private_error(monkeypatch: pytest.MonkeyPatch):
+    from integrations.ipfs_datasets import logic
+
+    marker = "  router = LegalIRProofRouter(pipeline, policy=policy)"
+    source = logic._PROOF_ROUTER_CALL_SOURCE
+    assert source.count(marker) == 1
+    source = source.replace(marker,
+        "  def failing_runner(request):\n"
+        "   raise ValueError('PRIVATE-ROUTER-ERROR-CONTENT')\n"
+        "  router = LegalIRProofRouter(pipeline, policy=policy, route_runners={'deterministic_syntax':failing_runner})", 1)
+    monkeypatch.setattr(logic, "_PROOF_ROUTER_CALL_SOURCE", source)
+    routed = _route()
+    syntax = next(row for row in routed["attempts"] if row["route"] == "deterministic_syntax")
+    assert syntax["status"] == "error"
+    assert syntax["reason"] == "route_execution_failed"
+    assert "PRIVATE-ROUTER-ERROR-CONTENT" not in str(routed)
+    assert routed["entails_claim_element"] is False
+    assert routed["process"]["actual_router_owned"] is True
+    assert routed["process"]["process_group_reaped"] is True
+
+
+@pytest.mark.parametrize("stop", ["timeout", "cancelled"])
+def test_stalled_request_reader_is_deadline_bounded_before_input_completes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stop: str,
+):
+    import json
+    import signal
+
+    from integrations.ipfs_datasets import logic
+
+    observed = tmp_path / "before-request-read.json"
+    source = logic._PROOF_ROUTER_CALL_SOURCE
+    marker = "request = json.loads(sys.stdin.buffer.read(1048577))"
+    assert source.count(marker) == 1
+    # This fixed inert child stops after one byte. The request exceeds pipe
+    # capacity, so the manager must cancel/expire while still pumping stdin.
+    stall = (
+        "state = ctypes.c_int()\n"
+        "assert ctypes.CDLL(None).prctl(2,ctypes.byref(state),0,0,0) == 0\n"
+        "assert len(os.read(sys.stdin.fileno(),1)) == 1\n"
+        f"with open({str(observed)!r},'w') as stream:\n"
+        " json.dump({'pid':os.getpid(),'parent':os.getppid(),'manager':manager,'pdeathsig':state.value},stream)\n"
+        "while True:time.sleep(.02)\n"
+    )
+    monkeypatch.setattr(logic, "_PROOF_ROUTER_CALL_SOURCE", source.replace(marker, stall, 1))
+    cancel = threading.Event()
+    thread = None
+    if stop == "cancelled":
+        def cancel_after_reader_starts():
+            deadline = time.monotonic() + 2.0
+            while not observed.exists() and time.monotonic() < deadline:
+                time.sleep(.005)
+            cancel.set()
+        thread = threading.Thread(target=cancel_after_reader_starts)
+        thread.start()
+    started = time.monotonic()
+    routed = _route(sample_or_document={"metadata": {"padding": "x" * 262144}},
+        managed_state_directory=str(tmp_path / "owned"), total_timeout_seconds=2.0,
+        cancellation_event=cancel)
+    elapsed = time.monotonic() - started
+    if thread is not None:
+        thread.join(timeout=.1)
+        assert not thread.is_alive()
+    assert routed["outcome"] == stop
+    assert routed["process"]["timed_out" if stop == "timeout" else "cancelled"] is True
+    assert elapsed < 3.0
+    assert observed.exists()
+    state = json.loads(observed.read_text())
+    assert state["pdeathsig"] == signal.SIGKILL
+    assert state["parent"] == state["manager"] == routed["process"]["pid"]
+    assert state["pid"] == routed["process"]["router_pid"]
+    assert routed["process"]["stdin_complete"] is False
+    assert routed["process"]["isolated_no_site_bootstrap_verified"] is True
+    assert routed["process"]["request_transport"] == "sealed_parent_memfd"
+    assert routed["process"]["sealed_request_transport_verified"] is True
+    expected_flags = {key: 1 for key in ("no_site", "isolated", "ignore_environment", "dont_write_bytecode")}
+    assert routed["process"]["manager_bootstrap_flags"] == expected_flags
+    assert routed["process"]["worker_bootstrap_flags"] == expected_flags
+    assert 0 < routed["process"]["input_bytes_sent"] < routed["process"]["input_bytes_total"]
+    assert routed["process"]["input_bytes_total"] > 262144
+    identity = routed["process"]["router_child_identity"]
+    assert identity["pid"] == state["pid"]
+    assert identity["start_ticks"] > 0
+    assert identity["manager_pid"] == state["manager"]
+    assert routed["process"]["router_tree_reaped"] is True
+    assert routed["process"]["process_group_reaped"] is True
+    assert routed["substantive_trust_satisfied"] is False
+    assert routed["entails_claim_element"] is False
+    with pytest.raises(ProcessLookupError):
+        os.kill(state["pid"], 0)
+    assert list((tmp_path / "owned").iterdir()) == []
+
+
+def test_large_request_is_fully_pumped_into_the_real_router(tmp_path: Path):
+    routed = _route(sample_or_document={"metadata": {"padding": "x" * 262144}},
+        managed_state_directory=str(tmp_path / "owned"))
+    assert routed["process"]["stdin_complete"] is True
+    assert routed["process"]["isolated_no_site_bootstrap_verified"] is True
+    assert routed["process"]["request_transport"] == "sealed_parent_memfd"
+    assert routed["process"]["sealed_request_transport_verified"] is True
+    expected_flags = {key: 1 for key in ("no_site", "isolated", "ignore_environment", "dont_write_bytecode")}
+    assert routed["process"]["manager_bootstrap_flags"] == expected_flags
+    assert routed["process"]["worker_bootstrap_flags"] == expected_flags
+    assert routed["process"]["input_bytes_sent"] == routed["process"]["input_bytes_total"]
+    assert routed["process"]["input_bytes_total"] > 262144
+    assert routed["router"].endswith("LegalIRProofRouter")
+    assert routed["attempts"]
+    assert routed["runtime_sources"]
+    assert routed["process"]["router_tree_reaped"] is True
+    assert routed["process"]["process_group_reaped"] is True
+    assert routed["entails_claim_element"] is False
+    assert list((tmp_path / "owned").iterdir()) == []

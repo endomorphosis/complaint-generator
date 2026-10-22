@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import replace
+
 import pytest
 
 from integrations.ipfs_datasets import logic
@@ -626,3 +629,360 @@ def test_claim_support_hook_keeps_source_proof_and_does_not_relabel_heuristics()
     assert diagnostics["logic_proof"].get("provable_elements") is not None
     # The legacy heuristic may still call supported coverage provable. The bound artifact does not.
     assert artifact["trust_level"] == "structural"
+
+
+@pytest.mark.parametrize("identity", [
+    "pipeline_cid", "source_map_schema", "canonical_ir_schema",
+    "measured_compiler_raw_cid",
+])
+def test_audit_rejects_changed_recorded_compiler_identities(identity: str) -> None:
+    original = _compile()
+    assert original["status"] == "success"
+    changed = deepcopy(original)
+    changed["identities"][identity] = "foreign-compiler-identity"
+
+    audited = logic.audit_canonical_formalization_payload(changed)
+
+    assert audited["status"] == "tampered"
+    assert audited["capability"]["implemented"] is False
+    assert any(issue["code"] == "canonical_identity_mismatch" for issue in audited["issues"])
+    assert logic.inspect_canonical_formalization_receipt(original["receipt_id"])["identities"] == original["identities"]
+
+
+@pytest.mark.parametrize("remove_field", [False, True])
+def test_audit_rejects_omitted_passage_coverage(remove_field: bool) -> None:
+    original = _compile()
+    assert original["status"] == "success"
+    changed = deepcopy(original)
+    if remove_field:
+        changed.pop("passages")
+    else:
+        changed["passages"] = []
+
+    audited = logic.audit_canonical_formalization_payload(changed)
+
+    assert audited["status"] == "tampered"
+    assert audited["capability"]["implemented"] is False
+    assert any(issue["field_path"] == "passages" for issue in audited["issues"])
+
+
+def test_audit_binds_top_source_to_the_typed_request_and_embedded_map() -> None:
+    original = _compile()
+    assert original["status"] == "success"
+    changed = deepcopy(original)
+    changed["source_text"] = "Agency shall file notice."
+    changed["source_cid"] = logic._source_cid_for_text(changed["source_text"])
+    changed["passages"] = []
+
+    audited = logic.audit_canonical_formalization_payload(changed)
+
+    assert audited["status"] == "tampered"
+    assert audited["capability"]["implemented"] is False
+    assert any(issue["code"] == "source_or_result_binding_mismatch" for issue in audited["issues"])
+
+
+def test_audit_rejects_an_internally_valid_map_from_another_real_compile() -> None:
+    original = _compile()
+    other = _compile("Agency shall file notice.", request_id="proof01-other-source")
+    assert original["status"] == other["status"] == "success"
+    assert other["source_map_validation"]["valid"] is True
+    changed = deepcopy(original)
+    changed["source_map"] = deepcopy(other["source_map"])
+
+    audited = logic.audit_canonical_formalization_payload(changed)
+
+    assert audited["status"] == "tampered"
+    assert audited["capability"]["implemented"] is False
+    assert any(issue["field_path"] == "source_map" for issue in audited["issues"])
+
+
+def test_complete_rule_coverage_is_derived_from_the_actual_typed_ir() -> None:
+    original = _compile(
+        "Company A shall submit backup report. Agency shall file notice.",
+        request_id="proof01-two-rules",
+    )
+    assert original["status"] == "success"
+    contracts = logic._canonical_contracts_module
+    result = contracts.CompilerResult.from_dict(original["compiler_result"])
+    assert result.canonical_ir is not None
+    assert len(result.canonical_ir.rules) == 2
+    omitted_rule = result.canonical_ir.rules[-1].rule_cid
+    incomplete = replace(result, source_map=tuple(
+        entry for entry in result.source_map if entry.rule_cid != omitted_rule
+    ))
+    changed = deepcopy(original)
+    changed["compiler_result"] = incomplete.to_dict()
+    changed["result_cid"] = incomplete.result_cid
+
+    audited = logic.audit_canonical_formalization_payload(changed)
+
+    assert audited["status"] == "tampered"
+    assert audited["capability"]["implemented"] is False
+    assert any(issue["code"] == "canonical_field_coverage_mismatch" for issue in audited["issues"])
+    assert any(issue["code"] == "traceability_failed" for issue in audited["issues"])
+
+
+def test_serialized_valid_structure_cannot_claim_an_original_execution() -> None:
+    original = _compile()
+    assert original["status"] == "success"
+    unchanged = logic.audit_canonical_formalization_payload(original)
+    assert unchanged["status"] == "verified"
+    assert unchanged["execution_origin_verified"] is True
+    assert unchanged["capability"]["implemented"] is True
+    unregistered = deepcopy(original)
+    unregistered["receipt_id"] = "canonical-receipt-not-executed"
+
+    audited = logic.audit_canonical_formalization_payload(unregistered)
+
+    assert audited["status"] == "unverified"
+    assert audited["traceable"] is True
+    assert audited["execution_origin_verified"] is False
+    assert audited["capability"]["implemented"] is False
+    assert audited["capability"]["support"] == "not_executed"
+
+
+@pytest.mark.parametrize("module_name,identity_name", [
+    ("_canonical_contracts_module", "CANONICAL_ROUNDTRIP_IR_SCHEMA_VERSION"),
+    ("_canonical_compiler_module", "MEASURED_TYPED_DEONTIC_ADAPTER_RAW_CID"),
+])
+def test_current_schema_or_measured_compiler_change_invalidates_old_execution(
+    monkeypatch: pytest.MonkeyPatch, module_name: str, identity_name: str,
+) -> None:
+    original = _compile()
+    assert original["status"] == "success"
+    original_stored = logic.inspect_canonical_formalization_receipt(original["receipt_id"])
+    monkeypatch.setattr(getattr(logic, module_name), identity_name, "changed-current-identity")
+
+    capability = logic.get_canonical_compiler_capability()
+    audited = logic.verify_canonical_formalization_receipt(original["receipt_id"])
+
+    assert capability.implemented is False
+    assert capability.support is CanonicalCompilerSupport.SCHEMA_MISMATCH
+    assert audited["status"] == "tampered"
+    assert audited["capability"]["implemented"] is False
+    assert any(issue["code"] == "canonical_identity_mismatch" for issue in audited["issues"])
+    assert logic.inspect_canonical_formalization_receipt(original["receipt_id"]) == original_stored
+
+
+def test_citation_change_does_not_reuse_the_previous_source_receipt() -> None:
+    original = _compile()
+    assert original["status"] == "success"
+    changed = _compile(legal_context={
+        "citation": "Synthetic Authority §2", "authority_version": "law04-synthetic-1",
+        "source_text": _LEGAL_TEXT,
+    })
+
+    assert changed["status"] == "success"
+    assert changed["reused"] is False
+    assert changed["receipt_id"] != original["receipt_id"]
+    assert changed["citation"] == "Synthetic Authority §2"
+    assert {span["citation"] for span in changed["source_map"]["spans"]} == {"Synthetic Authority §2"}
+    assert logic.verify_canonical_formalization_receipt(changed["receipt_id"])["capability"]["implemented"] is True
+    assert logic.inspect_canonical_formalization_receipt(original["receipt_id"])["citation"] == "Synthetic Authority §1"
+
+
+def test_reused_receipt_preserves_execution_origin_and_current_excluded_facts() -> None:
+    original = _compile(user_facts=["Synthetic user fact one."])
+    reused = _compile(user_facts=["Synthetic user fact one."])
+    assert original["status"] == "success"
+    assert reused["reused"] is True
+    assert logic.audit_canonical_formalization_payload(reused)["execution_origin_verified"] is True
+    changed = _compile(user_facts=["Synthetic user fact two."])
+    assert changed["status"] == "success"
+    assert changed["reused"] is False
+    assert changed["user_facts"] == ["Synthetic user fact two."]
+    assert changed["user_facts_included_in_source"] is False
+
+
+def test_partial_receipt_audit_remains_nonimplemented() -> None:
+    partial = _compile(
+        "Company A shall submit backup report. Unknown party must invent widgets.",
+        allow_explicit_partial=True, request_id="proof01-audited-partial",
+    )
+    assert partial["status"] == "partial"
+    audited = logic.audit_canonical_formalization_payload(partial)
+    assert audited["status"] == "verified"
+    assert audited["execution_origin_verified"] is True
+    assert audited["capability"]["implemented"] is False
+    assert audited["capability"]["support"] == "partial"
+
+
+@pytest.mark.parametrize("field", ["text", "revision", "provenance"])
+def test_assumption_semantics_invalidate_cache_without_changing_native_ids(field: str) -> None:
+    from copy import deepcopy
+
+    logic.reset_bound_proof_obligation_cache()
+    document = _modal_document()
+    original_inputs = _premise_kwargs(document.normalized_text)
+    original = logic.generate_bound_legal_ir_proof_obligations(document, **original_inputs)
+    changed_inputs = deepcopy(original_inputs)
+    changed_inputs["assumptions"][0][field] = {
+        "text": "PRIVATE-REVISED-ASSUMPTION deadline runs from receipt.",
+        "revision": "assumption-rev-2",
+        "provenance": {"source_id": "synthetic-assumption-2", "review": "unconfirmed"},
+    }[field]
+    changed = logic.generate_bound_legal_ir_proof_obligations(document, **changed_inputs)
+    replay = logic.generate_bound_legal_ir_proof_obligations(document, **changed_inputs)
+
+    assert original["status"] == changed["status"] == "success"
+    assert changed["reused"] is False
+    assert changed["execution_identity"] != original["execution_identity"]
+    assert changed["versions"]["premise_inventory_identity"] != original["versions"]["premise_inventory_identity"]
+    assert changed["native_obligation_ids"] == original["native_obligation_ids"]
+    assert replay["reused"] is True
+    assert replay["receipt_id"] == changed["receipt_id"]
+    assert logic.inspect_bound_proof_obligation_receipt(original["receipt_id"])["premise_inventory"] == original["premise_inventory"]
+    entry = changed["premise_inventory"]["assumptions"][0]
+    if field == "provenance":
+        assert entry["provenance"]["record_provenance"] == changed_inputs["assumptions"][0][field]
+    else:
+        assert entry[field] == changed_inputs["assumptions"][0][field]
+    assert entry["axiom"] is False
+    assert changed["entails_claim_element"] is False
+    assert "PRIVATE-REVISED-ASSUMPTION" not in str(changed["operational_trace"])
+
+
+@pytest.mark.parametrize("field", ["predicate", "arguments", "operator", "conditions", "exceptions", "provenance", "metadata"])
+def test_full_formula_semantics_recompute_real_native_obligations(field: str) -> None:
+    from dataclasses import replace
+
+    from ipfs_datasets_py.logic.integration.reasoning.legal_ir_obligations import generate_legal_ir_proof_obligations
+
+    logic.reset_bound_proof_obligation_cache()
+    document = _modal_document()
+    formula = document.formulas[0]
+    changes = {
+        "predicate": {"predicate": replace(formula.predicate, name="send_notice")},
+        "arguments": {"predicate": replace(formula.predicate, arguments=["agency", "recipient"])},
+        "operator": {"operator": replace(formula.operator, system="D")},
+        "conditions": {"conditions": ["within 45 days"]},
+        "exceptions": {"exceptions": ["emergency conditions exist", "unless delivery is impossible"]},
+        "provenance": {"provenance": replace(formula.provenance, citation="Synthetic §2")},
+        "metadata": {"metadata": {"source_revision": "synthetic-rule-revision-2"}},
+    }
+    changed_document = replace(document, formulas=[replace(formula, **changes[field])])
+    original = logic.generate_bound_legal_ir_proof_obligations(document, **_premise_kwargs(document.normalized_text))
+    changed = logic.generate_bound_legal_ir_proof_obligations(changed_document, **_premise_kwargs(document.normalized_text))
+    native = [item.to_dict() for item in generate_legal_ir_proof_obligations(changed_document)]
+
+    assert original["status"] == changed["status"] == "success"
+    assert changed["reused"] is False
+    assert changed["execution_identity"] != original["execution_identity"]
+    assert changed["versions"]["formula_identity"] != original["versions"]["formula_identity"]
+    assert changed["obligations"] == native
+    assert changed["native_obligation_ids"] == [item["obligation_id"] for item in native]
+    assert logic.generate_bound_legal_ir_proof_obligations(changed_document, **_premise_kwargs(document.normalized_text))["reused"] is True
+    assert logic.inspect_bound_proof_obligation_receipt(original["receipt_id"])["obligations"] == original["obligations"]
+    assert changed["entails_claim_element"] is False
+    assert changed["substantive_entailment"] is False
+
+
+@pytest.mark.parametrize(
+    "role,field,value",
+    [
+        ("asserted_facts", "provenance", {"source_id": "synthetic-fact-source-2", "revision": "source-r2"}),
+        ("asserted_facts", "support_ref", "synthetic-support-2"),
+        ("asserted_facts", "validation_status", "reviewed_unverified"),
+        ("asserted_facts", "validation_status", "contested"),
+        ("asserted_facts", "char_end", 1),
+        ("selected_legal_rules", "provenance", {"source_id": "synthetic-rule-source-2", "revision": "source-r2"}),
+        ("selected_legal_rules", "citation", "Synthetic Authority §2"),
+        ("selected_legal_rules", "text", "A different synthetic rule statement."),
+        ("selected_legal_rules", "applicable", False),
+    ],
+)
+def test_premise_source_and_classification_changes_replace_cached_inventory(role: str, field: str, value) -> None:
+    from copy import deepcopy
+
+    logic.reset_bound_proof_obligation_cache()
+    document = _modal_document()
+    original_inputs = _premise_kwargs(document.normalized_text)
+    original = logic.generate_bound_legal_ir_proof_obligations(document, **original_inputs)
+    changed_inputs = deepcopy(original_inputs)
+    changed_inputs[role][0][field] = value
+    changed = logic.generate_bound_legal_ir_proof_obligations(document, **changed_inputs)
+    current_role = (
+        "disputed_facts" if value == "contested" else
+        "rejected_rules" if role == "selected_legal_rules" and value is False else role
+    )
+    entry = next(
+        item for item in changed["premise_inventory"][current_role]
+        if item["premise_id"] == original["premise_inventory"][role][0]["premise_id"]
+    )
+
+    assert changed["reused"] is False
+    assert changed["execution_identity"] != original["execution_identity"]
+    assert changed["versions"]["premise_inventory_identity"] != original["versions"]["premise_inventory_identity"]
+    assert entry["input_record_sha256"] != original["premise_inventory"][role][0]["input_record_sha256"]
+    assert changed["native_obligation_ids"] == original["native_obligation_ids"]
+    assert logic.inspect_bound_proof_obligation_receipt(original["receipt_id"])["premise_inventory"] == original["premise_inventory"]
+    if field == "provenance":
+        assert entry["provenance"]["record_provenance"] == value
+    elif field in {"support_ref", "citation"}:
+        assert entry["provenance"][field] == value
+    elif field == "validation_status":
+        assert entry["validation_status"] == value
+        if value == "contested":
+            assert entry["disputed"] is True
+            assert changed["premise_inventory"]["asserted_facts"] == []
+    elif field == "applicable":
+        assert changed["premise_inventory"]["selected_legal_rules"] == []
+        assert entry["epistemic_status"] == "rejected_rule"
+    elif field in {"char_end", "text"}:
+        assert entry["source_validated"] is False
+    assert entry["axiom"] is False
+    assert changed["premise_inventory"]["axioms"] == []
+    assert changed["entails_claim_element"] is False
+
+
+@pytest.mark.parametrize("field", ["document_metadata", "structural_validation"])
+def test_current_document_and_check_metadata_do_not_return_old_cached_receipt(field: str) -> None:
+    from dataclasses import replace
+
+    logic.reset_bound_proof_obligation_cache()
+    document = _modal_document()
+    original_inputs = _premise_kwargs(document.normalized_text)
+    original = logic.generate_bound_legal_ir_proof_obligations(document, **original_inputs)
+    changed_document = document
+    changed_inputs = dict(original_inputs)
+    if field == "document_metadata":
+        changed_document = replace(document, metadata={"review_revision": "synthetic-document-r2"})
+    else:
+        changed_inputs["structural_validation"] = {"valid": False, "coverage_status": "partial", "code": "synthetic_missing_field"}
+    changed = logic.generate_bound_legal_ir_proof_obligations(changed_document, **changed_inputs)
+
+    assert changed["reused"] is False
+    assert changed["execution_identity"] != original["execution_identity"]
+    if field == "document_metadata":
+        assert changed["versions"]["modal_document_identity"] != original["versions"]["modal_document_identity"]
+        assert changed["obligations"] != original["obligations"]
+    else:
+        assert changed["structural_validation"] == changed_inputs["structural_validation"]
+        assert changed["versions"]["structural_validation_identity"] != original["versions"]["structural_validation_identity"]
+    assert changed["structural_validation_is_entailment"] is False
+    assert changed["entails_claim_element"] is False
+
+
+def test_missing_backend_after_success_returns_unavailable_and_preserves_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    logic.reset_bound_proof_obligation_cache()
+    document = _modal_document()
+    inputs = _premise_kwargs(document.normalized_text)
+    successful = logic.generate_bound_legal_ir_proof_obligations(document, **inputs)
+    assert successful["status"] == "success"
+    backend = logic._legal_ir_obligations_module
+    monkeypatch.setattr(logic, "_legal_ir_obligations_module", None)
+    unavailable = logic.generate_bound_legal_ir_proof_obligations(document, **inputs)
+
+    assert unavailable["status"] == "unavailable"
+    assert unavailable["support"] == "unsupported"
+    assert unavailable["backend"]["available"] is False
+    assert unavailable["reused"] is False
+    assert unavailable["cache_outcome"] == "not_cached"
+    assert unavailable["obligations"] == []
+    assert unavailable["entails_claim_element"] is False
+    assert logic.inspect_bound_proof_obligation_receipt(successful["receipt_id"]) == successful
+    monkeypatch.setattr(logic, "_legal_ir_obligations_module", backend)
+    restored = logic.generate_bound_legal_ir_proof_obligations(document, **inputs)
+    assert restored["reused"] is True
+    assert restored["receipt_id"] == successful["receipt_id"]
+    assert restored["obligations"] == successful["obligations"]

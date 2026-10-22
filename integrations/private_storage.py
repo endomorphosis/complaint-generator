@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import stat
@@ -1464,8 +1465,11 @@ def read_unlock_passphrase(prompt: str = "Private key passphrase", *, getpass_fn
 # refs and stable ids. Local WAL commit is not a network pin.
 
 _REVISION_SCHEMA = "cg-revision-manifest-v1"
-_INTENT_SCHEMA = "cg-revision-intent-v1"
+_INTENT_SCHEMA = "cg-revision-intent-v2"
 _HEAD_NAME = "head.cgpe"
+_HEAD_RECORD_MAGIC = b"CGJH\x01"
+_OWNER_NAME = "owner.cgpe"
+_RECOVERY_STATUS_NAME = "recovery.cgpe"
 _LOCK_NAME = ".owner.lock"
 _ROLE_NAMES = ("session", "fact_graph", "proof")
 _PROCESS_LOCKS: dict[str, threading.Lock] = {}
@@ -1951,7 +1955,7 @@ def _store_object(
 
 
 def _object_bytes(root: Path, ref: str) -> bytes:
-    if not isinstance(ref, str) or len(ref) != 64:
+    if not isinstance(ref, str) or len(ref) != 64 or any(char not in "0123456789abcdef" for char in ref):
         raise PrivateRevisionError("opaque ref rejected", code="bad_ref", state="recoverable")
     path = root / "o" / ref
     data = _read_exact(path)
@@ -1960,72 +1964,161 @@ def _object_bytes(root: Path, ref: str) -> bytes:
     return data
 
 
-def _open_head(
-    root: Path,
-    *,
-    tenant_id: str,
-    case_id: str,
-    principal_id: str,
-    key: bytes,
-    key_id: str,
-    revision_hint: str | None = None,
-) -> dict[str, Any] | None:
+def _head_record(root: Path) -> tuple[bytes | None, str | None]:
+    """Read one atomic head; the legacy pointer is consulted only for legacy bytes."""
     raw = _read_exact(root / _HEAD_NAME)
     if raw is None:
-        return None
-    hints = []
-    if revision_hint:
-        hints.append(revision_hint)
-    pointer = _read_exact(root / "head.rev")
-    if pointer:
-        text = pointer.decode("utf-8", errors="replace").strip()
-        if text and text not in hints:
-            hints.append(text)
-    last_error: Exception | None = None
-    for hint in hints:
+        return None, None
+    if raw.startswith(_HEAD_RECORD_MAGIC):
+        offset = len(_HEAD_RECORD_MAGIC)
+        if len(raw) < offset + 2:
+            raise PrivateRevisionError("head record is incomplete", code="corrupt_manifest")
+        length = int.from_bytes(raw[offset:offset + 2], "big")
         try:
-            return _open_manifest(
-                raw,
-                tenant_id=tenant_id,
-                case_id=case_id,
-                principal_id=principal_id,
-                revision=hint,
-                key=key,
-                key_id=key_id,
-            )
-        except PrivateStorageError as exc:
-            last_error = exc
-    if last_error is not None and not hints:
-        raise PrivateRevisionError(
-            "revision head has no revision pointer",
-            code="corrupt_manifest",
-            state="recoverable",
-        )
-    if last_error is not None:
-        raise PrivateRevisionError(
-            "revision head did not authenticate",
-            code="authentication_failed",
-            state="recoverable",
-        ) from last_error
-    return None
+            revision = raw[offset + 2:offset + 2 + length].decode("ascii")
+        except UnicodeError:
+            raise PrivateRevisionError("head revision is invalid", code="corrupt_manifest") from None
+        envelope = raw[offset + 2 + length:]
+        if not 0 < length <= 128 or not revision.isdigit() or not envelope.startswith(ENVELOPE_MAGIC):
+            raise PrivateRevisionError("head record is invalid", code="corrupt_manifest")
+        return envelope, revision
+    pointer = _read_exact(root / "head.rev")
+    try:
+        revision = pointer.decode("ascii").strip() if pointer else ""
+    except UnicodeError:
+        revision = ""
+    if not raw.startswith(ENVELOPE_MAGIC) or not revision.isdigit():
+        raise PrivateRevisionError("legacy head needs authenticated recovery", code="corrupt_manifest")
+    return raw, revision
+
+
+def _open_head(
+    root: Path, *, tenant_id: str, case_id: str, principal_id: str,
+    key: bytes, key_id: str, revision_hint: str | None = None,
+) -> dict[str, Any] | None:
+    envelope, revision = _head_record(root)
+    if envelope is None:
+        return None
+    if revision_hint is not None and revision != revision_hint:
+        raise PrivateRevisionError("head revision changed", code="revision_conflict")
+    try:
+        manifest = _open_manifest(envelope, tenant_id=tenant_id, case_id=case_id,
+                                  principal_id=principal_id, key=key, key_id=key_id,
+                                  revision=str(revision))
+    except PrivateStorageError:
+        raise PrivateRevisionError("revision head did not authenticate", code="authentication_failed") from None
+    if str(manifest.get("revision")) != revision:
+        raise PrivateRevisionError("authenticated revision differs", code="corrupt_manifest")
+    return manifest
 
 
 def _publish_head(
-    root: Path,
-    envelope: bytes,
-    revision: str,
-    *,
+    root: Path, envelope: bytes, revision: str, *,
     fsync_file: Callable[[int], None] | None,
     fsync_directory: Callable[[int], None] | None,
 ) -> None:
-    _atomic_write(root, _HEAD_NAME, envelope, fsync_file=fsync_file, fsync_directory=fsync_directory)
-    _atomic_write(
-        root,
-        "head.rev",
-        revision.encode("utf-8"),
-        fsync_file=fsync_file,
-        fsync_directory=fsync_directory,
-    )
+    encoded = str(revision).encode("ascii")
+    if not 0 < len(encoded) <= 128 or not str(revision).isdigit():
+        raise PrivateRevisionError("head revision is invalid", code="bad_revision")
+    record = _HEAD_RECORD_MAGIC + len(encoded).to_bytes(2, "big") + encoded + envelope
+    _atomic_write(root, _HEAD_NAME, record, fsync_file=fsync_file, fsync_directory=fsync_directory)
+
+
+def _authenticate_revision_owner(
+    root: Path, *, tenant_id: str, case_id: str, principal_id: str, key: bytes,
+    key_id: str, create: bool = False, fsync_file=None, fsync_directory=None,
+) -> None:
+    """Authenticate the caller before any WAL writer, replay, or compensation."""
+    raw = _read_exact(root / _OWNER_NAME)
+    options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id,
+                   key=key, key_id=key_id, kind="revision-owner", revision="1")
+    marker = b"complaint-private-revision-owner@1"
+    if raw is not None:
+        try:
+            if _open_role(raw, **options) != marker:
+                raise PrivateArtifactIntegrityError("authentication_failed")
+        except PrivateStorageError:
+            raise PrivateRevisionError("revision owner did not authenticate", code="authentication_failed") from None
+        return
+    if not create:
+        raise PrivateRevisionError("legacy repository owner proof is unavailable", code="owner_binding_unavailable")
+    # Legacy committed heads can be admitted only by successful caller-bound
+    # decryption. Uncommitted legacy debris has no safe ownership proof.
+    if _read_exact(root / _HEAD_NAME) is not None:
+        _open_head(root, tenant_id=tenant_id, case_id=case_id, principal_id=principal_id,
+                   key=key, key_id=key_id)
+    elif (root / "wal").exists() or (root / "o").exists():
+        raise PrivateRevisionError("legacy repository owner proof is unavailable", code="owner_binding_unavailable")
+    _atomic_write(root, _OWNER_NAME, _seal_role(marker, **options),
+                  fsync_file=fsync_file, fsync_directory=fsync_directory)
+
+
+def _recovery_generation(root: Path) -> str:
+    entries = []
+    aggregate = 0
+    journal = root / "wal"
+    if journal.exists():
+        for path in sorted(journal.rglob("*")):
+            if path.is_symlink():
+                raise PrivateRevisionError("journal is untrusted", code="journal_untrusted")
+            if not path.is_file():
+                continue
+            size = path.stat().st_size
+            aggregate += size
+            if size > 16 * 1024 * 1024 or aggregate > 64 * 1024 * 1024:
+                raise PrivateRevisionError("journal exceeds its bound", code="journal_oversized")
+            entries.append((str(path.relative_to(journal)), _opaque_ref(path.read_bytes())))
+    return _opaque_ref(_manifest_bytes({"files": entries}))
+
+
+def _recovery_status(root: Path, *, options: Mapping[str, Any], phase: str | None = None,
+                     fsync_file=None, fsync_directory=None) -> Mapping[str, Any] | None:
+    context = dict(options, kind="revision-recovery", revision="1")
+    raw = _read_exact(root / _RECOVERY_STATUS_NAME)
+    old = None
+    if raw is not None:
+        try:
+            old = json.loads(_open_role(raw, **context))
+        except (PrivateStorageError, ValueError, TypeError):
+            raise PrivateRevisionError("recovery status did not authenticate", code="authentication_failed") from None
+    if phase is None:
+        return old
+    document = {"phase": phase, "journal_generation": _recovery_generation(root)}
+    if old != document:
+        _atomic_write(root, _RECOVERY_STATUS_NAME, _seal_role(_manifest_bytes(document), **context),
+                      fsync_file=fsync_file, fsync_directory=fsync_directory)
+    return document
+
+
+def private_revision_readiness(repository: str | Path, *, tenant_id: str, case_id: str,
+                               principal_id: str, key: bytes, key_id: str) -> str:
+    """Pure admission for canonical readers/writers, including a missing head.
+
+    Owner/objects alone never prove an empty committed state. A first-commit
+    crash must be authenticated and reconciled before the old session is used.
+    """
+    root = Path(repository)
+    if not any((root / name).exists() for name in (_OWNER_NAME, _HEAD_NAME, "wal", "o")):
+        return "new"
+    options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, key=key, key_id=key_id)
+    if (root / _HEAD_NAME).exists():
+        manifest = _open_head(root, **options)
+        if manifest is None:
+            raise PrivateRevisionError("revision head changed", code="recovery_required")
+        _require_committed_revision(root, manifest, **options)
+        return "committed"
+    _authenticate_revision_owner(root, **options)
+    status = _recovery_status(root, options=options)
+    if (isinstance(status, Mapping) and status.get("phase") == "recovered_empty"
+        and status.get("journal_generation") == _recovery_generation(root)):
+        return "empty"
+    raise PrivateRevisionError("initialized revision needs authenticated recovery", code="recovery_required")
+
+
+def _wal_identity(key: bytes, domain: bytes, value: str) -> str:
+    # A keyed digest is an opaque stable identifier, not a plaintext digest of
+    # an answer or an identifying caller label exposed in the WAL.
+    return hmac.new(_require_data_key(key), b"cg-private-wal@1\x00" + domain + value.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def _intent_document(
@@ -2061,22 +2154,44 @@ def _intent_document(
     return document
 
 
-def _apply_intent(root: Path, intent: Mapping[str, Any], *, install: bool, fsync_file, fsync_directory) -> bool:
+def _apply_intent(root: Path, intent: Mapping[str, Any], *, install: bool, fsync_file, fsync_directory,
+                  lineage: Mapping[str, Any] | None = None) -> bool:
     revision = str(intent.get("revision") or "")
     effect_id = str(intent.get("effect_id") or "")
-    pointer = _read_exact(root / "head.rev")
-    current = pointer.decode("utf-8").strip() if pointer else ""
+    current_envelope, current_revision = _head_record(root)
+    current = current_revision or ""
+    current_ref = _opaque_ref(current_envelope) if current_envelope is not None else ""
     if install:
         if current == revision:
-            return True
+            return current_ref == intent.get("manifest_ref")
+        if current.isdigit() and revision.isdigit() and int(current) > int(revision):
+            # A later authenticated snapshot supersedes this committed effect.
+            # Walk exact ciphertext-parent references; a number alone never
+            # authorizes installing an older head or sharing an unrelated fork.
+            reference = current_ref
+            seen = set()
+            intents = (lineage or {}).get("intents", {})
+            while reference and reference not in seen and len(seen) < 4096:
+                if reference == intent.get("manifest_ref"):
+                    return True
+                seen.add(reference)
+                ancestor = intents.get(reference)
+                if ancestor is None:
+                    return False
+                reference = str(ancestor.get("previous_head_ref") or "")
+            return False
         expected = str(intent.get("expected_revision") or "")
         if current != expected and not (current == "" and expected in {"", "0"}):
+            return False
+        if current_ref != str(intent.get("previous_head_ref") or ""):
             return False
         envelope = _object_bytes(root, str(intent["manifest_ref"]))
         _publish_head(root, envelope, revision, fsync_file=fsync_file, fsync_directory=fsync_directory)
         return True
     if current != revision:
         return True
+    if current_ref != intent.get("manifest_ref"):
+        return False
     previous = str(intent.get("previous_head_ref") or "")
     expected = str(intent.get("expected_revision") or "")
     if not previous:
@@ -2091,6 +2206,115 @@ def _apply_intent(root: Path, intent: Mapping[str, Any], *, install: bool, fsync
     envelope = _object_bytes(root, previous)
     _publish_head(root, envelope, expected, fsync_file=fsync_file, fsync_directory=fsync_directory)
     return True
+
+
+def _authenticate_intent(root: Path, intent: Mapping[str, Any], *, tenant_id: str,
+                         case_id: str, principal_id: str, key: bytes, key_id: str) -> None:
+    """Bind every replay/rollback reference to an authenticated caller-owned revision."""
+    revision = str(intent.get("revision") or "")
+    expected = str(intent.get("expected_revision") or "")
+    options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, key=key, key_id=key_id)
+    try:
+        manifest = _open_manifest(_object_bytes(root, str(intent["manifest_ref"])),
+                                  revision=revision, **options)
+        objects = manifest.get("objects") or {}
+        keyed = (intent.get("transaction_id") == _wal_identity(key, b"transaction\x00", str(manifest.get("transaction_id") or ""))
+                 and intent.get("effect_id") == _wal_identity(key, b"effect\x00", str(manifest.get("effect_id") or "")))
+        legacy = (intent.get("schema") == "cg-revision-intent-v1"
+                  and intent.get("transaction_id") == manifest.get("transaction_id")
+                  and intent.get("effect_id") == manifest.get("effect_id"))
+        valid = (intent.get("schema") in {_INTENT_SCHEMA, "cg-revision-intent-v1"}
+                 and str(manifest.get("revision")) == revision
+                 and str(manifest.get("parent_revision")) == expected
+                 and (keyed or legacy))
+        for role in _ROLE_NAMES:
+            ref = str(objects.get(role) or "")
+            valid = valid and intent.get(role + "_ref") == ref
+            _open_role(_object_bytes(root, ref), kind=role, revision=revision, **options)
+        previous = str(intent.get("previous_head_ref") or "")
+        if expected == "0":
+            valid = valid and not previous
+        else:
+            parent = _open_manifest(_object_bytes(root, previous), revision=expected, **options)
+            valid = valid and str(parent.get("revision")) == expected
+        if not valid:
+            raise PrivateRevisionError("intent identity differs", code="authentication_failed")
+    except (PrivateStorageError, KeyError, TypeError, ValueError):
+        raise PrivateRevisionError("revision intent did not authenticate", code="authentication_failed") from None
+
+
+def _native_commit_transactions(root: Path) -> set[str]:
+    """Read actual checksum-verified Kit markers; never construct receipt flags."""
+    observed: set[str] = set()
+    wal = _load_wal()
+    records = root / "wal" / "records"
+    if records.exists():
+        for path in sorted(records.glob("*.wal")):
+            _reject_symlink(path)
+            if _segment_issue(path):
+                raise PrivateRevisionError("native WAL is corrupt", code="journal_corrupt")
+            recovered = wal["recover_segment"](path, disposition=wal["WALCorruptionDisposition"].BOUND_AND_REPORT)
+            for record in recovered.records:
+                if (getattr(record.kind, "value", "") == "commit"
+                    and record.acknowledgement_mode == wal["WALAcknowledgementMode"].WAL_FSYNC_PARENT
+                    and record.fsync_receipt_id):
+                    observed.add(record.transaction_id)
+    return observed
+
+
+def _authenticate_recovery_journal(root: Path, **options) -> dict[str, Any]:
+    intents: dict[str, Any] = {}
+    committed: set[str] = set()
+    path = root / "wal" / "transaction-decisions.jsonl"
+    raw = _read_exact(path)
+    if raw is None:
+        return {"intents": intents, "committed": committed}
+    if len(raw) > 16 * 1024 * 1024:
+        raise PrivateRevisionError("recovery journal exceeds its bound", code="journal_oversized")
+    lines = raw.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        try:
+            record = json.loads(line)
+        except (ValueError, UnicodeError):
+            if index == len(lines) - 1 and not line.endswith(b"\n"):
+                break
+            raise PrivateRevisionError("recovery journal is corrupt", code="journal_corrupt") from None
+        if not isinstance(record, Mapping):
+            raise PrivateRevisionError("recovery journal is corrupt", code="journal_corrupt")
+        if record.get("kind") == "commit":
+            committed.add(str(record.get("transaction_id") or ""))
+        if record.get("kind") == "intent":
+            intent = record.get("intent")
+            if not isinstance(intent, Mapping) or record.get("transaction_id") != intent.get("transaction_id") or record.get("effect_id") != intent.get("effect_id"):
+                raise PrivateRevisionError("recovery identity differs", code="authentication_failed")
+            _authenticate_intent(root, intent, **options)
+            reference = str(intent["manifest_ref"])
+            if reference in intents and intents[reference] != intent:
+                raise PrivateRevisionError("recovery lineage differs", code="authentication_failed")
+            intents[reference] = dict(intent)
+    native_commits = _native_commit_transactions(root)
+    intent_transactions = {item["transaction_id"] for item in intents.values()}
+    if committed - native_commits or (native_commits - committed) & intent_transactions:
+        raise PrivateRevisionError("native commit and coordinator decision need reconciliation", code="recovery_required")
+    return {"intents": intents, "committed": committed}
+
+
+def _require_committed_revision(root: Path, manifest: Mapping[str, Any], **options) -> None:
+    """Require the real coordinator decision and checksum-verified Kit commit marker.
+
+    A published effect without the later acknowledged commit is recovery-required,
+    never a visible committed revision. No writer or replay is constructed here.
+    """
+    lineage = _authenticate_recovery_journal(root, **options)
+    envelope, revision = _head_record(root)
+    reference = _opaque_ref(envelope) if envelope is not None else ""
+    intent = lineage["intents"].get(reference)
+    if intent is None or str(manifest.get("revision")) != revision or intent["transaction_id"] not in lineage["committed"]:
+        raise PrivateRevisionError("revision needs recovery before it is readable", code="recovery_required")
+    # _authenticate_recovery_journal has independently reconciled every
+    # committed decision against the actual framed Native Kit marker.
+    if intent["transaction_id"] not in _native_commit_transactions(root):
+        raise PrivateRevisionError("native commit receipt marker is unavailable", code="recovery_required")
 
 
 def _identity_args(transaction_id: str | None, effect_id: str | None) -> tuple[str, str]:
@@ -2146,8 +2370,11 @@ def commit_private_revision(
             )
         lock = _acquire_lock(root)
         expected = "0" if expected_revision in {None, ""} else str(expected_revision)
-        pointer = _read_exact(root / "head.rev")
-        current = pointer.decode("utf-8").strip() if pointer else "0"
+        _authenticate_revision_owner(root, tenant_id=tenant_id, case_id=case_id,
+            principal_id=principal_id, key=key, key_id=key_id, create=True,
+            fsync_file=fsync_file, fsync_directory=fsync_directory)
+        head_raw, recorded_revision = _head_record(root)
+        current = recorded_revision or "0"
         if current in {"",}:
             current = "0"
         if current != expected:
@@ -2156,7 +2383,6 @@ def commit_private_revision(
                 code="revision_conflict",
                 state="conflict",
             )
-        head_raw = _read_exact(root / _HEAD_NAME)
         if expected != "0":
             current_manifest = _open_manifest(
                 head_raw or b"",
@@ -2167,6 +2393,8 @@ def commit_private_revision(
                 key=key,
                 key_id=key_id,
             )
+            _require_committed_revision(root, current_manifest, tenant_id=tenant_id,
+                case_id=case_id, principal_id=principal_id, key=key, key_id=key_id)
             if current_manifest.get("effect_id") == effect_id and current_manifest.get("transaction_id") == transaction_id:
                 return RevisionPublication(
                     True, "committed", transaction_id, effect_id, expected,
@@ -2175,6 +2403,9 @@ def commit_private_revision(
         else:
             if head_raw not in {None, b""}:
                 raise PrivateRevisionError("unexpected head", code="revision_conflict", state="conflict")
+        _recovery_status(root, options=dict(tenant_id=tenant_id, case_id=case_id,
+            principal_id=principal_id, key=key, key_id=key_id), phase="pending",
+            fsync_file=fsync_file, fsync_directory=fsync_directory)
         next_revision = str(int(expected) + 1) if expected.isdigit() else uuid.uuid4().hex
         sealed = {}
         for role, payload in (("session", session), ("fact_graph", fact_graph), ("proof", proof)):
@@ -2216,9 +2447,11 @@ def commit_private_revision(
         manifest_ref = _store_object(
             root, manifest_envelope, fsync_file=fsync_file, fsync_directory=fsync_directory,
         )
+        wal_transaction_id = _wal_identity(key, b"transaction\x00", transaction_id)
+        wal_effect_id = _wal_identity(key, b"effect\x00", effect_id)
         intent = _intent_document(
-            transaction_id=transaction_id,
-            effect_id=effect_id,
+            transaction_id=wal_transaction_id,
+            effect_id=wal_effect_id,
             expected_revision=expected,
             revision=next_revision,
             previous_head_ref=previous_head_ref,
@@ -2238,11 +2471,15 @@ def commit_private_revision(
         )
 
         def effect() -> bool:
+            _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
+                                 principal_id=principal_id, key=key, key_id=key_id)
             return _apply_intent(
                 root, intent, install=True, fsync_file=fsync_file, fsync_directory=fsync_directory,
             )
 
         def compensate() -> bool:
+            _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
+                                 principal_id=principal_id, key=key, key_id=key_id)
             return _apply_intent(
                 root, intent, install=False, fsync_file=fsync_file, fsync_directory=fsync_directory,
             )
@@ -2252,8 +2489,8 @@ def commit_private_revision(
                 intent,
                 effect,
                 compensate,
-                transaction_id=transaction_id,
-                effect_id=effect_id,
+                transaction_id=wal_transaction_id,
+                effect_id=wal_effect_id,
             )
         except wal["WALTransactionCrash"] as exc:
             raise PrivateRevisionInterrupted(str(getattr(exc, "args", ["crash"])[0]), transaction_id) from exc
@@ -2271,8 +2508,8 @@ def commit_private_revision(
         return RevisionPublication(
             True,
             "committed",
-            result.transaction_id,
-            result.effect_id,
+            transaction_id,
+            effect_id,
             next_revision,
             getattr(mode, "value", str(mode)),
             len(bridge.receipts),
@@ -2311,10 +2548,17 @@ def recover_private_revision(
         )
     process_lock = _process_lock(root)
     process_lock.acquire()
-    lock = _acquire_lock(root)
+    lock = None
     coordinator = None
     writer = None
     try:
+        lock = _acquire_lock(root)
+        _authenticate_revision_owner(root, tenant_id=tenant_id, case_id=case_id,
+            principal_id=principal_id, key=key, key_id=key_id)
+        _open_head(root, tenant_id=tenant_id, case_id=case_id,
+                   principal_id=principal_id, key=key, key_id=key_id)
+        lineage = _authenticate_recovery_journal(root, tenant_id=tenant_id, case_id=case_id,
+                   principal_id=principal_id, key=key, key_id=key_id)
         writer = __import__(
             "ipfs_kit_py.core.wal.writer", fromlist=["WALWriter"]
         ).WALWriter(root / "wal" / "records")
@@ -2324,19 +2568,22 @@ def recover_private_revision(
         def replay(intent: Mapping[str, Any], effect_id: str) -> bool:
             if str(intent.get("effect_id") or "") != effect_id:
                 return False
-            return _apply_intent(root, intent, install=True, fsync_file=fsync_file, fsync_directory=fsync_directory)
+            _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
+                                 principal_id=principal_id, key=key, key_id=key_id)
+            return _apply_intent(root, intent, install=True, fsync_file=fsync_file, fsync_directory=fsync_directory, lineage=lineage)
 
         def rollback(intent: Mapping[str, Any], effect_id: str) -> bool:
             if str(intent.get("effect_id") or "") != effect_id:
                 return False
-            return _apply_intent(root, intent, install=False, fsync_file=fsync_file, fsync_directory=fsync_directory)
+            _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
+                                 principal_id=principal_id, key=key, key_id=key_id)
+            return _apply_intent(root, intent, install=False, fsync_file=fsync_file, fsync_directory=fsync_directory, lineage=lineage)
 
         try:
             counts = coordinator.recover(replay, rollback)
         except wal["WALTransactionError"] as exc:
             raise PrivateRevisionError(str(exc), code="recovery_failed", state="recoverable") from exc
-        pointer = _read_exact(root / "head.rev")
-        revision = pointer.decode("utf-8").strip() if pointer else None
+        _, revision = _head_record(root)
         manifest = None
         if revision:
             try:
@@ -2351,6 +2598,9 @@ def recover_private_revision(
                 )
             except PrivateRevisionError:
                 raise
+        if manifest is not None:
+            _require_committed_revision(root, manifest, tenant_id=tenant_id, case_id=case_id,
+                                       principal_id=principal_id, key=key, key_id=key_id)
         committed = bool(manifest) and counts["rolled_back"] == 0 and (
             counts["replayed"] > 0 or revision is not None
         )
@@ -2365,6 +2615,10 @@ def recover_private_revision(
         else:
             state = "committed"
             committed = True
+        if manifest is None:
+            _recovery_status(root, options=dict(tenant_id=tenant_id, case_id=case_id,
+                principal_id=principal_id, key=key, key_id=key_id), phase="recovered_empty",
+                fsync_file=fsync_file, fsync_directory=fsync_directory)
         effect = str((manifest or {}).get("effect_id") or "")
         transaction = str((manifest or {}).get("transaction_id") or "")
         return RevisionPublication(
@@ -2383,7 +2637,8 @@ def recover_private_revision(
             coordinator.close()
         if writer is not None:
             writer.close()
-        _release_lock(lock)
+        if lock is not None:
+            _release_lock(lock)
         process_lock.release()
 
 
@@ -2399,7 +2654,9 @@ def read_private_revision(
     """Open the published head. Wrong key or case raises; nothing is rewritten."""
 
     root = Path(repository)
-    if not (root / _HEAD_NAME).exists():
+    readiness = private_revision_readiness(root, tenant_id=tenant_id, case_id=case_id,
+        principal_id=principal_id, key=key, key_id=key_id)
+    if readiness in {"new", "empty"}:
         return None
     manifest = _open_head(
         root,
@@ -2410,7 +2667,9 @@ def read_private_revision(
         key_id=key_id,
     )
     if manifest is None:
-        return None
+        raise PrivateRevisionError("committed revision head changed during read", code="recovery_required")
+    _require_committed_revision(root, manifest, tenant_id=tenant_id, case_id=case_id,
+                               principal_id=principal_id, key=key, key_id=key_id)
     revision = str(manifest["revision"])
     opened: dict[str, Any] = {"manifest": manifest, "revision": revision}
     for role in _ROLE_NAMES:
@@ -2481,5 +2740,6 @@ __all__ = [
     "commit_private_revision",
     "inspect_revision_journal",
     "read_private_revision",
+    "private_revision_readiness",
     "recover_private_revision",
 ]

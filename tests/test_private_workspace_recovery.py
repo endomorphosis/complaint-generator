@@ -17,6 +17,7 @@ import pytest
 
 from applications.complaint_workspace import (
     ComplaintWorkspaceService,
+    WorkspacePersistenceError,
     WorkspaceAccess,
     workspace_access_scope,
 )
@@ -380,7 +381,7 @@ def test_workspace_join_uses_the_same_revision_identity(tmp_path: Path) -> None:
     assert receipt["transaction_id"] == "tx-ws"
     assert receipt["effect_id"] == "effect-ws"
     opened = read_private_revision(
-        service.joined_revision_repository(),
+        service.joined_revision_repository("tenant-a", "case-a"),
         tenant_id="tenant-a",
         case_id="case-a",
         principal_id="tenant-a",
@@ -391,7 +392,7 @@ def test_workspace_join_uses_the_same_revision_identity(tmp_path: Path) -> None:
     assert session["intake_answers"]["harm"] == SENTINEL
     assert session["annotation_knowledge_graph"]["relationships"][0]["id"] == "effect-ws"
     assert session["proof_history"][0]["effect_id"] == "effect-ws"
-    assert _scan(service.joined_revision_repository()) == []
+    assert _scan(service.joined_revision_repository("tenant-a", "case-a")) == []
     with workspace_access_scope(WorkspaceAccess.trusted_local()):
         first = service.recover_joined_intake_revision("tenant-a", case_id="case-a")
         second = service.recover_joined_intake_revision("tenant-a", case_id="case-a")
@@ -400,43 +401,276 @@ def test_workspace_join_uses_the_same_revision_identity(tmp_path: Path) -> None:
 
 
 def test_upstream_wal_suites_are_a_separate_qualification() -> None:
-    """Optional Kit fixtures stay a compatibility report.
+    """Availability is distinct from the separately executed Kit compatibility run.
 
-    A missing or failing upstream file is not counted as a first-party pass.
+    The primary crash-recovery suite runs every first-party assertion itself.
+    It does not recursively invoke optional repository suites or count their
+    presence as evidence that they passed. Run the three suites separately and
+    preserve their real per-suite collection, phases, JUnit and source report.
     """
-
     root = Path(__file__).resolve().parents[1] / "external" / "ipfs_kit_py"
-    report = []
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")
-    for relative in UPSTREAM_WAL_SUITES:
-        suite = root / relative
-        entry = {"suite": relative, "counts_as_passed": False, "status": "missing"}
-        if not suite.is_file():
-            report.append(entry)
-            continue
-        completed = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "--tb=no", str(suite)],
-            cwd=str(root),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=180,
-            check=False,
-        )
-        entry["returncode"] = completed.returncode
-        if completed.returncode == 0:
-            entry["status"] = "passed"
-            entry["counts_as_passed"] = True
-        elif completed.returncode == 5:
-            entry["status"] = "missing"
-        else:
-            entry["status"] = "failed"
-        report.append(entry)
+    report = [
+        {"suite": relative, "counts_as_passed": False,
+         "status": "available_unexecuted" if (root / relative).is_file() else "missing"}
+        for relative in UPSTREAM_WAL_SUITES
+    ]
     assert [item["suite"] for item in report] == list(UPSTREAM_WAL_SUITES)
-    for item in report:
-        if item["status"] != "passed":
-            assert item["counts_as_passed"] is False
-        assert item["status"] in {"passed", "failed", "missing", "unavailable"}
-    # The qualification record is explicit even when every suite passes.
-    assert all("counts_as_passed" in item for item in report)
+    assert len(report) == 3
+    assert all(item["status"] in {"available_unexecuted", "missing"} for item in report)
+    assert all(item["counts_as_passed"] is False for item in report)
+
+
+
+def _revision_service(directory: Path) -> ComplaintWorkspaceService:
+    service = ComplaintWorkspaceService(directory)
+    class Provider:
+        def resolve(self, binding):
+            return KEY_ID, KEY
+    service.private_key_provider = lambda: Provider()
+    return service
+
+
+def test_workspace_second_revision_is_canonical_after_fresh_service(tmp_path):
+    directory = tmp_path / "canonical"
+    service = _revision_service(directory)
+    with workspace_access_scope(WorkspaceAccess.trusted_local(TENANT, CASE)):
+        first = service.commit_joined_intake_revision(TENANT, question_id="harm", answer=SENTINEL,
+            transaction_id="tx-first", effect_id="ef-first", case_id=CASE, expected_revision="0")
+        reopened = _revision_service(directory)
+        current = reopened._load_state(TENANT)
+        assert current["private_revision"] == "1"
+        assert current["intake_answers"]["harm"] == SENTINEL
+        second = reopened.commit_joined_intake_revision(TENANT, question_id="timeline", answer="Synthetic second answer",
+            transaction_id="tx-second", effect_id="ef-second", case_id=CASE, expected_revision="1")
+        final = _revision_service(directory)._load_state(TENANT)
+    assert first["committed"] and second["committed"]
+    assert final["private_revision"] == "2"
+    assert final["intake_answers"]["harm"] == SENTINEL
+    assert final["intake_answers"]["timeline"] == "Synthetic second answer"
+    assert [row["id"] for row in final["annotation_knowledge_graph"]["relationships"]] == ["ef-first", "ef-second"]
+    assert [row["effect_id"] for row in final["proof_history"]] == ["ef-first", "ef-second"]
+
+
+@pytest.mark.parametrize("boundary", ("after_effect", "after_commit"))
+@pytest.mark.parametrize("wrong", ("key", "case", "tenant", "principal"))
+def test_recovery_authenticates_before_any_replay_or_compensation(tmp_path, monkeypatch, boundary, wrong):
+    import integrations.private_storage as storage
+    root = tmp_path / "owner-before-effects"
+    with pytest.raises(PrivateRevisionInterrupted):
+        _commit(root, crash_injector=_crash(boundary))
+    preserved = storage._snapshot_bytes(root)
+    effects = []
+    original = storage._apply_intent
+    def observe(*args, **kwargs):
+        effects.append(True)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(storage, "_apply_intent", observe)
+    options = dict(tenant_id=TENANT, case_id=CASE, principal_id=PRINCIPAL, key=KEY, key_id=KEY_ID)
+    options[{"key": "key", "case": "case_id", "tenant": "tenant_id", "principal": "principal_id"}[wrong]] = OTHER_KEY if wrong == "key" else "foreign-owner"
+    with pytest.raises(PrivateRevisionError) as rejected:
+        recover_private_revision(root, **options)
+    assert rejected.value.code == "authentication_failed"
+    assert effects == []
+    assert storage._snapshot_bytes(root) == preserved
+    first = recover_private_revision(root, tenant_id=TENANT, case_id=CASE,
+        principal_id=PRINCIPAL, key=KEY, key_id=KEY_ID)
+    second = recover_private_revision(root, tenant_id=TENANT, case_id=CASE,
+        principal_id=PRINCIPAL, key=KEY, key_id=KEY_ID)
+    assert first.state == ("committed" if boundary == "after_commit" else "compensated")
+    assert second.replayed == second.rolled_back == 0
+
+
+def test_head_publication_is_one_atomic_revision_record(tmp_path, monkeypatch):
+    import integrations.private_storage as storage
+    root = tmp_path / "single-head"
+    replacements = []
+    original = storage.os.replace
+    def replace(source, destination, *args, **kwargs):
+        original(source, destination, *args, **kwargs)
+        if Path(destination).name == "head.cgpe":
+            _, revision = storage._head_record(root)
+            replacements.append(revision)
+            # The atomic effect is complete, but its later WAL commit has not
+            # happened yet. Public readers must not publish it as committed.
+            with pytest.raises(PrivateRevisionError) as pending:
+                _visible(root)
+            assert pending.value.code == "recovery_required"
+    monkeypatch.setattr(storage.os, "replace", replace)
+    _commit(root)
+    _commit(root, expected="1", transaction="tx-two", effect="effect-two")
+    assert replacements == ["1", "2"]
+    opened = _visible(root)
+    assert opened["revision"] == "2"
+    assert json.loads(opened["session"])["private_revision"] == "2"
+    assert json.loads(opened["fact_graph"])["relationships"][0]["revision"] == "2"
+    assert json.loads(opened["proof"])["entries"][0]["revision"] == "2"
+    assert not (root / "head.rev").exists()
+    assert (root / "head.cgpe").read_bytes().startswith(storage._HEAD_RECORD_MAGIC)
+
+
+def test_identifying_operation_labels_never_enter_plaintext_WAL(tmp_path):
+    root = tmp_path / "opaque-labels"
+    transaction = "Sensitive synthetic claimant address and case narrative"
+    effect = "Sensitive synthetic source span and rule evaluation"
+    publication = _commit(root, transaction=transaction, effect=effect)
+    assert publication.committed
+    assert _visible(root)["manifest"]["transaction_id"] == transaction
+    assert _visible(root)["manifest"]["effect_id"] == effect
+    for path in (root / "wal").rglob("*"):
+        if path.is_file():
+            raw = path.read_bytes()
+            assert transaction.encode() not in raw
+            assert effect.encode() not in raw
+            assert SENTINEL.encode() not in raw
+            assert KEY not in raw
+
+
+def test_real_shared_chat_commits_then_resumes_without_duplicate_effect(tmp_path, monkeypatch):
+    import socket
+    def blocked(*args, **kwargs):
+        raise RuntimeError("external effect refused")
+    monkeypatch.setattr(socket.socket, "connect", blocked)
+    monkeypatch.setattr(socket.socket, "connect_ex", blocked)
+    directory = tmp_path / "real-chat"
+    service = _revision_service(directory)
+    message = "Synthetic supervisor fired me after I reported unsafe conditions."
+    with workspace_access_scope(WorkspaceAccess.trusted_local(TENANT, CASE)):
+        result = service.run_intake_chat_turn(TENANT, message=message, question_id="original_complaint")
+        reopened = _revision_service(directory)
+        state = reopened._load_state(TENANT)
+        before = json.loads(json.dumps(state))
+        again = reopened.run_intake_chat_turn(TENANT, message=message, question_id="original_complaint")
+        after = _revision_service(directory)._load_state(TENANT)
+    assert result["session"]["private_revision"] == "1"
+    assert state["original_complaint"]["text"] == message
+    assert state["shared_interview"].get("contract_version") == "interview-transition-v1" or state["shared_interview"].get("schema_version") == "shared-interview-session-v1"
+    assert again["duplicate_answer_effect"] is True
+    for field in ("private_revision", "intake_history", "annotation_knowledge_graph", "proof_history", "shared_interview"):
+        assert after[field] == before[field]
+    assert len(after["proof_history"]) == 1
+    assert len([row for row in after["annotation_knowledge_graph"]["relationships"] if row.get("kind") == "intake-answer"]) == 1
+    assert _scan(service.joined_revision_repository(TENANT, CASE)) == []
+
+
+
+@pytest.mark.parametrize("boundary", ("after_effect", "before_commit"))
+def test_uncommitted_visible_effect_is_explicitly_recovery_required(tmp_path, boundary):
+    root = tmp_path / "pending-head"
+    with pytest.raises(PrivateRevisionInterrupted):
+        _commit(root, crash_injector=_crash(boundary))
+    with pytest.raises(PrivateRevisionError) as pending:
+        _visible(root)
+    assert pending.value.code == "recovery_required"
+    assert pending.value.committed is False
+    recovered = recover_private_revision(root, tenant_id=TENANT, case_id=CASE,
+        principal_id=PRINCIPAL, key=KEY, key_id=KEY_ID)
+    assert recovered.state == "compensated"
+    assert _visible(root) is None
+
+
+def test_history_recovery_authenticates_superseded_revision_without_reinstall(tmp_path, monkeypatch):
+    import integrations.private_storage as storage
+    root = tmp_path / "history"
+    _commit(root)
+    _commit(root, expected="1", transaction="tx-second", effect="effect-second")
+    preserved_head = (root / "head.cgpe").read_bytes()
+    publications = []
+    original = storage._publish_head
+    def publish(*args, **kwargs):
+        publications.append(True)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(storage, "_publish_head", publish)
+    first = recover_private_revision(root, tenant_id=TENANT, case_id=CASE,
+        principal_id=PRINCIPAL, key=KEY, key_id=KEY_ID)
+    second = recover_private_revision(root, tenant_id=TENANT, case_id=CASE,
+        principal_id=PRINCIPAL, key=KEY, key_id=KEY_ID)
+    assert first.committed is True
+    assert first.replayed == 2
+    assert second.replayed == second.rolled_back == 0
+    assert publications == []
+    assert (root / "head.cgpe").read_bytes() == preserved_head
+    opened = _visible(root)
+    assert opened["revision"] == "2"
+    assert json.loads(opened["session"])["intake_history"][0]["effect_id"] == "effect-second"
+    assert len(json.loads(opened["fact_graph"])["relationships"]) == 1
+    assert len(json.loads(opened["proof"])["entries"]) == 1
+
+
+def test_authenticated_foreign_fork_does_not_authorize_history_rollback(tmp_path, monkeypatch):
+    import integrations.private_storage as storage
+    root = tmp_path / "original"
+    other = tmp_path / "other-branch"
+    for directory, prefix in ((root, "original"), (other, "other")):
+        _commit(directory, transaction=prefix + "-one", effect=prefix + "-one")
+        _commit(directory, expected="1", transaction=prefix + "-two", effect=prefix + "-two")
+    # Even an authentic same-owner revision number cannot substitute for the
+    # exact ciphertext ancestry retained by this repository's real WAL.
+    (root / "head.cgpe").write_bytes((other / "head.cgpe").read_bytes())
+    preserved_head = (root / "head.cgpe").read_bytes()
+    publications = []
+    monkeypatch.setattr(storage, "_publish_head", lambda *args, **kwargs: publications.append(True))
+    with pytest.raises(PrivateRevisionError) as refused:
+        recover_private_revision(root, tenant_id=TENANT, case_id=CASE,
+            principal_id=PRINCIPAL, key=KEY, key_id=KEY_ID)
+    assert refused.value.committed is False
+    assert publications == []
+    assert (root / "head.cgpe").read_bytes() == preserved_head
+
+
+
+@pytest.mark.parametrize("boundary", (
+    "before_begin", "after_begin", "before_intent", "after_intent",
+    "before_effect", "after_effect", "before_commit",
+))
+def test_fresh_service_requires_recovery_for_initialized_first_revision(tmp_path, boundary):
+    import integrations.private_storage as storage
+    directory = tmp_path / "initial-crash"
+    service = _revision_service(directory)
+    with workspace_access_scope(WorkspaceAccess.trusted_local(TENANT, CASE)):
+        prior = service._load_state(TENANT)
+        service._save_state(prior)
+        with pytest.raises(PrivateRevisionInterrupted):
+            service.commit_joined_intake_revision(TENANT, question_id="harm", answer=SENTINEL,
+                transaction_id="tx-initial", effect_id="ef-initial", case_id=CASE,
+                expected_revision="0", crash_injector=_crash(boundary))
+        repository = service.joined_revision_repository(TENANT, CASE)
+        preserved = storage._snapshot_bytes(repository)
+        with pytest.raises(PrivateRevisionError) as direct_read:
+            read_private_revision(repository, tenant_id=TENANT, case_id=CASE,
+                principal_id=PRINCIPAL, key=KEY, key_id=KEY_ID)
+        assert direct_read.value.code == "recovery_required"
+        fresh = _revision_service(directory)
+        with pytest.raises(WorkspacePersistenceError) as read:
+            fresh._load_state(TENANT)
+        assert read.value.code == "recovery_required"
+        with pytest.raises(WorkspacePersistenceError) as write:
+            fresh._save_state(prior)
+        assert write.value.code == "recovery_required"
+        assert storage._snapshot_bytes(repository) == preserved
+        recovered = fresh.recover_joined_intake_revision(TENANT, case_id=CASE)
+        again = fresh.recover_joined_intake_revision(TENANT, case_id=CASE)
+        after = _revision_service(directory)._load_state(TENANT)
+    assert recovered["state"] == "compensated"
+    assert again["replayed"] == again["rolled_back"] == 0
+    assert after["intake_answers"].get("harm") is None
+    assert str(after.get("private_revision") or "0") == "0"
+    assert _scan(repository) == []
+
+
+def test_committed_head_disappearance_is_recovery_required(tmp_path, monkeypatch):
+    import integrations.private_storage as storage
+    root = tmp_path / "head-disappeared"
+    _commit(root)
+    original = storage._open_head
+    calls = []
+    def open_once(*args, **kwargs):
+        calls.append(True)
+        return original(*args, **kwargs) if len(calls) == 1 else None
+    monkeypatch.setattr(storage, "_open_head", open_once)
+    with pytest.raises(PrivateRevisionError) as refused:
+        read_private_revision(root, tenant_id=TENANT, case_id=CASE,
+            principal_id=PRINCIPAL, key=KEY, key_id=KEY_ID)
+    assert refused.value.code == "recovery_required"
+    assert refused.value.committed is False
+    assert len(calls) == 2
+    assert (root / "head.cgpe").is_file()

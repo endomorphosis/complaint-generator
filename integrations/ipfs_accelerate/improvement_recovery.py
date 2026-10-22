@@ -162,7 +162,7 @@ def _assert_processes_absent(old_state: Path, workspace: Path, launcher: Mapping
     sealed_fallback = None
     if (launcher.get("status") != "stopped" or heartbeat.get("status") != "stopped"
             or (heartbeat.get("managed_daemon_cleanup") or {}).get("quiesced") is not True):
-        if launcher.get("status") != "stopped" or heartbeat.get("status") != "termination_blocked":
+        if launcher.get("status") != "stopped" or heartbeat.get("status") not in {"termination_blocked", "running"}:
             raise ValueError("native owned shutdown evidence is required")
         from .improvement_shutdown import _context, _parent_closed
         paths = (old_state / "launcher.json", old_state / "complaint_intake_supervisor_status.json")

@@ -4,7 +4,7 @@ This is an operator shutdown observation, not provider callback settlement or
 task completion. Unknown ownership or Docker state cannot establish closure.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 import math
@@ -247,7 +247,200 @@ def _sealed_managed_session_closed(state_dir: Path, record: Mapping[str, Any], c
         raise ValueError('retained native daemon custody changed during observation')
 
 
-def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[str, Any], supplied: bool) -> None:
+def _complete_process_inventory(minimum_owned_start_ticks: int) -> list[dict[str, Any]]:
+    """Read bounded process metadata; unavailable observations are not absence.
+
+    No environment, log, executable content or argv is returned in a receipt.
+    Disappeared processes may be skipped; changed/reused numeric identities and
+    inaccessible postlaunch entries invalidate the entire observation. Canonical
+    Native per-launch workers are newly spawned, so older process births remain
+    in the group/session census but cannot be descendants of this launcher.
+    """
+    if type(minimum_owned_start_ticks) is not int or minimum_owned_start_ticks <= 0:
+        raise ValueError('invalid historical launcher birth bound')
+    try:
+        hz = os.sysconf('SC_CLK_TCK')
+        current_ticks = int(time.clock_gettime(time.CLOCK_BOOTTIME) * hz)
+        if type(hz) is not int or hz <= 0 or minimum_owned_start_ticks > current_ticks:
+            raise ValueError('invalid historical launcher birth bound')
+    except (OSError, ValueError, AttributeError, OverflowError) as exc:
+        raise ValueError('historical launcher birth bound is unavailable') from exc
+    result = []
+    try:
+        entries = tuple(Path('/proc').iterdir())
+    except OSError as exc:
+        raise ValueError('complete process inventory is unavailable') from exc
+    if len(entries) > 131072:
+        raise ValueError('complete process inventory exceeds bound')
+    for directory in entries:
+        if not directory.name.isdecimal():
+            continue
+        try:
+            first = directory.stat()
+            raw = (directory / 'stat').read_text()
+            fields = raw[raw.rindex(')') + 2:].split()
+            pid = int(directory.name)
+            if int(raw.split(' ', 1)[0]) != pid or len(fields) < 20:
+                raise ValueError('process identity is malformed')
+            identity = (int(fields[1]), int(fields[2]), int(fields[3]), int(fields[19]))
+            argv: tuple[str, ...] = ()
+            cwd = None
+            scope_required = first.st_uid == os.getuid() and identity[3] >= minimum_owned_start_ticks
+            prelaunch_excluded = first.st_uid == os.getuid() and identity[3] < minimum_owned_start_ticks
+            if scope_required:
+                with (directory / 'cmdline').open('rb') as stream:
+                    command = stream.read(131073)
+                if len(command) > 131072:
+                    raise ValueError('process argv exceeds inspection bound')
+                argv = tuple(part.decode('utf-8', errors='strict') for part in command.split(b'\0') if part)
+                if fields[0] != 'Z':
+                    cwd = os.readlink(directory / 'cwd')
+                    if not Path(cwd).is_absolute():
+                        raise ValueError('process working directory is unknown')
+            after = directory.stat()
+            last = (directory / 'stat').read_text()
+            final = last[last.rindex(')') + 2:].split()
+            if (first.st_uid != after.st_uid or identity !=
+                    (int(final[1]), int(final[2]), int(final[3]), int(final[19]))):
+                raise ValueError('process identity changed during inventory')
+            result.append({'pid': pid, 'uid': first.st_uid, 'ppid': identity[0],
+                'process_group': identity[1], 'session': identity[2],
+                'start_ticks': identity[3], 'argv': argv, 'cwd': cwd,
+                'scope_metadata_required': scope_required, 'prelaunch_scope_excluded': prelaunch_excluded})
+        except (FileNotFoundError, ProcessLookupError) as exc:
+            # A missing cwd/cmdline is not death while the numeric process
+            # directory still exists (for example an inaccessible namespace).
+            try:
+                directory.lstat()
+            except FileNotFoundError:
+                continue
+            except OSError as unavailable:
+                raise ValueError('complete process inventory is unavailable') from unavailable
+            raise ValueError('complete process inventory is unavailable') from exc
+        except (OSError, ValueError, IndexError, UnicodeError) as exc:
+            raise ValueError('complete process inventory is unavailable') from exc
+    return result
+
+
+def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
+                                   context: Mapping[str, Any]) -> dict[str, Any]:
+    """Observe a crashed launch without restoring or inventing native markers.
+
+    An owned heartbeat is historical scope, never a death/healthy declaration.
+    Both numeric leaders, their entire groups/sessions, and escaped matching
+    campaign processes must be absent in two complete fresh observations.
+    """
+    from . import improvement_runner as runner
+    from .improvement_recovery import _owned_bytes, _campaign_process_argv
+    parent = record['identity']
+    launcher_path = state_dir / 'launcher.json'
+    heartbeat_path = state_dir / 'complaint_intake_supervisor_status.json'
+    pid_path = state_dir / f'{runner.STATE_PREFIX}_managed_daemon.pid'
+    # This is the public Native identity path recipe, without loading an
+    # absent identity or calling a Native constructor or lifecycle operation.
+    identity_path = pid_path.with_suffix('.identity.json')
+    def missing_markers():
+        for path in (pid_path, identity_path):
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise ValueError('native marker absence is unavailable') from exc
+            raise ValueError('both canonical native markers must be absent')
+    def custody():
+        launch = _owned_bytes(launcher_path)
+        heartbeat = _owned_bytes(heartbeat_path, legacy_group_write=True)
+        if json.loads(launch) != record or hashlib.sha256(launch).hexdigest() != context['launcher_sha256']:
+            raise ValueError('missing-marker launcher custody changed')
+        return launch, heartbeat
+    missing_markers()
+    before = custody()
+    heartbeat = json.loads(before[1])
+    repo = Path(context['repo_root'])
+    daemon = heartbeat.get('daemon_pid')
+    native_state = str(state_dir / f'{runner.STATE_PREFIX}_task_state.json')
+    expected_paths = {'repo_root': str(repo), 'todo_path': record['board_path'],
+        'state_path': native_state, 'current_status_path': native_state, 'progress_path': native_state,
+        'child_pid_path': str(pid_path),
+        'supervisor_lock_path': str(state_dir / f'{runner.STATE_PREFIX}_supervisor.lock'),
+        'state_prefix': runner.STATE_PREFIX, 'task_prefix': runner.TASK_PREFIX}
+    source_revision = heartbeat.get('control_plane_source_revision')
+    if (heartbeat.get('schema') != 'ipfs_accelerate_py.agent_supervisor.todo_implementation_supervisor.supervisor'
+        or heartbeat.get('status') not in {'running', 'termination_blocked'}
+        or heartbeat.get('supervisor_pid') != parent['pid']
+        or type(daemon) is not int or daemon <= 1 or daemon == parent['pid']
+        or heartbeat.get('max_task_attempts') != 3
+        or any(heartbeat.get(key) != value for key, value in expected_paths.items())
+        or not context['started_at'] <= _timestamp(heartbeat.get('updated_at')) <= time.time()
+        or heartbeat.get('control_plane_source_schema') != 'ipfs_accelerate_py.agent_supervisor.control_plane_source@1'
+        or not isinstance(source_revision, str) or not re.fullmatch(r'[0-9a-f]{40}', source_revision)
+        or heartbeat.get('control_plane_current_source_revision') != source_revision
+        or not isinstance(heartbeat.get('control_plane_source_id'), str)
+        or not _TASK_CID.fullmatch(heartbeat['control_plane_source_id'])
+        or heartbeat.get('control_plane_current_source_id') != heartbeat['control_plane_source_id']):
+        raise ValueError('missing-marker heartbeat is not bound to the full launch scope')
+    boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    if boot != parent['boot_id']:
+        raise ValueError('missing-marker launch is from a different boot')
+    run_id = heartbeat.get('run_id')
+    if (not isinstance(run_id, str) or not re.fullmatch(r'[0-9]{8}T[0-9]{6}Z', run_id)
+        or not math.floor(context['started_at']) <= datetime.strptime(run_id, '%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc).timestamp() <= _timestamp(heartbeat['updated_at'])
+        or heartbeat.get('log_path') != str(state_dir / f'{runner.STATE_PREFIX}_managed_daemon_{run_id}.log')):
+        raise ValueError('missing-marker heartbeat run paths differ')
+    old_ids = {parent['pid'], daemon}
+    worktree_root = Path(context['worktree_root'])
+    def absent():
+        for pid in old_ids:
+            try:
+                (Path('/proc') / str(pid)).lstat()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise ValueError('historical numeric PID absence is unavailable') from exc
+            raise ValueError('historical numeric PID is still present')
+    def scoped_path(value, root):
+        return isinstance(value, str) and Path(value).is_absolute() and Path(value).is_relative_to(root)
+    def scan():
+        absent()
+        prelaunch_exclusions = 0
+        for process in _complete_process_inventory(parent['start_ticks']):
+            prelaunch_exclusions += int(process.get('prelaunch_scope_excluded') is True)
+            if process['pid'] in old_ids or process['process_group'] in old_ids or process['session'] in old_ids:
+                raise ValueError('historical group or session is still present')
+            if process['uid'] != os.getuid() or process['pid'] == os.getpid():
+                continue
+            argv = list(process['argv'])
+            workspace_argument = any(scoped_path(value, worktree_root) for value in argv)
+            workspace_cwd = scoped_path(process['cwd'], worktree_root)
+            relevant = _campaign_process_argv(argv, repo_root=repo, state_dir=state_dir)
+            campaign_argument = any(scoped_path(value, state_dir) for value in argv)
+            if workspace_argument or workspace_cwd or (relevant and campaign_argument):
+                raise ValueError('matching campaign process remains outside historical session')
+        absent()
+        return prelaunch_exclusions
+    first_exclusions = scan()
+    if custody() != before:
+        raise ValueError('missing-marker custody changed during process inventory')
+    missing_markers()
+    second_exclusions = scan()
+    if custody() != before or Path('/proc/sys/kernel/random/boot_id').read_text().strip() != boot:
+        raise ValueError('missing-marker custody changed during second process inventory')
+    missing_markers()
+    return {'source': 'owned_historical_heartbeat_and_double_complete_proc_inventory',
+        'proc_census_complete': True, 'observations': 2, 'recorded_pids_absent': True,
+        'scope_birth_policy': 'same_uid_birth_at_or_after_owned_launcher_requires_argv_and_cwd',
+        'minimum_owned_start_ticks': parent['start_ticks'],
+        'prelaunch_scope_exclusions': [first_exclusions, second_exclusions],
+        'all_births_group_and_session_checked': True,
+        'matching_processes': 0, 'canonical_markers_absent': True,
+        'sealed_native_identity_used': False, 'daemon_birth_ticks_claimed': False,
+        'heartbeat_status_preserved': heartbeat['status'],
+        'heartbeat_sha256': hashlib.sha256(before[1]).hexdigest(),
+        'signals_sent': False, 'completion_authority': False, 'attempt_refunded': False}
+
+
+def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[str, Any], supplied: bool) -> dict[str, Any] | None:
     from . import improvement_runner as runner
     from .improvement_recovery import _object
     birth = record['identity']
@@ -262,6 +455,11 @@ def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[
         raise ValueError('historical campaign lacks current owned shutdown evidence')
     if heartbeat.get('status') == 'stopped' and (heartbeat.get('managed_daemon_cleanup') or {}).get('quiesced') is True:
         return
+    if heartbeat.get('status') in {'running', 'termination_blocked'}:
+        pid_path = state_dir / f'{runner.STATE_PREFIX}_managed_daemon.pid'
+        identity_path = pid_path.with_suffix('.identity.json')
+        if not os.path.lexists(pid_path) and not os.path.lexists(identity_path):
+            return _missing_marker_session_closed(state_dir, record, context)
     if heartbeat.get('status') != 'termination_blocked':
         raise ValueError('historical campaign lacks current owned shutdown evidence')
     _sealed_managed_session_closed(state_dir, record, context)
@@ -286,7 +484,9 @@ def close_campaign_containers(state_dir: Path, record: Mapping[str, Any], *, par
         if context is None:
             return {**result, 'applicable': False, 'status': 'not_applicable', 'reason': 'legacy_process_only_record'}
         result.update(context)
-        _parent_closed(state_dir, record, context, parent_quiesced)
+        process_closure = _parent_closed(state_dir, record, context, parent_quiesced)
+        if process_closure is not None:
+            result['process_closure'] = process_closure
         starts, event_sha = _events(state_dir, context['started_at'], worktree_root=Path(context['worktree_root']))
         result['event_log_sha256'] = event_sha
         native = _native_runtime()

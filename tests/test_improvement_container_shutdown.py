@@ -707,6 +707,38 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
             json.loads(original[heartbeat]))
         assert projection == {'old_births_alive': False, 'matching_processes': 0, 'native_shutdown_quiesced': True}
         assert original == {path: path.read_bytes() for path in original}
+        # A crash may remove both canonical markers after the actual public
+        # native fence. Historical running status remains historical; the new
+        # verifier must establish closure without reconstructing either file.
+        missing_record = deepcopy(record)
+        runner._atomic_json(state / 'launcher.json', missing_record)
+        running = _missing_marker_heartbeat(state, missing_record, child.pid)
+        runner._atomic_json(heartbeat, running)
+        pid_path.unlink(); sidecar.unlink()
+        running_bytes = heartbeat.read_bytes()
+        missing_context = shutdown._context(state, missing_record)
+        observed = shutdown._parent_closed(state, missing_record, missing_context, False)
+        assert observed['proc_census_complete'] is True and observed['observations'] == 2
+        assert observed['minimum_owned_start_ticks'] == record['identity']['start_ticks']
+        assert observed['all_births_group_and_session_checked'] is True
+        assert len(observed['prelaunch_scope_exclusions']) == 2
+        assert all(type(count) is int and count >= 0 for count in observed['prelaunch_scope_exclusions'])
+        assert observed['sealed_native_identity_used'] is False
+        assert observed['daemon_birth_ticks_claimed'] is False and observed['signals_sent'] is False
+        fake.calls.clear(); fake.ps_count = 0
+        stopped = runner.stop(state, timeout=0)
+        assert stopped['status'] == 'stopped' and stopped['signalled'] is False
+        missing_stopped = json.loads((state / 'launcher.json').read_text())
+        assert missing_stopped['status'] == 'stopped'
+        receipt = json.loads((state / shutdown.RECEIPT_NAME).read_text())
+        assert receipt['quiesced'] is True and receipt['process_closure']['observations'] == 2
+        assert fake.effects == [] and fake.ps_count == 2
+        assert heartbeat.read_bytes() == running_bytes
+        assert not pid_path.exists() and not sidecar.exists()
+        assert recovery._assert_processes_absent(state, state / 'worktrees', missing_stopped, {},
+            running) == {'old_births_alive': False, 'matching_processes': 0, 'native_shutdown_quiesced': True}
+        assert heartbeat.read_bytes() == running_bytes
+        assert not pid_path.exists() and not sidecar.exists()
     finally:
         if parent is not None and parent.poll() is None:
             parent.kill(); parent.wait(timeout=3)
@@ -718,3 +750,223 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
             try: os.waitpid(child.pid, os.WNOHANG)
             except ChildProcessError: pass
         assert libc.prctl(36, previous.value, 0, 0, 0) == 0
+
+
+def _missing_marker_heartbeat(state, record, daemon_pid):
+    """Synthetic producer-shaped scope; never manufactures a death receipt."""
+    started = record['started_at']
+    run_id = datetime.fromtimestamp(started, timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    native_state = str(state / f'{runner.STATE_PREFIX}_task_state.json')
+    return {'schema': 'ipfs_accelerate_py.agent_supervisor.todo_implementation_supervisor.supervisor',
+        'status': 'running', 'repo_root': record['repo_root'],
+        'supervisor_pid': record['identity']['pid'], 'daemon_pid': daemon_pid,
+        'updated_at': stamp(time.time()), 'todo_path': record['board_path'],
+        'state_path': native_state, 'current_status_path': native_state, 'progress_path': native_state,
+        'child_pid_path': str(state / f'{runner.STATE_PREFIX}_managed_daemon.pid'),
+        'supervisor_lock_path': str(state / f'{runner.STATE_PREFIX}_supervisor.lock'),
+        'state_prefix': runner.STATE_PREFIX, 'task_prefix': runner.TASK_PREFIX, 'max_task_attempts': 3,
+        'control_plane_source_schema': 'ipfs_accelerate_py.agent_supervisor.control_plane_source@1',
+        'control_plane_source_revision': 'a' * 40, 'control_plane_current_source_revision': 'a' * 40,
+        'control_plane_source_id': 'b' + 'a' * 58, 'control_plane_current_source_id': 'b' + 'a' * 58,
+        'run_id': run_id, 'log_path': str(state / f'{runner.STATE_PREFIX}_managed_daemon_{run_id}.log')}
+
+
+@pytest.fixture
+def missing_marker_campaign(campaign, monkeypatch):
+    # Isolated read-only census controls complement the real public-native
+    # fence above; no additional process is launched by these negative cases.
+    record = deepcopy(campaign.record)
+    record['identity'].update(pid=1073741824, session=1073741824, process_group=1073741824,
+        boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
+    record['status'] = 'starting'
+    runner._atomic_json(campaign.state / 'launcher.json', record)
+    heartbeat = _missing_marker_heartbeat(campaign.state, record, 1073741825)
+    runner._atomic_json(campaign.state / 'complaint_intake_supervisor_status.json', heartbeat)
+    monkeypatch.setattr(shutdown, '_complete_process_inventory', lambda *_a: [])
+    return SimpleNamespace(**vars(campaign), current_record=record, heartbeat=heartbeat,
+        context=shutdown._context(campaign.state, record))
+
+
+@pytest.mark.parametrize('mutation', [
+    {'repo_root': '/foreign'}, {'todo_path': '/foreign'}, {'state_path': '/foreign'},
+    {'current_status_path': '/foreign'}, {'progress_path': '/foreign'},
+    {'child_pid_path': '/foreign'}, {'supervisor_lock_path': '/foreign'},
+    {'state_prefix': 'foreign'}, {'task_prefix': 'foreign'}, {'supervisor_pid': 3},
+    {'daemon_pid': None}, {'max_task_attempts': 2}, {'schema': 'foreign'},
+    {'control_plane_current_source_revision': 'f' * 40},
+    {'control_plane_current_source_id': 'b' + 'f' * 58}, {'updated_at': '2000-01-01T00:00:00Z'},
+    {'run_id': '20000101T000000Z'}, {'log_path': '/foreign'},
+])
+def test_missing_marker_heartbeat_scope_never_grants_closure(missing_marker_campaign, mutation):
+    fixture = missing_marker_campaign
+    runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json',
+        {**fixture.heartbeat, **mutation})
+    with pytest.raises(ValueError):
+        shutdown._parent_closed(fixture.state, fixture.current_record, fixture.context, False)
+
+
+@pytest.mark.parametrize('marker', ['pid', 'identity', 'dangling_identity'])
+def test_missing_marker_partial_or_symlink_evidence_refuses(missing_marker_campaign, marker):
+    fixture = missing_marker_campaign
+    pid = fixture.state / 'complaint_intake_managed_daemon.pid'
+    sidecar = pid.with_suffix('.identity.json')
+    if marker == 'pid':
+        pid.write_text('1073741825\n')
+    elif marker == 'identity':
+        sidecar.write_text('{}')
+    else:
+        sidecar.symlink_to(fixture.state / 'missing-target')
+    with pytest.raises((ValueError, OSError)):
+        shutdown._parent_closed(fixture.state, fixture.current_record, fixture.context, False)
+
+
+@pytest.mark.parametrize('leader', ['parent', 'daemon'])
+def test_missing_marker_numeric_pid_reuse_refuses(missing_marker_campaign, leader):
+    fixture = missing_marker_campaign
+    record, heartbeat = deepcopy(fixture.current_record), deepcopy(fixture.heartbeat)
+    if leader == 'parent':
+        record['identity'].update(pid=os.getpid(), session=os.getpid(), process_group=os.getpid())
+        heartbeat['supervisor_pid'] = os.getpid()
+    else:
+        heartbeat['daemon_pid'] = os.getpid()
+    runner._atomic_json(fixture.state / 'launcher.json', record)
+    runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', heartbeat)
+    with pytest.raises(ValueError, match='numeric PID is still present'):
+        shutdown._parent_closed(fixture.state, record, shutdown._context(fixture.state, record), False)
+
+
+@pytest.mark.parametrize('kind', ['group', 'session', 'workspace_cwd', 'workspace_argv', 'daemon_argv'])
+def test_missing_marker_escaped_process_or_session_refuses(missing_marker_campaign, monkeypatch, kind):
+    fixture = missing_marker_campaign
+    row = {'pid': 1073741826, 'uid': os.getuid(), 'process_group': 1073741826,
+        'session': 1073741826, 'argv': ('unrelated',), 'cwd': str(fixture.repo)}
+    if kind in {'group', 'session'}:
+        row['process_group' if kind == 'group' else 'session'] = fixture.heartbeat['daemon_pid']
+        row['uid'] = os.getuid() + 1
+    elif kind == 'workspace_cwd':
+        row['cwd'] = str(fixture.workspace)
+    elif kind == 'workspace_argv':
+        row['argv'] = (sys.executable, str(fixture.workspace / 'worker.py'))
+    else:
+        row['argv'] = (sys.executable, str(fixture.repo / 'integrations/ipfs_accelerate/improvement_runner.py'),
+            '--todo-path', fixture.current_record['board_path'], '--state-dir', str(fixture.state))
+    monkeypatch.setattr(shutdown, '_complete_process_inventory', lambda *_a: [row])
+    with pytest.raises(ValueError, match='still present|remains outside'):
+        shutdown._parent_closed(fixture.state, fixture.current_record, fixture.context, False)
+
+
+@pytest.mark.parametrize('change', ['unavailable', 'heartbeat', 'launcher', 'marker', 'boot'])
+def test_missing_marker_unknown_or_changed_custody_refuses(missing_marker_campaign, monkeypatch, change):
+    fixture = missing_marker_campaign
+    calls = []
+    def inventory(_minimum_owned_start_ticks):
+        calls.append(1)
+        if change == 'unavailable':
+            raise ValueError('complete process inventory is unavailable')
+        if len(calls) == 1:
+            if change == 'heartbeat':
+                runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json',
+                    {**fixture.heartbeat, 'restart_count': 1})
+            elif change == 'launcher':
+                runner._atomic_json(fixture.state / 'launcher.json', {**fixture.current_record, 'status': 'stopped'})
+            elif change == 'marker':
+                (fixture.state / 'complaint_intake_managed_daemon.pid').write_text('1073741825\n')
+        return []
+    monkeypatch.setattr(shutdown, '_complete_process_inventory', inventory)
+    record = fixture.current_record
+    if change == 'boot':
+        record = deepcopy(record)
+        record['identity']['boot_id'] = 'foreign-boot'
+        runner._atomic_json(fixture.state / 'launcher.json', record)
+    with pytest.raises(ValueError):
+        shutdown._parent_closed(fixture.state, record, shutdown._context(fixture.state, record), False)
+
+
+def test_missing_marker_observation_is_pure_and_ignores_unrelated_shell_text(missing_marker_campaign, monkeypatch):
+    fixture = missing_marker_campaign
+    paths = [fixture.state / 'launcher.json', fixture.state / 'complaint_intake_supervisor_status.json']
+    before = {path: path.read_bytes() for path in paths}
+    shell_text = f'python {fixture.workspace}/worker.py --state-dir {fixture.state}'
+    calls = []
+    def inventory(_minimum_owned_start_ticks):
+        calls.append(1)
+        return [{'pid': 1073741826, 'uid': os.getuid(), 'process_group': 1073741826,
+            'session': 1073741826, 'argv': ('bash', '-lc', shell_text), 'cwd': str(fixture.repo)}]
+    monkeypatch.setattr(shutdown, '_complete_process_inventory', inventory)
+    result = shutdown._parent_closed(fixture.state, fixture.current_record, fixture.context, False)
+    assert len(calls) == 2 and result['proc_census_complete'] is True
+    assert result['signals_sent'] is False and result['completion_authority'] is False
+    assert result['heartbeat_status_preserved'] == 'running'
+    assert before == {path: path.read_bytes() for path in paths}
+    assert not (fixture.state / 'complaint_intake_managed_daemon.pid').exists()
+    assert not (fixture.state / 'complaint_intake_managed_daemon.identity.json').exists()
+
+
+@pytest.mark.parametrize('failure', ['malformed', 'missing_live_metadata', 'birth_changed'])
+def test_complete_process_inventory_never_converts_unknown_to_absence(tmp_path, monkeypatch, failure):
+    proc = tmp_path / 'synthetic-proc'
+    proc.mkdir()
+    entry = proc / '1073741826'
+    entry.mkdir()
+    fields = ['S', '1', '1073741826', '1073741826', *(['0'] * 15), '42']
+    raw = '1073741826 (synthetic fixture) ' + ' '.join(fields)
+    (entry / 'stat').write_text('malformed' if failure == 'malformed' else raw)
+    (entry / 'cmdline').write_bytes(b'unrelated\0')
+    if failure != 'missing_live_metadata':
+        (entry / 'cwd').symlink_to(tmp_path, target_is_directory=True)
+    actual_path, actual_read = Path, Path.read_text
+    monkeypatch.setattr(shutdown, 'Path', lambda value: proc if str(value) == '/proc' else actual_path(value))
+    reads = []
+    def read(path, *args, **kwargs):
+        result = actual_read(path, *args, **kwargs)
+        if failure == 'birth_changed' and path == entry / 'stat':
+            reads.append(1)
+            if len(reads) == 2:
+                return result.rsplit(' ', 1)[0] + ' 43'
+        return result
+    monkeypatch.setattr(actual_path, 'read_text', read)
+    with pytest.raises(ValueError, match='complete process inventory is unavailable'):
+        shutdown._complete_process_inventory(42)
+
+
+@pytest.mark.parametrize('cutoff', [None, True, False, 0, -1, 1.5, '42', 10**30])
+def test_complete_process_inventory_refuses_invalid_launcher_birth_bound(cutoff):
+    with pytest.raises(ValueError, match='birth bound'):
+        shutdown._complete_process_inventory(cutoff)
+
+
+@pytest.mark.parametrize('cutoff,permitted', [(43, True), (42, False), (41, False)])
+def test_nondumpable_scope_is_excluded_only_for_proven_prelaunch_birth(tmp_path, monkeypatch, cutoff, permitted):
+    proc = tmp_path / 'synthetic-proc'; proc.mkdir()
+    entry = proc / '1073741826'; entry.mkdir()
+    fields = ['S', '1', '1073741826', '1073741826', *(['0'] * 15), '42']
+    (entry / 'stat').write_text('1073741826 (preexisting nondumpable fixture) ' + ' '.join(fields))
+    (entry / 'cmdline').write_bytes(b'unrelated\0')
+    actual_path = Path
+    monkeypatch.setattr(shutdown, 'Path', lambda value: proc if str(value) == '/proc' else actual_path(value))
+    def unavailable_cwd(path):
+        assert path == entry / 'cwd'
+        raise PermissionError('synthetic nondumpable cwd')
+    monkeypatch.setattr(shutdown.os, 'readlink', unavailable_cwd)
+    if not permitted:
+        with pytest.raises(ValueError, match='complete process inventory is unavailable'):
+            shutdown._complete_process_inventory(cutoff)
+        return
+    rows = shutdown._complete_process_inventory(cutoff)
+    assert len(rows) == 1  # Excluded scope inspection is never process absence.
+    assert rows[0]['start_ticks'] == 42 and rows[0]['pid'] == 1073741826
+    assert rows[0]['process_group'] == rows[0]['session'] == 1073741826
+    assert rows[0]['scope_metadata_required'] is False and rows[0]['prelaunch_scope_excluded'] is True
+    assert rows[0]['argv'] == () and rows[0]['cwd'] is None
+
+
+@pytest.mark.parametrize('identity', ['group', 'session'])
+def test_prelaunch_exclusion_never_hides_historical_group_or_session(missing_marker_campaign, monkeypatch, identity):
+    fixture = missing_marker_campaign
+    row = {'pid': 1073741826, 'uid': os.getuid(), 'start_ticks': 1,
+        'process_group': 1073741826, 'session': 1073741826, 'argv': (), 'cwd': None,
+        'prelaunch_scope_excluded': True, 'scope_metadata_required': False}
+    row['process_group' if identity == 'group' else 'session'] = fixture.heartbeat['daemon_pid']
+    monkeypatch.setattr(shutdown, '_complete_process_inventory', lambda *_a: [row])
+    with pytest.raises(ValueError, match='historical group or session is still present'):
+        shutdown._parent_closed(fixture.state, fixture.current_record, fixture.context, False)

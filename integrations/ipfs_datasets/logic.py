@@ -111,6 +111,7 @@ _process_lifecycle_module, _process_lifecycle_error = import_module_optional(
 )
 _CANONICAL_FORMALIZATION_RECEIPTS: Dict[str, Dict[str, Any]] = {}
 _CANONICAL_FORMALIZATION_CACHE: Dict[str, str] = {}
+_CANONICAL_RECEIPT_ORIGIN_DIGESTS: Dict[str, str] = {}
 _CANONICAL_SUPPORTED_EXECUTION: Dict[str, Any] | None = None
 _BOUND_OBLIGATION_RECEIPTS: Dict[str, Dict[str, Any]] = {}
 _BOUND_OBLIGATION_CACHE: Dict[str, str] = {}
@@ -3659,8 +3660,11 @@ def canonical_compiler_identities() -> Dict[str, Any] | None:
     stage_table = tuple(pipeline.compiler_stage_identities())
     return {
         "source_map_schema": str(source_maps.LEGAL_IR_SOURCE_MAP_SCHEMA_VERSION),
+        "canonical_ir_schema": str(contracts.CANONICAL_ROUNDTRIP_IR_SCHEMA_VERSION),
+        "canonical_ir_interface": str(contracts.CANONICAL_ROUNDTRIP_IR_INTERFACE),
         "compiler_interface": str(contracts.CANONICAL_STRUCTURED_TEXT_COMPILER_INTERFACE),
         "compiler_config_cid": str(compiler.TYPED_DEONTIC_COMPILER_CONFIG_CID),
+        "measured_compiler_raw_cid": str(compiler.MEASURED_TYPED_DEONTIC_ADAPTER_RAW_CID),
         "policy_cid": str(contracts.CANONICAL_PARITY_POLICY_CID),
         "pipeline_interface": str(pipeline.CANONICAL_COMPILER_PIPELINE_INTERFACE),
         "pipeline_cid": str(pipeline.CANONICAL_COMPILER_PIPELINE_CID),
@@ -3739,6 +3743,7 @@ def reset_canonical_formalization_cache() -> None:
     global _CANONICAL_SUPPORTED_EXECUTION
     _CANONICAL_FORMALIZATION_RECEIPTS.clear()
     _CANONICAL_FORMALIZATION_CACHE.clear()
+    _CANONICAL_RECEIPT_ORIGIN_DIGESTS.clear()
     _CANONICAL_SUPPORTED_EXECUTION = None
     reset_bound_proof_obligation_cache()
 
@@ -3838,10 +3843,16 @@ def _compile_cache_key(
     vocabulary: Mapping[str, Any],
     allow_explicit_partial: bool,
     authority_version: str,
+    citation: str,
+    legal_text_origin: str,
+    excluded_user_facts: Sequence[str],
 ) -> str:
     payload = {
         "allow_explicit_partial": allow_explicit_partial,
         "authority_version": authority_version,
+        "citation": citation,
+        "legal_text_origin": legal_text_origin,
+        "excluded_user_facts": list(excluded_user_facts),
         "identities": dict(identities),
         "request_id": request_id,
         "source_cid": source_cid,
@@ -3951,6 +3962,20 @@ def _bridge_canonical_source_map(
         citation=citation,
         metadata={"source_cid": source_cid, "span_unit": "character"},
     )
+    formula_ids = list(dict.fromkeys(str(rule.rule_cid) for rule in rules))
+    expected_fields = {
+        (str(rule.rule_cid), f"/rules/{index}/{field}")
+        for index, rule in enumerate(rules)
+        for field in rule.to_dict()
+    }
+    observed_fields = Counter((str(entry.rule_cid), str(entry.field_path)) for entry in entries)
+    coverage_issues = []
+    if set(observed_fields) != expected_fields or any(count != 1 for count in observed_fields.values()):
+        coverage_issues.append({
+            "code": "canonical_field_coverage_mismatch",
+            "message": "Every emitted rule field requires exactly one matching source-map entry.",
+            "field_path": "source_map",
+        })
     field_ids_by_rule: Dict[str, List[str]] = {}
     passages: List[Dict[str, Any]] = []
     for entry in entries:
@@ -3994,7 +4019,6 @@ def _bridge_canonical_source_map(
             }
         )
 
-    formula_ids: List[str] = []
     for rule in rules:
         rule_cid = str(rule.rule_cid)
         parents = tuple(field_ids_by_rule.get(rule_cid) or ())
@@ -4010,7 +4034,6 @@ def _bridge_canonical_source_map(
             decompiler_attribution="not_decompiled",
             metadata={"rule": _jsonable(rule.to_dict())},
         )
-        formula_ids.append(rule_cid)
 
     previous = tuple(node_id for ids in field_ids_by_rule.values() for node_id in ids)
     stage_ids: List[str] = []
@@ -4058,6 +4081,13 @@ def _bridge_canonical_source_map(
         }
     }
     built = source_maps.build_legal_ir_source_map(formula_document)
+    if (bridged.schema_version != identities.get("source_map_schema")
+            or built.schema_version != identities.get("source_map_schema")):
+        coverage_issues.append({
+            "code": "source_map_schema_mismatch",
+            "message": "The executed source-map schema differs from the current identity.",
+            "field_path": "source_map.schema_version",
+        })
     validation = source_maps.validate_legal_ir_source_map(bridged)
     built_validation = source_maps.validate_legal_ir_source_map(built)
     emitted_ids = tuple(dict.fromkeys([*formula_ids, *stage_ids]))
@@ -4086,9 +4116,10 @@ def _bridge_canonical_source_map(
     transformations_missing = [
         trace["fact_id"]
         for trace in traces
-        if trace["fact_id"] in formula_ids and not trace.get("transformation_steps")
+        if trace["fact_id"] in formula_ids
+        and (not trace.get("transformation_steps") or not trace.get("source_spans"))
     ]
-    coverage_ok = bool(formula_ids) and bool(stage_ids) and not missing_from_build
+    coverage_ok = bool(formula_ids) and bool(stage_ids) and not missing_from_build and not coverage_issues
     return {
         "source_map": bridged.to_dict(),
         "built_source_map": built.to_dict(),
@@ -4100,6 +4131,7 @@ def _bridge_canonical_source_map(
         "formula_ids": formula_ids,
         "stage_node_ids": stage_ids,
         "transformations_missing": transformations_missing,
+        "coverage_issues": coverage_issues,
         "coverage_ok": (
             coverage_ok
             and validation.valid
@@ -4186,9 +4218,45 @@ def _receipt_shell(
     return body
 
 
+def _canonical_receipt_origin_digest(receipt: Mapping[str, Any]) -> str:
+    """Pin the original host-owned record, excluding presentation-only fields.
+
+    Public callers receive copies. This custody check does not authenticate
+    arbitrary privileged Python code that can replace private module state.
+    """
+    body = {key: value for key, value in receipt.items()
+            if key not in {"metadata", "reused", "cache_outcome"}}
+    # with_adapter_metadata adds these top-level defaults after storage. Apply
+    # exactly those defaults to both copies without trusting metadata as proof.
+    body.setdefault("provider", "ipfs_datasets_py")
+    capability = body.get("capability")
+    if isinstance(capability, Mapping):
+        reason = str(capability.get("reason") or "").strip()
+        if reason:
+            body.setdefault("degraded_reason", reason)
+    return hashlib.sha256(json.dumps(
+        body, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")).hexdigest()
+
+
+def _canonical_receipt_has_execution_origin(receipt: Mapping[str, Any]) -> bool:
+    receipt_id = receipt.get("receipt_id")
+    stored = _CANONICAL_FORMALIZATION_RECEIPTS.get(receipt_id) if isinstance(receipt_id, str) else None
+    digest = _CANONICAL_RECEIPT_ORIGIN_DIGESTS.get(receipt_id) if isinstance(receipt_id, str) else None
+    if stored is None or digest is None:
+        return False
+    try:
+        return (_canonical_receipt_origin_digest(stored) == digest
+                and _canonical_receipt_origin_digest(receipt) == digest)
+    except (TypeError, ValueError, RecursionError):
+        return False
+
+
 def _store_receipt(receipt: Dict[str, Any], *, cache_key: str = "") -> Dict[str, Any]:
     stored = deepcopy(receipt)
     _CANONICAL_FORMALIZATION_RECEIPTS[stored["receipt_id"]] = stored
+    _CANONICAL_RECEIPT_ORIGIN_DIGESTS[stored["receipt_id"]] = _canonical_receipt_origin_digest(stored)
     if cache_key and stored.get("status") == "success":
         _CANONICAL_FORMALIZATION_CACHE[cache_key] = stored["receipt_id"]
     return deepcopy(stored)
@@ -4342,11 +4410,15 @@ def compile_canonical_legal_ir(
         vocabulary=atom_vocabulary.to_dict(),
         allow_explicit_partial=bool(allow_explicit_partial),
         authority_version=authority_version,
+        citation=citation,
+        legal_text_origin=legal_origin,
+        excluded_user_facts=excluded_facts,
     )
     if use_cache and cache_key in _CANONICAL_FORMALIZATION_CACHE:
         cached_id = _CANONICAL_FORMALIZATION_CACHE[cache_key]
         cached = _CANONICAL_FORMALIZATION_RECEIPTS.get(cached_id)
-        if cached is not None and cached.get("identities") == identities:
+        if (cached is not None and cached.get("identities") == identities
+                and _canonical_receipt_has_execution_origin(cached)):
             reused = deepcopy(cached)
             reused["reused"] = True
             reused["cache_outcome"] = "reused"
@@ -4376,8 +4448,14 @@ def compile_canonical_legal_ir(
     stage_payload = _stage_records(stages)
     observed_pipeline_cid = str(pipeline.pipeline_cid)
     if observed_pipeline_cid != identities["pipeline_cid"]:
-        identities = dict(identities)
-        identities["pipeline_cid"] = observed_pipeline_cid
+        capability = classify_canonical_compiler_capability(_canonical_evidence(
+            schema_match=False, reason="Executed pipeline identity differs from the current compiler contract.",
+        ))
+        return _finish(_store_receipt(_receipt_shell(
+            status="schema_mismatch", capability=capability, identities=identities,
+            reason=capability.reason or "pipeline identity mismatch", cache_outcome="invalidated",
+            mismatched_fields=("pipeline_cid",),
+        )))
     rules = () if result.canonical_ir is None else tuple(result.canonical_ir.rules)
     span_issues = []
     bridge: Dict[str, Any] | None = None
@@ -4451,6 +4529,8 @@ def compile_canonical_legal_ir(
         "user_facts": excluded_facts,
         "compiler_status": status_value,
         "result_cid": str(result.result_cid),
+        "compiler_request": _jsonable(request.to_dict()),
+        "compiler_result": _jsonable(result.to_dict()),
         "pipeline_cid": observed_pipeline_cid,
         "stages": stage_payload,
         "unsupported_diagnostics": diagnostics,
@@ -4519,127 +4599,151 @@ def verify_canonical_formalization_receipt(
 
 
 def audit_canonical_formalization_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
-    """Validate source CID, character passages, and traceability on a receipt copy."""
+    """Recheck source/IR coverage and distinguish structure from execution.
 
+    A serialized mapping can be structurally valid without proving that this
+    process executed it. Only an unchanged originally stored receipt can retain
+    executed capability, and only while its complete live identities still match.
+    """
     if not _canonical_modules_ready():
         capability = classify_canonical_compiler_capability(
             _canonical_evidence(reason=_canonical_import_reason())
         )
-        return {
-            "status": "unavailable",
-            "tampered": False,
-            "capability": capability.as_dict(),
-            "reason": capability.reason,
-            "issues": [],
-        }
-    source_text = str(payload.get("source_text") or "")
+        return {"status": "unavailable", "tampered": False,
+                "capability": capability.as_dict(), "reason": capability.reason,
+                "issues": [], "traceable": False}
+
     issues: List[Dict[str, str]] = []
-    try:
-        expected_cid = _source_cid_for_text(source_text)
-    except Exception as exc:  # noqa: BLE001 - typed integrity failure
-        expected_cid = ""
-        issues.append({"code": "source_cid_unavailable", "message": str(exc), "field_path": "source_text"})
-    recorded_cid = str(payload.get("source_cid") or "")
-    if expected_cid and recorded_cid and expected_cid != recorded_cid:
-        issues.append(
-            {
-                "code": "source_text_tampered",
-                "message": "Source text does not match the receipt source CID.",
-                "field_path": "source_text",
-            }
-        )
-    for index, passage in enumerate(payload.get("passages") or []):
-        if not isinstance(passage, Mapping):
-            issues.append(
-                {"code": "passage_invalid", "message": "Passage record is not an object.", "field_path": f"passages[{index}]"}
-            )
-            continue
-        start = passage.get("start")
-        end = passage.get("end")
-        if not isinstance(start, int) or not isinstance(end, int) or end > len(source_text) or start < 0:
-            issues.append(
-                {
-                    "code": "character_span_out_of_range",
-                    "message": "Stored passage is outside the source character length.",
-                    "field_path": f"passages[{index}]",
-                }
-            )
-            continue
-        selected = source_text[start:end]
-        if selected != passage.get("passage"):
-            issues.append(
-                {
-                    "code": "passage_tampered",
-                    "message": "Stored passage does not match the source character span.",
-                    "field_path": f"passages[{index}].passage",
-                }
-            )
-    source_map = payload.get("source_map")
-    validation_payload: Dict[str, Any] | None = None
+    current = canonical_compiler_identities() or {}
+    recorded = payload.get("identities") if isinstance(payload.get("identities"), Mapping) else {}
+    identities_match = dict(recorded) == current
+    if not identities_match:
+        issues.append({"code": "canonical_identity_mismatch",
+                       "message": "Receipt identities do not match the current canonical compiler contract.",
+                       "field_path": "identities"})
+    execution_origin = _canonical_receipt_has_execution_origin(payload)
+    receipt_id = payload.get("receipt_id")
+    known_origin = isinstance(receipt_id, str) and receipt_id in _CANONICAL_RECEIPT_ORIGIN_DIGESTS
+    if known_origin and not execution_origin:
+        issues.append({"code": "execution_receipt_mismatch",
+                       "message": "Receipt differs from the originally stored execution record.",
+                       "field_path": "receipt_id"})
+
+    validation_payload = None
     traceable = False
-    if isinstance(source_map, Mapping) and payload.get("formula_ids"):
-        source_maps = _canonical_source_map_module
-        validation = source_maps.validate_legal_ir_source_map(source_map)
-        validation_payload = validation.to_dict()
-        if not validation.valid:
-            issues.append(
-                {
-                    "code": "source_map_invalid",
-                    "message": "Stored source map failed validation.",
-                    "field_path": "source_map",
-                }
-            )
-        binding = source_maps.bind_legal_ir_artifact_source_map(
-            {"emitted_fact_ids": list(payload.get("formula_ids") or [])},
-            source_map,
-            artifact_kind="compiler_formula",
-            emitted_fact_ids=tuple(payload.get("formula_ids") or ()),
-        )
-        traceable = bool(binding.traceable)
-        if not traceable:
-            issues.append(
-                {
-                    "code": "traceability_failed",
-                    "message": "Stored formulas are not traceable.",
-                    "field_path": "formula_ids",
-                }
-            )
-        for fact_id in payload.get("formula_ids") or []:
-            trace = source_maps.trace_legal_ir_fact(source_map, fact_id)
-            if not trace.transformation_steps or not trace.source_spans:
-                issues.append(
-                    {
-                        "code": "transformation_trace_missing",
-                        "message": "Formula does not trace to both a source passage and a transformation.",
-                        "field_path": f"traces.{fact_id}",
-                    }
+    status_value = str(payload.get("status") or "")
+    text = payload.get("source_text")
+    if isinstance(text, str):
+        for index, passage in enumerate(payload.get("passages") or ()):
+            if not isinstance(passage, Mapping):
+                issues.append({"code": "passage_invalid", "message": "Passage record is not an object.",
+                               "field_path": f"passages[{index}]"})
+                continue
+            start, end = passage.get("start"), passage.get("end")
+            if (type(start) is not int or type(end) is not int
+                    or not 0 <= start < end <= len(text)):
+                issues.append({"code": "character_span_out_of_range",
+                               "message": "Stored passage is outside the source character length.",
+                               "field_path": f"passages[{index}]"})
+            elif text[start:end] != passage.get("passage"):
+                issues.append({"code": "passage_tampered",
+                               "message": "Stored passage does not match the source character span.",
+                               "field_path": f"passages[{index}].passage"})
+    if status_value in {"success", "partial"}:
+        try:
+            request = _canonical_contracts_module.CompilerRequest.from_dict(payload.get("compiler_request"))
+            result = _canonical_contracts_module.CompilerResult.from_dict(payload.get("compiler_result"))
+            if (request.request_cid != result.request_cid
+                    or request.request_cid != payload.get("request_cid")
+                    or request.source_cid != payload.get("source_cid")
+                    or request.source_text != payload.get("source_text")
+                    or str(result.result_cid) != payload.get("result_cid")):
+                issues.append({"code": "source_or_result_binding_mismatch",
+                               "message": "Top-level source and compiler result do not match their typed request.",
+                               "field_path": "compiler_request"})
+            expected_outcome = "partial" if result.unsupported_semantics else "success"
+            if (str(getattr(result.status, "value", result.status)) != "success"
+                    or result.canonical_ir is None or status_value != expected_outcome):
+                issues.append({"code": "compiler_outcome_mismatch",
+                               "message": "Receipt status does not match the executed compiler outcome.",
+                               "field_path": "status"})
+            provenance = result.provenance
+            if any(provenance.get(key) != current.get(identity) for key, identity in (
+                    ("measured_adapter_raw_cid", "measured_compiler_raw_cid"),
+                    ("compiler_config_cid", "compiler_config_cid"),
+                    ("policy_cid", "policy_cid"))):
+                issues.append({"code": "compiler_provenance_mismatch",
+                               "message": "Compiler provenance differs from the current measured implementation.",
+                               "field_path": "compiler_result.provenance"})
+            stages = []
+            for item in payload.get("stages") or ():
+                stage = _canonical_pipeline_module.CompilerStageRecord(
+                    stage_id=item["stage_id"], interface=item["interface"],
+                    input_cid=item["input_cid"], output_cid=item["output_cid"],
+                    config_cid=item["config_cid"], status=item["status"],
+                    unsupported=tuple(item.get("unsupported") or ()),
                 )
-                traceable = False
-    tampered = any(item["code"].endswith("tampered") or item["code"].endswith("_tampered") for item in issues) or any(
-        item["code"] in {"source_text_tampered", "passage_tampered"} for item in issues
-    )
-    status = "tampered" if issues else "verified"
-    capability = classify_canonical_compiler_capability(
-        _canonical_evidence(
-            executed=not issues and payload.get("status") == "success",
-            status="success" if not issues and payload.get("status") == "success" else "failed",
-            traceable=traceable and not issues,
-            source_map_valid=bool(validation_payload and validation_payload.get("valid")) and not issues,
-            tampered=bool(issues),
-            reason="" if not issues else "Canonical formalization receipt failed integrity checks.",
-        )
-    )
+                if stage.to_dict() != item:
+                    raise ValueError("stage identity mismatch")
+                stages.append(stage)
+            if ([stage.stage_id for stage in stages] != current.get("stage_ids")
+                    or payload.get("pipeline_cid") != current.get("pipeline_cid")):
+                issues.append({"code": "pipeline_stage_identity_mismatch",
+                               "message": "Receipt does not contain the current complete ordered pipeline.",
+                               "field_path": "stages"})
+            span_issues = _prevalidate_character_spans(
+                request.source_text, request.source_cid, result.source_map)
+            issues.extend(span_issues)
+            if not span_issues and result.canonical_ir is not None:
+                bridge = _bridge_canonical_source_map(
+                    source_text=request.source_text, source_cid=request.source_cid,
+                    citation=str(payload.get("citation") or ""),
+                    entries=result.source_map, rules=result.canonical_ir.rules,
+                    stages=stages, identities=current,
+                )
+                validation_payload = bridge["validation"]
+                traceable = bool(bridge["coverage_ok"])
+                issues.extend(bridge["coverage_issues"])
+                # Rebuild both maps from the typed source/result. Neither a
+                # caller's smaller formula list nor an internally consistent
+                # map from a different document can select the checked universe.
+                for field, key in (
+                        ("formula_ids", "formula_ids"), ("passages", "passages"),
+                        ("source_map", "source_map"), ("built_source_map", "built_source_map"),
+                        ("source_map_validation", "validation"),
+                        ("built_source_map_validation", "built_validation"),
+                        ("traceability", "traceability"), ("traces", "traces")):
+                    if payload.get(field) != bridge[key]:
+                        issues.append({"code": "source_map_binding_mismatch",
+                                       "message": "Stored map, passages or emitted IDs differ from the full typed result.",
+                                       "field_path": field})
+                if not traceable:
+                    issues.append({"code": "traceability_failed",
+                                   "message": "Every emitted formula must trace to its source and transformations.",
+                                   "field_path": "formula_ids"})
+        except Exception:
+            # Malformed persisted records stay typed; parser/contract exception
+            # text can contain the caller's source and must not become a report.
+            issues.append({"code": "canonical_record_invalid",
+                           "message": "Typed compiler request, result or pipeline record is invalid.",
+                           "field_path": "compiler_result"})
+
+    structurally_valid = status_value in {"success", "partial"} and not issues and traceable
+    executed = structurally_valid and execution_origin
+    reason = ("Canonical formalization receipt failed integrity checks." if issues else
+              "" if executed else "Serialized structure does not prove an original compiler execution.")
+    capability = classify_canonical_compiler_capability(_canonical_evidence(
+        executed=executed, status=status_value if executed else "failed",
+        traceable=structurally_valid, source_map_valid=structurally_valid,
+        schema_match=identities_match, tampered=bool(issues), reason=reason,
+    ))
     return {
         "schema_version": "canonical-formalization-audit/v1",
-        "status": status,
-        "tampered": bool(issues),
-        "capability": capability.as_dict(),
-        "reason": "" if not issues else capability.reason,
-        "issues": issues,
-        "source_map_validation": validation_payload,
-        "traceable": traceable and not issues,
-        "identities": dict(payload.get("identities") or {}),
-        "receipt_id": payload.get("receipt_id"),
+        "status": "tampered" if issues else "verified" if executed else "unverified",
+        "tampered": bool(issues), "capability": capability.as_dict(),
+        "reason": reason, "issues": issues, "source_map_validation": validation_payload,
+        "traceable": structurally_valid, "execution_origin_verified": executed,
+        "identities": dict(recorded), "receipt_id": receipt_id,
     }
 
 
@@ -4963,6 +5067,8 @@ def _premise_entry(
     }[role]
     provenance = {
         "original_id": original_id,
+        # Retain caller evidence as evidence, independently of our span check.
+        "record_provenance": deepcopy(_mapping_or_empty(record.get("provenance"))),
         "support_ref": str(record.get("support_ref") or ""),
         "source_table": str(record.get("source_table") or ""),
         "citation": str(record.get("citation") or ""),
@@ -4996,6 +5102,8 @@ def _premise_entry(
         "axiom": False,
         "source_validated": bool(span.get("verified")),
         "disputed": disputed,
+        "validation_status": str(record.get("validation_status") or ""),
+        "input_record_sha256": _stable_payload_digest(dict(record)),
         "provenance": provenance,
     }
 
@@ -5087,16 +5195,18 @@ def _source_map_identity(receipt: Mapping[str, Any] | None) -> str:
 def _formula_identity_digest(sample_or_document: Any) -> str:
     rows = []
     for index, formula in enumerate(_formulas_of(sample_or_document), start=1):
-        provenance = _mapping_or_empty(_attr_or_key(formula, "provenance", {}) or {})
-        operator = _mapping_or_empty(_attr_or_key(formula, "operator", {}) or {})
-        rows.append(
-            {
-                "formula_id": _formula_identity(formula, index),
-                "start_char": provenance.get("start_char", _attr_or_key(_attr_or_key(formula, "provenance", {}), "start_char", None)),
-                "end_char": provenance.get("end_char", _attr_or_key(_attr_or_key(formula, "provenance", {}), "end_char", None)),
-                "operator": operator.get("symbol") or _attr_or_key(_attr_or_key(formula, "operator", {}), "symbol", ""),
-            }
-        )
+        # Native ids intentionally omit some semantics. Our cache must not.
+        payload = _mapping_or_empty(formula)
+        payload.update({
+            "formula_id": _formula_identity(formula, index),
+            "operator": _mapping_or_empty(_attr_or_key(formula, "operator", {})),
+            "predicate": _mapping_or_empty(_attr_or_key(formula, "predicate", {})),
+            "provenance": _mapping_or_empty(_attr_or_key(formula, "provenance", {})),
+            "conditions": list(_attr_or_key(formula, "conditions", []) or []),
+            "exceptions": list(_attr_or_key(formula, "exceptions", []) or []),
+            "metadata": _mapping_or_empty(_attr_or_key(formula, "metadata", {})),
+        })
+        rows.append(payload)
     return _stable_payload_digest(rows)
 
 
@@ -5219,7 +5329,13 @@ def generate_bound_legal_ir_proof_obligations(
         "document_sha256": document_hash,
         "source_passage_sha256": passage_hashes,
         "formula_identity": _formula_identity_digest(sample_or_document) if sample_or_document is not None else "",
+        "modal_document_identity": _stable_payload_digest({
+            "sample_id": _attr_or_key(sample_or_document, "sample_id", None),
+            "document": _mapping_or_empty(_document_view(sample_or_document)),
+        }),
         "source_map_identity": _source_map_identity(canonical_receipt),
+        "premise_inventory_identity": _stable_payload_digest(inventory),
+        "structural_validation_identity": _stable_payload_digest(dict(structural_validation or {})),
         "legal_context_version": str(legal_context_version or (canonical_receipt or {}).get("authority_version") or ""),
         "rule_versions": [
             {
@@ -5264,7 +5380,9 @@ def generate_bound_legal_ir_proof_obligations(
                 "cache_outcome": "not_cached",
             },
         )
-        return _store_obligation_receipt(receipt)
+        # An unavailable result must not resolve to an earlier successful
+        # receipt for this request identity. Keep that history unchanged.
+        return receipt
 
     if _is_pipeline_result(sample_or_document):
         return _unavailable(
@@ -5572,197 +5690,498 @@ def _missing_fact_values(premise_inventory: Mapping[str, Any] | None) -> List[Di
     return values
 
 
-def _owned_backend(local_backend: str, goal_statement: str) -> Any:
-    """Closed local backend. Callers cannot supply a prover callback."""
+# The actual router runs in this isolated call process. Input is JSON over stdin;
+# neither caller callbacks nor outcome-selecting backends cross this boundary.
+_PROOF_ROUTER_CALL_SOURCE = r"""
+import sys
+bootstrap_flags = {name:getattr(sys.flags,name) for name in ('no_site','isolated','ignore_environment','dont_write_bytecode')}
+if any(value != 1 for value in bootstrap_flags.values()): raise SystemExit(2)
+import ctypes, os, signal
+manager = int(sys.argv[1])
+if manager <= 1 or os.getppid() != manager: raise SystemExit(2)
+if ctypes.CDLL(None).prctl(1, signal.SIGKILL, 0, 0, 0) != 0: raise SystemExit(2)
+if os.getppid() != manager: raise SystemExit(2)
+# Bind parent death before any request read or optional-module import.
+import contextlib, hashlib, importlib, json, socket, time
+# Retain the actual interpreter flags even if request ingress stalls.
+fd=os.open('router-bootstrap.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+with os.fdopen(fd,'w') as stream:
+ json.dump({'schema':'complaint-owned-proof-router-bootstrap@1','pid':os.getpid(),
+  'manager_pid':manager,'flags':bootstrap_flags},stream,separators=(',',':'))
+ stream.flush();os.fsync(stream.fileno())
+request = json.loads(sys.stdin.buffer.read(1048577))
+if request.get('schema') != 'complaint-proof-router-call@1': raise SystemExit(2)
+if request.get('expected_manager_pid') != manager or os.getppid() != manager: raise SystemExit(2)
+def guard(event, args):
+ if event == 'socket.__new__' and len(args)>1 and args[1] in (socket.AF_INET,socket.AF_INET6): raise PermissionError('proof_network_disabled')
+ if event in ('socket.connect','socket.connect_ex','socket.sendto','socket.getaddrinfo','socket.gethostbyname','socket.gethostbyaddr','socket.getnameinfo'): raise PermissionError('proof_network_disabled')
+ if event in ('subprocess.Popen','os.system','os.posix_spawn','os.posix_spawnp','os.fork','os.forkpty') or event.startswith('os.exec') or event.startswith('os.spawn'): raise PermissionError('unconfigured_proof_process_disabled')
+sys.addaudithook(guard)
+sys.path[:0] = request['roots']
+def source_pins():
+ pins = {}
+ for name, expected in request['sources'].items():
+  path = expected['path']
+  with open(path,'rb') as stream: digest = hashlib.sha256(stream.read()).hexdigest()
+  if digest != expected['sha256']: raise ValueError('proof_source_changed')
+  pins[name] = {'path':path,'sha256':digest}
+ return pins
+payload = {'status':'unavailable','error_code':'proof_router_failed'}
+try:
+ before = source_pins()
+ # Optional-module notices must not become protocol output or private errors.
+ with contextlib.redirect_stdout(sys.stderr):
+  modules = {name:importlib.import_module(name) for name in request['sources']}
+  for name,module in modules.items():
+   if os.path.realpath(module.__file__) != before[name]['path']: raise ValueError('proof_module_origin_mismatch')
+  from ipfs_datasets_py.logic.integration.reasoning.legal_ir_obligations import LegalIRProofObligation
+  from ipfs_datasets_py.logic.integration.reasoning.hammer import HammerGoal, HammerPipeline, HammerPremise
+  from ipfs_datasets_py.logic.integration.reasoning.legal_ir_proof_router import LegalIRProofRouter, ProofRoutingPolicy
+  remaining = request['deadline_monotonic'] - time.monotonic()
+  if remaining <= 0: raise TimeoutError()
+  policy = ProofRoutingPolicy(required_trust=request['policy']['required_trust'],
+   total_timeout_seconds=remaining,stage_timeout_seconds={key:min(value,remaining) for key,value in request['policy']['stage_timeout_seconds'].items()},
+   enabled_routes=tuple(request['policy']['enabled_routes']),stop_on_theorem_failure=True)
+  pipeline = HammerPipeline(backends=[], kernel_verifier=None)
+  router = LegalIRProofRouter(pipeline, policy=policy)
+  obligation = LegalIRProofObligation(**request['obligation'])
+  goal = HammerGoal(statement=request['goal_statement'],name=obligation.obligation_id,
+   metadata={'logic_family':obligation.logic_family,'substantive_goal':True})
+  premises = [HammerPremise(**item) for item in request['premises']]
+  native = router.route(obligation,goal,premises,sample_or_document=request['sample_or_document'])
+  after = source_pins()
+  if after != before: raise ValueError('proof_source_changed')
+  native_payload = native.to_dict()
+  for attempt in native_payload.get('attempts',[]):
+   if attempt.get('status') == 'error':
+    attempt['reason']='route_execution_failed';attempt['metadata']={}
+  payload = {'status':'ok','native':native_payload,'runtime_sources':after,
+   'request_identity':request['request_identity'],'kernel_artifact_verified':False,
+   'negative_artifact_verified':False,'router_pid':os.getpid()}
+except TimeoutError:
+ payload = {'status':'timeout','error_code':'request_deadline'}
+except (ImportError,AttributeError,FileNotFoundError):
+ payload = {'status':'unavailable','error_code':'proof_backend_unavailable'}
+except BaseException:
+ payload = {'status':'unavailable','error_code':'proof_router_failed'}
+encoded = json.dumps(payload,ensure_ascii=True,allow_nan=False,separators=(',',':')).encode()
+if len(encoded)>524288: encoded=b'{"status":"unavailable","error_code":"proof_output_limit"}'
+sys.stdout.buffer.write(encoded);sys.stdout.buffer.flush()
+"""
 
-    status_type = _hammer_module.HammerBackendStatus
-    result_type = _hammer_module.HammerBackendResult
-    runner_type = _hammer_module.CallableHammerBackendRunner
 
-    def run(translation: Any, timeout_seconds: float) -> Any:
-        del timeout_seconds
-        if local_backend == "disproved":
-            return result_type(
-                backend="local-bound",
-                status=status_type.DISPROVED,
-                proved=False,
-                elapsed_seconds=0.0,
-                translation_format=getattr(translation, "target_format", ""),
-                proof_trace=f"bound-counterexample:{goal_statement}",
-                metadata={"bound_to_goal": True, "negative_proof": True},
-            )
-        if local_backend == "unavailable":
-            return result_type(
-                backend="local-bound",
-                status=status_type.UNAVAILABLE,
-                proved=False,
-                elapsed_seconds=0.0,
-                translation_format=getattr(translation, "target_format", ""),
-                error="tool_missing",
-            )
-        if local_backend == "timeout":
-            return result_type(
-                backend="local-bound",
-                status=status_type.TIMEOUT,
-                proved=False,
-                elapsed_seconds=0.0,
-                translation_format=getattr(translation, "target_format", ""),
-                timed_out=True,
-            )
-        proved = local_backend in {"proved", "reconstruction_failed"}
-        return result_type(
-            backend="local-bound",
-            status=status_type.PROVED if proved else status_type.UNKNOWN,
-            proved=proved,
-            elapsed_seconds=0.0,
-            translation_format=getattr(translation, "target_format", ""),
-            proof_trace=f"bound-goal:{goal_statement}" if proved else "",
-            metadata={"bound_to_goal": proved, "goal_statement": goal_statement},
-        )
+# This manager alone is a subreaper. It owns the actual call, not an unrelated
+# preliminary command, and confirms closure before the outer supervisor returns.
+_PROOF_ROUTER_MANAGER_SOURCE = r"""
+import sys
+bootstrap_flags = {name:getattr(sys.flags,name) for name in ('no_site','isolated','ignore_environment','dont_write_bytecode')}
+if any(value != 1 for value in bootstrap_flags.values()): raise SystemExit(2)
+import ctypes, fcntl, hashlib, json, math, os, selectors, signal, stat, subprocess, time
+if sys.platform != 'linux': raise SystemExit(2)
+execution_deadline = float(sys.argv[1])
+cleanup_deadline = float(sys.argv[2])
+cleanup_seconds = float(sys.argv[3])
+owner = int(sys.argv[4])
+request_path,request_size,request_sha256,request_inode=sys.argv[5],int(sys.argv[6]),sys.argv[7],int(sys.argv[8])
+parts=request_path.split('/')
+if (len(parts)!=5 or parts[:4]!=['','proc',str(owner),'fd'] or not parts[4].isdecimal()
+ or str(int(parts[4]))!=parts[4] or int(parts[4])<3 or not 0<request_size<=1048576
+ or request_inode<=0 or len(request_sha256)!=64 or any(c not in '0123456789abcdef' for c in request_sha256)):
+ raise SystemExit(2)
+request_verified=False
+required_seals=fcntl.F_SEAL_SEAL|fcntl.F_SEAL_SHRINK|fcntl.F_SEAL_GROW|fcntl.F_SEAL_WRITE
+if not all(math.isfinite(n) for n in (execution_deadline,cleanup_deadline,cleanup_seconds)): raise SystemExit(2)
+if cleanup_seconds<=0 or cleanup_deadline<=execution_deadline or owner<=1: raise SystemExit(2)
+cancelled = False
+process = None
+sent = total_input = 0
+stdin_complete = False
+def cancel(_signum,_frame):
+ global cancelled
+ cancelled = True
+signal.signal(signal.SIGTERM,cancel)
+signal.signal(signal.SIGINT,cancel)
+if os.getppid()!=owner: raise SystemExit(2)
+libc = ctypes.CDLL(None)
+if libc.prctl(1,signal.SIGTERM,0,0,0)!=0: raise SystemExit(2)
+if os.getppid()!=owner: raise SystemExit(2)
+if libc.prctl(36,1,0,0,0)!=0: raise SystemExit(2)
+call_source = CALL_SOURCE_LITERAL
+selector = None
+def check_execution():
+ if cancelled: raise InterruptedError()
+ if time.monotonic()>=execution_deadline: raise TimeoutError()
+def read_request():
+ # Current DataSupervisor cannot resume large stdin writes after a heartbeat
+ # timeout. Read immutable anonymous memory instead; never stage facts on disk.
+ global request_verified
+ check_execution()
+ if os.getppid()!=owner:raise ValueError('request_owner_changed')
+ fd=os.open(request_path,os.O_RDONLY|os.O_CLOEXEC|os.O_NONBLOCK)
+ try:
+  before=os.fstat(fd)
+  if (not stat.S_ISREG(before.st_mode) or before.st_uid!=os.getuid()
+   or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=0
+   or before.st_size!=request_size or before.st_ino!=request_inode
+   or fcntl.fcntl(fd,fcntl.F_GET_SEALS)&required_seals!=required_seals):
+   raise ValueError('request_memory_identity')
+  os.lseek(fd,0,os.SEEK_SET)
+  raw=bytearray()
+  while True:
+   check_execution()
+   chunk=os.read(fd,min(65536,1048577-len(raw)))
+   check_execution()
+   if not chunk:break
+   raw.extend(chunk)
+   if len(raw)>1048576:raise ValueError('request_limit')
+  after=os.fstat(fd)
+  fields=('st_dev','st_ino','st_size','st_mode','st_uid','st_nlink','st_mtime_ns','st_ctime_ns')
+  if (any(getattr(before,k)!=getattr(after,k)for k in fields)
+   or len(raw)!=request_size or hashlib.sha256(raw).hexdigest()!=request_sha256
+   or fcntl.fcntl(fd,fcntl.F_GET_SEALS)&required_seals!=required_seals
+   or os.getppid()!=owner):raise ValueError('request_memory_changed')
+  request_verified=True
+  check_execution()
+  return json.loads(raw)
+ finally:
+  os.close(fd)
+def retain_child_identity():
+ # This is a direct, unreaped owned child. Its PID cannot be reused here.
+ with open('/proc/'+str(process.pid)+'/stat') as stream:
+  fields=stream.read().rpartition(')')[2].split()
+ if os.getpgid(process.pid)!=process.pid:raise ValueError('router_group_mismatch')
+ identity={'schema':'complaint-owned-proof-router-child@1','pid':process.pid,
+  'start_ticks':int(fields[19]),'process_group_id':process.pid,'manager_pid':os.getpid(),
+  'manager_parent_pid':owner,'worker_source_sha256':hashlib.sha256(call_source.encode()).hexdigest()}
+ fd=os.open('router-child.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+ with os.fdopen(fd,'w') as stream:
+  json.dump(identity,stream,separators=(',',':'));stream.flush();os.fsync(stream.fileno())
+def cleanup():
+ if process is None:return True
+ deadline=min(cleanup_deadline,time.monotonic()+cleanup_seconds)
+ try:os.killpg(process.pid,signal.SIGKILL)
+ except ProcessLookupError:pass
+ except OSError:return False
+ remaining=deadline-time.monotonic()
+ if remaining<=0:return False
+ try:process.wait(timeout=remaining)
+ except subprocess.TimeoutExpired:return False
+ while time.monotonic()<deadline:
+  try:children=[int(p) for p in open('/proc/self/task/'+str(os.getpid())+'/children').read().split()]
+  except (OSError,ValueError):return False
+  for pid in children:
+   try:os.kill(pid,signal.SIGKILL)
+   except ProcessLookupError:pass
+  try:
+   while True:
+    pid,_=os.waitpid(-1,os.WNOHANG)
+    if pid==0:break
+  except ChildProcessError:return True
+  time.sleep(.002)
+ return False
+result={'outcome':'unavailable','cleanup_confirmed':False}
+try:
+ request=read_request()
+ call=dict(request['call']);call['expected_manager_pid']=os.getpid()
+ if call['deadline_monotonic']!=execution_deadline:raise ValueError('request_deadline_mismatch')
+ raw=json.dumps(call,ensure_ascii=True,allow_nan=False,separators=(',',':')).encode()
+ total_input=len(raw)
+ if total_input>1048576:raise ValueError('request_limit')
+ check_execution()
+ process=subprocess.Popen([sys.executable,'-I','-S','-B','-c',call_source,str(os.getpid())],stdin=subprocess.PIPE,
+  stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=dict(os.environ),process_group=0)
+ retain_child_identity()
+ selector=selectors.DefaultSelector()
+ for stream,events,label in ((process.stdin,selectors.EVENT_WRITE,'stdin'),
+   (process.stdout,selectors.EVENT_READ,'stdout'),(process.stderr,selectors.EVENT_READ,'stderr')):
+  os.set_blocking(stream.fileno(),False);selector.register(stream,events,label)
+ output=bytearray();total_output=0;outcome='ok'
+ while selector.get_map():
+  check_execution()
+  for key,_ in selector.select(min(.02,max(0,execution_deadline-time.monotonic()))):
+   check_execution()
+   if key.data=='stdin':
+    try:written=os.write(key.fileobj.fileno(),raw[sent:sent+65536])
+    except BlockingIOError:continue
+    except BrokenPipeError:outcome='input_failed';break
+    if written<=0:outcome='input_failed';break
+    sent+=written
+    if sent==total_input:
+     selector.unregister(key.fileobj);key.fileobj.close();stdin_complete=True
+    continue
+   try:chunk=os.read(key.fileobj.fileno(),65536)
+   except BlockingIOError:continue
+   if not chunk:selector.unregister(key.fileobj);continue
+   total_output+=len(chunk)
+   if total_output>524288:outcome='output_limit';break
+   if key.data=='stdout':output.extend(chunk)
+  if outcome!='ok':break
+ result={'outcome':outcome,'cleanup_confirmed':False}
+ if outcome=='ok':
+  try:result['payload']=json.loads(output)
+  except (ValueError,UnicodeError):result['outcome']='unavailable'
+except InterruptedError:
+ result={'outcome':'cancelled','cleanup_confirmed':False}
+except TimeoutError:
+ result={'outcome':'timeout','cleanup_confirmed':False}
+except BaseException:
+ result={'outcome':'unavailable','cleanup_confirmed':False}
+finally:
+ confirmed=cleanup();result['cleanup_confirmed']=confirmed
+ result.update(bootstrap_flags=bootstrap_flags,sealed_request_verified=request_verified,
+  request_sha256=request_sha256,request_size=request_size,request_inode=request_inode,router_pid=None if process is None else process.pid,input_bytes_sent=sent,
+  input_bytes_total=total_input,stdin_complete=stdin_complete)
+ if result.get('outcome')=='ok' and process is not None and process.returncode!=0:
+  result.pop('payload',None);result['outcome']='unavailable'
+ if not confirmed:
+  result.pop('payload',None);result['outcome']='cleanup_unconfirmed'
+ if selector is not None:selector.close()
+ for stream in (() if process is None else (process.stdin,process.stdout,process.stderr)):
+  try:stream.close()
+  except (OSError,ValueError):pass
+ sys.stdout.write(json.dumps(result,ensure_ascii=True,allow_nan=False,separators=(',',':')));sys.stdout.flush()
+"""
 
-    return runner_type("local-bound", "smt-lib", run)
+
+@contextmanager
+def _proof_router_private_scope(state_directory: str | None):
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    if state_directory:
+        Path(state_directory).mkdir(parents=True, exist_ok=True, mode=0o700)
+    root = Path(tempfile.mkdtemp(prefix="proof-router-", dir=state_directory))
+    closure = {"confirmed": False}
+    try:
+        yield root, closure
+    finally:
+        # Unknown custody retains the private native manifest for recovery.
+        if closure["confirmed"]:
+            shutil.rmtree(root)
 
 
-def _owned_verifier(local_backend: str, goal_statement: str):
-    verification_type = _hammer_module.HammerVerification
+def _run_owned_proof_router(request: Mapping[str, Any], *, deadline: float, cancellation_event: Any,
+                            state_directory: str | None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    import fcntl
+    import site
+    import sys
+    from pathlib import Path
 
-    def verify(itp: str, script: str, goal: Any, premises: Sequence[Any]) -> Any:
-        del itp, premises
-        statement = str(getattr(goal, "statement", "") or "")
-        verified = (
-            local_backend == "proved"
-            and statement == goal_statement
-            and bool(goal_statement)
-            and goal_statement in str(script or "")
-        )
-        return verification_type(
-            verified=verified,
-            checker="bound-local-kernel",
-            elapsed_seconds=0.0,
-            output="kernel_bound_to_goal" if verified else "reconstruction_not_a_counterexample",
-        )
-
-    return verify
-
-
-def _run_managed_command(
-    command: Sequence[str],
-    *,
-    wall_time_seconds: float,
-    cancellation_event: Any,
-    state_directory: str,
-) -> Dict[str, Any]:
-    if _process_lifecycle_module is None:
-        return {
-            "available": False,
-            "process_group_reaped": False,
-            "timed_out": False,
-            "cancelled": False,
-            "error": "process_supervisor_unavailable",
+    process: Dict[str, Any] = {"available": False, "process_group_reaped": False,
+                               "timed_out": False, "cancelled": False, "actual_router_owned": True}
+    if _process_lifecycle_module is None or sys.platform != "linux":
+        return {"status": "unavailable", "error_code": "process_supervisor_unavailable"}, process
+    if cancellation_event is not None and cancellation_event.is_set():
+        process.update(available=True, cancelled=True, process_group_reaped=True)
+        return {"status": "cancelled"}, process
+    with _proof_router_private_scope(state_directory) as (root, closure):
+        for name in ("home", "tmp", "control-plane"):
+            (root / name).mkdir(mode=0o700)
+        environment = {
+            "PATH": "/usr/bin:/bin", "HOME": str(root / "home"), "TMPDIR": str(root / "tmp"),
+            "LC_ALL": "C", "LANG": "C", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+            "IPFS_DATASETS_PY_AUTO_NLTK_DOWNLOAD": "0", "IPFS_DATASETS_PY_MINIMAL_IMPORTS": "1",
+            "IPFS_ACCELERATE_AGENT_ORCHESTRATION_DIR": str(root / "control-plane"),
+            "IPFS_ACCELERATE_META_TODO_TASK_FILE": "", "IPFS_ACCELERATE_META_TODO_RUN_ID": "",
+            **_INSTALL_DISABLE_ENV,
         }
-    limits = _process_lifecycle_module.ProcessLimits(
-        wall_time_seconds=wall_time_seconds,
-        graceful_shutdown_seconds=0.2,
-        forced_cleanup_seconds=0.4,
-    )
-    supervisor = _process_lifecycle_module.ProcessSupervisor(
-        state_directory=state_directory,
-        heartbeat_interval_seconds=0.05,
-        recover=False,
-    )
-    started = time.monotonic()
-    result = supervisor.run(
-        list(command),
-        limits=limits,
-        cancel_event=cancellation_event,
-    )
-    payload = result.to_dict() if hasattr(result, "to_dict") else {}
-    payload["available"] = True
-    payload["adapter_elapsed_seconds"] = max(0.0, time.monotonic() - started)
-    payload["process_group_reaped"] = bool(getattr(result, "process_group_reaped", False))
-    payload["timed_out"] = bool(getattr(result, "timed_out", False))
-    payload["cancelled"] = bool(getattr(result, "cancelled", False))
-    return payload
+        modules = [_proof_router_module, _hammer_module, _legal_ir_obligations_module]
+        sources = {module.__name__: {"path": str(Path(module.__file__).resolve()),
+                   "sha256": hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()} for module in modules}
+        data_root = str(Path(_proof_router_module.__file__).resolve().parents[4])
+        roots = [data_root, *[entry for entry in site.getsitepackages() if Path(entry).is_dir()]]
+        remaining = deadline - time.monotonic()
+        reserve = min(0.8, remaining / 2)
+        if remaining <= 0.02:
+            process.update(available=True, timed_out=True, process_group_reaped=True)
+            closure["confirmed"] = True
+            return {"status": "timeout"}, process
+        call = {**dict(request), "schema": "complaint-proof-router-call@1", "sources": sources,
+                "roots": roots, "deadline_monotonic": deadline - reserve}
+        call["request_identity"] = _stable_payload_digest(call)
+        encoded = json.dumps({"call": call}, ensure_ascii=True,
+                             allow_nan=False, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) > 1048576:
+            closure["confirmed"] = True
+            return {"status": "unsupported", "error_code": "proof_request_limit"}, process
+        request_fd = os.memfd_create("complaint-proof-router-request", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        entered_native_run = False
+        try:
+            os.fchmod(request_fd, 0o600)
+            request_bytes = encoded.encode("utf-8")
+            offset = 0
+            while offset < len(request_bytes):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError()
+                written = os.write(request_fd, request_bytes[offset:offset+65536])
+                if written <= 0:
+                    raise OSError("request_memory_write_failed")
+                offset += written
+            required_seals = fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
+            fcntl.fcntl(request_fd, fcntl.F_ADD_SEALS, required_seals)
+            info = os.fstat(request_fd)
+            actual_seals = fcntl.fcntl(request_fd, fcntl.F_GET_SEALS)
+            if actual_seals & required_seals != required_seals or info.st_size != len(request_bytes):
+                raise OSError("request_memory_unsealed")
+            request_memory = {"path": f"/proc/{os.getpid()}/fd/{request_fd}", "size": info.st_size,
+                              "inode": info.st_ino, "sha256": hashlib.sha256(request_bytes).hexdigest(),
+                              "seals": actual_seals, "owner_pid": os.getpid()}
+            source = _PROOF_ROUTER_MANAGER_SOURCE.replace("CALL_SOURCE_LITERAL", repr(_PROOF_ROUTER_CALL_SOURCE), 1)
+            supervisor = _process_lifecycle_module.ProcessSupervisor(
+                state_directory=root / "lifecycle", heartbeat_interval_seconds=0.02, recover=False)
+            remaining = deadline - time.monotonic()
+            if remaining <= reserve:
+                process.update(available=True, timed_out=True, process_group_reaped=True)
+                closure["confirmed"] = True
+                return {"status": "timeout"}, process
+            # The manager has time to reap before the native owner's final kill.
+            # Both levels consume this request's existing reserve, never a new total.
+            limits = _process_lifecycle_module.ProcessLimits(wall_time_seconds=remaining-reserve,
+                graceful_shutdown_seconds=3*reserve/4, forced_cleanup_seconds=reserve/4)
+            command = [sys.executable, "-I", "-S", "-B", "-c", source, str(call["deadline_monotonic"]),
+                       str(deadline-reserve/4), str(reserve/2), str(os.getpid()),
+                       request_memory["path"],str(request_memory["size"]),request_memory["sha256"],str(request_memory["inode"])]
+            entered_native_run = True
+            result = supervisor.run(command, limits=limits,
+                cancel_event=cancellation_event, env=environment, cwd=str(root), input_text=None)
+        except TimeoutError:
+            if entered_native_run:
+                raise
+            process.update(available=True, timed_out=True, process_group_reaped=True)
+            closure["confirmed"] = True
+            return {"status": "timeout"}, process
+        finally:
+            os.close(request_fd)
+        process.update({key: getattr(result, key) for key in (
+            "pid", "process_group_id", "returncode", "timed_out", "cancelled", "wall_time_seconds",
+            "process_group_reaped", "termination_reason", "forced_cleanup")})
+        process["available"] = True
+        process["stdout_bytes"] = len(result.stdout.encode("utf-8"))
+        process["stderr_bytes"] = len(result.stderr.encode("utf-8"))
+        process["worker_source_sha256"] = hashlib.sha256(_PROOF_ROUTER_CALL_SOURCE.encode()).hexdigest()
+        process["manager_source_sha256"] = hashlib.sha256(source.encode()).hexdigest()
+        process["cleanup_reserve_seconds"] = reserve
+        process["execution_budget_seconds"] = max(0.0, remaining-reserve)
+        try:
+            envelope = json.loads(result.stdout)
+        except (ValueError, TypeError):
+            envelope = {}
+        cleanup = envelope.get("cleanup_confirmed") is True or (result.pid is None and result.process_group_reaped)
+        process["router_tree_reaped"] = cleanup
+        process["router_pid"] = envelope.get("router_pid")
+        identity_path = root / "router-child.json"
+        identity = None
+        if identity_path.exists() and not identity_path.is_symlink():
+            info = identity_path.stat()
+            if info.st_uid == os.getuid() and info.st_mode & 0o777 == 0o600 and info.st_size <= 4096:
+                try:
+                    candidate = json.loads(identity_path.read_text())
+                    if (isinstance(candidate, dict) and candidate.get("schema") == "complaint-owned-proof-router-child@1"
+                            and type(candidate.get("pid")) is int and candidate["pid"] > 1
+                            and type(candidate.get("start_ticks")) is int and candidate["start_ticks"] > 0
+                            and candidate.get("process_group_id") == candidate["pid"]
+                            and candidate.get("manager_pid") == result.pid
+                            and candidate.get("manager_parent_pid") == os.getpid()
+                            and candidate.get("worker_source_sha256") == process["worker_source_sha256"]
+                            and process["router_pid"] in (None, candidate["pid"])):
+                        identity = candidate
+                except (OSError, ValueError, TypeError):
+                    pass
+        if identity is not None:
+            process["router_pid"] = identity["pid"]
+            process["router_child_identity"] = identity
+        elif type(process["router_pid"]) is int:
+            cleanup = False
+            process["router_tree_reaped"] = False
+        expected_flags = {key: 1 for key in ("no_site", "isolated", "ignore_environment", "dont_write_bytecode")}
+        manager_flags = envelope.get("bootstrap_flags")
+        process["manager_bootstrap_flags"] = manager_flags if manager_flags == expected_flags else None
+        bootstrap_path = root / "router-bootstrap.json"
+        worker_flags = None
+        if identity is not None and bootstrap_path.exists() and not bootstrap_path.is_symlink():
+            info = bootstrap_path.stat()
+            if info.st_uid == os.getuid() and info.st_mode & 0o777 == 0o600 and info.st_size <= 4096:
+                try:
+                    observed = json.loads(bootstrap_path.read_text())
+                    if (isinstance(observed, dict) and observed.get("schema") == "complaint-owned-proof-router-bootstrap@1"
+                            and observed.get("pid") == identity["pid"]
+                            and observed.get("manager_pid") == result.pid
+                            and observed.get("flags") == expected_flags):
+                        worker_flags = observed["flags"]
+                except (OSError, ValueError, TypeError):
+                    pass
+        process["worker_bootstrap_flags"] = worker_flags
+        process["isolated_no_site_bootstrap_verified"] = (
+            process["manager_bootstrap_flags"] == expected_flags and worker_flags == expected_flags)
+        if identity is not None and not process["isolated_no_site_bootstrap_verified"]:
+            envelope.pop("payload", None)
+            envelope["outcome"] = "unavailable"
+        process["request_transport"] = "sealed_parent_memfd"
+        process["request_memory"] = request_memory
+        process["sealed_request_transport_verified"] = (
+            envelope.get("sealed_request_verified") is True
+            and envelope.get("request_sha256") == request_memory["sha256"]
+            and envelope.get("request_size") == request_memory["size"]
+            and envelope.get("request_inode") == request_memory["inode"])
+        if identity is not None and not process["sealed_request_transport_verified"]:
+            envelope.pop("payload", None)
+            envelope["outcome"] = "unavailable"
+        process["input_bytes_sent"] = envelope.get("input_bytes_sent", 0)
+        process["input_bytes_total"] = envelope.get("input_bytes_total", 0)
+        process["stdin_complete"] = envelope.get("stdin_complete") is True
+        process["actual_router_started"] = type(process["router_pid"]) is int
+        process["process_group_reaped"] = process["process_group_reaped"] and cleanup
+        closure["confirmed"] = process["process_group_reaped"]
+        if not closure["confirmed"]:
+            process["retained_state_directory"] = str(root)
+        process["timed_out"] = process["timed_out"] or envelope.get("outcome") == "timeout"
+        process["timed_out"] = process["timed_out"] or time.monotonic() >= deadline
+        process["cancelled"] = process["cancelled"] or envelope.get("outcome") == "cancelled"
+        payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else {}
+        if payload.get("status") == "timeout":
+            process["timed_out"] = True
+        if (not process["process_group_reaped"] or result.returncode != 0
+                or payload.get("status") == "ok" and (payload.get("request_identity") != call["request_identity"]
+                                                       or payload.get("runtime_sources") != sources)):
+            return {"status": "unavailable", "error_code": "proof_cleanup_or_identity_unconfirmed"}, process
+        return payload or {"status": envelope.get("outcome") or "unavailable",
+                           "error_code": "proof_output_limit" if envelope.get("outcome") == "output_limit" else "proof_router_unavailable"}, process
 
 
-def _classify_route(
-    *,
-    native_status: str,
-    native_trust: str,
-    native_reason: str,
-    attempt_metadata: Sequence[Mapping[str, Any]],
-    missing_facts: Sequence[Mapping[str, Any]],
-    versions_match: bool,
-    similarity_score: Any,
-    model_assertion: Any,
-    process: Mapping[str, Any] | None,
-    local_backend: str,
-    goal_bound_kernel: bool,
-) -> Dict[str, Any]:
-    structural_proved = any(
-        str(item.get("status") or "") == "proved" and str(item.get("route") or "").startswith("deterministic_")
-        for item in attempt_metadata
-    )
-    premise_consistency = ""
-    negative_bound = local_backend == "disproved" or native_reason == "backend_counterexample"
-    for item in attempt_metadata:
-        metadata = item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
-        if metadata.get("premise_consistency"):
-            premise_consistency = str(metadata.get("premise_consistency"))
-        if metadata.get("negative_proof") is True and metadata.get("bound_to_goal") is True:
-            negative_bound = True
-    if process and process.get("available") and process.get("cancelled"):
+def _classify_route(*, native_status: str, native_trust: str, native_reason: str,
+                    attempt_metadata: Sequence[Mapping[str, Any]], missing_facts: Sequence[Mapping[str, Any]],
+                    versions_match: bool, similarity_score: Any, model_assertion: Any,
+                    process: Mapping[str, Any] | None, goal_bound_kernel: bool = False,
+                    negative_artifact_verified: bool = False) -> Dict[str, Any]:
+    structural_proved = any(str(item.get("status") or "") == "proved"
+        and str(item.get("route") or "").startswith("deterministic_") for item in attempt_metadata)
+    if process and process.get("cancelled"):
         outcome = "cancelled"
-    elif process and process.get("available") and process.get("timed_out"):
+    elif process and process.get("timed_out"):
         outcome = "timeout"
-    elif local_backend == "timeout" or native_status == "timeout":
+    elif process and not process.get("process_group_reaped"):
+        outcome = "unavailable"
+    elif not versions_match or missing_facts:
+        outcome = "unknown"
+    elif native_status == "timeout":
         outcome = "timeout"
     elif native_status == "cancelled":
         outcome = "cancelled"
-    elif not versions_match:
-        outcome = "unknown"
-    elif missing_facts:
-        outcome = "unknown"
-    elif local_backend == "unsat_premises" or premise_consistency == "unsat":
-        outcome = "inconsistent"
-    elif local_backend == "sat" or premise_consistency == "sat":
-        outcome = "unknown"
-    elif local_backend == "unavailable" or native_reason == "tool_missing":
-        outcome = "unavailable"
-    elif native_status in {"unsupported_translation", "unsupported"} or local_backend == "unsupported":
-        outcome = "unsupported"
-    elif native_status == "theorem_failed" and negative_bound and local_backend == "disproved":
-        outcome = "refuted"
-    elif native_status == "theorem_failed":
-        outcome = "unsupported"
-    elif (
-        native_status == "proved"
-        and native_trust == "kernel"
-        and goal_bound_kernel
-        and local_backend == "proved"
-        and not structural_proved
-    ):
+    elif native_status in {"unsupported_translation", "unsupported", "theorem_failed"}:
+        outcome = "refuted" if native_status == "theorem_failed" and negative_artifact_verified else "unsupported"
+    elif native_status == "proved" and native_trust == "kernel" and goal_bound_kernel and not structural_proved:
         outcome = "proved"
-    elif native_status == "error":
-        outcome = "unavailable" if "unavailable" in native_reason or native_reason == "tool_missing" else "unknown"
+    elif native_status in {"error", "unavailable"}:
+        outcome = "unavailable"
     else:
         outcome = "unknown"
-    substantive = outcome == "proved"
-    return {
-        "outcome": outcome,
-        "substantive_trust_satisfied": substantive,
-        "structural_proof_is_substantive": False,
-        "structural_route_proved": structural_proved,
-        "similarity_score_ignored": similarity_score is not None,
-        "model_assertion_ignored": model_assertion is not None,
-        "consistency_is_entailment": False,
-        "unsat_proves_arbitrary_claim": False,
-        "theorem_failed_is_counterexample": outcome == "refuted",
-        "premise_consistency": premise_consistency or ("unsat" if local_backend == "unsat_premises" else "sat" if local_backend == "sat" else ""),
-        "native_status": native_status,
-        "native_trust": native_trust,
-        "native_reason": native_reason,
-    }
+    return {"outcome": outcome, "substantive_trust_satisfied": outcome == "proved",
+        "structural_route_proved": structural_proved, "structural_proof_is_substantive": False,
+        "similarity_score_ignored": similarity_score is not None, "model_assertion_ignored": model_assertion is not None,
+        "consistency_is_entailment": False, "unsat_proves_arbitrary_claim": False,
+        "theorem_failed_is_counterexample": outcome == "refuted", "native_status": native_status,
+        "native_trust": native_trust, "native_reason": native_reason}
 
 
 def _routing_receipt(
@@ -5781,6 +6200,7 @@ def _routing_receipt(
         "outcomes": list(PROOF_ROUTING_OUTCOMES),
         "substantive_trust_floor": PROOF_ROUTING_SUBSTANTIVE_TRUST,
         "substantive_trust_satisfied": outcome == "proved",
+        "entails_claim_element": False,
         "structural_proof_is_substantive": False,
         "missing_facts_are_false": False,
         "policy": dict(policy or {}),
@@ -5817,31 +6237,26 @@ def route_bound_legal_ir_proof(
     premise_version: str = "",
     expected_premise_version: str = "",
 ) -> Dict[str, Any]:
-    """Route one obligation through LegalIRProofRouter without minting proof trust.
+    """Own the actual native router within one request deadline.
 
-    Structural deterministic successes stay below the substantive kernel floor.
-    Missing facts stay unknown. Timeout and cancellation are process-scoped:
-    a managed child is reaped before this function returns.
+    The compatibility selector and command parameters cannot supply a backend,
+    choose an outcome, or launch arbitrary code. This configuration has no
+    checked substantive kernel backend: structural successes remain unknown.
     """
-
+    started = time.monotonic()
     total = _positive_finite(total_timeout_seconds, "total_timeout_seconds")
-    stage_input = dict(stage_timeout_seconds or _default_stage_budgets())
+    deadline = started + total
+    if managed_wall_time_seconds is not None:
+        deadline = min(deadline, started + _positive_finite(managed_wall_time_seconds, "managed_wall_time_seconds"))
+    stage_input = dict(stage_timeout_seconds if stage_timeout_seconds is not None else _default_stage_budgets())
+    if any(key not in stage_input for key in _default_stage_budgets()):
+        raise ValueError("missing stage budget")
     stages = {key: _positive_finite(stage_input[key], key) for key in _default_stage_budgets()}
-    if stage_timeout_seconds is not None:
-        for key in _default_stage_budgets():
-            if key not in stage_timeout_seconds:
-                raise ValueError(f"missing stage budget: {key}")
     rejected_empty_enabled_routes = enabled_routes is not None and len(tuple(enabled_routes)) == 0
-    requested_routes = tuple(
-        str(item) for item in (enabled_routes if enabled_routes is not None and not rejected_empty_enabled_routes else _PROOF_ROUTING_SAFE_ROUTES)
-    )
+    requested_routes = tuple(str(item) for item in (
+        enabled_routes if enabled_routes is not None and not rejected_empty_enabled_routes else _PROOF_ROUTING_SAFE_ROUTES))
     dropped_install_routes = [item for item in requested_routes if item in _PROOF_ROUTING_INSTALL_PRONE_ROUTES]
-    safe_routes = tuple(item for item in requested_routes if item not in _PROOF_ROUTING_INSTALL_PRONE_ROUTES)
-    if not safe_routes:
-        safe_routes = _PROOF_ROUTING_SAFE_ROUTES
-    local_backend = str(local_backend or "")
-    if local_backend in {"proved", "disproved", "reconstruction_failed", "unavailable", "timeout"}:
-        safe_routes = tuple(dict.fromkeys((*safe_routes, "smt_atp_portfolio", "native_lean_reconstruction")))
+    safe_routes = tuple(item for item in requested_routes if item not in _PROOF_ROUTING_INSTALL_PRONE_ROUTES) or _PROOF_ROUTING_SAFE_ROUTES
     versions = {
         "execution_identity": str(execution_identity or ""),
         "expected_execution_identity": str(expected_execution_identity or execution_identity or ""),
@@ -5852,194 +6267,82 @@ def route_bound_legal_ir_proof(
         "policy_version": PROOF_ROUTING_POLICY_VERSION,
         "premises": _premise_identity(premise_inventory),
     }
-    versions_match = (
-        versions["execution_identity"] == versions["expected_execution_identity"]
-        and versions["obligation_version"] == versions["expected_obligation_version"]
-        and versions["premise_version"] == versions["expected_premise_version"]
-    )
+    versions_match = all(versions[key] == versions["expected_" + key]
+                         for key in ("execution_identity", "obligation_version", "premise_version"))
     missing = _missing_fact_values(premise_inventory)
+    common = {
+        "missing_facts": missing, "backend_available": False, "attempts": [], "process": None,
+        "rejected_empty_enabled_routes": rejected_empty_enabled_routes,
+        "dropped_install_prone_routes": dropped_install_routes, "requested_trust": str(required_trust),
+        "assumption_ids": [str(item.get("premise_id") or "") for item in (premise_inventory or {}).get("assumptions") or [] if isinstance(item, Mapping)],
+        "similarity_score_ignored": similarity_score is not None, "model_assertion_ignored": model_assertion is not None,
+        "consistency_is_entailment": False, "unsat_proves_arbitrary_claim": False,
+        "theorem_failed_is_counterexample": False, "entails_claim_element": False,
+    }
+    def unavailable(outcome: str, reason: str, *, policy: Mapping[str, Any] | None = None,
+                    extra: Mapping[str, Any] | None = None) -> Dict[str, Any]:
+        return _routing_receipt(outcome=outcome, reason=reason, policy=policy, versions=versions,
+                                extra={**common, **dict(extra or {})})
+    if not versions_match:
+        return unavailable("unknown", "stale_source_or_policy_version")
+    if missing:
+        return unavailable("unknown", "missing_fact_open_world")
+    if local_backend:
+        return unavailable("unsupported", "untrusted_backend_selector", extra={"backend_selector_rejected": True})
+    if managed_command:
+        return unavailable("unsupported", "untrusted_process_command", extra={"managed_command_rejected": True})
     if not _routing_modules_available():
-        return _routing_receipt(
-            outcome="unavailable",
-            reason="legal_ir_proof_router_unavailable",
-            policy=None,
-            versions=versions,
-            extra={"missing_facts": missing, "backend_available": False},
-        )
+        return unavailable("unavailable", "legal_ir_proof_router_unavailable")
     try:
         bound_obligation, rejected_metadata = _coerce_obligation(obligation, goal_statement)
-    except Exception as exc:  # noqa: BLE001 - typed boundary failure
-        return _routing_receipt(
-            outcome="unavailable",
-            reason=type(exc).__name__,
-            policy=None,
-            versions=versions,
-            extra={"missing_facts": missing, "backend_available": False},
-        )
-    goal_text = str(goal_statement or bound_obligation.statement or "")
-    policy = _proof_router_module.ProofRoutingPolicy(
-        required_trust=required_trust,
-        total_timeout_seconds=total,
-        stage_timeout_seconds={
-            _proof_router_module.ProofRouteStage.DETERMINISTIC: stages["deterministic"],
-            _proof_router_module.ProofRouteStage.NATIVE_LOGIC: stages["native_logic"],
-            _proof_router_module.ProofRouteStage.SMT_ATP: stages["smt_atp"],
-            _proof_router_module.ProofRouteStage.LEAN_RECONSTRUCTION: stages["lean_reconstruction"],
-        },
-        enabled_routes=safe_routes,
-        stop_on_theorem_failure=True,
-    )
-    process_payload: Dict[str, Any] | None = None
-    if managed_command:
-        if not managed_state_directory:
-            raise ValueError("managed_state_directory is required when a managed command is set")
-        wall = _positive_finite(managed_wall_time_seconds or total, "managed_wall_time_seconds")
-        process_payload = _run_managed_command(
-            managed_command,
-            wall_time_seconds=min(wall, total),
-            cancellation_event=cancellation_event,
-            state_directory=managed_state_directory,
-        )
-        if not process_payload.get("available"):
-            return _routing_receipt(
-                outcome="unavailable",
-                reason="process_supervisor_unavailable",
-                policy=policy.to_dict(),
-                versions=versions,
-                extra={"process": process_payload, "missing_facts": missing},
-            )
-    route_runners: Dict[str, Any] = {}
-    if local_backend in {"unsat_premises", "sat"}:
-        consistency = "unsat" if local_backend == "unsat_premises" else "sat"
-
-        def _consistency_runner(request: Any, marker: str = consistency) -> Any:
-            del request
-            return _proof_router_module.ProofRouteOutcome(
-                status=_proof_router_module.ProofRouteStatus.UNKNOWN,
-                trust_level=_proof_router_module.ProofTrustLevel.NONE,
-                reason="premise_consistency_is_not_entailment",
-                metadata={"premise_consistency": marker},
-            )
-
-        route_runners["deterministic_syntax"] = _consistency_runner
-    backends: List[Any] = []
-    verifier = None
-    if local_backend in {"proved", "disproved", "reconstruction_failed", "unavailable", "timeout"}:
-        backends.append(_owned_backend(local_backend, goal_text))
-        verifier = _owned_verifier(local_backend, goal_text)
-    pipeline = _hammer_module.HammerPipeline(backends=backends, kernel_verifier=verifier)
-    router = _proof_router_module.LegalIRProofRouter(
-        pipeline,
-        policy=policy,
-        route_runners=route_runners or None,
-    )
-    goal = _hammer_module.HammerGoal(
-        statement=goal_text,
-        name=str(bound_obligation.obligation_id),
-        metadata={"logic_family": bound_obligation.logic_family, "substantive_goal": True},
-    )
-    hammer_premises = _hammer_premises(premise_inventory, premises)
-    if local_backend and not hammer_premises:
-        hammer_premises = [
-            _hammer_module.HammerPremise(
-                name="bound-check",
-                statement="bound_check_premise(p)",
-                metadata={"role": "bound_artifact", "axiom": False},
-            )
-        ]
-    with _prover_installs_disabled():
-        native = router.route(
-            bound_obligation,
-            goal,
-            hammer_premises,
-            sample_or_document=sample_or_document,
-            cancellation_event=None if process_payload else cancellation_event,
-        )
-    native_payload = native.to_dict()
-    attempts = list(native_payload.get("attempts") or [])
-    goal_bound_kernel = bool(
-        local_backend == "proved"
-        and getattr(getattr(native, "hammer_result", None), "reconstruction", None) is not None
-        and bool(getattr(native.hammer_result.reconstruction, "verified", False))
-    )
-    # A deterministic structural pass can be the only proved attempt. Kernel
-    # trust still has to be the winning native trust, scoped to this goal.
-    if any(str(item.get("route") or "").startswith("deterministic_") and item.get("status") == "proved" for item in attempts):
-        if str(native_payload.get("trust_level") or "") != "kernel":
-            goal_bound_kernel = False
-    classified = _classify_route(
-        native_status=str(native_payload.get("status") or ""),
-        native_trust=str(native_payload.get("trust_level") or ""),
-        native_reason=str(native_payload.get("stop_reason") or ""),
-        attempt_metadata=attempts,
-        missing_facts=missing,
-        versions_match=versions_match,
-        similarity_score=similarity_score,
-        model_assertion=model_assertion,
-        process=process_payload,
-        local_backend=local_backend,
-        goal_bound_kernel=goal_bound_kernel,
-    )
-    reason = classified["outcome"]
-    if process_payload and process_payload.get("timed_out"):
-        reason = "managed_child_deadline"
-    elif process_payload and process_payload.get("cancelled"):
-        reason = "managed_child_cancelled"
-    elif not versions_match:
-        reason = "stale_source_or_policy_version"
-    elif missing and classified["outcome"] == "unknown":
-        reason = "missing_fact_open_world"
-    elif classified["outcome"] == "unsupported" and native_payload.get("status") == "theorem_failed":
+        goal_text = str(goal_statement or bound_obligation.statement or "")
+        policy = _proof_router_module.ProofRoutingPolicy(required_trust=required_trust,
+            total_timeout_seconds=total, stage_timeout_seconds=stages, enabled_routes=safe_routes,
+            stop_on_theorem_failure=True)
+        hammer_premises = _hammer_premises(premise_inventory, premises)
+        document = None if sample_or_document is None else _mapping_or_empty(_document_view(sample_or_document))
+        request = {
+            "policy": policy.to_dict(), "goal_statement": goal_text,
+            "obligation": bound_obligation.to_dict(),
+            "premises": [{"name": item.name, "statement": item.statement, "weight": item.weight,
+                          "metadata": item.metadata} for item in hammer_premises],
+            "sample_or_document": document,
+        }
+        # Serializing actual typed inputs rejects callback/opaque object shortcuts.
+        json.dumps(request, allow_nan=False)
+        native_result, process = _run_owned_proof_router(request, deadline=deadline,
+            cancellation_event=cancellation_event, state_directory=managed_state_directory)
+    except Exception:  # noqa: BLE001 - never expose private source/error text
+        return unavailable("unavailable", "proof_request_or_supervisor_failed")
+    common.update(process=process, rejected_untrusted_metadata=rejected_metadata,
+                  goal_statement_sha256=hashlib.sha256(goal_text.encode("utf-8")).hexdigest(),
+                  obligation_id=str(bound_obligation.obligation_id),
+                  request_elapsed_seconds=max(0.0, time.monotonic()-started),
+                  checked_kernel_backend_configured=False)
+    if native_result.get("status") != "ok":
+        outcome = "cancelled" if process.get("cancelled") else "timeout" if process.get("timed_out") else "unsupported" if native_result.get("status") == "unsupported" else "unavailable"
+        return unavailable(outcome, "owned_router_"+outcome, policy=policy.to_dict(),
+                           extra={"error_code": native_result.get("error_code", "")})
+    native = native_result["native"]
+    attempts = list(native.get("attempts") or [])
+    classified = _classify_route(native_status=str(native.get("status") or ""),
+        native_trust=str(native.get("trust_level") or ""), native_reason=str(native.get("stop_reason") or ""),
+        attempt_metadata=attempts, missing_facts=missing, versions_match=versions_match,
+        similarity_score=similarity_score, model_assertion=model_assertion, process=process,
+        goal_bound_kernel=False, negative_artifact_verified=False)
+    reason = "structural_check_below_substantive_trust" if classified["structural_route_proved"] else classified["outcome"]
+    if native.get("status") == "theorem_failed":
         reason = "theorem_failed_without_bound_negative_proof"
-    elif classified["outcome"] == "refuted":
-        reason = "bound_negative_proof"
-    elif classified["outcome"] == "inconsistent":
-        reason = "premise_set_unsatisfiable"
-    elif classified["outcome"] == "proved":
-        reason = "kernel_bound_to_goal"
-    elif structural_only := classified["structural_route_proved"]:
-        del structural_only
-        reason = "structural_check_below_substantive_trust"
-    return _routing_receipt(
-        outcome=classified["outcome"],
-        reason=reason,
-        policy=policy.to_dict(),
-        versions=versions,
-        extra={
-            "backend_available": True,
+    return _routing_receipt(outcome=classified["outcome"], reason=reason, policy=policy.to_dict(), versions=versions,
+        extra={**common, "backend_available": True,
             "router": "ipfs_datasets_py.logic.integration.reasoning.legal_ir_proof_router.LegalIRProofRouter",
-            "router_schema_version": str(native_payload.get("schema_version") or ""),
-            "native_status": native_payload.get("status"),
-            "native_trust": native_payload.get("trust_level"),
-            "native_required_trust": native_payload.get("required_trust"),
-            "native_stop_reason": native_payload.get("stop_reason"),
-            "native_proved": bool(native_payload.get("proved")),
-            "native_trust_satisfied": bool(native_payload.get("trust_satisfied")),
-            "attempts": attempts,
-            "rejected_untrusted_metadata": rejected_metadata,
-            "dropped_install_prone_routes": dropped_install_routes,
-            "rejected_empty_enabled_routes": rejected_empty_enabled_routes,
-            "requested_trust": str(required_trust),
-            "missing_facts": missing,
-            "process": process_payload,
-            "assumption_ids": [
-                str(item.get("premise_id") or "")
-                for item in (premise_inventory or {}).get("assumptions") or []
-                if isinstance(item, Mapping)
-            ],
-            "goal_statement_sha256": hashlib.sha256(goal_text.encode("utf-8")).hexdigest(),
-            "obligation_id": str(bound_obligation.obligation_id),
-            "substantive_trust_satisfied": classified["substantive_trust_satisfied"],
+            "router_schema_version": str(native.get("schema_version") or ""),
+            "native_status": native.get("status"), "native_trust": native.get("trust_level"),
+            "native_required_trust": native.get("required_trust"), "native_stop_reason": native.get("stop_reason"),
+            "native_proved": bool(native.get("proved")), "native_trust_satisfied": bool(native.get("trust_satisfied")),
+            "attempts": attempts, "runtime_sources": native_result.get("runtime_sources"),
             "structural_route_proved": classified["structural_route_proved"],
-            "similarity_score_ignored": classified["similarity_score_ignored"],
-            "model_assertion_ignored": classified["model_assertion_ignored"],
-            "consistency_is_entailment": False,
-            "unsat_proves_arbitrary_claim": False,
-            "theorem_failed_is_counterexample": classified["theorem_failed_is_counterexample"],
-            "legacy_no_contradiction_is_certified_consistency": False,
-            "entails_claim_element": classified["outcome"] == "proved",
-        },
-    )
+            "substantive_trust_satisfied": False, "legacy_no_contradiction_is_certified_consistency": False})
 
 
 def legacy_procedural_template_attributes() -> Dict[str, Any]:

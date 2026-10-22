@@ -2642,6 +2642,15 @@ class ComplaintWorkspaceRequestHandlers:
             payload["message"] = f"Saved privacy mode for this case. The pending question is unchanged.\n{pending}".strip()
             return payload
 
+        joined_effect = None
+        if normalized_message and normalized_action not in {"status", "resume"}:
+            identity_question = normalized_question_id or str((target_question or {}).get("id") or "")
+            joined_effect = workspace._joined_chat_identity(state, identity_question, normalized_message,
+                                                            expected_question_revision)
+            if any(item.get("effect_id") == joined_effect for item in state.get("intake_history", []) if isinstance(item, dict)):
+                payload = workspace._build_intake_chat_payload(state)
+                payload["duplicate_answer_effect"] = True
+                return payload
         show_privacy_notice = not bool(state.get("privacy_notice_shown"))
         if show_privacy_notice:
             state["privacy_notice_shown"] = True
@@ -2692,7 +2701,15 @@ class ComplaintWorkspaceRequestHandlers:
             interview_action=normalized_action or None,
             narrative_turn=bool(normalized_message and narrative_turn),
         )
-        workspace._save_state(state)
+        if interview.get("status") == "refused":
+            payload = workspace._build_intake_chat_payload(state)
+            payload["interview"] = interview
+            return payload
+        if joined_effect is not None:
+            workspace._commit_joined_snapshot(state, effect_id=joined_effect,
+                question_id=identity_question, answer=normalized_message)
+        else:
+            workspace._save_state(state)
         payload = workspace._build_intake_chat_payload(
             state,
             accepted_answer=accepted_answer,
@@ -3236,8 +3253,74 @@ class ComplaintWorkspaceService:
             os.close(root_fd)
         return state
 
-    def joined_revision_repository(self) -> Path:
-        return self._session_dir / "joined-revisions"
+    def joined_revision_repository(self, user_id: Optional[str] = None, case_id: Optional[str] = None) -> Path:
+        root = self._session_dir / "joined-revisions"
+        if user_id is None:
+            return root
+        # An existing singleton repository is never hidden or treated as a
+        # fresh namespace. Authentication/recovery must admit it explicitly.
+        if any((root / name).exists() for name in ("head.cgpe", "wal", "owner.cgpe", "o")):
+            return root
+        # Reuse the workspace's opaque namespace convention; no identifying
+        # caller label is a repository pathname.
+        identity = json.dumps([str(user_id), str(case_id or user_id)], separators=(",", ":"))
+        return root / ("p-" + principal_namespace(identity))
+
+    def _joined_key(self, user_id: str, case_id: Optional[str] = None):
+        from integrations.private_storage import PrivateArtifactBinding
+        context = self._private_artifact_context(user_id, case_id)
+        binding = PrivateArtifactBinding(tenant_id=context["tenant_id"], case_id=context["case_id"],
+            principal_id=context["principal_id"], artifact_kind="session", revision="session-v1")
+        key_id, key = context["key_provider"].resolve(binding)
+        return context, key_id, key
+
+    def _joined_chat_identity(self, state: Mapping[str, Any], question_id: str, answer: str,
+                              question_revision: Optional[int] = None) -> str:
+        import hmac
+        user = str(state["user_id"])
+        context, _, key = self._joined_key(user, _state_case_id(state, user))
+        body = json.dumps([context["tenant_id"], context["case_id"], question_id,
+                           question_revision, answer], separators=(",", ":")).encode("utf-8")
+        return hmac.new(key, b"joined-intake-effect@1\x00" + body, hashlib.sha256).hexdigest()
+
+    def _commit_joined_snapshot(self, state: Dict[str, Any], *, effect_id: Optional[str] = None,
+                                question_id: Optional[str] = None, answer: Optional[str] = None) -> Dict[str, Any]:
+        from integrations.private_storage import commit_private_revision
+        user = str(state["user_id"])
+        context, key_id, key = self._joined_key(user, _state_case_id(state, user))
+        expected = str(state.get("private_revision") or "0")
+        revision = str(int(expected) + 1)
+        transaction = uuid.uuid4().hex
+        effect = effect_id or uuid.uuid4().hex
+        if effect_id:
+            history = state.setdefault("intake_history", [])
+            if any(item.get("effect_id") == effect_id for item in history if isinstance(item, dict)):
+                return state
+            found = next((item for item in reversed(history) if isinstance(item, dict)
+                          and item.get("question_id") == question_id and item.get("answer") == answer
+                          and not item.get("effect_id")), None)
+            if found is None:
+                found = {"question_id": question_id, "answer": answer}
+                history.append(found)
+            found.update(effect_id=effect, transaction_id=transaction)
+            graph = state.setdefault("annotation_knowledge_graph", {"entities": [], "relationships": []})
+            graph.setdefault("relationships", []).append({"id": effect, "kind": "intake-answer",
+                "question_id": question_id, "revision": revision})
+            state.setdefault("proof_history", []).append({"effect_id": effect, "transaction_id": transaction,
+                "kind": "intake-revision", "revision": revision})
+        state.update(private_revision=revision, missing_new_session=False, session_readable=True,
+                     at_rest_protection="private_envelope")
+        publication = commit_private_revision(self.joined_revision_repository(user, context["case_id"]),
+            tenant_id=context["tenant_id"], case_id=context["case_id"], principal_id=context["principal_id"],
+            key=key, key_id=key_id, expected_revision=expected,
+            session=json.dumps(state, sort_keys=True).encode("utf-8"),
+            fact_graph=json.dumps({"relationships": state.get("annotation_knowledge_graph", {}).get("relationships", []),
+                                   "revision": revision}, sort_keys=True).encode("utf-8"),
+            proof=json.dumps({"entries": state.get("proof_history", []), "revision": revision}, sort_keys=True).encode("utf-8"),
+            transaction_id=transaction, effect_id=effect)
+        if not publication.committed:
+            raise WorkspacePersistenceError("joined revision did not commit", code="durability_unproven", public_status="recoverable")
+        return state
 
     def commit_joined_intake_revision(
         self,
@@ -3265,7 +3348,7 @@ class ComplaintWorkspaceService:
         resolved = self._check_access(user_id, ability="write", case_id=case_id)
         context = self._private_artifact_context(resolved, case_id)
         binding_case = context["case_id"]
-        state = self._load_state(resolved)
+        state = self._load_state(resolved, case_id=binding_case)
         if str(state.get("user_id") or "") != resolved:
             raise WorkspaceAuthorizationDenied()
         if _state_case_id(state, resolved) != binding_case and state.get("missing_new_session") is not True:
@@ -3330,7 +3413,7 @@ class ComplaintWorkspaceService:
         )
         key_id, key = context["key_provider"].resolve(binding)
         publication = commit_private_revision(
-            self.joined_revision_repository(),
+            self.joined_revision_repository(resolved, binding_case),
             tenant_id=resolved,
             case_id=binding_case,
             principal_id=resolved,
@@ -3366,7 +3449,7 @@ class ComplaintWorkspaceService:
         )
         key_id, key = context["key_provider"].resolve(binding)
         publication = recover_private_revision(
-            self.joined_revision_repository(),
+            self.joined_revision_repository(resolved, context["case_id"]),
             tenant_id=resolved,
             case_id=context["case_id"],
             principal_id=resolved,
@@ -3980,9 +4063,39 @@ class ComplaintWorkspaceService:
             "at_rest_protection": "private_envelope",
         }
 
-    def _load_state(self, user_id: str) -> Dict[str, Any]:
-        resolved_user = self._check_access(user_id, ability="read")
-        context = self._private_artifact_context(resolved_user)
+    def _load_state(self, user_id: str, *, case_id: Optional[str] = None) -> Dict[str, Any]:
+        resolved_user = self._check_access(user_id, ability="read", case_id=case_id)
+        context = self._private_artifact_context(resolved_user, case_id)
+        repository = self.joined_revision_repository(resolved_user, context["case_id"])
+        from integrations.private_storage import private_revision_readiness, PrivateStorageError
+        _, readiness_key_id, readiness_key = self._joined_key(resolved_user, context["case_id"])
+        try:
+            readiness = private_revision_readiness(repository, tenant_id=resolved_user,
+                case_id=context["case_id"], principal_id=context["principal_id"],
+                key=readiness_key, key_id=readiness_key_id)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Joined state requires authenticated recovery; original bytes were preserved.",
+                code=exc.code, public_status="recoverable") from None
+        if readiness == "committed":
+            from integrations.private_storage import read_private_revision, PrivateStorageError
+            _, key_id, key = self._joined_key(resolved_user, context["case_id"])
+            try:
+                opened = read_private_revision(repository, tenant_id=resolved_user, case_id=context["case_id"],
+                    principal_id=context["principal_id"], key=key, key_id=key_id)
+                loaded = json.loads(opened["session"])
+                graph = json.loads(opened["fact_graph"])
+                proof = json.loads(opened["proof"])
+                if (str(loaded.get("private_revision")) != opened["revision"]
+                    or loaded.get("annotation_knowledge_graph", {}).get("relationships", []) != graph.get("relationships", [])
+                    or loaded.get("proof_history", []) != proof.get("entries", [])):
+                    raise ValueError("joined revision differs")
+                self._prepare_loaded_state(loaded, resolved_user)
+            except (PrivateStorageError, ValueError, TypeError, KeyError):
+                raise WorkspacePersistenceError("Joined private state did not authenticate; original bytes were preserved.",
+                    code="authentication_failed", public_status="recoverable") from None
+            loaded.update(status="available", session_readable=True, missing_new_session=False,
+                          existing_unreadable=False, at_rest_protection="private_envelope")
+            return loaded
         filename = self._private_session_filename(resolved_user)
         try:
             raw = self._read_bytes_nofollow(filename)
@@ -4078,6 +4191,18 @@ class ComplaintWorkspaceService:
         record_case = _state_case_id(state, user_id)
         self._check_access(user_id, ability="write", record_case_id=record_case)
         _apply_effective_privacy_policy(state, user_id)
+        repository = self.joined_revision_repository(user_id, record_case)
+        from integrations.private_storage import private_revision_readiness, PrivateStorageError
+        context, readiness_key_id, readiness_key = self._joined_key(user_id, record_case)
+        try:
+            readiness = private_revision_readiness(repository, tenant_id=user_id,
+                case_id=record_case, principal_id=context["principal_id"],
+                key=readiness_key, key_id=readiness_key_id)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Joined state requires authenticated recovery; original bytes were preserved.",
+                code=exc.code, public_status="recoverable") from None
+        if readiness == "committed":
+            return self._commit_joined_snapshot(state)
         filename = self._private_session_filename(user_id)
         try:
             existing_raw = self._read_bytes_nofollow(filename)

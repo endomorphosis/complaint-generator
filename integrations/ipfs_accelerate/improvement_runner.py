@@ -611,6 +611,104 @@ def _worktree_capacity(repo_root: Path, worktree_root: Path) -> dict[str, Any]:
     return result
 
 
+RESOURCE_MIN_FREE_BYTES = 1_073_741_824
+RESOURCE_MIN_FREE_INODES = 1024
+
+
+class CampaignResourceHold(RuntimeError):
+    """A local admission refusal, never a task failure/refund or live wait."""
+    code = "campaign_resource_hold"
+
+    def __init__(self, observation: Mapping[str, Any]):
+        self.observation = dict(observation)
+        super().__init__("campaign_resource_hold:" + str(observation.get("reason", "unavailable")))
+
+
+def _resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
+                       environment: Mapping[str, str]) -> dict[str, Any]:
+    """Observe each storage role without creating paths or reserving capacity.
+
+    Free bytes/inodes and access are a point-in-time admission observation;
+    other writers, quotas and subsequent IO can still fail after this check.
+    """
+    paths = {"repository": repo_root, "state": state_dir, "worktrees": worktree_root,
+             "home": Path(environment.get("HOME") or Path.home()),
+             "temporary": Path(environment.get("TMPDIR") or tempfile.gettempdir())}
+    roles = {}
+    timed_out = False
+    for role, raw_path in paths.items():
+        row: dict[str, Any] = {"path": str(raw_path), "ready": False}
+        try:
+            path = Path(raw_path)
+            if not path.is_absolute() or path.resolve(strict=False) != path:
+                raise ValueError("resource path is not canonical")
+            probe = path
+            while not probe.exists() and probe != probe.parent:
+                probe = probe.parent
+            info = probe.stat()
+            if not stat.S_ISDIR(info.st_mode) or (probe != path and info.st_uid != os.getuid()):
+                raise ValueError("absent resource path lacks an owned existing directory")
+            available = os.statvfs(probe)
+            fields = (available.f_bavail, available.f_frsize, available.f_favail, available.f_files)
+            if any(type(value) is not int or value < 0 for value in fields) or fields[1] == 0 or fields[3] == 0:
+                raise ValueError("resource capacity metadata is unavailable")
+            free_bytes, free_inodes = fields[0] * fields[1], fields[2]
+            writable = (not available.f_flag & os.ST_RDONLY
+                        and os.access(probe, os.W_OK | os.X_OK, effective_ids=True))
+            ready = bool(writable and free_bytes >= RESOURCE_MIN_FREE_BYTES and free_inodes >= RESOURCE_MIN_FREE_INODES)
+            row.update(filesystem_path=str(probe), free_bytes=free_bytes, free_inodes=free_inodes,
+                       writable_observed=bool(writable), ready=ready,
+                       reason="observed_capacity_ready" if ready else "local_capacity_insufficient")
+        except TimeoutError:
+            # Native's hook alarm is an OSError subclass. Stop this observation
+            # immediately; swallowing it and proceeding would lose its bound.
+            timed_out = True
+            row["reason"] = "resource_observation_timed_out"
+            roles[role] = row
+            break
+        except (OSError, ValueError, TypeError, AttributeError):
+            row["reason"] = "local_capacity_unavailable"
+        roles[role] = row
+    for role, raw_path in paths.items():
+        if role not in roles:
+            roles[role] = {"path": str(raw_path), "ready": False, "reason": "unobserved_after_timeout"}
+    ready = all(row["ready"] for row in roles.values())
+    return {"schema": "complaint-campaign-resource-admission@1", "ready": ready,
+            "reason": "resource_observation_timed_out" if timed_out else ("observed_capacity_ready" if ready else "local_capacity_hold"),
+            "minimum_free_bytes_per_filesystem": RESOURCE_MIN_FREE_BYTES,
+            "minimum_free_inodes_per_filesystem": RESOURCE_MIN_FREE_INODES,
+            "roles": roles, "capacity_reserved": False, "paid_dispatch": False,
+            "attempt_refunded": False, "accounting_changed": False,
+            "live_wait_or_lease_claimed": False}
+
+
+def _require_resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
+                               environment: Mapping[str, str], *, stage: str) -> None:
+    observed = _resource_capacity(repo_root, state_dir, worktree_root, environment)
+    if not observed["ready"]:
+        raise CampaignResourceHold({**observed, "stage": stage})
+
+
+def _resource_admission_hook(repo_root: Path, state_dir: Path, worktree_root: Path,
+                             environment: Mapping[str, str]):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon_runner import (
+        DaemonLoopHook, DaemonHookTimeoutError,
+    )
+    # Native's generic optional hook timeout is normally logged and ignored.
+    # Convert it inside the callback so this mandatory admission check refuses
+    # before run_once; every other hold also propagates through the sole loop.
+    def before_pass(_context):
+        try:
+            _require_resource_capacity(repo_root, state_dir, worktree_root, environment,
+                                       stage="before_native_pass")
+        except DaemonHookTimeoutError:
+            raise CampaignResourceHold({"schema": "complaint-campaign-resource-admission@1",
+                "ready": False, "reason": "resource_observation_timed_out", "stage": "before_native_pass",
+                "paid_dispatch": False, "accounting_changed": False, "attempt_refunded": False,
+                "live_wait_or_lease_claimed": False}) from None
+    return DaemonLoopHook(phase="before", message="Campaign resource admission hold: %s", callback=before_pass)
+
+
 def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktree_root: Path | None = None) -> list[str]:
     """Compile only options supported by the actual native supervisor parser."""
     return [
@@ -682,13 +780,17 @@ def prepare(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]
 
 def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: str | None = None, worktree_root: Path | None = None) -> dict[str, Any]:
     """Read-only readiness checks: never run a model, daemon, or auth command."""
+    selected_root, root_binding = _select_worktree_root(repo_root, state_dir, _read_json(state_dir / "launcher.json"), worktree_root)
+    resources = _resource_capacity(repo_root, state_dir, selected_root, os.environ)
+    if not resources["ready"]:
+        return {"status": "not_ready", "reason": CampaignResourceHold.code, "resource_capacity": resources,
+                "paid_calls": 0, "native_config_validated": False, "execution_started": False}
     os.chdir(repo_root)
     from .improvement_plan import BOARD_RELATIVE, build_improvement_work_plan, load_spec
     spec = load_spec(spec_path)
     plan = build_improvement_work_plan(spec)
     branch = merge_target or _branch(repo_root)
     supervisor, _ = _native_modules(repo_root)
-    selected_root, root_binding = _select_worktree_root(repo_root, state_dir, _read_json(state_dir / "launcher.json"), worktree_root)
     args = native_argv(repo_root / BOARD_RELATIVE, state_dir, branch, worktree_root=selected_root)
     parsed = supervisor.parse_args(args)
     config = supervisor.supervisor_config_from_args(parsed, repo_root=repo_root)
@@ -698,14 +800,14 @@ def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: s
     auth_present = _auth_material_present(env)
     privacy = _private_runtime_checks(repo_root, env)
     capacity = _worktree_capacity(repo_root, selected_root)
-    return {"status": "ready" if grok and auth_present and privacy["ready"] and capacity["sufficient"] is not False else "not_ready",
+    return {"status": "ready" if grok and auth_present and privacy["ready"] and capacity["sufficient"] is not False and resources["ready"] else "not_ready",
             "provider": "grok_cli", "model": MODEL, "allow_fallback": False,
             "grok_binary_present": bool(grok), "auth_material_present": bool(auth_present),
             "auth_provider_command_supported": False,
             "auth_validated": False, "paid_calls": 0, "native_plan_id": plan.plan_id,
             "native_config_validated": True, "native_task_source": parsed.task_source_kind,
             "ephemeral_worktrees": config.use_ephemeral_worktree, "merge_target": branch,
-            "privacy": privacy, "worktree_capacity": capacity, "worktree_root": str(selected_root), "worktree_root_binding": root_binding,
+            "privacy": privacy, "worktree_capacity": capacity, "resource_capacity": resources, "worktree_root": str(selected_root), "worktree_root_binding": root_binding,
             "board": board, "native_argv": args,
             "limitations": ["Credential presence does not verify login, quota, model access or execution progress.",
                             "Native supervisor retries are bounded per task and to five daemon restarts; manual holds are never cleared.",
@@ -714,6 +816,11 @@ def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: s
 
 def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: Path | None = None) -> dict[str, Any]:
     state_dir = state_dir.resolve()
+    prospective_root, _ = _select_worktree_root(repo_root, state_dir, _read_json(state_dir / "launcher.json"), worktree_root)
+    resources = _resource_capacity(repo_root, state_dir, prospective_root, os.environ)
+    if not resources["ready"]:
+        return {"status": "not_ready", "reason": CampaignResourceHold.code, "resource_capacity": resources,
+                "paid_calls": 0, "execution_started": False}
     with _lock(state_dir):
         owner_path = state_dir / "launcher.json"
         previous = _read_json(owner_path)
@@ -1796,6 +1903,9 @@ def stop(state_dir: Path, *, timeout: float = 15.0) -> dict[str, Any]:
 
 
 def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, merge_target: str, *, worktree_root: Path | None = None) -> int:
+    # Refuse before creating even a lock file when storage cannot be observed.
+    prospective_root, _ = recorded_worktree_root(_read_json(state_dir / "launcher.json"), state_dir)
+    _require_resource_capacity(repo_root, state_dir, prospective_root, os.environ, stage="before_owned_startup_lock")
     # Serialize startup against parent receipt publication and future starts.
     with _lock(state_dir):
         record = _read_json(state_dir / "launcher.json")
@@ -1819,6 +1929,7 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
         privacy = _private_runtime_checks(repo_root, effective)
         if not privacy["ready"]:
             raise RuntimeError(privacy["reason"])
+        _require_resource_capacity(repo_root, state_dir, selected_root, effective, stage="before_native_supervisor")
         from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor_runner import (
             run_configured_portal_implementation_supervisor,
         )
@@ -2482,6 +2593,10 @@ def _run_evidence_daemon_adapter(argv, *, repo_root, validation_scheduler, proof
         raise ValueError("unsupported_evidence_daemon_authority")
     if int(getattr(args, 'state_owner_bootstrap_fd', -1)) != -1:
         raise ValueError("unsupported_evidence_daemon_owner_bootstrap")
+    resource_worktrees = args.worktree_root or args.state_dir / "worktrees"
+    resource_environment = dict(os.environ)
+    _require_resource_capacity(Path(repo_root), args.state_dir, resource_worktrees,
+                               resource_environment, stage="before_native_daemon")
     configure_daemon_logging(args)
     apply_merge_resolver_environment(args)
     # Preserve nativeA main's exact49 argument expressions. In particular this
@@ -2555,7 +2670,8 @@ def _run_evidence_daemon_adapter(argv, *, repo_root, validation_scheduler, proof
         previous_int = signal.signal(signal.SIGINT, request_stop)
     try:
         # The public native loop owns run_once, bounded wait and event close.
-        return run_portal_implementation_daemon_loop(daemon, context, logger=native.logger)
+        return run_portal_implementation_daemon_loop(daemon, context, logger=native.logger,
+            hooks=(_resource_admission_hook(REPO_ROOT, args.state_dir, resource_worktrees, resource_environment),))
     finally:
         if handlers_installed:
             signal.signal(signal.SIGTERM, previous_term)

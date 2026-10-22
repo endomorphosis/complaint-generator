@@ -1265,3 +1265,150 @@ def test_configured_start_and_owned_reentry_preserve_root_epoch_and_native_contr
     assert calls[0][calls[0].index('--merge-queue-dir') + 1] == str(state / 'merge-queue')
     assert history.read_bytes() == original
     assert not (state / 'worktrees').exists()
+
+
+def _resource_directories(tmp_path):
+    values = {}
+    for role in ('repository', 'state', 'worktrees', 'home', 'temporary'):
+        values[role] = tmp_path / role
+        values[role].mkdir()
+    return values
+
+
+def _capacity_metadata(*, free_bytes=None, free_inodes=None, read_only=False):
+    return SimpleNamespace(f_bavail=runner.RESOURCE_MIN_FREE_BYTES if free_bytes is None else free_bytes,
+        f_frsize=1, f_favail=runner.RESOURCE_MIN_FREE_INODES if free_inodes is None else free_inodes,
+        f_files=1_000_000, f_flag=os.ST_RDONLY if read_only else 0)
+
+
+@pytest.mark.parametrize('role', ['repository', 'state', 'worktrees', 'home', 'temporary'])
+@pytest.mark.parametrize('failure', ['bytes', 'inodes', 'readonly', 'access', 'unavailable'])
+def test_each_campaign_filesystem_role_can_hold_admission(tmp_path, monkeypatch, role, failure):
+    paths = _resource_directories(tmp_path)
+    def capacity(path):
+        if Path(path) != paths[role]:
+            return _capacity_metadata()
+        if failure == 'unavailable':
+            raise OSError('synthetic statvfs refusal')
+        return _capacity_metadata(free_bytes=runner.RESOURCE_MIN_FREE_BYTES - 1 if failure == 'bytes' else None,
+            free_inodes=runner.RESOURCE_MIN_FREE_INODES - 1 if failure == 'inodes' else None,
+            read_only=failure == 'readonly')
+    monkeypatch.setattr(runner.os, 'statvfs', capacity)
+    monkeypatch.setattr(runner.os, 'access', lambda path, *a, **k: failure != 'access' or Path(path) != paths[role])
+    observed = runner._resource_capacity(paths['repository'], paths['state'], paths['worktrees'],
+        {'HOME': str(paths['home']), 'TMPDIR': str(paths['temporary'])})
+    assert observed['ready'] is False and observed['roles'][role]['ready'] is False
+    assert all(value['ready'] for name, value in observed['roles'].items() if name != role)
+    assert observed['capacity_reserved'] is False and observed['paid_dispatch'] is False
+    assert observed['accounting_changed'] is False and observed['attempt_refunded'] is False
+    assert observed['live_wait_or_lease_claimed'] is False
+
+
+def test_absent_resource_locations_use_owned_ancestor_without_creation(tmp_path, monkeypatch):
+    root = tmp_path / 'repository'; root.mkdir()
+    home = tmp_path / 'home'; home.mkdir()
+    state, worktrees, temporary = (tmp_path / name / 'absent' for name in ('state', 'worktrees', 'temporary'))
+    checked = []
+    monkeypatch.setattr(runner.os, 'statvfs', lambda path: checked.append(Path(path)) or _capacity_metadata())
+    monkeypatch.setattr(runner.os, 'access', lambda *a, **k: True)
+    observed = runner._resource_capacity(root, state, worktrees, {'HOME': str(home), 'TMPDIR': str(temporary)})
+    assert observed['ready'] is True and len(checked) == 5
+    assert observed['roles']['state']['filesystem_path'] == str(tmp_path)
+    assert not state.parent.exists() and not worktrees.parent.exists() and not temporary.parent.exists()
+    assert observed['capacity_reserved'] is False
+
+
+@pytest.mark.parametrize('operation', ['doctor', 'start', 'internal'])
+def test_resource_hold_precedes_state_creation_and_native_admission(tmp_path, monkeypatch, operation):
+    root = tmp_path / 'repository'; root.mkdir()
+    state = tmp_path / 'absent-state'
+    history = tmp_path / 'spent-accounting.json'; history.write_text('{"spent":1}')
+    before = history.read_bytes()
+    monkeypatch.setattr(runner, '_resource_capacity', lambda *a: {'ready': False, 'reason': 'local_capacity_hold',
+        'paid_dispatch': False, 'attempt_refunded': False, 'accounting_changed': False})
+    monkeypatch.setattr(runner, '_native_modules', lambda *a: pytest.fail('resource hold imported Native'))
+    monkeypatch.setattr(runner, '_lock', lambda *a, **k: pytest.fail('resource hold created a lock'))
+    monkeypatch.setattr(runner, 'prepare', lambda *a: pytest.fail('resource hold rewrote the task board'))
+    monkeypatch.setattr(runner.subprocess, 'Popen', lambda *a, **k: pytest.fail('resource hold spawned an actor'))
+    if operation == 'internal':
+        with pytest.raises(runner.CampaignResourceHold) as refused:
+            runner.run_internal(root, root / 'unread-spec.json', state, 'synthetic-owner', 'campaign')
+        assert refused.value.code == 'campaign_resource_hold'
+        assert refused.value.observation['stage'] == 'before_owned_startup_lock'
+    else:
+        call = runner.doctor if operation == 'doctor' else runner.start
+        observed = call(root, root / 'unread-spec.json', state)
+        assert observed['status'] == 'not_ready' and observed['reason'] == 'campaign_resource_hold'
+        assert observed['paid_calls'] == 0 and observed['execution_started'] is False
+    assert history.read_bytes() == before and not state.exists()
+
+
+@pytest.mark.parametrize('failure', ['bytes', 'unavailable', 'native_timeout'])
+def test_public_native_loop_resource_hold_cannot_reach_run_once(tmp_path, monkeypatch, failure):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon_runner as native_loop
+    calls, closed = [], []
+    class InertDaemon:
+        def run_once(self):
+            calls.append(True)
+            pytest.fail('resource hold reached dispatch')
+        def close_event_runtime(self):
+            closed.append(True)
+    def capacity(*args):
+        if failure == 'native_timeout':
+            time.sleep(.2)
+            pytest.fail('Native hook deadline did not interrupt the capacity observation')
+        return {'ready': False, 'reason': 'local_capacity_insufficient' if failure == 'bytes' else 'local_capacity_unavailable',
+            'paid_dispatch': False, 'attempt_refunded': False, 'accounting_changed': False}
+    monkeypatch.setattr(runner, '_resource_capacity', capacity)
+    context = native_loop.ImplementationDaemonRunContext(
+        parsed=SimpleNamespace(once=True, daemon_hook_timeout_seconds=.02, interval=1),
+        state_path=tmp_path / 'native-state.json', strategy_path=tmp_path / 'strategy.json',
+        events_path=tmp_path / 'events.jsonl')
+    with pytest.raises(runner.CampaignResourceHold) as refused:
+        native_loop.run_portal_implementation_daemon_loop(InertDaemon(), context,
+            logger=runner._LOGGER, hooks=(runner._resource_admission_hook(tmp_path, tmp_path / 'state', tmp_path / 'worktrees', {}),))
+    assert refused.value.observation['stage'] == 'before_native_pass'
+    assert calls == [] and closed == [True]
+    assert refused.value.observation['paid_dispatch'] is False
+    assert not context.events_path.exists() and not context.state_path.exists()
+    if failure == 'native_timeout':
+        assert refused.value.observation['reason'] == 'resource_observation_timed_out'
+
+
+def test_public_native_loop_capacity_observation_allows_one_ordinary_pass(tmp_path, monkeypatch):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon_runner as native_loop
+    calls, closed, checks = [], [], []
+    class InertDaemon:
+        def run_once(self):
+            calls.append(True)
+            return {'unchanged': True, 'write_count': 0}
+        def close_event_runtime(self):
+            closed.append(True)
+    monkeypatch.setattr(runner, '_resource_capacity', lambda *a: checks.append(a) or {'ready': True})
+    context = native_loop.ImplementationDaemonRunContext(
+        parsed=SimpleNamespace(once=True, daemon_hook_timeout_seconds=1, interval=1),
+        state_path=tmp_path / 'native-state.json', strategy_path=tmp_path / 'strategy.json',
+        events_path=tmp_path / 'events.jsonl')
+    native_loop.run_portal_implementation_daemon_loop(InertDaemon(), context,
+        logger=runner._LOGGER, hooks=(runner._resource_admission_hook(tmp_path, tmp_path / 'state', tmp_path / 'worktrees', {}),))
+    assert len(checks) == 1 and calls == [True] and closed == [True]
+    assert not context.events_path.exists() and not context.state_path.exists()
+
+
+
+def test_native_resource_alarm_stops_remaining_filesystem_observations(tmp_path, monkeypatch):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon_runner as native_loop
+    paths = _resource_directories(tmp_path)
+    calls = []
+    def expired(path):
+        calls.append(Path(path))
+        raise native_loop.DaemonHookTimeoutError('synthetic native alarm')
+    monkeypatch.setattr(runner.os, 'statvfs', expired)
+    observed = runner._resource_capacity(paths['repository'], paths['state'], paths['worktrees'],
+        {'HOME': str(paths['home']), 'TMPDIR': str(paths['temporary'])})
+    assert calls == [paths['repository']]
+    assert observed['ready'] is False and observed['reason'] == 'resource_observation_timed_out'
+    assert len(observed['roles']) == 5 and all(row['ready'] is False for row in observed['roles'].values())
+    assert all(observed['roles'][name]['reason'] == 'unobserved_after_timeout'
+        for name in ('state', 'worktrees', 'home', 'temporary'))
+    assert observed['paid_dispatch'] is False and observed['live_wait_or_lease_claimed'] is False
