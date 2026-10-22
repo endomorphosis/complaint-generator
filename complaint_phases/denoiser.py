@@ -94,6 +94,91 @@ _BYPASS_DEDUPLICATION_QUESTION_TYPES: frozenset = frozenset({
 })
 
 
+def project_stopping_policy(
+    stop: Optional[Dict[str, Any]] = None,
+    *,
+    paused: bool = False,
+    needs_review: bool = False,
+) -> Dict[str, Any]:
+    """Public stopping outcome. Saturation never claims legal sufficiency or complete proof."""
+    payload = stop if isinstance(stop, dict) else {}
+    summary = payload.get("unresolved_issue_summary") if isinstance(payload.get("unresolved_issue_summary"), dict) else {}
+    items = [item for item in (summary.get("items") or []) if isinstance(item, dict)]
+    shortcuts = [str(item) for item in (summary.get("rejected_shortcuts") or [])]
+    state = str(payload.get("state") or "").strip()
+    try:
+        open_count = int(summary.get("open_answerable_count") or 0)
+    except (TypeError, ValueError):
+        open_count = 0
+    bound_hit = bool(
+        {"repeat_attempt_bound", "no_information_bound", "model_retry_bound"} & set(shortcuts)
+    )
+    if paused or state == "paused":
+        outcome = "paused"
+    elif state in {"provider_unavailable", "blocked_provider"}:
+        outcome = "blocked_provider"
+    elif state in {"limit_reached", "no_progress", "cancelled"} or bound_hit:
+        outcome = "no_progress"
+    elif state == "needs_answer" and open_count == 0 and shortcuts:
+        outcome = "no_progress"
+    elif state == "needs_review" or (needs_review and open_count == 0):
+        outcome = "needs_review"
+    elif state in {"deferred_unknown", "deferred_needs_evidence"}:
+        outcome = "deferred_needs_evidence"
+    elif state == "saturated" and needs_review:
+        outcome = "needs_review"
+    elif state == "saturated" and payload.get("intake_complete") and not items:
+        outcome = "complete"
+    elif state == "saturated":
+        outcome = "saturated"
+    elif state == "needs_answer" or open_count:
+        outcome = "awaiting_user"
+    else:
+        stored = str(payload.get("outcome") or "").strip()
+        outcome = stored if stored in {
+            "saturated", "complete", "paused", "awaiting_user",
+            "deferred_needs_evidence", "blocked_provider", "no_progress", "needs_review",
+        } else "awaiting_user"
+    if paused:
+        outcome = "paused"
+    standing = {
+        "reason": "interview_stop_is_not_legal_sufficiency",
+        "legal_sufficiency": False,
+        "core_facts_complete": False,
+        "proof_requirements_satisfied": False,
+    }
+    remaining = [standing, *items]
+    next_actions = {
+        "paused": "resume_when_user_returns",
+        "awaiting_user": "answer_pending_question",
+        "deferred_needs_evidence": "collect_evidence_then_resume",
+        "blocked_provider": "retry_when_provider_available",
+        "no_progress": "review_unresolved_issues_then_resume",
+        "needs_review": "manual_review_then_resume",
+        "saturated": "review_unresolved_issues_then_resume",
+        "complete": "review_evidence_gaps_before_filing",
+    }
+    return {
+        "outcome": outcome,
+        "state": state or None,
+        "remaining_issues": remaining,
+        "unresolved_issue_summary": summary,
+        "resumable_next_action": {
+            "action": next_actions.get(outcome, "review_unresolved_issues_then_resume"),
+            "resumable": True,
+            "reason": outcome,
+            "worker_stalled": False,
+            "supervisory_restart": False,
+        },
+        "legal_sufficiency": False,
+        "core_facts_complete": False,
+        "proof_requirements_satisfied": False,
+        "filing_ready": False,
+        "intake_complete": bool(payload.get("intake_complete")) and outcome == "complete",
+        "rejected_shortcuts": shortcuts,
+    }
+
+
 class ComplaintDenoiser:
     """
     Denoises complaint information through iterative questioning.
@@ -112,6 +197,8 @@ class ComplaintDenoiser:
         self._question_scope_revision = "standard-intake"
         self.objective_repeat_counts: Dict[str, int] = {}
         self.semantic_repeat_counts: Dict[str, int] = {}
+        self.no_information_attempts = 0
+        self.model_retry_count = 0
         self.presented_question_records: List[Dict[str, Any]] = []
         self._presented_inquiry_ids: Set[str] = set()
         self.explained_inquiry_pool: List[Dict[str, Any]] = []
@@ -3230,6 +3317,10 @@ class ComplaintDenoiser:
             "reopened": False,
             "status": "disposed",
         }
+        if target_id:
+            self.objective_repeat_counts[target_id] = int(self.objective_repeat_counts.get(target_id) or 0) + 1
+        if classified in {"unknown", "skipped", "deferred"} or not str(answer or "").strip():
+            self.no_information_attempts = int(getattr(self, "no_information_attempts", 0) or 0) + 1
         if target_id:
             self.question_disposition_records = [
                 item for item in self.question_disposition_records
@@ -7124,13 +7215,30 @@ class ComplaintDenoiser:
         "provider_unavailable",
         "cancelled",
         "limit_reached",
+        "no_progress",
+        "needs_review",
     )
+    STOPPING_OUTCOMES = (
+        "saturated",
+        "complete",
+        "paused",
+        "awaiting_user",
+        "deferred_needs_evidence",
+        "blocked_provider",
+        "no_progress",
+        "needs_review",
+    )
+    MAX_REPEAT_ATTEMPTS = 3
+    MAX_NO_INFORMATION_ATTEMPTS = 3
+    MAX_MODEL_RETRIES = 2
     _INCOMPLETE_INTERVIEW_STOPS = frozenset({
         "needs_answer",
         "deferred_unknown",
         "provider_unavailable",
         "cancelled",
         "limit_reached",
+        "no_progress",
+        "needs_review",
     })
     _PROVIDER_UNAVAILABLE_STATUSES = frozenset({
         "unavailable",
@@ -7254,6 +7362,12 @@ class ComplaintDenoiser:
         self.intentional_user_wait = resumed
         return dict(resumed)
 
+    def note_model_retry(self, reason: Any = None) -> int:
+        """Count one model retry. The bound stops the interview without claiming progress."""
+        self.model_retry_count = int(getattr(self, "model_retry_count", 0) or 0) + 1
+        self._last_model_retry_reason = str(reason or "").strip() or None
+        return self.model_retry_count
+
     def evaluate_interview_stop(
         self,
         *,
@@ -7266,6 +7380,12 @@ class ComplaintDenoiser:
         question_limit: Optional[int] = None,
         loss_converged: bool = False,
         pool_empty: Optional[bool] = None,
+        paused: bool = False,
+        needs_review: bool = False,
+        repeat_attempts: Optional[int] = None,
+        no_information_attempts: Optional[int] = None,
+        model_retries: Optional[int] = None,
+        contradictions: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Classify the interview stop. Shortcuts cannot claim completion.
 
@@ -7356,6 +7476,29 @@ class ComplaintDenoiser:
         if over_iteration_cap:
             rejected_shortcuts.append("iteration_cap")
 
+        observed_repeats = max([int(value or 0) for value in self.objective_repeat_counts.values()] or [0])
+        repeat_count = observed_repeats if repeat_attempts is None else int(repeat_attempts)
+        no_info_count = (
+            int(getattr(self, "no_information_attempts", 0) or 0)
+            if no_information_attempts is None
+            else int(no_information_attempts)
+        )
+        retry_count = (
+            int(getattr(self, "model_retry_count", 0) or 0)
+            if model_retries is None
+            else int(model_retries)
+        )
+        repeat_bounded = repeat_count >= self.MAX_REPEAT_ATTEMPTS
+        no_info_bounded = no_info_count >= self.MAX_NO_INFORMATION_ATTEMPTS
+        retry_bounded = retry_count >= self.MAX_MODEL_RETRIES
+        if repeat_bounded:
+            rejected_shortcuts.append("repeat_attempt_bound")
+        if no_info_bounded:
+            rejected_shortcuts.append("no_information_bound")
+        if retry_bounded:
+            rejected_shortcuts.append("model_retry_bound")
+        review_requested = bool(needs_review) or bool(contradictions)
+
         unresolved_items = list(open_targets)
         for item in disposed:
             if item.get("disposition") != "answered":
@@ -7374,8 +7517,12 @@ class ComplaintDenoiser:
             "answered_count": answered_count,
             "legal_sufficiency": False,
             "core_facts_complete": False,
+            "proof_requirements_satisfied": False,
             "filing_ready": False,
             "rejected_shortcuts": rejected_shortcuts,
+            "repeat_attempts": repeat_count,
+            "no_information_attempts": no_info_count,
+            "model_retries": retry_count,
         }
 
         if cancelled or provider_token == "cancelled":
@@ -7384,25 +7531,39 @@ class ComplaintDenoiser:
             state = "provider_unavailable"
         elif over_iteration_cap or over_question_limit:
             state = "limit_reached"
-        elif open_targets:
+        elif open_targets and not (repeat_bounded or no_info_bounded or retry_bounded):
             state = "needs_answer"
-        elif disposed and unknown_only and answered_count == 0:
+        elif disposed and unknown_only and answered_count == 0 and not (repeat_bounded or no_info_bounded or retry_bounded):
             state = "deferred_unknown"
-        elif disposed and not open_targets:
+        elif disposed and not open_targets and not (repeat_bounded or no_info_bounded or retry_bounded):
             state = "saturated"
+        elif repeat_bounded or no_info_bounded or retry_bounded:
+            state = "no_progress"
+        elif review_requested and not open_targets:
+            state = "needs_review"
         elif self.source_operator_diagnostics and not disposed:
             state = "provider_unavailable"
+        elif open_targets:
+            state = "needs_answer"
         else:
             state = "needs_answer"
 
         targets_accounted_for = bool(disposed) and not open_targets and state == "saturated"
-        intake_complete = state == "saturated" and not unresolved_items
+        intake_complete = (
+            state == "saturated"
+            and not unresolved_items
+            and answered_count > 0
+            and not unknown_only
+        )
+        summary["core_facts_complete"] = False
         stop = {
             "state": state,
             "targets_accounted_for": targets_accounted_for,
             "intake_complete": intake_complete,
             "filing_ready": False,
             "legal_sufficiency": False,
+            "core_facts_complete": False,
+            "proof_requirements_satisfied": False,
             "ready_for_evidence_phase": False,
             "awaiting_user": state == "needs_answer",
             "worker_stalled": False,
@@ -7410,6 +7571,20 @@ class ComplaintDenoiser:
             "unresolved_issue_summary": summary,
             "message": self._interview_stop_message(state, intake_complete),
         }
+        if not paused:
+            wait = getattr(self, "intentional_user_wait", None)
+            paused = isinstance(wait, dict) and bool(wait.get("paused")) and bool(wait.get("intentional"))
+        projected = project_stopping_policy(
+            stop,
+            paused=paused,
+            needs_review=bool(review_requested) and not open_targets,
+        )
+        stop.update({
+            "outcome": projected["outcome"],
+            "remaining_issues": projected["remaining_issues"],
+            "resumable_next_action": projected["resumable_next_action"],
+        })
+        stop["awaiting_user"] = projected["outcome"] in {"awaiting_user", "paused"}
         self.last_interview_stop = stop
         return stop
 
@@ -7436,6 +7611,16 @@ class ComplaintDenoiser:
             return "The interview was cancelled. Intake is not complete and the complaint is not ready to file."
         if state == "limit_reached":
             return "The interview iteration or question limit was reached. Intake is not complete and the complaint is not ready to file."
+        if state == "no_progress":
+            return (
+                "Repeat, no-information, or model-retry bounds stopped the interview. "
+                "Unresolved issues remain. Intake is not complete and the complaint is not ready to file."
+            )
+        if state == "needs_review":
+            return (
+                "The interview needs review before it can continue. "
+                "Intake is not complete and the complaint is not ready to file."
+            )
         return "An answerable interview target still needs an answer. Intake is not complete and the complaint is not ready to file."
     
     def generate_evidence_questions(self,

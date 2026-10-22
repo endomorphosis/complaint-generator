@@ -199,6 +199,18 @@ class Mediator:
 			return None, None
 		return knowledge, dependency
 
+	def _current_stopping_policy(self):
+		"""Project the stored interview stop into a truthful, resumable outcome."""
+		from complaint_phases.denoiser import project_stopping_policy
+		from complaint_phases.phase_manager import ComplaintPhase
+		stop = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'interview_stop')
+		wait = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intentional_user_wait')
+		paused = isinstance(wait, dict) and bool(wait.get('paused')) and bool(wait.get('intentional'))
+		stored = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'stopping_policy')
+		if isinstance(stored, dict) and stored.get('outcome') and not paused:
+			return dict(stored)
+		return project_stopping_policy(stop if isinstance(stop, dict) else {}, paused=paused)
+
 	def pause_intentional_user_wait(self, reason='user_pause'):
 		"""Record an intentional user wait without changing assertion or rule truth."""
 		from complaint_phases.phase_manager import ComplaintPhase
@@ -8931,6 +8943,9 @@ class Mediator:
 			pool_empty=len(getattr(self.denoiser, 'questions_pool', []) or []) == 0,
 		)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'interview_stop', interview_stop)
+		from complaint_phases.denoiser import project_stopping_policy
+		stopping_policy = project_stopping_policy(interview_stop)
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'stopping_policy', stopping_policy)
 		converged = (
 			interview_stop.get('state') == 'saturated'
 			and bool(interview_stop.get('intake_complete'))
@@ -8943,6 +8958,7 @@ class Mediator:
 			'gaps_remaining': gaps,
 			'converged': converged,
 			'interview_stop': interview_stop,
+			'stopping_policy': stopping_policy,
 			'filing_ready': False,
 			'intake_complete': bool(interview_stop.get('intake_complete')),
 			'intake_matching_summary': self._summarize_intake_matching_pressure(intake_matching_pressure),
@@ -8962,6 +8978,10 @@ class Mediator:
 		# Check if ready to advance to Phase 2. Incomplete stops never say so.
 		incomplete_stop = interview_stop.get('state') in {
 			'needs_answer', 'deferred_unknown', 'provider_unavailable', 'cancelled', 'limit_reached',
+			'no_progress', 'needs_review',
+		} or interview_stop.get('outcome') in {
+			'paused', 'awaiting_user', 'deferred_needs_evidence', 'blocked_provider',
+			'no_progress', 'needs_review', 'saturated',
 		}
 		if incomplete_stop or not interview_stop.get('intake_complete'):
 			result['ready_for_evidence_phase'] = False
@@ -13665,6 +13685,7 @@ class Mediator:
 				if isinstance(self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'interview_stop'), dict)
 				else {}
 			),
+			'stopping_policy': self._current_stopping_policy(),
 			'intentional_user_wait': (
 				dict(self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intentional_user_wait') or {})
 				if isinstance(self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intentional_user_wait'), dict)
@@ -14125,6 +14146,12 @@ class Mediator:
 		stop = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'interview_stop')
 		if isinstance(stop, dict) and stop.get('state') in {
 			'needs_answer', 'deferred_unknown', 'provider_unavailable', 'cancelled', 'limit_reached',
+			'no_progress', 'needs_review',
+		}:
+			return False
+		if isinstance(stop, dict) and stop.get('outcome') in {
+			'paused', 'awaiting_user', 'deferred_needs_evidence', 'blocked_provider',
+			'no_progress', 'needs_review', 'saturated',
 		}:
 			return False
 		if isinstance(stop, dict) and stop.get('filing_ready') is False and stop.get('state') == 'saturated' and not stop.get('intake_complete'):
