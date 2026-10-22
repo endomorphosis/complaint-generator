@@ -4317,6 +4317,25 @@ def project_graph_revision_view(case_file: Dict[str, Any], knowledge_graph) -> D
     for conflict in ledger.get("conflicts") or []:
         if isinstance(conflict, dict):
             contradictions.append(dict(conflict))
+    for revision in ledger.get("revisions") or []:
+        if not isinstance(revision, dict):
+            continue
+        revision_status = _normalize_text(revision.get("value_status") or "")
+        statement = revision.get("statement") or (revision.get("provenance") or {}).get("statement")
+        if revision_status == "unknown" and statement:
+            unknowns.append({
+                "entity_id": revision.get("entity_id") or "",
+                "statement": statement,
+                "value_status": "unknown",
+                "event_id": revision.get("event_id") or "",
+            })
+        if revision_status == "contradiction" and statement:
+            contradictions.append({
+                "entity_id": revision.get("entity_id") or "",
+                "statement": statement,
+                "value_status": "contradiction",
+                "event_id": revision.get("event_id") or "",
+            })
     for relationship in getattr(knowledge_graph, "relationships", {}).values():
         attributes = relationship.attributes if isinstance(getattr(relationship, "attributes", None), dict) else {}
         if attributes.get("epistemic_class"):

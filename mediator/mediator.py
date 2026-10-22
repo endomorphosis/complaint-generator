@@ -8778,7 +8778,8 @@ class Mediator:
 				explicit_class = ""
 			epistemic_class = classify_epistemic_class(answer, explicit=explicit_class)
 			value_status = statement_value_status(answer)
-			if isinstance(updates, dict) and updates.get("creates_fact") is False:
+			non_fact_dispositions = {"unknown", "refused", "skipped", "deferred", "invalidated"}
+			if isinstance(updates, dict) and str(updates.get("disposition") or "") in non_fact_dispositions:
 				value_status = str(updates.get("disposition") or value_status or "unknown")
 				explicit_class = ""
 				epistemic_class = "user_non_answer"
