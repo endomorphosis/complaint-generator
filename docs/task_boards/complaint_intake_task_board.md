@@ -559,7 +559,7 @@ Implementation instructions:
 
 ## CIMP-PROOF-02 Generate proof obligations with explicit premise and claim-element identity
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.proof
