@@ -605,7 +605,7 @@ Implementation instructions:
 
 ## CIMP-PROOF-04 Invalidate and replay proofs when source, fact or law versions change
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.proof
