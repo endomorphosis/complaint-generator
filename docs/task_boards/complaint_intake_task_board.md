@@ -927,7 +927,7 @@ Implementation instructions:
 
 ## CIMP-PRIV-005 Prevent private case metadata leakage through identifiers and diagnostics
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.privacy
