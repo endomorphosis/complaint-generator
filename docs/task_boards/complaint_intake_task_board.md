@@ -536,7 +536,7 @@ Implementation instructions:
 
 ## CIMP-PROOF-01 Connect canonical compiler with replayable lossless source maps
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.proof
