@@ -858,7 +858,7 @@ Implementation instructions:
 
 ## CIMP-DUR-003 Join encrypted session, fact graph and proof revisions with Kit WAL
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.durability
