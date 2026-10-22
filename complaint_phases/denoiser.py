@@ -4662,7 +4662,12 @@ class ComplaintDenoiser:
             explicit_disposition = question.get("disposition") or question.get("answer_disposition")
         if explicit_disposition in (None, "") and isinstance(source_context, dict):
             explicit_disposition = source_context.get("disposition") or source_context.get("answer_disposition")
-        classified_disposition = self.classify_answer_disposition(answer, explicit=explicit_disposition)
+        # A stored question label cannot turn "I don't know" or a refusal into a fact.
+        answer_disposition = self.classify_answer_disposition(answer)
+        if answer_disposition in self._NON_FACT_DISPOSITIONS:
+            classified_disposition = answer_disposition
+        else:
+            classified_disposition = self.classify_answer_disposition(answer, explicit=explicit_disposition)
         if isinstance(question, dict) and str(question.get('type') or '').strip().lower() == 'legal_context':
             updates = self._process_legal_context_answer(
                 question, answer, knowledge_graph, source_context,

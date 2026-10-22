@@ -631,3 +631,38 @@ def test_private_graph_materials_are_sealed_before_replication():
         assert sentinel_source.encode() not in blob
         assert sentinel_embedding.encode() not in blob
         assert sentinel_index.encode() not in blob
+
+
+def test_scripted_interview_correction_and_contradictory_dates_keep_both_sources(tmp_path, monkeypatch):
+    from tests.test_question_saturation_contract import (
+        application_level_interview_fixture,
+        scripted_turn,
+    )
+
+    session = application_level_interview_fixture(tmp_path, monkeypatch)
+    correction = scripted_turn(session, "correction")
+    statuses = {item["stable_id"]: item for item in correction["observation"]["assertions"]}
+    assert statuses[correction["extra"]["supersedes"]]["status"] == "superseded"
+    assert statuses[correction["extra"]["stable_id"]]["status"] == "active"
+    assert "March 4, 2024" in statuses[correction["extra"]["supersedes"]]["statement"]
+    assert "March 5, 2024" in statuses[correction["extra"]["stable_id"]]["statement"]
+    assert statuses[correction["extra"]["supersedes"]]["source_id"] == "msg-complete"
+    assert statuses[correction["extra"]["stable_id"]]["source_id"] == "msg-correction"
+
+    conflict = scripted_turn(session, "contradictory_dates")
+    conflicted = {
+        item["stable_id"]: item
+        for item in conflict["observation"]["assertions"]
+        if item["stable_id"] in set(conflict["extra"]["conflict_stable_ids"])
+    }
+    assert len(conflicted) == 2
+    assert all(item["status"] != "superseded" for item in conflicted.values())
+    statements = " ".join(item["statement"] for item in conflicted.values())
+    assert "March 5, 2024" in statements and "June 2, 2021" in statements
+
+    unknown = scripted_turn(session, "unknown")
+    refused = scripted_turn(session, "refused")
+    assert unknown["observation"]["fact_ids"] == scripted_turn(session, "complete")["observation"]["fact_ids"]
+    assert refused["observation"]["fact_ids"] == unknown["observation"]["fact_ids"]
+    assert any(item["disposition"] == "unknown" and item["creates_fact"] is False for item in unknown["observation"]["dispositions"])
+    assert any(item["disposition"] == "refused" and item["creates_fact"] is False for item in refused["observation"]["dispositions"])

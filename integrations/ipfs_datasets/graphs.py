@@ -786,6 +786,11 @@ _UNKNOWN_STATEMENTS = frozenset({
     "", "n/a", "na", "none", "unknown", "not sure", "unsure", "no idea",
     "i do not know", "i don't know", "idk",
 })
+_REFUSED_STATEMENTS = frozenset({
+    "i refuse", "i refuse to answer", "refused", "refuse", "i decline",
+    "i decline to answer", "declined", "decline", "prefer not to say",
+    "skip", "skipped", "ask me later", "later",
+})
 _HYPOTHESIS_MARKERS = (
     "i think", "i believe", "maybe", "might have", "possibly", "hypothesis", "i guess",
 )
@@ -831,6 +836,8 @@ def classify_epistemic_class(text: str, *, explicit: Optional[str] = None, legal
 def statement_value_status(text: str) -> str:
     """Keep unknown and contradiction answers visible as values, not deletions."""
     normalized = " ".join(str(text or "").split()).lower()
+    if normalized in _REFUSED_STATEMENTS:
+        return "refused"
     if normalized in _UNKNOWN_STATEMENTS:
         return "unknown"
     if any(marker in normalized for marker in _CONTRADICTION_MARKERS):
