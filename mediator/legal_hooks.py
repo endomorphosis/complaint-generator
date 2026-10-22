@@ -423,6 +423,17 @@ class SummaryJudgmentHook:
             )
         
         return requirements
+
+    def adapt_requirements_for_dependency_graph(self, requirements: Any, legal_context: Optional[Dict[str, Any]] = None) -> Dict[str, List[Dict[str, Any]]]:
+        """Adapt hook output into DependencyGraphBuilder entries.
+
+        ``generate_requirements`` still returns ``dict[str, list[str]]`` for
+        question prompts. Those strings are not legal elements. The adapter
+        records them as unresolved requirements.
+        """
+        from integrations.ipfs_datasets.legal import adapt_sourced_legal_requirements
+
+        return adapt_sourced_legal_requirements(requirements, legal_context=legal_context)
     
     def _get_claim_requirements(self, claim_type: str, 
                                classification: Dict[str, Any],

@@ -10,10 +10,11 @@ import asyncio
 import calendar
 import hashlib
 import math
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 import logging
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Union
 
 from .loader import import_attr_optional, run_async_compat
 from .types import with_adapter_metadata
@@ -705,6 +706,307 @@ def select_requirement_applicability(
         "filing_reference_date": context.get("filing_reference_date"),
         "corpus_retrieval_date": context.get("corpus_retrieval_date"),
         "context_revision": current_revision,
+    }
+
+
+@dataclass(frozen=True)
+class SourcedLegalRequirement:
+    """One legal requirement that can be handed to DependencyGraphBuilder.
+
+    String lists from SummaryJudgmentHook are not instances of this type.
+    A user assertion never fills the authority fields.
+    """
+
+    claim_type: str
+    name: str
+    description: str
+    authority_locator: str
+    source_locator: str
+    jurisdiction: str
+    effective_date: str
+    authority_version: str
+    derivation_status: str
+    proof_status: str
+    unresolved_reason: str = ""
+    asserted_text: str = ""
+    source_record: Optional[Dict[str, Any]] = None
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+    def as_builder_entry(self) -> Dict[str, Any]:
+        """Dictionary entry the dependency-graph builder accepts."""
+        payload = {key: value for key, value in asdict(self).items() if key != "extra"}
+        extra = dict(self.extra or {})
+        extra.pop("source_record", None)
+        payload.update(extra)
+        payload["source_record"] = self.source_record
+        payload["intake_requirement_status"] = (
+            "unresolved" if self.derivation_status != "source_derived" or self.proof_status != "source_bound" else "source_bound"
+        )
+        payload["authority_source_locator"] = self.authority_locator or self.source_locator
+        return payload
+
+
+def _text(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _is_user_law_assertion(record: Mapping[str, Any]) -> bool:
+    """User text cannot become authoritative law, even with a pasted citation."""
+    if record.get("user_asserted") is True or record.get("authoritative") is False and record.get("origin") == "user":
+        return True
+    origin = _text(record.get("origin") or record.get("source_kind")).lower()
+    if origin in {"user", "user_assertion", "complainant", "summary_judgment_hook"}:
+        return True
+    derivation = _text(record.get("derivation_status")).lower()
+    return derivation in {"user_assertion", "user", "asserted"}
+
+
+def _locator_from(record: Mapping[str, Any]) -> str:
+    for key in ("authority_locator", "source_locator", "authority_source_locator", "citation", "uri", "authority_id"):
+        text = _text(record.get(key))
+        if text:
+            return text
+    source = record.get("source_record")
+    if isinstance(source, Mapping):
+        return _locator_from(source)
+    return ""
+
+
+def _version_from(record: Mapping[str, Any]) -> str:
+    for key in ("authority_version", "version", "corpus_version"):
+        text = _text(record.get(key))
+        if text:
+            return text
+    source = record.get("source_record")
+    if isinstance(source, Mapping):
+        return _version_from(source)
+    return ""
+
+
+def _effective_date_from(record: Mapping[str, Any]) -> str:
+    for key in ("effective_date", "applicable_date"):
+        value = record.get(key)
+        if isinstance(value, Mapping):
+            text = _text(value.get("precise_date") or value.get("raw_text"))
+        else:
+            text = _text(value)
+        if text:
+            return text
+    source = record.get("source_record")
+    if isinstance(source, Mapping):
+        return _effective_date_from(source)
+    return ""
+
+
+def unresolved_legal_requirement(
+    claim_type: str,
+    reason: str,
+    *,
+    jurisdiction: str = UNKNOWN_LEGAL_CONTEXT,
+    asserted_text: str = "",
+    derivation_status: str = "unresolved",
+    proof_status: str = "unresolved",
+) -> SourcedLegalRequirement:
+    """An explicit non-rule. Missing authority is not filled in."""
+    resolved = resolve_explicit_jurisdiction(jurisdiction)
+    return SourcedLegalRequirement(
+        claim_type=str(claim_type or "unknown"),
+        name="Unresolved legal requirement",
+        description=(
+            "No sourced legal requirement was selected. "
+            "Missing or ambiguous authority is unresolved and was not replaced with an invented rule."
+        ),
+        authority_locator="",
+        source_locator="",
+        jurisdiction=resolved,
+        effective_date="",
+        authority_version="",
+        derivation_status=derivation_status,
+        proof_status=proof_status,
+        unresolved_reason=reason,
+        asserted_text=_text(asserted_text)[:500],
+    )
+
+
+def sourced_requirement_from_record(
+    record: Mapping[str, Any],
+    *,
+    claim_type: str,
+    legal_context: Optional[Mapping[str, Any]] = None,
+) -> SourcedLegalRequirement:
+    """Adapt one sourced mapping. Incomplete authority stays unresolved."""
+    claim = _text(record.get("claim_type") or claim_type) or "unknown"
+    if _is_user_law_assertion(record):
+        return unresolved_legal_requirement(
+            claim,
+            "user_assertion_cannot_create_law",
+            jurisdiction=record.get("jurisdiction") or UNKNOWN_LEGAL_CONTEXT,
+            asserted_text=record.get("description") or record.get("name") or record.get("rule_text") or "",
+            derivation_status="user_assertion",
+            proof_status="not_authoritative",
+        )
+    source = record.get("source_record") if isinstance(record.get("source_record"), Mapping) else {}
+    jurisdiction = resolve_explicit_jurisdiction(
+        record.get("jurisdiction") or record.get("state") or source.get("jurisdiction") or source.get("state")
+    )
+    locator = _locator_from(record)
+    source_locator = _text(record.get("source_locator") or record.get("source_span") or locator)
+    effective_date = _effective_date_from(record)
+    version = _version_from(record)
+    reason = ""
+    if not locator:
+        reason = "missing_authority_locator"
+    elif jurisdiction == UNKNOWN_LEGAL_CONTEXT:
+        reason = "unresolved_jurisdiction"
+    elif not effective_date or not version:
+        reason = "missing_effective_date_or_version"
+    elif legal_context is not None:
+        decision = select_requirement_applicability(dict(record), dict(legal_context))
+        if not decision.get("selected"):
+            reason = str(decision.get("reason") or "unresolved_legal_context")
+            jurisdiction = resolve_explicit_jurisdiction(decision.get("jurisdiction"))
+    if reason:
+        unresolved = unresolved_legal_requirement(claim, reason, jurisdiction=jurisdiction)
+        return unresolved
+    preserved = {
+        key: value for key, value in record.items()
+        if key not in {
+            "claim_type", "name", "description", "authority_locator", "source_locator",
+            "jurisdiction", "effective_date", "authority_version", "derivation_status",
+            "proof_status", "unresolved_reason", "asserted_text", "source_record", "extra",
+        }
+    }
+    source_record = record.get("source_record") if isinstance(record.get("source_record"), dict) else None
+    return SourcedLegalRequirement(
+        claim_type=claim,
+        name=_text(record.get("name") or record.get("rule_id") or "Sourced requirement"),
+        description=str(record.get("description") or record.get("rule_text") or ""),
+        authority_locator=locator,
+        source_locator=source_locator,
+        jurisdiction=jurisdiction,
+        effective_date=effective_date,
+        authority_version=version,
+        derivation_status="source_derived",
+        proof_status="source_bound",
+        source_record=source_record,
+        extra=preserved,
+    )
+
+
+def _groups_from_requirements(requirements: Any) -> List[tuple]:
+    """Normalize dict, typed, or SummaryJudgmentHook list[str] inputs."""
+    if requirements is None:
+        return []
+    if isinstance(requirements, SourcedLegalRequirement):
+        return [(requirements.claim_type, [requirements])]
+    if isinstance(requirements, Mapping):
+        groups = []
+        for claim_type, items in requirements.items():
+            if isinstance(items, (str, SourcedLegalRequirement, Mapping)):
+                items = [items]
+            elif not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
+                items = [items]
+            groups.append((str(claim_type), list(items)))
+        return groups
+    if isinstance(requirements, Sequence) and not isinstance(requirements, (str, bytes)):
+        return [("unknown", list(requirements))]
+    return [("unknown", [requirements])]
+
+
+def adapt_sourced_legal_requirements(
+    requirements: Any,
+    *,
+    legal_context: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Typed adapter from sourced requirements to DependencyGraphBuilder entries.
+
+    ``SummaryJudgmentHook`` values are ``dict[str, list[str]]``. Those strings
+    are recorded as unresolved requirements. They are not copied through as
+    legal element text and they are not authoritative law.
+    """
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for claim_type, items in _groups_from_requirements(requirements):
+        entries = grouped.setdefault(str(claim_type or "unknown"), [])
+        for item in items:
+            if isinstance(item, SourcedLegalRequirement):
+                requirement = item
+            elif isinstance(item, str):
+                requirement = unresolved_legal_requirement(
+                    claim_type,
+                    "summary_judgment_string_is_not_authority",
+                    jurisdiction=(legal_context or {}).get("jurisdiction") if isinstance(legal_context, Mapping) else UNKNOWN_LEGAL_CONTEXT,
+                    asserted_text=item,
+                    derivation_status="unresolved",
+                    proof_status="not_authoritative",
+                )
+            elif isinstance(item, Mapping):
+                requirement = sourced_requirement_from_record(item, claim_type=claim_type, legal_context=legal_context)
+            else:
+                requirement = unresolved_legal_requirement(
+                    claim_type,
+                    "ambiguous_authority",
+                    jurisdiction=(legal_context or {}).get("jurisdiction") if isinstance(legal_context, Mapping) else UNKNOWN_LEGAL_CONTEXT,
+                )
+            entries.append(requirement.as_builder_entry())
+    return grouped
+
+
+def intake_legal_selection(
+    legal_context: Optional[Mapping[str, Any]],
+    claim_candidates: Optional[Iterable[Any]],
+) -> Dict[str, Any]:
+    """Resolve jurisdiction, relevant date, and claim candidates before selection.
+
+    Unknown jurisdiction stays the explicit value ``unknown``. This function
+    does not search for law and does not invent a jurisdiction.
+    """
+    context = dict(legal_context) if isinstance(legal_context, Mapping) else empty_legal_context()
+    jurisdiction = resolve_explicit_jurisdiction(context.get("jurisdiction"))
+    context["jurisdiction"] = jurisdiction
+    applicable = context.get("applicable_law_date") if isinstance(context.get("applicable_law_date"), Mapping) else {}
+    relevant_date = ""
+    if _resolved_legal_date(applicable) and not applicable.get("is_uncertain"):
+        relevant_date = _text(applicable.get("precise_date"))
+    candidates: List[Dict[str, Any]] = []
+    for item in claim_candidates or []:
+        if isinstance(item, str):
+            claim_type = _text(item)
+            record = {"claim_type": claim_type, "name": claim_type}
+        elif isinstance(item, Mapping):
+            claim_type = _text(item.get("claim_type") or item.get("type"))
+            record = {"claim_type": claim_type, "name": _text(item.get("name") or item.get("label") or claim_type), "description": _text(item.get("description"))}
+        else:
+            continue
+        if not claim_type or claim_type.lower() == "unknown":
+            continue
+        candidates.append(record)
+    questions = questions_for_legal_context(context, selecting_rules=True)
+    if not candidates:
+        questions.append({
+            "question_id": "legal_context.claim_candidates",
+            "field": "claim_candidates",
+            "prompt": (
+                "Which claim should be checked against sourced law? "
+                "Name the claim. A claim will not be inferred in order to invent legal requirements."
+            ),
+            "reason": "missing_claim_candidates",
+        })
+    reasons = []
+    if jurisdiction == UNKNOWN_LEGAL_CONTEXT:
+        reasons.append("unresolved_jurisdiction")
+    if not relevant_date:
+        reasons.append("missing_applicable_law_date")
+    if not candidates:
+        reasons.append("missing_claim_candidates")
+    ready = not reasons
+    return {
+        "ready_to_select": ready,
+        "selection_status": "ready" if ready else "unresolved_context",
+        "jurisdiction": jurisdiction,
+        "relevant_date": relevant_date or None,
+        "claim_candidates": candidates,
+        "questions": [] if ready else questions,
+        "unresolved_reasons": reasons,
     }
 
 
@@ -3385,6 +3687,10 @@ __all__ = [
     "apply_legal_context_update",
     "questions_for_legal_context",
     "select_requirement_applicability",
+    "SourcedLegalRequirement",
+    "adapt_sourced_legal_requirements",
+    "intake_legal_selection",
+    "unresolved_legal_requirement",
     "legal_requirement_search_plan",
     "lookup_bounded_legal_corpus",
     "normalize_corpus_candidate",
