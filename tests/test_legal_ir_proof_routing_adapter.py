@@ -443,6 +443,186 @@ def test_stalled_request_reader_is_deadline_bounded_before_input_completes(
     assert list((tmp_path / "owned").iterdir()) == []
 
 
+def _element_identity(**overrides):
+    from integrations.ipfs_datasets.logic import proof_cache_identity
+
+    payload = {
+        "claim_id": "retaliation",
+        "element_id": "causation",
+        "factual_revisions": [{"fact_id": "fact-1", "revision": "rev-1"}],
+        "legal_source": {
+            "source_id": "statute-1",
+            "source_version": "law-v1",
+            "legal_context_version": "law-v1",
+            "law_as_of": "2024-01-01",
+            "rules": [{"rule_id": "rule-1", "version": "law-v1", "superseded": False}],
+        },
+        "compiler": {"compiler_config_cid": "compiler-a", "schema": "schema-a"},
+        "compiler_config": {"max_obligations": 8},
+        "proof_policy": {"required_trust": "kernel", "total_timeout_seconds": 1.5},
+        "chronology": {"issues": []},
+    }
+    payload.update(overrides)
+    return proof_cache_identity(**payload)
+
+
+def test_proof_cache_identity_covers_fact_law_compiler_and_policy():
+    from integrations.ipfs_datasets.logic import reset_satisfied_element_proof_cache
+
+    reset_satisfied_element_proof_cache()
+    base = _element_identity()
+    components = base["components"]
+    assert components["factual_revisions"][0]["revision"] == "rev-1"
+    assert components["legal_source"]["law_as_of"] == "2024-01-01"
+    assert components["legal_source"]["source_version"] == "law-v1"
+    assert components["compiler"]["identities"]["compiler_config_cid"] == "compiler-a"
+    assert components["compiler"]["schema_version"]
+    assert components["proof_policy"]["policy"]["required_trust"] == "kernel"
+    assert components["proof_policy"]["cache_policy"]
+    variants = [
+        _element_identity(factual_revisions=[{"fact_id": "fact-1", "revision": "rev-2"}]),
+        _element_identity(legal_source={
+            "source_id": "statute-1", "source_version": "law-v1", "legal_context_version": "law-v1",
+            "law_as_of": "2025-06-01", "rules": [{"rule_id": "rule-1", "version": "law-v1", "superseded": False}],
+        }),
+        _element_identity(legal_source={
+            "source_id": "statute-1", "source_version": "law-v2", "legal_context_version": "law-v2",
+            "law_as_of": "2024-01-01", "rules": [{"rule_id": "rule-1", "version": "law-v2", "superseded": True}],
+        }),
+        _element_identity(compiler={"compiler_config_cid": "compiler-b", "schema": "schema-b"}),
+        _element_identity(proof_policy={"required_trust": "kernel", "total_timeout_seconds": 2.5}),
+    ]
+    assert len({base["cache_identity"], *(item["cache_identity"] for item in variants)}) == 6
+
+
+def test_corrected_facts_law_date_and_superseded_rules_do_not_reuse_satisfied_results():
+    from integrations.ipfs_datasets.logic import (
+        lookup_satisfied_element_proof,
+        replay_satisfied_element_proof,
+        reset_satisfied_element_proof_cache,
+    )
+
+    reset_satisfied_element_proof_cache()
+    calls = {"count": 0}
+
+    def provider():
+        calls["count"] += 1
+        return {"satisfied": True, "token": calls["count"], "outcome": "proved"}
+
+    original = _element_identity()
+    first = replay_satisfied_element_proof(original, provider=provider)
+    assert first["satisfied"] is True
+    assert first["provider_called"] is True
+    assert calls["count"] == 1
+    again = replay_satisfied_element_proof(original, provider=provider)
+    assert again["reused"] is True
+    assert again["provider_called"] is False
+    assert again["result"] == first["result"]
+    assert calls["count"] == 1
+
+    corrected = _element_identity(factual_revisions=[{"fact_id": "fact-1", "revision": "rev-2"}])
+    corrected_result = replay_satisfied_element_proof(corrected, provider=provider)
+    assert corrected_result["result"]["token"] == 2
+    assert corrected_result["result"] != first["result"]
+    assert lookup_satisfied_element_proof(original)["result"]["token"] == 1
+    assert lookup_satisfied_element_proof(corrected)["result"]["token"] == 2
+
+    changed_date = _element_identity(legal_source={
+        "source_id": "statute-1", "source_version": "law-v1", "legal_context_version": "law-v1",
+        "law_as_of": "2026-01-01", "rules": [{"rule_id": "rule-1", "version": "law-v1", "superseded": False}],
+    })
+    dated = replay_satisfied_element_proof(changed_date, provider=provider)
+    assert dated["result"]["token"] == 3
+    assert lookup_satisfied_element_proof(original)["result"]["token"] == 1
+
+    superseded = _element_identity(legal_source={
+        "source_id": "statute-1", "source_version": "law-v1", "legal_context_version": "law-v1",
+        "law_as_of": "2024-01-01", "rules": [{"rule_id": "rule-1", "version": "law-v1", "superseded": True}],
+    })
+    blocked = replay_satisfied_element_proof(superseded, provider=provider)
+    assert blocked["satisfied"] is False
+    assert blocked["reason"] == "superseded_rule"
+    assert blocked["result"]["token"] == 4
+    assert lookup_satisfied_element_proof(superseded) is None
+    assert lookup_satisfied_element_proof(original)["satisfied"] is True
+    replay_satisfied_element_proof(superseded, provider=provider)
+    assert calls["count"] == 4
+
+
+def test_contradictory_dates_and_relative_chronology_stay_uncertain():
+    from complaint_phases.dependency_graph import DependencyGraph, DependencyGraphBuilder, DependencyNode, NodeType
+    from integrations.ipfs_datasets.logic import replay_satisfied_element_proof, reset_satisfied_element_proof_cache
+
+    reset_satisfied_element_proof_cache()
+
+    def provider():
+        raise AssertionError("live provider called")
+
+    contradictory = _element_identity(chronology={"contradictory_dates": True})
+    first = replay_satisfied_element_proof(contradictory, provider=provider)
+    second = replay_satisfied_element_proof(contradictory, provider=provider)
+    assert first["satisfied"] is False
+    assert first["status"] == "uncertain"
+    assert first["provider_called"] is False
+    assert first["recommended_follow_ups"][0]["issue_type"] == "contradictory_dates"
+    assert first["recommended_follow_ups"][0]["follow_up_target"] == "document_request"
+    assert second["reused"] is True
+    assert second["provider_called"] is False
+    assert second["result"] == first["result"]
+
+    relative = _element_identity(chronology={"issues": ["relative_only_ordering"]})
+    relative_result = replay_satisfied_element_proof(relative, provider=provider)
+    assert relative_result["status"] == "uncertain"
+    assert relative_result["reason"] == "relative_only_chronology"
+    assert relative_result["recommended_follow_ups"][0]["target_kind"] == "absolute_chronology"
+    assert relative_result["provider_called"] is False
+
+    graph = DependencyGraph()
+    node = DependencyNode(
+        id="element-1",
+        node_type=NodeType.LEGAL_ELEMENT,
+        name="causation",
+        satisfied=True,
+        attributes={
+            "dependency_class": "legally_sourced",
+            "date_sensitive": True,
+            "satisfaction_state": "satisfied",
+            "dependency_scope": {"rule_id": "rule-1", "fact_ids": ["fact-1"], "date_sensitive": True},
+        },
+    )
+    graph.add_node(node)
+    builder = DependencyGraphBuilder()
+    bound = builder.apply_element_proof_cache(graph, "element-1", first)
+    assert bound["satisfaction_state"] == "uncertain"
+    assert bound["proof_cache_reusable"] is False
+    assert bound["recommended_follow_ups"][0]["issue_type"] == "contradictory_dates"
+    report = builder.refresh_affected_dependencies(graph, {"chronology_issue": "relative_only_ordering"})
+    assert "element-1" in report["affected_node_ids"]
+    assert graph.nodes["element-1"].attributes["satisfaction_state"] == "uncertain"
+    assert graph.nodes["element-1"].attributes["recommended_follow_ups"][0]["issue_type"] == "relative_only_ordering"
+    assert graph.nodes["element-1"].satisfied is False
+
+
+def test_unchanged_proof_replay_is_deterministic_without_a_live_provider():
+    from integrations.ipfs_datasets.logic import replay_satisfied_element_proof, reset_satisfied_element_proof_cache
+
+    reset_satisfied_element_proof_cache()
+    calls = {"count": 0}
+
+    def provider():
+        calls["count"] += 1
+        return {"satisfied": True, "token": "stable", "outcome": "proved"}
+
+    identity = _element_identity()
+    first = replay_satisfied_element_proof(identity, provider=provider)
+    second = replay_satisfied_element_proof(identity, provider=provider)
+    assert calls["count"] == 1
+    assert second["provider_called"] is False
+    assert second["reused"] is True
+    assert second["result"] == first["result"]
+    assert second["cache_identity"] == first["cache_identity"]
+
+
 def test_large_request_is_fully_pumped_into_the_real_router(tmp_path: Path):
     routed = _route(sample_or_document={"metadata": {"padding": "x" * 262144}},
         managed_state_directory=str(tmp_path / "owned"))

@@ -3442,6 +3442,39 @@ class DependencyGraphBuilder:
                 invalidated.append(node_id)
             node.attributes["satisfaction_revision"] = int(node.attributes.get("satisfaction_revision") or 0) + 1
             node.attributes["dependency_recomputed"] = True
+            if node.attributes.get("proof_cache_identity"):
+                node.attributes["rejected_proof_cache_identity"] = node.attributes.get("proof_cache_identity")
+                node.attributes["proof_cache_reusable"] = False
+                if isinstance(node.attributes.get("proof_cache"), dict):
+                    node.attributes["proof_cache"]["reusable"] = False
+                    node.attributes["proof_cache"]["satisfied"] = False
+
+        chronology_issue = str(payload.get("chronology_issue") or "").strip().lower()
+        if chronology_issue in {"contradictory_dates", "relative_only_ordering"}:
+            from integrations.ipfs_datasets.logic import chronology_follow_ups
+
+            follow_ups = chronology_follow_ups(chronology_issue)
+            for node in graph.nodes.values():
+                attributes = node.attributes if isinstance(node.attributes, dict) else {}
+                scope = attributes.get("dependency_scope") if isinstance(attributes.get("dependency_scope"), dict) else {}
+                if not (attributes.get("timeline_fact_node") or attributes.get("date_sensitive") or scope.get("date_sensitive")):
+                    continue
+                if node.satisfied or attributes.get("satisfaction_state") == "satisfied":
+                    attributes["invalidated_satisfaction"] = {
+                        "satisfied": bool(node.satisfied),
+                        "confidence": node.confidence,
+                        "satisfaction_state": attributes.get("satisfaction_state"),
+                    }
+                node.satisfied = False
+                attributes["satisfaction_state"] = "uncertain"
+                attributes["stale_satisfaction"] = True
+                attributes["proof_cache_reusable"] = False
+                attributes["chronology_issue"] = chronology_issue
+                attributes["recommended_follow_ups"] = follow_ups
+                if node.id not in affected_ids:
+                    affected_ids.append(node.id)
+                    invalidated.append(node.id)
+            affected_set = set(affected_ids)
 
         report = {
             "affected_node_ids": list(affected_ids),
@@ -3732,6 +3765,54 @@ class DependencyGraphBuilder:
         """Generate unique dependency ID."""
         self.dependency_counter += 1
         return f"dep_{self.dependency_counter}"
+
+    def apply_element_proof_cache(
+        self,
+        graph: DependencyGraph,
+        node_id: str,
+        evaluation: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Bind a versioned element proof. A new identity drops the prior satisfied result."""
+
+        node = graph.nodes.get(node_id)
+        if node is None or not isinstance(node.attributes, dict):
+            raise KeyError(node_id)
+        identity = str(evaluation.get("cache_identity") or "")
+        previous = str(node.attributes.get("proof_cache_identity") or "")
+        if previous and previous != identity:
+            node.attributes["rejected_proof_cache_identity"] = previous
+            node.attributes["proof_cache_reusable"] = False
+            if node.satisfied or node.attributes.get("satisfaction_state") == "satisfied":
+                node.attributes["invalidated_satisfaction"] = {
+                    "satisfied": bool(node.satisfied),
+                    "confidence": node.confidence,
+                    "satisfaction_state": node.attributes.get("satisfaction_state"),
+                    "proof_cache_identity": previous,
+                }
+            node.satisfied = False
+        satisfied = bool(evaluation.get("satisfied")) and evaluation.get("status") == "satisfied"
+        node.attributes["proof_cache_identity"] = identity
+        node.attributes["proof_cache"] = {
+            "cache_identity": identity,
+            "satisfied": satisfied,
+            "status": evaluation.get("status"),
+            "reason": evaluation.get("reason"),
+            "reusable": satisfied,
+            "result": deepcopy(evaluation.get("result")),
+        }
+        node.attributes["recommended_follow_ups"] = list(evaluation.get("recommended_follow_ups") or [])
+        if satisfied:
+            node.satisfied = True
+            node.attributes["satisfaction_state"] = "satisfied"
+            node.attributes["proof_cache_reusable"] = True
+            node.attributes["stale_satisfaction"] = False
+        else:
+            node.satisfied = False
+            node.attributes["satisfaction_state"] = str(evaluation.get("status") or "uncertain")
+            node.attributes["proof_cache_reusable"] = False
+            node.attributes["stale_satisfaction"] = True
+        graph._update_metadata()
+        return deepcopy(node.attributes)
 
     def add_fact_rule_link(
         self,

@@ -126,6 +126,9 @@ PROOF_OBLIGATION_BACKEND_IDENTITY = (
 PROOF_OBLIGATION_TRUST_STRUCTURAL = "structural"
 PROOF_ROUTING_SCHEMA = "legal-ir-bound-proof-routing/v1"
 PROOF_ROUTING_POLICY_VERSION = "proof03-open-world-substantive-trust/v1"
+PROOF_ELEMENT_CACHE_SCHEMA = "legal-ir-satisfied-element-cache/v1"
+PROOF_ELEMENT_CACHE_POLICY_VERSION = "proof04-versioned-invalidation/v1"
+_SATISFIED_ELEMENT_PROOF_CACHE: Dict[str, Dict[str, Any]] = {}
 PROOF_ROUTING_OUTCOMES = (
     "proved",
     "refuted",
@@ -6345,6 +6348,246 @@ def route_bound_legal_ir_proof(
             "substantive_trust_satisfied": False, "legacy_no_contradiction_is_certified_consistency": False})
 
 
+def _as_identity_rows(value: Any) -> List[Dict[str, Any]]:
+    if value is None:
+        return []
+    rows = value if isinstance(value, Sequence) and not isinstance(value, (str, bytes)) else [value]
+    normalized: List[Dict[str, Any]] = []
+    for item in rows:
+        if isinstance(item, Mapping):
+            normalized.append({str(key): item[key] for key in sorted(item, key=str)})
+        else:
+            normalized.append({"value": item})
+    normalized.sort(key=_stable_json_dumps)
+    return normalized
+
+
+def _chronology_flags(chronology: Mapping[str, Any] | None) -> Dict[str, Any]:
+    payload = dict(chronology or {})
+    issue_types = []
+    for item in payload.get("issues") or payload.get("issue_types") or []:
+        if isinstance(item, Mapping):
+            label = item.get("issue_type") or item.get("category") or ""
+        else:
+            label = item
+        text = str(label or "").strip().lower()
+        if text and text not in issue_types:
+            issue_types.append(text)
+    contradictory = bool(payload.get("contradictory_dates") or payload.get("has_contradictory_dates"))
+    relative_only = bool(payload.get("relative_only") or payload.get("relative_only_ordering"))
+    if "contradictory_dates" in issue_types:
+        contradictory = True
+    if "relative_only_ordering" in issue_types:
+        relative_only = True
+    return {
+        "contradictory_dates": contradictory,
+        "relative_only_ordering": relative_only,
+        "issue_types": issue_types,
+    }
+
+
+def chronology_follow_ups(issue_type: str) -> List[Dict[str, str]]:
+    """Targeted follow-up for chronology that cannot satisfy an element."""
+
+    kind = str(issue_type or "").strip().lower()
+    if kind == "contradictory_dates":
+        return [{
+            "lane": "contradiction_resolution",
+            "follow_up_lane": "contradiction_resolution",
+            "follow_up_target": "document_request",
+            "issue_type": "contradictory_dates",
+            "target_kind": "event_dates",
+            "reason": "Resolve contradictory event dates with a dated document or authoritative record.",
+        }]
+    if kind == "relative_only_ordering":
+        return [{
+            "lane": "anchor_capture",
+            "follow_up_lane": "anchor_capture",
+            "follow_up_target": "document_request",
+            "issue_type": "relative_only_ordering",
+            "target_kind": "absolute_chronology",
+            "reason": "Replace relative-only ordering with a calendar date or dated record.",
+        }]
+    return []
+
+
+def proof_cache_identity(
+    *,
+    claim_id: str = "",
+    element_id: str = "",
+    factual_revisions: Any = None,
+    legal_source: Mapping[str, Any] | None = None,
+    compiler: Mapping[str, Any] | None = None,
+    compiler_config: Mapping[str, Any] | None = None,
+    proof_policy: Mapping[str, Any] | None = None,
+    chronology: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Identity for a satisfied-element proof.
+
+    Factual revision, applicable legal source and version, compiler schema and
+    config, and proof policy all participate. A change to any of them is a
+    different cache entry.
+    """
+
+    source = dict(legal_source or {})
+    rules = _as_identity_rows(source.get("rules") or source.get("rule_versions"))
+    for rule in rules:
+        rule["superseded"] = bool(rule.get("superseded") or str(rule.get("status") or "").lower() == "superseded")
+    factual = _as_identity_rows(factual_revisions)
+    compiler_identities = dict(compiler) if compiler is not None else (canonical_compiler_identities() or {})
+    policy = {
+        "obligation_policy": PROOF_OBLIGATION_POLICY_VERSION,
+        "routing_policy": PROOF_ROUTING_POLICY_VERSION,
+        "cache_policy": PROOF_ELEMENT_CACHE_POLICY_VERSION,
+        "policy": dict(proof_policy or {}),
+    }
+    components = {
+        "claim_id": str(claim_id or ""),
+        "element_id": str(element_id or ""),
+        "factual_revisions": factual,
+        "legal_source": {
+            "source_id": str(source.get("source_id") or ""),
+            "source_version": str(source.get("source_version") or source.get("legal_context_version") or ""),
+            "legal_context_version": str(source.get("legal_context_version") or ""),
+            "law_as_of": str(source.get("law_as_of") or source.get("applicable_law_date") or ""),
+            "rules": rules,
+        },
+        "compiler": {
+            "schema_version": PROOF_ELEMENT_CACHE_SCHEMA,
+            "obligation_schema": PROOF_OBLIGATION_ARTIFACT_SCHEMA,
+            "routing_schema": PROOF_ROUTING_SCHEMA,
+            "identities": compiler_identities,
+            "config": dict(compiler_config or {}),
+        },
+        "proof_policy": policy,
+        "chronology": _chronology_flags(chronology),
+    }
+    return {
+        "schema_version": PROOF_ELEMENT_CACHE_SCHEMA,
+        "components": components,
+        "cache_identity": _stable_payload_digest(components),
+    }
+
+
+def reset_satisfied_element_proof_cache() -> None:
+    _SATISFIED_ELEMENT_PROOF_CACHE.clear()
+
+
+def lookup_satisfied_element_proof(identity: Mapping[str, Any]) -> Dict[str, Any] | None:
+    """Return a stored satisfied result only when its cache identity matches."""
+
+    key = str((identity or {}).get("cache_identity") or "")
+    stored = _SATISFIED_ELEMENT_PROOF_CACHE.get(key)
+    if not stored or not stored.get("satisfied"):
+        return None
+    found = deepcopy(stored)
+    found["reused"] = True
+    found["provider_called"] = False
+    return found
+
+
+def _element_cache_block(identity: Mapping[str, Any]) -> Dict[str, Any] | None:
+    components = identity.get("components") if isinstance(identity.get("components"), Mapping) else {}
+    chronology = _chronology_flags(components.get("chronology") if isinstance(components.get("chronology"), Mapping) else {})
+    if chronology["contradictory_dates"]:
+        return {
+            "reason": "contradictory_event_dates",
+            "recommended_follow_ups": chronology_follow_ups("contradictory_dates"),
+        }
+    if chronology["relative_only_ordering"]:
+        return {
+            "reason": "relative_only_chronology",
+            "recommended_follow_ups": chronology_follow_ups("relative_only_ordering"),
+        }
+    legal = components.get("legal_source") if isinstance(components.get("legal_source"), Mapping) else {}
+    rules = legal.get("rules") if isinstance(legal.get("rules"), list) else []
+    if any(isinstance(rule, Mapping) and rule.get("superseded") for rule in rules):
+        return {"reason": "superseded_rule", "recommended_follow_ups": [], "evaluate": True}
+    return None
+
+
+def replay_satisfied_element_proof(
+    identity: Mapping[str, Any],
+    *,
+    provider: Any = None,
+) -> Dict[str, Any]:
+    """Replay a versioned element proof. Unchanged inputs do not call providers.
+
+    A corrected fact, law date, compiler identity, proof policy, or superseded
+    rule is a different identity and cannot return an earlier satisfied result.
+    Contradictory dates and relative-only chronology stay uncertain.
+    """
+
+    key = str(identity.get("cache_identity") or "")
+    if not key:
+        raise ValueError("proof cache identity is required")
+    stored = _SATISFIED_ELEMENT_PROOF_CACHE.get(key)
+    if stored is not None:
+        replayed = deepcopy(stored)
+        replayed["reused"] = True
+        replayed["provider_called"] = False
+        replayed["deterministic"] = True
+        return replayed
+    block = _element_cache_block(identity)
+    if block and not block.get("evaluate"):
+        record = {
+            "schema_version": PROOF_ELEMENT_CACHE_SCHEMA,
+            "cache_identity": key,
+            "satisfied": False,
+            "status": "uncertain",
+            "reason": block["reason"],
+            "substantive_trust_satisfied": False,
+            "entails_claim_element": False,
+            "recommended_follow_ups": list(block["recommended_follow_ups"]),
+            "reused": False,
+            "provider_called": False,
+            "deterministic": True,
+            "result": None,
+        }
+        _SATISFIED_ELEMENT_PROOF_CACHE[key] = deepcopy(record)
+        return deepcopy(record)
+    if provider is None:
+        return {
+            "schema_version": PROOF_ELEMENT_CACHE_SCHEMA,
+            "cache_identity": key,
+            "satisfied": False,
+            "status": "not_cached",
+            "reason": "proof_cache_miss",
+            "substantive_trust_satisfied": False,
+            "entails_claim_element": False,
+            "recommended_follow_ups": [],
+            "reused": False,
+            "provider_called": False,
+            "deterministic": True,
+            "result": None,
+        }
+    produced = provider()
+    if not isinstance(produced, Mapping):
+        produced = {"value": produced}
+    produced_map = dict(produced)
+    satisfied = bool(produced_map.get("satisfied") is True or produced_map.get("substantive_trust_satisfied") is True)
+    reason = str(produced_map.get("reason") or "")
+    if block and block.get("reason") == "superseded_rule":
+        satisfied = False
+        reason = "superseded_rule"
+    record = {
+        "schema_version": PROOF_ELEMENT_CACHE_SCHEMA,
+        "cache_identity": key,
+        "satisfied": satisfied,
+        "status": "satisfied" if satisfied else str(produced_map.get("outcome") or produced_map.get("status") or "evaluated"),
+        "reason": reason,
+        "substantive_trust_satisfied": satisfied,
+        "entails_claim_element": False,
+        "recommended_follow_ups": [],
+        "reused": False,
+        "provider_called": True,
+        "deterministic": True,
+        "result": deepcopy(produced_map),
+    }
+    _SATISFIED_ELEMENT_PROOF_CACHE[key] = deepcopy(record)
+    return deepcopy(record)
+
+
 def legacy_procedural_template_attributes() -> Dict[str, Any]:
     return {
         "category": "civil_procedure",
@@ -6409,4 +6652,10 @@ __all__ = [
     "route_bound_legal_ir_proof",
     "PROOF_ROUTING_SCHEMA",
     "PROOF_ROUTING_OUTCOMES",
+    "PROOF_ELEMENT_CACHE_SCHEMA",
+    "chronology_follow_ups",
+    "proof_cache_identity",
+    "reset_satisfied_element_proof_cache",
+    "lookup_satisfied_element_proof",
+    "replay_satisfied_element_proof",
 ]
