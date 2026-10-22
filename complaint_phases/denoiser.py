@@ -26,6 +26,60 @@ from .intake_claim_registry import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def format_terminal_why(inquiry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Render a /why explanation a person can read without seeing ranking internals."""
+    if not isinstance(inquiry, dict) or not (
+        str(inquiry.get("question") or "").strip() or str(inquiry.get("why_it_matters") or "").strip()
+    ):
+        display = (
+            "There is no current question to explain. "
+            "The interview is waiting for a selected gap, and this is not a stalled worker."
+        )
+        return {
+            "command": "/why",
+            "display": display,
+            "stored_as_answer": False,
+            "awaiting_user": True,
+            "inquiry": None,
+        }
+    why = str(inquiry.get("why_it_matters") or inquiry.get("question_reason") or "").strip()
+    if not why:
+        why = "This question asks for information that is still missing from the complaint record."
+    question = str(inquiry.get("question") or "").strip()
+    objective_id = str(inquiry.get("objective_id") or "")
+    target_id = str(inquiry.get("target_id") or inquiry.get("inquiry_id") or "")
+    answer_contract = inquiry.get("expected_answer_contract") if isinstance(inquiry.get("expected_answer_contract"), dict) else {}
+    update_contract = inquiry.get("expected_update_contract") if isinstance(inquiry.get("expected_update_contract"), dict) else {}
+    expected = str(
+        answer_contract.get("expected_information")
+        or inquiry.get("expected_information")
+        or "facts, dates, people, or documents you observed"
+    ).strip()
+    update_kind = str(update_contract.get("update_kind") or "record the answer against this target").replace("_", " ")
+    display = (
+        f"Why this question: {why}\n"
+        f"Question: {question}\n"
+        f"Objective id: {objective_id}\n"
+        f"Target id: {target_id}\n"
+        f"Expected answer: {expected}.\n"
+        f"Expected update: {update_kind} for this target. "
+        "An unknown, refused, or skipped answer is recorded as that response and does not satisfy the underlying legal requirement."
+    )
+    return {
+        "command": "/why",
+        "display": display,
+        "stored_as_answer": False,
+        "awaiting_user": True,
+        "objective_id": objective_id,
+        "target_id": target_id,
+        "why_it_matters": why,
+        "expected_answer_contract": answer_contract,
+        "expected_update_contract": update_contract,
+    }
+
+
 MODULE_OWNERSHIP = require_module_ownership("complaint_phases.denoiser")
 RUNTIME_ENTRYPOINT_ROLE = MODULE_OWNERSHIP.role
 
@@ -56,6 +110,14 @@ class ComplaintDenoiser:
         self.target_dispositions: Dict[str, str] = {}
         self.question_disposition_records: List[Dict[str, Any]] = []
         self._question_scope_revision = "standard-intake"
+        self.objective_repeat_counts: Dict[str, int] = {}
+        self.semantic_repeat_counts: Dict[str, int] = {}
+        self.presented_question_records: List[Dict[str, Any]] = []
+        self._presented_inquiry_ids: Set[str] = set()
+        self.explained_inquiry_pool: List[Dict[str, Any]] = []
+        self.current_explained_inquiry: Optional[Dict[str, Any]] = None
+        self.suppressed_semantic_duplicates: List[Dict[str, Any]] = []
+        self.retired_explained_targets: Set[str] = set()
 
         # Optional “policy” knobs for SGD-style exploration.
         # Default is deterministic/no-randomness.
@@ -4221,6 +4283,321 @@ class ComplaintDenoiser:
         else:
             normalized_candidates.sort(key=self._default_candidate_sort_key)
         return _finalize(normalized_candidates, dedupe=True)
+
+    SEMANTIC_DUPLICATE_REPEAT_LIMIT = 2
+    _EXPLAINED_GAP_FAMILIES = frozenset({
+        "factual_uncertainty",
+        "legal_element_support",
+        "contradiction",
+        "evidence",
+    })
+    _SEMANTIC_DUPLICATE_SIMILARITY = 0.84
+
+    def _explained_gap_family(self, candidate: Dict[str, Any]) -> str:
+        source = str(candidate.get("candidate_source") or "").strip().lower()
+        question_type = str(candidate.get("type") or candidate.get("question_type") or "").strip().lower()
+        kind = str(candidate.get("target_kind") or "").strip().lower()
+        if kind == "contradiction" or question_type == "contradiction" or "contradict" in source:
+            return "contradiction"
+        if source == "intake_claim_element_gap" or question_type == "requirement" or kind == "requirement" or source == "dependency_graph_requirement":
+            return "legal_element_support"
+        if question_type == "evidence" or kind == "proof" or source == "intake_proof_gap":
+            return "evidence"
+        if kind == "factual" or source == "knowledge_graph_gap" or question_type in {
+            "clarification", "timeline", "relationship", "responsible_party", "impact", "remedy",
+        }:
+            return "factual_uncertainty"
+        return ""
+
+    def _stable_explained_id(self, prefix: str, *parts: Any) -> str:
+        material = "|".join(str(part or "").strip() for part in parts)
+        digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:20]
+        return f"{prefix}-{digest}"
+
+    def _explained_inquiry_from_candidate(self, candidate: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not isinstance(candidate, dict):
+            return None
+        family = self._explained_gap_family(candidate)
+        if family not in self._EXPLAINED_GAP_FAMILIES:
+            return None
+        if self._is_operator_source_gap(candidate) or candidate.get("user_answerability") == "operator_only":
+            return None
+        target = candidate.get("unresolved_target") if isinstance(candidate.get("unresolved_target"), dict) else {}
+        target_id = str(target.get("target_id") or candidate.get("target_id") or "").strip()
+        if not target_id:
+            return None
+        if target_id in self.retired_explained_targets or self.is_question_target_closed(
+            target_id, target.get("target_revision") or candidate.get("target_revision"),
+        ):
+            return None
+        if str(target.get("user_answerability") or candidate.get("user_answerability") or "user_observable") != "user_observable":
+            return None
+        question = str(candidate.get("question") or "").strip()
+        if not question:
+            return None
+        objective_key = str(candidate.get("proof_objective_id") or candidate.get("question_objective_key") or self._question_objective_key(candidate))
+        objective_id = self._stable_explained_id("obj", objective_key)
+        semantic_key = str(candidate.get("coverage_key") or self._question_coverage_key(candidate) or objective_id)
+        why = str(
+            candidate.get("why_answer_helps")
+            or candidate.get("question_reason")
+            or (target.get("why_answer_helps") if isinstance(target, dict) else "")
+            or ""
+        ).strip()
+        if not why:
+            why = "This question asks for an unresolved fact, conflict, legal-element detail, or evidence lead."
+        expected_information = str(
+            candidate.get("expected_information")
+            or (target.get("expected_information") if isinstance(target, dict) else "")
+            or "Observed events, dates, people, or documents you can recall."
+        ).strip()
+        update_kind = str(candidate.get("expected_update_kind") or self._question_expected_update_kind(candidate) or "clarify_record")
+        inquiry_id = self._stable_explained_id("inq", objective_id, target_id)
+        family_reason = {
+            "factual_uncertainty": "A factual detail is still uncertain, so later review cannot treat it as established.",
+            "legal_element_support": "A legal element still lacks support. The element definition itself is not changed by the answer.",
+            "contradiction": "Two accounts conflict, and neither account is treated as proved until you clarify it.",
+            "evidence": "A proof lead is still missing, so the element cannot be treated as documented.",
+        }[family]
+        why_it_matters = f"{why} {family_reason}".strip()
+        answer_contract = {
+            "objective_id": objective_id,
+            "target_id": target_id,
+            "expected_information": expected_information,
+            "accepts": ["observed_fact", "date", "person", "document_reference"],
+            "non_answers": ["unknown", "refused", "skipped"],
+            "non_answer_effect": "record_disposition_without_satisfying_legal_requirement",
+        }
+        update_contract = {
+            "objective_id": objective_id,
+            "target_id": target_id,
+            "target_revision": str(target.get("target_revision") or candidate.get("target_revision") or "unresolved"),
+            "update_kind": update_kind,
+            "on_answer": "update_or_remove_candidate",
+            "on_non_answer": "record_disposition_and_select_next_candidate",
+            "satisfies_legal_requirement_on_non_answer": False,
+        }
+        return {
+            "inquiry_id": inquiry_id,
+            "objective_id": objective_id,
+            "semantic_key": semantic_key,
+            "target_id": target_id,
+            "target_revision": update_contract["target_revision"],
+            "target_kind": str(target.get("target_kind") or candidate.get("target_kind") or ""),
+            "gap_family": family,
+            "question": question,
+            "why_it_matters": why_it_matters,
+            "expected_information": expected_information,
+            "expected_answer_contract": answer_contract,
+            "expected_update_contract": update_contract,
+            "candidate": candidate,
+        }
+
+    def _semantic_repeat_count(self, inquiry: Dict[str, Any], running: Dict[str, int], kept: List[Dict[str, Any]]) -> int:
+        keys = [str(inquiry.get("objective_id") or ""), str(inquiry.get("semantic_key") or "")]
+        count = max(int(running.get(key, 0) or 0) for key in keys)
+        question = str(inquiry.get("question") or "")
+        compared = list(self.presented_question_records) + list(kept)
+        for prior in compared:
+            if not isinstance(prior, dict):
+                continue
+            prior_question = str(prior.get("question") or "")
+            if not prior_question:
+                continue
+            same_objective = str(prior.get("objective_id") or "") == str(inquiry.get("objective_id") or "")
+            same_semantic = str(prior.get("semantic_key") or "") == str(inquiry.get("semantic_key") or "")
+            similar = self._question_text_similarity(question, prior_question) >= self._SEMANTIC_DUPLICATE_SIMILARITY
+            if not (same_objective or same_semantic or similar):
+                continue
+            prior_count = int(prior.get("repeat_count") or running.get(str(prior.get("semantic_key") or ""), 0) or 0)
+            if prior in kept:
+                prior_count = max(prior_count, 1)
+            count = max(count, prior_count if (same_objective or same_semantic or similar) else 0)
+            if similar or same_objective or same_semantic:
+                count = max(count, int(running.get(str(prior.get("objective_id") or ""), 0) or 0))
+                count = max(count, int(running.get(str(prior.get("semantic_key") or ""), 0) or 0))
+        return count
+
+    def apply_semantic_duplicate_repeat_policy(
+        self,
+        inquiries: List[Dict[str, Any]],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Allow a bounded number of semantically duplicate objectives, then stop repeating them."""
+        running = dict(self.semantic_repeat_counts)
+        for objective_id, count in self.objective_repeat_counts.items():
+            running[str(objective_id)] = max(int(running.get(str(objective_id), 0) or 0), int(count or 0))
+        kept: List[Dict[str, Any]] = []
+        suppressed: List[Dict[str, Any]] = []
+        for inquiry in inquiries or []:
+            if not isinstance(inquiry, dict):
+                continue
+            count = self._semantic_repeat_count(inquiry, running, kept)
+            if count >= self.SEMANTIC_DUPLICATE_REPEAT_LIMIT:
+                suppressed.append({
+                    "inquiry_id": inquiry.get("inquiry_id"),
+                    "objective_id": inquiry.get("objective_id"),
+                    "semantic_key": inquiry.get("semantic_key"),
+                    "target_id": inquiry.get("target_id"),
+                    "question": inquiry.get("question"),
+                    "repeat_count": count,
+                    "repeat_limit": self.SEMANTIC_DUPLICATE_REPEAT_LIMIT,
+                    "suppressed_reason": "semantic_duplicate_repeat_limit",
+                })
+                continue
+            kept.append(inquiry)
+            for key in (inquiry.get("objective_id"), inquiry.get("semantic_key")):
+                if key:
+                    running[str(key)] = max(int(running.get(str(key), 0) or 0), count) + 1
+        return kept, suppressed
+
+    def _mark_explained_inquiry_presented(self, inquiry: Optional[Dict[str, Any]]) -> None:
+        if not isinstance(inquiry, dict):
+            return
+        inquiry_id = str(inquiry.get("inquiry_id") or "")
+        if not inquiry_id or inquiry_id in self._presented_inquiry_ids:
+            return
+        self._presented_inquiry_ids.add(inquiry_id)
+        for key_name, store in (
+            ("objective_id", self.objective_repeat_counts),
+            ("semantic_key", self.semantic_repeat_counts),
+        ):
+            key = str(inquiry.get(key_name) or "")
+            if key:
+                store[key] = int(store.get(key, 0) or 0) + 1
+        self.presented_question_records.append({
+            "inquiry_id": inquiry_id,
+            "objective_id": inquiry.get("objective_id"),
+            "semantic_key": inquiry.get("semantic_key"),
+            "question": inquiry.get("question"),
+            "repeat_count": int(self.objective_repeat_counts.get(str(inquiry.get("objective_id") or ""), 1) or 1),
+        })
+
+    def select_explained_gap_inquiries(
+        self,
+        knowledge_graph: KnowledgeGraph,
+        dependency_graph: DependencyGraph,
+        *,
+        intake_case_file: Optional[Dict[str, Any]] = None,
+        max_questions: int = 8,
+    ) -> List[Dict[str, Any]]:
+        """Select explained questions from actionable graph gaps.
+
+        Candidate text comes from ``collect_question_candidates`` and
+        ``select_question_candidates``. This method adds stable objective and
+        target ids, why the question matters, and the answer/update contract.
+        """
+        self.load_question_dispositions(intake_case_file)
+        budget = max(int(max_questions or 0), 0)
+        if budget <= 0:
+            self.explained_inquiry_pool = []
+            self.current_explained_inquiry = None
+            self.suppressed_semantic_duplicates = []
+            return []
+        raw_candidates = self.collect_question_candidates(
+            knowledge_graph,
+            dependency_graph,
+            max_questions=budget,
+            intake_case_file=intake_case_file,
+        )
+        selected = self.select_question_candidates(
+            raw_candidates,
+            max_questions=max(budget * 4, budget),
+        )
+        shaped = []
+        for candidate in selected:
+            inquiry = self._explained_inquiry_from_candidate(candidate)
+            if inquiry is not None:
+                shaped.append(inquiry)
+        admitted, suppressed = self.apply_semantic_duplicate_repeat_policy(shaped)
+        self.suppressed_semantic_duplicates = suppressed
+        self.explained_inquiry_pool = admitted[:budget]
+        self.current_explained_inquiry = self.explained_inquiry_pool[0] if self.explained_inquiry_pool else None
+        self._mark_explained_inquiry_presented(self.current_explained_inquiry)
+        return list(self.explained_inquiry_pool)
+
+    def apply_explained_inquiry_answer(
+        self,
+        answer: Any,
+        knowledge_graph: KnowledgeGraph,
+        dependency_graph: DependencyGraph,
+        *,
+        intake_case_file: Optional[Dict[str, Any]] = None,
+        inquiry: Optional[Dict[str, Any]] = None,
+        disposition: Any = None,
+        max_questions: int = 8,
+    ) -> Dict[str, Any]:
+        """Record one answer, retire that candidate, and select the next gap."""
+        current = inquiry if isinstance(inquiry, dict) else self.current_explained_inquiry
+        if not isinstance(current, dict):
+            raise ValueError("no current explained inquiry")
+        question = current.get("candidate") if isinstance(current.get("candidate"), dict) else {}
+        classified = self.classify_answer_disposition(answer, explicit=disposition)
+        updates = self.process_answer(
+            question,
+            "" if answer is None else str(answer),
+            knowledge_graph,
+            dependency_graph,
+            source_context={
+                "intake_case_file": intake_case_file,
+                "disposition": classified,
+            },
+        )
+        if not isinstance(updates, dict):
+            updates = {}
+        non_fact = classified in self._NON_FACT_DISPOSITIONS
+        if non_fact or not updates.get("question_disposition"):
+            self.record_question_disposition(
+                question,
+                answer,
+                disposition=classified,
+                intake_case_file=intake_case_file,
+                creates_fact=False if non_fact else bool(updates.get("creates_fact")),
+                satisfies_requirement=False if non_fact else bool(updates.get("satisfies_requirement")),
+            )
+        satisfies_requirement = False if non_fact else bool(updates.get("satisfies_requirement"))
+        target_id = str(current.get("target_id") or "")
+        if target_id:
+            self.retired_explained_targets.add(target_id)
+        self._mark_explained_inquiry_presented(current)
+        self.explained_inquiry_pool = [
+            item for item in self.explained_inquiry_pool
+            if str(item.get("target_id") or "") != target_id
+        ]
+        refreshed = self.select_explained_gap_inquiries(
+            knowledge_graph,
+            dependency_graph,
+            intake_case_file=intake_case_file,
+            max_questions=max_questions,
+        )
+        next_inquiry = self.current_explained_inquiry
+        if isinstance(next_inquiry, dict) and str(next_inquiry.get("target_id") or "") == target_id:
+            alternatives = [item for item in refreshed if str(item.get("target_id") or "") != target_id]
+            if alternatives:
+                next_inquiry = alternatives[0]
+                self.current_explained_inquiry = next_inquiry
+                self.explained_inquiry_pool = alternatives
+            else:
+                revised = dict(next_inquiry)
+                revised["target_revision"] = str(int(str(revised.get("target_revision") or "0") or 0) + 1) if str(revised.get("target_revision") or "").isdigit() else str(revised.get("target_revision") or "unresolved") + ":updated"
+                revised["why_it_matters"] = str(revised.get("why_it_matters") or "") + " The previous answer changed this candidate, and it remains open."
+                next_inquiry = revised
+                self.current_explained_inquiry = revised
+        return {
+            "disposition": classified,
+            "recorded_as": classified if non_fact else "answered",
+            "satisfies_requirement": satisfies_requirement,
+            "removed_target_id": target_id,
+            "objective_id": current.get("objective_id"),
+            "inquiry_id": current.get("inquiry_id"),
+            "next_inquiry": next_inquiry,
+            "inquiries": list(self.explained_inquiry_pool),
+            "updates": {
+                "disposition": updates.get("disposition", classified),
+                "creates_fact": False if non_fact else bool(updates.get("creates_fact")),
+                "satisfies_requirement": satisfies_requirement,
+                "requirements_satisfied": 0 if non_fact else int(updates.get("requirements_satisfied") or 0),
+            },
+        }
 
     def _ensure_standard_intake_questions(self, questions: List[Dict[str, Any]], max_questions: int) -> List[Dict[str, Any]]:
         if len(questions) >= max_questions:
