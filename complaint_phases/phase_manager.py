@@ -17,9 +17,15 @@ _DENOISING_MAX_ITERATIONS = 20
 _INCOMPLETE_INTERVIEW_STOPS = frozenset({
     'needs_answer',
     'deferred_unknown',
+    'deferred_needs_evidence',
     'provider_unavailable',
+    'blocked_provider',
     'cancelled',
     'limit_reached',
+    'no_progress',
+    'needs_review',
+    'paused',
+    'awaiting_user',
 })
 _EVIDENCE_REVIEWABLE_ESCALATION_STATUSES = {
     'awaiting_complainant_record',
@@ -73,6 +79,22 @@ def _coerce_ratio(value: Any, default: float = 1.0) -> float:
 
 def _utc_now_isoformat() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _attach_stopping_policy(action: Dict[str, Any], stop: Dict[str, Any], *, paused: bool = False) -> Dict[str, Any]:
+    """Copy the truthful stopping projection onto a phase action."""
+    from complaint_phases.denoiser import project_stopping_policy
+
+    projected = project_stopping_policy(stop, paused=paused)
+    action['outcome'] = projected['outcome']
+    action['stopping_policy'] = projected
+    action['remaining_issues'] = list(projected.get('remaining_issues') or [])
+    action['resumable_next_action'] = dict(projected.get('resumable_next_action') or {})
+    action['legal_sufficiency'] = False
+    action['core_facts_complete'] = False
+    action['proof_requirements_satisfied'] = False
+    action['filing_ready'] = False
+    return action
 
 
 class ComplaintPhase(Enum):
@@ -1464,7 +1486,7 @@ class PhaseManager:
         readiness = self.get_intake_readiness()
         wait = data.get('intentional_user_wait') if isinstance(data.get('intentional_user_wait'), dict) else {}
         if wait.get('paused') and wait.get('intentional'):
-            return {
+            paused_action = {
                 'action': 'awaiting_user',
                 'awaiting_user': True,
                 'worker_stalled': False,
@@ -1474,14 +1496,15 @@ class PhaseManager:
                 'intake_readiness_score': readiness['score'],
                 'intake_blockers': readiness['blockers'],
             }
+            return _attach_stopping_policy(paused_action, {}, paused=True)
 
         stop = data.get('interview_stop') if isinstance(data.get('interview_stop'), dict) else {}
         stop_state = str(stop.get('state') or '').strip()
         if stop_state in _INCOMPLETE_INTERVIEW_STOPS or stop_state == 'saturated':
-            return {
+            stop_action = {
                 'action': 'interview_saturated' if stop_state == 'saturated' else stop_state,
                 'interview_state': stop_state,
-                'awaiting_user': stop_state == 'needs_answer',
+                'awaiting_user': stop_state == 'needs_answer' or str(stop.get('outcome') or '') == 'awaiting_user',
                 'worker_stalled': False,
                 'supervisory_restart': False,
                 'filing_ready': False,
@@ -1491,6 +1514,7 @@ class PhaseManager:
                 'intake_readiness_score': readiness['score'],
                 'intake_blockers': readiness['blockers'],
             }
+            return _attach_stopping_policy(stop_action, stop)
 
         if 'knowledge_graph' not in data:
             return {
@@ -1544,7 +1568,7 @@ class PhaseManager:
 
         genuinely_ready = bool(data.get('denoising_converged', False) and remaining_gaps <= gap_threshold and readiness.get('ready'))
         if denoising_iteration_cap_hit and not genuinely_ready:
-            return {
+            return _attach_stopping_policy({
                 'action': 'limit_reached',
                 'interview_state': 'limit_reached',
                 'filing_ready': False,
@@ -1555,7 +1579,17 @@ class PhaseManager:
                 'message': 'Iteration cap reached. Intake is not complete and the complaint is not ready to file.',
                 'intake_readiness_score': readiness['score'],
                 'intake_blockers': readiness['blockers'],
-            }
+            }, {
+                'state': 'limit_reached',
+                'intake_complete': False,
+                'unresolved_issue_summary': {
+                    'items': [{'reason': 'iteration_cap'}],
+                    'rejected_shortcuts': ['iteration_cap'],
+                    'legal_sufficiency': False,
+                    'core_facts_complete': False,
+                    'open_answerable_count': 0,
+                },
+            })
 
         if genuinely_ready:
             return {

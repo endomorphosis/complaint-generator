@@ -576,6 +576,60 @@ def _narrative_is_open(state: Dict[str, Any]) -> bool:
     if _structured_answers_present(state):
         return False
     return True
+
+
+_UNKNOWN_INTAKE_ANSWERS = {
+    "unknown", "i do not know", "i don't know", "i dont know", "idk", "not sure",
+    "unsure", "no idea", "do not know", "don't know", "n/a", "na", "none",
+}
+
+
+def _workspace_stopping_policy(
+    state: Dict[str, Any],
+    *,
+    active_question: Optional[Dict[str, Any]],
+    answers: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Workspace view of the same stopping outcomes the interview denoiser returns."""
+    from complaint_phases.denoiser import project_stopping_policy
+
+    wait = state.get("intentional_user_wait") if isinstance(state.get("intentional_user_wait"), dict) else {}
+    paused = bool(wait.get("paused")) and bool(wait.get("intentional", True))
+    stored = state.get("interview_stop") if isinstance(state.get("interview_stop"), dict) else None
+    shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+    if stored is None and isinstance(shared.get("interview_stop"), dict):
+        stored = shared.get("interview_stop")
+    if isinstance(stored, dict) and stored.get("state"):
+        return project_stopping_policy(stored, paused=paused)
+
+    values = [str(value or "").strip().lower() for value in (answers or {}).values() if str(value or "").strip()]
+    unknown_only = bool(values) and all(value in _UNKNOWN_INTAKE_ANSWERS for value in values)
+    if paused:
+        state_name = "paused"
+    elif active_question is not None:
+        state_name = "needs_answer"
+    elif unknown_only:
+        state_name = "deferred_unknown"
+    else:
+        state_name = "saturated"
+    stop = {
+        "state": state_name,
+        "intake_complete": False,
+        "filing_ready": False,
+        "legal_sufficiency": False,
+        "core_facts_complete": False,
+        "unresolved_issue_summary": {
+            "items": [{"reason": "unknown_only_session" if unknown_only else "structured_questions_are_not_legal_sufficiency"}],
+            "open_answerable_count": 1 if active_question is not None else 0,
+            "legal_sufficiency": False,
+            "core_facts_complete": False,
+            "proof_requirements_satisfied": False,
+            "rejected_shortcuts": ["empty_question_list"] if active_question is None else [],
+        },
+    }
+    return project_stopping_policy(stop, paused=paused)
+
+
 _CLAIM_TYPE_LABELS: Dict[str, str] = {
     "retaliation": "Retaliation",
     "employment_discrimination": "Employment Discrimination",
@@ -4378,14 +4432,14 @@ class ComplaintWorkspaceService:
             explanation = self._build_intake_chat_explanation(active_question, state)
         else:
             message = (
-                "Intake complete. I have the core complaint facts. Next, review the synopsis, add corroborating evidence, "
-                "and use the mediator follow-up flow to tighten proof gaps."
+                "No further answerable intake questions are waiting. That is interview saturation, "
+                "not a finding that every fact, proof requirement, or legal element is satisfied."
             )
             explanation = {
                 "question_id": None,
-                "why_this_matters": "The intake record is complete enough to hand off into evidence collection and complaint drafting.",
-                "how_to_answer": "No further intake answer is required right now.",
-                "review_focus": "Shift attention to corroborating documents, witness testimony, and legal support.",
+                "why_this_matters": "An empty question list does not establish legal sufficiency or complete core facts.",
+                "how_to_answer": "Review the remaining issues, then add evidence or resume when there is something new to say.",
+                "review_focus": "Unresolved proof and evidence gaps stay open until they are actually resolved.",
             }
         payload = {
             "user_id": str(state.get("user_id") or DEFAULT_USER_ID),
@@ -4449,6 +4503,10 @@ class ComplaintWorkspaceService:
             payload["conversation_state"]["is_complete"] = pending is None
             payload["conversation_state"]["active_engine"] = "shared_interview"
             payload["legal_sufficiency"] = False
+        payload["stopping_policy"] = _workspace_stopping_policy(state, active_question=active_question, answers=answers)
+        payload["legal_sufficiency"] = False
+        payload["core_facts_complete"] = False
+        payload["filing_ready"] = False
         return payload
 
     def _support_matrix(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
