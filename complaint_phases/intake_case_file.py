@@ -32,6 +32,235 @@ def _coerce_dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+QUESTION_DISPOSITIONS = (
+    "answered",
+    "unknown",
+    "refused",
+    "skipped",
+    "deferred",
+    "invalidated",
+)
+_NON_FACT_QUESTION_DISPOSITIONS = {
+    "unknown",
+    "refused",
+    "skipped",
+    "deferred",
+    "invalidated",
+}
+_QUESTION_DISPOSITION_ALIASES = {
+    "answered": "answered",
+    "answer": "answered",
+    "unknown": "unknown",
+    "do_not_know": "unknown",
+    "dont_know": "unknown",
+    "don't_know": "unknown",
+    "do-not-know": "unknown",
+    "declined": "refused",
+    "decline": "refused",
+    "refused": "refused",
+    "refuse": "refused",
+    "refusal": "refused",
+    "skipped": "skipped",
+    "skip": "skipped",
+    "deferred": "deferred",
+    "defer": "deferred",
+    "invalidated": "invalidated",
+    "invalidate": "invalidated",
+    "contradictory": "contradictory",
+}
+_CLOSED_QUESTION_DISPOSITIONS = _NON_FACT_QUESTION_DISPOSITIONS | {
+    "answered",
+    "declined",
+    "contradictory",
+}
+
+
+def canonical_question_disposition(value: Any) -> str:
+    """Map an answer label onto the persisted disposition vocabulary."""
+    token = _normalize_text(value).lower().replace(" ", "_")
+    if token in _QUESTION_DISPOSITION_ALIASES:
+        return _QUESTION_DISPOSITION_ALIASES[token]
+    return ""
+
+
+def question_disposition_creates_fact(disposition: str) -> bool:
+    """Unknown and refusal dispositions are not facts or requirement satisfaction."""
+    return canonical_question_disposition(disposition) == "answered"
+
+
+def _question_disposition_key(record: Mapping[str, Any]) -> tuple:
+    return (
+        _normalize_text(record.get("target_id")),
+        _normalize_text(record.get("target_revision")),
+        _normalize_text(record.get("disposition")).lower(),
+        bool(record.get("reopened")),
+        _normalize_text(record.get("reopen_reason")),
+    )
+
+
+def _normalize_question_disposition_record(record: Mapping[str, Any]) -> Dict[str, Any]:
+    disposition = canonical_question_disposition(record.get("disposition")) or _normalize_text(
+        record.get("disposition")
+    ).lower()
+    non_fact = disposition in _NON_FACT_QUESTION_DISPOSITIONS or disposition in {"declined", "contradictory"}
+    creates_fact = False if non_fact else bool(record.get("creates_fact"))
+    satisfies_requirement = False if non_fact else bool(record.get("satisfies_requirement"))
+    contradictory_conclusion = False if non_fact else bool(record.get("contradictory_conclusion"))
+    if disposition != "answered":
+        creates_fact = False if non_fact else creates_fact
+    return {
+        "target_id": _normalize_text(record.get("target_id")),
+        "target_revision": _normalize_text(record.get("target_revision")) or "unresolved",
+        "target_kind": _normalize_text(record.get("target_kind")) or None,
+        "disposition": disposition,
+        "question": _normalize_text(record.get("question")) or None,
+        "answer": None if non_fact and not _normalize_text(record.get("answer")) else record.get("answer"),
+        "reason": _normalize_text(record.get("reason")) or None,
+        "creates_fact": creates_fact,
+        "satisfies_requirement": satisfies_requirement,
+        "contradictory_conclusion": contradictory_conclusion,
+        "reopened": bool(record.get("reopened")),
+        "reopen_reason": _normalize_text(record.get("reopen_reason")) or None,
+        "evidence_change": _normalize_text(record.get("evidence_change")) or None,
+        "scope_change": _normalize_text(record.get("scope_change")) or None,
+        "status": "reopened" if record.get("reopened") else "disposed",
+    }
+
+
+def question_disposition_records(intake_case_file: Any) -> List[Dict[str, Any]]:
+    case_file = _coerce_dict(intake_case_file)
+    records: List[Dict[str, Any]] = []
+    seen = set()
+    for item in _coerce_list(case_file.get("question_dispositions")):
+        if not isinstance(item, dict):
+            continue
+        normalized = _normalize_question_disposition_record(item)
+        if not normalized["target_id"] or not normalized["disposition"]:
+            continue
+        key = _question_disposition_key(normalized)
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append(normalized)
+    return records
+
+
+def question_target_is_closed(
+    intake_case_file: Any,
+    target_id: Any,
+    target_revision: Any = None,
+) -> bool:
+    """A disposed target stays closed across revisions until an explicit reopen."""
+    wanted = _normalize_text(target_id)
+    if not wanted:
+        return False
+    revision = _normalize_text(target_revision)
+    closed = False
+    for record in question_disposition_records(intake_case_file):
+        if record["target_id"] != wanted:
+            continue
+        if record["reopened"]:
+            reopen_revision = record.get("target_revision") or ""
+            if not revision or not reopen_revision or reopen_revision in {revision, "unresolved"}:
+                closed = False
+            continue
+        if record["disposition"] in _CLOSED_QUESTION_DISPOSITIONS:
+            closed = True
+    return closed
+
+
+def record_question_disposition(
+    intake_case_file: Dict[str, Any],
+    *,
+    target_id: Any,
+    target_revision: Any,
+    disposition: Any,
+    target_kind: Any = None,
+    question: Any = None,
+    answer: Any = None,
+    reason: Any = None,
+    creates_fact: bool = False,
+    satisfies_requirement: bool = False,
+    contradictory_conclusion: bool = False,
+) -> Dict[str, Any]:
+    """Persist one stable target revision and its disposition on the case file."""
+    case_file = _coerce_dict(intake_case_file)
+    canonical = canonical_question_disposition(disposition)
+    if not canonical:
+        raise ValueError("question disposition must be answered, unknown, refused, skipped, deferred, or invalidated")
+    record = _normalize_question_disposition_record({
+        "target_id": target_id,
+        "target_revision": target_revision,
+        "target_kind": target_kind,
+        "disposition": canonical,
+        "question": question,
+        "answer": answer,
+        "reason": reason,
+        "creates_fact": creates_fact,
+        "satisfies_requirement": satisfies_requirement,
+        "contradictory_conclusion": contradictory_conclusion,
+        "reopened": False,
+    })
+    if not record["target_id"]:
+        raise ValueError("question disposition requires a stable target_id")
+    records = question_disposition_records(case_file)
+    records = [
+        item for item in records
+        if not (
+            item["target_id"] == record["target_id"]
+            and item["target_revision"] == record["target_revision"]
+            and not item["reopened"]
+        )
+    ]
+    records.append(record)
+    case_file["question_dispositions"] = records
+    return record
+
+
+def reopen_question_disposition(
+    intake_case_file: Dict[str, Any],
+    target_id: Any,
+    *,
+    reason: Any,
+    target_revision: Any = None,
+    evidence_change: Any = None,
+    scope_change: Any = None,
+) -> Dict[str, Any]:
+    """Reopen a disposed question only when new evidence or scope is named."""
+    why = _normalize_text(reason)
+    evidence = _normalize_text(evidence_change) or None
+    scope = _normalize_text(scope_change) or None
+    if not why:
+        raise ValueError("reopening a disposed question requires a reason")
+    if not evidence and not scope:
+        raise ValueError("reopening a disposed question requires new evidence or changed scope")
+    case_file = _coerce_dict(intake_case_file)
+    wanted = _normalize_text(target_id)
+    records = question_disposition_records(case_file)
+    disposed = [
+        item for item in records
+        if item["target_id"] == wanted and not item["reopened"] and item["disposition"] in _CLOSED_QUESTION_DISPOSITIONS
+    ]
+    if not wanted or not disposed:
+        raise ValueError("no disposed question matches that target")
+    revision = _normalize_text(target_revision) or disposed[-1]["target_revision"]
+    reopened = _normalize_question_disposition_record({
+        **disposed[-1],
+        "target_revision": revision,
+        "reopened": True,
+        "reopen_reason": why,
+        "evidence_change": evidence,
+        "scope_change": scope,
+        "creates_fact": False,
+        "satisfies_requirement": False,
+        "contradictory_conclusion": False,
+        "answer": None,
+    })
+    records.append(reopened)
+    case_file["question_dispositions"] = records
+    return reopened
+
+
 def _coerce_provenance_refs(value: Any) -> List[Any]:
     refs: List[Any] = []
     seen = set()
@@ -4188,6 +4417,7 @@ def build_intake_case_file(knowledge_graph, complaint_text: str = "") -> Dict[st
         "proof_leads": proof_leads,
         "blocker_follow_up_summary": blocker_follow_up_summary,
         "contradiction_queue": [],
+        "question_dispositions": [],
         "open_items": [],
         "summary_snapshots": [],
         "complainant_summary_confirmation": {},
@@ -4315,6 +4545,7 @@ def refresh_intake_case_file(intake_case_file: Dict[str, Any], knowledge_graph, 
         proof_leads=_coerce_list(case_file.get("proof_leads")),
         source_text=str(case_file.get("source_complaint_text") or ""),
     )
+    case_file["question_dispositions"] = question_disposition_records(case_file)
     case_file["open_items"] = build_open_items(case_file)
 
     summary_snapshots = _coerce_list(case_file.get("summary_snapshots"))
