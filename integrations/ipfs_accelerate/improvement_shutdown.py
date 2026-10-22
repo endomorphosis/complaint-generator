@@ -247,12 +247,202 @@ def _sealed_managed_session_closed(state_dir: Path, record: Mapping[str, Any], c
         raise ValueError('retained native daemon custody changed during observation')
 
 
+def _scope_bytes(path: Path, maximum: int = 65536, *, root_owned: bool = False) -> bytes:
+    """Read only fixed kernel/logind metadata, never process environment or logs."""
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise ValueError('foreign login metadata traverses an alias')
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        first = os.fstat(descriptor)
+        if (not stat.S_ISREG(first.st_mode) or first.st_nlink != 1
+                or (root_owned and (first.st_uid != 0 or first.st_mode & 0o022))):
+            raise ValueError('foreign login metadata ownership is unknown')
+        body = bytearray()
+        while len(body) <= maximum:
+            block = os.read(descriptor, min(8192, maximum + 1 - len(body)))
+            if not block:
+                break
+            body.extend(block)
+        last = os.fstat(descriptor)
+        current = path.lstat()
+        identity = lambda value: (value.st_dev, value.st_ino, value.st_uid, value.st_mode,
+            value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+        if len(body) > maximum or identity(first) != identity(last) or identity(last) != identity(current):
+            raise ValueError('foreign login metadata changed or exceeded its bound')
+        return bytes(body)
+    finally:
+        os.close(descriptor)
+
+
+def _scope_number(value: str, maximum: int = 2**64 - 1) -> int:
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9]{1,20}', value):
+        raise ValueError('foreign login numeric metadata is malformed')
+    result = int(value)
+    if result > maximum:
+        raise ValueError('foreign login numeric metadata exceeds its bound')
+    return result
+
+
+def _scope_root_path(path: Path, *, directory: bool) -> tuple[int, ...]:
+    info = path.lstat()
+    if (path.resolve(strict=True) != path or info.st_uid != 0 or info.st_mode & 0o022
+            or not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))):
+        raise ValueError('foreign login scope is aliased, delegated or writable')
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_mode, info.st_nlink)
+
+
+def _scope_process(pid: int) -> dict[str, Any]:
+    directory = Path('/proc') / str(pid)
+    raw = _scope_bytes(directory / 'stat', 8192).decode('utf-8')
+    fields = raw[raw.rindex(')') + 2:].split()
+    if raw.split(' ', 1)[0] != str(pid) or len(fields) < 20 or fields[0] == 'Z':
+        raise ValueError('foreign login process identity is unavailable')
+    status = {}
+    for line in _scope_bytes(directory / 'status').decode('ascii').splitlines():
+        if ':' in line:
+            key, value = line.split(':', 1)
+            if key in status:
+                raise ValueError('foreign login process status has duplicate fields')
+            status[key] = value.strip()
+    uids = tuple(_scope_number(value, 2**32 - 1) for value in status.get('Uid', '').split())
+    caps = {}
+    for key in ('CapEff', 'CapPrm', 'CapAmb'):
+        if not re.fullmatch(r'[0-9a-fA-F]{1,16}', status.get(key, '')):
+            raise ValueError('foreign login process capabilities are unknown')
+        caps[key] = int(status.get(key, ''), 16)
+    if (len(uids) != 4 or status.get('NSpid', '').split() != [str(pid)]
+            or status.get('Pid') != str(pid)):
+        raise ValueError('foreign login process credentials are unknown')
+    return {'pid': pid, 'ppid': int(fields[1]), 'process_group': int(fields[2]),
+        'session': int(fields[3]), 'start_ticks': int(fields[19]), 'uids': uids,
+        'capabilities': caps,
+        'audit': _scope_number(_scope_bytes(directory / 'sessionid', 64).decode('ascii').strip(), 2**32 - 1),
+        'loginuid': _scope_number(_scope_bytes(directory / 'loginuid', 64).decode('ascii').strip(), 2**32 - 1),
+        'cgroup': _scope_bytes(directory / 'cgroup', 8192).decode('ascii')}
+
+
+def _foreign_login_cwd_proof(pid: int, minimum_owned_start_ticks: int) -> dict[str, Any]:
+    """Prove foreign root-broker ownership only under a trusted privileged host.
+
+    This is not proof that root never migrated a process historically. The
+    exception concerns only an unreadable cwd; argv and all births/groups/
+    sessions remain in the ordinary complete census and matching checks.
+    """
+    if os.getuid() <= 0 or os.geteuid() != os.getuid():
+        raise ValueError('foreign login cwd proof requires an ordinary unprivileged observer')
+    target = _scope_process(pid)
+    if (target['uids'] != (os.getuid(),) * 4 or any(target['capabilities'].values())
+            or not minimum_owned_start_ticks <= target['start_ticks']
+            or not 0 < target['audit'] < 2**32 - 1 or target['loginuid'] != os.getuid()):
+        raise ValueError('foreign login target credentials are unknown')
+    boot = _scope_bytes(Path('/proc/sys/kernel/random/boot_id'), 128)
+    reader = '/proc/' + str(os.getpid())
+    namespace = os.readlink(reader + '/ns/time')
+    offsets = _scope_bytes(Path(reader + '/timens_offsets'), 1024).decode('ascii').splitlines()
+    init_offsets = _scope_bytes(Path('/proc/1/timens_offsets'), 1024).decode('ascii').splitlines()
+    if (not re.fullmatch(r'time:\[[0-9]+\]', namespace)
+            or sorted(line.split() for line in offsets) != [['boottime', '0', '0'], ['monotonic', '0', '0']]
+            or sorted(line.split() for line in init_offsets) != [['boottime', '0', '0'], ['monotonic', '0', '0']]
+            or _scope_bytes(Path(reader + '/uid_map'), 1024).split() != [b'0', b'0', b'4294967295']):
+        raise ValueError('foreign login clock or user namespace is unavailable')
+    record_path = Path('/run/systemd/sessions') / str(target['audit'])
+    record_parents = [(str(parent), _scope_root_path(parent, directory=True))
+        for parent in reversed(record_path.parents)]
+    record_raw = _scope_bytes(record_path, root_owned=True)
+    record = {}
+    for line in record_raw.decode('utf-8').splitlines():
+        if not line or line.startswith('#'):
+            continue
+        key, value = line.split('=', 1)
+        if key in record or not re.fullmatch(r'[A-Z_]{1,64}', key):
+            raise ValueError('foreign login session record is malformed')
+        record[key] = value
+    if (len(record) > 128 or _scope_number(record.get('UID'), 2**32 - 1) != os.getuid()
+            or _scope_number(record.get('AUDIT'), 2**32 - 1) != target['audit']
+            or record.get('REMOTE') != '1' or record.get('SERVICE') != 'sshd'
+            or record.get('SCOPE') != f"session-{target['audit']}.scope"):
+        raise ValueError('foreign login root session record does not match')
+    leader = _scope_process(_scope_number(record.get('LEADER'), 2**31 - 1))
+    broker = _scope_process(leader['ppid'])
+    if (target['ppid'] != leader['pid'] or leader['uids'] != (0,) * 4
+            or not minimum_owned_start_ticks < leader['start_ticks'] <= target['start_ticks']
+            or leader['audit'] != target['audit'] or leader['loginuid'] != target['loginuid']
+            or broker['uids'] != (0,) * 4 or not 0 < broker['start_ticks'] < minimum_owned_start_ticks
+            or broker['audit'] != 2**32 - 1 or broker['loginuid'] != 2**32 - 1):
+        raise ValueError('foreign login privileged broker lineage is unknown')
+    hz = os.sysconf('SC_CLK_TCK')
+    created = _scope_number(record.get('MONOTONIC'))
+    # MONOTONIC excludes suspend whereas proc birth is BOOTTIME. This strict
+    # inequality is conservative with zero namespace offsets, not an assertion
+    # that the two clocks have equal historical offsets.
+    if (type(hz) is not int or hz <= 0 or created * hz <= (minimum_owned_start_ticks + 1) * 1_000_000
+            or created > int(time.clock_gettime(time.CLOCK_MONOTONIC) * 1_000_000)):
+        raise ValueError('foreign login scope creation is not proven after launch')
+    cgroup_lines = target['cgroup'].splitlines()
+    if len(cgroup_lines) != 1 or not cgroup_lines[0].startswith('0::/') or leader['cgroup'] != target['cgroup']:
+        raise ValueError('foreign login kernel cgroup membership is unknown')
+    relative = cgroup_lines[0][3:]
+    parts = relative.split('/')[1:]
+    if (not 1 <= len(parts) <= 64 or any(not re.fullmatch(r'[A-Za-z0-9_.@:-]{1,255}', part) or part in {'.', '..'} for part in parts)
+            or parts[-1] != record['SCOPE']):
+        raise ValueError('foreign login scope path differs')
+    mounts = _scope_bytes(Path(reader + '/mountinfo'), 262144).decode('utf-8').splitlines()
+    matches = [line for line in mounts if ' - ' in line and line.split(' - ', 1)[1].split()[0] == 'cgroup2'
+        and len(line.split(' - ', 1)[0].split()) >= 6 and line.split()[3:5] == ['/', '/sys/fs/cgroup']]
+    if len(matches) != 1:
+        raise ValueError('foreign login cgroup2 mount is unavailable')
+    root = Path('/sys/fs/cgroup')
+    for parent in reversed(root.parents):
+        _scope_root_path(parent, directory=True)
+    scope_metadata = []
+    current = root
+    for component in [None, *parts]:
+        if component is not None:
+            current = current / component
+        scope_metadata.append((str(current), _scope_root_path(current, directory=True),
+            _scope_root_path(current / 'cgroup.procs', directory=False),
+            _scope_root_path(current / 'cgroup.threads', directory=False)))
+    if _scope_bytes(current / 'cgroup.type', 128, root_owned=True).strip() != b'domain':
+        raise ValueError('foreign login cgroup is not a nondelegated domain')
+    if (target != _scope_process(pid) or leader != _scope_process(leader['pid'])
+            or broker != _scope_process(broker['pid']) or record_raw != _scope_bytes(record_path, root_owned=True)
+            or boot != _scope_bytes(Path('/proc/sys/kernel/random/boot_id'), 128)
+            or namespace != os.readlink(reader + '/ns/time')
+            or offsets != _scope_bytes(Path(reader + '/timens_offsets'), 1024).decode('ascii').splitlines()
+            or init_offsets != _scope_bytes(Path('/proc/1/timens_offsets'), 1024).decode('ascii').splitlines()
+            or record_parents != [(str(parent), _scope_root_path(parent, directory=True))
+                for parent in reversed(record_path.parents)]
+            or _scope_bytes(Path(reader + '/uid_map'), 1024).split() != [b'0', b'0', b'4294967295']
+            or mounts != _scope_bytes(Path(reader + '/mountinfo'), 262144).decode('utf-8').splitlines()):
+        raise ValueError('foreign login scope proof changed during observation')
+    again = []
+    current = root
+    for component in [None, *parts]:
+        if component is not None:
+            current = current / component
+        again.append((str(current), _scope_root_path(current, directory=True),
+            _scope_root_path(current / 'cgroup.procs', directory=False),
+            _scope_root_path(current / 'cgroup.threads', directory=False)))
+    if (again != scope_metadata
+            or _scope_bytes(current / 'cgroup.type', 128, root_owned=True).strip() != b'domain'):
+        raise ValueError('foreign login cgroup custody changed during observation')
+    digest = lambda value: hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return {'policy': 'fresh_root_broker_login_scope_unknown_cwd@1', 'cwd_known': False,
+        'cwd_permission_denied': True, 'pid': pid, 'start_ticks': target['start_ticks'],
+        'audit_session': target['audit'], 'leader_pid': leader['pid'], 'leader_start_ticks': leader['start_ticks'],
+        'broker_pid': broker['pid'], 'record_sha256': hashlib.sha256(record_raw).hexdigest(),
+        'kernel_identity_sha256': digest([target, leader, broker]), 'cgroup_metadata_sha256': digest(scope_metadata),
+        'boot_sha256': hashlib.sha256(boot).hexdigest(), 'time_namespace': namespace,
+        'trusted_privileged_host_boundary': True, 'historical_privileged_migration_impossible_claim': False}
+
+
 def _complete_process_inventory(minimum_owned_start_ticks: int) -> list[dict[str, Any]]:
     """Read bounded process metadata; unavailable observations are not absence.
 
     No environment, log, executable content or argv is returned in a receipt.
     Disappeared processes may be skipped; changed/reused numeric identities and
-    inaccessible postlaunch entries invalidate the entire observation. Canonical
+    inaccessible postlaunch entries invalidate the entire observation except
+    a cwd-only denial with a freshly rederived foreign root-login proof. Canonical
     Native per-launch workers are newly spawned, so older process births remain
     in the group/session census but cannot be descendants of this launcher.
     """
@@ -285,6 +475,7 @@ def _complete_process_inventory(minimum_owned_start_ticks: int) -> list[dict[str
             identity = (int(fields[1]), int(fields[2]), int(fields[3]), int(fields[19]))
             argv: tuple[str, ...] = ()
             cwd = None
+            foreign_cwd_proof = None
             scope_required = first.st_uid == os.getuid() and identity[3] >= minimum_owned_start_ticks
             prelaunch_excluded = first.st_uid == os.getuid() and identity[3] < minimum_owned_start_ticks
             if scope_required:
@@ -294,8 +485,13 @@ def _complete_process_inventory(minimum_owned_start_ticks: int) -> list[dict[str
                     raise ValueError('process argv exceeds inspection bound')
                 argv = tuple(part.decode('utf-8', errors='strict') for part in command.split(b'\0') if part)
                 if fields[0] != 'Z':
-                    cwd = os.readlink(directory / 'cwd')
-                    if not Path(cwd).is_absolute():
+                    try:
+                        cwd = os.readlink(directory / 'cwd')
+                    except PermissionError:
+                        if not argv:
+                            raise ValueError('foreign login cwd exception requires readable nonempty argv')
+                        foreign_cwd_proof = _foreign_login_cwd_proof(pid, minimum_owned_start_ticks)
+                    if foreign_cwd_proof is None and not Path(cwd).is_absolute():
                         raise ValueError('process working directory is unknown')
             after = directory.stat()
             last = (directory / 'stat').read_text()
@@ -306,7 +502,8 @@ def _complete_process_inventory(minimum_owned_start_ticks: int) -> list[dict[str
             result.append({'pid': pid, 'uid': first.st_uid, 'ppid': identity[0],
                 'process_group': identity[1], 'session': identity[2],
                 'start_ticks': identity[3], 'argv': argv, 'cwd': cwd,
-                'scope_metadata_required': scope_required, 'prelaunch_scope_excluded': prelaunch_excluded})
+                'scope_metadata_required': scope_required, 'prelaunch_scope_excluded': prelaunch_excluded,
+                'foreign_cwd_proof': foreign_cwd_proof})
         except (FileNotFoundError, ProcessLookupError) as exc:
             # A missing cwd/cmdline is not death while the numeric process
             # directory still exists (for example an inaccessible namespace).
@@ -401,11 +598,15 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
             raise ValueError('historical numeric PID is still present')
     def scoped_path(value, root):
         return isinstance(value, str) and Path(value).is_absolute() and Path(value).is_relative_to(root)
+    foreign_cwd_observations = []
     def scan():
         absent()
         prelaunch_exclusions = 0
+        foreign_cwd_proofs = []
         for process in _complete_process_inventory(parent['start_ticks']):
             prelaunch_exclusions += int(process.get('prelaunch_scope_excluded') is True)
+            if process.get('foreign_cwd_proof') is not None:
+                foreign_cwd_proofs.append(process['foreign_cwd_proof'])
             if process['pid'] in old_ids or process['process_group'] in old_ids or process['session'] in old_ids:
                 raise ValueError('historical group or session is still present')
             if process['uid'] != os.getuid() or process['pid'] == os.getpid():
@@ -418,6 +619,7 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
             if workspace_argument or workspace_cwd or (relevant and campaign_argument):
                 raise ValueError('matching campaign process remains outside historical session')
         absent()
+        foreign_cwd_observations.append(foreign_cwd_proofs)
         return prelaunch_exclusions
     first_exclusions = scan()
     if custody() != before:
@@ -432,6 +634,8 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         'scope_birth_policy': 'same_uid_birth_at_or_after_owned_launcher_requires_argv_and_cwd',
         'minimum_owned_start_ticks': parent['start_ticks'],
         'prelaunch_scope_exclusions': [first_exclusions, second_exclusions],
+        'foreign_cwd_policy': 'fresh_root_broker_login_scope_unknown_cwd@1',
+        'foreign_cwd_observations': foreign_cwd_observations,
         'all_births_group_and_session_checked': True,
         'matching_processes': 0, 'canonical_markers_absent': True,
         'sealed_native_identity_used': False, 'daemon_birth_ticks_claimed': False,

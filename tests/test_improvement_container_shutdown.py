@@ -970,3 +970,247 @@ def test_prelaunch_exclusion_never_hides_historical_group_or_session(missing_mar
     monkeypatch.setattr(shutdown, '_complete_process_inventory', lambda *_a: [row])
     with pytest.raises(ValueError, match='historical group or session is still present'):
         shutdown._parent_closed(fixture.state, fixture.current_record, fixture.context, False)
+
+
+_REAL_COMPLETE_PROCESS_INVENTORY = shutdown._complete_process_inventory
+
+
+@pytest.fixture
+def foreign_login_kernel(tmp_path, monkeypatch):
+    """Synthetic kernel/root-logind filesystem, no process or session launch.
+
+    Only virtual root ownership is projected. The real metadata parsers, file
+    readers, session/cgroup checks and complete census execute unchanged.
+    """
+    import stat as stat_module
+    base = tmp_path / 'foreign-login-kernel'
+    proc, run, cgroup = base / 'proc', base / 'run/systemd/sessions', base / 'sys/fs/cgroup'
+    proc.mkdir(parents=True); run.mkdir(parents=True); cgroup.mkdir(parents=True)
+    target, leader, broker, audit = 1073741800, 1073741801, 1073741802, 77
+    cutoff = 100
+    actual_path, actual_stat, actual_fstat, actual_readlink = Path, Path.stat, os.fstat, os.readlink
+    root_roles = {proc / str(leader), proc / str(broker)}
+    trusted_ancestors = set(base.parents) | {base}
+    bad_owner = set()
+    def path(value):
+        text = str(value)
+        reader = '/proc/' + str(os.getpid())
+        if text.startswith(reader + '/'):
+            return proc / 'self' / text[len(reader):].lstrip('/')
+        if text == '/proc/1/timens_offsets':
+            return proc / 'initial-timens-offsets'
+        for prefix, replacement in [('/proc', proc), ('/run/systemd/sessions', run), ('/sys/fs/cgroup', cgroup)]:
+            if text == prefix or text.startswith(prefix + '/'):
+                return replacement / text[len(prefix):].lstrip('/')
+        return actual_path(value)
+    def root_owned(p):
+        return (p in trusted_ancestors or p == run or p.is_relative_to(run)
+            or p == cgroup or p.is_relative_to(cgroup)
+            or any(p == root or p.is_relative_to(root) for root in root_roles)
+            or p in set(run.parents) | set(cgroup.parents))
+    def projected(p, info):
+        values = list(info)
+        if root_owned(p):
+            values[4] = 0
+        if p in bad_owner:
+            values[4] = os.getuid()
+        if p in trusted_ancestors:
+            values[0] = stat_module.S_IFDIR | 0o755
+        return os.stat_result(values)
+    def observed_stat(p, *args, **kwargs):
+        return projected(p, actual_stat(p, *args, **kwargs))
+    def observed_fstat(fd):
+        info = actual_fstat(fd)
+        try:
+            p = actual_path(actual_readlink('/proc/self/fd/' + str(fd)))
+        except OSError:
+            return info
+        return projected(p, info)
+    def observed_readlink(p):
+        if str(p) == '/proc/' + str(os.getpid()) + '/ns/time':
+            return 'time:[4026531834]'
+        if actual_path(p) == proc / str(target) / 'cwd':
+            raise PermissionError('synthetic foreign root-broker cwd')
+        return actual_readlink(p)
+    def write(p, body):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(body if isinstance(body, bytes) else body.encode())
+        p.chmod(0o644)
+    scope = f'/user.slice/user-{os.getuid()}.slice/session-{audit}.scope'
+    def process(pid, uid, parent, birth, sid, loginuid, group=None, session=None):
+        directory = proc / str(pid); directory.mkdir(exist_ok=True)
+        fields = ['S', str(parent), str(group or pid), str(session or pid), *(['0'] * 15), str(birth)]
+        write(directory / 'stat', str(pid) + ' (synthetic root-broker fixture) ' + ' '.join(fields))
+        write(directory / 'status', f'Pid:\t{pid}\nNSpid:\t{pid}\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\nCapEff:\t0000000000000000\nCapPrm:\t0000000000000000\nCapAmb:\t0000000000000000\n')
+        write(directory / 'sessionid', str(sid) + '\n'); write(directory / 'loginuid', str(loginuid) + '\n')
+        write(directory / 'cgroup', '0::' + scope + '\n')
+    process(target, os.getuid(), leader, 300, audit, os.getuid())
+    process(leader, 0, broker, 200, audit, os.getuid())
+    process(broker, 0, 1, 50, 2**32 - 1, 2**32 - 1)
+    write(proc / str(target) / 'cmdline', b'unrelated-session-server\0')
+    write(proc / 'sys/kernel/random/boot_id', 'synthetic-current-boot\n')
+    write(proc / 'self/timens_offsets', 'monotonic 0 0\nboottime 0 0\n')
+    write(proc / 'initial-timens-offsets', 'monotonic 0 0\nboottime 0 0\n')
+    write(proc / 'self/uid_map', '0 0 4294967295\n')
+    write(proc / 'self/mountinfo', '1 0 0:1 / /sys/fs/cgroup rw - cgroup2 cgroup rw\n')
+    record = run / str(audit)
+    record_body = f'UID={os.getuid()}\nAUDIT={audit}\nLEADER={leader}\nSERVICE=sshd\nREMOTE=1\nSCOPE=session-{audit}.scope\nMONOTONIC=2500000\n'
+    write(record, record_body)
+    current = cgroup
+    for component in [None, *scope.lstrip('/').split('/')]:
+        if component is not None:
+            current = current / component
+        current.mkdir(exist_ok=True); current.chmod(0o755)
+        write(current / 'cgroup.procs', ''); write(current / 'cgroup.threads', '')
+    write(current / 'cgroup.type', 'domain\n')
+    # mkdir(parents=True) obeys the real user's umask. Model the declared
+    # trusted root hierarchy physically, before projecting only its UID.
+    trusted_directories = {run, cgroup, *run.parents, *cgroup.parents}
+    for directory in trusted_directories:
+        if directory.is_relative_to(base):
+            directory.chmod(0o755)
+    assert all(not directory.stat().st_mode & 0o022 for directory in trusted_directories
+        if directory.is_relative_to(base))
+    monkeypatch.setattr(shutdown, 'Path', path)
+    monkeypatch.setattr(actual_path, 'stat', observed_stat)
+    monkeypatch.setattr(shutdown.os, 'fstat', observed_fstat)
+    monkeypatch.setattr(shutdown.os, 'readlink', observed_readlink)
+    return SimpleNamespace(proc=proc, run=run, cgroup=cgroup, leaf=current, record=record,
+        target=target, leader=leader, broker=broker, audit=audit, cutoff=cutoff, write=write,
+        process=process, record_body=record_body, bad_owner=bad_owner, actual_readlink=actual_readlink,
+        observed_readlink=observed_readlink, actual_path=actual_path)
+
+
+def test_foreign_login_cwd_exception_retains_real_census_and_explicit_proof(foreign_login_kernel):
+    fixture = foreign_login_kernel
+    rows = shutdown._complete_process_inventory(fixture.cutoff)
+    target = next(row for row in rows if row['pid'] == fixture.target)
+    assert len(rows) == 3 and target['cwd'] is None and target['argv'] == ('unrelated-session-server',)
+    assert target['scope_metadata_required'] is True and target['prelaunch_scope_excluded'] is False
+    proof = target['foreign_cwd_proof']
+    assert proof['cwd_known'] is False and proof['cwd_permission_denied'] is True
+    assert proof['audit_session'] == fixture.audit and proof['leader_pid'] == fixture.leader
+    assert proof['broker_pid'] == fixture.broker and proof['trusted_privileged_host_boundary'] is True
+    assert proof['historical_privileged_migration_impossible_claim'] is False
+    assert all(len(proof[key]) == 64 for key in ['record_sha256', 'kernel_identity_sha256', 'cgroup_metadata_sha256', 'boot_sha256'])
+
+
+@pytest.mark.parametrize('failure', [
+    'record_uid', 'record_audit', 'record_duplicate', 'record_symlink', 'record_owner',
+    'record_old', 'record_equal', 'record_future', 'leader_uid', 'leader_old', 'target_parent',
+    'target_audit', 'target_loginuid', 'broker_uid', 'broker_audit', 'broker_loginuid',
+    'cap_effective', 'cap_permitted', 'cap_ambient', 'writable_scope', 'writable_ancestor',
+    'foreign_cgroup', 'threaded_scope', 'wrong_mount', 'time_offset', 'user_namespace', 'nested_pid_namespace', 'unknown_argv',
+])
+def test_foreign_login_cwd_exception_refuses_incomplete_or_forged_proof(foreign_login_kernel, failure):
+    f = foreign_login_kernel
+    def replace(p, old, new):
+        f.write(p, p.read_text().replace(old, new))
+    if failure == 'record_uid': replace(f.record, f'UID={os.getuid()}', 'UID=0')
+    elif failure == 'record_audit': replace(f.record, f'AUDIT={f.audit}', 'AUDIT=78')
+    elif failure == 'record_duplicate': f.write(f.record, f.record_body + 'UID=0\n')
+    elif failure == 'record_symlink':
+        original = f.record.with_name('original-record'); f.record.rename(original); f.record.symlink_to(original)
+    elif failure == 'record_owner': f.bad_owner.add(f.record)
+    elif failure in {'record_old', 'record_equal', 'record_future'}:
+        value = {'record_old': '1', 'record_equal': '1010000', 'record_future': str(2**64 - 1)}[failure]
+        replace(f.record, 'MONOTONIC=2500000', 'MONOTONIC=' + value)
+    elif failure == 'leader_uid': replace(f.proc / str(f.leader) / 'status', 'Uid:\t0\t0\t0\t0', f'Uid:\t{os.getuid()}\t{os.getuid()}\t{os.getuid()}\t{os.getuid()}')
+    elif failure == 'leader_old': f.process(f.leader, 0, f.broker, 99, f.audit, os.getuid())
+    elif failure == 'target_parent': f.process(f.target, os.getuid(), f.broker, 300, f.audit, os.getuid())
+    elif failure == 'target_audit': f.write(f.proc / str(f.target) / 'sessionid', '78\n')
+    elif failure == 'target_loginuid': f.write(f.proc / str(f.target) / 'loginuid', '0\n')
+    elif failure == 'broker_uid': f.process(f.broker, os.getuid(), 1, 50, 2**32 - 1, 2**32 - 1)
+    elif failure == 'broker_audit': f.write(f.proc / str(f.broker) / 'sessionid', str(f.audit))
+    elif failure == 'broker_loginuid': f.write(f.proc / str(f.broker) / 'loginuid', str(os.getuid()))
+    elif failure.startswith('cap_'):
+        key = {'cap_effective': 'CapEff', 'cap_permitted': 'CapPrm', 'cap_ambient': 'CapAmb'}[failure]
+        replace(f.proc / str(f.target) / 'status', key + ':\t0000000000000000', key + ':\t0000000020000000')
+    elif failure == 'writable_scope': (f.leaf / 'cgroup.procs').chmod(0o666)
+    elif failure == 'writable_ancestor': (f.cgroup / 'cgroup.procs').chmod(0o666)
+    elif failure == 'foreign_cgroup': f.write(f.proc / str(f.target) / 'cgroup', '0::/foreign.scope\n')
+    elif failure == 'threaded_scope': f.write(f.leaf / 'cgroup.type', 'threaded\n')
+    elif failure == 'wrong_mount': f.write(f.proc / 'self/mountinfo', '1 0 0:1 / /sys/fs/cgroup rw - tmpfs tmpfs rw\n')
+    elif failure == 'time_offset': f.write(f.proc / 'self/timens_offsets', 'monotonic 1 0\nboottime 0 0\n')
+    elif failure == 'user_namespace': f.write(f.proc / 'self/uid_map', '0 1003 1\n')
+    elif failure == 'nested_pid_namespace': replace(f.proc / str(f.target) / 'status', f'NSpid:\t{f.target}', f'NSpid:\t{f.target}\t1')
+    else: (f.proc / str(f.target) / 'cmdline').unlink()
+    with pytest.raises(ValueError, match='complete process inventory is unavailable'):
+        shutdown._complete_process_inventory(f.cutoff)
+
+
+@pytest.mark.parametrize('change', ['record', 'birth', 'audit', 'namespace', 'cgroup_type'])
+def test_foreign_login_cwd_proof_refuses_observation_races(foreign_login_kernel, monkeypatch, change):
+    f = foreign_login_kernel
+    # Race actual filesystem metadata between the first and final kernel
+    # reads, without mocking the product's proof predicate or its decision.
+    original_fstat = shutdown.os.fstat
+    calls = []
+    def fstat(fd):
+        result = original_fstat(fd)
+        path = f.actual_path(f.actual_readlink('/proc/self/fd/' + str(fd)))
+        if path == f.record:
+            calls.append(1)
+            if len(calls) == 1:
+                if change == 'record': f.write(f.record, f.record_body.replace('REMOTE=1', 'REMOTE=0'))
+                elif change == 'birth': f.process(f.target, os.getuid(), f.leader, 301, f.audit, os.getuid())
+                elif change == 'audit': f.write(f.proc / str(f.target) / 'sessionid', '78\n')
+        return result
+    if change in {'namespace', 'cgroup_type'}:
+        names = []
+        def readlink(path):
+            if str(path) == '/proc/' + str(os.getpid()) + '/ns/time':
+                names.append(1)
+                if change == 'cgroup_type':
+                    if len(names) == 2:
+                        f.write(f.leaf / 'cgroup.type', 'threaded\n')
+                    return 'time:[4026531834]'
+                return 'time:[1]' if len(names) == 1 else 'time:[2]'
+            return f.observed_readlink(path)
+        monkeypatch.setattr(shutdown.os, 'readlink', readlink)
+    else:
+        monkeypatch.setattr(shutdown.os, 'fstat', fstat)
+    with pytest.raises(ValueError, match='complete process inventory is unavailable'):
+        shutdown._complete_process_inventory(f.cutoff)
+
+
+@pytest.mark.parametrize('matching', ['none', 'group', 'argv'])
+def test_missing_marker_public_closure_keeps_foreign_process_and_rejects_owned_matches(
+        missing_marker_campaign, foreign_login_kernel, monkeypatch, matching):
+    f, campaign = foreign_login_kernel, missing_marker_campaign
+    record = deepcopy(campaign.current_record)
+    record['identity'].update(start_ticks=f.cutoff, boot_id='synthetic-current-boot')
+    runner._atomic_json(campaign.state / 'launcher.json', record)
+    context = shutdown._context(campaign.state, record)
+    if matching == 'group':
+        f.process(f.target, os.getuid(), f.leader, 300, f.audit, os.getuid(), group=campaign.heartbeat['daemon_pid'])
+    elif matching == 'argv':
+        f.write(f.proc / str(f.target) / 'cmdline', (str(campaign.workspace / 'escaped.py') + '\0').encode())
+    monkeypatch.setattr(shutdown, '_complete_process_inventory', _REAL_COMPLETE_PROCESS_INVENTORY)
+    before = (campaign.state / 'complaint_intake_supervisor_status.json').read_bytes()
+    if matching != 'none':
+        with pytest.raises(ValueError, match='historical group or session is still present|matching campaign process'):
+            shutdown._parent_closed(campaign.state, record, context, False)
+        return
+    observed = shutdown._parent_closed(campaign.state, record, context, False)
+    assert observed['proc_census_complete'] is True and observed['observations'] == 2
+    assert len(observed['foreign_cwd_observations']) == 2
+    assert all(len(proofs) == 1 and proofs[0]['cwd_known'] is False for proofs in observed['foreign_cwd_observations'])
+    assert observed['signals_sent'] is False and observed['heartbeat_status_preserved'] == 'running'
+    assert (campaign.state / 'complaint_intake_supervisor_status.json').read_bytes() == before
+
+
+
+@pytest.mark.parametrize('uid,euid', [(0, 0), (1000, 1001)])
+def test_foreign_login_cwd_proof_refuses_privileged_observer_before_io(monkeypatch, uid, euid):
+    calls = []
+    def unavailable(*args, **kwargs):
+        calls.append(1)
+        raise AssertionError('foreign proof must reject this observer before opening metadata')
+    with monkeypatch.context() as observer:
+        observer.setattr(shutdown.os, 'getuid', lambda: uid)
+        observer.setattr(shutdown.os, 'geteuid', lambda: euid)
+        observer.setattr(shutdown.os, 'open', unavailable)
+        with pytest.raises(ValueError, match='ordinary unprivileged observer'):
+            shutdown._foreign_login_cwd_proof(1073741800, 100)
+    assert calls == []
