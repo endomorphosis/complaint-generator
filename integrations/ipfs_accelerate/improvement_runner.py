@@ -455,7 +455,7 @@ def campaign_environment(repo_root: Path, ambient: Mapping[str, str] | None = No
     env.update({
         "IPFS_ACCELERATE_AGENT_IMPLEMENTATION_PROVIDER": "grok",
         AUTOMATIC_RETRY_REARM_ENV: "0",
-        "IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS": "external/ipfs_datasets_py",
+        "IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS": "external/ipfs_datasets_py,external/ipfs_kit_py",
         # Bound retained prepared checkouts in this campaign, without reclaiming leases.
         "IPFS_ACCELERATE_AGENT_WORKTREE_POOL_MAX_ENTRIES": "1",
         # Optional Common Crawl tooling must not clone an unrelated HEAD into
@@ -724,9 +724,10 @@ def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktre
         "--max-task-attempts", "3", "--max-restarts", "5", "--validation-max-workers", "1",
         "--task-shard-count", "1", "--task-shard-index", "0",
         "--worktree-root", str(worktree_root if worktree_root is not None else state_dir / "worktrees"), "--merge-target-branch", merge_target,
-        # The workspace imports datasets during pytest collection. This pinned
-        # source is required even for tasks that edit only first-party files.
+        # Every task validation imports datasets, and shared interviews use
+        # Kit's pinned WAL even when tasks edit only first-party files.
         "--worktree-submodule-path", "external/ipfs_datasets_py",
+        "--worktree-submodule-path", "external/ipfs_kit_py",
         "--merge-queue-dir", str(state_dir / "merge-queue"),
         "--llm-merge-resolver-command", "",
         "--no-worktree-reconciliation", "--no-worktree-reconciliation-preflight",

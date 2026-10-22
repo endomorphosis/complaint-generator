@@ -96,7 +96,7 @@ def test_explicit_environment_removes_ambient_routes_and_pins_model():
     assert environment["IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS"] == "64"
     assert environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "low"
     assert environment[runner.AUTOMATIC_RETRY_REARM_ENV] == "0"
-    assert environment["IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS"] == "external/ipfs_datasets_py"
+    assert environment["IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS"] == "external/ipfs_datasets_py,external/ipfs_kit_py"
     assert environment["IPFS_ACCELERATE_AGENT_WORKTREE_POOL_MAX_ENTRIES"] == "1"
     assert environment["HOME"] == "/preserved/user"
     assert environment["XAI_API_KEY"] == "fixture-secret"
@@ -228,7 +228,39 @@ def test_real_native_parser_and_config_accept_explicit_bounded_campaign(campaign
     assert config.merge_target_branch == "local-campaign"
     assert not config.worktree_reconciliation_enabled
     assert config.worktree_root == state / "worktrees"
-    assert tuple(config.worktree_submodule_paths) == ("external/ipfs_datasets_py",)
+    assert tuple(config.worktree_submodule_paths) == ("external/ipfs_datasets_py", "external/ipfs_kit_py")
+
+
+
+def test_first_party_tasks_select_pinned_kit_wal_for_native_worktree_setup(campaign):
+    _, _, state, generated = campaign
+    native, daemon_module = runner._native_modules(ROOT)
+    board = Path(generated["board_path"])
+    args = native.parse_args(runner.native_argv(board, state, "local-campaign"))
+    config = native.supervisor_config_from_args(args, repo_root=ROOT)
+    environment = runner.campaign_environment(ROOT, {
+        "IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS": "external/unrelated",
+    }, state_dir=state)
+    expected = ("external/ipfs_datasets_py", "external/ipfs_kit_py")
+    assert tuple(args.worktree_submodule_path) == expected
+    assert tuple(config.worktree_submodule_paths) == expected
+    assert daemon_module.normalize_relative_path_list(
+        environment["IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS"]
+    ) == expected
+    tasks = daemon_module.parse_task_file(board, task_header_prefix=runner.TASK_PREFIX)
+    assert tasks and all(not task.metadata.get("submodules") for task in tasks)
+    # Exercise the actual setup dependency selector without constructing or
+    # starting a daemon. These first-party tasks declare no Kit output.
+    daemon = object.__new__(daemon_module.PortalImplementationDaemon)
+    daemon.repo_root = ROOT
+    daemon.worktree_submodule_paths = config.worktree_submodule_paths
+    for task in tasks:
+        assert not any("external/" in output for output in task.outputs)
+        assert daemon._effective_worktree_submodule_paths(task) == expected
+    kit = ROOT / expected[1]
+    assert (kit / ".git").exists()
+    for name in ("contracts.py", "coordinator.py", "writer.py", "segments.py"):
+        assert (kit / "ipfs_kit_py/core/wal" / name).is_file()
 
 
 def test_native_task_parser_sees_entire_dag_and_grok_route(campaign):
