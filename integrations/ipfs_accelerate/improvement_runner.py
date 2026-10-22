@@ -2046,6 +2046,105 @@ def _preserve_uncommitted_reconciliation_candidates(supervisor):
     return preserved
 
 
+def _rescue_original_branch_from_attestation(*, task_id, branch, baseline, commit, raw_commit, events):
+    """Recover a Native rescue's original branch without granting admission."""
+    if not branch.startswith("rescue/worktree/") or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        return None
+    header, separator, body = raw_commit.partition("\n\n")
+    if (not separator or len(raw_commit.encode()) > 65536
+            or [line[7:] for line in header.splitlines() if line.startswith("parent ")] != [baseline]
+            or not any(line.startswith("author ") and " <implementation-supervisor@example.invalid> " in line for line in header.splitlines())
+            or not any(line.startswith("committer ") and " <implementation-supervisor@example.invalid> " in line for line in header.splitlines())):
+        return None
+    lines = [line.strip() for line in body.splitlines() if line.strip()]
+    if len(lines) != 4 or not lines[1].startswith("Original branch: "):
+        return None
+    original = lines[1].removeprefix("Original branch: ")
+    if (not original.startswith("implementation/")
+            or re.search(rf"(?<![A-Za-z0-9]){re.escape(task_id)}(?![A-Za-z0-9])", original, re.IGNORECASE) is None
+            or lines[0] != "Rescue dirty worktree " + original
+            or lines[2] != "Original HEAD: " + baseline
+            or lines[3] != "Cleanup reason: reconciliation_uncommitted_integrated_base"):
+        return None
+    matches = [event for event in events if event.get("type") == "dirty_worktree_rescued"
+        and event.get("preserved") is True and event.get("returncode") == 0
+        and event.get("branch") == original and event.get("head") == baseline
+        and event.get("rescue_branch") == branch and event.get("rescue_commit") == commit]
+    return original if matches else None
+
+
+def _owned_rescue_original_branch(supervisor, daemon, task, branch, baseline):
+    """Bind Native's existing receipt lookup to the attested original branch."""
+    held = getattr(supervisor, "_held_implementation_maintenance_lease", None)
+    config = supervisor.config
+    if (daemon.implement is not False or not isinstance(held, Mapping)
+            or held.get("lease_role") != "supervisor_maintenance" or held.get("pid") != os.getpid()):
+        return None
+    launch = _read_json(config.state_dir / "launcher.json")
+    if (launch.get("status") not in {"starting", "running"}
+            or launch.get("repo_root") != str(config.repo_root.resolve())
+            or launch.get("state_dir") != str(config.state_dir)
+            or launch.get("identity", {}).get("pid") != os.getpid() or not owns_process(launch)):
+        return None
+    root, binding = recorded_worktree_root(launch, config.state_dir)
+    if binding is None or config.worktree_root != root or root.resolve(strict=True) != root:
+        return None
+    records = supervisor._git_worktree_records(config.repo_root)
+    if len(records) > 256:
+        return None
+    records = [row for row in records if str(row.get("branch") or "").removeprefix("refs/heads/") == branch]
+    if len(records) != 1:
+        return None
+    row = records[0]
+    path = Path(str(row.get("worktree") or ""))
+    if (not path.is_absolute() or not path.is_relative_to(root) or path == root
+            or path.resolve(strict=True) != path or supervisor._git_status_short(path)):
+        return None
+    commit = str(row.get("HEAD") or "")
+    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        return None
+    metadata = daemon._run_git(["cat-file", "commit", commit], cwd=path)
+    if metadata.returncode != 0 or len(metadata.stdout.encode()) > 65536:
+        return None
+    from .improvement_recovery import _owned_bytes
+    raw = _owned_bytes(config.events_path, MAX_EVENT_HISTORY_BYTES, legacy_group_write=True)
+    if not raw.endswith(b"\n"):
+        return None
+    events = [json.loads(line) for line in raw.splitlines()]
+    previous = ""
+    for index, event in enumerate(events, 1):
+        body = {key: value for key, value in event.items() if key != "event_id"}
+        digest = hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+        if (event.get("sequence") != index or event.get("previous_event_id", "") != previous
+                or event.get("event_id") != "sha256:" + digest):
+            return None
+        previous = event["event_id"]
+    events = [event for event in events if event.get("path") == str(path)
+        and event.get("target_ref") == config.merge_target_branch]
+    return _rescue_original_branch_from_attestation(task_id=task.task_id, branch=branch,
+        baseline=baseline, commit=commit, raw_commit=metadata.stdout, events=events)
+
+
+def _rescue_receipt_daemon_class(native_class, supervisor):
+    class RescueReceiptDaemon(native_class):
+        __slots__ = ()
+
+        def _reconciliation_accepted_proposal_context(self, *, task, branch_name, baseline_ref):
+            ordinary = super()._reconciliation_accepted_proposal_context(
+                task=task, branch_name=branch_name, baseline_ref=baseline_ref)
+            if ordinary.get("segment_found") or not branch_name.startswith("rescue/worktree/"):
+                return ordinary
+            original = _owned_rescue_original_branch(supervisor, self, task, branch_name, baseline_ref)
+            if original is None:
+                return ordinary
+            # Native still rederives and exactly matches the proposal, policy,
+            # receipt, task identity, baseline and changed paths. It then runs
+            # fresh measured validation; no consumed-token set is edited here.
+            return super()._reconciliation_accepted_proposal_context(
+                task=task, branch_name=original, baseline_ref=baseline_ref)
+    return RescueReceiptDaemon
+
+
 def _validation_aware_supervisor_class(native_class):
     class ValidationAwareSupervisor(native_class):
         @staticmethod
@@ -2063,6 +2162,9 @@ def _validation_aware_supervisor_class(native_class):
             if getattr(self, "_complaint_startup_preflight_pending", False):
                 if result.get("maintenance_blocked") is True:
                     raise RuntimeError("Native startup preflight blocked: " + str(result.get("reason") or "maintenance unavailable"))
+                if any(item.get("merged") is not True for item in
+                        result.get("worktree_reconciliation", {}).get("processed", ())):
+                    raise RuntimeError("Native startup candidate recovery remains unresolved")
                 self._complaint_startup_preflight_pending = False
             return result
 
@@ -2075,6 +2177,9 @@ def _validation_aware_supervisor_class(native_class):
             # completion callback. Recovery uses the same measured gate as a
             # newly generated proposal and dispatches no replacement provider.
             daemon = super()._build_worktree_reconciliation_daemon()
+            from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
+            if isinstance(daemon, PortalImplementationDaemon):
+                daemon.__class__ = _rescue_receipt_daemon_class(type(daemon), self)
             from .improvement_plan import load_spec
             from ipfs_accelerate_py.agent_supervisor.validation.validation_scheduler import ValidationScheduler
             native_scheduler = daemon.validation_scheduler

@@ -2086,3 +2086,99 @@ def test_live_worker_maintenance_deferral_after_preflight_is_not_a_startup_failu
     supervisor = runner._validation_aware_supervisor_class(NativeSupervisor)()
     assert supervisor._run_forever_loop() == {"maintenance_blocked": False}
     assert supervisor.run_once()["reason"] == "implementation_protected_path_attempt_active"
+
+
+@pytest.mark.parametrize("damage", [None, "author", "committer", "parent", "subject", "branch", "reason", "event_commit", "event_branch", "event_rejected", "event_missing", "task"])
+def test_rescue_receipt_provenance_requires_exact_native_attestation(damage):
+    baseline, commit = "a" * 40, "b" * 40
+    original = "implementation/cimp-quest-04-attempt-2-123"
+    rescue = "rescue/worktree/" + original.replace("/", "-") + "-abcdef"
+    raw = (f"tree {'c' * 40}\nparent {baseline}\nauthor Implementation Supervisor <implementation-supervisor@example.invalid> 1 +0000\n"
+           "committer Implementation Supervisor <implementation-supervisor@example.invalid> 1 +0000\n\n"
+           f"Rescue dirty worktree {original}\n\nOriginal branch: {original}\n\nOriginal HEAD: {baseline}\n\n"
+           "Cleanup reason: reconciliation_uncommitted_integrated_base\n")
+    event = {"type": "dirty_worktree_rescued", "preserved": True, "returncode": 0,
+        "branch": original, "head": baseline, "rescue_branch": rescue, "rescue_commit": commit}
+    if damage in {"author", "committer"}:
+        raw = raw.replace(damage + " Implementation Supervisor <implementation-supervisor@example.invalid>", damage + " Other <other@example.invalid>")
+    elif damage == "parent": raw = raw.replace("parent " + baseline, "parent " + "d" * 40)
+    elif damage == "subject": raw = raw.replace("Rescue dirty worktree", "Untrusted snapshot")
+    elif damage == "branch": raw = raw.replace("Original branch: " + original, "Original branch: implementation/foreign")
+    elif damage == "reason": raw = raw.replace("reconciliation_uncommitted_integrated_base", "unknown_reason")
+    elif damage == "event_commit": event["rescue_commit"] = "d" * 40
+    elif damage == "event_branch": event["branch"] = "implementation/foreign"
+    elif damage == "event_rejected": event["preserved"] = False
+    events = [] if damage == "event_missing" else [event]
+    answer = runner._rescue_original_branch_from_attestation(task_id="CIMP-PRIV-005" if damage == "task" else "CIMP-QUEST-04",
+        branch=rescue, baseline=baseline, commit=commit, raw_commit=raw, events=events)
+    assert answer == (original if damage is None else None)
+
+
+@pytest.mark.parametrize("ordinary_segment,attested", [(True, True), (False, True), (False, False)])
+def test_rescue_adapter_delegates_receipt_admission_to_native(monkeypatch, ordinary_segment, attested):
+    calls = []
+    original = "implementation/cimp-quest-04-attempt-2"
+    rescue = "rescue/worktree/cimp-quest-04"
+    original_receipts = ({"proposal_id": "native-content-addressed", "policy_id": "native-policy", "receipt_id": "native-receipt"},)
+    class NativeDaemon:
+        def _reconciliation_accepted_proposal_context(self, *, task, branch_name, baseline_ref):
+            calls.append(branch_name)
+            return {"segment_found": ordinary_segment or branch_name == original,
+                "accepted_receipts": original_receipts if branch_name == original else ()}
+    monkeypatch.setattr(runner, "_owned_rescue_original_branch", lambda *args: original if attested else None)
+    daemon = runner._rescue_receipt_daemon_class(NativeDaemon, object())()
+    answer = daemon._reconciliation_accepted_proposal_context(task=object(), branch_name=rescue, baseline_ref="a" * 40)
+    expected = [rescue, original] if attested and not ordinary_segment else [rescue]
+    assert calls == expected
+    assert answer["accepted_receipts"] is original_receipts if len(expected) == 2 else answer["accepted_receipts"] == ()
+
+
+@pytest.mark.parametrize("merged", [True, False])
+def test_startup_cannot_dispatch_past_an_unresolved_recovery_candidate(merged):
+    dispatched = []
+    class NativeSupervisor:
+        def run_once(self, **kwargs):
+            return {"worktree_reconciliation": {"processed": [{"path": "/owned/candidate", "merged": merged}]}}
+        def _run_forever_loop(self):
+            self.run_once(include_refill=False)
+            dispatched.append(True)
+    supervisor = runner._validation_aware_supervisor_class(NativeSupervisor)()
+    if merged:
+        supervisor._run_forever_loop()
+        assert dispatched == [True]
+    else:
+        with pytest.raises(RuntimeError, match="candidate recovery remains unresolved"):
+            supervisor._run_forever_loop()
+        assert dispatched == []
+
+
+def test_real_native_recovery_instance_keeps_identity_and_native_receipt_checks(monkeypatch, tmp_path):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+    daemon = object.__new__(native.PortalImplementationDaemon)
+    daemon.todo_path = tmp_path / "board.md"
+    daemon.implement = False
+    task = native.PortalTask(task_id="CIMP-QUEST-04", title="Synthetic recovery", status="todo", completion="manual", priority="P1", track="ops",
+        outputs=("tests/test_synthetic.py",), acceptance=("Synthetic case passes",))
+    identity = daemon._identity_for_task(task)
+    original = "implementation/cimp-quest-04-attempt-2"
+    baseline = "a" * 40
+    events = [
+        {"type":"implementation_started","task_id":task.task_id,"branch":original,"baseline_ref":baseline,
+            "canonical_task_key":identity.canonical_task_key,"canonical_task_cid":identity.canonical_task_cid,
+            "board_namespace":identity.board_namespace},
+        {"type":"implementation_proposal_validated","accepted":True,"task_id":task.task_id,
+            "proposal_id":"proposal","policy_id":"policy","receipt_id":"receipt",
+            "repository_tree_id":baseline,"changed_paths":["tests/test_synthetic.py"]},
+    ]
+    daemon._iter_events = lambda: iter(events)
+    expected = daemon._reconciliation_accepted_proposal_context(task=task, branch_name=original, baseline_ref=baseline)
+    assert expected["segment_found"] and not expected["segment_mismatches"]
+    before = (id(daemon), dict(daemon.__dict__))
+    monkeypatch.setattr(runner, "_owned_rescue_original_branch", lambda *args: original)
+    daemon.__class__ = runner._rescue_receipt_daemon_class(type(daemon), object())
+    observed = daemon._reconciliation_accepted_proposal_context(task=task,
+        branch_name="rescue/worktree/synthetic", baseline_ref=baseline)
+    assert observed == expected and (id(daemon), daemon.__dict__) == before
+    mismatch = daemon._reconciliation_accepted_proposal_context(task=task,
+        branch_name="rescue/worktree/synthetic", baseline_ref="f" * 40)
+    assert mismatch["segment_mismatches"] == ("repository_tree_id",)

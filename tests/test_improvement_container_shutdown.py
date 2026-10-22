@@ -1375,3 +1375,77 @@ def test_event_history_above_finite_limit_refuses_before_container_effects(campa
     assert result['reason'] == 'recovery evidence must be a bounded owned regular file'
     assert not docker[0].calls and not docker[0].effects
     assert events.stat().st_size == shutdown.MAX_EVENTS_BYTES + 1
+
+
+@pytest.fixture
+def failed_preflight_campaign(missing_marker_campaign):
+    fixture = missing_marker_campaign
+    heartbeat = deepcopy(fixture.heartbeat)
+    heartbeat.update(status='agentic_maintenance_failed', daemon_pid=None, daemon_process_birth=None,
+        active_agentic_maintenance_has_daemon=False, active_worker_count=0, active_worker_pids=[],
+        worker_descendant_count=0, last_agentic_maintenance_status='failed',
+        last_agentic_maintenance_phase='worktree_reconciliation', run_id='',
+        supervisor_process_birth={'pid':fixture.current_record['identity']['pid'],
+            'start_time_ticks':fixture.current_record['identity']['start_ticks'],
+            'boot_id':fixture.current_record['identity']['boot_id'], 'parent_pid':1},
+        supervisor_maintenance={'schema':'ipfs_accelerate_py/agent-supervisor/supervisor-maintenance@1',
+            'phase':'failed','started_at':stamp(fixture.started+1),'finished_at':stamp(fixture.started+2)})
+    runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', heartbeat)
+    (fixture.state / 'complaint_intake_events.jsonl').write_text('')
+    return SimpleNamespace(**vars(fixture), preflight_heartbeat=heartbeat)
+
+
+def test_failed_preflight_public_stop_proves_closure_without_fabricating_a_child(failed_preflight_campaign, docker, monkeypatch):
+    fixture = failed_preflight_campaign
+    observations = []
+    def census(cutoff):
+        observations.append(cutoff)
+        return []
+    monkeypatch.setattr(shutdown, '_complete_process_inventory', census)
+    before = (fixture.state / 'complaint_intake_supervisor_status.json').read_bytes()
+    result = runner.stop(fixture.state)
+    assert result['status'] == 'stopped' and result['signalled'] is False
+    proof = result['container_shutdown']['process_closure']
+    assert proof['preflight_without_managed_daemon'] is True
+    assert proof['proc_census_complete'] is True and proof['observations'] == 2
+    assert proof['daemon_birth_ticks_claimed'] is False and proof['signals_sent'] is False
+    assert observations == [fixture.current_record['identity']['start_ticks']] * 2
+    assert not docker[0].effects
+    assert (fixture.state / 'complaint_intake_supervisor_status.json').read_bytes() == before
+
+
+@pytest.mark.parametrize('damage', ['birth_pid','birth_ticks','birth_boot','daemon','daemon_birth','has_daemon','workers','worker_pids','descendants','phase','status','maintenance_phase','maintenance_time','current_run','paid_start'])
+def test_failed_preflight_cannot_claim_closure_for_unknown_or_launched_work(failed_preflight_campaign, docker, damage):
+    fixture = failed_preflight_campaign
+    hb = deepcopy(fixture.preflight_heartbeat)
+    if damage == 'birth_pid': hb['supervisor_process_birth']['pid'] += 1
+    elif damage == 'birth_ticks': hb['supervisor_process_birth']['start_time_ticks'] += 1
+    elif damage == 'birth_boot': hb['supervisor_process_birth']['boot_id'] = 'foreign'
+    elif damage == 'daemon': hb['daemon_pid'] = 1073741825
+    elif damage == 'daemon_birth': hb['daemon_process_birth'] = {'pid':1073741825}
+    elif damage == 'has_daemon': hb['active_agentic_maintenance_has_daemon'] = True
+    elif damage == 'workers': hb['active_worker_count'] = 1
+    elif damage == 'worker_pids': hb['active_worker_pids'] = [1073741825]
+    elif damage == 'descendants': hb['worker_descendant_count'] = 1
+    elif damage == 'phase': hb['last_agentic_maintenance_phase'] = 'unknown'
+    elif damage == 'status': hb['last_agentic_maintenance_status'] = 'running'
+    elif damage == 'maintenance_phase': hb['supervisor_maintenance']['phase'] = 'running'
+    elif damage == 'maintenance_time': hb['supervisor_maintenance']['started_at'] = stamp(fixture.started-1)
+    elif damage == 'current_run': hb['run_id'] = datetime.fromtimestamp(fixture.started, timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    else: (fixture.state / 'complaint_intake_events.jsonl').write_text(json.dumps(fixture.event)+'\n')
+    runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', hb)
+    result = runner.stop(fixture.state)
+    assert result['status'] == 'stop_incomplete' and result['signalled'] is False
+    assert not docker[0].calls and not docker[0].effects
+
+
+@pytest.mark.parametrize('scope', ['group','workspace'])
+def test_failed_preflight_still_requires_complete_empty_fresh_process_censuses(failed_preflight_campaign, docker, monkeypatch, scope):
+    fixture = failed_preflight_campaign
+    process = {'pid':1073741826,'uid':os.getuid(),'process_group':0,'session':0,
+        'argv':['/usr/bin/python3'],'cwd':str(fixture.repo.parent),'start_ticks':123457}
+    if scope == 'group': process['session'] = fixture.current_record['identity']['pid']
+    else: process['cwd'] = str(fixture.workspace)
+    monkeypatch.setattr(shutdown, '_complete_process_inventory', lambda *_args: [process])
+    result = runner.stop(fixture.state)
+    assert result['status'] == 'stop_incomplete' and not docker[0].calls
