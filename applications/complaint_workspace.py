@@ -962,6 +962,40 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
 }
 
 
+def format_terminal_why(
+    inquiry: Optional[Dict[str, Any]] = None,
+    *,
+    state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Explain the current gap question for a terminal /why command."""
+    from complaint_phases.denoiser import format_terminal_why as render_terminal_why
+
+    chosen = inquiry if isinstance(inquiry, dict) else None
+    if chosen is None and isinstance(state, dict):
+        stored = state.get("explained_inquiry")
+        if isinstance(stored, dict):
+            chosen = stored
+        else:
+            projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+            pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else {}
+            phase_inquiry = None
+            phase_data = state.get("phase_data") if isinstance(state.get("phase_data"), dict) else {}
+            intake = phase_data.get("intake") if isinstance(phase_data.get("intake"), dict) else {}
+            if isinstance(intake.get("current_explained_inquiry"), dict):
+                phase_inquiry = intake.get("current_explained_inquiry")
+            chosen = phase_inquiry or (pending or None)
+    return render_terminal_why(chosen)
+
+
+def publish_explained_inquiry(state: Dict[str, Any], selection: Dict[str, Any]) -> Dict[str, Any]:
+    """Copy a phase-manager selection onto the workspace session without storing an answer."""
+    current = selection.get("current") if isinstance(selection, dict) else None
+    inquiries = selection.get("inquiries") if isinstance(selection, dict) else None
+    state["explained_inquiry"] = current if isinstance(current, dict) else None
+    state["explained_inquiries"] = list(inquiries or [])
+    return state
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -2578,6 +2612,16 @@ class ComplaintWorkspaceRequestHandlers:
     ) -> Dict[str, Any]:
         workspace = self.workspace
         state = self._load_state(user_id)
+        normalized_message = str(message or "").strip()
+        if normalized_message.lower() == "/why":
+            why = format_terminal_why(state=state)
+            payload = workspace._build_intake_chat_payload(state)
+            payload["why"] = why
+            payload["command"] = "/why"
+            payload["stored_as_answer"] = False
+            payload["awaiting_user"] = True
+            payload["message"] = why["display"]
+            return payload
         normalized_action = str(interview_action or "").strip().lower()
         if normalized_action == "resume":
             interview = workspace.apply_shared_interview(

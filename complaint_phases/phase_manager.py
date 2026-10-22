@@ -6,7 +6,7 @@ Manages the three-phase complaint process and transitions between phases.
 
 import logging
 from enum import Enum
-from typing import Dict, Any, Callable, List
+from typing import Dict, Any, Callable, List, Optional
 from datetime import datetime, UTC
 
 logger = logging.getLogger(__name__)
@@ -1318,6 +1318,64 @@ class PhaseManager:
         self.phase_data[phase][key] = value
         self._refresh_phase_derived_state(phase)
         logger.debug("Updated %s data: %s = %s", phase.value, key, value)
+
+    def select_explained_gap_questions(self, denoiser: Any, *, max_questions: int = 8) -> Dict[str, Any]:
+        """Select explained intake questions from the graphs already stored for this phase."""
+        data = self.phase_data[ComplaintPhase.INTAKE]
+        inquiries = denoiser.select_explained_gap_inquiries(
+            data.get("knowledge_graph"),
+            data.get("dependency_graph"),
+            intake_case_file=data.get("intake_case_file"),
+            max_questions=max_questions,
+        )
+        data["explained_inquiries"] = list(inquiries)
+        data["current_explained_inquiry"] = denoiser.current_explained_inquiry
+        data["suppressed_semantic_duplicates"] = list(getattr(denoiser, "suppressed_semantic_duplicates", []) or [])
+        return {
+            "inquiries": list(inquiries),
+            "current": denoiser.current_explained_inquiry,
+            "suppressed_semantic_duplicates": data["suppressed_semantic_duplicates"],
+        }
+
+    def apply_explained_inquiry_answer(
+        self,
+        answer: Any,
+        denoiser: Any,
+        *,
+        disposition: Any = None,
+        inquiry: Optional[Dict[str, Any]] = None,
+        max_questions: int = 8,
+    ) -> Dict[str, Any]:
+        """Apply one explained answer and store the resulting next question."""
+        data = self.phase_data[ComplaintPhase.INTAKE]
+        result = denoiser.apply_explained_inquiry_answer(
+            answer,
+            data.get("knowledge_graph"),
+            data.get("dependency_graph"),
+            intake_case_file=data.get("intake_case_file"),
+            inquiry=inquiry if isinstance(inquiry, dict) else data.get("current_explained_inquiry"),
+            disposition=disposition,
+            max_questions=max_questions,
+        )
+        data["current_explained_inquiry"] = result.get("next_inquiry")
+        data["explained_inquiries"] = list(result.get("inquiries") or [])
+        data["suppressed_semantic_duplicates"] = list(getattr(denoiser, "suppressed_semantic_duplicates", []) or [])
+        records = data.setdefault("explained_answer_records", [])
+        records.append({
+            "disposition": result.get("disposition"),
+            "recorded_as": result.get("recorded_as"),
+            "target_id": result.get("removed_target_id"),
+            "objective_id": result.get("objective_id"),
+            "satisfies_requirement": bool(result.get("satisfies_requirement")),
+        })
+        return result
+
+    def explain_current_inquiry(self) -> Dict[str, Any]:
+        """Return the terminal /why payload for the current explained question."""
+        from complaint_phases.denoiser import format_terminal_why
+
+        inquiry = self.phase_data[ComplaintPhase.INTAKE].get("current_explained_inquiry")
+        return format_terminal_why(inquiry if isinstance(inquiry, dict) else None)
 
     def record_verified_dependency_refresh(self, graph: Any, report: Dict[str, Any]) -> Dict[str, Any]:
         """Store a scoped dependency refresh and the legal-source gaps it left visible."""
