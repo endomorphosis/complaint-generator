@@ -22,6 +22,7 @@ from integrations.ipfs_datasets.logic import (
     build_legal_ir_premise_inventory,
     check_contradictions,
     generate_bound_legal_ir_proof_obligations,
+    route_bound_legal_ir_proof,
     prove_claim_elements,
     run_hybrid_reasoning,
 )
@@ -3686,6 +3687,39 @@ class ClaimSupportHook:
                     'operational_trace': [{'code': type(exc).__name__, 'status': 'unavailable'}],
                     'obligations': [],
                 }
+        obligation_rows = legal_ir_proof_obligations.get('obligations') if isinstance(legal_ir_proof_obligations, dict) else None
+        first_obligation = obligation_rows[0] if isinstance(obligation_rows, list) and obligation_rows else None
+        inventory = legal_ir_proof_obligations.get('premise_inventory') if isinstance(legal_ir_proof_obligations, dict) else None
+        identity = ''
+        if isinstance(legal_ir_proof_obligations, dict):
+            versions = legal_ir_proof_obligations.get('versions')
+            if isinstance(versions, dict):
+                identity = str(versions.get('execution_identity') or '')
+        try:
+            legal_ir_proof_routing = route_bound_legal_ir_proof(
+                first_obligation,
+                premise_inventory=inventory if isinstance(inventory, dict) else None,
+                sample_or_document=obligation_inputs['sample_or_document'],
+                goal_statement=str(element.get('element_text') or ''),
+                execution_identity=identity,
+                expected_execution_identity=identity,
+                total_timeout_seconds=1.5,
+                stage_timeout_seconds={
+                    'deterministic': 0.25,
+                    'native_logic': 0.25,
+                    'smt_atp': 0.25,
+                    'lean_reconstruction': 0.25,
+                },
+                required_trust='kernel',
+            )
+        except Exception as exc:
+            legal_ir_proof_routing = {
+                'schema_version': 'legal-ir-bound-proof-routing/v1',
+                'outcome': 'unavailable',
+                'reason': type(exc).__name__,
+                'substantive_trust_satisfied': False,
+                'entails_claim_element': False,
+            }
         ontology_validation = validate_ontology(ontology_for_validation)
         ontology_workflow = build_validate_score_ontology(
             ontology_seed_text,
@@ -3784,6 +3818,7 @@ class ClaimSupportHook:
             'temporal_proof_bundle': temporal_proof_bundle,
             'claim_support_temporal_handoff': claim_support_temporal_handoff,
             'legal_ir_proof_obligations': legal_ir_proof_obligations,
+            'legal_ir_proof_routing': legal_ir_proof_routing,
             'legacy_proof_heuristic': {
                 'proof_status': logic_proof.get('proof_status') if isinstance(logic_proof, dict) else '',
                 'labels_supported_coverage_provable': True,
