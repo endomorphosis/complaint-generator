@@ -2220,6 +2220,142 @@ def _write_private_graph_ciphertext(destination: Any, name: str, envelope: bytes
         os.close(descriptor)
 
 
+def publish_private_graph_case_manifest(
+    graph_payload: Dict[str, Any],
+    private_context: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Bind a private graph into the case manifest. Public names stay opaque hashes.
+
+    The filename, node labels, and provenance travel only inside the encrypted
+    manifest and the sealed fact-graph envelope. The destination filename is the
+    manifest generation.
+    """
+    from integrations.private_storage import (
+        CaseManifestConflict,
+        PrivateRevisionError,
+        PrivateStorageError,
+        publish_case_manifest,
+        read_case_manifest,
+    )
+
+    if not isinstance(graph_payload, Mapping):
+        raise TypeError("graph_payload must be a mapping")
+    repository = private_context.get("case_manifest_repository")
+    if not repository:
+        raise PrivateRevisionError("case manifest repository is missing", code="role_missing", state="recoverable")
+    supplied = private_context.get("case_artifacts")
+    if not isinstance(supplied, Mapping):
+        raise PrivateRevisionError("case artifacts are missing", code="role_missing", state="recoverable")
+    graph_body = json.dumps(dict(graph_payload), sort_keys=True, default=str).encode("utf-8")
+    artifacts: Dict[str, Any] = {}
+    for role in ("answer", "fact_graph", "legal_rule_source", "evaluation", "proof"):
+        item = supplied.get(role)
+        if role == "fact_graph":
+            revision = role
+            if isinstance(item, Mapping) and item.get("revision"):
+                revision = str(item["revision"])
+            artifacts[role] = {"body": graph_body, "revision": revision}
+            continue
+        if isinstance(item, (bytes, bytearray)):
+            artifacts[role] = {"body": bytes(item), "revision": role}
+        elif isinstance(item, Mapping) and isinstance(item.get("body"), (bytes, bytearray)):
+            artifacts[role] = {
+                "body": bytes(item["body"]),
+                "revision": str(item.get("revision") or role),
+            }
+        else:
+            raise PrivateRevisionError("case role is missing", code="role_missing", state="recoverable")
+    labels = private_context.get("labels")
+    if labels is None:
+        labels = []
+        for entity in graph_payload.get("entities") or []:
+            if isinstance(entity, Mapping):
+                labels.append(str(entity.get("label") or entity.get("text") or ""))
+    provenance = private_context.get("provenance")
+    if not isinstance(provenance, Mapping):
+        raw_provenance = graph_payload.get("provenance")
+        provenance = dict(raw_provenance) if isinstance(raw_provenance, Mapping) else {}
+    filename = str(private_context.get("filename") or "")
+    try:
+        publication = publish_case_manifest(
+            repository,
+            tenant_id=str(private_context["tenant_id"]),
+            case_id=str(private_context["case_id"]),
+            principal_id=str(private_context.get("principal_id") or private_context["tenant_id"]),
+            key=private_context.get("key"),
+            key_id=private_context.get("key_id"),
+            expected_head=str(private_context.get("expected_head") or ""),
+            expected_hash=str(private_context.get("expected_hash") or ""),
+            artifacts=artifacts,
+            private_names={"filename": filename, "labels": list(labels), "provenance": dict(provenance)},
+            backend=str(private_context.get("case_backend") or "local"),
+            iroh_store=private_context.get("iroh_store"),
+        )
+    except CaseManifestConflict:
+        return {
+            "status": "conflict",
+            "persisted": False,
+            "committed": False,
+            "verified": False,
+            "private_artifact": True,
+            "private_indexing": "unsupported",
+            "plaintext_catalog": False,
+            "plaintext_index": False,
+            "code": "manifest_conflict",
+            "overwrites_existing": False,
+            "minted_completion": False,
+        }
+    except PrivateStorageError as exc:
+        return {
+            "status": "unlock_needed" if getattr(exc, "code", "") == "key_unavailable" else "recoverable",
+            "persisted": False,
+            "committed": False,
+            "verified": False,
+            "private_artifact": True,
+            "private_indexing": "unsupported",
+            "plaintext_catalog": False,
+            "code": str(getattr(exc, "code", "") or "private_graph_failed"),
+            "overwrites_existing": False,
+            "minted_completion": False,
+        }
+    destination = private_context.get("destination_dir")
+    if destination is not None:
+        opened = read_case_manifest(
+            repository,
+            tenant_id=str(private_context["tenant_id"]),
+            case_id=str(private_context["case_id"]),
+            principal_id=str(private_context.get("principal_id") or private_context["tenant_id"]),
+            key=private_context.get("key"),
+            key_id=private_context.get("key_id"),
+        )
+        envelope = (opened or {}).get("envelopes", {}).get("fact_graph")
+        if not isinstance(envelope, (bytes, bytearray)) or not publication.generation:
+            return {
+                "status": "recoverable",
+                "persisted": False,
+                "verified": False,
+                "private_artifact": True,
+                "plaintext_catalog": False,
+                "code": "readback_mismatch",
+                "overwrites_existing": False,
+                "minted_completion": False,
+            }
+        _write_private_graph_ciphertext(destination, publication.generation + ".bin", bytes(envelope))
+    public = publication.as_dict()
+    public.update({
+        "status": "stored-private",
+        "persisted": True,
+        "verified": True,
+        "private_artifact": True,
+        "private_indexing": "unsupported",
+        "plaintext_catalog": False,
+        "plaintext_index": False,
+        "opaque_ref": publication.generation,
+        "overwrites_existing": False,
+    })
+    return public
+
+
 def persist_private_graph_snapshot(
     graph_payload: Dict[str, Any],
     private_context: Mapping[str, Any],
@@ -2231,6 +2367,8 @@ def persist_private_graph_snapshot(
         raise TypeError("graph_payload must be a mapping")
     if not isinstance(private_context, Mapping):
         raise TypeError("private_context must be a mapping")
+    if private_context.get("case_manifest_repository"):
+        return publish_private_graph_case_manifest(dict(graph_payload), private_context)
     missing_key = private_context.get("key") is None and private_context.get("key_provider") is None
     if private_context.get("locked") or missing_key:
         return {"status": "unlock_needed", "persisted": False, "private_artifact": True,
