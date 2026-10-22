@@ -1,6 +1,9 @@
 """Reusable formal-logic primitives for complaint-generator."""
 
 from .capabilities import (
+    CANONICAL_COMPILER_CAPABILITY_SCHEMA,
+    CanonicalCompilerCapability,
+    CanonicalCompilerSupport,
     FormalLogicCapability,
     FormalLogicCapabilityError,
     FormalLogicDegradedError,
@@ -9,6 +12,7 @@ from .capabilities import (
     LogicCapabilityState,
     LogicCapabilityStatus,
     capability_state_from_payload,
+    classify_canonical_compiler_capability,
 )
 from .core import (
     Action,
@@ -38,6 +42,9 @@ __all__ = [
     "Frame",
     "FrameKnowledgeBase",
     "FrameSlotEvidence",
+    "CANONICAL_COMPILER_CAPABILITY_SCHEMA",
+    "CanonicalCompilerCapability",
+    "CanonicalCompilerSupport",
     "FormalLogicCapability",
     "FormalLogicCapabilityError",
     "FormalLogicDegradedError",
@@ -48,6 +55,7 @@ __all__ = [
     "LogicCapabilityState",
     "LogicCapabilityStatus",
     "capability_state_from_payload",
+    "classify_canonical_compiler_capability",
     "Negation",
     "Party",
     "Predicate",

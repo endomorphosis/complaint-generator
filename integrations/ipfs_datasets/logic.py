@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from copy import deepcopy
 from datetime import date
+from enum import Enum
 import hashlib
 import inspect
 import json
@@ -10,6 +11,8 @@ import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from lib.formal_logic.capabilities import (
+    CanonicalCompilerCapability,
+    CanonicalCompilerSupport,
     FormalLogicCapability,
     FormalLogicCapabilityError,
     FormalLogicDegradedError,
@@ -17,6 +20,7 @@ from lib.formal_logic.capabilities import (
     FormalLogicUnavailableError,
     LogicCapabilityState,
     LogicCapabilityStatus,
+    classify_canonical_compiler_capability,
 )
 from lib.formal_logic.frames import FrameKnowledgeBase
 
@@ -74,6 +78,22 @@ REASONER_BRIDGE_PATH = getattr(_reasoner_module, "__name__", "") if _reasoner_mo
 LOCAL_FORMAL_LOGIC_AVAILABLE = True
 LOCAL_FORMAL_LOGIC_PATH = "lib.formal_logic"
 LOGIC_CAPABILITY_SCHEMA_VERSION = "formal-logic-capabilities/v1"
+
+_canonical_pipeline_module, _canonical_pipeline_error = import_module_optional(
+    "ipfs_datasets_py.logic.integration.reasoning.legal_ir_canonical_pipeline"
+)
+_canonical_contracts_module, _canonical_contracts_error = import_module_optional(
+    "ipfs_datasets_py.logic.legal_ir.canonical_contracts"
+)
+_canonical_compiler_module, _canonical_compiler_error = import_module_optional(
+    "ipfs_datasets_py.logic.legal_ir.canonical_compiler"
+)
+_canonical_source_map_module, _canonical_source_map_error = import_module_optional(
+    "ipfs_datasets_py.logic.integration.reasoning.legal_ir_source_maps"
+)
+_CANONICAL_FORMALIZATION_RECEIPTS: Dict[str, Dict[str, Any]] = {}
+_CANONICAL_FORMALIZATION_CACHE: Dict[str, str] = {}
+_CANONICAL_SUPPORTED_EXECUTION: Dict[str, Any] | None = None
 
 _DEGRADED_OPERATION_REASONS = {
     FormalLogicOperation.TEXT_TO_FOL: (
@@ -3533,6 +3553,1032 @@ def legacy_unverified_requirement_templates(claim_types: Sequence[str]) -> List[
     return templates
 
 
+def _canonical_symbol(module: Any, name: str) -> Any:
+    if module is None:
+        return None
+    return getattr(module, name, None)
+
+
+def _canonical_modules_ready() -> bool:
+    required = (
+        _canonical_symbol(_canonical_pipeline_module, "compile_canonical_pipeline"),
+        _canonical_symbol(_canonical_contracts_module, "CompilerRequest"),
+        _canonical_symbol(_canonical_contracts_module, "CanonicalAtomVocabulary"),
+        _canonical_symbol(_canonical_compiler_module, "TYPED_DEONTIC_COMPILER_CONFIG_CID"),
+        _canonical_symbol(_canonical_source_map_module, "LegalIRSourceMapBuilder"),
+        _canonical_symbol(_canonical_source_map_module, "build_legal_ir_source_map"),
+        _canonical_symbol(_canonical_source_map_module, "validate_legal_ir_source_map"),
+        _canonical_symbol(_canonical_source_map_module, "trace_legal_ir_fact"),
+        _canonical_symbol(_canonical_source_map_module, "bind_legal_ir_artifact_source_map"),
+    )
+    return all(symbol is not None for symbol in required)
+
+
+def _canonical_import_reason() -> str:
+    return _provider_diagnostic(
+        _canonical_pipeline_error
+        or _canonical_contracts_error
+        or _canonical_compiler_error
+        or _canonical_source_map_error,
+        fallback="Canonical compiler pipeline or source-map module is unavailable.",
+    )
+
+
+def canonical_compiler_identities() -> Dict[str, Any] | None:
+    """Return live schema, compiler, policy, pipeline, and stage identities."""
+
+    if not _canonical_modules_ready():
+        return None
+    contracts = _canonical_contracts_module
+    compiler = _canonical_compiler_module
+    pipeline = _canonical_pipeline_module
+    source_maps = _canonical_source_map_module
+    stage_table = tuple(pipeline.compiler_stage_identities())
+    return {
+        "source_map_schema": str(source_maps.LEGAL_IR_SOURCE_MAP_SCHEMA_VERSION),
+        "compiler_interface": str(contracts.CANONICAL_STRUCTURED_TEXT_COMPILER_INTERFACE),
+        "compiler_config_cid": str(compiler.TYPED_DEONTIC_COMPILER_CONFIG_CID),
+        "policy_cid": str(contracts.CANONICAL_PARITY_POLICY_CID),
+        "pipeline_interface": str(pipeline.CANONICAL_COMPILER_PIPELINE_INTERFACE),
+        "pipeline_cid": str(pipeline.CANONICAL_COMPILER_PIPELINE_CID),
+        "stage_ids": [str(item["stage_id"]) for item in stage_table],
+        "stage_interfaces": {
+            str(item["stage_id"]): str(item["interface"]) for item in stage_table
+        },
+    }
+
+
+def _canonical_evidence(
+    *,
+    executed: bool = False,
+    status: str = "",
+    traceable: bool = False,
+    source_map_valid: bool = False,
+    schema_match: bool = True,
+    tampered: bool = False,
+    reason: str = "",
+) -> Dict[str, Any]:
+    return {
+        "module_present": _canonical_modules_ready(),
+        "provider": "ipfs_datasets_py",
+        "module_path": "ipfs_datasets_py.logic.integration.reasoning.legal_ir_canonical_pipeline",
+        "executed": executed,
+        "status": status,
+        "traceable": traceable,
+        "source_map_valid": source_map_valid,
+        "schema_match": schema_match,
+        "tampered": tampered,
+        "reason": reason,
+        "identities": canonical_compiler_identities() or {},
+    }
+
+
+def get_canonical_compiler_capability() -> CanonicalCompilerCapability:
+    """Return the canonical compiler gate.
+
+    Importing the pipeline module leaves the capability degraded. Implemented
+    status is recorded only after a supported compile with a validated source
+    map, and only while the live identities still match that execution.
+    """
+
+    if not _canonical_modules_ready():
+        return classify_canonical_compiler_capability(
+            _canonical_evidence(reason=_canonical_import_reason())
+        )
+    execution = _CANONICAL_SUPPORTED_EXECUTION
+    live = canonical_compiler_identities() or {}
+    if not execution:
+        return classify_canonical_compiler_capability(_canonical_evidence())
+    if execution.get("identities") != live:
+        return classify_canonical_compiler_capability(
+            _canonical_evidence(
+                schema_match=False,
+                reason="Live canonical identities no longer match the executed formalization.",
+            )
+        )
+    return classify_canonical_compiler_capability(
+        _canonical_evidence(
+            executed=True,
+            status="success",
+            traceable=True,
+            source_map_valid=True,
+        )
+    )
+
+
+def reset_canonical_formalization_cache() -> None:
+    """Drop cached formalizations and the supported-execution marker.
+
+    Receipts already returned to callers are independent copies. This reset
+    clears only the adapter's reuse index.
+    """
+
+    global _CANONICAL_SUPPORTED_EXECUTION
+    _CANONICAL_FORMALIZATION_RECEIPTS.clear()
+    _CANONICAL_FORMALIZATION_CACHE.clear()
+    _CANONICAL_SUPPORTED_EXECUTION = None
+
+
+def inspect_canonical_formalization_receipt(receipt_id: str) -> Dict[str, Any] | None:
+    """Return a stored formalization receipt without treating it as reusable."""
+
+    stored = _CANONICAL_FORMALIZATION_RECEIPTS.get(str(receipt_id or ""))
+    if stored is None:
+        return None
+    return deepcopy(stored)
+
+
+def _jsonable(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        try:
+            return _jsonable(to_dict())
+        except (TypeError, ValueError):
+            return str(value)
+    if isinstance(value, Enum):
+        return value.value
+    return str(value)
+
+
+def _identity_mismatch(live: Mapping[str, Any], expected: Mapping[str, Any]) -> List[str]:
+    mismatched: List[str] = []
+    for key, expected_value in expected.items():
+        if expected_value is None:
+            continue
+        actual = live.get(key)
+        if key == "stage_ids":
+            actual_ids = tuple(actual or ())
+            expected_ids = tuple(expected_value)
+            if actual_ids != expected_ids:
+                mismatched.append(key)
+            continue
+        if str(actual or "") != str(expected_value):
+            mismatched.append(key)
+    return mismatched
+
+
+def _vocabulary_from_mapping(value: Mapping[str, Any]) -> Any:
+    vocabulary_type = _canonical_contracts_module.CanonicalAtomVocabulary
+    return vocabulary_type(
+        actors=tuple(value.get("actors") or ()),
+        actions=tuple(value.get("actions") or ()),
+        objects=tuple(value.get("objects") or ()),
+        qualifiers=tuple(value.get("qualifiers") or ()),
+    )
+
+
+def _legal_source_text(
+    source_text: str,
+    legal_context: Mapping[str, Any] | None,
+) -> tuple[str, str]:
+    context = legal_context if isinstance(legal_context, Mapping) else {}
+    versioned = str(
+        context.get("source_text")
+        or context.get("normalized_text")
+        or ""
+    ).strip()
+    if versioned:
+        return versioned, "legal_context"
+    return str(source_text or ""), "argument"
+
+
+def _citation_from_context(legal_context: Mapping[str, Any] | None, request_id: str) -> str:
+    context = legal_context if isinstance(legal_context, Mapping) else {}
+    for key in ("citation", "authority_locator", "source_locator", "authority_id"):
+        text = str(context.get(key) or "").strip()
+        if text:
+            return text
+    return request_id or "synthetic-legal-source"
+
+
+def _version_from_context(legal_context: Mapping[str, Any] | None) -> str:
+    context = legal_context if isinstance(legal_context, Mapping) else {}
+    for key in ("authority_version", "corpus_version", "version"):
+        text = str(context.get(key) or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _compile_cache_key(
+    identities: Mapping[str, Any],
+    *,
+    source_cid: str,
+    request_id: str,
+    vocabulary: Mapping[str, Any],
+    allow_explicit_partial: bool,
+    authority_version: str,
+) -> str:
+    payload = {
+        "allow_explicit_partial": allow_explicit_partial,
+        "authority_version": authority_version,
+        "identities": dict(identities),
+        "request_id": request_id,
+        "source_cid": source_cid,
+        "vocabulary": dict(vocabulary),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _source_cid_for_text(source_text: str) -> str:
+    cid_for_bytes = _canonical_symbol(_canonical_contracts_module, "cid_for_bytes")
+    if cid_for_bytes is None:
+        from ipfs_datasets_py.utils.cid_utils import cid_for_bytes as cid_for_bytes  # type: ignore
+    return str(cid_for_bytes(source_text.encode("utf-8")))
+
+
+def _prevalidate_character_spans(
+    source_text: str,
+    source_cid: str,
+    entries: Sequence[Any],
+) -> List[Dict[str, str]]:
+    """Reject spans before the source-map builder can clamp them.
+
+    Canonical entries are character offsets. Byte offsets from other contracts
+    are not accepted, including offsets that would become in-range after clamping.
+    """
+
+    issues: List[Dict[str, str]] = []
+    character_length = len(source_text)
+    if not entries:
+        issues.append(
+            {
+                "code": "empty_source_map",
+                "message": "Canonical result emitted no source-map entries.",
+                "field_path": "source_map",
+            }
+        )
+        return issues
+    for index, entry in enumerate(entries):
+        path = f"source_map[{index}]"
+        entry_cid = str(getattr(entry, "source_cid", "") or "")
+        if entry_cid != source_cid:
+            issues.append(
+                {
+                    "code": "source_cid_mismatch",
+                    "message": "Source-map entry CID does not match the legal source text.",
+                    "field_path": path,
+                }
+            )
+        start = getattr(entry, "start", None)
+        end = getattr(entry, "end", None)
+        if (
+            isinstance(start, bool)
+            or isinstance(end, bool)
+            or not isinstance(start, int)
+            or not isinstance(end, int)
+            or start < 0
+            or end <= start
+            or end > character_length
+        ):
+            issues.append(
+                {
+                    "code": "character_span_out_of_range",
+                    "message": "Source-map span is not a nonempty character range inside the legal text.",
+                    "field_path": path,
+                }
+            )
+            continue
+        passage = source_text[start:end]
+        if passage == "":
+            issues.append(
+                {
+                    "code": "empty_passage",
+                    "message": "Character span selected an empty passage.",
+                    "field_path": path,
+                }
+            )
+    return issues
+
+
+def _bridge_canonical_source_map(
+    *,
+    source_text: str,
+    source_cid: str,
+    citation: str,
+    entries: Sequence[Any],
+    rules: Sequence[Any],
+    stages: Sequence[Any],
+    identities: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Bridge canonical character spans into the LegalIR source-map schema."""
+
+    source_maps = _canonical_source_map_module
+    builder = source_maps.LegalIRSourceMapBuilder(
+        source_map_id="",
+        metadata={
+            "builder": "canonical_compiler_adapter",
+            "span_unit": "character",
+            "schema_version": identities.get("source_map_schema"),
+            "compiler_interface": identities.get("compiler_interface"),
+            "pipeline_cid": identities.get("pipeline_cid"),
+        },
+    )
+    builder.add_source_document(
+        source_cid,
+        source_text,
+        citation=citation,
+        metadata={"source_cid": source_cid, "span_unit": "character"},
+    )
+    field_ids_by_rule: Dict[str, List[str]] = {}
+    passages: List[Dict[str, Any]] = []
+    for entry in entries:
+        passage = source_text[entry.start:entry.end]
+        span = builder.add_span(
+            source_cid,
+            entry.start,
+            entry.end,
+            citation=citation,
+            normalized_text=passage,
+            transformation_step_id="canonical.source_span",
+            decompiler_attribution="not_decompiled",
+            metadata={
+                "rule_cid": entry.rule_cid,
+                "field_path": entry.field_path,
+                "attribution": entry.attribution,
+                "span_unit": "character",
+            },
+        )
+        node_id = f"field:{entry.rule_cid}:{entry.field_path}"
+        builder.add_node(
+            node_id,
+            node_kind="canonical_field",
+            span_ids=(span.span_id,),
+            emitted_fact=entry.rule_cid,
+            transformation_step_id="canonical.source_span",
+            decompiler_attribution="not_decompiled",
+            metadata={"field_path": entry.field_path, "rule_cid": entry.rule_cid},
+        )
+        field_ids_by_rule.setdefault(str(entry.rule_cid), []).append(node_id)
+        passages.append(
+            {
+                "rule_cid": entry.rule_cid,
+                "field_path": entry.field_path,
+                "source_cid": entry.source_cid,
+                "start": entry.start,
+                "end": entry.end,
+                "passage": passage,
+                "span_id": span.span_id,
+                "span_unit": "character",
+            }
+        )
+
+    formula_ids: List[str] = []
+    for rule in rules:
+        rule_cid = str(rule.rule_cid)
+        parents = tuple(field_ids_by_rule.get(rule_cid) or ())
+        if not parents:
+            continue
+        builder.add_derived_node(
+            rule_cid,
+            node_kind="compiler_formula",
+            derived_from_node_ids=parents,
+            transformation_step="compiler.emit_formula",
+            transform_kind=source_maps.LegalIRTransformationKind.COMPILER,
+            emitted_fact=rule_cid,
+            decompiler_attribution="not_decompiled",
+            metadata={"rule": _jsonable(rule.to_dict())},
+        )
+        formula_ids.append(rule_cid)
+
+    previous = tuple(node_id for ids in field_ids_by_rule.values() for node_id in ids)
+    stage_ids: List[str] = []
+    for stage in stages:
+        stage_id = str(stage.stage_id)
+        node_id = f"stage:{stage_id}"
+        builder.add_derived_node(
+            node_id,
+            node_kind="compiler_stage",
+            derived_from_node_ids=previous or tuple(formula_ids),
+            transformation_step=f"compiler.stage.{stage_id}",
+            transform_kind=source_maps.LegalIRTransformationKind.COMPILER,
+            emitted_fact=node_id,
+            decompiler_attribution="not_decompiled",
+            metadata={
+                "interface": str(stage.interface),
+                "identity_cid": str(stage.identity_cid),
+                "status": str(stage.status),
+            },
+        )
+        previous = (node_id,)
+        stage_ids.append(node_id)
+
+    bridged = builder.to_source_map()
+    formula_document = {
+        "modal_ir": {
+            "document_id": source_cid,
+            "normalized_text": source_text,
+            "citation": citation,
+            "formulas": [
+                {
+                    "formula_id": item["rule_cid"],
+                    "provenance": {
+                        "source_document_id": source_cid,
+                        "source_id": source_cid,
+                        "citation": citation,
+                        "start_char": item["start"],
+                        "end_char": item["end"],
+                        "transformation_step": "compiler.source_span",
+                        "decompiler_attribution": "not_decompiled",
+                    },
+                }
+                for item in passages
+            ],
+        }
+    }
+    built = source_maps.build_legal_ir_source_map(formula_document)
+    validation = source_maps.validate_legal_ir_source_map(bridged)
+    built_validation = source_maps.validate_legal_ir_source_map(built)
+    emitted_ids = tuple(dict.fromkeys([*formula_ids, *stage_ids]))
+    binding = source_maps.bind_legal_ir_artifact_source_map(
+        {"emitted_fact_ids": list(emitted_ids), "artifact_id": bridged.source_map_id},
+        bridged,
+        artifact_kind="compiler_formula",
+        emitted_fact_ids=emitted_ids,
+    )
+    binding_payload = {
+        "artifact_id": binding.artifact_id,
+        "artifact_kind": binding.artifact_kind,
+        "emitted_fact_ids": list(binding.emitted_fact_ids),
+        "traceable_fact_ids": list(binding.traceable_fact_ids),
+        "derived_fact_ids": list(binding.derived_fact_ids),
+        "missing_fact_ids": list(binding.missing_fact_ids),
+        "traceable": bool(binding.traceable),
+        "issues": [issue.to_dict() for issue in binding.issues],
+    }
+    traces = [
+        source_maps.trace_legal_ir_fact(bridged, fact_id).to_dict()
+        for fact_id in emitted_ids
+    ]
+    built_formula_ids = [node.node_id for node in built.nodes]
+    missing_from_build = sorted(set(formula_ids) - set(built_formula_ids))
+    transformations_missing = [
+        trace["fact_id"]
+        for trace in traces
+        if trace["fact_id"] in formula_ids and not trace.get("transformation_steps")
+    ]
+    coverage_ok = bool(formula_ids) and bool(stage_ids) and not missing_from_build
+    return {
+        "source_map": bridged.to_dict(),
+        "built_source_map": built.to_dict(),
+        "validation": validation.to_dict(),
+        "built_validation": built_validation.to_dict(),
+        "traceability": binding_payload,
+        "traces": traces,
+        "passages": passages,
+        "formula_ids": formula_ids,
+        "stage_node_ids": stage_ids,
+        "transformations_missing": transformations_missing,
+        "coverage_ok": (
+            coverage_ok
+            and validation.valid
+            and built_validation.valid
+            and binding.traceable
+            and not transformations_missing
+            and binding.emitted_fact_ids
+        ),
+    }
+
+
+def _unsupported_diagnostics(result: Any, stages: Sequence[Any]) -> List[Dict[str, Any]]:
+    diagnostics: List[Dict[str, Any]] = []
+    for item in getattr(result, "unsupported_semantics", ()) or ():
+        payload = _jsonable(item.to_dict() if hasattr(item, "to_dict") else item)
+        if isinstance(payload, dict):
+            payload["origin"] = "result.unsupported_semantics"
+            diagnostics.append(payload)
+    for item in getattr(result, "diagnostics", ()) or ():
+        payload = _jsonable(item.to_dict() if hasattr(item, "to_dict") else item)
+        if isinstance(payload, dict):
+            payload["origin"] = "result.diagnostics"
+            diagnostics.append(payload)
+    error = getattr(result, "error", None)
+    if error is not None:
+        payload = _jsonable(error.to_dict() if hasattr(error, "to_dict") else error)
+        if isinstance(payload, dict):
+            payload["origin"] = "result.error"
+            diagnostics.append(payload)
+    for stage in stages:
+        for item in getattr(stage, "unsupported", ()) or ():
+            payload = _jsonable(item)
+            if isinstance(payload, dict):
+                payload["origin"] = f"stage.{stage.stage_id}"
+                diagnostics.append(payload)
+    return diagnostics
+
+
+def _stage_records(stages: Sequence[Any]) -> List[Dict[str, Any]]:
+    return [_jsonable(stage.to_dict()) for stage in stages]
+
+
+def _receipt_shell(
+    *,
+    status: str,
+    capability: CanonicalCompilerCapability,
+    identities: Mapping[str, Any] | None,
+    reason: str,
+    cache_outcome: str,
+    prior_receipt_id: str = "",
+    mismatched_fields: Sequence[str] = (),
+    extra: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    body: Dict[str, Any] = {
+        "schema_version": "canonical-formalization-receipt/v1",
+        "status": status,
+        "capability": capability.as_dict(),
+        "identities": dict(identities or {}),
+        "reason": reason,
+        "cache_outcome": cache_outcome,
+        "reused": cache_outcome == "reused",
+        "prior_receipt_id": prior_receipt_id,
+        "mismatched_fields": list(mismatched_fields),
+        "entails_applicability": False,
+        "entails_claim": False,
+        "legal_text_separated_from_user_facts": True,
+        "user_facts_included_in_source": False,
+        "source_map": None,
+        "source_map_validation": None,
+        "traceability": None,
+        "unsupported_diagnostics": [],
+        "stages": [],
+        "formula_ids": [],
+        "passages": [],
+    }
+    if extra:
+        body.update(dict(extra))
+    encoded = json.dumps(
+        {key: body[key] for key in ("status", "reason", "identities", "prior_receipt_id", "mismatched_fields")},
+        sort_keys=True,
+        default=str,
+    )
+    body["receipt_id"] = "canonical-receipt-" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:32]
+    return body
+
+
+def _store_receipt(receipt: Dict[str, Any], *, cache_key: str = "") -> Dict[str, Any]:
+    stored = deepcopy(receipt)
+    _CANONICAL_FORMALIZATION_RECEIPTS[stored["receipt_id"]] = stored
+    if cache_key and stored.get("status") == "success":
+        _CANONICAL_FORMALIZATION_CACHE[cache_key] = stored["receipt_id"]
+    return deepcopy(stored)
+
+
+def _finish(receipt: Dict[str, Any]) -> Dict[str, Any]:
+    capability = receipt.get("capability") if isinstance(receipt.get("capability"), Mapping) else {}
+    return with_adapter_metadata(
+        receipt,
+        operation="compile_canonical_legal_ir",
+        backend_available=bool(capability.get("available")),
+        degraded_reason=capability.get("reason"),
+        implementation_status=str(capability.get("status") or ""),
+        extra_metadata={
+            "canonical_support": capability.get("support"),
+            "pipeline_cid": (receipt.get("identities") or {}).get("pipeline_cid", ""),
+            "compiler_config_cid": (receipt.get("identities") or {}).get("compiler_config_cid", ""),
+        },
+    )
+
+
+def compile_canonical_legal_ir(
+    source_text: str,
+    *,
+    request_id: str,
+    vocabulary: Mapping[str, Sequence[str]],
+    legal_context: Mapping[str, Any] | None = None,
+    user_facts: Sequence[str] | None = None,
+    allow_explicit_partial: bool = False,
+    expected_schema_version: str | None = None,
+    expected_compiler_interface: str | None = None,
+    expected_compiler_config_cid: str | None = None,
+    expected_policy_cid: str | None = None,
+    expected_pipeline_interface: str | None = None,
+    expected_pipeline_cid: str | None = None,
+    expected_stage_ids: Sequence[str] | None = None,
+    use_cache: bool = True,
+) -> Dict[str, Any]:
+    """Compile legal text through ``compile_canonical_pipeline`` and map sources.
+
+    User facts are recorded as excluded. They are not appended to the legal
+    source, and neither applicability nor claim entailment is claimed.
+    A version or schema mismatch does not reuse a cached formalization; the
+    previous receipt stays inspectable.
+    """
+
+    global _CANONICAL_SUPPORTED_EXECUTION
+    identities = canonical_compiler_identities()
+    if identities is None:
+        capability = classify_canonical_compiler_capability(
+            _canonical_evidence(reason=_canonical_import_reason())
+        )
+        receipt = _receipt_shell(
+            status="unavailable",
+            capability=capability,
+            identities=None,
+            reason=capability.reason or _canonical_import_reason(),
+            cache_outcome="not_cached",
+            extra={"user_facts": [str(item) for item in (user_facts or ())]},
+        )
+        return _finish(_store_receipt(receipt))
+
+    expected = {
+        "source_map_schema": expected_schema_version,
+        "compiler_interface": expected_compiler_interface,
+        "compiler_config_cid": expected_compiler_config_cid,
+        "policy_cid": expected_policy_cid,
+        "pipeline_interface": expected_pipeline_interface,
+        "pipeline_cid": expected_pipeline_cid,
+        "stage_ids": None if expected_stage_ids is None else tuple(expected_stage_ids),
+    }
+    provided = {
+        key: value
+        for key, value in expected.items()
+        if value is not None and key != "stage_ids" or (key == "stage_ids" and expected_stage_ids is not None)
+    }
+    mismatched = _identity_mismatch(identities, provided)
+    if mismatched:
+        capability = classify_canonical_compiler_capability(
+            _canonical_evidence(
+                schema_match=False,
+                reason="Requested canonical schema or compiler identity does not match the live pipeline.",
+            )
+        )
+        prior = ""
+        if _CANONICAL_FORMALIZATION_CACHE:
+            prior = next(reversed(_CANONICAL_FORMALIZATION_CACHE.values()))
+        receipt = _receipt_shell(
+            status="schema_mismatch",
+            capability=capability,
+            identities=identities,
+            reason=capability.reason or "schema mismatch",
+            cache_outcome="invalidated",
+            prior_receipt_id=prior,
+            mismatched_fields=mismatched,
+        )
+        return _finish(_store_receipt(receipt))
+
+    legal_text, legal_origin = _legal_source_text(source_text, legal_context)
+    excluded_facts = [str(item) for item in (user_facts or ()) if str(item).strip()]
+    authority_version = _version_from_context(legal_context)
+    citation = _citation_from_context(legal_context, request_id)
+    if not str(legal_text or "").strip():
+        capability = classify_canonical_compiler_capability(
+            _canonical_evidence(
+                executed=True,
+                status="failed",
+                reason="Legal source text is required and is separate from user facts.",
+            )
+        )
+        receipt = _receipt_shell(
+            status="failed",
+            capability=capability,
+            identities=identities,
+            reason=capability.reason or "missing legal text",
+            cache_outcome="not_cached",
+            extra={
+                "user_facts": excluded_facts,
+                "legal_text_origin": legal_origin,
+                "authority_version": authority_version,
+            },
+        )
+        return _finish(_store_receipt(receipt))
+
+    try:
+        atom_vocabulary = _vocabulary_from_mapping(vocabulary)
+        request = _canonical_contracts_module.CompilerRequest(
+            source_text=legal_text,
+            request_id=str(request_id),
+            atom_vocabulary=atom_vocabulary,
+            allow_explicit_partial=bool(allow_explicit_partial),
+        )
+    except (TypeError, ValueError) as exc:
+        capability = classify_canonical_compiler_capability(
+            _canonical_evidence(executed=True, status="failed", reason=str(exc))
+        )
+        receipt = _receipt_shell(
+            status="failed",
+            capability=capability,
+            identities=identities,
+            reason=str(exc),
+            cache_outcome="not_cached",
+            extra={"user_facts": excluded_facts, "authority_version": authority_version},
+        )
+        return _finish(_store_receipt(receipt))
+
+    cache_key = _compile_cache_key(
+        identities,
+        source_cid=request.source_cid,
+        request_id=str(request_id),
+        vocabulary=atom_vocabulary.to_dict(),
+        allow_explicit_partial=bool(allow_explicit_partial),
+        authority_version=authority_version,
+    )
+    if use_cache and cache_key in _CANONICAL_FORMALIZATION_CACHE:
+        cached_id = _CANONICAL_FORMALIZATION_CACHE[cache_key]
+        cached = _CANONICAL_FORMALIZATION_RECEIPTS.get(cached_id)
+        if cached is not None and cached.get("identities") == identities:
+            reused = deepcopy(cached)
+            reused["reused"] = True
+            reused["cache_outcome"] = "reused"
+            reused["cache_key"] = cache_key
+            return _finish(reused)
+
+    try:
+        pipeline = _canonical_pipeline_module.compile_canonical_pipeline(request)
+    except (TypeError, ValueError) as exc:
+        capability = classify_canonical_compiler_capability(
+            _canonical_evidence(executed=True, status="failed", reason=str(exc))
+        )
+        receipt = _receipt_shell(
+            status="failed",
+            capability=capability,
+            identities=identities,
+            reason=str(exc),
+            cache_outcome="not_cached",
+            extra={"user_facts": excluded_facts, "cache_key": cache_key},
+        )
+        return _finish(_store_receipt(receipt))
+
+    result = pipeline.result
+    stages = tuple(pipeline.stages)
+    status_value = str(getattr(result.status, "value", result.status))
+    diagnostics = _unsupported_diagnostics(result, stages)
+    stage_payload = _stage_records(stages)
+    observed_pipeline_cid = str(pipeline.pipeline_cid)
+    if observed_pipeline_cid != identities["pipeline_cid"]:
+        identities = dict(identities)
+        identities["pipeline_cid"] = observed_pipeline_cid
+    rules = () if result.canonical_ir is None else tuple(result.canonical_ir.rules)
+    span_issues = []
+    bridge: Dict[str, Any] | None = None
+    if status_value == "success":
+        span_issues = _prevalidate_character_spans(legal_text, request.source_cid, result.source_map)
+        if not span_issues and rules:
+            bridge = _bridge_canonical_source_map(
+                source_text=legal_text,
+                source_cid=request.source_cid,
+                citation=citation,
+                entries=result.source_map,
+                rules=rules,
+                stages=stages,
+                identities=identities,
+            )
+        elif not span_issues and not rules:
+            span_issues.append(
+                {
+                    "code": "empty_formula_coverage",
+                    "message": "Successful compile emitted no formulas to trace.",
+                    "field_path": "canonical_ir.rules",
+                }
+            )
+    coverage_ok = bool(bridge and bridge.get("coverage_ok"))
+    partial = status_value == "success" and bool(result.unsupported_semantics)
+    if status_value == "success" and not partial and coverage_ok and not span_issues:
+        outcome = "success"
+    elif status_value == "success" and partial and coverage_ok and not span_issues:
+        outcome = "partial"
+    elif status_value == "abstained":
+        outcome = "abstained"
+    else:
+        outcome = "failed"
+    reason = ""
+    if outcome != "success":
+        if span_issues:
+            reason = "; ".join(item["message"] for item in span_issues)
+        elif bridge is not None and not bridge.get("coverage_ok"):
+            reason = "Emitted formulas are not fully traceable to source passages and transformations."
+        elif outcome == "partial":
+            reason = "Canonical compile retained unsupported semantics as an explicit partial result."
+        elif outcome == "abstained":
+            reason = "Canonical compile abstained and did not emit a reusable formalization."
+        else:
+            reason = "Canonical compile failed."
+    capability = classify_canonical_compiler_capability(
+        _canonical_evidence(
+            executed=True,
+            status=outcome,
+            traceable=coverage_ok,
+            source_map_valid=coverage_ok,
+            reason=reason,
+        )
+    )
+    if capability.implemented:
+        _CANONICAL_SUPPORTED_EXECUTION = {
+            "identities": deepcopy(identities),
+            "receipt_status": outcome,
+        }
+    receipt_extra: Dict[str, Any] = {
+        "request_id": str(request_id),
+        "request_cid": request.request_cid,
+        "source_cid": request.source_cid,
+        "source_text": legal_text,
+        "source_character_length": len(legal_text),
+        "source_byte_length": len(legal_text.encode("utf-8")),
+        "span_unit": "character",
+        "legal_text_origin": legal_origin,
+        "authority_version": authority_version,
+        "citation": citation,
+        "user_facts": excluded_facts,
+        "compiler_status": status_value,
+        "result_cid": str(result.result_cid),
+        "pipeline_cid": observed_pipeline_cid,
+        "stages": stage_payload,
+        "unsupported_diagnostics": diagnostics,
+        "span_issues": span_issues,
+        "cache_key": cache_key,
+        "formula_ids": [] if bridge is None else list(bridge["formula_ids"]),
+        "passages": [] if bridge is None else list(bridge["passages"]),
+        "source_map": None if bridge is None else bridge["source_map"],
+        "built_source_map": None if bridge is None else bridge["built_source_map"],
+        "source_map_validation": None if bridge is None else bridge["validation"],
+        "built_source_map_validation": None if bridge is None else bridge["built_validation"],
+        "traceability": None if bridge is None else bridge["traceability"],
+        "traces": [] if bridge is None else list(bridge["traces"]),
+        "vocabulary": atom_vocabulary.to_dict(),
+        "allow_explicit_partial": bool(allow_explicit_partial),
+    }
+    if any(fact and fact in legal_text for fact in excluded_facts):
+        receipt_extra["user_facts_overlap_warning"] = (
+            "A user fact string also occurs inside the legal source; it was not added as a fact premise."
+        )
+    receipt = _receipt_shell(
+        status=outcome,
+        capability=capability,
+        identities=identities,
+        reason=reason,
+        cache_outcome="stored",
+        extra=receipt_extra,
+    )
+    # Include the compiler result CID so distinct compiles do not share a shell id.
+    receipt["receipt_id"] = "canonical-receipt-" + hashlib.sha256(
+        f"{result.result_cid}:{cache_key}:{outcome}".encode("utf-8")
+    ).hexdigest()[:32]
+    return _finish(_store_receipt(receipt, cache_key=cache_key if outcome == "success" else ""))
+
+
+def verify_canonical_formalization_receipt(
+    receipt_id: str,
+    *,
+    source_text: str | None = None,
+) -> Dict[str, Any]:
+    """Re-check a stored receipt. Tampering does not delete the old receipt."""
+
+    stored = inspect_canonical_formalization_receipt(receipt_id)
+    if stored is None:
+        capability = classify_canonical_compiler_capability(
+            _canonical_evidence(reason="Canonical formalization receipt was not found.")
+        )
+        return _finish(
+            {
+                "schema_version": "canonical-formalization-receipt/v1",
+                "status": "unavailable",
+                "receipt_id": str(receipt_id or ""),
+                "capability": capability.as_dict(),
+                "reason": capability.reason,
+                "tampered": False,
+                "identities": {},
+            }
+        )
+    candidate = deepcopy(stored)
+    if source_text is not None:
+        candidate["source_text"] = source_text
+    audit = audit_canonical_formalization_payload(candidate)
+    audit["inspected_receipt_id"] = stored.get("receipt_id")
+    audit["stored_status"] = stored.get("status")
+    return _finish(audit)
+
+
+def audit_canonical_formalization_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Validate source CID, character passages, and traceability on a receipt copy."""
+
+    if not _canonical_modules_ready():
+        capability = classify_canonical_compiler_capability(
+            _canonical_evidence(reason=_canonical_import_reason())
+        )
+        return {
+            "status": "unavailable",
+            "tampered": False,
+            "capability": capability.as_dict(),
+            "reason": capability.reason,
+            "issues": [],
+        }
+    source_text = str(payload.get("source_text") or "")
+    issues: List[Dict[str, str]] = []
+    try:
+        expected_cid = _source_cid_for_text(source_text)
+    except Exception as exc:  # noqa: BLE001 - typed integrity failure
+        expected_cid = ""
+        issues.append({"code": "source_cid_unavailable", "message": str(exc), "field_path": "source_text"})
+    recorded_cid = str(payload.get("source_cid") or "")
+    if expected_cid and recorded_cid and expected_cid != recorded_cid:
+        issues.append(
+            {
+                "code": "source_text_tampered",
+                "message": "Source text does not match the receipt source CID.",
+                "field_path": "source_text",
+            }
+        )
+    for index, passage in enumerate(payload.get("passages") or []):
+        if not isinstance(passage, Mapping):
+            issues.append(
+                {"code": "passage_invalid", "message": "Passage record is not an object.", "field_path": f"passages[{index}]"}
+            )
+            continue
+        start = passage.get("start")
+        end = passage.get("end")
+        if not isinstance(start, int) or not isinstance(end, int) or end > len(source_text) or start < 0:
+            issues.append(
+                {
+                    "code": "character_span_out_of_range",
+                    "message": "Stored passage is outside the source character length.",
+                    "field_path": f"passages[{index}]",
+                }
+            )
+            continue
+        selected = source_text[start:end]
+        if selected != passage.get("passage"):
+            issues.append(
+                {
+                    "code": "passage_tampered",
+                    "message": "Stored passage does not match the source character span.",
+                    "field_path": f"passages[{index}].passage",
+                }
+            )
+    source_map = payload.get("source_map")
+    validation_payload: Dict[str, Any] | None = None
+    traceable = False
+    if isinstance(source_map, Mapping) and payload.get("formula_ids"):
+        source_maps = _canonical_source_map_module
+        validation = source_maps.validate_legal_ir_source_map(source_map)
+        validation_payload = validation.to_dict()
+        if not validation.valid:
+            issues.append(
+                {
+                    "code": "source_map_invalid",
+                    "message": "Stored source map failed validation.",
+                    "field_path": "source_map",
+                }
+            )
+        binding = source_maps.bind_legal_ir_artifact_source_map(
+            {"emitted_fact_ids": list(payload.get("formula_ids") or [])},
+            source_map,
+            artifact_kind="compiler_formula",
+            emitted_fact_ids=tuple(payload.get("formula_ids") or ()),
+        )
+        traceable = bool(binding.traceable)
+        if not traceable:
+            issues.append(
+                {
+                    "code": "traceability_failed",
+                    "message": "Stored formulas are not traceable.",
+                    "field_path": "formula_ids",
+                }
+            )
+        for fact_id in payload.get("formula_ids") or []:
+            trace = source_maps.trace_legal_ir_fact(source_map, fact_id)
+            if not trace.transformation_steps or not trace.source_spans:
+                issues.append(
+                    {
+                        "code": "transformation_trace_missing",
+                        "message": "Formula does not trace to both a source passage and a transformation.",
+                        "field_path": f"traces.{fact_id}",
+                    }
+                )
+                traceable = False
+    tampered = any(item["code"].endswith("tampered") or item["code"].endswith("_tampered") for item in issues) or any(
+        item["code"] in {"source_text_tampered", "passage_tampered"} for item in issues
+    )
+    status = "tampered" if issues else "verified"
+    capability = classify_canonical_compiler_capability(
+        _canonical_evidence(
+            executed=not issues and payload.get("status") == "success",
+            status="success" if not issues and payload.get("status") == "success" else "failed",
+            traceable=traceable and not issues,
+            source_map_valid=bool(validation_payload and validation_payload.get("valid")) and not issues,
+            tampered=bool(issues),
+            reason="" if not issues else "Canonical formalization receipt failed integrity checks.",
+        )
+    )
+    return {
+        "schema_version": "canonical-formalization-audit/v1",
+        "status": status,
+        "tampered": bool(issues),
+        "capability": capability.as_dict(),
+        "reason": "" if not issues else capability.reason,
+        "issues": issues,
+        "source_map_validation": validation_payload,
+        "traceable": traceable and not issues,
+        "identities": dict(payload.get("identities") or {}),
+        "receipt_id": payload.get("receipt_id"),
+    }
+
+
 def legacy_procedural_template_attributes() -> Dict[str, Any]:
     return {
         "category": "civil_procedure",
@@ -3585,4 +4631,13 @@ __all__ = [
     "legacy_procedural_template_attributes",
     "legacy_unverified_requirement_templates",
     "sha256_utf8",
+    "CanonicalCompilerCapability",
+    "CanonicalCompilerSupport",
+    "audit_canonical_formalization_payload",
+    "canonical_compiler_identities",
+    "compile_canonical_legal_ir",
+    "get_canonical_compiler_capability",
+    "inspect_canonical_formalization_receipt",
+    "reset_canonical_formalization_cache",
+    "verify_canonical_formalization_receipt",
 ]
