@@ -11700,6 +11700,116 @@ class ComplaintWorkspaceService:
             },
         }
 
+    def metadata_residual_exposure(self) -> Dict[str, Any]:
+        """Plain statement of size, timing, and access-pattern residuals."""
+
+        from integrations.ipfs_datasets.storage import PADDING_POLICY, RESIDUAL_METADATA_EXPOSURE
+
+        return {
+            "residual_exposure": RESIDUAL_METADATA_EXPOSURE,
+            "padding_policy": dict(PADDING_POLICY),
+            "embeddings_classification": "private_derived",
+        }
+
+    def publish_case_public_reference(
+        self,
+        record: Mapping[str, Any],
+        *,
+        sensitive_literals: Optional[list] = None,
+        document_filename: str = "",
+    ) -> Dict[str, Any]:
+        """Publish an opaque index row and filename. Private literals stay off both."""
+
+        from integrations.ipfs_datasets.storage import (
+            opaque_storage_filename,
+            publish_public_index_entry,
+        )
+
+        literals = [str(item) for item in (sensitive_literals or []) if str(item or "")]
+        if document_filename:
+            literals.append(str(document_filename))
+        filename = opaque_storage_filename(
+            str(record.get("kind") or "object"),
+            document_filename or str(record.get("cid") or "object"),
+        )
+        projected = publish_public_index_entry(
+            {
+                "cid": record.get("cid"),
+                "cid_kind": record.get("cid_kind") or "opaque",
+                "artifact_class": record.get("artifact_class") or "opaque_private_ref",
+                "classification": record.get("classification") or "opaque",
+                "status": record.get("status") or "stored",
+                "opaque_name": filename,
+                "user_name": record.get("user_name"),
+                "case_name": record.get("case_name"),
+                "complaint_text": record.get("complaint_text"),
+                "filename": document_filename,
+                "node_label": record.get("node_label"),
+                "query": record.get("query"),
+            },
+            sensitive_literals=literals,
+        )
+        return {"filename": filename, "public_metadata": projected}
+
+    def remember_case_alias(self, user_id: str, case_id: str, alias: str, canonical: str, *, key: bytes, key_id: str) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.llm import remember_case_alias
+
+        self._check_access(str(user_id), ability="read", case_id=str(case_id))
+        return remember_case_alias(
+            user_id=str(user_id),
+            case_id=str(case_id),
+            alias=alias,
+            canonical=canonical,
+            key=key,
+            key_id=key_id,
+            principal_id=str(user_id),
+        )
+
+    def resolve_case_alias(self, user_id: str, case_id: str, alias: str, *, key: bytes, key_id: str) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.llm import resolve_case_alias
+
+        self._check_access(str(user_id), ability="read", case_id=str(case_id))
+        return resolve_case_alias(
+            user_id=str(user_id),
+            case_id=str(case_id),
+            alias=alias,
+            key=key,
+            key_id=key_id,
+            principal_id=str(user_id),
+        )
+
+    def store_case_embedding(
+        self,
+        user_id: str,
+        case_id: str,
+        vector: list,
+        source_text: str,
+        *,
+        key: bytes,
+        key_id: str,
+        sensitive_literals: Optional[list] = None,
+    ) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.llm import store_private_embedding
+
+        self._check_access(str(user_id), ability="read", case_id=str(case_id))
+        return store_private_embedding(
+            user_id=str(user_id),
+            case_id=str(case_id),
+            vector=vector,
+            source_text=source_text,
+            key=key,
+            key_id=key_id,
+            principal_id=str(user_id),
+            sensitive_literals=sensitive_literals,
+        )
+
+    def default_workspace_log(self, record: Mapping[str, Any]) -> Dict[str, Any]:
+        """Default workspace log line. Payloads and case text are not included."""
+
+        from integrations.ipfs_datasets.storage import emit_default_storage_log
+
+        return emit_default_storage_log(record)
+
     def _private_key_directory(self) -> Path:
         return self._session_dir / "private-keys"
 

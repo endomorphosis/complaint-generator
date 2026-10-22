@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-import os
 import hashlib
+import json
+import logging
+import os
+import re
 import shutil
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from .loader import get_repo_paths, import_attr_optional
 from .types import with_adapter_metadata
@@ -1076,7 +1080,256 @@ AUTOMATIC_PRIVATE_ARTIFACT_KINDS = frozenset({
     "theorem-source",
     "index",
     "backup-manifest",
+    "embedding",
+    "case-alias",
 })
+
+# Public CID metadata, filenames, the global index, and default logs may carry
+# only these keys. Case names, complaint text, document filenames, graph labels,
+# and claim-specific queries are not public fields.
+_PUBLIC_METADATA_KEYS = frozenset({
+    "cid",
+    "cid_kind",
+    "artifact_class",
+    "schema",
+    "status",
+    "opaque_name",
+    "classification",
+})
+_FORBIDDEN_PUBLIC_KEYS = frozenset({
+    "user_name",
+    "user_id",
+    "case_name",
+    "case_id",
+    "display_name",
+    "complaint",
+    "complaint_text",
+    "filename",
+    "file_name",
+    "original_filename",
+    "document_filename",
+    "node_label",
+    "graph_label",
+    "label",
+    "query",
+    "claim_query",
+    "legal_query",
+    "prompt",
+    "payload",
+    "token",
+    "api_key",
+    "key",
+    "data_key",
+    "master_key",
+    "embedding",
+    "embeddings",
+    "plaintext",
+    "source_text",
+    "mapping",
+})
+_PUBLIC_ARTIFACT_CLASSES = frozenset({
+    "public_legal_source",
+    "opaque_private_ref",
+})
+_FILENAME_KIND = re.compile(r"[^a-z0-9]+")
+_DIAGNOSTIC_FIELDS = (
+    "operation_id",
+    "status",
+    "error_category",
+    "duration_ms",
+    "synthetic_source",
+)
+
+# Encryption hides plaintext bytes. It does not hide ciphertext size, when a
+# request happened, or which opaque object was fetched. Padding is optional and
+# only changes size inside a declared bound. It is not a claim that metadata
+# is gone.
+RESIDUAL_METADATA_EXPOSURE = (
+    "Encryption does not hide ciphertext size, request timing, or access patterns. "
+    "Those residuals stay visible to anyone who can see the public object, the "
+    "transport, or the default log clock. Padding is an optional policy. When it "
+    "is enabled, the block size must sit between 256 and 65536 bytes. Padding is "
+    "not a promise that encryption hides all metadata."
+)
+PADDING_MIN_BLOCK_BYTES = 256
+PADDING_MAX_BLOCK_BYTES = 65536
+PADDING_POLICY = {
+    "optional": True,
+    "min_block_bytes": PADDING_MIN_BLOCK_BYTES,
+    "max_block_bytes": PADDING_MAX_BLOCK_BYTES,
+    "hides_all_metadata": False,
+    "residual_exposure": RESIDUAL_METADATA_EXPOSURE,
+}
+
+_public_index_lock = threading.Lock()
+_public_index: list[dict[str, Any]] = []
+_storage_logger = logging.getLogger(__name__)
+
+
+def _sensitive_hit(value: str, literals: Sequence[str]) -> bool:
+    for literal in literals:
+        text = str(literal or "")
+        if len(text) >= 4 and text in value:
+            return True
+    return False
+
+
+def project_public_cid_metadata(
+    raw: Mapping[str, Any] | None,
+    *,
+    sensitive_literals: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Allow-list public CID metadata.
+
+    Forbidden keys are dropped. String values that still contain a caller-supplied
+    case name, complaint excerpt, filename, graph label, or claim query are dropped.
+    """
+
+    if not isinstance(raw, Mapping):
+        return {"schema": "public-cid-metadata/v1", "classification": "opaque_private_ref"}
+    projected: dict[str, Any] = {"schema": "public-cid-metadata/v1"}
+    for key, value in raw.items():
+        name = str(key)
+        if name in _FORBIDDEN_PUBLIC_KEYS or name not in _PUBLIC_METADATA_KEYS:
+            continue
+        if isinstance(value, str):
+            if _sensitive_hit(value, sensitive_literals):
+                continue
+            if name == "artifact_class" and value not in _PUBLIC_ARTIFACT_CLASSES:
+                continue
+            projected[name] = value
+        elif isinstance(value, bool) or value is None:
+            projected[name] = value
+        elif name == "classification" and isinstance(value, str):
+            projected[name] = value
+    artifact_class = projected.get("artifact_class")
+    if artifact_class not in _PUBLIC_ARTIFACT_CLASSES:
+        projected["artifact_class"] = "opaque_private_ref"
+        projected["classification"] = "private_derived" if raw.get("classification") == "private_derived" else "opaque"
+    if projected.get("classification") == "private_derived":
+        projected["artifact_class"] = "opaque_private_ref"
+    return projected
+
+
+def opaque_storage_filename(kind: str, secret_name: str) -> str:
+    """Filename for a stored object. The original document name is not recoverable."""
+
+    kind_text = _FILENAME_KIND.sub("-", str(kind or "object").lower()).strip("-")[:24] or "object"
+    digest = hashlib.sha256(str(secret_name or "").encode("utf-8")).hexdigest()[:32]
+    return f"{kind_text}-{digest}.bin"
+
+
+def clear_public_index() -> None:
+    with _public_index_lock:
+        _public_index.clear()
+
+
+def publish_public_index_entry(
+    entry: Mapping[str, Any],
+    *,
+    sensitive_literals: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Record one global-index row that cannot carry private case metadata."""
+
+    projected = project_public_cid_metadata(entry, sensitive_literals=sensitive_literals)
+    if entry.get("classification") == "private_derived":
+        projected["classification"] = "private_derived"
+        projected["artifact_class"] = "opaque_private_ref"
+    encoded = json.dumps(projected, sort_keys=True)
+    for literal in sensitive_literals:
+        text = str(literal or "")
+        if len(text) >= 4 and text in encoded:
+            raise ValueError("public index refused a private literal")
+    with _public_index_lock:
+        _public_index.append(dict(projected))
+    return dict(projected)
+
+
+def public_index_snapshot() -> list[dict[str, Any]]:
+    with _public_index_lock:
+        return [dict(item) for item in _public_index]
+
+
+def redact_private_diagnostic(record: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Keep operation identity and drop payloads, keys, tokens, and case text.
+
+    ``synthetic_source`` is the only identity copied through. A raw user or case
+    name is hashed when the caller did not already supply a synthetic source.
+    """
+
+    source = ""
+    status = "unknown"
+    operation_id = "unspecified"
+    error_category = ""
+    duration_ms: int | float | None = None
+    if isinstance(record, Mapping):
+        source = str(record.get("synthetic_source") or record.get("source_identity") or "")
+        status = str(record.get("status") or "unknown")
+        operation_id = str(record.get("operation_id") or record.get("phase") or "unspecified")
+        error_category = str(record.get("error_category") or record.get("error_kind") or "")
+        raw_duration = record.get("duration_ms")
+        if isinstance(raw_duration, bool) or not isinstance(raw_duration, (int, float)):
+            raw_duration = record.get("phase_elapsed_seconds")
+        if isinstance(raw_duration, bool) or not isinstance(raw_duration, (int, float)):
+            duration_ms = None
+        else:
+            duration_ms = raw_duration
+        if not source:
+            raw_user = str(record.get("user_id") or record.get("user_name") or "")
+            if raw_user:
+                source = "syn-" + hashlib.sha256(raw_user.encode("utf-8")).hexdigest()[:16]
+    if not source:
+        source = "synthetic-unspecified"
+    if not error_category and isinstance(record, Mapping) and record.get("error"):
+        error_category = "operation_error"
+    diagnostic = {
+        "operation_id": operation_id[:128],
+        "status": status[:64],
+        "error_category": error_category[:64],
+        "duration_ms": duration_ms,
+        "synthetic_source": source[:64],
+    }
+    return {key: diagnostic[key] for key in _DIAGNOSTIC_FIELDS}
+
+
+def emit_default_storage_log(record: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Log one redacted diagnostic. The message is the allow-listed JSON object."""
+
+    diagnostic = redact_private_diagnostic(record)
+    _storage_logger.info("storage_diagnostic %s", json.dumps(diagnostic, sort_keys=True))
+    return diagnostic
+
+
+def optional_size_padding(
+    data: bytes,
+    *,
+    enabled: bool = False,
+    block_size: int | None = None,
+) -> dict[str, Any]:
+    """Apply optional size padding inside the declared bounds.
+
+    Disabled padding returns the original bytes. Enabled padding never claims
+    that size, timing, or access patterns are hidden.
+    """
+
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError("padding input must be bytes")
+    payload = bytes(data)
+    policy = dict(PADDING_POLICY)
+    if not enabled:
+        return {"applied": False, "data": payload, "block_size": None, "policy": policy}
+    if type(block_size) is not int or block_size < PADDING_MIN_BLOCK_BYTES or block_size > PADDING_MAX_BLOCK_BYTES:
+        raise ValueError("padding_block_out_of_bounds")
+    remainder = len(payload) % block_size
+    pad = 0 if remainder == 0 else block_size - remainder
+    if pad == 0:
+        pad = block_size
+    return {
+        "applied": True,
+        "data": payload + b"\x00" * pad,
+        "block_size": block_size,
+        "policy": policy,
+    }
 
 
 def store_private_artifact(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -1151,4 +1404,14 @@ __all__ = [
     "translate_kit_operation_result",
     "IPFS_AVAILABLE",
     "IPFS_ERROR",
+    "RESIDUAL_METADATA_EXPOSURE",
+    "PADDING_POLICY",
+    "project_public_cid_metadata",
+    "opaque_storage_filename",
+    "clear_public_index",
+    "publish_public_index_entry",
+    "public_index_snapshot",
+    "redact_private_diagnostic",
+    "emit_default_storage_log",
+    "optional_size_padding",
 ]

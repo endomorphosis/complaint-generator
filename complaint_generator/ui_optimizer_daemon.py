@@ -122,6 +122,22 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def redact_daemon_default_log(record: dict[str, Any] | None) -> dict[str, Any]:
+    """Default daemon log projection. Case text, filenames, keys, and tokens stay out."""
+
+    from integrations.ipfs_datasets.storage import redact_private_diagnostic
+
+    return redact_private_diagnostic(record)
+
+
+def append_default_daemon_log(log_file: Path, record: dict[str, Any] | None) -> dict[str, Any]:
+    diagnostic = redact_daemon_default_log(record)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    with log_file.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(diagnostic, sort_keys=True) + "\n")
+    return diagnostic
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -435,6 +451,19 @@ def _write_status(
         error_summary=error_summary,
     )
     _write_json(status_file, payload)
+    append_default_daemon_log(
+        log_file,
+        {
+            "operation_id": str(payload.get("phase") or "daemon"),
+            "status": str(payload.get("status") or ""),
+            "error_category": str(payload.get("error_kind") or ""),
+            "duration_ms": payload.get("phase_elapsed_seconds"),
+            "synthetic_source": "ui-optimizer-daemon",
+            "user_id": getattr(args, "user_id", ""),
+            "error": payload.get("error"),
+            "last_result": payload.get("last_result"),
+        },
+    )
     return payload
 
 

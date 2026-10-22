@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from copy import deepcopy
+import hashlib
 import importlib
 import json
 import logging
@@ -1941,6 +1942,259 @@ def _private_generation_options(options: Mapping[str, Any]) -> Dict[str, Any]:
 	}
 
 
+# Per-case alias and embedding caches. Keys are (user_id, case_id). Values are
+# sealed envelopes only. A lookup never reads another pair's slot.
+_CASE_ALIAS_CACHE: Dict[tuple[str, str], Dict[str, bytes]] = {}
+_CASE_EMBEDDING_CACHE: Dict[tuple[str, str], Dict[str, bytes]] = {}
+_CASE_CACHE_LOCK = threading.Lock()
+EMBEDDING_CLASSIFICATION = "private_derived"
+
+
+def _case_cache_key(user_id: str, case_id: str) -> tuple[str, str]:
+	user = str(user_id or "").strip()
+	case = str(case_id or "").strip()
+	if not user or not case:
+		raise ValueError("privacy_denied:case_binding")
+	return user, case
+
+
+def _alias_binding(user_id: str, case_id: str, principal_id: str):
+	from integrations.private_storage import PrivateArtifactBinding
+
+	return PrivateArtifactBinding(
+		tenant_id=user_id,
+		case_id=case_id,
+		artifact_kind="case-alias",
+		revision="1",
+		principal_id=principal_id or user_id,
+	)
+
+
+def _embedding_binding(user_id: str, case_id: str, principal_id: str):
+	from integrations.private_storage import PrivateArtifactBinding
+
+	return PrivateArtifactBinding(
+		tenant_id=user_id,
+		case_id=case_id,
+		artifact_kind="embedding",
+		revision="1",
+		principal_id=principal_id or user_id,
+	)
+
+
+def remember_case_alias(
+	*,
+	user_id: str,
+	case_id: str,
+	alias: str,
+	canonical: str,
+	key: bytes,
+	key_id: str,
+	principal_id: str = "",
+) -> Dict[str, Any]:
+	"""Seal one alias mapping into this user and case cache only."""
+
+	from integrations.private_storage import seal_private_artifact
+
+	user, case = _case_cache_key(user_id, case_id)
+	alias_text = str(alias or "").strip()
+	canonical_text = str(canonical or "").strip()
+	if not alias_text or not canonical_text:
+		raise ValueError("privacy_denied:malformed_alias")
+	alias_id = hashlib.sha256(f"{user}\0{case}\0{alias_text}".encode("utf-8")).hexdigest()
+	payload = json.dumps(
+		{"alias": alias_text, "canonical": canonical_text},
+		separators=(",", ":"),
+	).encode("utf-8")
+	envelope = seal_private_artifact(
+		payload,
+		binding=_alias_binding(user, case, principal_id or user),
+		key=key,
+		key_id=key_id,
+	)
+	with _CASE_CACHE_LOCK:
+		_CASE_ALIAS_CACHE.setdefault((user, case), {})[alias_id] = bytes(envelope)
+	return {
+		"alias_id": alias_id,
+		"encrypted": True,
+		"classification": "private",
+		"user_id": user,
+		"case_id": case,
+	}
+
+
+def resolve_case_alias(
+	*,
+	user_id: str,
+	case_id: str,
+	alias: str,
+	key: bytes,
+	key_id: str,
+	principal_id: str = "",
+) -> Dict[str, Any]:
+	"""Open one alias from the same user and case. Other caches are not consulted."""
+
+	from integrations.private_storage import open_private_artifact
+
+	user, case = _case_cache_key(user_id, case_id)
+	alias_text = str(alias or "").strip()
+	alias_id = hashlib.sha256(f"{user}\0{case}\0{alias_text}".encode("utf-8")).hexdigest()
+	with _CASE_CACHE_LOCK:
+		envelope = _CASE_ALIAS_CACHE.get((user, case), {}).get(alias_id)
+	if envelope is None:
+		return {"found": False, "alias_id": alias_id, "user_id": user, "case_id": case}
+	opened = open_private_artifact(
+		envelope,
+		binding=_alias_binding(user, case, principal_id or user),
+		key=key,
+		expected_key_id=key_id,
+	)
+	mapping = json.loads(opened.decode("utf-8"))
+	return {
+		"found": True,
+		"alias_id": alias_id,
+		"alias": mapping.get("alias"),
+		"canonical": mapping.get("canonical"),
+		"user_id": user,
+		"case_id": case,
+	}
+
+
+def case_alias_cache_public_view(user_id: str, case_id: str) -> Dict[str, Any]:
+	"""Show that the cache holds ciphertext, not names or mappings."""
+
+	user, case = _case_cache_key(user_id, case_id)
+	with _CASE_CACHE_LOCK:
+		slot = dict(_CASE_ALIAS_CACHE.get((user, case), {}))
+	bodies = [envelope.decode("latin1", errors="replace") for envelope in slot.values()]
+	return {
+		"user_id": user,
+		"case_id": case,
+		"entry_count": len(slot),
+		"encrypted": all(envelope.startswith(b"CGPE") for envelope in slot.values()) if slot else True,
+		"bodies_are_envelopes": True,
+		"joined_ciphertext": "".join(bodies),
+	}
+
+
+def clear_case_private_caches() -> None:
+	with _CASE_CACHE_LOCK:
+		_CASE_ALIAS_CACHE.clear()
+		_CASE_EMBEDDING_CACHE.clear()
+
+
+def store_private_embedding(
+	*,
+	user_id: str,
+	case_id: str,
+	vector: list,
+	source_text: str,
+	key: bytes,
+	key_id: str,
+	principal_id: str = "",
+	sensitive_literals: Optional[list] = None,
+) -> Dict[str, Any]:
+	"""Treat an embedding as private derived data and keep it out of the public index."""
+
+	from integrations.ipfs_datasets.storage import publish_public_index_entry
+	from integrations.private_storage import seal_private_artifact
+
+	user, case = _case_cache_key(user_id, case_id)
+	if not isinstance(vector, list) or not vector:
+		raise ValueError("privacy_denied:malformed_embedding")
+	embedding_id = hashlib.sha256(
+		json.dumps({"user": user, "case": case, "vector": vector}, separators=(",", ":")).encode("utf-8")
+	).hexdigest()
+	payload = json.dumps(
+		{"vector": vector, "source_text": str(source_text or "")},
+		separators=(",", ":"),
+	).encode("utf-8")
+	envelope = seal_private_artifact(
+		payload,
+		binding=_embedding_binding(user, case, principal_id or user),
+		key=key,
+		key_id=key_id,
+	)
+	with _CASE_CACHE_LOCK:
+		_CASE_EMBEDDING_CACHE.setdefault((user, case), {})[embedding_id] = bytes(envelope)
+	literals = list(sensitive_literals or [])
+	if source_text:
+		literals.append(str(source_text))
+	public_row = publish_public_index_entry(
+		{
+			"cid": embedding_id,
+			"cid_kind": "opaque",
+			"artifact_class": "opaque_private_ref",
+			"classification": EMBEDDING_CLASSIFICATION,
+			"status": "stored",
+			"source_text": source_text,
+			"embedding": vector,
+			"user_name": user,
+			"case_name": case,
+		},
+		sensitive_literals=literals,
+	)
+	return {
+		"embedding_id": embedding_id,
+		"classification": EMBEDDING_CLASSIFICATION,
+		"encrypted": True,
+		"public_index": public_row,
+		"user_id": user,
+		"case_id": case,
+	}
+
+
+def open_private_embedding(
+	*,
+	user_id: str,
+	case_id: str,
+	embedding_id: str,
+	key: bytes,
+	key_id: str,
+	principal_id: str = "",
+) -> Dict[str, Any]:
+	from integrations.private_storage import open_private_artifact
+
+	user, case = _case_cache_key(user_id, case_id)
+	with _CASE_CACHE_LOCK:
+		envelope = _CASE_EMBEDDING_CACHE.get((user, case), {}).get(str(embedding_id))
+	if envelope is None:
+		return {"found": False, "embedding_id": embedding_id, "classification": EMBEDDING_CLASSIFICATION}
+	opened = open_private_artifact(
+		envelope,
+		binding=_embedding_binding(user, case, principal_id or user),
+		key=key,
+		expected_key_id=key_id,
+	)
+	payload = json.loads(opened.decode("utf-8"))
+	return {
+		"found": True,
+		"embedding_id": embedding_id,
+		"classification": EMBEDDING_CLASSIFICATION,
+		"vector": payload.get("vector"),
+		"source_text": payload.get("source_text"),
+	}
+
+
+def redact_generation_diagnostic(record: Mapping[str, Any] | None) -> Dict[str, Any]:
+	"""Private generation diagnostics share the storage allow-list."""
+
+	from integrations.ipfs_datasets.storage import redact_private_diagnostic
+
+	return redact_private_diagnostic(record)
+
+
+def public_query_reference(query: str) -> Dict[str, Any]:
+	"""Hash a claim-specific query. The query text is not a public field."""
+
+	text = str(query or "")
+	return {
+		"schema": "public-query-ref/v1",
+		"query_ref": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+		"classification": "opaque_private_ref",
+	}
+
+
 __all__ = [
 	"generate_text",
 	"generate_text_via_router",
@@ -1969,4 +2223,13 @@ __all__ = [
 	"complaint_data_class_inventory",
 	"inspect_privacy_policy",
 	"privacy_policy_for_mode",
+	"EMBEDDING_CLASSIFICATION",
+	"remember_case_alias",
+	"resolve_case_alias",
+	"case_alias_cache_public_view",
+	"clear_case_private_caches",
+	"store_private_embedding",
+	"open_private_embedding",
+	"redact_generation_diagnostic",
+	"public_query_reference",
 ]
