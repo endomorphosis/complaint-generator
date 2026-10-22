@@ -2583,6 +2583,8 @@ def build_candidate_claims(knowledge_graph) -> List[Dict[str, Any]]:
                 "confidence": float(entity.confidence),
                 "source": entity.source,
                 "required_elements": [],
+                "epistemic_class": _normalize_text(entity.attributes.get("epistemic_class") or "") or None,
+                "narrative_kind": _normalize_text(entity.attributes.get("narrative_kind") or "") or None,
             }
         )
     return candidates
@@ -2710,6 +2712,8 @@ def build_canonical_facts(knowledge_graph) -> List[Dict[str, Any]]:
                     "target_ids": list(entity.attributes.get("target_ids") or []),
                     "location": _normalize_text(entity.attributes.get("location") or "") or None,
                     "confidence": float(entity.confidence),
+                    "epistemic_class": _normalize_text(entity.attributes.get("epistemic_class") or "") or None,
+                    "value_status": _normalize_text(entity.attributes.get("value_status") or "") or None,
                     "needs_corroboration": entity.confidence < 0.85,
                     "corroboration_priority": "high" if entity.confidence < 0.7 else "medium",
                     "materiality": "medium",
@@ -4049,6 +4053,60 @@ def apply_explicit_legal_context(intake_case_file: Dict[str, Any], **updates: An
     return case_file
 
 
+def project_graph_revision_view(case_file: Dict[str, Any], knowledge_graph) -> Dict[str, Any]:
+    """Expose narrative nodes, revisions, unknowns, and contradictions without dropping history."""
+    if not isinstance(case_file, dict) or knowledge_graph is None:
+        return case_file
+    from complaint_phases.knowledge_graph import inspect_graph_revisions
+
+    narrative_nodes = []
+    unknowns = []
+    contradictions = []
+    support_edges = []
+    for entity in getattr(knowledge_graph, "entities", {}).values():
+        attributes = entity.attributes if isinstance(getattr(entity, "attributes", None), dict) else {}
+        epistemic_class = _normalize_text(attributes.get("epistemic_class") or "") or None
+        if attributes.get("narrative_source_linked") or attributes.get("narrative_kind"):
+            envelope = _user_assertion_payload(getattr(entity, "provenance", {})) or {}
+            narrative_nodes.append({
+                "entity_id": entity.id,
+                "entity_type": entity.type,
+                "narrative_kind": attributes.get("narrative_kind"),
+                "name": entity.name,
+                "epistemic_class": epistemic_class or "user_allegation",
+                "stable_id": envelope.get("stable_id"),
+                "source_span": envelope.get("source_span"),
+                "source_hash": envelope.get("source_hash"),
+                "statement": envelope.get("source_span_text") or attributes.get("description") or entity.name,
+            })
+        value_status = _normalize_text(attributes.get("value_status") or "")
+        if value_status == "unknown":
+            unknowns.append({"entity_id": entity.id, "statement": attributes.get("description") or entity.name, "value_status": "unknown"})
+        if value_status == "contradiction":
+            contradictions.append({"entity_id": entity.id, "statement": attributes.get("description") or entity.name, "value_status": "contradiction"})
+    ledger = knowledge_graph.factual_ledger() if hasattr(knowledge_graph, "factual_ledger") else {}
+    for conflict in ledger.get("conflicts") or []:
+        if isinstance(conflict, dict):
+            contradictions.append(dict(conflict))
+    for relationship in getattr(knowledge_graph, "relationships", {}).values():
+        attributes = relationship.attributes if isinstance(getattr(relationship, "attributes", None), dict) else {}
+        if attributes.get("epistemic_class"):
+            support_edges.append({
+                "relationship_id": relationship.id,
+                "relation_type": relationship.relation_type,
+                "epistemic_class": attributes.get("epistemic_class"),
+                "source_id": relationship.source_id,
+                "target_id": relationship.target_id,
+                "statement": attributes.get("statement"),
+            })
+    case_file["graph_revisions"] = inspect_graph_revisions(knowledge_graph)
+    case_file["narrative_source_nodes"] = narrative_nodes
+    case_file["visible_unknowns"] = unknowns
+    case_file["visible_contradictions"] = contradictions
+    case_file["epistemic_support_edges"] = support_edges
+    return case_file
+
+
 def build_intake_case_file(knowledge_graph, complaint_text: str = "") -> Dict[str, Any]:
     """Build the initial structured intake case file from current graph state."""
     candidate_claims = [
@@ -4136,6 +4194,7 @@ def build_intake_case_file(knowledge_graph, complaint_text: str = "") -> Dict[st
         "source_complaint_text": normalized_complaint_text,
     }
     intake_case_file["legal_context"] = refresh_explicit_legal_context(intake_case_file)
+    intake_case_file = project_graph_revision_view(intake_case_file, knowledge_graph)
 
     open_items = build_open_items(intake_case_file)
     intake_case_file["open_items"] = open_items

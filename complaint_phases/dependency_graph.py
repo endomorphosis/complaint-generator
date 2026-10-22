@@ -3069,12 +3069,13 @@ class DependencyGraphBuilder:
             return False
         return isinstance(record, dict) and bounded(record)
 
-    def _is_verified_legal_requirement(self, requirement: Any) -> bool:
+    @classmethod
+    def _is_verified_legal_requirement(cls, requirement: Any) -> bool:
         """Re-derive source admission; serialized verification booleans are not proof."""
         if not isinstance(requirement, dict):
             return False
         source = requirement.get("source_record")
-        if not self._bounded_source_record(source):
+        if not cls._bounded_source_record(source):
             return False
         try:
             from integrations.ipfs_datasets.logic import extract_source_bound_rule_candidates

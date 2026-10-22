@@ -393,6 +393,194 @@ def envelope_for_extracted_record(
     )
 
 
+def attach_narrative_source_records(graph: "KnowledgeGraph", source_text: str, builder: Any) -> List["Entity"]:
+    """Add people, events, and allegations linked to exact narrative spans.
+
+    Heuristic graph rows stay untouched. Only labels that occur once in the
+    submitted narrative become source-bound user allegations.
+    """
+    from integrations.ipfs_datasets.graphs import narrative_source_records
+    from integrations.ipfs_datasets.types import DEFAULT_USER_ASSERTION_EXTRACTOR_VERSION
+
+    created: List["Entity"] = []
+    caller_context = {
+        "source_kind": "user_statement",
+        "source_id": "original_complaint",
+        "message_id": "original_complaint",
+        "assertion_status": "asserted",
+        "extractor_version": DEFAULT_USER_ASSERTION_EXTRACTOR_VERSION,
+        "source_text": source_text,
+    }
+    existing_spans = set()
+    type_for_kind = {"person": "person", "event": "fact", "allegation": "allegation"}
+    for record in narrative_source_records(source_text):
+        span = record["source_span"]
+        entity_type = type_for_kind[record["narrative_kind"]]
+        if (span["start"], span["end"], entity_type) in existing_spans:
+            continue
+        envelope = envelope_for_extracted_record(
+            {
+                "type": entity_type,
+                "name": record["name"] if entity_type == "person" else record["description"],
+                "origin": "user",
+                "attributes": {
+                    "description": record["description"],
+                    "narrative_kind": record["narrative_kind"],
+                    "epistemic_class": record["epistemic_class"],
+                    "source_span": span,
+                    "fact_type": "event" if record["narrative_kind"] == "event" else "allegation",
+                },
+                "source_span": span,
+            },
+            source_text=source_text,
+            caller_context=caller_context,
+            role=record["narrative_kind"],
+        )
+        if not envelope.is_asserted_user_fact:
+            continue
+        entity = Entity(
+            id=builder._get_entity_id(),
+            type=entity_type,
+            name=record["name"] if entity_type == "person" else record["description"],
+            attributes={
+                "description": record["description"],
+                "narrative_kind": record["narrative_kind"],
+                "epistemic_class": record["epistemic_class"],
+                "narrative_source_linked": True,
+                "fact_type": "event" if record["narrative_kind"] == "event" else "allegation",
+            },
+            confidence=1.0,
+            source="complaint",
+            provenance={"user_assertion": envelope.as_dict()},
+        )
+        graph.add_entity(entity)
+        graph.register_assertion(entity, envelope, status="active", event_id="narrative")
+        created.append(entity)
+        existing_spans.add((span["start"], span["end"], entity_type))
+    if created:
+        graph.append_revision({
+            "action": "narrative",
+            "event_id": "narrative",
+            "statement": source_text,
+            "source_hash": created[0].provenance["user_assertion"].get("source_hash"),
+            "entity_ids": [entity.id for entity in created],
+            "stable_ids": [
+                assertion_from_provenance(entity.provenance).stable_id for entity in created
+            ],
+            "epistemic_classes": [entity.attributes["epistemic_class"] for entity in created],
+        })
+    return created
+
+
+def record_answer_graph_revision(
+    graph: "KnowledgeGraph",
+    *,
+    answer: str,
+    source_text: str,
+    source_context: Optional[Mapping[str, Any]],
+    question: Optional[Mapping[str, Any]],
+    event_id: str,
+    epistemic_class: str,
+    value_status: str,
+    support_changes: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Append one inspectable answer revision bound to the exact user statement."""
+    from integrations.ipfs_datasets.graphs import exact_statement_provenance
+    from integrations.ipfs_datasets.types import DEFAULT_USER_ASSERTION_EXTRACTOR_VERSION, build_user_assertion_envelope
+
+    provenance = exact_statement_provenance(source_text, answer)
+    context = dict(source_context or {})
+    span = provenance.get("source_span")
+    envelope = None
+    entity = None
+    if isinstance(span, Mapping) and not provenance.get("deficiency"):
+        envelope = build_user_assertion_envelope(
+            source_text=source_text,
+            source_kind=str(context.get("source_kind") or "user_statement"),
+            source_id=str(context.get("source_id") or event_id or "answer"),
+            message_id=str(context.get("message_id") or context.get("source_id") or event_id or "answer"),
+            document_id=str(context.get("document_id") or ""),
+            assertion_status=str(context.get("assertion_status") or "asserted"),
+            extractor_version=str(context.get("extractor_version") or DEFAULT_USER_ASSERTION_EXTRACTOR_VERSION),
+            source_hash=str(context.get("source_hash") or ""),
+            source_span=span,
+            role="answer",
+            subject_key=f"answer|{event_id}|{epistemic_class}|{value_status}",
+        )
+    if envelope is not None and envelope.is_asserted_user_fact:
+        entity = Entity(
+            id=f"answer_{len(graph.entities) + 1}",
+            type="fact",
+            name=envelope.source_span_text,
+            attributes={
+                "description": envelope.source_span_text,
+                "epistemic_class": epistemic_class,
+                "value_status": value_status,
+                "fact_type": "answer",
+                "answer_event_id": event_id,
+            },
+            confidence=1.0,
+            source="complaint",
+            provenance={"user_assertion": envelope.as_dict()},
+        )
+        graph.add_entity(entity)
+        graph.register_assertion(entity, envelope, status="active", event_id=event_id)
+        if value_status == "contradiction":
+            graph.factual_ledger()["conflicts"].append({
+                "event_id": event_id,
+                "stable_id": envelope.stable_id,
+                "entity_id": entity.id,
+                "statement": envelope.source_span_text,
+                "status": "visible",
+            })
+    statement = provenance.get("statement") or answer
+    revision = graph.append_revision({
+        "action": "answer",
+        "event_id": event_id,
+        "statement": statement,
+        "source_hash": provenance.get("source_hash"),
+        "source_span": provenance.get("source_span"),
+        "deficiency": provenance.get("deficiency") or "",
+        "epistemic_class": epistemic_class,
+        "value_status": value_status,
+        "question": dict(question) if isinstance(question, Mapping) else {},
+        "entity_id": entity.id if entity is not None else "",
+        "stable_id": envelope.stable_id if envelope is not None and envelope.is_asserted_user_fact else "",
+        "support_changes": [dict(item) for item in (support_changes or [])],
+        "audit_retained": True,
+        "provenance": {
+            "statement": statement,
+            "source_hash": provenance.get("source_hash"),
+            "source_span": provenance.get("source_span"),
+            "epistemic_class": epistemic_class,
+            "value_status": value_status,
+            "event_id": event_id,
+        },
+    })
+    return revision
+
+
+def inspect_graph_revisions(graph: "KnowledgeGraph") -> List[Dict[str, Any]]:
+    """Return append-only revisions with the statement provenance still attached."""
+    revisions = []
+    for record in graph.factual_ledger().get("revisions") or []:
+        if not isinstance(record, Mapping):
+            continue
+        item = copy.deepcopy(dict(record))
+        statement = item.get("statement") or ""
+        span = item.get("source_span") if isinstance(item.get("source_span"), Mapping) else {}
+        item["provenance"] = {
+            "statement": statement,
+            "source_hash": item.get("source_hash") or (item.get("new_envelope") or {}).get("source_hash"),
+            "source_span": span or (item.get("new_envelope") or {}).get("source_span"),
+            "epistemic_class": item.get("epistemic_class"),
+            "value_status": item.get("value_status"),
+            "event_id": item.get("event_id"),
+        }
+        revisions.append(item)
+    return revisions
+
+
 def _resolve_graph_endpoint(
     record: Mapping[str, Any],
     graph: "KnowledgeGraph",
@@ -2383,6 +2571,10 @@ class KnowledgeGraphBuilder:
                 "relationship_score_floor": float(self.min_relationship_actor_critic_score),
             }
         
+        link_narrative = bool(isinstance(source_context, Mapping) and source_context.get("link_narrative") is True)
+        if include_local_heuristics and not legal_passage and link_narrative:
+            attach_narrative_source_records(graph, source_text, self)
+
         logger.info(f"Built knowledge graph: {graph.summary()}")
         
         # Batch 220: Track graph building

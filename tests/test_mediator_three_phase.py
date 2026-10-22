@@ -3407,7 +3407,10 @@ class TestMediatorThreePhaseIntegration:
 
         mediator = Mediator([MockBackend()])
 
+        selector_calls = []
+
         def selector(candidates, max_questions=10):
+            selector_calls.append([candidate.get('type') for candidate in candidates])
             evidence_first = [candidate for candidate in candidates if candidate.get('type') == 'evidence']
             remainder = [candidate for candidate in candidates if candidate.get('type') != 'evidence']
             return (evidence_first + remainder)[:max_questions]
@@ -3419,6 +3422,8 @@ class TestMediatorThreePhaseIntegration:
 
         assert result['initial_questions']
         assert result['initial_questions'][0]['type'] == 'evidence'
+        assert len(selector_calls) == 1
+        assert 'legal_context' in selector_calls[0]
 
     def test_default_selector_attaches_reasoning_scores_to_selected_questions(self, monkeypatch):
         """Default mediator selection should annotate chosen intake questions with reasoning signals."""

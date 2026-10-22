@@ -616,6 +616,199 @@ def build_namespaced_support_link(
     }
 
 
+USER_ALLEGATION_CLASS = "user_allegation"
+CORROBORATING_EVIDENCE_CLASS = "corroborating_evidence"
+INFERRED_HYPOTHESIS_CLASS = "inferred_hypothesis"
+LEGAL_AUTHORITY_CLASS = "legal_authority"
+EPISTEMIC_CLASSES = frozenset({
+    USER_ALLEGATION_CLASS,
+    CORROBORATING_EVIDENCE_CLASS,
+    INFERRED_HYPOTHESIS_CLASS,
+    LEGAL_AUTHORITY_CLASS,
+})
+REQUIREMENT_DEFINITION_FIELDS = (
+    "description",
+    "authority_locator",
+    "source_locator",
+    "jurisdiction",
+    "effective_date",
+    "authority_version",
+    "derivation_status",
+    "proof_status",
+    "asserted_text",
+    "citation",
+    "authority_text",
+    "rule_text",
+)
+_UNKNOWN_STATEMENTS = frozenset({
+    "", "n/a", "na", "none", "unknown", "not sure", "unsure", "no idea",
+    "i do not know", "i don't know", "idk",
+})
+_HYPOTHESIS_MARKERS = (
+    "i think", "i believe", "maybe", "might have", "possibly", "hypothesis", "i guess",
+)
+_EVIDENCE_MARKERS = (
+    "attached", "exhibit", "witness", "the email", "email shows", "document",
+    "photograph", "photo shows", "receipt", "corroborat", "recording", "screenshot",
+)
+_CONTRADICTION_MARKERS = (
+    "that is wrong", "i contradict", "the opposite", "not true", "i was wrong",
+    "correction:", "that contradicts",
+)
+_DATE_IN_SENTENCE = re.compile(
+    r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2},\s+\d{4}\b"
+)
+_PERSON_NAME = r"([A-Z][a-z]+(?: [A-Z][a-z]+)+)"
+_PERSON_PATTERNS = (
+    re.compile(r"(?i:\bmy name is )" + _PERSON_NAME),
+    re.compile(r"\bI am " + _PERSON_NAME),
+    re.compile(r"(?i:\b(?:manager|supervisor|landlord|owner) )" + _PERSON_NAME),
+)
+_ALLEGATION_MARKERS = ("fired", "discriminat", "denied", "retaliat", "harass", "evict", "allege")
+
+
+def classify_epistemic_class(text: str, *, explicit: Optional[str] = None, legal: bool = False) -> str:
+    """Separate allegation, corroboration, hypothesis, and legal authority.
+
+    A legal flag wins over user wording. Marker checks do not invent a fact.
+    """
+    supplied = str(explicit or "").strip().lower()
+    if supplied in EPISTEMIC_CLASSES:
+        return supplied
+    if legal:
+        return LEGAL_AUTHORITY_CLASS
+    normalized = " ".join(str(text or "").split()).lower()
+    if any(marker in normalized for marker in _HYPOTHESIS_MARKERS):
+        return INFERRED_HYPOTHESIS_CLASS
+    if any(marker in normalized for marker in _EVIDENCE_MARKERS):
+        return CORROBORATING_EVIDENCE_CLASS
+    return USER_ALLEGATION_CLASS
+
+
+def statement_value_status(text: str) -> str:
+    """Keep unknown and contradiction answers visible as values, not deletions."""
+    normalized = " ".join(str(text or "").split()).lower()
+    if normalized in _UNKNOWN_STATEMENTS:
+        return "unknown"
+    if any(marker in normalized for marker in _CONTRADICTION_MARKERS):
+        return "contradiction"
+    return "stated"
+
+
+def exact_statement_provenance(source_text: str, statement: str) -> Dict[str, Any]:
+    """Bind a revision to the exact user statement bytes when the span is unique."""
+    source = source_text if isinstance(source_text, str) else ""
+    located = locate_unique_byte_span(source, statement if isinstance(statement, str) else "")
+    source_hash = hashlib.sha256(source.encode("utf-8")).hexdigest() if source else ""
+    if located.deficiency or located.start is None or located.end is None:
+        return {
+            "statement": statement if isinstance(statement, str) else "",
+            "source_text": source,
+            "source_hash": source_hash,
+            "source_span": None,
+            "deficiency": located.deficiency or "missing_source_span",
+        }
+    return {
+        "statement": located.text,
+        "source_text": source,
+        "source_hash": source_hash,
+        "source_span": {"start": located.start, "end": located.end, "text": located.text, "unit": "byte"},
+        "deficiency": "",
+    }
+
+
+def narrative_source_records(text: str) -> List[Dict[str, Any]]:
+    """People, events, and allegations whose labels are exact narrative spans."""
+    source = text if isinstance(text, str) else ""
+    records: List[Dict[str, Any]] = []
+    seen = set()
+
+    def _add(kind: str, label: str) -> None:
+        cleaned = " ".join(str(label or "").split())
+        if not cleaned:
+            return
+        located = locate_unique_byte_span(source, cleaned)
+        if located.deficiency or located.start is None:
+            return
+        key = (kind, located.start, located.end)
+        if key in seen:
+            return
+        seen.add(key)
+        records.append({
+            "narrative_kind": kind,
+            "name": located.text if kind == "person" else located.text,
+            "description": located.text,
+            "epistemic_class": USER_ALLEGATION_CLASS,
+            "source_span": {"start": located.start, "end": located.end, "text": located.text},
+        })
+
+    for pattern in _PERSON_PATTERNS:
+        for match in pattern.finditer(source):
+            _add("person", match.group(1))
+    sentences = _split_sentences(source)
+    counts: Dict[str, int] = {}
+    for sentence in sentences:
+        counts[sentence] = counts.get(sentence, 0) + 1
+    for sentence in sentences:
+        if counts[sentence] != 1:
+            continue
+        lower = sentence.lower()
+        if _DATE_IN_SENTENCE.search(sentence):
+            _add("event", sentence)
+        if any(marker in lower for marker in _ALLEGATION_MARKERS):
+            _add("allegation", sentence)
+    return records
+
+
+def build_epistemic_support_edge(
+    *,
+    factual_assertion_id: str,
+    rule_id: str,
+    epistemic_class: str,
+    statement: str,
+    factual_provenance: Optional[Mapping[str, Any]] = None,
+    rule_provenance: Optional[Mapping[str, Any]] = None,
+    relation: str = "supports",
+) -> Dict[str, Any]:
+    """Support or contradict a legal element without treating authority as a user fact."""
+    kind = classify_epistemic_class(statement, explicit=epistemic_class)
+    if kind == LEGAL_AUTHORITY_CLASS:
+        raise ValueError("legal authority cannot be the factual endpoint of a support edge")
+    link = build_namespaced_support_link(
+        factual_assertion_id=factual_assertion_id,
+        rule_id=rule_id,
+        relation=relation,
+        factual_provenance=factual_provenance,
+        rule_provenance=rule_provenance,
+    )
+    link["epistemic_class"] = kind
+    link["statement"] = statement
+    link["requirement_definition_unchanged"] = True
+    return link
+
+
+def requirement_definition_snapshot(node: Any) -> Dict[str, Any]:
+    """Copy the authority-derived definition fields an answer must not edit."""
+    attributes = getattr(node, "attributes", None)
+    attributes = dict(attributes) if isinstance(attributes, Mapping) else {}
+    return {
+        "name": getattr(node, "name", ""),
+        "description": getattr(node, "description", ""),
+        "fields": {key: deepcopy(attributes[key]) for key in REQUIREMENT_DEFINITION_FIELDS if key in attributes},
+    }
+
+
+def restore_requirement_definition(node: Any, snapshot: Mapping[str, Any]) -> None:
+    """Put the requirement definition back after an answer changes only support."""
+    node.name = snapshot.get("name", getattr(node, "name", ""))
+    node.description = snapshot.get("description", getattr(node, "description", ""))
+    attributes = node.attributes if isinstance(getattr(node, "attributes", None), dict) else {}
+    node.attributes = attributes
+    for key, value in dict(snapshot.get("fields") or {}).items():
+        attributes[key] = deepcopy(value)
+
+
 def _split_sentences(text: str) -> List[str]:
     cleaned = " ".join((text or "").split())
     if not cleaned:

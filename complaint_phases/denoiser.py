@@ -3658,7 +3658,8 @@ class ComplaintDenoiser:
                           knowledge_graph: KnowledgeGraph,
                           dependency_graph: DependencyGraph,
                           max_questions: int = 10,
-                          intake_case_file: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+                          intake_case_file: Optional[Dict[str, Any]] = None,
+                          additional_candidates: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """
         Generate questions to denoise the complaint.
         
@@ -3676,6 +3677,9 @@ class ComplaintDenoiser:
             max_questions=max_questions,
             intake_case_file=intake_case_file,
         )
+        # Context questions join the same selection pass as graph questions.
+        questions = [candidate for candidate in (additional_candidates or [])
+                     if isinstance(candidate, dict)] + questions
         selector = getattr(self.mediator, 'select_intake_question_candidates', None) if self.mediator else None
         questions = self.select_question_candidates(
             questions,
@@ -5570,6 +5574,12 @@ class ComplaintDenoiser:
             # All source and target admission precedes entity/ledger mutation.
             previous = knowledge_graph.require_revision_target(target_id or "", envelope)
         span_text = envelope.source_span_text
+        from integrations.ipfs_datasets.graphs import classify_epistemic_class
+        question_context = question.get("context") if isinstance(question.get("context"), dict) else {}
+        requested_class = str(question_context.get("epistemic_class") or "")
+        if requested_class == "legal_authority":
+            requested_class = ""
+        epistemic_class = classify_epistemic_class(span_text, explicit=requested_class)
         entity = Entity(
             id=self._next_entity_id(knowledge_graph),
             type="fact",
@@ -5579,6 +5589,8 @@ class ComplaintDenoiser:
                 "fact_type": str((question.get("context") or {}).get("fact_type") or "clarification")
                 if isinstance(question.get("context"), dict) else "clarification",
                 "factual_action": action,
+                "epistemic_class": epistemic_class,
+                "value_status": "contradiction" if action == "contradict" else "stated",
             },
             confidence=float(envelope.confidence if envelope.confidence is not None else 1.0),
             source="complaint",

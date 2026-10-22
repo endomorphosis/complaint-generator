@@ -12,6 +12,7 @@ an unexpected failure.
 
 from time import time
 import hashlib
+import inspect
 import re
 from typing import List, Optional, Dict, Any
 from lib.runtime_ownership import require_module_ownership
@@ -528,6 +529,7 @@ class Mediator:
 			anchor_selection_fallback = _anchor_selection_fallback_probe(candidate, signals, text)
 			hearing_request_timing_triplet_match = _hearing_request_timing_triplet_match(candidate, signals, text)
 			return (
+				int(candidate.get('type') != 'legal_context'),
 				-float(candidate.get('selector_score', 0.0) or 0.0),
 				int(signals.get('phase_focus_rank', 99) or 99),
 				-int(signals.get('blocker_closure_match_count', 0) or 0),
@@ -6670,7 +6672,20 @@ class Mediator:
 		# Phase 1: Build initial knowledge and dependency graphs.
 		# Verified legal requirements are bound before any element question is asked.
 		construction_sequence = []
-		kg = self.kg_builder.build_from_text(initial_complaint_text)
+		narrative_context = {"link_narrative": True, "source_text": initial_complaint_text}
+		build_graph = self.kg_builder.build_from_text
+		try:
+			parameters = inspect.signature(build_graph).parameters
+		except (TypeError, ValueError):
+			parameters = None
+		accepts_source_context = parameters is None or any(
+			parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == "source_context"
+			for parameter in parameters.values()
+		)
+		if accepts_source_context:
+			kg = build_graph(initial_complaint_text, source_context=narrative_context)
+		else:
+			kg = build_graph(initial_complaint_text)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph', kg)
 		
 		# Extract claims from knowledge graph
@@ -6741,7 +6756,11 @@ class Mediator:
 			self._build_intake_claim_pressure_map(dg),
 			intake_matching_pressure,
 		)
-		question_candidates = self.denoiser.collect_question_candidates(
+		legal_context_candidates = (
+			self._legal_selection_questions(legal_selection)
+			if not legal_selection.get('ready_to_select') else []
+		)
+		question_candidates = legal_context_candidates + self.denoiser.collect_question_candidates(
 			kg,
 			dg,
 			max_questions=10,
@@ -6752,12 +6771,11 @@ class Mediator:
 		questions = self.denoiser.generate_questions(
 			kg,
 			dg,
-			max_questions=10,
+			max_questions=10 + len(legal_context_candidates),
 			intake_case_file=intake_case_file,
+			additional_candidates=legal_context_candidates,
 		)
 		questions = self._intake_question_proposals(questions, source_text=initial_complaint_text)
-		if not legal_selection.get('ready_to_select'):
-			questions = self._legal_selection_questions(legal_selection) + list(questions or [])
 		construction_sequence.append('element_questions')
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'question_candidates', question_candidates)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'current_questions', questions)
@@ -6800,7 +6818,8 @@ class Mediator:
 
 	def _initialize_intake_case_file(self, knowledge_graph, complaint_text: str) -> Dict[str, Any]:
 		"""Build the initial structured intake case file from the current knowledge graph."""
-		return build_intake_case_file(knowledge_graph, complaint_text)
+		from complaint_phases.intake_case_file import project_graph_revision_view
+		return project_graph_revision_view(build_intake_case_file(knowledge_graph, complaint_text), knowledge_graph)
 
 	def confirm_intake_summary(self, confirmation_note: str = '', confirmation_source: str = 'complainant') -> Dict[str, Any]:
 		"""Mark the latest intake summary snapshot as confirmed for evidence handoff."""
@@ -8458,6 +8477,7 @@ class Mediator:
 		supersedes_stable_id: Optional[str] = None,
 		retracts_stable_id: Optional[str] = None,
 		contradicts_stable_id: Optional[str] = None,
+		transition_id: Optional[str] = None,
 	) -> Dict[str, Any]:
 		"""
 		Process an answer to a denoising question in Phase 1.
@@ -8469,6 +8489,8 @@ class Mediator:
 		Returns:
 			Updated status with next questions or phase transition info
 		"""
+		if transition_id and not answer_event_id:
+			answer_event_id = f"transition:{transition_id}"
 		kg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph')
 		dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
 		from complaint_phases.knowledge_graph import answer_event_payload
@@ -8485,6 +8507,18 @@ class Mediator:
 			prior = kg.begin_answer_event(answer_event_id, event_payload)
 			if prior is not None and prior.get("mediator_result") is not None:
 				return prior["mediator_result"]
+
+		from integrations.ipfs_datasets.graphs import (
+			requirement_definition_snapshot,
+			restore_requirement_definition,
+		)
+		definition_snapshots = {}
+		if dg is not None:
+			for node in dg.nodes.values():
+				definition_snapshots[node.id] = {
+					"definition": requirement_definition_snapshot(node),
+					"satisfied": bool(node.satisfied),
+				}
 		
 		# Process the answer
 		updates = self.denoiser.process_answer(
@@ -8524,6 +8558,76 @@ class Mediator:
 				'fact_change': True, 'clarification_keys': clarification_keys,
 				'fact_ids': fact_ids, 'factual_revision': updates.get('revision'),
 			})
+			dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph') or dg
+
+		from complaint_phases.intake_case_file import project_graph_revision_view
+		from complaint_phases.knowledge_graph import record_answer_graph_revision
+		from integrations.ipfs_datasets.graphs import classify_epistemic_class, statement_value_status
+		question_context = (question or {}).get("context") if isinstance((question or {}).get("context"), dict) else {}
+		explicit_class = str(question_context.get("epistemic_class") or (question or {}).get("epistemic_class") or "")
+		if explicit_class == "legal_authority":
+			explicit_class = ""
+		epistemic_class = classify_epistemic_class(answer, explicit=explicit_class)
+		value_status = statement_value_status(answer)
+		target_ids = {
+			str(item).strip()
+			for item in (
+				question_context.get("requirement_id"),
+				question_context.get("target_element_id"),
+				question_context.get("node_id"),
+				(question or {}).get("target_element_id"),
+			)
+			if str(item or "").strip()
+		}
+		support_changes = []
+		if dg is not None:
+			for node_id, snapshot in definition_snapshots.items():
+				node = dg.nodes.get(node_id)
+				if node is None:
+					continue
+				restore_requirement_definition(node, snapshot["definition"])
+				if node_id in target_ids and value_status == "unknown":
+					node.satisfied = snapshot["satisfied"]
+					node.attributes["value_status"] = "unknown"
+					node.attributes["unknown_value"] = answer
+				elif node_id in target_ids and value_status == "contradiction":
+					node.attributes["value_status"] = "contradiction"
+					node.attributes["contradiction_value"] = answer
+			for target_id in sorted(target_ids):
+				node = dg.nodes.get(target_id)
+				if node is None:
+					continue
+				change = {
+					"requirement_id": node.id,
+					"epistemic_class": epistemic_class,
+					"statement": answer,
+					"value_status": value_status,
+					"definition_unchanged": True,
+				}
+				node.attributes["element_support"] = list(node.attributes.get("element_support") or []) + [change]
+				support_changes.append(change)
+		if kg is not None and hasattr(kg, "append_revision"):
+			answer_source = source_context if isinstance(source_context, dict) else {}
+			source_text = answer_source.get("source_text") if isinstance(answer_source.get("source_text"), str) and answer_source.get("source_text") else str(answer or "")
+			revision = record_answer_graph_revision(
+				kg,
+				answer=str(answer or ""),
+				source_text=source_text,
+				source_context=answer_source,
+				question=question if isinstance(question, dict) else {},
+				event_id=answer_event_id or "",
+				epistemic_class=epistemic_class,
+				value_status=value_status,
+				support_changes=support_changes,
+			)
+			if isinstance(updates, dict):
+				updates = dict(updates)
+				updates["graph_revision"] = revision
+				updates["epistemic_class"] = epistemic_class
+				updates["value_status"] = value_status
+				updates["support_changes"] = support_changes
+		intake_case_file = project_graph_revision_view(intake_case_file, kg)
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', intake_case_file)
 		
 		# Generate next questions
 		max_questions = 5
@@ -13665,6 +13769,11 @@ class Mediator:
 		claims = [{'type': node.attributes.get('claim_type'), 'name': node.name} for node in dg.get_nodes_by_type(NodeType.CLAIM)]
 		case = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intake_case_file') or {}
 		grouped = self._collect_verified_legal_requirements(claims, case)
+		# Reconciliation must use the same current-context adapter representation
+		# as initial construction; display/proof metadata is part of the node ID.
+		selection = self.resolve_intake_legal_selection(claims, case)
+		grouped = self.summary_judgment.adapt_requirements_for_dependency_graph(
+			grouped, selection.get('legal_context'))
 		source_report = self.dg_builder.reconcile_verified_requirements(dg, grouped)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'verified_legal_requirements', grouped)
 		# A serialized updated_requirements mapping cannot bypass current source lookup.

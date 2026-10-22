@@ -10,7 +10,8 @@ import asyncio
 import calendar
 import hashlib
 import math
-from dataclasses import asdict, dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass, field, fields
 from datetime import date, datetime, timezone
 import logging
 import re
@@ -732,17 +733,30 @@ class SourcedLegalRequirement:
     source_record: Optional[Dict[str, Any]] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
-    def as_builder_entry(self) -> Dict[str, Any]:
-        """Dictionary entry the dependency-graph builder accepts."""
-        payload = {key: value for key, value in asdict(self).items() if key != "extra"}
-        extra = dict(self.extra or {})
-        extra.pop("source_record", None)
-        payload.update(extra)
-        payload["source_record"] = self.source_record
-        payload["intake_requirement_status"] = (
-            "unresolved" if self.derivation_status != "source_derived" or self.proof_status != "source_bound" else "source_bound"
-        )
+    def as_builder_entry(self, *, legal_context: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+        """Bind an entry to real source proof and the supplied current context."""
+        # Inspect the bounded proof before making a recursive copy. Extra fields
+        # carry the promoted span/hash/treatment record, not authority to replace
+        # this object's source record or its closed status fields.
+        payload = dict(self.extra or {})
+        payload.update({item.name: getattr(self, item.name) for item in fields(self) if item.name != "extra"})
+        payload["intake_requirement_status"] = "unresolved"
         payload["authority_source_locator"] = self.authority_locator or self.source_locator
+        if _is_user_law_assertion(payload):
+            payload.update(proof_status="not_authoritative", derivation_status="user_assertion",
+                           unresolved_reason="user_assertion_cannot_create_law")
+            return payload
+        if self.unresolved_reason or self.proof_status == "not_authoritative":
+            if self.proof_status != "not_authoritative":
+                payload["proof_status"] = "unresolved"
+            return payload
+        reason, source, revision = _bind_requirement_current_context(payload, legal_context)
+        if reason:
+            payload.update(proof_status="unresolved", derivation_status="unresolved", unresolved_reason=reason)
+        else:
+            payload.update(source_record=source, context_revision=revision,
+                           proof_status="source_bound", derivation_status="source_derived",
+                           intake_requirement_status="source_bound")
         return payload
 
 
@@ -796,6 +810,48 @@ def _effective_date_from(record: Mapping[str, Any]) -> str:
     if isinstance(source, Mapping):
         return _effective_date_from(source)
     return ""
+
+
+def _bind_requirement_current_context(record: Mapping[str, Any], legal_context: Optional[Mapping[str, Any]]):
+    """Reuse DG's full source gate against an explicit current query context."""
+    from complaint_phases.dependency_graph import DependencyGraphBuilder
+
+    if not isinstance(legal_context, Mapping):
+        return "missing_current_legal_context", None, None
+    jurisdiction = resolve_explicit_jurisdiction(legal_context.get("jurisdiction"))
+    if jurisdiction == UNKNOWN_LEGAL_CONTEXT:
+        return "unresolved_current_jurisdiction", None, None
+    current_date = classify_legal_date(legal_context.get("applicable_law_date"), role=DATE_ROLE_APPLICABLE_LAW)
+    query_date = current_date.get("precise_date")
+    if not query_date or current_date.get("is_uncertain"):
+        return "missing_current_applicable_law_date", None, None
+    revision = legal_context.get("context_revision", 0)
+    if type(revision) is not int or revision < 0:
+        return "invalid_current_context_revision", None, None
+    prior_revision = record.get("context_revision")
+    if prior_revision is not None and (type(prior_revision) is not int or prior_revision != revision):
+        return "stale_legal_context", None, None
+    if resolve_explicit_jurisdiction(record.get("jurisdiction")) != jurisdiction:
+        return "jurisdiction_not_selected", None, None
+    source = record.get("source_record")
+    if not DependencyGraphBuilder._bounded_source_record(source):
+        return "unverified_source_record", None, None
+    previous_query = source.get("query_context") or source.get("temporal_query_context")
+    if previous_query is not None and not isinstance(previous_query, dict):
+        return "unverified_source_record", None, None
+    for stored in (source.get("context_revision"), (previous_query or {}).get("context_revision")):
+        if stored is not None and (type(stored) is not int or stored != revision):
+            return "stale_legal_context", None, None
+    # Re-derive every original proof field before consulting its query result.
+    # Preserve the source's date provenance instead of changing an as_of_date
+    # proof into a different explicit_query_context proof just to relabel it.
+    if not DependencyGraphBuilder._is_verified_legal_requirement(record):
+        return "unverified_source_record", None, None
+    temporal = record.get("temporal_applicability")
+    if (not isinstance(temporal, dict) or temporal.get("query_date") != query_date
+            or resolve_explicit_jurisdiction(temporal.get("query_jurisdiction")) != jurisdiction):
+        return "source_proof_not_bound_to_current_context", None, None
+    return "", deepcopy(source), revision
 
 
 def unresolved_legal_requirement(
@@ -860,11 +916,6 @@ def sourced_requirement_from_record(
         reason = "unresolved_jurisdiction"
     elif not effective_date or not version:
         reason = "missing_effective_date_or_version"
-    elif legal_context is not None:
-        decision = select_requirement_applicability(dict(record), dict(legal_context))
-        if not decision.get("selected"):
-            reason = str(decision.get("reason") or "unresolved_legal_context")
-            jurisdiction = resolve_explicit_jurisdiction(decision.get("jurisdiction"))
     if reason:
         unresolved = unresolved_legal_requirement(claim, reason, jurisdiction=jurisdiction)
         return unresolved
@@ -877,7 +928,7 @@ def sourced_requirement_from_record(
         }
     }
     source_record = record.get("source_record") if isinstance(record.get("source_record"), dict) else None
-    return SourcedLegalRequirement(
+    requirement = SourcedLegalRequirement(
         claim_type=claim,
         name=_text(record.get("name") or record.get("rule_id") or "Sourced requirement"),
         description=str(record.get("description") or record.get("rule_text") or ""),
@@ -891,6 +942,10 @@ def sourced_requirement_from_record(
         source_record=source_record,
         extra=preserved,
     )
+    entry = requirement.as_builder_entry(legal_context=legal_context)
+    if entry["intake_requirement_status"] != "source_bound":
+        return unresolved_legal_requirement(claim, entry["unresolved_reason"], jurisdiction=jurisdiction)
+    return requirement
 
 
 def _groups_from_requirements(requirements: Any) -> List[tuple]:
@@ -947,7 +1002,7 @@ def adapt_sourced_legal_requirements(
                     "ambiguous_authority",
                     jurisdiction=(legal_context or {}).get("jurisdiction") if isinstance(legal_context, Mapping) else UNKNOWN_LEGAL_CONTEXT,
                 )
-            entries.append(requirement.as_builder_entry())
+            entries.append(requirement.as_builder_entry(legal_context=legal_context))
     return grouped
 
 
