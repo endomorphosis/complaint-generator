@@ -6684,7 +6684,18 @@ class Mediator:
 			for e in claim_entities
 		]
 		intake_case_file = self._initialize_intake_case_file(kg, initial_complaint_text)
-		verified_legal_requirements = self._collect_verified_legal_requirements(claims, intake_case_file)
+		legal_selection = self.resolve_intake_legal_selection(claims, intake_case_file)
+		construction_sequence.append('legal_selection_context')
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'legal_selection', legal_selection)
+		if legal_selection.get('ready_to_select'):
+			verified_legal_requirements = self._collect_verified_legal_requirements(claims, intake_case_file)
+		else:
+			verified_legal_requirements = self._unresolved_requirements_for_selection(claims, legal_selection)
+			self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'legal_source_status', 'unresolved_context')
+		verified_legal_requirements = self.summary_judgment.adapt_requirements_for_dependency_graph(
+			verified_legal_requirements,
+			legal_selection.get('legal_context'),
+		)
 		construction_sequence.append('verified_legal_requirements')
 		self.phase_manager.update_phase_data(
 			ComplaintPhase.INTAKE,
@@ -6696,9 +6707,12 @@ class Mediator:
 		# records a legal-context/source gap and does not invent heuristic law.
 		dg = self.dg_builder.build_from_claims(
 			claims,
-			verified_legal_requirements,
+			legal_requirements=verified_legal_requirements,
 			require_verified_legal_sources=True,
 		)
+		if isinstance(getattr(dg, 'metadata', None), dict):
+			dg.metadata['legal_context_jurisdiction'] = legal_selection.get('jurisdiction') or 'unknown'
+			dg.metadata['legal_selection_status'] = legal_selection.get('selection_status')
 		construction_sequence.append('dependency_graph')
 		dg = self.dg_builder.sync_intake_timeline_to_graph(dg, intake_case_file)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'dependency_graph', dg)
@@ -6742,6 +6756,8 @@ class Mediator:
 			intake_case_file=intake_case_file,
 		)
 		questions = self._intake_question_proposals(questions, source_text=initial_complaint_text)
+		if not legal_selection.get('ready_to_select'):
+			questions = self._legal_selection_questions(legal_selection) + list(questions or [])
 		construction_sequence.append('element_questions')
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'question_candidates', question_candidates)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'current_questions', questions)
@@ -13398,6 +13414,61 @@ class Mediator:
 		if len(unique) == 1:
 			return unique[0]
 		return "unknown"
+
+	def resolve_intake_legal_selection(self, claims, intake_case_file):
+		"""Ask or resolve jurisdiction, relevant date, and claim candidates first."""
+		from complaint_phases.intake_case_file import refresh_explicit_legal_context
+		from integrations.ipfs_datasets.legal import intake_legal_selection
+
+		case = intake_case_file if isinstance(intake_case_file, dict) else {}
+		context = refresh_explicit_legal_context(case)
+		candidates = list(case.get('candidate_claims') or [])
+		if not candidates:
+			candidates = list(claims or [])
+		selection = intake_legal_selection(context, candidates)
+		selection['legal_context'] = context
+		return selection
+
+	def _unresolved_requirements_for_selection(self, claims, legal_selection):
+		"""Do not select law while jurisdiction, date, or claims are unresolved."""
+		from integrations.ipfs_datasets.legal import unresolved_legal_requirement
+
+		reason = '+'.join(legal_selection.get('unresolved_reasons') or ['unresolved_context'])
+		jurisdiction = legal_selection.get('jurisdiction') or 'unknown'
+		claim_types = []
+		for item in list(legal_selection.get('claim_candidates') or []) + list(claims or []):
+			if isinstance(item, dict):
+				claim_type = str(item.get('type') or item.get('claim_type') or 'unknown')
+			else:
+				claim_type = 'unknown'
+			if claim_type not in claim_types:
+				claim_types.append(claim_type)
+		if not claim_types:
+			claim_types = ['unknown']
+		grouped = {}
+		for claim_type in claim_types:
+			requirement = unresolved_legal_requirement(claim_type, reason, jurisdiction=jurisdiction)
+			grouped[claim_type] = [requirement.as_builder_entry()]
+		return grouped
+
+	def _legal_selection_questions(self, legal_selection):
+		questions = []
+		for item in legal_selection.get('questions') or []:
+			if not isinstance(item, dict):
+				continue
+			prompt = str(item.get('prompt') or item.get('question') or '').strip()
+			if not prompt:
+				continue
+			questions.append({
+				'question': prompt,
+				'type': 'legal_context',
+				'question_id': item.get('question_id'),
+				'field': item.get('field'),
+				'reason': item.get('reason'),
+				'priority': 'critical',
+				'jurisdiction': legal_selection.get('jurisdiction') or 'unknown',
+			})
+		return questions
 
 	def legal_context_questions(self, intake_case_file):
 		"""Questions for jurisdiction and event dates that are still unresolved."""

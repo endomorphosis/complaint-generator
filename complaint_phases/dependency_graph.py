@@ -40,6 +40,7 @@ _ACTOR_CRITIC_WEAK_EVIDENCE_MODALITIES = {"policy_document", "file_evidence"}
 _FACTUAL_CLARIFICATION_CLASS = "factual_clarification"
 _LEGALLY_SOURCED_CLASS = "legally_sourced_requirement"
 _LEGAL_SOURCE_GAP_CLASS = "legal_source_gap"
+_UNRESOLVED_LEGAL_CLASS = "unresolved_legal_requirement"
 _HEURISTIC_LAW_ORIGINS = {"heuristic", "heuristic_graph", "law_derived", "law-derived"}
 _UNVERIFIED_REQUIREMENT_STATUSES = {"unverified_template", "unverified", "heuristic", "candidate"}
 _VERIFIED_REQUIREMENT_STATUSES = {"verified", "source_bound", "applicable"}
@@ -2973,15 +2974,17 @@ class DependencyGraphBuilder:
         graph.metadata["legal_source_gaps"] = []
 
         supplied_requirements = legal_requirements if isinstance(legal_requirements, dict) else {}
-        if require_verified_legal_sources:
-            supplied_requirements = {
-                claim_type: [
-                    requirement for requirement in (requirements or [])
-                    if self._is_verified_legal_requirement(requirement)
-                ]
-                for claim_type, requirements in supplied_requirements.items()
-                if isinstance(requirements, list)
-            }
+        # SummaryJudgmentHook returns dict[str, list[str]]. Those strings are
+        # adapted to unresolved entries before this loop. A raw string still
+        # must not be stored as a legal element.
+        if any(
+            isinstance(item, str)
+            for items in supplied_requirements.values()
+            if isinstance(items, list)
+            for item in items
+        ):
+            from integrations.ipfs_datasets.legal import adapt_sourced_legal_requirements
+            supplied_requirements = adapt_sourced_legal_requirements(supplied_requirements)
 
         # Add legal requirements for each claim. Verified intake never promotes
         # heuristic or template text into a law-derived element.
@@ -2993,8 +2996,25 @@ class DependencyGraphBuilder:
                     requirements = []
                 for req_data in requirements:
                     if not isinstance(req_data, dict):
+                        self._add_unresolved_legal_requirement(
+                            graph, claim_node, "ambiguous_authority",
+                        )
+                        continue
+                    if self._is_user_law_assertion(req_data) or req_data.get("intake_requirement_status") == "unresolved" or req_data.get("proof_status") in {"unresolved", "not_authoritative"}:
+                        self._add_unresolved_legal_requirement(
+                            graph,
+                            claim_node,
+                            str(req_data.get("unresolved_reason") or "ambiguous_authority"),
+                            req_data,
+                        )
                         continue
                     if require_verified_legal_sources and not self._is_verified_legal_requirement(req_data):
+                        self._add_unresolved_legal_requirement(
+                            graph,
+                            claim_node,
+                            "ambiguous_or_unverified_authority",
+                            req_data,
+                        )
                         continue
                     self._add_legal_requirement_node(graph, claim_node, req_data)
 
@@ -3087,6 +3107,84 @@ class DependencyGraphBuilder:
             or requirement.get("name")
             or ""
         ).strip()
+
+    @staticmethod
+    def _is_user_law_assertion(requirement: Dict[str, Any]) -> bool:
+        if requirement.get("user_asserted") is True:
+            return True
+        origin = str(requirement.get("origin") or requirement.get("source_kind") or "").strip().lower()
+        if origin in {"user", "user_assertion", "complainant"}:
+            return True
+        return str(requirement.get("derivation_status") or "").strip().lower() == "user_assertion"
+
+    def _add_unresolved_legal_requirement(
+        self,
+        graph: DependencyGraph,
+        claim_node: DependencyNode,
+        reason: str,
+        req_data: Optional[Dict[str, Any]] = None,
+    ) -> DependencyNode:
+        """Record that authority was not selected. This node is not a legal rule."""
+        payload = req_data if isinstance(req_data, dict) else {}
+        jurisdiction = str(payload.get("jurisdiction") or graph.metadata.get("legal_context_jurisdiction") or "unknown")
+        if not jurisdiction.strip():
+            jurisdiction = "unknown"
+        claim_type = str(claim_node.attributes.get("claim_type") or payload.get("claim_type") or "unknown")
+        node = DependencyNode(
+            id=self._get_namespaced_node_id("legal_requirement", {
+                "gap": "unresolved_legal_requirement",
+                "claim_type": claim_type,
+                "claim_id": claim_node.id,
+                "reason": reason,
+                "authority_locator": str(payload.get("authority_locator") or ""),
+            }),
+            node_type=NodeType.REQUIREMENT,
+            name="Unresolved legal requirement",
+            description=(
+                "No sourced legal requirement was selected. "
+                "Missing or ambiguous authority was not replaced with an invented rule."
+            ),
+            satisfied=False,
+            attributes={
+                "record_kind": _UNRESOLVED_LEGAL_CLASS,
+                "dependency_class": _UNRESOLVED_LEGAL_CLASS,
+                "claim_type": claim_type,
+                "jurisdiction": jurisdiction,
+                "authority_locator": "",
+                "source_locator": "",
+                "authority_source_locator": "",
+                "effective_date": "",
+                "authority_version": "",
+                "derivation_status": str(payload.get("derivation_status") or "unresolved"),
+                "proof_status": "not_authoritative" if self._is_user_law_assertion(payload) or payload.get("proof_status") == "not_authoritative" else "unresolved",
+                "unresolved_reason": reason,
+                "asserted_text": str(payload.get("asserted_text") or "")[:500],
+                "law_derived": False,
+                "heuristic_law_derived": False,
+                "source_available": False,
+                "about_complainant": False,
+                "user_assertion_is_not_law": True,
+                "dependency_scope": {"claim_type": claim_type, "rule_id": "", "fact_ids": []},
+            },
+        )
+        graph.add_node(node)
+        graph.add_dependency(Dependency(
+            id=self._get_dependency_id(),
+            source_id=node.id,
+            target_id=claim_node.id,
+            dependency_type=DependencyType.REQUIRES,
+            required=True,
+        ))
+        graph.metadata.setdefault("unresolved_legal_requirements", []).append({
+            "claim_type": claim_type,
+            "claim_id": claim_node.id,
+            "node_id": node.id,
+            "jurisdiction": jurisdiction,
+            "reason": reason,
+            "derivation_status": node.attributes["derivation_status"],
+            "proof_status": node.attributes["proof_status"],
+        })
+        return node
 
     def _add_legal_requirement_node(
         self,
