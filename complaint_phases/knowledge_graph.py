@@ -507,7 +507,12 @@ def record_answer_graph_revision(
             role="answer",
             subject_key=f"answer|{event_id}|{epistemic_class}|{value_status}",
         )
-    if envelope is not None and envelope.is_asserted_user_fact:
+    # Unknown, refused, skipped, and deferred answers stay on the revision
+    # ledger. They are not complainant facts.
+    non_fact_status = str(value_status or "").strip().lower() in {
+        "unknown", "refused", "skipped", "deferred", "invalidated",
+    }
+    if envelope is not None and envelope.is_asserted_user_fact and not non_fact_status:
         entity = Entity(
             id=f"answer_{len(graph.entities) + 1}",
             type="fact",

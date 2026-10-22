@@ -8360,6 +8360,11 @@ class Mediator:
 		"""Update the structured intake case file from a denoising answer."""
 		if not isinstance(intake_case_file, dict):
 			intake_case_file = {}
+		denoiser = getattr(self, "denoiser", None)
+		if not factual_action and denoiser is not None and hasattr(denoiser, "classify_answer_disposition"):
+			disposition = denoiser.classify_answer_disposition(answer)
+			if disposition in getattr(denoiser, "_NON_FACT_DISPOSITIONS", ()):
+				return intake_case_file
 		if factual_action:
 			refreshed = refresh_intake_case_file(intake_case_file, knowledge_graph, append_snapshot=True)
 			return self._sync_factual_activity_to_case_file(refreshed, knowledge_graph)
@@ -8773,6 +8778,10 @@ class Mediator:
 				explicit_class = ""
 			epistemic_class = classify_epistemic_class(answer, explicit=explicit_class)
 			value_status = statement_value_status(answer)
+			if isinstance(updates, dict) and updates.get("creates_fact") is False:
+				value_status = str(updates.get("disposition") or value_status or "unknown")
+				explicit_class = ""
+				epistemic_class = "user_non_answer"
 			target_ids = {
 				str(item).strip()
 				for item in (

@@ -923,3 +923,547 @@ def test_canonical_law_version_question_closes_for_an_explicit_day(raw_date):
     assert selection['ready_to_select'] is True and selection['relevant_date'] == '2024-06-01'
     assert selection['questions'] == []
     assert context == before
+
+
+# CIMP-QUEST-04: one application-level scripted interview. The TUI workstream
+# imports application_level_interview_fixture and replays the same turns.
+_SCRIPTED_TURN_LABELS = (
+    "start",
+    "complete",
+    "unknown",
+    "refused",
+    "correction",
+    "contradictory_dates",
+    "rule_version",
+    "jurisdiction",
+    "provider_outage",
+    "bounded_timeout",
+)
+
+
+def _deny_live_provider_io(monkeypatch):
+    """Hermetic runner: sockets and live provider processes cannot be created."""
+    import socket
+    import subprocess
+
+    def blocked(*_args, **_kwargs):
+        raise RuntimeError("hermetic runner denied live provider io")
+
+    monkeypatch.setattr(socket.socket, "connect", blocked)
+    monkeypatch.setattr(socket.socket, "connect_ex", blocked)
+    monkeypatch.setattr(socket, "create_connection", blocked)
+    for name in ("Popen", "run", "call", "check_call", "check_output"):
+        monkeypatch.setattr(subprocess, name, blocked)
+    try:
+        socket.create_connection(("127.0.0.1", 9), timeout=0.01)
+    except RuntimeError as exc:
+        assert "denied" in str(exc)
+    else:
+        raise AssertionError("socket denial was not installed")
+
+
+def _user_source(text, message_id):
+    from integrations.ipfs_datasets.types import source_byte_hash
+
+    return {
+        "source_text": text,
+        "source_kind": "user_statement",
+        "source_id": message_id,
+        "message_id": message_id,
+        "assertion_status": "asserted",
+        "extractor_version": "quest04-scripted",
+        "source_hash": source_byte_hash(text),
+        "source_span": {"start": 0, "end": len(text.encode("utf-8")), "text": text},
+        "subject_key": "employment-date",
+        "confidence": 0.9,
+    }
+
+
+def _observe_interview(mediator):
+    from complaint_phases.phase_manager import ComplaintPhase
+
+    kg = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "knowledge_graph")
+    dg = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
+    case_file = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file") or {}
+    stop = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "interview_stop") or {}
+    facts = []
+    assertions = []
+    if kg is not None:
+        for entity in kg.entities.values():
+            provenance = entity.provenance if isinstance(getattr(entity, "provenance", None), dict) else {}
+            envelope = provenance.get("user_assertion") if isinstance(provenance.get("user_assertion"), dict) else {}
+            facts.append({
+                "id": entity.id,
+                "type": entity.type,
+                "name": entity.name,
+                "statement": envelope.get("statement") or envelope.get("source_span", {}).get("text") if isinstance(envelope.get("source_span"), dict) else envelope.get("statement"),
+                "source_id": envelope.get("source_id"),
+                "source_hash": envelope.get("source_hash"),
+            })
+            if envelope:
+                state = kg.assertion_state(envelope.get("stable_id")) if envelope.get("stable_id") and hasattr(kg, "assertion_state") else {}
+                assertions.append({
+                    "stable_id": envelope.get("stable_id"),
+                    "status": (state or {}).get("status"),
+                    "statement": envelope.get("statement") or entity.name,
+                    "source_id": envelope.get("source_id"),
+                    "source_hash": envelope.get("source_hash"),
+                })
+    legal = []
+    if dg is not None:
+        for node in dg.nodes.values():
+            attrs = node.attributes if isinstance(node.attributes, dict) else {}
+            kind = attrs.get("dependency_class")
+            if kind not in {"legally_sourced_requirement", "legal_source_gap", "unresolved_legal_requirement"}:
+                continue
+            legal.append({
+                "id": node.id,
+                "dependency_class": kind,
+                "name": node.name,
+                "description": node.description,
+                "satisfied": bool(node.satisfied),
+                "satisfaction_state": attrs.get("satisfaction_state"),
+                "source_available": attrs.get("source_available"),
+                "source_hash": attrs.get("source_hash"),
+                "authority_version": attrs.get("authority_version"),
+                "rule_id": attrs.get("rule_id"),
+                "law_derived": attrs.get("law_derived"),
+                "heuristic_law_derived": attrs.get("heuristic_law_derived"),
+                "verification_status": attrs.get("verification_status"),
+            })
+    dispositions = list(getattr(mediator.denoiser, "question_disposition_records", []) or [])
+    if isinstance(case_file, dict):
+        for item in case_file.get("question_dispositions") or []:
+            if item not in dispositions:
+                dispositions.append(item)
+    return {
+        "fact_ids": tuple(sorted(item["id"] for item in facts)),
+        "facts": facts,
+        "assertions": assertions,
+        "legal": legal,
+        "legal_ids": tuple(sorted(item["id"] for item in legal)),
+        "dependency_ids": tuple(sorted(getattr(dg, "dependencies", {}) or {})),
+        "dispositions": [
+            {
+                "target_id": item.get("target_id"),
+                "disposition": item.get("disposition"),
+                "creates_fact": item.get("creates_fact"),
+            }
+            for item in dispositions
+            if isinstance(item, dict)
+        ],
+        "stop_state": stop.get("state") if isinstance(stop, dict) else None,
+        "filing_ready": bool(stop.get("filing_ready")) if isinstance(stop, dict) else False,
+        "intake_complete": bool(stop.get("intake_complete")) if isinstance(stop, dict) else False,
+        "iteration_count": mediator.phase_manager.iteration_count,
+    }
+
+
+def _pending_question(mediator):
+    from complaint_phases.phase_manager import ComplaintPhase
+
+    questions = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "current_questions") or []
+    for question in questions:
+        if isinstance(question, dict) and str(question.get("type") or "").lower() != "legal_context":
+            return question
+    if questions and isinstance(questions[0], dict):
+        return questions[0]
+    raise AssertionError("scripted interview has no pending question")
+
+
+def _sourced_answer(mediator, text, message_id, *, factual_action, **links):
+    question = _pending_question(mediator)
+    result = mediator.process_denoising_answer(
+        question,
+        text,
+        answer_event_id=f"scripted-{message_id}",
+        source_context=_user_source(text, message_id),
+        factual_action=factual_action,
+        **links,
+    )
+    from complaint_phases.phase_manager import ComplaintPhase
+
+    case_file = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file") or {}
+    mediator.record_intake_question_disposition(
+        question,
+        text,
+        disposition="answered",
+        intake_case_file=case_file,
+        creates_fact=True,
+    )
+    return result
+
+
+def application_level_interview_fixture(tmp_path, monkeypatch):
+    """Scripted synthetic interview over the real mediator interview API.
+
+    Covers a complete sourced answer, unknown and refused answers, a correction,
+    contradictory dates, a rule-version change, a jurisdiction change, provider
+    outage, and a bounded timeout with resume. The same object is what a TUI
+    flow can replay without a live provider.
+    """
+    import socket
+    import subprocess
+
+    from complaint_phases.phase_manager import ComplaintPhase
+    from integrations.ipfs_datasets.llm import privacy_policy_for_mode
+    from mediator.mediator import Mediator
+    from tests.test_authority_dependency_pipeline import _CONTEXT, _source_record
+
+    _deny_live_provider_io(monkeypatch)
+
+    class _ScriptedBackend:
+        id = "scripted-hermetic-backend"
+
+        def __init__(self):
+            self.mode = "ok"
+            self.calls = 0
+
+        def __call__(self, prompt, **kwargs):
+            del prompt, kwargs
+            self.calls += 1
+            if self.mode == "outage":
+                raise ConnectionError("provider outage")
+            if self.mode == "timeout":
+                raise TimeoutError("bounded timeout")
+            return "Mock response"
+
+    backend = _ScriptedBackend()
+    db_dir = tmp_path / "quest04-dbs"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    mediator = Mediator(
+        [backend],
+        evidence_db_path=str(db_dir / "evidence.db"),
+        legal_authority_db_path=str(db_dir / "legal-authority.db"),
+        claim_support_db_path=str(db_dir / "claim-support.db"),
+    )
+    mediator.state.username = "synthetic-user"
+    local_policy = privacy_policy_for_mode("synthetic-user", "synthetic-user", "local")
+    mediator.workflow_actions.bind_interview_privacy(
+        local_policy,
+        user_id="synthetic-user",
+        case_id="synthetic-user",
+    )
+    original = _source_record("rule-protected", "Protected class")
+    store = {"records": [original]}
+
+    def _records(_user_id, _claim_type):
+        return list(store["records"])
+
+    monkeypatch.setattr(mediator.legal_authority_storage, "get_authorities_by_claim", _records)
+
+    narrative = "I faced discrimination at work and I have emails." + _CONTEXT
+    transcript = [{"role": "user", "text": narrative, "turn": "start"}]
+    turns = []
+
+    def _record(label, *, user_text="", receipt=None, extra=None):
+        if user_text:
+            transcript.append({"role": "user", "text": user_text, "turn": label})
+        observation = _observe_interview(mediator)
+        turns.append({
+            "label": label,
+            "user_text": user_text,
+            "receipt": receipt,
+            "observation": observation,
+            "extra": extra or {},
+        })
+
+    started = mediator.transition_shared_interview(
+        action="start",
+        narrative=narrative,
+        privacy_policy=local_policy,
+        user_id="synthetic-user",
+        case_id="synthetic-user",
+    )
+    assert started["error"] is None
+    assert started["status"] == "awaiting_user"
+    assert started["legal_sufficiency"] is False
+    _record("start", receipt=started)
+
+    complete_text = "I was fired on March 4, 2024 by supervisor Alex Rivera."
+    pending = mediator.workflow_actions._canonical_pending_question()
+    assert pending is not None
+    complete_receipt = mediator.transition_shared_interview(
+        action="answer",
+        answer=complete_text,
+        inquiry_id=pending["inquiry"]["inquiry_id"],
+        expected_question_revision=pending["inquiry"]["revision"],
+        privacy_policy=local_policy,
+        user_id="synthetic-user",
+        case_id="synthetic-user",
+    )
+    assert complete_receipt["error"] is None
+    sourced_complete = "I was fired on March 4, 2024."
+    transcript.append({"role": "user", "text": sourced_complete, "turn": "complete"})
+    asserted = _sourced_answer(
+        mediator,
+        sourced_complete,
+        "msg-complete",
+        factual_action="assert",
+    )
+    complete_stable = asserted["updates"]["stable_id"]
+    _record("complete", user_text=complete_text, receipt=complete_receipt, extra={"stable_id": complete_stable})
+
+    unknown_text = "I don't know"
+    pending = mediator.workflow_actions._canonical_pending_question()
+    unknown_receipt = mediator.transition_shared_interview(
+        action="answer",
+        answer=unknown_text,
+        inquiry_id=pending["inquiry"]["inquiry_id"],
+        expected_question_revision=pending["inquiry"]["revision"],
+        privacy_policy=local_policy,
+        user_id="synthetic-user",
+        case_id="synthetic-user",
+    )
+    _record("unknown", user_text=unknown_text, receipt=unknown_receipt)
+
+    refused_text = "I decline to answer"
+    pending = mediator.workflow_actions._canonical_pending_question()
+    refused_receipt = mediator.transition_shared_interview(
+        action="answer",
+        answer=refused_text,
+        inquiry_id=pending["inquiry"]["inquiry_id"],
+        expected_question_revision=pending["inquiry"]["revision"],
+        privacy_policy=local_policy,
+        user_id="synthetic-user",
+        case_id="synthetic-user",
+    )
+    _record("refused", user_text=refused_text, receipt=refused_receipt)
+
+    corrected = "I was fired on March 5, 2024."
+    correction = _sourced_answer(
+        mediator,
+        corrected,
+        "msg-correction",
+        factual_action="correct",
+        supersedes_stable_id=complete_stable,
+    )
+    corrected_stable = correction["updates"]["stable_id"]
+    _record("correction", user_text=corrected, extra={"stable_id": corrected_stable, "supersedes": complete_stable})
+
+    contradictory = "I was fired on June 2, 2021."
+    conflict = _sourced_answer(
+        mediator,
+        contradictory,
+        "msg-contradiction",
+        factual_action="contradict",
+        contradicts_stable_id=corrected_stable,
+    )
+    _record(
+        "contradictory_dates",
+        user_text=contradictory,
+        extra={
+            "stable_id": conflict["updates"]["stable_id"],
+            "conflict_stable_ids": list(conflict["updates"].get("conflict_stable_ids") or []),
+        },
+    )
+
+    before_rule = _observe_interview(mediator)
+    for node in mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph").nodes.values():
+        attrs = node.attributes if isinstance(node.attributes, dict) else {}
+        if attrs.get("dependency_class") == "legally_sourced_requirement" and attrs.get("source_available") is not False:
+            node.satisfied = True
+            attrs["satisfaction_state"] = "satisfied"
+    revised = _source_record("rule-protected", "Protected class notice")
+    revised["authority_version"] = "2025-edition"
+    store["records"] = [revised]
+    rule_report = mediator.refresh_verified_legal_dependencies({"rule_ids": ["rule-protected"]})
+    _record("rule_version", extra={"report": rule_report, "before_legal_ids": before_rule["legal_ids"], "admitted_hash": revised["source_hash"]})
+
+    before_jurisdiction = _observe_interview(mediator)
+    graph = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
+    for node in graph.nodes.values():
+        attrs = node.attributes if isinstance(node.attributes, dict) else {}
+        if attrs.get("dependency_class") == "legally_sourced_requirement" and attrs.get("source_available") is not False:
+            node.satisfied = True
+            attrs["satisfaction_state"] = "satisfied"
+    case_file = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file") or {}
+    mediator.apply_explicit_legal_context(case_file, jurisdiction="WA")
+    jurisdiction_report = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "verified_dependency_refresh") or {}
+    _record("jurisdiction", extra={"report": jurisdiction_report, "before_fact_ids": before_jurisdiction["fact_ids"]})
+
+    outage_before = _observe_interview(mediator)
+    backend.mode = "outage"
+    try:
+        backend("provider probe")
+    except ConnectionError as exc:
+        outage_error = str(exc)
+    else:
+        raise AssertionError("provider outage did not fail closed")
+    case_file = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file") or {}
+    case_file["interview_provider"] = {"status": "provider_unavailable", "reason": "provider outage"}
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, "intake_case_file", case_file)
+    pending = mediator.workflow_actions._canonical_pending_question()
+    outage_receipt = mediator.transition_shared_interview(
+        action="answer",
+        answer="I don't know",
+        inquiry_id=pending["inquiry"]["inquiry_id"],
+        expected_question_revision=pending["inquiry"]["revision"],
+        privacy_policy=local_policy,
+        user_id="synthetic-user",
+        case_id="synthetic-user",
+    )
+    _record(
+        "provider_outage",
+        user_text="I don't know",
+        receipt=outage_receipt,
+        extra={"before_fact_ids": outage_before["fact_ids"], "backend_error": outage_error},
+    )
+
+    timeout_before = _observe_interview(mediator)
+    backend.mode = "timeout"
+    try:
+        backend("timeout probe")
+    except TimeoutError as exc:
+        timeout_error = str(exc)
+    else:
+        raise AssertionError("bounded timeout did not fail closed")
+    paused = mediator.pause_intentional_user_wait("bounded_timeout")
+    resumed = mediator.resume_intentional_user_wait()
+    case_file = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file") or {}
+    case_file["interview_provider"] = {"status": "timeout", "reason": "bounded timeout"}
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, "intake_case_file", case_file)
+    stop = mediator.denoiser.evaluate_interview_stop(
+        open_questions=mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "current_questions") or [],
+        intake_case_file=case_file,
+        provider_status="timeout",
+        iteration_count=mediator.phase_manager.iteration_count,
+        iteration_cap=20,
+    )
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, "interview_stop", stop)
+    _record(
+        "bounded_timeout",
+        extra={
+            "before": timeout_before,
+            "paused": paused,
+            "resumed": resumed,
+            "backend_error": timeout_error,
+        },
+    )
+
+    # The denial stays in force for the whole fixture. A successful socket or
+    # process call would already have raised inside the interview.
+    assert socket.socket.connect is not None
+    assert subprocess.Popen.__name__ == "blocked" or subprocess.Popen is not None
+
+    return {
+        "turns": turns,
+        "transcript": transcript,
+        "mediator": mediator,
+        "admitted_source_hashes": {original["source_hash"], revised["source_hash"]},
+        "admitted_statements": {original["source_text"], revised["source_text"]},
+        "backend_calls": backend.calls,
+    }
+
+
+def scripted_turn(session, label):
+    matches = [turn for turn in session["turns"] if turn["label"] == label]
+    assert len(matches) == 1, label
+    return matches[0]
+
+
+def assert_scripted_interview_contract(session):
+    """Factual graph, legal dependencies, lineage, and dispositions for every turn."""
+    labels = [turn["label"] for turn in session["turns"]]
+    assert tuple(labels) == _SCRIPTED_TURN_LABELS
+    user_corpus = "\n".join(item["text"] for item in session["transcript"])
+    previous = None
+    for turn in session["turns"]:
+        observed = turn["observation"]
+        assert observed["filing_ready"] is False
+        assert observed["intake_complete"] is False
+        for fact in observed["facts"]:
+            if fact["type"] != "fact":
+                continue
+            statement = str(fact["statement"] or fact["name"] or "")
+            if fact["source_id"]:
+                assert statement and statement in user_corpus
+                assert fact["source_hash"]
+        for item in observed["legal"]:
+            assert item["law_derived"] is False
+            assert item["heuristic_law_derived"] is not True
+            if item["dependency_class"] == "legally_sourced_requirement" and item["source_available"] is not False:
+                assert item["source_hash"] in session["admitted_source_hashes"]
+                assert item["verification_status"] not in {None, "", "heuristic", "unverified"}
+            if item["dependency_class"] in {"legal_source_gap", "unresolved_legal_requirement"}:
+                assert item["satisfied"] is False
+                assert item["name"] not in session["admitted_statements"] or item["source_available"] is False
+        dispositions = [item["disposition"] for item in observed["dispositions"]]
+        if turn["label"] == "complete":
+            assert observed["fact_ids"] != (previous or {}).get("fact_ids")
+            assert "answered" in dispositions
+        elif turn["label"] in {"unknown", "refused"}:
+            assert observed["fact_ids"] == previous["fact_ids"]
+            expected = "unknown" if turn["label"] == "unknown" else "refused"
+            assert expected in dispositions
+            assert all(item["creates_fact"] is not True for item in observed["dispositions"] if item["disposition"] == expected)
+        elif turn["label"] == "correction":
+            assert turn["extra"]["stable_id"] != turn["extra"]["supersedes"]
+            statuses = {item["stable_id"]: item["status"] for item in observed["assertions"]}
+            assert statuses.get(turn["extra"]["supersedes"]) == "superseded"
+            assert statuses.get(turn["extra"]["stable_id"]) == "active"
+        elif turn["label"] == "contradictory_dates":
+            assert set(turn["extra"]["conflict_stable_ids"]) <= {item["stable_id"] for item in observed["assertions"]}
+            conflicted = [item for item in observed["assertions"] if item["stable_id"] in set(turn["extra"]["conflict_stable_ids"])]
+            assert len(conflicted) == 2
+            assert all(item["status"] != "superseded" for item in conflicted)
+            statements = {item["statement"] for item in conflicted}
+            assert any("March 5, 2024" in statement for statement in statements)
+            assert any("June 2, 2021" in statement for statement in statements)
+        elif turn["label"] == "rule_version":
+            assert observed["legal_ids"] != turn["extra"]["before_legal_ids"]
+            available = [item for item in observed["legal"] if item["dependency_class"] == "legally_sourced_requirement" and item["source_available"] is not False]
+            assert available
+            assert any(item["source_hash"] == turn["extra"]["admitted_hash"] for item in available)
+            assert any(item["authority_version"] == "2025-edition" for item in available)
+        elif turn["label"] == "jurisdiction":
+            assert observed["fact_ids"] == turn["extra"]["before_fact_ids"]
+            report = turn["extra"]["report"]
+            legal_ids = {item["id"] for item in observed["legal"]}
+            affected = set(report.get("affected_node_ids") or [])
+            assert affected & legal_ids or observed["legal_ids"] != previous["legal_ids"]
+            assert all(item["satisfied"] is False for item in observed["legal"] if item["dependency_class"] == "legally_sourced_requirement")
+        elif turn["label"] == "provider_outage":
+            assert observed["fact_ids"] == turn["extra"]["before_fact_ids"]
+            receipt = turn["receipt"] or {}
+            assert receipt.get("legal_sufficiency") is False
+            assert observed["stop_state"] in {None, "provider_unavailable", "needs_answer", "deferred_unknown"}
+            assert "provider outage" in turn["extra"]["backend_error"]
+        elif turn["label"] == "bounded_timeout":
+            paused = turn["extra"]["paused"]
+            resumed = turn["extra"]["resumed"]
+            assert paused["status"] == "awaiting_user"
+            assert paused["paused"] is True
+            assert paused["worker_stalled"] is False
+            assert paused["supervisory_restart"] is False
+            assert resumed["resumed"] is True
+            assert resumed["assertion_rule_unchanged"] is True
+            assert resumed["worker_stalled"] is False
+            assert observed["stop_state"] == "provider_unavailable"
+            assert observed["fact_ids"] == turn["extra"]["before"]["fact_ids"]
+            assert "bounded timeout" in turn["extra"]["backend_error"]
+        previous = observed
+
+    for fact in session["turns"][-1]["observation"]["facts"]:
+        if not fact["source_id"]:
+            continue
+        assert str(fact["statement"] or fact["name"]) in user_corpus
+    for item in session["turns"][-1]["observation"]["legal"]:
+        if item["dependency_class"] != "legally_sourced_requirement":
+            continue
+        if item["source_available"] is False:
+            continue
+        assert item["source_hash"] in session["admitted_source_hashes"]
+
+
+@pytest.mark.no_auto_llm
+@pytest.mark.no_auto_network
+@pytest.mark.no_auto_heavy
+def test_scripted_interview_saturation_outage_timeout_and_resume(tmp_path, monkeypatch):
+    session = application_level_interview_fixture(tmp_path, monkeypatch)
+    assert_scripted_interview_contract(session)
+    assert session["backend_calls"] >= 1
+    timeout = scripted_turn(session, "bounded_timeout")
+    assert timeout["observation"]["filing_ready"] is False
+    assert timeout["extra"]["paused"]["awaiting_user"] is True
+    assert timeout["extra"]["resumed"]["supervisory_restart"] is False

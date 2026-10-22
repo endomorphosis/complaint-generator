@@ -262,3 +262,39 @@ def test_phase_manager_records_scoped_refresh_from_context_and_answers(monkeypat
     assert legal.satisfied is False
     assert legal.attributes["source_available"] is False
     assert _gap_nodes(graph)
+
+
+def test_scripted_interview_refreshes_law_dependencies_with_source_lineage(tmp_path, monkeypatch):
+    """Jurisdiction and rule-version turns change only sourced legal dependencies."""
+    from tests.test_question_saturation_contract import (
+        application_level_interview_fixture,
+        scripted_turn,
+    )
+
+    session = application_level_interview_fixture(tmp_path, monkeypatch)
+    rule = scripted_turn(session, "rule_version")
+    available = [
+        item for item in rule["observation"]["legal"]
+        if item["dependency_class"] == "legally_sourced_requirement" and item["source_available"] is not False
+    ]
+    assert available
+    assert {item["source_hash"] for item in available} <= session["admitted_source_hashes"]
+    assert any(item["authority_version"] == "2025-edition" for item in available)
+    assert all(item["law_derived"] is False for item in available)
+    retired = [
+        item for item in rule["observation"]["legal"]
+        if item["dependency_class"] == "legally_sourced_requirement" and item["source_available"] is False
+    ]
+    assert retired
+    assert all(item["satisfied"] is False for item in retired)
+
+    jurisdiction = scripted_turn(session, "jurisdiction")
+    assert jurisdiction["observation"]["fact_ids"] == jurisdiction["extra"]["before_fact_ids"]
+    assert all(
+        item["satisfied"] is False
+        for item in jurisdiction["observation"]["legal"]
+        if item["dependency_class"] == "legally_sourced_requirement"
+    )
+    report = jurisdiction["extra"]["report"]
+    assert report.get("affected_node_ids")
+    assert "heuristic" not in str(report).lower() or report.get("heuristic_law_derived_invoked") is not True

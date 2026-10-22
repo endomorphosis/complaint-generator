@@ -1082,3 +1082,38 @@ def test_missing_or_malformed_cleanup_acknowledgement_is_not_a_bounded_success(t
     assert private['status'] == 'degraded'
     assert _asserted_upstream(result) == []
     assert 'synthetic-private-backend-secret-marker' not in str(result)
+
+
+def test_scripted_interview_keeps_fact_and_law_lineage_separate(tmp_path, monkeypatch):
+    """User facts cite user turns. Applicable requirements cite admitted sources only."""
+    from tests.test_question_saturation_contract import (
+        application_level_interview_fixture,
+        assert_scripted_interview_contract,
+        scripted_turn,
+    )
+
+    session = application_level_interview_fixture(tmp_path, monkeypatch)
+    assert_scripted_interview_contract(session)
+    user_corpus = "\n".join(item["text"] for item in session["transcript"])
+    final = session["turns"][-1]["observation"]
+    sourced_facts = [fact for fact in final["facts"] if fact["source_id"]]
+    assert sourced_facts
+    assert {fact["source_id"] for fact in sourced_facts} >= {"msg-complete", "msg-correction", "msg-contradiction"}
+    for fact in sourced_facts:
+        assert fact["statement"] in user_corpus
+        assert fact["source_hash"]
+    applicable = [
+        item for item in final["legal"]
+        if item["dependency_class"] == "legally_sourced_requirement" and item["source_available"] is not False
+    ]
+    # A jurisdiction with no admitted source leaves no applicable requirement.
+    during_rule = [
+        item for item in scripted_turn(session, "rule_version")["observation"]["legal"]
+        if item["dependency_class"] == "legally_sourced_requirement" and item["source_available"] is not False
+    ]
+    assert during_rule
+    assert {item["source_hash"] for item in during_rule} <= session["admitted_source_hashes"]
+    assert {item["source_hash"] for item in applicable} <= session["admitted_source_hashes"]
+    assert all(item["verification_status"] not in {None, "", "heuristic", "unverified"} for item in applicable)
+    gaps = [item for item in final["legal"] if item["dependency_class"] != "legally_sourced_requirement"]
+    assert all(item["satisfied"] is False and item["law_derived"] is False for item in gaps)
