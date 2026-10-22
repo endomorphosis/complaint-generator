@@ -375,7 +375,7 @@ Implementation instructions:
 
 ## CIMP-FACT-05 Persist graph revisions with verified Client and encrypted storage boundary
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.facts
