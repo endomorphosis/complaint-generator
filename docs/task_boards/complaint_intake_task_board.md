@@ -697,7 +697,7 @@ Implementation instructions:
 
 ## CIMP-QUEST-04 Validate multi-turn graph refinement, saturation and resume end to end
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.questioning
