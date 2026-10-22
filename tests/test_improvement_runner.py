@@ -226,7 +226,8 @@ def test_real_native_parser_and_config_accept_explicit_bounded_campaign(campaign
     assert args.task_shard_count == 1 and args.task_shard_index == 0
     assert config.use_ephemeral_worktree
     assert config.merge_target_branch == "local-campaign"
-    assert not config.worktree_reconciliation_enabled
+    assert config.worktree_reconciliation_enabled
+    assert config.worktree_reconciliation_preflight_enabled
     assert config.worktree_root == state / "worktrees"
     assert tuple(config.worktree_submodule_paths) == ("external/ipfs_datasets_py", "external/ipfs_kit_py")
 

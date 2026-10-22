@@ -731,7 +731,8 @@ def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktre
         "--worktree-submodule-path", "external/ipfs_kit_py",
         "--merge-queue-dir", str(state_dir / "merge-queue"),
         "--llm-merge-resolver-command", "",
-        "--no-worktree-reconciliation", "--no-worktree-reconciliation-preflight",
+        # Native recovers interrupted owned proposals through the measured
+        # scheduler and normal merge callback before another provider starts.
         "--no-objective-task-janitor", "--no-objective-goal-refinement",
         "--no-objective-goal-completion-reconcile", "--no-objective-goal-migration",
         "--no-objective-ast-dataset", "--no-objective-todo-vector-index",
