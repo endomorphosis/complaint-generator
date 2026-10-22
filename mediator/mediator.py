@@ -548,10 +548,26 @@ class Mediator:
 				-int(bool(signals.get('weak_claim_generalization_match', False))),
 				-_actor_critic_priority_score(candidate),
 				int(candidate.get('proof_priority', 99) or 99),
+				*_target_rank_tuple(candidate),
+			)
+
+		denoiser = getattr(self, 'denoiser', None)
+
+		def _target_rank_tuple(candidate: Dict[str, Any]):
+			ranker = getattr(denoiser, '_target_rank_tuple', None) if denoiser is not None else None
+			if callable(ranker):
+				return ranker(candidate)
+			target = candidate.get('unresolved_target') if isinstance(candidate.get('unresolved_target'), dict) else {}
+			answerability = str(target.get('user_answerability') or 'user_observable')
+			answer_rank = {'user_observable': 0, 'partial': 1, 'not_answerable': 2, 'operator_only': 3}.get(answerability, 2)
+			return (
+				-int(target.get('dependency_impact') or 0),
+				-int(target.get('uncertainty') or 0),
+				answer_rank,
+				str(target.get('target_id') or ''),
 			)
 
 		scored_candidates.sort(key=_sort_key)
-		denoiser = getattr(self, 'denoiser', None)
 		if denoiser is not None and hasattr(denoiser, '_select_proof_directed_candidates'):
 			selected = denoiser._select_proof_directed_candidates(
 				scored_candidates,
