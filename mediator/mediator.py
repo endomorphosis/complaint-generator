@@ -205,6 +205,98 @@ class Mediator:
 	def response(self):
 		return "I'm sorry, I don't understand. Please try again."
 
+	def _intake_case_file_for_questions(self, intake_case_file=None):
+		if isinstance(intake_case_file, dict):
+			return intake_case_file
+		getter = getattr(getattr(self, "phase_manager", None), "get_phase_data", None)
+		if not callable(getter):
+			return None
+		try:
+			from complaint_phases.phase_manager import ComplaintPhase
+			loaded = getter(ComplaintPhase.INTAKE, "intake_case_file")
+		except Exception:
+			return None
+		return loaded if isinstance(loaded, dict) else None
+
+	def _question_target_identity(self, candidate: Dict[str, Any]):
+		target = candidate.get("unresolved_target") if isinstance(candidate.get("unresolved_target"), dict) else {}
+		target_id = str(target.get("target_id") or candidate.get("target_id") or "").strip()
+		revision = str(target.get("target_revision") or candidate.get("target_revision") or "").strip()
+		return target_id, revision
+
+	def record_intake_question_disposition(
+		self,
+		question: Dict[str, Any],
+		answer: Any = "",
+		disposition: Any = None,
+		*,
+		reason: Any = None,
+		intake_case_file: Optional[Dict[str, Any]] = None,
+		creates_fact: bool = False,
+		satisfies_requirement: bool = False,
+	) -> Dict[str, Any]:
+		"""Persist a question target revision and disposition for this interview."""
+		from complaint_phases.denoiser import ComplaintDenoiser
+		case_file = self._intake_case_file_for_questions(intake_case_file)
+		denoiser = getattr(self, "denoiser", None)
+		if not isinstance(denoiser, ComplaintDenoiser):
+			denoiser = ComplaintDenoiser(mediator=self)
+			self.denoiser = denoiser
+		record = denoiser.record_question_disposition(
+			question if isinstance(question, dict) else {},
+			answer,
+			disposition=disposition,
+			reason=reason,
+			intake_case_file=case_file,
+			creates_fact=creates_fact,
+			satisfies_requirement=satisfies_requirement,
+			contradictory_conclusion=False,
+		)
+		target_id = str(record.get("target_id") or "")
+		inquiries = getattr(getattr(self, "state", None), "inquiries", None)
+		if isinstance(inquiries, list) and target_id:
+			for inquiry in inquiries:
+				if not isinstance(inquiry, dict):
+					continue
+				inquiry_target = inquiry.get("unresolved_target") if isinstance(inquiry.get("unresolved_target"), dict) else {}
+				inquiry_id = str(inquiry_target.get("target_id") or inquiry.get("target_id") or "")
+				if inquiry_id != target_id:
+					continue
+				inquiry["disposition"] = record["disposition"]
+				inquiry["answer_disposition"] = record["disposition"]
+				if record["disposition"] != "answered":
+					inquiry["answer"] = inquiry.get("answer") or f"[{record['disposition']}]"
+					inquiry["creates_fact"] = False
+					inquiry["satisfies_requirement"] = False
+					inquiry["contradictory_conclusion"] = False
+		return record
+
+	def reopen_intake_question(
+		self,
+		target_id: str,
+		reason: str,
+		*,
+		target_revision: Any = None,
+		intake_case_file: Optional[Dict[str, Any]] = None,
+		evidence_change: Any = None,
+		scope_change: Any = None,
+	) -> Dict[str, Any]:
+		"""Reopen a disposed question because evidence or scope changed."""
+		from complaint_phases.denoiser import ComplaintDenoiser
+		case_file = self._intake_case_file_for_questions(intake_case_file)
+		denoiser = getattr(self, "denoiser", None)
+		if not isinstance(denoiser, ComplaintDenoiser):
+			denoiser = ComplaintDenoiser(mediator=self)
+			self.denoiser = denoiser
+		return denoiser.reopen_disposed_question(
+			target_id,
+			reason,
+			target_revision=target_revision,
+			intake_case_file=case_file,
+			evidence_change=evidence_change,
+			scope_change=scope_change,
+		)
+
 	def select_intake_question_candidates(
 		self,
 		candidates: List[Dict[str, Any]],
@@ -213,6 +305,24 @@ class Mediator:
 	) -> List[Dict[str, Any]]:
 		"""Default intake-question selector using explicit reasoning signals and a fallback heuristic."""
 		normalized_candidates = [candidate for candidate in (candidates or []) if isinstance(candidate, dict)]
+		case_file = self._intake_case_file_for_questions()
+		denoiser = getattr(self, "denoiser", None)
+		if case_file is not None and denoiser is not None and hasattr(denoiser, "load_question_dispositions"):
+			denoiser.load_question_dispositions(case_file)
+		if denoiser is not None and hasattr(denoiser, "is_question_target_closed"):
+			filtered_candidates = []
+			for candidate in normalized_candidates:
+				target_id, revision = self._question_target_identity(candidate)
+				if target_id and denoiser.is_question_target_closed(target_id, revision):
+					continue
+				filtered_candidates.append(candidate)
+			normalized_candidates = filtered_candidates
+		elif case_file is not None:
+			from complaint_phases.intake_case_file import question_target_is_closed
+			normalized_candidates = [
+				candidate for candidate in normalized_candidates
+				if not question_target_is_closed(case_file, *self._question_target_identity(candidate)[:1], self._question_target_identity(candidate)[1])
+			]
 		if not normalized_candidates:
 			return []
 		dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')

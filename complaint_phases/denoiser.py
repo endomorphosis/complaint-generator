@@ -53,6 +53,8 @@ class ComplaintDenoiser:
         self.questions_pool = []
         self.source_operator_diagnostics: List[Dict[str, Any]] = []
         self.target_dispositions: Dict[str, str] = {}
+        self.question_disposition_records: List[Dict[str, Any]] = []
+        self._question_scope_revision = "standard-intake"
 
         # Optional “policy” knobs for SGD-style exploration.
         # Default is deterministic/no-randomness.
@@ -2745,7 +2747,41 @@ class ComplaintDenoiser:
 
         return questions[:max_questions]
 
-    _CLOSED_TARGET_DISPOSITIONS = {'unknown', 'declined', 'refused', 'skipped', 'contradictory'}
+    _CLOSED_TARGET_DISPOSITIONS = {
+        'answered', 'unknown', 'declined', 'refused', 'skipped', 'deferred',
+        'invalidated', 'contradictory',
+    }
+    _NON_FACT_DISPOSITIONS = {'unknown', 'refused', 'skipped', 'deferred', 'invalidated', 'declined'}
+    _DISPOSITION_ALIASES = {
+        'answered': 'answered',
+        'answer': 'answered',
+        'unknown': 'unknown',
+        'do_not_know': 'unknown',
+        'dont_know': 'unknown',
+        'declined': 'refused',
+        'decline': 'refused',
+        'refused': 'refused',
+        'refuse': 'refused',
+        'refusal': 'refused',
+        'skipped': 'skipped',
+        'skip': 'skipped',
+        'deferred': 'deferred',
+        'defer': 'deferred',
+        'invalidated': 'invalidated',
+        'invalidate': 'invalidated',
+        'contradictory': 'contradictory',
+    }
+    _UNKNOWN_ANSWERS = {
+        'unknown', 'i do not know', "i don't know", 'i dont know', 'idk', 'not sure',
+        'unsure', 'no idea', 'do not know', "don't know", 'n/a', 'na', 'none',
+    }
+    _REFUSED_ANSWERS = {
+        'i refuse', 'i refuse to answer', 'refused', 'refuse', 'i decline',
+        'i decline to answer', 'declined', 'decline', 'prefer not to say',
+    }
+    _SKIPPED_ANSWERS = {'skip', 'skipped', 'skip this', 'skip this question'}
+    _DEFERRED_ANSWERS = {'defer', 'deferred', 'later', 'not now', 'ask me later'}
+    _INVALIDATED_ANSWERS = {'invalidated', 'invalidate', 'no longer applies'}
     _OPERATOR_GAP_TOKENS = (
         'prover', 'solver', 'huggingface', 'citation database', 'currentness',
         'backend', 'model download', 'repair the', 'source outage', 'unavailable source',
@@ -2774,11 +2810,313 @@ class ComplaintDenoiser:
             uncertainty = 0
         return (-impact, -uncertainty, answer_rank, str(target.get('target_id') or ''))
 
+    def _normalize_disposition_token(self, value: Any) -> str:
+        token = " ".join(str(value or "").strip().lower().replace("_", " ").replace("-", " ").split())
+        key = token.replace(" ", "_")
+        if key in self._DISPOSITION_ALIASES:
+            return self._DISPOSITION_ALIASES[key]
+        compact = re.sub(r"[^a-z0-9' ]+", "", token).strip()
+        return compact
+
+    def classify_answer_disposition(self, answer: Any, explicit: Any = None) -> str:
+        """Classify an answer without turning a non-answer into a fact."""
+        if explicit not in (None, ""):
+            mapped = self._DISPOSITION_ALIASES.get(self._normalize_disposition_token(explicit).replace(" ", "_"))
+            if mapped:
+                return mapped
+            token = self._normalize_disposition_token(explicit)
+            if token in self._CLOSED_TARGET_DISPOSITIONS or token in self._NON_FACT_DISPOSITIONS:
+                return token
+        compact = self._normalize_disposition_token(answer)
+        if compact in self._UNKNOWN_ANSWERS:
+            return "unknown"
+        if compact in self._REFUSED_ANSWERS:
+            return "refused"
+        if compact in self._SKIPPED_ANSWERS:
+            return "skipped"
+        if compact in self._DEFERRED_ANSWERS:
+            return "deferred"
+        if compact in self._INVALIDATED_ANSWERS:
+            return "invalidated"
+        return "answered" if compact else "skipped"
+
+    def _standard_intake_slot(self, candidate: Dict[str, Any]) -> str:
+        if not isinstance(candidate, dict):
+            return ""
+        context = candidate.get("context") if isinstance(candidate.get("context"), dict) else {}
+        source = str(candidate.get("candidate_source") or context.get("candidate_source") or "").strip()
+        explicit = str(context.get("standard_intake_slot") or candidate.get("standard_intake_slot") or "").strip().lower()
+        if explicit in {"timeline", "impact", "notice"}:
+            return explicit
+        if source != "standard_intake_backstop":
+            return ""
+        text = str(candidate.get("question") or "").lower()
+        if any(token in text for token in ("harm", "remedy", "emotional", "financial", "damages")):
+            return "impact"
+        if any(token in text for token in ("notice", "letter", "email", "message", "who sent")):
+            return "notice"
+        if any(token in text for token in ("timeline", "key events", "who made", "what date")):
+            return "timeline"
+        return ""
+
+    def _target_identity(self, question: Dict[str, Any]) -> Tuple[str, str, str]:
+        target = question.get("unresolved_target") if isinstance(question, dict) and isinstance(question.get("unresolved_target"), dict) else {}
+        context = question.get("context") if isinstance(question, dict) and isinstance(question.get("context"), dict) else {}
+        target_id = str(target.get("target_id") or (question or {}).get("target_id") or "").strip()
+        revision = str(
+            target.get("target_revision")
+            or (question or {}).get("target_revision")
+            or context.get("target_revision")
+            or self._question_scope_revision
+            or "unresolved"
+        ).strip() or "unresolved"
+        kind = str(target.get("target_kind") or (question or {}).get("target_kind") or "").strip()
+        return target_id, revision, kind
+
+    def load_question_dispositions(self, intake_case_file: Optional[Dict[str, Any]]) -> None:
+        if isinstance(intake_case_file, dict):
+            scope = intake_case_file.get("question_scope_revision") or intake_case_file.get("scope_revision")
+            legal = intake_case_file.get("legal_context") if isinstance(intake_case_file.get("legal_context"), dict) else {}
+            scope = scope or legal.get("scope_revision")
+            if str(scope or "").strip():
+                self._question_scope_revision = str(scope).strip()
+        from complaint_phases.intake_case_file import question_disposition_records
+        incoming = question_disposition_records(intake_case_file)
+        seen = {
+            (
+                str(item.get("target_id") or ""),
+                str(item.get("target_revision") or ""),
+                str(item.get("disposition") or ""),
+                bool(item.get("reopened")),
+                str(item.get("reopen_reason") or ""),
+            )
+            for item in self.question_disposition_records
+            if isinstance(item, dict)
+        }
+        for record in incoming:
+            key = (
+                record["target_id"],
+                record["target_revision"],
+                record["disposition"],
+                bool(record["reopened"]),
+                str(record.get("reopen_reason") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            self.question_disposition_records.append(dict(record))
+
+    def is_question_target_closed(self, target_id: Any, target_revision: Any = None) -> bool:
+        wanted = str(target_id or "").strip()
+        if not wanted:
+            return False
+        revision = str(target_revision or "").strip()
+        blanket = str((self.target_dispositions or {}).get(wanted) or "").strip().lower()
+        if blanket in self._CLOSED_TARGET_DISPOSITIONS:
+            reopened = False
+            for record in self.question_disposition_records:
+                if not isinstance(record, dict) or str(record.get("target_id") or "") != wanted:
+                    continue
+                if record.get("reopened"):
+                    reopen_revision = str(record.get("target_revision") or "")
+                    if not revision or not reopen_revision or reopen_revision == revision:
+                        reopened = True
+            if not reopened:
+                return True
+        closed = False
+        for record in self.question_disposition_records:
+            if not isinstance(record, dict) or str(record.get("target_id") or "") != wanted:
+                continue
+            if record.get("reopened"):
+                reopen_revision = str(record.get("target_revision") or "")
+                if not revision or not reopen_revision or reopen_revision == revision:
+                    closed = False
+                continue
+            disposition = str(record.get("disposition") or "").strip().lower()
+            if disposition in self._CLOSED_TARGET_DISPOSITIONS or disposition in self._NON_FACT_DISPOSITIONS:
+                closed = True
+        return closed
+
+    def record_question_disposition(
+        self,
+        question: Dict[str, Any],
+        answer: Any = "",
+        *,
+        disposition: Any = None,
+        reason: Any = None,
+        intake_case_file: Optional[Dict[str, Any]] = None,
+        creates_fact: bool = False,
+        satisfies_requirement: bool = False,
+        contradictory_conclusion: bool = False,
+    ) -> Dict[str, Any]:
+        from complaint_phases.intake_case_file import record_question_disposition as persist_disposition
+        bound = self._bind_unresolved_target(question if isinstance(question, dict) else {})
+        target_id, revision, kind = self._target_identity(bound if isinstance(bound, dict) else {})
+        if not target_id and isinstance(question, dict):
+            slot = self._standard_intake_slot(question)
+            if slot:
+                kind = "proof" if slot == "notice" else "factual"
+                target_id = f"{kind}:standard-intake:{slot}"
+                revision = revision or self._question_scope_revision
+        classified = self.classify_answer_disposition(answer, explicit=disposition)
+        non_fact = classified in self._NON_FACT_DISPOSITIONS
+        record = {
+            "target_id": target_id,
+            "target_revision": revision or self._question_scope_revision or "unresolved",
+            "target_kind": kind or None,
+            "disposition": classified,
+            "question": str((bound or question or {}).get("question") or "") or None,
+            "answer": None if non_fact else answer,
+            "reason": str(reason or "").strip() or None,
+            "creates_fact": False if non_fact else bool(creates_fact),
+            "satisfies_requirement": False if non_fact else bool(satisfies_requirement),
+            "contradictory_conclusion": False if non_fact else bool(contradictory_conclusion),
+            "reopened": False,
+            "status": "disposed",
+        }
+        if target_id:
+            self.question_disposition_records = [
+                item for item in self.question_disposition_records
+                if not (
+                    isinstance(item, dict)
+                    and str(item.get("target_id") or "") == target_id
+                    and str(item.get("target_revision") or "") == record["target_revision"]
+                    and not item.get("reopened")
+                )
+            ]
+            self.question_disposition_records.append(dict(record))
+        case_file = intake_case_file if isinstance(intake_case_file, dict) else None
+        if case_file is None and self.mediator is not None:
+            phase_manager = getattr(self.mediator, "phase_manager", None)
+            getter = getattr(phase_manager, "get_phase_data", None)
+            if callable(getter):
+                try:
+                    from complaint_phases.phase_manager import ComplaintPhase
+                    loaded = getter(ComplaintPhase.INTAKE, "intake_case_file")
+                except Exception:
+                    loaded = None
+                if isinstance(loaded, dict):
+                    case_file = loaded
+        if isinstance(case_file, dict) and target_id:
+            persist_disposition(
+                case_file,
+                target_id=target_id,
+                target_revision=record["target_revision"],
+                disposition=classified,
+                target_kind=kind,
+                question=record["question"],
+                answer=record["answer"],
+                reason=record["reason"],
+                creates_fact=record["creates_fact"],
+                satisfies_requirement=record["satisfies_requirement"],
+                contradictory_conclusion=record["contradictory_conclusion"],
+            )
+        return record
+
+    def reopen_disposed_question(
+        self,
+        target_id: Any,
+        reason: Any,
+        *,
+        target_revision: Any = None,
+        intake_case_file: Optional[Dict[str, Any]] = None,
+        evidence_change: Any = None,
+        scope_change: Any = None,
+    ) -> Dict[str, Any]:
+        from complaint_phases.intake_case_file import reopen_question_disposition
+        why = str(reason or "").strip()
+        evidence = str(evidence_change or "").strip() or None
+        scope = str(scope_change or "").strip() or None
+        if not why:
+            raise ValueError("reopening a disposed question requires a reason")
+        if not evidence and not scope:
+            raise ValueError("reopening a disposed question requires new evidence or changed scope")
+        wanted = str(target_id or "").strip()
+        case_file = intake_case_file if isinstance(intake_case_file, dict) else None
+        if case_file is None and self.mediator is not None:
+            phase_manager = getattr(self.mediator, "phase_manager", None)
+            getter = getattr(phase_manager, "get_phase_data", None)
+            if callable(getter):
+                try:
+                    from complaint_phases.phase_manager import ComplaintPhase
+                    loaded = getter(ComplaintPhase.INTAKE, "intake_case_file")
+                except Exception:
+                    loaded = None
+                if isinstance(loaded, dict):
+                    case_file = loaded
+        if isinstance(case_file, dict):
+            reopened = reopen_question_disposition(
+                case_file,
+                wanted,
+                reason=why,
+                target_revision=target_revision,
+                evidence_change=evidence,
+                scope_change=scope,
+            )
+        else:
+            if not any(
+                isinstance(item, dict) and str(item.get("target_id") or "") == wanted and not item.get("reopened")
+                for item in self.question_disposition_records
+            ) and wanted not in (self.target_dispositions or {}):
+                raise ValueError("no disposed question matches that target")
+            reopened = {
+                "target_id": wanted,
+                "target_revision": str(target_revision or self._question_scope_revision or "unresolved"),
+                "disposition": str((self.target_dispositions or {}).get(wanted) or "unknown"),
+                "reopened": True,
+                "reopen_reason": why,
+                "evidence_change": evidence,
+                "scope_change": scope,
+                "status": "reopened",
+                "creates_fact": False,
+                "satisfies_requirement": False,
+                "contradictory_conclusion": False,
+            }
+        self.question_disposition_records.append(dict(reopened))
+        if wanted in self.target_dispositions:
+            self.target_dispositions.pop(wanted, None)
+        if scope:
+            self._question_scope_revision = scope
+        return reopened
+
+    def _non_fact_answer_updates(self, disposition: str, record: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "entities_updated": 0,
+            "relationships_added": 0,
+            "requirements_satisfied": 0,
+            "disposition": disposition,
+            "creates_fact": False,
+            "satisfies_requirement": False,
+            "contradictory_conclusion": False,
+            "question_disposition": record,
+        }
+
+    def _target_was_reopened(self, target_id: str) -> bool:
+        wanted = str(target_id or "").strip()
+        reopened = False
+        for record in self.question_disposition_records:
+            if not isinstance(record, dict) or str(record.get("target_id") or "") != wanted:
+                continue
+            if record.get("reopened"):
+                reopened = True
+            elif str(record.get("disposition") or "").strip().lower() in self._CLOSED_TARGET_DISPOSITIONS:
+                reopened = False
+        return reopened
+
     def _closed_target_ids(self) -> Set[str]:
         closed: Set[str] = set()
         for target_id, disposition in (self.target_dispositions or {}).items():
             if str(disposition or '').strip().lower() in self._CLOSED_TARGET_DISPOSITIONS and str(target_id or '').strip():
-                closed.add(str(target_id))
+                if not self._target_was_reopened(str(target_id)):
+                    closed.add(str(target_id))
+        for record in self.question_disposition_records:
+            if not isinstance(record, dict):
+                continue
+            target_id = str(record.get("target_id") or "").strip()
+            disposition = str(record.get("disposition") or "").strip().lower()
+            if target_id and not record.get("reopened") and disposition in self._CLOSED_TARGET_DISPOSITIONS:
+                if not self._target_was_reopened(target_id):
+                    closed.add(target_id)
         for item in self.questions_asked:
             if not isinstance(item, dict):
                 continue
@@ -2790,7 +3128,7 @@ class ComplaintDenoiser:
             if disposition in self._CLOSED_TARGET_DISPOSITIONS or any(
                 phrase in answer for phrase in ("don't know", 'do not know', 'i decline', 'declined', 'i refuse', 'refused')
             ):
-                if target_id:
+                if target_id and not self._target_was_reopened(target_id):
                     closed.add(target_id)
         return closed
 
@@ -2890,6 +3228,7 @@ class ComplaintDenoiser:
 
         question_type = str(enriched.get('type') or enriched.get('question_type') or '').strip().lower()
         source = str(enriched.get('candidate_source') or context.get('candidate_source') or '').strip()
+        standard_slot = self._standard_intake_slot(enriched)
         left_id = str(context.get('left_node_id') or '').strip()
         right_id = str(context.get('right_node_id') or '').strip()
         raw_id = str(
@@ -2907,7 +3246,10 @@ class ComplaintDenoiser:
         ).strip()
         if not raw_id and source == 'knowledge_graph_gap':
             raw_id = 'kg:' + str(context.get('gap_type') or question_type or 'gap')
-        if question_type == 'contradiction' or (left_id and right_id and 'contradict' in source):
+        if standard_slot:
+            target_kind = 'proof' if standard_slot == 'notice' else 'factual'
+            target_id = f"{target_kind}:standard-intake:{standard_slot}"
+        elif question_type == 'contradiction' or (left_id and right_id and 'contradict' in source):
             target_kind = 'contradiction'
             pair = tuple(sorted([left_id or raw_id or 'left', right_id or 'right']))
             target_id = f"contradiction:{pair[0]}:{pair[1]}"
@@ -3020,6 +3362,7 @@ class ComplaintDenoiser:
         """
         closed = self._closed_target_ids()
         kept: List[Dict[str, Any]] = []
+        seen_target_ids: Set[str] = set()
         for raw in questions or []:
             if not isinstance(raw, dict):
                 continue
@@ -3050,8 +3393,14 @@ class ComplaintDenoiser:
                 continue
             if target.get('user_answerability') != 'user_observable':
                 continue
-            if str(target.get('target_id')) in closed:
+            if str(target.get('target_id')) in closed or self.is_question_target_closed(
+                target.get('target_id'),
+                target.get('target_revision'),
+            ):
                 continue
+            if str(target.get('target_id')) in seen_target_ids:
+                continue
+            seen_target_ids.add(str(target.get('target_id')))
             required = (
                 'target_id', 'target_revision', 'target_kind', 'provenance',
                 'why_answer_helps', 'expected_information', 'user_answerability',
@@ -3680,18 +4029,32 @@ class ComplaintDenoiser:
 
         existing_text = " ".join([q.get('question', '') for q in questions]).lower()
         added: List[Dict[str, Any]] = []
+        revision = self._question_scope_revision or "standard-intake"
+
+        def _slot_open(slot: str, kind: str) -> bool:
+            target_id = f"{kind}:standard-intake:{slot}"
+            if any(
+                str((q.get("unresolved_target") or {}).get("target_id") or q.get("target_id") or "") == target_id
+                for q in questions + added
+                if isinstance(q, dict)
+            ):
+                return False
+            return not self.is_question_target_closed(target_id, revision)
 
         timeline_text = (
             'What is the timeline of key events, including dates, who made each decision, what notice or communication you received, and when you requested help or accommodation?'
         )
         if len(questions) + len(added) < max_questions:
             if not any(q.get('type') == 'timeline' for q in questions) and not any(k in existing_text for k in ['timeline', 'when did', 'what date', 'dates', 'notice', 'who made']):
-                if not self._already_asked(timeline_text):
+                if not self._already_asked(timeline_text) and _slot_open("timeline", "factual"):
                     added.append(self._question_candidate(
                         source='standard_intake_backstop',
                         question_type='timeline',
                         question_text=timeline_text,
-                        context={},
+                        context={
+                            "standard_intake_slot": "timeline",
+                            "target_revision": revision,
+                        },
                         priority='high',
                     ))
 
@@ -3700,12 +4063,15 @@ class ComplaintDenoiser:
         )
         if len(questions) + len(added) < max_questions:
             if not any(q.get('type') in {'impact', 'remedy'} for q in questions) and not any(k in existing_text for k in ['harm', 'damages', 'remedy', 'seeking', 'notice', 'letter', 'message']):
-                if not self._already_asked(impact_text):
+                if not self._already_asked(impact_text) and _slot_open("impact", "factual"):
                     added.append(self._question_candidate(
                         source='standard_intake_backstop',
                         question_type='impact',
                         question_text=impact_text,
-                        context={},
+                        context={
+                            "standard_intake_slot": "impact",
+                            "target_revision": revision,
+                        },
                         priority='high',
                     ))
 
@@ -3714,12 +4080,15 @@ class ComplaintDenoiser:
             )
             if len(questions) + len(added) < max_questions:
                 if not any(q.get('type') == 'evidence' for q in questions) and not any(k in existing_text for k in ['notice', 'letter', 'email', 'message', 'sent it']):
-                    if not self._already_asked(notice_text):
+                    if not self._already_asked(notice_text) and _slot_open("notice", "proof"):
                         added.append(self._question_candidate(
                             source='standard_intake_backstop',
                             question_type='evidence',
                             question_text=notice_text,
-                            context={},
+                            context={
+                                "standard_intake_slot": "notice",
+                                "target_revision": revision,
+                            },
                             priority='high',
                         ))
 
@@ -3996,6 +4365,7 @@ class ComplaintDenoiser:
         Returns:
             List of question dictionaries with type, question text, and context
         """
+        self.load_question_dispositions(intake_case_file)
         questions = self.collect_question_candidates(
             knowledge_graph,
             dependency_graph,
@@ -4070,6 +4440,36 @@ class ComplaintDenoiser:
             prior = knowledge_graph.begin_answer_event(answer_event_id, event_payload)
             if prior is not None and prior.get("denoiser_updates") is not None:
                 return dict(prior["denoiser_updates"])
+        explicit_disposition = None
+        if isinstance(question, dict):
+            explicit_disposition = question.get("disposition") or question.get("answer_disposition")
+        if explicit_disposition in (None, "") and isinstance(source_context, dict):
+            explicit_disposition = source_context.get("disposition") or source_context.get("answer_disposition")
+        classified_disposition = self.classify_answer_disposition(answer, explicit=explicit_disposition)
+        if classified_disposition in self._NON_FACT_DISPOSITIONS:
+            record = self.record_question_disposition(
+                question if isinstance(question, dict) else {},
+                answer,
+                disposition=classified_disposition,
+                intake_case_file=(source_context or {}).get("intake_case_file") if isinstance(source_context, dict) else None,
+            )
+            updates = self._non_fact_answer_updates(classified_disposition, record)
+            self.questions_asked.append({
+                'question': question,
+                'answer': answer,
+                'answer_event_id': answer_event_id,
+                'disposition': classified_disposition,
+                'creates_fact': False,
+                'satisfies_requirement': False,
+                'contradictory_conclusion': False,
+            })
+            if answer_event_id and knowledge_graph is not None:
+                knowledge_graph.finish_answer_event(
+                    answer_event_id,
+                    event_payload,
+                    denoiser_updates=dict(updates),
+                )
+            return updates
         if factual_action:
             updates = self._process_factual_revision(
                 question,
@@ -5825,6 +6225,21 @@ class ComplaintDenoiser:
             _mark_dependency_gap_satisfied()
 
         logger.info(f"Processed answer: {updates}")
+        answered_record = self.record_question_disposition(
+            question if isinstance(question, dict) else {},
+            answer,
+            disposition="answered",
+            intake_case_file=(source_context or {}).get("intake_case_file") if isinstance(source_context, dict) else None,
+            creates_fact=bool(updates.get("entities_updated") or updates.get("relationships_added")),
+            satisfies_requirement=bool(updates.get("requirements_satisfied")),
+            contradictory_conclusion=False,
+        )
+        updates["disposition"] = "answered"
+        updates["creates_fact"] = answered_record["creates_fact"]
+        updates["satisfies_requirement"] = bool(updates.get("requirements_satisfied"))
+        updates["contradictory_conclusion"] = False
+        updates["question_disposition"] = answered_record
+        self.questions_asked[-1]["disposition"] = "answered"
 
         try:
             gain = self._compute_gain(updates)
