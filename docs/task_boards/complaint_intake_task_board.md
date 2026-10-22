@@ -99,7 +99,7 @@ Implementation instructions:
 
 ## CIMP-TUI-05 Refine factual graph and support links on every answer
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.tui
