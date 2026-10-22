@@ -1732,7 +1732,7 @@ def validation_watchdog_case(tmp_path, monkeypatch):
     monkeypatch.setattr(supervisor, "_implementation_maintenance_lock_path", lambda: tmp_path / "lease")
     monkeypatch.setattr(supervisor, "_task_dispatch_claim_path", lambda s: tmp_path / "claim")
     monkeypatch.setattr(supervisor, "_managed_daemon_identity_path", lambda: tmp_path / "identity")
-    monkeypatch.setattr(supervisor, "_read_watchdog_authority", lambda p: lease if p.name == "lease" else claim)
+    monkeypatch.setattr(runner, "_read_validation_watchdog_authority", lambda p: lease if p.name == "lease" else claim)
     monkeypatch.setattr(supervisor, "_managed_daemon_owner_scope", lambda: scope)
     monkeypatch.setattr(supervisor, "_build_daemon_command", lambda: list(identity.command))
     monkeypatch.setattr(native, "load_supervised_child_identity", lambda p: identity)
@@ -1764,7 +1764,7 @@ def test_validation_watchdog_refuses_unowned_or_expired_window(validation_watchd
     elif change == "outside_worktree": state.active_worktree_path = str(tmp_path)
     elif change == "no_worker": monkeypatch.setattr(supervisor, "_active_validation_subprocess_exists", lambda: False)
     elif change == "wrong_owner": identity.owner_scope = {"state_dir": "/unrelated"}
-    elif change == "missing_claim": monkeypatch.setattr(supervisor, "_read_watchdog_authority", lambda p: None)
+    elif change == "missing_claim": monkeypatch.setattr(runner, "_read_validation_watchdog_authority", lambda p: None)
     assert runner._owned_validation_window(supervisor, state, now_ts=now) is False
     assert supervisor.is_stuck(state, now_ts=now)[0] is True
 
@@ -1808,3 +1808,204 @@ def test_validation_adapter_uses_native_configuration_and_exactly_one_native_loo
     assert tuple(config.worktree_submodule_paths) == ("external/ipfs_datasets_py", "external/ipfs_kit_py")
     assert context.state_path == config.state_path and context.events_path == config.events_path
     assert context.daemon_events_path.parent == tmp_path
+
+
+@pytest.mark.parametrize("mode", [0o600, 0o640, 0o664, 0o775])
+def test_validation_authority_reads_real_native_lease_modes_without_mutating_them(tmp_path, mode):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as native
+    path = tmp_path / "native-lease.json"
+    payload = {"kind": "implementation", "pid": os.getpid(), "attempt": 2}
+    path.write_text(json.dumps(payload))
+    path.chmod(mode)
+    before = (path.read_bytes(), path.stat())
+    assert runner._read_validation_watchdog_authority(path) == payload
+    if mode & 0o020:
+        assert native.PortalImplementationSupervisor._read_watchdog_authority(path) is None
+    after = path.stat()
+    assert path.read_bytes() == before[0]
+    assert (after.st_ino, after.st_mode, after.st_mtime_ns, after.st_ctime_ns) == (before[1].st_ino, before[1].st_mode, before[1].st_mtime_ns, before[1].st_ctime_ns)
+
+
+@pytest.mark.parametrize("damage", ["world_writable", "alias", "hardlink", "oversized", "nonobject", "invalid_json", "fifo", "missing"])
+def test_validation_authority_refuses_unproven_native_lease_files(tmp_path, damage):
+    path = tmp_path / "lease.json"
+    path.write_text('{"kind":"implementation"}')
+    path.chmod(0o600)
+    if damage == "world_writable": path.chmod(0o777)
+    elif damage == "alias":
+        alias = tmp_path / "alias.json"
+        alias.symlink_to(path)
+        path = alias
+    elif damage == "hardlink": os.link(path, tmp_path / "other.json")
+    elif damage == "oversized": path.write_text(" " * 65537)
+    elif damage == "nonobject": path.write_text("[]")
+    elif damage == "invalid_json": path.write_text("{")
+    elif damage == "fifo":
+        path.unlink()
+        os.mkfifo(path, 0o600)
+    elif damage == "missing": path.unlink()
+    assert runner._read_validation_watchdog_authority(path) is None
+
+
+def test_campaign_validation_returns_without_full_campaign_readiness_scan(tmp_path, monkeypatch):
+    def forbidden_scan(*args, **kwargs):
+        pytest.fail("full-campaign readiness must stay outside current Native validation")
+    monkeypatch.setattr(runner, "recompute_dependent_readiness", forbidden_scan)
+    monkeypatch.setattr(runner, "_source_freeze", forbidden_scan)
+    delegated = []
+    class NativeScheduler:
+        def run(self, commands, **kwargs):
+            delegated.append(tuple(commands))
+            return {"passed": False, "returncode": 41, "results": []}
+    scheduler = runner.EvidenceValidationScheduler(NativeScheduler(), state_dir=tmp_path / "state", spec=_spec(), defer_readiness=True)
+    scheduler.bind_task(SimpleNamespace(task_id="CIMP-TUI-01"), tmp_path)
+    result = scheduler.run(["python -m pytest -q tests/test_terminal_contract.py"], workspace_path=tmp_path)
+    assert len(delegated) == 1 and result["passed"] is False and result["returncode"] == 41
+    assert result["dependent_readiness"] == {"available": False, "reason": "deferred_outside_validation", "native_scheduling_enforced": False, "completion_authority": False}
+    assert not (tmp_path / "state/evidence/readiness.json").exists()
+
+
+def test_standalone_validation_keeps_explicit_readiness_observation(tmp_path, monkeypatch):
+    calls = []
+    class NativeScheduler:
+        def run(self, commands, **kwargs):
+            return {"passed": False, "returncode": 41, "results": []}
+    monkeypatch.setattr(runner, "_source_freeze", lambda *a: {"dependencies": {"external/ipfs_datasets_py": {"head": "synthetic-legal-revision"}}})
+    def observe(*args, **kwargs):
+        calls.append(kwargs["legal_data_version"])
+        return {"available": True, "completion_authority": False}
+    monkeypatch.setattr(runner, "recompute_dependent_readiness", observe)
+    scheduler = runner.EvidenceValidationScheduler(NativeScheduler(), state_dir=tmp_path / "state", spec=_spec())
+    scheduler.bind_task(SimpleNamespace(task_id="CIMP-TUI-01"), tmp_path)
+    result = scheduler.run(["python -m pytest -q tests/test_terminal_contract.py"], workspace_path=tmp_path)
+    assert calls == ["synthetic-legal-revision"] and result["passed"] is False
+    assert result["dependent_readiness"] == {"available": True, "completion_authority": False}
+
+
+def test_production_daemon_uses_deferred_readiness(tmp_path, monkeypatch):
+    captured = []
+    monkeypatch.setattr(runner, "_run_evidence_daemon_adapter", lambda argv, **kwargs: captured.append(kwargs) or 17)
+    argv = ["--todo-path", str(ROOT / "docs/task_boards/complaint_intake_improvement.md"), "--state-dir", str(tmp_path), "--implementation-timeout", "900", "--validation-max-workers", "1"]
+    assert runner.evidence_daemon_main(argv) == 17
+    scheduler = captured[0]["validation_scheduler"]
+    assert scheduler.defer_readiness is True and scheduler.state_dir == tmp_path
+    assert captured[0]["proof_workflow"].__self__ is scheduler
+
+
+def test_orphan_reconciliation_keeps_measured_validation_and_binds_native_task(tmp_path):
+    native_scheduler = object()
+    daemon = SimpleNamespace(validation_scheduler=native_scheduler, proof_workflow=None)
+    construction = []
+    class NativeSupervisor:
+        def _build_worktree_reconciliation_daemon(self):
+            construction.append(True)
+            return daemon
+    supervisor = runner._validation_aware_supervisor_class(NativeSupervisor)()
+    supervisor.config = SimpleNamespace(repo_root=ROOT, state_dir=tmp_path)
+    assert supervisor._build_worktree_reconciliation_daemon() is daemon
+    scheduler = daemon.validation_scheduler
+    assert construction == [True] and isinstance(scheduler, runner.EvidenceValidationScheduler)
+    assert scheduler.native_scheduler is native_scheduler and scheduler.defer_readiness is True
+    task = SimpleNamespace(task_id="CIMP-QUEST-04")
+    assert daemon.proof_workflow(task, tmp_path) == {}
+    assert scheduler.bound_task == (task, tmp_path.resolve())
+    assert len(scheduler.spec["tasks"]) == 58
+
+
+@pytest.fixture
+def uncommitted_reconciliation_case(campaign, monkeypatch):
+    from integrations.ipfs_accelerate.improvement_plan import BOARD_RELATIVE
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor import PortalImplementationSupervisor
+    root, spec, state, generated = campaign
+    state.mkdir()
+    workroot = root / "owned-worktrees"
+    workspace = workroot / "pending"
+    workspace.mkdir(parents=True)
+    launch = _owner(state)
+    launch.update(repo_root=str(root), state_dir=str(state), worktree_root=str(workroot))
+    launch["identity"]["pid"] = os.getpid()
+    runner._atomic_json(state / "launcher.json", launch)
+    monkeypatch.setattr(runner, "owns_process", lambda record: True)
+    monkeypatch.setattr(runner, "recorded_worktree_root", lambda record, state_dir: (workroot, {"unit_binding": True}))
+    calls = []
+    records = [{"worktree": str(workspace), "branch": "refs/heads/implementation/cimp-tui-01-attempt-1", "HEAD": "baseline"}]
+    behavior = {"owner": None, "commands": [], "dirty": [" M tests/test_terminal_contract.py"], "merged": True, "preserved": True, "integrated": True}
+    class NativeSupervisor:
+        _worktree_branch_is_reconcilable = staticmethod(PortalImplementationSupervisor._worktree_branch_is_reconcilable)
+        _worktree_branch_source_task_id = staticmethod(PortalImplementationSupervisor._worktree_branch_source_task_id)
+        def _git_worktree_records(self, repo): return records
+        def _shared_active_worktree_owners(self, path): return {}
+        def _list_process_commands(self): return behavior["commands"]
+        def _git_ref_is_ancestor(self, *args): return behavior["merged"]
+        def _git_status_short(self, path): return behavior["dirty"]
+        def _active_worktree_skip_detail(self, path, owners): return behavior["owner"]
+        def _rescue_dirty_worktree(self, path, **kwargs):
+            calls.append(("rescue", path, kwargs))
+            return {"preserved": behavior["preserved"], "path": str(path), "rescue_branch": "rescue/worktree/cimp-tui-01"}
+        def reconcile_backlogged_worktrees(self, **kwargs):
+            calls.append(("scan", kwargs))
+            return {"attempted": True, "processed": [{"path": str(workspace), "merged": behavior["integrated"]}]}
+    supervisor = runner._validation_aware_supervisor_class(NativeSupervisor)()
+    supervisor.config = SimpleNamespace(repo_root=root, state_dir=state, worktree_root=workroot,
+        todo_path=root / BOARD_RELATIVE, task_prefix=runner.TASK_PREFIX, merge_target_branch="main")
+    lease = {"pid": os.getpid(), "lease_role": "supervisor_maintenance"}
+    supervisor._held_implementation_maintenance_lease = lease
+    return supervisor, lease, workspace, workroot, records, behavior, calls, launch
+
+
+def test_uncommitted_proposal_on_integrated_baseline_is_preserved_before_native_scan(uncommitted_reconciliation_case):
+    supervisor, lease, workspace, workroot, records, behavior, calls, launch = uncommitted_reconciliation_case
+    result = supervisor.reconcile_backlogged_worktrees(preacquired_implementation_lock=lease)
+    assert [call[0] for call in calls] == ["rescue", "scan"]
+    assert calls[0][1] == workspace and calls[0][2]["head"] == "baseline"
+    assert calls[0][2]["reason"] == "reconciliation_uncommitted_integrated_base"
+    assert calls[1][1]["preacquired_implementation_lock"] is lease
+    assert result["owned_uncommitted_candidates_preserved"] == [{"preserved": True, "path": str(workspace), "rescue_branch": "rescue/worktree/cimp-tui-01"}]
+
+
+@pytest.mark.parametrize("condition", ["active_owner", "active_command", "foreign_path", "foreign_branch", "clean", "unowned_supervisor", "not_merged", "dependency_only"])
+def test_uncommitted_reconciliation_prepass_respects_ownership_and_scope(uncommitted_reconciliation_case, condition):
+    supervisor, lease, workspace, workroot, records, behavior, calls, launch = uncommitted_reconciliation_case
+    if condition == "active_owner": behavior["owner"] = {"reason": "live_owner"}
+    elif condition == "active_command": behavior["commands"] = ["python " + str(workspace)]
+    elif condition == "foreign_path": records[0]["worktree"] = str(workroot.parent)
+    elif condition == "foreign_branch": records[0]["branch"] = "refs/heads/user-work"
+    elif condition == "clean": behavior["dirty"] = []
+    elif condition == "dependency_only": behavior["dirty"] = [" M external/ipfs_accelerate_py"]
+    elif condition == "unowned_supervisor": supervisor._held_implementation_maintenance_lease = None
+    elif condition == "not_merged": behavior["merged"] = False
+    result = supervisor.reconcile_backlogged_worktrees(preacquired_implementation_lock=lease)
+    assert [call[0] for call in calls] == ["scan"]
+    assert result["owned_uncommitted_candidates_preserved"] == []
+
+
+def test_unpreservable_pending_proposal_blocks_dispatch_before_native_scan(uncommitted_reconciliation_case):
+    supervisor, lease, workspace, workroot, records, behavior, calls, launch = uncommitted_reconciliation_case
+    behavior["preserved"] = False
+    with pytest.raises(RuntimeError, match="candidate preservation is required"):
+        supervisor.reconcile_backlogged_worktrees(preacquired_implementation_lock=lease)
+    assert [call[0] for call in calls] == ["rescue"]
+
+
+def test_preserved_candidate_must_pass_native_recovery_before_another_provider_dispatch(uncommitted_reconciliation_case):
+    supervisor, lease, workspace, workroot, records, behavior, calls, launch = uncommitted_reconciliation_case
+    behavior["integrated"] = False
+    with pytest.raises(RuntimeError, match="requires Native recovery before provider dispatch"):
+        supervisor.reconcile_backlogged_worktrees(preacquired_implementation_lock=lease)
+    assert [call[0] for call in calls] == ["rescue", "scan"]
+
+
+def test_orphan_recovery_retains_the_configured_validation_worker_and_time_budgets(tmp_path):
+    from ipfs_accelerate_py.agent_supervisor.validation.validation_scheduler import ValidationScheduler
+    original = ValidationScheduler(max_workers=2, resource_budget=2, default_timeout_seconds=1800)
+    daemon = SimpleNamespace(validation_scheduler=original, proof_workflow=None)
+    class NativeSupervisor:
+        def _build_worktree_reconciliation_daemon(self): return daemon
+    supervisor = runner._validation_aware_supervisor_class(NativeSupervisor)()
+    supervisor.config = SimpleNamespace(repo_root=ROOT, state_dir=tmp_path,
+        validation_max_workers=1, validation_resource_budget=1, implementation_timeout=900)
+    supervisor._build_worktree_reconciliation_daemon()
+    scheduler = daemon.validation_scheduler.native_scheduler
+    assert scheduler.max_workers == 1 and scheduler.resource_budget == 1
+    assert scheduler.default_timeout_seconds == 900
+    assert scheduler.cache is original.cache

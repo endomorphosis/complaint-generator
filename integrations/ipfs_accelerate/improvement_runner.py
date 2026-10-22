@@ -1908,6 +1908,19 @@ def stop(state_dir: Path, *, timeout: float = 15.0,
                 "container_shutdown": containers, "manual_holds_preserved": True}
 
 
+def _read_validation_watchdog_authority(path: Path) -> dict[str, Any] | None:
+    """Read Native's ordinary lease mode with the existing legacy custody rule."""
+    from .improvement_recovery import _owned_bytes
+
+    try:
+        if path.resolve(strict=True) != path:
+            return None
+        value = json.loads(_owned_bytes(path, 65536, legacy_group_write=True))
+        return value if isinstance(value, dict) else None
+    except (OSError, ValueError, UnicodeError):
+        return None
+
+
 def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
     """Observe a fixed validation deadline without refreshing any task clock.
 
@@ -1936,8 +1949,8 @@ def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
         if (not workspace.is_absolute() or workspace.resolve(strict=True) != workspace
                 or workspace == worktree_root or not workspace.is_relative_to(worktree_root)):
             return False
-        lease = supervisor._read_watchdog_authority(supervisor._implementation_maintenance_lock_path())
-        claim = supervisor._read_watchdog_authority(supervisor._task_dispatch_claim_path(state))
+        lease = _read_validation_watchdog_authority(supervisor._implementation_maintenance_lock_path())
+        claim = _read_validation_watchdog_authority(supervisor._task_dispatch_claim_path(state))
         identity = native.load_supervised_child_identity(supervisor._managed_daemon_identity_path())
         if lease is None or claim is None or identity is None:
             return False
@@ -1972,11 +1985,108 @@ def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
         return False
 
 
+def _preserve_uncommitted_reconciliation_candidates(supervisor):
+    """Let Native preserve pending orphan edits before its merged-base shortcut.
+
+    An interrupted proposal can still have the already-integrated baseline as
+    HEAD. Native's ordinary reconciliation skips that HEAD before checking its
+    uncommitted content. Only this owned campaign, under Native's maintenance
+    lease, may ask its existing rescue helper to preserve those edits first.
+    """
+    config = supervisor.config
+    held = getattr(supervisor, "_held_implementation_maintenance_lease", None)
+    if (not getattr(config, "worktree_reconciliation_enabled", True)
+            or not isinstance(held, Mapping) or held.get("lease_role") != "supervisor_maintenance"
+            or held.get("pid") != os.getpid()):
+        return []
+    launch = _read_json(config.state_dir / "launcher.json")
+    if (launch.get("status") not in {"starting", "running"}
+            or launch.get("repo_root") != str(config.repo_root.resolve())
+            or launch.get("state_dir") != str(config.state_dir)
+            or launch.get("identity", {}).get("pid") != os.getpid()
+            or not owns_process(launch)):
+        return []
+    root, binding = recorded_worktree_root(launch, config.state_dir)
+    if binding is None or config.worktree_root != root or root.resolve(strict=True) != root:
+        raise RuntimeError("owned reconciliation worktree domain is unavailable")
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import parse_task_text
+    tasks = parse_task_text(config.todo_path.read_text(), path=config.todo_path, task_header_prefix=config.task_prefix)
+    held_tasks = set(_board_summary(tasks)["manual_hold_task_ids"])
+    pending = {task.task_id for task in tasks if task.status == "todo" and task.task_id not in held_tasks}
+    records = supervisor._git_worktree_records(config.repo_root)
+    if len(records) > 256:
+        raise RuntimeError("owned reconciliation worktree population exceeds its bound")
+    owners = supervisor._shared_active_worktree_owners(root)
+    commands = supervisor._list_process_commands()
+    target = config.merge_target_branch or supervisor._git_current_branch(config.repo_root) or "HEAD"
+    preserved = []
+    for record in records:
+        path = Path(str(record.get("worktree") or ""))
+        branch = str(record.get("branch") or "").removeprefix("refs/heads/")
+        head = str(record.get("HEAD") or "")
+        if (not path.is_absolute() or not path.is_relative_to(root) or path == root
+                or not path.exists() or path.resolve(strict=True) != path or not head
+                or not supervisor._worktree_branch_is_reconcilable(branch)
+                or supervisor._worktree_branch_source_task_id(branch, known_task_ids=tuple(pending)) not in pending
+                or not supervisor._git_ref_is_ancestor(config.repo_root, head, target)):
+            continue
+        dirty = supervisor._git_status_short(path)
+        # An unused prepared checkout can differ only in SDK gitlinks. That
+        # bootstrap state is not an uncommitted complaint-generator proposal.
+        root_edits = [line for line in dirty if line[3:] not in _PRIVATE_DEPENDENCY_ROOTS]
+        if (not root_edits or supervisor._active_worktree_skip_detail(path, owners) is not None
+                or any(str(path) in command for command in commands)):
+            continue
+        result = supervisor._rescue_dirty_worktree(path, branch=branch, head=head,
+            target_ref=target, status_lines=dirty, reason="reconciliation_uncommitted_integrated_base")
+        if result.get("preserved") is not True:
+            raise RuntimeError("uncommitted reconciliation candidate preservation is required")
+        preserved.append(result)
+    return preserved
+
+
 def _validation_aware_supervisor_class(native_class):
     class ValidationAwareSupervisor(native_class):
         def _implementation_attempt_is_active(self, state, *, now_ts):
             return (super()._implementation_attempt_is_active(state, now_ts=now_ts)
                     or _owned_validation_window(self, state, now_ts=now_ts))
+
+        def _build_worktree_reconciliation_daemon(self):
+            # Native owns orphan discovery, claims, validation, merge and the
+            # completion callback. Recovery uses the same measured gate as a
+            # newly generated proposal and dispatches no replacement provider.
+            daemon = super()._build_worktree_reconciliation_daemon()
+            from .improvement_plan import load_spec
+            from ipfs_accelerate_py.agent_supervisor.validation.validation_scheduler import ValidationScheduler
+            native_scheduler = daemon.validation_scheduler
+            if isinstance(native_scheduler, ValidationScheduler):
+                workers = getattr(self.config, "validation_max_workers", None) or 1
+                budget = getattr(self.config, "validation_resource_budget", None) or workers
+                native_scheduler = ValidationScheduler(
+                    cache=native_scheduler.cache, max_workers=workers, resource_budget=budget,
+                    default_timeout_seconds=getattr(self.config, "implementation_timeout", TIMEOUT_SECONDS),
+                )
+            scheduler = EvidenceValidationScheduler(
+                native_scheduler, state_dir=self.config.state_dir,
+                spec=load_spec(self.config.repo_root / SPEC_RELATIVE),
+                defer_readiness=True,
+            )
+            daemon.validation_scheduler = scheduler
+            daemon.proof_workflow = scheduler.bind_task
+            return daemon
+
+        def reconcile_backlogged_worktrees(self, *, preacquired_implementation_lock=None):
+            preserved = _preserve_uncommitted_reconciliation_candidates(self)
+            result = super().reconcile_backlogged_worktrees(
+                preacquired_implementation_lock=preacquired_implementation_lock,
+            )
+            result["owned_uncommitted_candidates_preserved"] = preserved
+            unresolved = [candidate for candidate in preserved if not any(
+                item.get("path") == candidate.get("path") and item.get("merged") is True
+                for item in result.get("processed", ())) ]
+            if unresolved:
+                raise RuntimeError("preserved candidate requires Native recovery before provider dispatch")
+            return result
     return ValidationAwareSupervisor
 
 
@@ -2828,9 +2938,10 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
 
 class EvidenceValidationScheduler:
     """Native scheduler decorator: preserve proposal/impact binding and sole loop."""
-    def __init__(self, native_scheduler, *, state_dir, spec):
+    def __init__(self, native_scheduler, *, state_dir, spec, defer_readiness=False):
         self.native_scheduler = native_scheduler
         self.state_dir, self.spec = Path(state_dir), spec
+        self.defer_readiness = bool(defer_readiness)
         self.bound_task = None
 
     def bind_task(self, task, workspace):
@@ -2881,6 +2992,17 @@ class EvidenceValidationScheduler:
                           merge_eligible=False, completion_authoritative=False, authoritative=False)
         result["behavioral_evidence"] = receipts
         result["firstparty_completion_authority"] = False
+        if self.defer_readiness:
+            # This full-campaign observation can scan every previous evidence
+            # receipt. Keep it outside Native's current validation deadline;
+            # current measured admission and Native dependency checks already
+            # govern this result. Explicit standalone observations retain the
+            # synchronous behavior through the default constructor option.
+            result["dependent_readiness"] = {
+                "available": False, "reason": "deferred_outside_validation",
+                "native_scheduling_enforced": False, "completion_authority": False,
+            }
+            return result
         from .improvement_plan import canonical_model_policy
         try:
             dependency = _source_freeze(root).get("dependencies", {}).get("external/ipfs_datasets_py", {})
@@ -3030,7 +3152,7 @@ def evidence_daemon_main(argv):
     args = native.parse_args(list(argv))
     scheduler = EvidenceValidationScheduler(ValidationScheduler(max_workers=args.validation_max_workers,
         resource_budget=args.validation_resource_budget, default_timeout_seconds=args.implementation_timeout),
-        state_dir=args.state_dir, spec=load_spec(root / SPEC_RELATIVE))
+        state_dir=args.state_dir, spec=load_spec(root / SPEC_RELATIVE), defer_readiness=True)
     return _run_evidence_daemon_adapter(argv, repo_root=root, validation_scheduler=scheduler, proof_workflow=scheduler.bind_task)
 
 
