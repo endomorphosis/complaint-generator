@@ -2274,10 +2274,170 @@ def _read_catalog(path, *, repo_root=None):
     return [n for n, _, _, _ in nodes], hashes
 
 
+_PRIVATE_REPLICA_ACCEPTANCE = "tests/test_private_replica_acceptance.py"
+_PRIVATE_REPLICA_CAPABILITY_NODE = _PRIVATE_REPLICA_ACCEPTANCE + "::test_replica_api_capability_is_explicit"
+
+
+def _private_replica_host_file(path, *, limit, exact_mode=None):
+    """Read an immutable host/operator file, never a provider success field."""
+    import stat
+    path = Path(path)
+    if not path.is_absolute() or str(path.resolve()) != str(path):
+        raise ValueError("private_replica_compatibility_unavailable")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                or before.st_nlink != 1 or before.st_mode & 0o022
+                or (exact_mode is not None and stat.S_IMODE(before.st_mode) != exact_mode)
+                or not 0 < before.st_size <= limit):
+            raise ValueError("private_replica_compatibility_unavailable")
+        chunks, remaining = [], before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 65536))
+            if not chunk:
+                raise ValueError("private_replica_compatibility_unavailable")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        stable = lambda item: (item.st_dev, item.st_ino, item.st_mode, item.st_uid,
+                               item.st_gid, item.st_nlink, item.st_size,
+                               item.st_mtime_ns, item.st_ctime_ns)
+        if (os.read(descriptor, 1) or stable(os.fstat(descriptor)) != stable(before)
+                or str(path.resolve()) != str(path) or stable(path.stat()) != stable(before)):
+            raise ValueError("private_replica_compatibility_unavailable")
+        return b"".join(chunks)
+    finally:
+        os.close(descriptor)
+
+
+def _private_replica_kit_qualification(root, evidence_state_dir, task, source, *, campaign_state_dir=None):
+    """Require real separately measured Kit compatibility for exact DUR005.
+
+    The 0600 binding is privileged operator configuration outside the provider
+    checkout. Its reviewed pure verifier rederives the actual qualification and
+    remaps current candidate Kit bytes, retaining measured origins separately.
+    This function never runs Kit tests, a provider, a subprocess or Git.
+    """
+    if task.get("id") != "CIMP-DUR-005":
+        return None
+    import types
+    try:
+        if campaign_state_dir is None:
+            raise ValueError("private_replica_compatibility_unavailable")
+        campaign = Path(campaign_state_dir)
+        if (not campaign.is_absolute() or str(campaign.resolve()) != str(campaign)
+                or Path(evidence_state_dir) != campaign / "evidence-runs"):
+            raise ValueError("private_replica_compatibility_unavailable")
+        directory = campaign / "host-acceptance"
+        if (directory.is_symlink() or str(directory.resolve()) != str(directory)
+                or directory.stat().st_uid != os.getuid()
+                or directory.stat().st_mode & 0o077):
+            raise ValueError("private_replica_compatibility_unavailable")
+        binding_path = directory / "private-replica-kit.json"
+        binding_bytes = _private_replica_host_file(binding_path, limit=65536, exact_mode=0o600)
+        binding = json.loads(binding_bytes)
+        if (set(binding) != {"schema", "reader", "qualification"}
+                or binding["schema"] != "complaint-private-replica-kit-host-binding@1"):
+            raise ValueError("private_replica_compatibility_unavailable")
+        loaded = {}
+        for name, limit in (("reader", 65536), ("qualification", 64 * 1024 * 1024)):
+            row = binding[name]
+            if (not isinstance(row, dict) or set(row) != {"path", "sha256"}
+                    or not isinstance(row["path"], str)
+                    or not isinstance(row["sha256"], str)
+                    or re.fullmatch(r"[0-9a-f]{64}", row["sha256"]) is None
+                    or Path(row["path"]).is_relative_to(root)):
+                raise ValueError("private_replica_compatibility_unavailable")
+            loaded[name] = _private_replica_host_file(row["path"], limit=limit)
+            if hashlib.sha256(loaded[name]).hexdigest() != row["sha256"]:
+                raise ValueError("private_replica_compatibility_unavailable")
+        head = source["dependencies"]["external/ipfs_kit_py"]["head"]
+        if re.fullmatch(r"[0-9a-f]{40}", str(head)) is None:
+            raise ValueError("private_replica_compatibility_unavailable")
+        name = "_complaint_replica_kit_" + binding["reader"]["sha256"]
+        module = types.ModuleType(name)
+        module.__file__ = binding["reader"]["path"]
+        previous = sys.modules.get(name)
+        sys.modules[name] = module
+        try:
+            exec(compile(loaded["reader"], module.__file__, "exec"), module.__dict__)
+            proof = module.prove_kit_qualification(
+                binding["qualification"]["path"], binding["qualification"]["sha256"],
+                Path(root) / "external/ipfs_kit_py", head)
+        finally:
+            if previous is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
+        if (not isinstance(proof, dict)
+                or proof.get("schema") != "complaint-kit-replica-compatibility-qualification@1"
+                or proof.get("status") != "passed" or proof.get("kit_head") != head):
+            raise ValueError("private_replica_compatibility_unavailable")
+        # Detect a replacement during the pure reproof as well as at the later
+        # post-measurement call. Raw pass flags never replace the pinned reader.
+        for label, limit in (("reader", 65536), ("qualification", 64 * 1024 * 1024)):
+            if _private_replica_host_file(binding[label]["path"], limit=limit) != loaded[label]:
+                raise ValueError("private_replica_compatibility_unavailable")
+        if _private_replica_host_file(binding_path, limit=65536, exact_mode=0o600) != binding_bytes:
+            raise ValueError("private_replica_compatibility_unavailable")
+        return {"binding": {"path": str(binding_path),
+                            "sha256": hashlib.sha256(binding_bytes).hexdigest()},
+                "reader": binding["reader"], "qualification": binding["qualification"],
+                "kit_head": head, "current_kit_root": str(Path(root) / "external/ipfs_kit_py"),
+                "execution_root": proof.get("execution_root"),
+                "schema": proof["schema"], "separate_compatibility_evidence": True}
+    except Exception:
+        raise ValueError("private_replica_compatibility_unavailable") from None
+
+
+def _private_replica_acceptance_binding(root, task, impacted):
+    """Bind the provider checkout to the installed trusted companion bytes.
+
+    The task plan and CID stay unchanged. An API-absent baseline may be
+    characterized, but cannot satisfy the exact DUR005 task capability gate.
+    """
+    required = task.get("id") == "CIMP-DUR-005"
+    if not required and _PRIVATE_REPLICA_ACCEPTANCE not in impacted:
+        return None
+    installed = Path(__file__).resolve().parents[2] / _PRIVATE_REPLICA_ACCEPTANCE
+    candidate = Path(root) / _PRIVATE_REPLICA_ACCEPTANCE
+    for path in (installed, candidate):
+        if (path.is_symlink() or str(path.resolve()) != str(path)
+                or not path.is_file() or path.stat().st_nlink != 1):
+            raise ValueError("trusted_replica_acceptance_changed")
+    trusted = hashlib.sha256(installed.read_bytes()).hexdigest()
+    if hashlib.sha256(candidate.read_bytes()).hexdigest() != trusted:
+        raise ValueError("trusted_replica_acceptance_changed")
+    return {"path": _PRIVATE_REPLICA_ACCEPTANCE, "trusted_path": str(installed),
+            "candidate_path": str(candidate), "sha256": trusted,
+            "required_supported": required}
+
+
+def _private_replica_acceptance_capability(junit, binding):
+    """Consume an actual measured JUnit property; no JSON success shortcuts."""
+    if binding is None:
+        return None
+    matches = []
+    for case in junit.iter("testcase"):
+        properties = case.findall("properties/property")
+        identities = [p.get("value") for p in properties if p.get("name") == "complaint_nodeid"]
+        if identities == [_PRIVATE_REPLICA_CAPABILITY_NODE]:
+            if any(case.find(tag) is not None for tag in ("failure", "error", "skipped")):
+                raise ValueError("private_replica_capability_unavailable")
+            matches.append([p.get("value") for p in properties
+                            if p.get("name") == "private_replica_capability"])
+    if len(matches) != 1 or matches[0] not in (["supported"], ["unsupported"]):
+        raise ValueError("private_replica_capability_unavailable")
+    capability = matches[0][0]
+    if binding["required_supported"] and capability != "supported":
+        raise ValueError("private_replica_capability_unavailable")
+    return capability
+
+
 _IMPACTED_BEHAVIORAL_CHECKS = {
     "integrations/ipfs_datasets/legal.py": ("tests/test_explicit_legal_context.py", "tests/test_ipfs_adapter_layer.py"),
-    "integrations/ipfs_datasets/storage.py": ("tests/test_private_storage_adapter.py", "tests/test_ipfs_kit_storage_adapter.py", "tests/test_proof_report_and_pinning.py"),
-    "integrations/private_storage.py": ("tests/test_private_workspace_crypto.py", "tests/test_private_workspace_keys.py", "tests/test_private_storage_adapter.py"),
+    "integrations/ipfs_datasets/storage.py": ("tests/test_private_storage_adapter.py", "tests/test_ipfs_kit_storage_adapter.py", "tests/test_proof_report_and_pinning.py", _PRIVATE_REPLICA_ACCEPTANCE),
+    "integrations/private_storage.py": ("tests/test_private_workspace_crypto.py", "tests/test_private_workspace_keys.py", "tests/test_private_storage_adapter.py", _PRIVATE_REPLICA_ACCEPTANCE),
     "applications/complaint_workspace.py": ("tests/test_private_workspace_isolation.py", "tests/test_private_workspace_policy.py", "tests/test_private_workspace_keys.py"),
     "integrations/ipfs_datasets/llm.py": ("tests/test_grok47_router_contract.py", "tests/test_private_workspace_policy.py"),
     "mediator/mediator.py": ("tests/test_factual_correction_replay.py", "tests/test_tui_shared_interview.py"),
@@ -2333,6 +2493,12 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                        native_root / "ipfs_accelerate_py/testing/pytest_ast_seal.py")
     bootstrap_before = {str(path): _hash_file(path) for path in bootstrap_files}
     impacted = _impacted_behavioral_checks(root, (context or {}).get("changed_paths", ()))
+    if task.get("id") == "CIMP-DUR-005" and _PRIVATE_REPLICA_ACCEPTANCE not in impacted:
+        impacted.append(_PRIVATE_REPLICA_ACCEPTANCE)
+        impacted.sort()
+    replica_binding = _private_replica_acceptance_binding(root, task, impacted)
+    replica_capability = None
+    replica_kit_before = None
     release_script = (task.get("id") == "CIMP-REL-03" and
         observation_command == "python scripts/validate_complaint_intake.py --phase pre-admission" and
         task.get("validation_commands") in (
@@ -2388,6 +2554,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             artifacts.append({"path": str(path), "sha256": _hash_file(path)})
         return result, observation, _read_catalog(catalog, repo_root=root)
     try:
+        replica_kit_before = _private_replica_kit_qualification(root, state_dir, task, before,
+            campaign_state_dir=(context or {}).get("campaign_state_dir"))
         if release_script:
             if time.monotonic() - start >= timeout_seconds:
                 raise TimeoutError("subprocess_timeout")
@@ -2435,7 +2603,9 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         if set(by_node) != set(required) or executed.get("returncode") != 0:
             raise ValueError("failed_assertion")
         junit_nodes = []
-        for case in ET.parse(run / "junit.xml").iter("testcase"):
+        junit_document = ET.parse(run / "junit.xml")
+        replica_capability = _private_replica_acceptance_capability(junit_document, replica_binding)
+        for case in junit_document.iter("testcase"):
             identity = [p.get("value") for p in case.findall("properties/property") if p.get("name") == "complaint_nodeid"]
             if len(identity) != 1 or any(case.find(tag) is not None for tag in ("failure", "error", "skipped")):
                 raise ValueError("junit_required_case_mismatch")
@@ -2447,8 +2617,20 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         if any(imported.get(p) != h for p, h in collected_hashes.items()):
             raise ValueError("stale_source_hash")
     except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
-        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command"} else "host_measurement_unavailable"
+        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable"} else "host_measurement_unavailable"
+    try:
+        if replica_binding != _private_replica_acceptance_binding(root, task, impacted):
+            reason = "trusted_replica_acceptance_changed"
+    except (OSError, ValueError):
+        reason = "trusted_replica_acceptance_changed"
     after = _source_freeze(root, extra)
+    try:
+        replica_kit_after = _private_replica_kit_qualification(root, state_dir, task, after,
+            campaign_state_dir=(context or {}).get("campaign_state_dir"))
+        if replica_kit_after != replica_kit_before:
+            reason = "private_replica_compatibility_unavailable"
+    except ValueError:
+        reason = "private_replica_compatibility_unavailable"
     bootstrap_after = {str(path): _hash_file(path) for path in bootstrap_files}
     if before != after or bootstrap_before != bootstrap_after:
         reason = "stale_source_hash"
@@ -2466,6 +2648,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                 "completion_authority": False, "run_path": str(run),
                 "lane_basis": "native_host_validation", "live_node_verified": False, "impacted_checks": impacted,
                 "behavioral_companion": "tests/test_intake_release_gate.py" if release_script else None,
+                "private_replica_acceptance": {"binding": replica_binding, "capability": replica_capability,
+                                               "kit_compatibility": replica_kit_before},
                 "environment_policy": {"effective_PATH": environment.get("PATH"), "python": environment.get("IPFS_ACCELERATE_VALIDATION_PYTHON_EXECUTABLE"),
                     "HOME": "fresh private native command directory; not operator home", "ambient_pytest_injection": False}}
     measured["workspace_path"] = str(root)
@@ -2517,7 +2701,8 @@ class EvidenceValidationScheduler:
             observed = measure_behavioral_command(root, self.state_dir / "evidence-runs", task, str(spec.command),
                 runner=delegate, environment=environment, timeout_seconds=timeout_seconds,
                 declared_command=task["validation_commands"][spec.ordinal] if spec.ordinal < len(task["validation_commands"]) else None,
-                context={"task_id": native_task.task_id, "task_cid": str(getattr(native_task, "canonical_task_cid", "")),
+                context={"campaign_state_dir": str(self.state_dir.resolve()),
+                         "task_id": native_task.task_id, "task_cid": str(getattr(native_task, "canonical_task_cid", "")),
                          "proposal_id": str(getattr(getattr(args[0], "proposal", None), "proposal_id", "")) if method == "run_validated" else "",
                          "proposal_context_id": str(getattr(getattr(args[0], "proposal", None), "context_id", "")) if method == "run_validated" else "",
                          "proposal_replay_nonce_sha256": hashlib.sha256(str(getattr(getattr(args[0], "proposal", None), "replay_nonce", "")).encode()).hexdigest() if method == "run_validated" else "",

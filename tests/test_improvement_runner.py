@@ -1540,3 +1540,108 @@ def test_growing_owned_event_history_preserves_progress_and_recovery_bounds(camp
     with pytest.raises(ValueError, match='bounded owned regular file'):
         runner._recovery_preimage(root, state, record)
     assert events.read_bytes() == original
+# Trusted acceptance companion controls. These validate host admission, never
+# manufacture a successful storage or Kit execution receipt.
+def _replica_companion_roots(tmp_path, monkeypatch):
+    trusted = tmp_path / "trusted"
+    candidate = tmp_path / "candidate"
+    source = trusted / "integrations/ipfs_accelerate/improvement_runner.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("# trusted host fixture\n")
+    monkeypatch.setattr(runner, "__file__", str(source))
+    for root in (trusted, candidate):
+        path = root / runner._PRIVATE_REPLICA_ACCEPTANCE
+        path.parent.mkdir(parents=True)
+        path.write_text("def test_replica_api_capability_is_explicit():\n    pass\n")
+    return trusted, candidate
+
+
+def test_storage_impact_always_selects_trusted_replica_companion(tmp_path):
+    for changed in ("integrations/private_storage.py", "integrations/ipfs_datasets/storage.py"):
+        expected = runner._IMPACTED_BEHAVIORAL_CHECKS[changed]
+        for relative in expected:
+            path = tmp_path / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        assert runner._PRIVATE_REPLICA_ACCEPTANCE in runner._impacted_behavioral_checks(tmp_path, [changed])
+
+
+def test_replica_companion_binding_uses_installed_bytes_even_without_impact_context(tmp_path, monkeypatch):
+    trusted, candidate = _replica_companion_roots(tmp_path, monkeypatch)
+    binding = runner._private_replica_acceptance_binding(candidate, {"id": "CIMP-DUR-005"}, [])
+    assert binding["required_supported"] is True
+    assert binding["trusted_path"] == str(trusted / runner._PRIVATE_REPLICA_ACCEPTANCE)
+    assert binding["candidate_path"] == str(candidate / runner._PRIVATE_REPLICA_ACCEPTANCE)
+    import hashlib
+    assert binding["sha256"] == hashlib.sha256(Path(binding["trusted_path"]).read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("damage", ["changed", "missing", "alias"])
+def test_provider_cannot_weaken_or_remove_trusted_replica_checks(tmp_path, monkeypatch, damage):
+    trusted, candidate = _replica_companion_roots(tmp_path, monkeypatch)
+    path = candidate / runner._PRIVATE_REPLICA_ACCEPTANCE
+    path.unlink()
+    if damage == "changed":
+        path.write_text("def test_replaced():\n    pass\n")
+    elif damage == "alias":
+        path.symlink_to(trusted / runner._PRIVATE_REPLICA_ACCEPTANCE)
+    with pytest.raises(ValueError, match="trusted_replica_acceptance_changed"):
+        runner._private_replica_acceptance_binding(candidate, {"id": "CIMP-DUR-005"}, [])
+
+
+def _replica_capability_xml(values, *, include_identity=True):
+    from xml.etree import ElementTree as ET
+    suite = ET.Element("testsuite")
+    case = ET.SubElement(suite, "testcase")
+    properties = ET.SubElement(case, "properties")
+    if include_identity:
+        ET.SubElement(properties, "property", name="complaint_nodeid",
+                      value=runner._PRIVATE_REPLICA_CAPABILITY_NODE)
+    for value in values:
+        ET.SubElement(properties, "property", name="private_replica_capability", value=value)
+    return suite
+
+
+def test_unsupported_baseline_is_explicit_but_cannot_satisfy_dur005():
+    xml = _replica_capability_xml(["unsupported"])
+    assert runner._private_replica_acceptance_capability(xml, {"required_supported": False}) == "unsupported"
+    with pytest.raises(ValueError, match="private_replica_capability_unavailable"):
+        runner._private_replica_acceptance_capability(xml, {"required_supported": True})
+
+
+@pytest.mark.parametrize("values,identity", [([], True), (["supported", "supported"], True),
+                                            (["true"], True), (["supported"], False)])
+def test_replica_capability_cannot_omit_or_duplicate_actual_case_property(values, identity):
+    with pytest.raises(ValueError, match="private_replica_capability_unavailable"):
+        runner._private_replica_acceptance_capability(
+            _replica_capability_xml(values, include_identity=identity), {"required_supported": True})
+
+
+def test_unrelated_task_needs_no_replica_compatibility_file(tmp_path):
+    assert runner._private_replica_kit_qualification(tmp_path, tmp_path / "evidence-runs", {"id": "OTHER"}, {}) is None
+
+
+def test_dur005_requires_actual_host_kit_compatibility_binding(tmp_path):
+    with pytest.raises(ValueError, match="private_replica_compatibility_unavailable"):
+        runner._private_replica_kit_qualification(
+            tmp_path / "candidate", tmp_path / "evidence-runs", {"id": "CIMP-DUR-005"}, {},
+            campaign_state_dir=tmp_path)
+
+
+@pytest.mark.parametrize("damage", ["group_writable", "alias"])
+def test_kit_host_binding_rejects_unsafe_metadata_before_reader_import(tmp_path, damage):
+    directory = tmp_path / "host-acceptance"
+    directory.mkdir(mode=0o700)
+    path = directory / "private-replica-kit.json"
+    actual = tmp_path / "not-an-executable-reader.json"
+    actual.write_text("{}")
+    actual.chmod(0o600)
+    if damage == "alias":
+        path.symlink_to(actual)
+    else:
+        path.write_text("{}")
+        path.chmod(0o620)
+    with pytest.raises(ValueError, match="private_replica_compatibility_unavailable"):
+        runner._private_replica_kit_qualification(
+            tmp_path / "candidate", tmp_path / "evidence-runs", {"id": "CIMP-DUR-005"}, {},
+            campaign_state_dir=tmp_path)
