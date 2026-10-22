@@ -2160,7 +2160,7 @@ def _read_catalog(path, *, repo_root=None):
 _IMPACTED_BEHAVIORAL_CHECKS = {
     "integrations/ipfs_datasets/legal.py": ("tests/test_explicit_legal_context.py", "tests/test_ipfs_adapter_layer.py"),
     "integrations/ipfs_datasets/storage.py": ("tests/test_private_storage_adapter.py", "tests/test_ipfs_kit_storage_adapter.py", "tests/test_proof_report_and_pinning.py"),
-    "integrations/ipfs_datasets/private_storage.py": ("tests/test_private_workspace_crypto.py", "tests/test_private_workspace_keys.py", "tests/test_private_storage_adapter.py"),
+    "integrations/private_storage.py": ("tests/test_private_workspace_crypto.py", "tests/test_private_workspace_keys.py", "tests/test_private_storage_adapter.py"),
     "applications/complaint_workspace.py": ("tests/test_private_workspace_isolation.py", "tests/test_private_workspace_policy.py", "tests/test_private_workspace_keys.py"),
     "integrations/ipfs_datasets/llm.py": ("tests/test_grok47_router_contract.py", "tests/test_private_workspace_policy.py"),
     "mediator/mediator.py": ("tests/test_factual_correction_replay.py", "tests/test_tui_shared_interview.py"),
@@ -2217,7 +2217,12 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     bootstrap_before = {str(path): _hash_file(path) for path in bootstrap_files}
     impacted = _impacted_behavioral_checks(root, (context or {}).get("changed_paths", ()))
     release_script = (task.get("id") == "CIMP-REL-03" and
-        task.get("validation_commands") == ["python scripts/validate_complaint_intake.py --phase pre-admission"] and
+        observation_command == "python scripts/validate_complaint_intake.py --phase pre-admission" and
+        task.get("validation_commands") in (
+            ["python scripts/validate_complaint_intake.py --phase pre-admission"],
+            ["python -m pytest -q --run-llm --run-network --run-heavy tests/test_intake_release_gate.py",
+             "python scripts/validate_complaint_intake.py --phase pre-admission"],
+        ) and
         "tests/test_intake_release_gate.py" in extra and
         command.rstrip().endswith("python scripts/validate_complaint_intake.py --phase pre-admission"))
     before = _source_freeze(root, extra)

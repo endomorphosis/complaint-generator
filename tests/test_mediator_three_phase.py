@@ -313,7 +313,7 @@ class TestMediatorThreePhaseIntegration:
             for candidate in status['intake_contradictions']['candidates']
         )
 
-    def test_start_three_phase_process_persists_intake_case_file(self):
+    def test_start_three_phase_process_persists_intake_case_file(self, monkeypatch):
         """Starting intake should persist a structured intake case file."""
         from mediator.mediator import Mediator
 
@@ -324,12 +324,14 @@ class TestMediatorThreePhaseIntegration:
                 return 'Mock response'
 
         mediator = Mediator([MockBackend()])
+        from tests.test_authority_dependency_pipeline import _source_record, _local_sources, _CONTEXT
+        _local_sources(monkeypatch, mediator, [_source_record('matching-local-rule', 'notice')])
         complaint_text = (
             "My employer fired me on January 20, 2026 after I complained about discrimination. "
             "I have emails and a termination letter, and I lost wages."
         )
 
-        result = mediator.start_three_phase_process(complaint_text)
+        result = mediator.start_three_phase_process(complaint_text + _CONTEXT)
         intake_case_file = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intake_case_file')
 
         assert result['intake_case_file'] == intake_case_file
@@ -1194,7 +1196,7 @@ class TestMediatorThreePhaseIntegration:
         assert status['alignment_promotion_drift_summary']['pending_conversion_count'] == 2
         assert status['alignment_promotion_drift_summary']['drift_flag'] is True
 
-    def test_advance_to_evidence_phase_builds_claim_support_packets(self):
+    def test_advance_to_evidence_phase_builds_claim_support_packets(self, monkeypatch):
         """Evidence phase initialization should normalize claim-support validation into packets."""
         from mediator.mediator import Mediator
         from unittest.mock import Mock
@@ -1206,8 +1208,10 @@ class TestMediatorThreePhaseIntegration:
                 return 'Mock response'
 
         mediator = Mediator([MockBackend()])
+        from tests.test_authority_dependency_pipeline import _source_record, _local_sources, _CONTEXT
+        _local_sources(monkeypatch, mediator, [_source_record('handoff-local-rule', 'notice')])
         mediator.start_three_phase_process(
-            "I was fired after I complained about discrimination and I have a termination letter."
+            "I was fired after I complained about discrimination and I have a termination letter." + _CONTEXT
         )
         mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'remaining_gaps', 0)
         mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'denoising_converged', True)
@@ -2941,7 +2945,7 @@ class TestMediatorThreePhaseIntegration:
         assert calls[0]['learned_support_kind'] == 'testimony'
         assert calls[0]['suggested_support_kind'] == 'evidence'
 
-    def test_process_evidence_and_legal_denoising_include_confirmed_intake_handoff(self):
+    def test_process_evidence_and_legal_denoising_include_confirmed_intake_handoff(self, monkeypatch):
         """Evidence and formalization workflow payloads should preserve the confirmed intake handoff."""
         from mediator.mediator import Mediator
 
@@ -2952,8 +2956,10 @@ class TestMediatorThreePhaseIntegration:
                 return 'Mock response'
 
         mediator = Mediator([MockBackend()])
+        from tests.test_authority_dependency_pipeline import _source_record, _local_sources, _CONTEXT
+        _local_sources(monkeypatch, mediator, [_source_record('handoff-local-rule', 'notice')])
         mediator.start_three_phase_process(
-            'I was fired after I complained about discrimination and I have emails and a termination letter.'
+            'I was fired after I complained about discrimination and I have emails and a termination letter.' + _CONTEXT
         )
         mediator.confirm_intake_summary('summary reviewed with complainant')
         mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'remaining_gaps', 0)
@@ -3414,7 +3420,7 @@ class TestMediatorThreePhaseIntegration:
         assert result['initial_questions']
         assert result['initial_questions'][0]['type'] == 'evidence'
 
-    def test_default_selector_attaches_reasoning_scores_to_selected_questions(self):
+    def test_default_selector_attaches_reasoning_scores_to_selected_questions(self, monkeypatch):
         """Default mediator selection should annotate chosen intake questions with reasoning signals."""
         from mediator.mediator import Mediator
 
@@ -3425,8 +3431,10 @@ class TestMediatorThreePhaseIntegration:
                 return 'Mock response'
 
         mediator = Mediator([MockBackend()])
+        from tests.test_authority_dependency_pipeline import _source_record, _local_sources, _CONTEXT
+        _local_sources(monkeypatch, mediator, [_source_record('matching-local-rule', 'notice')])
         result = mediator.start_three_phase_process(
-            "My employer discriminated against me because of my race."
+            "My employer discriminated against me because of my race." + _CONTEXT
         )
 
         assert result['initial_questions']
@@ -3477,7 +3485,7 @@ class TestMediatorThreePhaseIntegration:
         assert questions[0]['selector_signals']['candidate_source'] == 'dependency_graph_contradiction'
         assert 'matcher_missing_requirement_count' in questions[0]['selector_signals']
 
-    def test_default_selector_marks_direct_legal_target_match_for_missing_element_question(self):
+    def test_default_selector_marks_direct_legal_target_match_for_missing_element_question(self, monkeypatch):
         """A question that targets an unresolved legal element should carry a direct-match selector signal."""
         from mediator.mediator import Mediator
 
@@ -3488,8 +3496,10 @@ class TestMediatorThreePhaseIntegration:
                 return 'Mock response'
 
         mediator = Mediator([MockBackend()])
+        from tests.test_authority_dependency_pipeline import _source_record, _local_sources, _CONTEXT
+        _local_sources(monkeypatch, mediator, [_source_record('matching-local-rule', 'notice')])
         result = mediator.start_three_phase_process(
-            "My employer discriminated against me."
+            "My employer discriminated against me." + _CONTEXT
         )
 
         matching_summary = result['intake_matching_summary']

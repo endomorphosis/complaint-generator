@@ -777,7 +777,12 @@ class Mediator:
 		if knowledge_graph is None or dependency_graph is None or not isinstance(intake_case_file, dict):
 			return pressure_map
 		try:
-			legal_graph = self._build_intake_selector_legal_graph(intake_case_file)
+			if getattr(dependency_graph, 'metadata', {}).get('legal_requirement_mode') == 'verified_sources':
+				if dependency_graph.metadata.get('legal_source_gaps'):
+					return pressure_map
+				legal_graph = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'verified_legal_graph')
+			else:
+				legal_graph = self._build_intake_selector_legal_graph(intake_case_file)
 			if not getattr(legal_graph, 'elements', {}):
 				return pressure_map
 			matching = self.neurosymbolic_matcher.match_claims_to_law(knowledge_graph, dependency_graph, legal_graph)
@@ -793,8 +798,11 @@ class Mediator:
 		for claim_result in matching.get('claims', []) if isinstance(matching, dict) else []:
 			if not isinstance(claim_result, dict):
 				continue
+			claim_id = str(claim_result.get('claim_id') or '')
+			claim = dependency_graph.get_node(claim_id)
 			claim_type = str(claim_result.get('claim_type') or '').strip().lower()
-			if not claim_type:
+			if (not claim_type or claim is None or claim.node_type != NodeType.CLAIM
+				or str(claim.attributes.get('claim_type') or '').strip().lower() != claim_type):
 				continue
 			missing_requirements = claim_result.get('missing_requirements', [])
 			missing_requirement_names = [
@@ -806,10 +814,23 @@ class Mediator:
 			for legal_requirement in legal_graph.get_requirements_for_claim_type(claim_type):
 				if legal_requirement.name not in missing_requirement_names:
 					continue
-				element_id = str((legal_requirement.attributes or {}).get('element_id') or '').strip()
-				if element_id and element_id not in missing_requirement_element_ids:
-					missing_requirement_element_ids.append(element_id)
-			pressure_map[claim_type] = {
+				if dependency_graph.metadata.get('legal_requirement_mode') == 'verified_sources':
+					# A promoted rule is not an intake-ontology element. Use its
+					# current obligation for this exact claim as the question target.
+					for dependency in dependency_graph.get_dependencies_for_node(claim_id, direction='incoming'):
+						node = dependency_graph.get_node(dependency.source_id)
+						if (node is not None and dependency.required
+							and node.attributes.get('dependency_class') == 'legally_sourced_requirement'
+							and node.attributes.get('source_available') is True
+							and node.attributes.get('dependency_scope', {}).get('claim_id') == claim_id
+							and node.attributes.get('rule_id') == legal_requirement.id
+							and node.id not in missing_requirement_element_ids):
+							missing_requirement_element_ids.append(node.id)
+				else:
+					element_id = str((legal_requirement.attributes or {}).get('element_id') or '').strip()
+					if element_id and element_id not in missing_requirement_element_ids:
+						missing_requirement_element_ids.append(element_id)
+			claim_pressure = {
 				'missing_requirement_count': len(missing_requirements) if isinstance(missing_requirements, list) else 0,
 				'matcher_confidence': float(claim_result.get('confidence', 0.0) or 0.0),
 				'legal_requirements': int(claim_result.get('legal_requirements', 0) or 0),
@@ -817,6 +838,19 @@ class Mediator:
 				'missing_requirement_names': missing_requirement_names,
 				'missing_requirement_element_ids': missing_requirement_element_ids,
 			}
+			group = pressure_map.setdefault(claim_type, {
+				'missing_requirement_count': 0, 'matcher_confidence': 0.0,
+				'legal_requirements': 0, 'satisfied_requirements': 0,
+				'missing_requirement_names': [], 'missing_requirement_element_ids': [],
+				'claim_obligations': {},
+			})
+			group['claim_obligations'][claim_id] = claim_pressure
+			for key in ('missing_requirement_count', 'legal_requirements', 'satisfied_requirements'):
+				group[key] += claim_pressure[key]
+			for key in ('missing_requirement_names', 'missing_requirement_element_ids'):
+				group[key] = list(dict.fromkeys(group[key] + claim_pressure[key]))
+			group['matcher_confidence'] = sum(item['matcher_confidence']
+				for item in group['claim_obligations'].values()) / len(group['claim_obligations'])
 		return pressure_map
 
 	def _build_intake_workflow_action_queue(
@@ -1059,8 +1093,34 @@ class Mediator:
 			or candidate.get('target_claim_type')
 			or ''
 		).strip().lower()
+		context = candidate.get('context') if isinstance(candidate.get('context'), dict) else {}
+		claim_id = str(context.get('claim_id') or '')
+		dependency_graph = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
+		verified_mode = (dependency_graph is not None
+			and dependency_graph.metadata.get('legal_requirement_mode') == 'verified_sources')
+		claim_bound = False
+		if verified_mode:
+			claim = dependency_graph.get_node(claim_id)
+			claim_bound = claim is not None and claim.node_type == NodeType.CLAIM
+			target_id = str(context.get('requirement_id') or explanation.get('target_element_id')
+				or candidate.get('target_element_id') or '')
+			target = dependency_graph.get_node(target_id)
+			source_obligation = (target is not None
+				and target.attributes.get('dependency_class') == 'legally_sourced_requirement')
+			if claim_bound:
+				target_claim_type = str(claim.attributes.get('claim_type') or '').strip().lower()
+			elif claim_id or source_obligation:
+				target_claim_type = ''
+			# Generic factual/proof-lead routing may retain its advisory claim
+			# type. A sourced-law match still requires an actual current claim.
+			annotated['target_claim_type'] = target_claim_type
+			explanation['target_claim_type'] = target_claim_type
 		claim_state = claim_pressure.get(target_claim_type, {})
 		matching_state = matching_pressure.get(target_claim_type, {})
+		if verified_mode:
+			matching_state = matching_state.get('claim_obligations', {}).get(claim_id, {}) if claim_bound else {}
+		elif claim_id and 'claim_obligations' in matching_state:
+			matching_state = matching_state['claim_obligations'].get(claim_id, {})
 		missing_count = int(claim_state.get('missing_count', 0) or 0)
 		satisfaction_ratio = float(claim_state.get('satisfaction_ratio', 0.0) or 0.0)
 		matcher_missing_requirement_count = int(matching_state.get('missing_requirement_count', 0) or 0)
@@ -8441,12 +8501,13 @@ class Mediator:
 			'clarification': ['clarification'],
 			'contradiction': ['contradiction'],
 		}.get(question_type, [])
-		if clarification_keys and dg is not None:
-			refresh_report = self.dg_builder.refresh_affected_dependencies(dg, {
-				'fact_change': True,
-				'clarification_keys': clarification_keys,
+		fact_ids = [str(updates[key]) for key in ('stable_id', 'entity_id', 'superseded_stable_id', 'retracted_stable_id') if updates.get(key)]
+		fact_ids.extend(str(item) for item in (updates.get('conflict_stable_ids') or []))
+		if dg is not None and (clarification_keys or fact_ids):
+			self.refresh_verified_legal_dependencies({
+				'fact_change': True, 'clarification_keys': clarification_keys,
+				'fact_ids': fact_ids, 'factual_revision': updates.get('revision'),
 			})
-			self.phase_manager.record_verified_dependency_refresh(dg, refresh_report)
 		
 		# Generate next questions
 		max_questions = 5
@@ -8504,7 +8565,8 @@ class Mediator:
 		self.phase_manager.update_phase_data(
 			ComplaintPhase.INTAKE,
 			'intake_gap_types',
-			[gap.get('type') for gap in kg_gaps if isinstance(gap, dict) and gap.get('type')],
+			[gap.get('type') for gap in kg_gaps if isinstance(gap, dict) and gap.get('type')]
+			+ (['legal_context_source_gap'] if dg.metadata.get('legal_source_gaps') else []),
 		)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'remaining_gaps', gaps)
 		
@@ -10078,14 +10140,31 @@ class Mediator:
 					or candidate.get('target_claim_type')
 					or ''
 				).strip().lower()
-				if target_claim_type and target_claim_type != str(claim_type).strip().lower():
-					continue
 				target_element_id = str(
 					explanation.get('target_element_id')
 					or candidate.get('target_element_id')
 					or ''
 				).strip().lower()
-				direct_match = bool(selector_signals.get('direct_legal_target_match'))
+				verified_direct_match = False
+				dependency_graph = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
+				if (dependency_graph is not None
+					and dependency_graph.metadata.get('legal_requirement_mode') == 'verified_sources'):
+					context = candidate.get('context') if isinstance(candidate.get('context'), dict) else {}
+					claim_id = str(context.get('claim_id') or '')
+					claim = dependency_graph.get_node(claim_id)
+					target = dependency_graph.get_node(target_element_id)
+					current_ids = claim_data.get('claim_obligations', {}).get(claim_id, {}).get('missing_requirement_element_ids', [])
+					if (claim is None or claim.node_type != NodeType.CLAIM or target is None
+						or target.attributes.get('dependency_class') != 'legally_sourced_requirement'
+						or target.attributes.get('source_available') is not True
+						or target.attributes.get('dependency_scope', {}).get('claim_id') != claim_id
+						or target_element_id not in current_ids):
+						continue
+					target_claim_type = str(claim.attributes.get('claim_type') or '').strip().lower()
+					verified_direct_match = True
+				if target_claim_type and target_claim_type != str(claim_type).strip().lower():
+					continue
+				direct_match = verified_direct_match or bool(selector_signals.get('direct_legal_target_match'))
 				if not direct_match and target_element_id not in missing_element_ids:
 					continue
 				if target_element_id and target_element_id not in mapped_element_ids:
@@ -12604,6 +12683,17 @@ class Mediator:
 		Returns:
 			Status of formalization phase initiation
 		"""
+		self.refresh_verified_legal_dependencies({'stage': 'formalization_source_check'})
+		current_dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
+		current_legal = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'verified_legal_graph')
+		if (current_dg is None or current_dg.metadata.get('legal_source_gaps')
+				or not current_dg.get_nodes_by_type(NodeType.CLAIM)
+				or current_legal is None or not current_legal.get_elements_by_type('legal_requirement')):
+			result = {'error': 'Legal source or context is unavailable.', 'code': 'legal_context_source_gap',
+				'current_phase': self.phase_manager.get_current_phase().value,
+				'matching_complete': False, 'applicability': 'unknown'}
+			result.update(self._get_confirmed_intake_summary_handoff())
+			return result
 		if not self.phase_manager.advance_to_phase(ComplaintPhase.FORMALIZATION):
 			result = {
 				'error': 'Cannot advance to formalization phase. Complete evidence gathering first.',
@@ -12615,12 +12705,9 @@ class Mediator:
 		kg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph')
 		dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
 		
-		# Build legal graph from applicable statutes
-		statutes = getattr(self.state, 'applicable_statutes', [])
-		claim_types = [claim.attributes.get('claim_type', 'unknown') 
-		              for claim in kg.get_entities_by_type('claim')]
-		
-		legal_graph = self.legal_graph_builder.build_from_statutes(statutes, claim_types)
+		# Use the same current source-promoted graph as intake. An empty statute
+		# list must not become a vacuously satisfied matching result.
+		legal_graph = current_legal
 		self.phase_manager.update_phase_data(ComplaintPhase.FORMALIZATION, 'legal_graph', legal_graph)
 		
 		# Also build procedural requirements
@@ -13319,51 +13406,203 @@ class Mediator:
 		context = refresh_explicit_legal_context(intake_case_file if isinstance(intake_case_file, dict) else {})
 		return list(context.get("questions") or [])
 
-	def _collect_verified_legal_requirements(self, claims, intake_case_file):
-		"""Group retrieved requirements that pass the verified-source gate, keyed by claim type."""
-		from complaint_phases.intake_claim_registry import normalize_claim_type
+	@staticmethod
+	def _bounded_legal_source_record(record):
+		"""Bound locally loaded source records before copying or source promotion."""
+		fields = {'id', 'content', 'source_text', 'source_hash', 'content_hash', 'content_hash_scope',
+			'authority_id', 'citation', 'jurisdiction', 'authority_version', 'version',
+			'effective_date', 'expiration_date', 'sunset_date', 'repeal_date', 'superseded_date',
+			'law_versions', 'changes', 'law_version_id', 'rule_candidates', 'metadata', 'provenance',
+			'fact_ids', 'treatment_records', 'authority_treatment_edges', 'treatment_summary'}
+		# Query timestamps and optional parser objects are not source admission
+		# fields; do not coerce or copy them into legal proof.
+		return (isinstance(record, dict) and len(record) <= 128
+			and DependencyGraphBuilder._bounded_source_record({key: value for key, value in record.items() if key in fields}))
 
-		claim_types = []
-		for claim in claims or []:
-			if isinstance(claim, dict):
-				claim_types.append(str(claim.get('type') or 'unknown'))
-		grouped = {claim_type: [] for claim_type in claim_types}
-		candidates = []
-		state_value = getattr(self.state, 'verified_legal_requirements', None)
-		state_data = getattr(self.state, 'data', None)
-		if state_value is None and isinstance(state_data, dict):
-			state_value = state_data.get('verified_legal_requirements')
-		case_value = intake_case_file.get('verified_legal_requirements') if isinstance(intake_case_file, dict) else None
-		for source in (state_value, case_value):
-			if isinstance(source, dict):
-				for claim_type, items in source.items():
-					if not isinstance(items, list):
-						continue
-					for item in items:
-						if isinstance(item, dict):
-							copied = dict(item)
-							copied.setdefault('claim_type', claim_type)
-							candidates.append(copied)
-			elif isinstance(source, list):
-				candidates.extend(dict(item) for item in source if isinstance(item, dict))
-		for requirement in candidates:
-			if not self.dg_builder._is_verified_legal_requirement(requirement):
+	def _collect_verified_legal_requirements(self, claims, intake_case_file):
+		"""Promote current locally owned authority text, never caller verification flags.
+
+		This reads stored/configured source records only. It does not start legal
+		search, embedding, or a remote corpus request.
+		"""
+		from copy import deepcopy
+		from complaint_phases.intake_claim_registry import normalize_claim_type
+		from complaint_phases.intake_case_file import refresh_explicit_legal_context
+		from integrations.ipfs_datasets.logic import extract_source_bound_rule_candidates
+		from integrations.ipfs_datasets.legal import resolve_explicit_jurisdiction
+
+		claim_types = list(dict.fromkeys(str(item.get('type') or 'unknown') for item in (claims or []) if isinstance(item, dict)))[:32]
+		grouped = {key: [] for key in claim_types}
+		case = intake_case_file if isinstance(intake_case_file, dict) else {}
+		context = refresh_explicit_legal_context(case)
+		jurisdiction = resolve_explicit_jurisdiction(context.get('jurisdiction'))
+		date = context.get('applicable_law_date') or {}
+		query_date = date.get('precise_date') if isinstance(date, dict) and not date.get('is_uncertain') else ''
+		sources = []
+		available = jurisdiction != 'unknown' and bool(query_date)
+		if available:
+			try:
+				for claim_type in claim_types:
+					local = self.get_legal_authorities(claim_type=claim_type)
+					if not isinstance(local, list) or len(local) > 128:
+						raise ValueError('source_record_bound')
+					for record in local:
+						if isinstance(record, dict):
+							sources.append((claim_type, record))
+				if len(sources) > 128:
+					raise ValueError('source_record_bound')
+			except Exception:
+				available = False
+				sources = []
+		aliases = ('source_text', 'source_hash', 'content_hash', 'content_hash_scope',
+			'authority_version', 'version', 'effective_date', 'expiration_date',
+			'sunset_date', 'repeal_date', 'superseded_date', 'law_versions', 'changes',
+			'law_version_id', 'authority_id', 'citation', 'jurisdiction', 'fact_ids')
+		normalized = []
+		for claim_type, record in sources:
+			if not self._bounded_legal_source_record(record):
 				continue
-			target = str(requirement.get('claim_type') or requirement.get('type') or '')
-			target_norm = normalize_claim_type(target) or target.strip().lower()
-			for claim_type in claim_types:
-				claim_norm = normalize_claim_type(claim_type) or claim_type.strip().lower()
-				if claim_type == target or (target_norm and claim_norm == target_norm):
-					grouped[claim_type].append(requirement)
+			source = {key: deepcopy(value) for key, value in record.items() if key in aliases or key in ('id', 'rule_candidates', 'treatment_records', 'authority_treatment_edges', 'treatment_summary', 'provenance', 'fact_ids')}
+			# A stored canonical body cannot be replaced by an independently
+			# hashed metadata alias. Explicit top-level source_text remains a
+			# supported source API; the ordinary storage row exposes content.
+			if 'source_text' not in source and isinstance(record.get('content'), str) and record['content']:
+				source['source_text'] = record['content']
+			proof_fields = ('rule_candidates', 'provenance', 'treatment_records',
+				'authority_treatment_edges', 'treatment_summary')
+			for container in ('metadata', 'provenance'):
+				values = record.get(container)
+				if isinstance(values, dict) and len(values) <= 128:
+					for key in aliases + proof_fields:
+						if key not in source and key in values:
+							source[key] = deepcopy(values[key])
+			# Retain source evidence stored below metadata without replacing
+			# canonical top-level coordinates or acquisition provenance. Stale
+			# retrieval/query dates and caller verification flags are not inputs.
+			metadata = record.get('metadata')
+			if isinstance(metadata, dict):
+				source['metadata'] = {key: deepcopy(value) for key, value in metadata.items()
+					if key in aliases + proof_fields}
+			# Storage may materialize empty top-level treatment lists while an
+			# owned corpus supplies adverse evidence in metadata. Neither layer
+			# may erase the other's evidence merely by containing an empty list.
+			treatments = []
+			malformed_treatment = False
+			for container in (record, record.get('metadata'), record.get('provenance')):
+				if not isinstance(container, dict):
+					continue
+				for key in ('authority_treatment_edges', 'treatment_records', 'treatment_summary'):
+					rows = container.get(key)
+					if key == 'treatment_summary' and isinstance(rows, dict):
+						rows = rows.get('records')
+					if rows is None:
+						continue
+					if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+						malformed_treatment = True
+						continue
+					for row in rows:
+						if row not in treatments:
+							treatments.append(deepcopy(row))
+			if malformed_treatment or len(treatments) > 256:
+				continue
+			source['authority_treatment_edges'] = treatments
+			source.setdefault('source_text', record.get('content') or '')
+			if not isinstance(source['source_text'], str) or len(source['source_text']) > 65536:
+				continue
+			source.setdefault('authority_id', record.get('id'))
+			source['claim_type'] = claim_type
+			if resolve_explicit_jurisdiction(source.get('jurisdiction')) != jurisdiction:
+				continue
+			# The user's current context supplies the query date, not the law's
+			# effective date or a prior retrieval's context.
+			source['as_of_date'] = query_date
+			source['query_context'] = {'jurisdiction': jurisdiction, 'as_of_date': query_date}
+			source.pop('temporal_query_context', None)
+			try:
+				candidates = source.get('rule_candidates')
+				if not candidates:
+					candidates = extract_source_bound_rule_candidates(source).get('candidates', [])
+				if not isinstance(candidates, list) or len(candidates) > 256:
+					continue
+				# Source coordinates belong to the stored authority, not a saved
+				# candidate's caller-supplied promoted/applicable flags.
+				source['rule_candidates'] = [
+					{'rule_text': candidate.get('rule_text') or candidate.get('text'), 'claim_type': claim_type}
+					for candidate in candidates if isinstance(candidate, dict)
+				]
+				normalized.append(source)
+			except Exception:
+				continue
+		try:
+			legal_graph = self.legal_graph_builder.build_from_authorities(normalized)
+		except Exception:
+			# Preserve a typed, empty source result; never expose backend text.
+			legal_graph = self.legal_graph_builder.build_from_authorities([])
+			available = False
+			normalized = []
+		admitted_claims = {}
+		proof_fields = ('source_span', 'source_hash', 'span_sha256', 'authority_text_sha256',
+			'authority_id', 'authority_version', 'jurisdiction', 'applicable_date', 'temporal_applicability')
+		for element in legal_graph.get_elements_by_type('legal_requirement'):
+			attrs = element.attributes
+			if attrs.get('applicable') is not True or attrs.get('support_eligible') is not True:
+				continue
+			# Authority IDs alone are not version identities. A stored older
+			# edition must never supply the proof for a different graph element.
+			for source in normalized:
+				if str(source.get('authority_id') or source.get('id') or '') != str(attrs.get('authority_id') or ''):
+					continue
+				proof = deepcopy(source)
+				proof.pop('rule_candidates', None)
+				proof['rule_text'] = element.description
+				try:
+					admitted = extract_source_bound_rule_candidates(proof).get('promoted_requirements', [])
+				except Exception:
+					continue
+				candidate = next((item for item in admitted if item.get('rule_text') == element.description
+					and all(item.get(key) == attrs.get(key) for key in proof_fields)), None)
+				if not candidate or not candidate.get('support_eligible'):
+					continue
+				requirement = dict(deepcopy(candidate), source_record=proof, rule_id=element.id,
+					name=element.name, description=element.description, provenance=deepcopy(source.get('provenance') or {}),
+					fact_ids=list(source.get('fact_ids') or []))
+				if not self.dg_builder._is_verified_legal_requirement(requirement):
+					continue
+				target = normalize_claim_type(source.get('claim_type'))
+				for claim_type in claim_types:
+					if normalize_claim_type(claim_type) == target and claim_type not in admitted_claims.get(element.id, set()):
+						grouped[claim_type].append(requirement)
+						admitted_claims.setdefault(element.id, set()).add(claim_type)
+		for element in legal_graph.get_elements_by_type('legal_requirement'):
+			claims_for_element = sorted(admitted_claims.get(element.id, set()))
+			element.attributes['applicable_claim_types'] = claims_for_element
+			if not claims_for_element:
+				element.attributes.update(applicable=False, support_eligible=False)
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'verified_legal_graph', legal_graph)
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'legal_source_status', ('available' if normalized else 'empty_or_unavailable') if available else 'unavailable')
 		return grouped
 
 	def refresh_verified_legal_dependencies(self, change):
-		"""Recompute intake dependencies affected by a factual, jurisdiction, date, or rule change."""
+		"""Re-read local sources and reconcile admission before invalidating support."""
 		dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
 		if dg is None:
 			return {'affected_node_ids': [], 'preserved_node_ids': [], 'recomputed_dependencies': []}
-		report = self.dg_builder.refresh_affected_dependencies(dg, change if isinstance(change, dict) else {})
-		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'dependency_graph', dg)
+		payload = dict(change) if isinstance(change, dict) else {}
+		if dg.metadata.get('legal_requirement_mode') != 'verified_sources':
+			return self.phase_manager.record_verified_dependency_refresh(
+				dg, self.dg_builder.refresh_affected_dependencies(dg, payload))
+		claims = [{'type': node.attributes.get('claim_type'), 'name': node.name} for node in dg.get_nodes_by_type(NodeType.CLAIM)]
+		case = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intake_case_file') or {}
+		grouped = self._collect_verified_legal_requirements(claims, case)
+		source_report = self.dg_builder.reconcile_verified_requirements(dg, grouped)
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'verified_legal_requirements', grouped)
+		# A serialized updated_requirements mapping cannot bypass current source lookup.
+		if 'updated_requirements' in payload:
+			payload['updated_requirements'] = grouped
+		report = self.dg_builder.refresh_affected_dependencies(dg, payload)
+		report['affected_node_ids'] = list(dict.fromkeys(source_report['affected_node_ids'] + report['affected_node_ids']))
+		report['preserved_node_ids'] = [key for key in report['preserved_node_ids'] if key not in report['affected_node_ids']]
+		report['source_admission'] = source_report
 		return self.phase_manager.record_verified_dependency_refresh(dg, report)
 
 	def apply_explicit_legal_context(self, intake_case_file, **updates):
@@ -13388,6 +13627,7 @@ class Mediator:
 			change['date_changed'] = True
 			change['date_roles'] = date_roles
 		if change and self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph') is not None:
+			self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', intake_case_file)
 			self.refresh_verified_legal_dependencies(change)
 		return updated
 	

@@ -222,6 +222,16 @@ class DependencyGraph:
         for node in self.nodes.values():
             check = self.check_satisfaction(node.id)
             if not check.get('satisfied', False) and check.get('total_required', 0) > 0:
+                if self.metadata.get('legal_requirement_mode') == 'verified_sources':
+                    # The denoiser has a finite per-claim question budget. Keep
+                    # current sourced obligations visible before generic facts.
+                    def sourced_obligation(dependency):
+                        source = self.get_node(dependency['source_node_id'])
+                        return bool(source is not None
+                            and source.attributes.get('dependency_class') == _LEGALLY_SOURCED_CLASS
+                            and source.attributes.get('source_available') is True
+                            and source.attributes.get('dependency_scope', {}).get('claim_id') == node.id)
+                    check['missing_dependencies'].sort(key=lambda dependency: not sourced_obligation(dependency))
                 unsatisfied.append(check)
         
         return unsatisfied
@@ -2698,11 +2708,17 @@ class DependencyGraphBuilder:
         def has_date(text_value: str) -> bool:
             if not text_value:
                 return False
+            # A user's explicit law-query date selects a legal version; it is
+            # not an event date and cannot close a factual chronology gap.
+            # Preserve the original claim/source text and all other dates.
             patterns = [
                 r'\b(?:Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December)\s+\d{1,2},\s+\d{4}\b',
                 r'\b\d{1,2}/\d{1,2}/\d{2,4}\b',
                 r'\b\d{4}-\d{2}-\d{2}\b',
             ]
+            legal_date = (r'(?i:\b(?:applicable law date|law in effect on|law applicable on))\s*[: ]\s*(?:'
+                          + '|'.join(patterns) + ')')
+            text_value = re.sub(legal_date, '', text_value)
             return any(re.search(p, text_value) for p in patterns)
 
         def has_actor_signal(text_value: str) -> bool:
@@ -3011,42 +3027,51 @@ class DependencyGraphBuilder:
             })
             node.attributes = attributes
 
+    @staticmethod
+    def _bounded_source_record(record: Any) -> bool:
+        """Bound the serialized source proof before the parser copies it."""
+        remaining, characters = 8192, 262144
+        def bounded(value, depth=0):
+            nonlocal remaining, characters
+            remaining -= 1
+            if remaining < 0 or depth > 8:
+                return False
+            if isinstance(value, str):
+                characters -= len(value)
+                return len(value) <= 65536 and characters >= 0
+            if value is None or type(value) in (bool, int, float):
+                return True
+            if isinstance(value, dict):
+                return len(value) <= 128 and all(isinstance(key, str) and len(key) <= 128
+                    and bounded(item, depth + 1) for key, item in value.items())
+            if isinstance(value, list):
+                return len(value) <= 256 and all(bounded(item, depth + 1) for item in value)
+            return False
+        return isinstance(record, dict) and bounded(record)
+
     def _is_verified_legal_requirement(self, requirement: Any) -> bool:
-        """A retrieved requirement is verified only when its source is explicit and applicable."""
+        """Re-derive source admission; serialized verification booleans are not proof."""
         if not isinstance(requirement, dict):
             return False
-        if requirement.get("legacy_template") is True or requirement.get("law_derived") is True:
-            return False
-        origin = str(requirement.get("origin") or requirement.get("source_origin") or "").strip().lower()
-        if origin in _HEURISTIC_LAW_ORIGINS:
-            return False
-        verification_status = str(requirement.get("verification_status") or "").strip().lower()
-        promotion_status = str(requirement.get("promotion_status") or "").strip().lower()
-        if verification_status in _UNVERIFIED_REQUIREMENT_STATUSES or promotion_status in _UNVERIFIED_REQUIREMENT_STATUSES:
-            return False
-        if requirement.get("applicable") is False or requirement.get("support_eligible") is False:
+        source = requirement.get("source_record")
+        if not self._bounded_source_record(source):
             return False
         try:
-            from integrations.ipfs_datasets.logic import is_applicable_legal_requirement
+            from integrations.ipfs_datasets.logic import extract_source_bound_rule_candidates
+            admitted = extract_source_bound_rule_candidates(source).get("promoted_requirements", [])
         except Exception:
             return False
-        if not is_applicable_legal_requirement(requirement):
-            return False
-        provenance = requirement.get("provenance") if isinstance(requirement.get("provenance"), dict) else {}
-        source_id = str(
-            requirement.get("authority_id")
-            or requirement.get("source_id")
-            or provenance.get("authority_id")
-            or provenance.get("source_id")
-            or ""
-        ).strip()
-        if not source_id:
-            return False
-        return bool(
-            requirement.get("promoted") is True
-            or requirement.get("source_bound") is True
-            or verification_status in _VERIFIED_REQUIREMENT_STATUSES
-        )
+        keys = ("rule_text", "source_span", "source_hash", "span_sha256",
+                "authority_text_sha256", "authority_id", "authority_version",
+                "jurisdiction", "applicable_date", "temporal_applicability",
+                "treatment_edges", "blocking_treatments")
+        for candidate in admitted:
+            if (candidate.get("applicable") is True and candidate.get("support_eligible") is True
+                    and not candidate.get("treatment_blocks_support")
+                    and all(requirement.get(key) == candidate.get(key) for key in keys)
+                    and requirement.get("description") == candidate.get("rule_text")):
+                return True
+        return False
 
     def _heuristic_graph_law_derived(self, *args: Any, **kwargs: Any) -> None:
         """Heuristic law text is not a retrieved legal source."""
@@ -3075,6 +3100,7 @@ class DependencyGraphBuilder:
         req_node = DependencyNode(
             id=self._get_namespaced_node_id("legal_requirement", {
                 "claim_type": claim_type,
+                "claim_id": claim_node.id,
                 "requirement": req_data,
             }),
             node_type=NodeType.LEGAL_ELEMENT,
@@ -3082,8 +3108,11 @@ class DependencyGraphBuilder:
             description=req_data.get("description", ""),
             satisfied=False,
             attributes={
+                **deepcopy(req_data),
                 "record_kind": "legal_requirement",
                 "dependency_class": _LEGALLY_SOURCED_CLASS,
+                "source_available": True,
+                "source_fact_ids": list(req_data.get("fact_ids") or []),
                 "law_derived": False,
                 "about_complainant": False,
                 "provenance": dict(requirement_provenance),
@@ -3092,6 +3121,7 @@ class DependencyGraphBuilder:
                 "source_bound": req_data.get("source_bound"),
                 "dependency_scope": {
                     "claim_type": claim_type,
+                    "claim_id": claim_node.id,
                     "rule_id": rule_id,
                     "jurisdiction": str(req_data.get("jurisdiction") or ""),
                     "fact_ids": [str(item) for item in (req_data.get("fact_ids") or []) if str(item).strip()],
@@ -3165,9 +3195,68 @@ class DependencyGraphBuilder:
             source = graph.nodes.get(dependency.source_id)
             if source is None or not isinstance(source.attributes, dict):
                 continue
-            if source.attributes.get("dependency_class") == _LEGALLY_SOURCED_CLASS:
+            if (source.attributes.get("dependency_class") == _LEGALLY_SOURCED_CLASS
+                    and source.attributes.get("source_available") is not False
+                    and self._is_verified_legal_requirement(source.attributes)):
                 return True
         return False
+
+    def reconcile_verified_requirements(self, graph: DependencyGraph, grouped: Dict[str, Any]) -> Dict[str, Any]:
+        """Keep unchanged source nodes; retire removed or changed source admissions."""
+        claims = graph.get_nodes_by_type(NodeType.CLAIM)
+        desired = {}
+        for claim in claims:
+            for requirement in grouped.get(claim.attributes.get("claim_type"), []) or []:
+                if self._is_verified_legal_requirement(requirement):
+                    key = self._get_namespaced_node_id("legal_requirement", {
+                        "claim_type": claim.attributes.get("claim_type"),
+                        "claim_id": claim.id, "requirement": requirement,
+                    })
+                    desired[key] = (claim, requirement)
+        affected, added = [], []
+        for node in list(graph.nodes.values()):
+            if node.attributes.get("dependency_class") != _LEGALLY_SOURCED_CLASS:
+                continue
+            if node.id in desired and node.attributes.get("source_available") is not False:
+                desired.pop(node.id)
+                continue
+            if node.attributes.get("source_available") is False:
+                if node.satisfied:
+                    affected.append(node.id)
+                node.satisfied = False
+                node.attributes.update(stale_satisfaction=True, satisfaction_state="invalidated")
+                continue
+            node.attributes["invalidated_satisfaction"] = {"satisfied": bool(node.satisfied), "confidence": node.confidence}
+            node.satisfied = False
+            node.attributes.update(source_available=False, stale_satisfaction=True,
+                                   satisfaction_state="invalidated")
+            retired = [edge for edge in graph.dependencies.values()
+                       if edge.source_id == node.id or edge.target_id == node.id]
+            node.attributes["retired_dependency_edges"] = [
+                {"id": edge.id, "source_id": edge.source_id, "target_id": edge.target_id,
+                 "dependency_type": edge.dependency_type.value, "required": edge.required}
+                for edge in retired]
+            graph.dependencies = {key: edge for key, edge in graph.dependencies.items()
+                                  if edge.source_id != node.id and edge.target_id != node.id}
+            node.attributes["satisfaction_revision"] = int(node.attributes.get("satisfaction_revision") or 0) + 1
+            affected.append(node.id)
+        for key, (claim, requirement) in desired.items():
+            node = self._add_legal_requirement_node(graph, claim, requirement)
+            node.attributes.update(stale_satisfaction=True, satisfaction_state="invalidated")
+            added.append(node.id)
+        self._refresh_legal_source_gaps(graph, claims)
+        return {"affected_node_ids": affected + added, "added_node_ids": added,
+                "preserved_node_ids": [key for key in graph.nodes if key not in set(affected + added)]}
+
+    def _refresh_legal_source_gaps(self, graph, claims=None):
+        gap_ids = {node.id for node in graph.nodes.values()
+                   if node.attributes.get("dependency_class") == _LEGAL_SOURCE_GAP_CLASS}
+        for key in gap_ids:
+            graph.nodes.pop(key, None)
+        graph.dependencies = {key: edge for key, edge in graph.dependencies.items()
+                              if edge.source_id not in gap_ids and edge.target_id not in gap_ids}
+        graph.metadata["legal_source_gaps"] = []
+        self._add_legal_source_gaps(graph, claims if claims is not None else graph.get_nodes_by_type(NodeType.CLAIM))
 
     def refresh_affected_dependencies(
         self,
@@ -3200,7 +3289,7 @@ class DependencyGraphBuilder:
                 preserved_ids.append(node.id)
 
         replaced_rule_ids = []
-        if rule_ids and updated_requirements:
+        if rule_ids and "updated_requirements" in payload:
             replaced_rule_ids = self._replace_changed_rules(graph, rule_ids, updated_requirements)
             affected_ids = [node_id for node_id in affected_ids if node_id in graph.nodes]
             for node in graph.nodes.values():
@@ -3265,7 +3354,11 @@ class DependencyGraphBuilder:
             "jurisdiction_changed": jurisdiction_changed,
             "date_changed": date_changed,
             "fact_change": fact_change,
+            "fact_ids": sorted(fact_ids),
+            "factual_revision": payload.get("factual_revision"),
         }
+        if graph.metadata.get("legal_requirement_mode") == "verified_sources":
+            self._refresh_legal_source_gaps(graph)
         graph.metadata["last_dependency_refresh"] = {
             "affected_count": len(affected_ids),
             "preserved_count": len(report["preserved_node_ids"]),
@@ -3316,13 +3409,14 @@ class DependencyGraphBuilder:
         """Replace only the sourced requirements whose rule identity changed."""
         removed = []
         claim_nodes = {
-            str(node.attributes.get("claim_type") or ""): node
+            node.id: node
             for node in graph.get_nodes_by_type(NodeType.CLAIM)
             if isinstance(node.attributes, dict)
         }
         for node in list(graph.nodes.values()):
             attributes = node.attributes if isinstance(node.attributes, dict) else {}
-            if attributes.get("dependency_class") != _LEGALLY_SOURCED_CLASS:
+            if (attributes.get("dependency_class") != _LEGALLY_SOURCED_CLASS
+                    or attributes.get("source_available") is False):
                 continue
             scope = attributes.get("dependency_scope") if isinstance(attributes.get("dependency_scope"), dict) else {}
             rule_id = str(scope.get("rule_id") or attributes.get("rule_id") or "")
@@ -3339,9 +3433,9 @@ class DependencyGraphBuilder:
             }
             graph.nodes.pop(node.id, None)
             removed.append(rule_id)
-            claim_node = claim_nodes.get(str(scope.get("claim_type") or ""))
+            claim_node = claim_nodes.get(str(scope.get("claim_id") or ""))
             replacement = None
-            for requirements in updated_requirements.values():
+            for requirements in [updated_requirements.get(str(scope.get("claim_type") or ""), [])]:
                 if not isinstance(requirements, list):
                     continue
                 for requirement in requirements:

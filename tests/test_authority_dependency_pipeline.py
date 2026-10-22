@@ -11,22 +11,38 @@ class _MockBackend:
         return "Mock response"
 
 
-def _verified_requirement(rule_id, name, *, fact_ids=None, jurisdiction="federal"):
+def _source_record(rule_id, name, *, fact_ids=None, jurisdiction="OR"):
+    from integrations.ipfs_datasets.logic import sha256_utf8
+    text = f"An employer shall provide {name.lower()} to an employee."
     return {
-        "name": name,
-        "description": f"Source-bound requirement {name}",
-        "rule_id": rule_id,
-        "authority_id": rule_id,
-        "jurisdiction": jurisdiction,
-        "promoted": True,
-        "source_bound": True,
-        "verification_status": "verified",
-        "applicable": True,
-        "support_eligible": True,
-        "fact_ids": list(fact_ids or []),
-        "provenance": {"source_id": rule_id, "authority_id": rule_id},
+        "id": rule_id, "authority_id": rule_id, "content": text, "source_text": text,
+        # Synthetic owned source, not a quotation of an actual statute.
+        "citation": f"Synthetic fixture rule {rule_id}",
+        "source_hash": sha256_utf8(text), "jurisdiction": jurisdiction,
+        "authority_version": "2024-edition", "effective_date": "2024-01-01",
+        "as_of_date": "2024-06-01", "fact_ids": list(fact_ids or []),
+        "claim_type": "employment_discrimination", "provenance": {"source_id": rule_id},
     }
 
+
+def _verified_requirement(rule_id, name, *, fact_ids=None, jurisdiction="OR"):
+    from integrations.ipfs_datasets.logic import extract_source_bound_rule_candidates
+    source = _source_record(rule_id, name, fact_ids=fact_ids, jurisdiction=jurisdiction)
+    source["rule_text"] = source["source_text"]
+    admitted = extract_source_bound_rule_candidates(source)["promoted_requirements"]
+    assert len(admitted) == 1
+    return dict(admitted[0], source_record=source, name=name, description=admitted[0]["rule_text"],
+                rule_id=rule_id, fact_ids=list(fact_ids or []))
+
+
+def _local_sources(monkeypatch, mediator, records):
+    # Replace only the local storage I/O boundary; source admission, temporal
+    # evaluation, graph construction, and all public workflow methods stay real.
+    monkeypatch.setattr(mediator.legal_authority_storage, "get_authorities_by_claim",
+                        lambda user_id, claim_type: records)
+
+
+_CONTEXT = " Under Oregon law. Applicable law date: 2024-06-01."
 
 def _mediator():
     from mediator.mediator import Mediator
@@ -58,16 +74,12 @@ def _factual_nodes(graph):
     ]
 
 
-def test_start_binds_verified_requirements_before_element_questions():
+def test_start_binds_verified_requirements_before_element_questions(monkeypatch):
     mediator = _mediator()
-    mediator.state.verified_legal_requirements = {
-        "employment_discrimination": [
-            _verified_requirement("rule-protected", "Protected class"),
-        ],
-    }
+    _local_sources(monkeypatch, mediator, [_source_record("rule-protected", "Protected class")])
 
     result = mediator.start_three_phase_process(
-        "I faced discrimination at work and I have emails."
+        "I faced discrimination at work and I have emails." + _CONTEXT
     )
 
     sequence = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_construction_sequence")
@@ -87,7 +99,7 @@ def test_start_binds_verified_requirements_before_element_questions():
     assert result["initial_questions"] is not None
 
 
-def test_missing_retrieved_requirements_record_a_source_gap_without_heuristic_law():
+def test_missing_retrieved_requirements_record_a_source_gap_without_heuristic_law(monkeypatch):
     mediator = _mediator()
     mediator.state.verified_legal_requirements = {
         "employment_discrimination": [{
@@ -99,7 +111,8 @@ def test_missing_retrieved_requirements_record_a_source_gap_without_heuristic_la
         }],
     }
 
-    mediator.start_three_phase_process("My employer discriminated against me.")
+    _local_sources(monkeypatch, mediator, [])
+    mediator.start_three_phase_process("My employer discriminated against me." + _CONTEXT)
 
     graph = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
     assert graph.metadata["heuristic_law_derived_invoked"] is False
@@ -192,14 +205,14 @@ def test_fact_jurisdiction_date_and_rule_changes_refresh_only_affected_dependenc
     sourced["rule-a"].attributes["satisfaction_state"] = "satisfied"
     sourced["rule-b"].attributes["satisfaction_state"] = "satisfied"
     revised = _verified_requirement("rule-a", "Element A revised", fact_ids=["fact-a"])
-    revised["description"] = "Revised source text"
+    revised_text = revised["description"]
     rule_report = builder.refresh_affected_dependencies(graph, {
         "rule_ids": ["rule-a"],
         "updated_requirements": {"employment_discrimination": [revised]},
     })
     refreshed = {node.attributes.get("rule_id"): node for node in _sourced_nodes(graph)}
     assert "rule-a" in refreshed and "rule-b" in refreshed
-    assert refreshed["rule-a"].description == "Revised source text"
+    assert refreshed["rule-a"].description == revised_text
     assert refreshed["rule-a"].satisfied is False
     assert refreshed["rule-a"].attributes["satisfaction_state"] == "invalidated"
     assert refreshed["rule-b"].satisfied is True
@@ -208,14 +221,11 @@ def test_fact_jurisdiction_date_and_rule_changes_refresh_only_affected_dependenc
     assert "rule-b" not in rule_report["replaced_rule_ids"]
 
 
-def test_phase_manager_records_scoped_refresh_from_context_and_answers():
+def test_phase_manager_records_scoped_refresh_from_context_and_answers(monkeypatch):
     mediator = _mediator()
-    mediator.state.verified_legal_requirements = {
-        "employment_discrimination": [
-            _verified_requirement("rule-protected", "Protected class", fact_ids=["fact-protected"]),
-        ],
-    }
-    mediator.start_three_phase_process("My employer discriminated against me.")
+    records = [_source_record("rule-protected", "Protected class", fact_ids=["fact-protected"])]
+    _local_sources(monkeypatch, mediator, records)
+    mediator.start_three_phase_process("My employer discriminated against me." + _CONTEXT)
     graph = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
     legal = _sourced_nodes(graph)[0]
     factual = _factual_nodes(graph)[0]
@@ -249,5 +259,6 @@ def test_phase_manager_records_scoped_refresh_from_context_and_answers():
     factual = next(node for node in graph.nodes.values() if node.id == factual.id)
     assert factual.satisfied is False
     assert factual.attributes["stale_satisfaction"] is True
-    assert legal.satisfied is True
-    assert legal.attributes.get("satisfaction_state") != "invalidated"
+    assert legal.satisfied is False
+    assert legal.attributes["source_available"] is False
+    assert _gap_nodes(graph)

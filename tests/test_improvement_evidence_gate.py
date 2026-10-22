@@ -95,20 +95,38 @@ def _gate(tmp_path: Path, task: dict, observation: dict, **kwargs) -> dict:
         tests.mkdir(exist_ok=True)
         (tmp_path / "conftest.py").write_text("def pytest_addoption(parser):\n for flag in ('--run-llm','--run-network','--run-heavy'): parser.addoption(flag, action='store_true')\n")
         (tmp_path / "complaint_fixture_guard.py").write_text("""import json, socket, sys
+import os, stat, tempfile
 from pathlib import Path
 from collections import Counter
+_fixture = Path(__file__).resolve().parent
+_control = _fixture / 'nested-fixture-control-plane'
+_temporary = _fixture / 'nested-fixture-tmp'
+for _path in (_control, _temporary):
+ _path.mkdir(mode=0o700, exist_ok=True)
+ _info = _path.lstat()
+ if _path.resolve(strict=True) != _path or not stat.S_ISDIR(_info.st_mode) or _info.st_uid != os.getuid() or stat.S_IMODE(_info.st_mode) != 0o700:
+  raise AssertionError('nested_fixture_namespace_not_owned')
+os.environ['IPFS_ACCELERATE_AGENT_ORCHESTRATION_DIR'] = str(_control)
+os.environ['IPFS_ACCELERATE_META_INDEX_DUCKDB'] = ''
+os.environ['IPFS_ACCELERATE_META_INDEX_DUCKLAKE'] = ''
+os.environ['IPFS_DATASETS_PY_AUTO_NLTK_DOWNLOAD'] = '0'
+os.environ['TMPDIR'] = str(_temporary)
+tempfile.tempdir = str(_temporary)
 _counts = Counter()
 def _audit(event, args):
- if event == 'subprocess.Popen':
+ if event in {'subprocess.Popen', 'os.system', 'os.exec', 'os.fork', 'os.forkpty', 'os.posix_spawn', 'os.spawn'}:
   _counts['denied_process'] += 1
   raise AssertionError('nested_fixture_process_denied')
- if event == 'socket.connect' and args[0].family in (socket.AF_INET, socket.AF_INET6):
+ network = event in {'socket.getaddrinfo', 'socket.gethostbyname', 'socket.gethostbyaddr', 'socket.getnameinfo'}
+ network = network or event == 'socket.__new__' and args[1] in (socket.AF_INET, socket.AF_INET6)
+ network = network or event in {'socket.connect', 'socket.sendto'} and args[0].family in (socket.AF_INET, socket.AF_INET6)
+ if network:
   _counts['denied_network'] += 1
   raise AssertionError('nested_fixture_network_denied')
 sys.addaudithook(_audit)
 def pytest_sessionfinish(session, exitstatus):
  path=Path(session.config.getoption('--complaint-evidence-path')).with_suffix('.guard.json')
- path.write_text(json.dumps({'schema':'complaint-nested-fixture-egress@1','exitstatus':int(exitstatus),'denied_attempts':dict(_counts),'network_process_dispatch_permitted':False,'guard_load_order':'explicit first -p before AST and phase plugins; pytest bootstrap precedes guard'}))
+ path.write_text(json.dumps({'schema':'complaint-nested-fixture-egress@1','exitstatus':int(exitstatus),'denied_attempts':dict(_counts),'network_process_dispatch_permitted':False,'guard_load_order':'explicit first -p before AST and phase plugins; pytest bootstrap precedes guard','private_namespaces':{'orchestration_dir':str(_control),'tmpdir':str(_temporary),'meta_index_duckdb_disabled':os.environ.get('IPFS_ACCELERATE_META_INDEX_DUCKDB')=='','meta_index_ducklake_disabled':os.environ.get('IPFS_ACCELERATE_META_INDEX_DUCKLAKE')=='','nltk_auto_download':os.environ.get('IPFS_DATASETS_PY_AUTO_NLTK_DOWNLOAD')}}))
  path.chmod(0o600)
 """)
         adapter = tmp_path / "adapter.py"
@@ -553,6 +571,126 @@ def test_exact_rel03_script_and_trusted_behavioral_companion_are_both_required(t
         assert receipt["reason"] == "declared_command_failed"
 
 
+def _current_rel03_measurement_fixture(tmp_path):
+    """Use the real two-command contract with inert source-bound child bodies."""
+    from integrations.ipfs_accelerate import improvement_plan as compiler
+    _write_output(tmp_path, "CIMP-OPS-04")
+    _, executor, environment = _gate(
+        tmp_path, _task(), _observation(tmp_path), _return_measurement=True)
+    spec = compiler.load_spec(Path(__file__).resolve().parents[1] / compiler.SPEC_RELATIVE)
+    task = next(item for item in spec["tasks"] if item["id"] == "CIMP-REL-03")
+    assert task["validation_commands"] == [
+        "python -m pytest -q --run-llm --run-network --run-heavy tests/test_intake_release_gate.py",
+        "python scripts/validate_complaint_intake.py --phase pre-admission",
+    ]
+    script = tmp_path / "scripts/validate_complaint_intake.py"
+    script.parent.mkdir(exist_ok=True)
+    script.write_text(
+        "import complaint_fixture_guard\nfrom pathlib import Path\n"
+        "Path('declared-release-script-ran').write_text('synthetic invocation')\n"
+        "print('synthetic pre-admission checker; no real task completion claimed')\n")
+    report = tmp_path / "docs/task_boards/complaint_intake_completion.json"
+    report.parent.mkdir(parents=True)
+    report.write_text(json.dumps({"phase":"pre-admission", "release_qualified":False,
+                                 "self_completion_pending":True, "pending_task_ids":["CIMP-REL-03"]}))
+    (tmp_path / "tests/test_intake_release_gate.py").write_text(
+        "import json\nfrom pathlib import Path\n"
+        "def test_current_release_remains_self_pending():\n"
+        " value=json.loads(Path('docs/task_boards/complaint_intake_completion.json').read_text())\n"
+        " assert value['release_qualified'] is False\n"
+        " assert value['self_completion_pending'] is True\n"
+        " assert value['pending_task_ids'] == ['CIMP-REL-03']\n")
+    assert all((tmp_path / path).is_file() for path in task["targets"])
+    return task, executor, environment
+
+
+@pytest.mark.parametrize("command_index", [0, 1])
+def test_real_rel03_two_command_contract_preserves_each_command_identity(tmp_path, command_index):
+    import shlex
+    from integrations.ipfs_accelerate.improvement_runner import measure_behavioral_command
+    task, executor, environment = _current_rel03_measurement_fixture(tmp_path)
+    declared = task["validation_commands"][command_index]
+    command = "PYTHONPATH=" + shlex.quote(environment["PYTHONPATH"]) + " " + declared
+    observed = measure_behavioral_command(
+        tmp_path, tmp_path / "real-rel-runs", task, command,
+        runner=executor, environment=environment, timeout_seconds=45,
+        declared_command=declared,
+        context={"require_child_guard":True, "pytest_guard_plugin":"complaint_fixture_guard"})
+    receipt = gate_task_completion(tmp_path, tmp_path / "real-rel-state", task, observed,
+                                   legal_data_version="synthetic-source-version")
+    assert receipt["admitted"] is True
+    assert receipt["completion_authority"] is False
+    assert observed["command"] == declared
+    assert observed["host_task_contract"]["task"]["validation_commands"] == task["validation_commands"]
+    assert observed["host_measurement"]["reason"] == ""
+    assert observed["required_nodeids"] == [
+        "tests/test_intake_release_gate.py::test_current_release_remains_self_pending"]
+    expected_modes = ["declared_script", "collect", "run"] if command_index == 1 else ["collect", "run"]
+    assert [result["mode"] for result in observed["host_measurement"]["results"]] == expected_modes
+    assert (tmp_path / "declared-release-script-ran").exists() is (command_index == 1)
+    assert observed["host_measurement"]["behavioral_companion"] == (
+        "tests/test_intake_release_gate.py" if command_index == 1 else None)
+
+
+def test_rel03_unknown_extra_command_does_not_gain_script_companion_dispatch(tmp_path):
+    import shlex
+    from integrations.ipfs_accelerate.improvement_runner import measure_behavioral_command
+    task, _executor, environment = _current_rel03_measurement_fixture(tmp_path)
+    task["validation_commands"] = task["validation_commands"] + ["python unreviewed.py"]
+    declared = task["validation_commands"][1]
+    calls = []
+    def forbidden(**kwargs):
+        calls.append(kwargs)
+        raise AssertionError("an unfamiliar release contract must refuse before execution")
+    observed = measure_behavioral_command(
+        tmp_path, tmp_path / "refused-rel-runs", task,
+        "PYTHONPATH=" + shlex.quote(environment["PYTHONPATH"]) + " " + declared,
+        runner=forbidden, environment=environment, timeout_seconds=45,
+        declared_command=declared,
+        context={"require_child_guard":True, "pytest_guard_plugin":"complaint_fixture_guard"})
+    assert calls == []
+    assert observed["host_measurement"]["reason"] == "unsupported_behavioral_command"
+    assert observed["host_measurement"]["behavioral_companion"] is None
+    assert not (tmp_path / "declared-release-script-ran").exists()
+    assert observed["host_measurement"]["completion_authority"] is False
+
+
+def test_actual_private_storage_change_measures_all_finite_impacted_companions(tmp_path):
+    import shlex
+    from integrations.ipfs_accelerate.improvement_runner import (
+        _impacted_behavioral_checks, measure_behavioral_command,
+    )
+    _write_output(tmp_path, "CIMP-OPS-04")
+    _, executor, environment = _gate(
+        tmp_path, _task(), _observation(tmp_path), _return_measurement=True)
+    product = tmp_path / "integrations/private_storage.py"
+    product.parent.mkdir()
+    product.write_text("SOURCE_KIND = 'synthetic private storage impact fixture'\n")
+    companions = {
+        "tests/test_private_workspace_crypto.py":"test_crypto_companion_selected",
+        "tests/test_private_workspace_keys.py":"test_key_companion_selected",
+        "tests/test_private_storage_adapter.py":"test_adapter_companion_selected",
+    }
+    for relative, function in companions.items():
+        (tmp_path / relative).write_text("def " + function + "():\n assert 2 + 2 == 4\n")
+    assert _impacted_behavioral_checks(tmp_path, ["integrations/private_storage.py"]) == sorted(companions)
+    assert _impacted_behavioral_checks(tmp_path, ["integrations/ipfs_datasets/private_storage.py"]) == []
+    task = _task()
+    observed = measure_behavioral_command(
+        tmp_path, tmp_path / "private-impact-runs", task,
+        "PYTHONPATH=" + shlex.quote(environment["PYTHONPATH"]) + " " + COMMAND,
+        runner=executor, environment=environment, timeout_seconds=45, declared_command=COMMAND,
+        context={"changed_paths":["integrations/private_storage.py"],
+                 "require_child_guard":True, "pytest_guard_plugin":"complaint_fixture_guard"})
+    assert observed["host_measurement"]["reason"] == ""
+    assert observed["host_measurement"]["impacted_checks"] == sorted(companions)
+    expected = {NODE_A, NODE_B} | {path + "::" + function for path, function in companions.items()}
+    assert set(observed["required_nodeids"]) == expected
+    assert observed["collected_count"] == 5
+    assert all(row["outcome"] == "passed" for row in observed["cases"])
+    assert observed["host_measurement"]["completion_authority"] is False
+
+
 @pytest.mark.parametrize("mutation", ["cases", "required", "count", "record", "unimported_source", "contract"])
 def test_measured_capability_rejects_postrun_mutants(tmp_path, mutation):
     import subprocess
@@ -657,7 +795,7 @@ def test_impacted_checks_use_actual_reused_adapter_paths():
     root = Path(__file__).resolve().parents[1]
     assert {"tests/test_explicit_legal_context.py", "tests/test_ipfs_adapter_layer.py"} <= set(_impacted_behavioral_checks(root, ["integrations/ipfs_datasets/legal.py"]))
     assert "tests/test_proof_report_and_pinning.py" in _impacted_behavioral_checks(root, ["integrations/ipfs_datasets/storage.py"])
-    assert "tests/test_private_workspace_keys.py" in _impacted_behavioral_checks(root, ["integrations/ipfs_datasets/private_storage.py"])
+    assert "tests/test_private_workspace_keys.py" in _impacted_behavioral_checks(root, ["integrations/private_storage.py"])
     assert _impacted_behavioral_checks(root, ["unrelated.py"]) == []
 
 

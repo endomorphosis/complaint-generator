@@ -445,7 +445,17 @@ class PhaseManager:
             criteria['chronology_provenance_coverage_complete'] = not bool(chronology_readiness.get('required_provenance_kinds'))
             criteria['chronology_ready_for_formalization'] = bool(chronology_readiness.get('ready_for_temporal_formalization', False))
 
+        dependency_graph = data.get('dependency_graph')
+        metadata = getattr(dependency_graph, 'metadata', {}) or {}
+        verified_mode = metadata.get('legal_requirement_mode') == 'verified_sources'
+        legal_source_gap = verified_mode and (bool(metadata.get('legal_source_gaps'))
+            or not [node for node in dependency_graph.nodes.values() if getattr(node.node_type, 'value', '') == 'claim'])
+        if verified_mode:
+            criteria['legal_sources_available'] = not legal_source_gap
+
         blockers: List[str] = []
+        if legal_source_gap:
+            blockers.append('legal_context_source_gap')
         if not has_knowledge_graph:
             blockers.append('missing_knowledge_graph')
         if not has_dependency_graph:
@@ -1155,6 +1165,19 @@ class PhaseManager:
             logger.warning("Cannot advance to phase %s - requirements not met", phase.value)
             return False
     
+    def _verified_legal_sources_ready(self) -> bool:
+        """Direct phase entry shares intake's source-admission boundary."""
+        from .dependency_graph import DependencyGraphBuilder, NodeType
+        graph = self.phase_data[ComplaintPhase.INTAKE].get('dependency_graph')
+        metadata = getattr(graph, 'metadata', {}) or {}
+        if metadata.get('legal_requirement_mode') != 'verified_sources':
+            return True
+        claims = graph.get_nodes_by_type(NodeType.CLAIM)
+        if not claims or metadata.get('legal_source_gaps'):
+            return False
+        builder = getattr(self.mediator, 'dg_builder', None) or DependencyGraphBuilder()
+        return all(builder._claim_has_sourced_requirement(graph, claim.id) for claim in claims)
+
     def _can_advance_to(self, phase: ComplaintPhase) -> bool:
         """Check if we can advance to a given phase."""
         if phase == ComplaintPhase.INTAKE:
@@ -1166,7 +1189,7 @@ class PhaseManager:
         
         if phase == ComplaintPhase.FORMALIZATION:
             # Can advance to formalization if evidence gathering is sufficient
-            return self.is_phase_complete(ComplaintPhase.EVIDENCE)
+            return self._verified_legal_sources_ready() and self.is_phase_complete(ComplaintPhase.EVIDENCE)
         
         return False
     
@@ -1257,6 +1280,13 @@ class PhaseManager:
         matching_done = data.get('matching_complete', False)
         complaint_generated = data.get('formal_complaint', None) is not None
         
+        if not self._verified_legal_sources_ready():
+            return False
+        intake_graph = self.phase_data[ComplaintPhase.INTAKE].get('dependency_graph')
+        if (getattr(intake_graph, 'metadata', {}) or {}).get('legal_requirement_mode') == 'verified_sources':
+            legal_graph = data.get('legal_graph')
+            if legal_graph is None or not legal_graph.get_elements_by_type('legal_requirement'):
+                return False
         return has_legal_graph and matching_done and complaint_generated
     
     def update_phase_data(self, phase: ComplaintPhase, key: str, value: Any):
@@ -1274,6 +1304,10 @@ class PhaseManager:
         metadata = getattr(graph, "metadata", {}) if graph is not None else {}
         gaps = list(metadata.get("legal_source_gaps") or []) if isinstance(metadata, dict) else []
         intake["legal_context_source_gaps"] = gaps
+        gap_types = [item for item in (intake.get("intake_gap_types") or []) if item != "legal_context_source_gap"]
+        if gaps:
+            gap_types.append("legal_context_source_gap")
+        intake["intake_gap_types"] = gap_types
         self._refresh_phase_derived_state(ComplaintPhase.INTAKE)
         return refresh_report
     
