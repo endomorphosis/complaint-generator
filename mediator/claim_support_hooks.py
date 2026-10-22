@@ -18,7 +18,13 @@ from integrations.ipfs_datasets.graphrag import (
     score_support_path_quality,
 )
 from integrations.ipfs_datasets.graphs import persist_graph_snapshot, query_graph_snapshot
-from integrations.ipfs_datasets.logic import check_contradictions, prove_claim_elements, run_hybrid_reasoning
+from integrations.ipfs_datasets.logic import (
+    build_legal_ir_premise_inventory,
+    check_contradictions,
+    generate_bound_legal_ir_proof_obligations,
+    prove_claim_elements,
+    run_hybrid_reasoning,
+)
 from complaint_analysis.temporal_rule_profiles import (
     enrich_follow_up,
     evaluate_temporal_rule_profile,
@@ -3122,6 +3128,7 @@ class ClaimSupportHook:
                     'source_table': trace.get('source_table'),
                     'text': trace.get('fact_text') or trace.get('support_label') or '',
                     'confidence': trace.get('confidence', 0.0),
+                    'source_proof': self._support_trace_source_proof(trace),
                 }
             )
 
@@ -3277,6 +3284,144 @@ class ClaimSupportHook:
             )
 
         return predicates
+
+    def _support_trace_source_proof(self, trace: Dict[str, Any]) -> Dict[str, Any]:
+        """Keep source identity from a support trace without treating it as entailment."""
+
+        record_summary = trace.get('record_summary') if isinstance(trace.get('record_summary'), dict) else {}
+        graph_trace = trace.get('graph_trace') if isinstance(trace.get('graph_trace'), dict) else {}
+        passage = trace.get('source_passage') if isinstance(trace.get('source_passage'), dict) else {}
+        if not passage and isinstance(record_summary.get('source_passage'), dict):
+            passage = record_summary.get('source_passage') or {}
+        provenance = trace.get('provenance') if isinstance(trace.get('provenance'), dict) else {}
+        character_span = None
+        byte_span = None
+        for source in (passage, provenance, trace):
+            if character_span is None and any(key in source for key in ('start_char', 'char_start', 'end_char', 'char_end')):
+                character_span = {
+                    'start': source.get('start_char', source.get('char_start')),
+                    'end': source.get('end_char', source.get('char_end')),
+                    'span_unit': 'character',
+                }
+            if byte_span is None and any(key in source for key in ('byte_start', 'start_byte', 'byte_end', 'end_byte')):
+                byte_span = {
+                    'start': source.get('byte_start', source.get('start_byte')),
+                    'end': source.get('byte_end', source.get('end_byte')),
+                    'span_unit': 'utf8_byte',
+                }
+        validation_status = str(trace.get('validation_status') or record_summary.get('validation_status') or '')
+        return {
+            'fact_id': str(trace.get('fact_id') or ''),
+            'support_ref': str(trace.get('support_ref') or ''),
+            'source_table': str(trace.get('source_table') or ''),
+            'source_family': str(trace.get('source_family') or ''),
+            'source_record_id': trace.get('source_record_id'),
+            'source_ref': str(trace.get('source_ref') or ''),
+            'proof_path_id': str(trace.get('proof_path_id') or graph_trace.get('proof_path_id') or ''),
+            'graph_id': str(trace.get('graph_id') or graph_trace.get('graph_id') or ''),
+            'content_hash': str(
+                trace.get('content_hash')
+                or provenance.get('content_hash')
+                or record_summary.get('content_hash')
+                or ''
+            ),
+            'citation': str(trace.get('citation') or record_summary.get('citation') or ''),
+            'authority_id': str(trace.get('authority_id') or record_summary.get('authority_id') or ''),
+            'authority_version': str(
+                trace.get('authority_version')
+                or record_summary.get('authority_version')
+                or ''
+            ),
+            'revision': str(trace.get('revision') or trace.get('fact_revision') or record_summary.get('revision') or ''),
+            'validation_status': validation_status,
+            'disputed': bool(trace.get('disputed')) or validation_status.lower() in {'disputed', 'contested'},
+            'character_span': character_span,
+            'utf8_byte_span': byte_span,
+            'dual_provenance': character_span is not None and byte_span is not None,
+            'epistemic_status': 'disputed' if bool(trace.get('disputed')) else 'allegation',
+            'axiom': False,
+            'is_entailment': False,
+        }
+
+    def _legal_ir_inputs_for_element(
+        self,
+        claim_type: str,
+        element: Dict[str, Any],
+        contradiction_candidates: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        asserted: List[Dict[str, Any]] = []
+        disputed: List[Dict[str, Any]] = []
+        selected_rules: List[Dict[str, Any]] = []
+        explicit_rules = element.get('selected_legal_rules') or element.get('selected_rules') or []
+        if isinstance(explicit_rules, list):
+            selected_rules.extend(rule for rule in explicit_rules if isinstance(rule, dict))
+        for trace in element.get('support_traces', []) or []:
+            if not isinstance(trace, dict):
+                continue
+            proof = self._support_trace_source_proof(trace)
+            fact = {
+                'fact_id': proof['fact_id'] or proof['support_ref'],
+                'text': str(trace.get('fact_text') or trace.get('support_label') or ''),
+                'revision': proof['revision'] or 'unversioned',
+                'support_ref': proof['support_ref'],
+                'source_table': proof['source_table'],
+                'content_hash': proof['content_hash'],
+                'citation': proof['citation'],
+                'authority_version': proof['authority_version'],
+                'disputed': proof['disputed'],
+                'validation_status': proof['validation_status'],
+            }
+            if proof['character_span']:
+                fact['span_unit'] = 'character'
+                fact['char_start'] = proof['character_span']['start']
+                fact['char_end'] = proof['character_span']['end']
+            if proof['utf8_byte_span']:
+                fact['span_unit'] = 'utf8_byte' if not proof['character_span'] else fact.get('span_unit', 'character')
+                fact['byte_start'] = proof['utf8_byte_span']['start']
+                fact['byte_end'] = proof['utf8_byte_span']['end']
+            if proof['disputed'] or str(trace.get('support_kind') or '') == 'contradiction':
+                disputed.append(fact)
+            elif str(trace.get('support_kind') or '') not in {'authority', 'legal_rule'}:
+                asserted.append(fact)
+            for candidate in trace.get('rule_candidates') or []:
+                if not isinstance(candidate, dict):
+                    continue
+                if candidate.get('applicable') is True or candidate.get('selected') is True:
+                    selected_rules.append(candidate)
+        for index, candidate in enumerate(contradiction_candidates):
+            if not isinstance(candidate, dict):
+                continue
+            texts = candidate.get('texts') or []
+            statement = texts[0] if isinstance(texts, list) and texts else candidate.get('summary') or candidate.get('text') or ''
+            disputed.append(
+                {
+                    'fact_id': str(candidate.get('contradiction_id') or candidate.get('candidate_id') or f'contradiction-{index}'),
+                    'text': str(statement or ''),
+                    'revision': str(candidate.get('revision') or 'unversioned'),
+                    'disputed': True,
+                }
+            )
+        assumptions = element.get('assumptions') if isinstance(element.get('assumptions'), list) else []
+        missing = [
+            {'fact_id': f'missing:{kind}', 'text': '', 'revision': 'missing'}
+            for kind in (element.get('missing_support_kinds') or [])
+        ]
+        modal = element.get('modal_ir') or element.get('legal_ir') or element.get('legal_ir_document')
+        return {
+            'sample_or_document': modal,
+            'canonical_receipt': element.get('canonical_formalization') if isinstance(element.get('canonical_formalization'), dict) else None,
+            'asserted_facts': asserted,
+            'disputed_facts': disputed,
+            'selected_legal_rules': selected_rules,
+            'assumptions': assumptions,
+            'missing_facts': missing,
+            'legal_context_version': str(element.get('legal_context_version') or element.get('authority_version') or ''),
+            'claim_id': str(element.get('claim_id') or claim_type),
+            'element_id': str(element.get('element_id') or ''),
+            'coverage_status': str(element.get('coverage_status') or element.get('status') or ''),
+            'max_obligations': element.get('max_obligations'),
+            'source_text': element.get('source_text') if isinstance(element.get('source_text'), str) else None,
+        }
 
     def _build_reasoning_ontology_fallback(
         self,
@@ -3477,6 +3622,70 @@ class ClaimSupportHook:
         logic_proof = prove_claim_elements(reasoning_payload)
         logic_contradictions = check_contradictions(reasoning_payload)
         hybrid_reasoning = run_hybrid_reasoning(reasoning_payload)
+        obligation_inputs = self._legal_ir_inputs_for_element(claim_type, element, contradiction_candidates)
+        if obligation_inputs['sample_or_document'] is None and not obligation_inputs['canonical_receipt']:
+            inventory = build_legal_ir_premise_inventory(
+                asserted_facts=obligation_inputs['asserted_facts'],
+                disputed_facts=obligation_inputs['disputed_facts'],
+                selected_legal_rules=obligation_inputs['selected_legal_rules'],
+                assumptions=obligation_inputs['assumptions'],
+                missing_facts=obligation_inputs['missing_facts'],
+                source_text=obligation_inputs['source_text'] or '',
+                coverage_status=obligation_inputs['coverage_status'],
+            )
+            legal_ir_proof_obligations = {
+                'schema_version': 'legal-ir-bound-proof-obligations/v1',
+                'status': 'unavailable',
+                'support': 'unsupported',
+                'reason': 'Modal IR document was not supplied for this claim element.',
+                'backend': {
+                    'identity': 'ipfs_datasets_py.logic.integration.reasoning.legal_ir_obligations.generate_legal_ir_proof_obligations',
+                    'available': False,
+                },
+                'trust_level': 'unavailable',
+                'structural_only': True,
+                'substantive_entailment': False,
+                'entails_claim_element': False,
+                'coverage_status_promoted_to_proof': False,
+                'premise_inventory': inventory,
+                'assumptions': [
+                    {'premise_id': item.get('premise_id'), 'label': item.get('label')}
+                    for item in inventory.get('assumptions') or []
+                ],
+                'obligations': [],
+                'native_obligation_ids': [],
+                'operational_trace': [{'code': 'modal_ir_absent', 'status': 'unavailable'}],
+            }
+        else:
+            try:
+                legal_ir_proof_obligations = generate_bound_legal_ir_proof_obligations(
+                    obligation_inputs['sample_or_document'],
+                    canonical_receipt=obligation_inputs['canonical_receipt'],
+                    max_obligations=obligation_inputs['max_obligations'],
+                    claim_id=obligation_inputs['claim_id'],
+                    element_id=obligation_inputs['element_id'],
+                    asserted_facts=obligation_inputs['asserted_facts'],
+                    disputed_facts=obligation_inputs['disputed_facts'],
+                    selected_legal_rules=obligation_inputs['selected_legal_rules'],
+                    assumptions=obligation_inputs['assumptions'],
+                    missing_facts=obligation_inputs['missing_facts'],
+                    legal_context_version=obligation_inputs['legal_context_version'],
+                    coverage_status=obligation_inputs['coverage_status'],
+                    source_text=obligation_inputs['source_text'],
+                )
+            except Exception as exc:
+                legal_ir_proof_obligations = {
+                    'schema_version': 'legal-ir-bound-proof-obligations/v1',
+                    'status': 'unavailable',
+                    'support': 'unsupported',
+                    'reason': 'Legal IR proof obligation generator failed.',
+                    'trust_level': 'unavailable',
+                    'structural_only': True,
+                    'substantive_entailment': False,
+                    'entails_claim_element': False,
+                    'operational_trace': [{'code': type(exc).__name__, 'status': 'unavailable'}],
+                    'obligations': [],
+                }
         ontology_validation = validate_ontology(ontology_for_validation)
         ontology_workflow = build_validate_score_ontology(
             ontology_seed_text,
@@ -3574,6 +3783,14 @@ class ClaimSupportHook:
             'temporal_rule_profile': temporal_rule_profile,
             'temporal_proof_bundle': temporal_proof_bundle,
             'claim_support_temporal_handoff': claim_support_temporal_handoff,
+            'legal_ir_proof_obligations': legal_ir_proof_obligations,
+            'legacy_proof_heuristic': {
+                'proof_status': logic_proof.get('proof_status') if isinstance(logic_proof, dict) else '',
+                'labels_supported_coverage_provable': True,
+                'no_contradiction_scan_can_read_passed': True,
+                'is_substantive_entailment': False,
+            },
+            'substantive_entailment': False,
         }
 
     def _summarize_claim_reasoning_diagnostics(self, elements: List[Dict[str, Any]]) -> Dict[str, Any]:

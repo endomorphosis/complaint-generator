@@ -226,3 +226,403 @@ def test_user_facts_do_not_replace_versioned_legal_text() -> None:
     assert payload["legal_text_origin"] == "legal_context"
     assert payload["entails_applicability"] is False
     assert payload["entails_claim"] is False
+
+
+def _modal_document(text: str | None = None, *, formula_id: str = "f1", end: int | None = None, duplicate: bool = False):
+    from ipfs_datasets_py.optimizers.logic_theorem_optimizer.modal_ir import (
+        ModalIRDocument,
+        ModalIRFormula,
+        ModalIROperator,
+        ModalIRPredicate,
+        ModalIRProvenance,
+    )
+
+    body = text if text is not None else "The agency shall provide notice unless emergency conditions exist within 30 days."
+    stop = len(body) if end is None else end
+    formulas = [
+        ModalIRFormula(
+            formula_id=formula_id,
+            operator=ModalIROperator(family="deontic", system="KD", symbol="shall", label="shall"),
+            predicate=ModalIRPredicate(name="provide_notice", arguments=["agency", "notice"], role="obligation"),
+            provenance=ModalIRProvenance(source_id="doc-proof02", start_char=0, end_char=stop, citation="Synthetic §1"),
+            conditions=["within 30 days"],
+            exceptions=["emergency conditions exist"],
+        )
+    ]
+    if duplicate:
+        formulas.append(
+            ModalIRFormula(
+                formula_id=formula_id,
+                operator=ModalIROperator(family="deontic", system="KD", symbol="may", label="may"),
+                predicate=ModalIRPredicate(name="delay_notice", arguments=["agency"], role="permission"),
+                provenance=ModalIRProvenance(source_id="doc-proof02", start_char=0, end_char=len(body), citation="Synthetic §1"),
+                conditions=[],
+                exceptions=[],
+            )
+        )
+    return ModalIRDocument(document_id="doc-proof02", source="synthetic", normalized_text=body, formulas=formulas)
+
+
+def _premise_kwargs(text: str):
+    return dict(
+        claim_id="claim-retaliation",
+        element_id="element-protected-activity",
+        legal_context_version="law06-v1",
+        coverage_status="supported",
+        asserted_facts=[
+            {
+                "fact_id": "fact-asserted",
+                "text": "The agency",
+                "revision": "fact-rev-1",
+                "span_unit": "character",
+                "char_start": 0,
+                "char_end": len("The agency"),
+            }
+        ],
+        disputed_facts=[
+            {
+                "fact_id": "fact-disputed",
+                "text": "The company denies the report.",
+                "revision": "fact-rev-1",
+                "disputed": True,
+            }
+        ],
+        selected_legal_rules=[
+            {
+                "rule_id": "rule-notice",
+                "citation": "Synthetic Authority §1",
+                "version": "law06-v1",
+                "authority_version": "law06-v1",
+                "applicable": True,
+                "text": text,
+                "span_unit": "character",
+                "char_start": 0,
+                "char_end": len(text),
+            }
+        ],
+        assumptions=[
+            {
+                "assumption_id": "assume-deadline",
+                "label": "deadline-runs-from-notice",
+                "text": "PRIVATE-ASSUMPTION-TEXT deadline runs from notice.",
+                "revision": "assumption-rev-1",
+            }
+        ],
+        missing_facts=[{"fact_id": "fact-missing", "text": "Date of the decision.", "revision": "missing"}],
+        structural_validation={"valid": True, "coverage_status": "supported"},
+        source_text=text,
+    )
+
+
+def test_generator_replay_is_stable_and_structural_only() -> None:
+    document = _modal_document()
+    text = document.normalized_text
+    first = logic.generate_bound_legal_ir_proof_obligations(document, **_premise_kwargs(text))
+    second = logic.generate_bound_legal_ir_proof_obligations(document, **_premise_kwargs(text))
+
+    assert first["status"] == "success"
+    assert second["reused"] is True
+    assert second["receipt_id"] == first["receipt_id"]
+    assert second["execution_identity"] == first["execution_identity"]
+    assert first["native_obligation_ids"] == [item["obligation_id"] for item in first["obligations"]]
+    assert first["native_schema_versions"] == ["legal-ir-proof-obligation-v1"]
+    assert first["obligations"][0]["obligation_id"].startswith("lir-obligation-")
+    assert first["entails_claim_element"] is False
+    assert first["substantive_entailment"] is False
+    assert first["structural_validation_is_entailment"] is False
+    assert first["coverage_status_promoted_to_proof"] is False
+    assert first["complete_coverage"] is False
+    assert first["complete_coverage_certificate"] is None
+    assert first["trust_level"] == "structural"
+    assert first["backend"]["identity"].endswith("generate_legal_ir_proof_obligations")
+    assert first["backend"]["available"] is True
+    assert first["versions"]["checker_version"]
+    assert first["versions"]["policy_version"]
+    assert first["versions"]["claim_id"] == "claim-retaliation"
+    assert first["versions"]["element_id"] == "element-protected-activity"
+    assert first["source_spans_verified"] is True
+    assert first["source_span_checks"][0]["native_hash_matches_verified_source"] is True
+    kinds = set(first["obligation_kinds"])
+    assert "modal_well_formedness" in kinds
+    assert "provenance_preservation" in kinds
+    inventory = first["premise_inventory"]
+    assert [item["premise_id"] for item in inventory["asserted_facts"]] == ["fact-asserted"]
+    assert inventory["asserted_facts"][0]["epistemic_status"] == "allegation"
+    assert inventory["asserted_facts"][0]["axiom"] is False
+    assert inventory["asserted_facts"][0]["source_validated"] is True
+    assert inventory["disputed_facts"][0]["epistemic_status"] == "disputed"
+    assert inventory["disputed_facts"][0]["axiom"] is False
+    assert inventory["selected_legal_rules"][0]["premise_id"] == "rule-notice"
+    assert inventory["selected_legal_rules"][0]["source_validated"] is True
+    assert inventory["assumptions"][0]["label"] == "deadline-runs-from-notice"
+    assert inventory["missing_facts"][0]["epistemic_status"] == "missing"
+    assert inventory["axioms"] == []
+    assert inventory["coverage_status_is_proof"] is False
+    assert first["assumptions"] == [
+        {"premise_id": "assume-deadline", "label": "deadline-runs-from-notice", "revision": "assumption-rev-1"}
+    ]
+    trace_blob = str(first["operational_trace"]) + str(first["reason"])
+    assert "PRIVATE-ASSUMPTION-TEXT" not in trace_blob
+    assert "The company denies" not in trace_blob
+
+
+def test_metadata_and_source_version_changes_keep_native_ids_and_old_receipt() -> None:
+    document = _modal_document()
+    text = document.normalized_text
+    original = logic.generate_bound_legal_ir_proof_obligations(document, **_premise_kwargs(text))
+    changed = logic.generate_bound_legal_ir_proof_obligations(
+        document,
+        **{**_premise_kwargs(text), "legal_context_version": "law06-v2"},
+    )
+    assert changed["reused"] is False
+    assert changed["execution_identity"] != original["execution_identity"]
+    assert changed["native_obligation_ids"] == original["native_obligation_ids"]
+    assert changed["prior_receipt_id"] == original["receipt_id"]
+    inspected = logic.inspect_bound_proof_obligation_receipt(original["receipt_id"])
+    assert inspected is not None
+    assert inspected["status"] == "success"
+    assert inspected["versions"]["legal_context_version"] == "law06-v1"
+
+    revised = logic.generate_bound_legal_ir_proof_obligations(
+        document,
+        **{
+            **_premise_kwargs(text),
+            "asserted_facts": [
+                {
+                    "fact_id": "fact-asserted",
+                    "text": "The agency",
+                    "revision": "fact-rev-2",
+                    "span_unit": "character",
+                    "char_start": 0,
+                    "char_end": len("The agency"),
+                }
+            ],
+        },
+    )
+    assert revised["execution_identity"] != original["execution_identity"]
+    assert revised["native_obligation_ids"] == original["native_obligation_ids"]
+    assert logic.inspect_bound_proof_obligation_receipt(original["receipt_id"])["status"] == "success"
+
+
+def test_missing_and_unicode_spans_and_duplicate_labels() -> None:
+    text = "The agency shall provide notice. café"
+    missing = logic.generate_bound_legal_ir_proof_obligations(
+        _modal_document(text, end=len(text) + 8),
+        claim_id="claim",
+        element_id="element",
+        source_text=text,
+    )
+    assert missing["status"] == "source_unverified"
+    assert missing["source_spans_verified"] is False
+    check = missing["source_span_checks"][0]
+    assert check["native_span_hash_is_fallback"] is True
+    assert check["verified_source_sha256"] == ""
+    assert check["native_hash_matches_verified_source"] is False
+    assert check["native_source_span_sha256"]
+    assert missing["entails_claim_element"] is False
+
+    unicode_doc = _modal_document(text)
+    verified = logic.generate_bound_legal_ir_proof_obligations(unicode_doc, source_text=text, claim_id="c", element_id="e")
+    assert verified["status"] == "success"
+    span = verified["source_span_checks"][0]
+    assert span["character_length"] == len(text)
+    assert span["byte_length"] == len(text.encode("utf-8"))
+    assert span["character_length"] != span["byte_length"]
+    assert span["verified"] is True
+
+    cafe = "café"
+    byte_start = text.encode("utf-8").find(cafe.encode("utf-8"))
+    inventory = logic.build_legal_ir_premise_inventory(
+        asserted_facts=[
+            {
+                "fact_id": "fact-cafe",
+                "text": cafe,
+                "revision": "r1",
+                "span_unit": "utf8_byte",
+                "byte_start": byte_start,
+                "byte_end": byte_start + len(cafe.encode("utf-8")),
+            }
+        ],
+        source_text=text,
+    )
+    assert inventory["asserted_facts"][0]["source_validated"] is True
+    assert inventory["asserted_facts"][0]["provenance"]["span_unit"] == "utf8_byte"
+    assert inventory["asserted_facts"][0]["epistemic_status"] == "allegation"
+
+    duplicated = logic.generate_bound_legal_ir_proof_obligations(_modal_document(duplicate=True), claim_id="c", element_id="e")
+    assert duplicated["duplicate_local_labels"]
+    assert duplicated["duplicate_local_labels"][0]["formula_id"] == "f1"
+    assert len(duplicated["duplicate_local_labels"][0]["binding_ids"]) == 2
+    assert duplicated["duplicate_local_labels"][0]["binding_ids"][0] != duplicated["duplicate_local_labels"][0]["binding_ids"][1]
+
+
+def test_truncation_empty_formulas_pipeline_result_and_missing_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    document = _modal_document()
+    bounded = logic.generate_bound_legal_ir_proof_obligations(document, max_obligations=3, claim_id="c", element_id="e")
+    assert bounded["status"] == "truncated"
+    assert bounded["truncated"] is True
+    assert bounded["obligation_count"] == 3
+    assert bounded["complete_coverage"] is False
+    assert bounded["complete_coverage_certificate"] is None
+    assert bounded["unbounded_obligation_count"] > 3
+    assert bounded["entails_claim_element"] is False
+
+    from ipfs_datasets_py.optimizers.logic_theorem_optimizer.modal_ir import ModalIRDocument
+
+    empty = logic.generate_bound_legal_ir_proof_obligations(
+        ModalIRDocument(document_id="empty", source="synthetic", normalized_text="No modal cues here.", formulas=[]),
+        claim_id="c",
+        element_id="e",
+    )
+    assert empty["status"] == "presence_diagnostic"
+    assert empty["presence_diagnostic"] is True
+    assert empty["obligations"][0]["kind"] == "modal_formula_presence"
+    assert empty["entails_claim_element"] is False
+
+    class CompilerPipelineResult:
+        def __init__(self) -> None:
+            self.pipeline_cid = "pipeline"
+            self.result = object()
+
+    rejected = logic.generate_bound_legal_ir_proof_obligations(CompilerPipelineResult(), claim_id="c", element_id="e")
+    assert rejected["status"] == "unsupported"
+    assert rejected["support"] == "unsupported"
+    assert rejected["obligations"] == []
+    assert rejected["entails_claim_element"] is False
+    assert any(item["code"] == "pipeline_result_not_modal_ir" for item in rejected["operational_trace"])
+
+    monkeypatch.setattr(logic, "_legal_ir_obligations_module", None)
+    missing = logic.generate_bound_legal_ir_proof_obligations(document, claim_id="c", element_id="e")
+    assert missing["status"] == "unavailable"
+    assert missing["support"] == "unsupported"
+    assert missing["backend"]["available"] is False
+    assert missing["trust_level"] == "unavailable"
+    assert missing["obligations"] == []
+    assert missing["entails_claim_element"] is False
+
+
+def test_canonical_receipt_bridge_binds_character_spans() -> None:
+    compiled = _compile()
+    assert compiled["status"] == "success"
+    bridged = logic.modal_ir_from_canonical_formalization(compiled)
+    assert bridged["bridge"] == "proof01_canonical_formalization_receipt"
+    assert bridged["formulas"]
+    assert bridged["formulas"][0]["provenance"]["span_unit"] == "character"
+    artifact = logic.generate_bound_legal_ir_proof_obligations(
+        canonical_receipt=compiled,
+        claim_id="claim-canonical",
+        element_id="element-rule",
+        legal_context_version="law04-synthetic-1",
+        selected_legal_rules=[
+            {
+                "rule_id": compiled["formula_ids"][0],
+                "version": "law04-synthetic-1",
+                "applicable": True,
+                "text": compiled["source_text"],
+                "span_unit": "character",
+                "char_start": 0,
+                "char_end": len(compiled["source_text"]),
+            }
+        ],
+        structural_validation={"valid": True},
+    )
+    assert artifact["bridge"] == "proof01_canonical_formalization_receipt"
+    assert artifact["status"] in {"success", "source_unverified"}
+    assert artifact["source_spans_verified"] is True
+    assert artifact["versions"]["source_map_identity"]
+    assert artifact["versions"]["legal_context_version"] == "law04-synthetic-1"
+    assert artifact["structural_validation"]["valid"] is True
+    assert artifact["structural_validation_is_entailment"] is False
+    assert artifact["entails_claim_element"] is False
+    assert artifact["native_schema_versions"] == ["legal-ir-proof-obligation-v1"]
+
+
+def test_claim_support_hook_keeps_source_proof_and_does_not_relabel_heuristics() -> None:
+    from unittest.mock import Mock
+
+    from mediator.claim_support_hooks import ClaimSupportHook
+
+    hook = ClaimSupportHook(Mock(), db_path=":memory:")
+    text = "The agency shall provide notice unless emergency conditions exist within 30 days."
+    element = {
+        "element_id": "element-1",
+        "claim_id": "claim-1",
+        "element_text": "Protected activity",
+        "status": "supported",
+        "support_by_kind": {},
+        "missing_support_kinds": ["document"],
+        "source_text": text,
+        "legal_context_version": "law06-v1",
+        "modal_ir": _modal_document(text),
+        "assumptions": [
+            {
+                "assumption_id": "assume-1",
+                "label": "notice-was-required",
+                "text": "PRIVATE-ASSUMPTION-TEXT notice was required.",
+                "revision": "a1",
+            }
+        ],
+        "selected_legal_rules": [
+            {
+                "rule_id": "rule-1",
+                "version": "law06-v1",
+                "applicable": True,
+                "text": "shall provide notice",
+            }
+        ],
+        "support_traces": [
+            {
+                "fact_id": "fact-1",
+                "support_ref": "ref-1",
+                "support_kind": "evidence",
+                "source_table": "evidence",
+                "fact_text": "The complainant reported the issue.",
+                "confidence": 0.4,
+                "revision": "fact-rev-1",
+                "content_hash": "abc123",
+                "proof_path_id": "path-1",
+                "graph_id": "graph-1",
+                "source_passage": {"start_char": 0, "end_char": 10},
+                "byte_start": 0,
+                "byte_end": 10,
+                "record_summary": {"citation": "Synthetic §1", "authority_version": "law06-v1"},
+            }
+        ],
+    }
+    predicates = hook._build_reasoning_predicates("retaliation", element, [])
+    support = next(item for item in predicates if item["predicate_type"] == "support_trace")
+    assert support["source_proof"]["proof_path_id"] == "path-1"
+    assert support["source_proof"]["content_hash"] == "abc123"
+    assert support["source_proof"]["graph_id"] == "graph-1"
+    assert support["source_proof"]["character_span"]["span_unit"] == "character"
+    assert support["source_proof"]["utf8_byte_span"]["span_unit"] == "utf8_byte"
+    assert support["source_proof"]["dual_provenance"] is True
+    assert support["source_proof"]["axiom"] is False
+    assert support["source_proof"]["epistemic_status"] == "allegation"
+    assert support["source_proof"]["authority_version"] == "law06-v1"
+
+    diagnostics = hook._run_element_reasoning_diagnostics(
+        "retaliation",
+        element,
+        [{"contradiction_id": "c-1", "texts": ["The company denies the report."], "revision": "d1"}],
+    )
+    artifact = diagnostics["legal_ir_proof_obligations"]
+    assert artifact["entails_claim_element"] is False
+    assert artifact["substantive_entailment"] is False
+    assert artifact["coverage_status_promoted_to_proof"] is False
+    assert diagnostics["substantive_entailment"] is False
+    assert diagnostics["legacy_proof_heuristic"]["is_substantive_entailment"] is False
+    assert diagnostics["legacy_proof_heuristic"]["labels_supported_coverage_provable"] is True
+    inventory = artifact["premise_inventory"]
+    assert inventory["asserted_facts"][0]["premise_id"] == "fact-1"
+    assert inventory["asserted_facts"][0]["epistemic_status"] == "allegation"
+    assert any(item["premise_id"] == "c-1" for item in inventory["disputed_facts"])
+    assert inventory["selected_legal_rules"][0]["version"] == "law06-v1"
+    assert inventory["assumptions"][0]["label"] == "notice-was-required"
+    assert inventory["missing_facts"]
+    assert inventory["axioms"] == []
+    assert "PRIVATE-ASSUMPTION-TEXT" not in str(artifact["operational_trace"])
+    assert artifact["native_obligation_ids"]
+    assert diagnostics["logic_proof"].get("provable_elements") is not None
+    # The legacy heuristic may still call supported coverage provable. The bound artifact does not.
+    assert artifact["trust_level"] == "structural"
