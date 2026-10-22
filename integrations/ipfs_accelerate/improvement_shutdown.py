@@ -221,6 +221,7 @@ def _sealed_managed_session_closed(state_dir: Path, record: Mapping[str, Any], c
         '--implementation-timeout', str(float(runner.TIMEOUT_SECONDS)),
         '--worktree-root', context['worktree_root'],
         '--worktree-submodule-path', 'external/ipfs_datasets_py',
+        '--worktree-submodule-path', 'external/ipfs_kit_py',
         '--task-shard-count', '1', '--task-shard-index', '0')
     if (dict(identity.owner_scope) != scope or identity.command != command
             or before[pid_path] != f'{birth.pid}\n'.encode('ascii')

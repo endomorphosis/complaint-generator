@@ -519,6 +519,7 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
         '--implementation-timeout', str(float(runner.TIMEOUT_SECONDS)),
         '--worktree-root', str(state / 'worktrees'),
         '--worktree-submodule-path', 'external/ipfs_datasets_py',
+        '--worktree-submodule-path', 'external/ipfs_kit_py',
         '--task-shard-count', '1', '--task-shard-index', '0']
     config = root / 'sealed-orphan-config.json'
     config.write_text(json.dumps({'repo': str(repo), 'record': campaign.record,
@@ -554,6 +555,7 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
         record = json.loads((state / 'launcher.json').read_text())
         identity = native.load_supervised_child_identity(sidecar)
         assert identity is not None and identity.process_birth.parent_pid == parent.pid
+        assert identity.command == tuple(command)
         assert record['identity']['pid'] == parent.pid and not (Path('/proc') / str(parent.pid)).exists()
         assert record['status'] == 'starting'
         ready = json.loads((state / 'inert-ready.json').read_text())
@@ -588,7 +590,10 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
             sidecar.write_text(json.dumps(value.to_dict())); sidecar.chmod(0o600)
             pid_path.write_text(f'{value.process_birth.pid}\n'); pid_path.chmod(0o600)
 
+        kit_index = identity.command.index('external/ipfs_kit_py')
         mutations = [
+            replace(identity, command=identity.command[:kit_index - 1] + identity.command[kit_index + 1:], record_id=''),
+            replace(identity, command=(*identity.command, '--worktree-submodule-path', 'external/unrelated'), record_id=''),
             replace(identity, owner_scope={**identity.owner_scope, 'state_dir': str(root / 'foreign')}, record_id=''),
             replace(identity, command=(*identity.command, '--foreign-option'), record_id=''),
             replace(identity, created_at=stamp(record['started_at'] - 1), record_id=''),
