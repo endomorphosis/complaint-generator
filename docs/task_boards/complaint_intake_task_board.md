@@ -628,7 +628,7 @@ Implementation instructions:
 
 ## CIMP-QUEST-01 Generate neutral questions from unresolved dependency and proof targets
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.questioning
