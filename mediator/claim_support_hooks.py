@@ -22,6 +22,8 @@ from integrations.ipfs_datasets.logic import (
     build_legal_ir_premise_inventory,
     check_contradictions,
     generate_bound_legal_ir_proof_obligations,
+    proof_cache_identity,
+    replay_satisfied_element_proof,
     route_bound_legal_ir_proof,
     prove_claim_elements,
     run_hybrid_reasoning,
@@ -3691,12 +3693,69 @@ class ClaimSupportHook:
         first_obligation = obligation_rows[0] if isinstance(obligation_rows, list) and obligation_rows else None
         inventory = legal_ir_proof_obligations.get('premise_inventory') if isinstance(legal_ir_proof_obligations, dict) else None
         identity = ''
+        versions = {}
         if isinstance(legal_ir_proof_obligations, dict):
-            versions = legal_ir_proof_obligations.get('versions')
-            if isinstance(versions, dict):
-                identity = str(versions.get('execution_identity') or '')
-        try:
-            legal_ir_proof_routing = route_bound_legal_ir_proof(
+            versions = legal_ir_proof_obligations.get('versions') if isinstance(legal_ir_proof_obligations.get('versions'), dict) else {}
+            identity = str(versions.get('execution_identity') or '')
+        issue_labels = []
+        if isinstance(temporal_context, dict):
+            for issue in temporal_context.get('temporal_issues') or []:
+                if isinstance(issue, dict):
+                    issue_labels.append(issue.get('issue_type') or issue.get('category') or '')
+        profile_warnings = list((temporal_rule_profile or {}).get('warnings') or []) if isinstance(temporal_rule_profile, dict) else []
+        relative_only = any('relative-only' in str(warning) or 'relative_only' in str(warning) for warning in profile_warnings)
+        selected_rules = []
+        for rule in obligation_inputs.get('selected_legal_rules') or []:
+            if not isinstance(rule, dict):
+                continue
+            selected_rules.append({
+                'rule_id': rule.get('rule_id') or rule.get('premise_id') or '',
+                'version': rule.get('version') or rule.get('authority_version') or '',
+                'source_id': rule.get('source_id') or rule.get('citation') or '',
+                'source_version': rule.get('source_version') or rule.get('authority_version') or '',
+                'superseded': bool(rule.get('superseded') or str(rule.get('status') or '').lower() == 'superseded'),
+                'law_as_of': rule.get('law_as_of') or rule.get('effective_date') or '',
+            })
+        cache_identity = proof_cache_identity(
+            claim_id=obligation_inputs.get('claim_id') or claim_type,
+            element_id=obligation_inputs.get('element_id') or '',
+            factual_revisions=versions.get('fact_revisions') or [],
+            legal_source={
+                'source_id': str(element.get('legal_source_id') or ''),
+                'source_version': str(element.get('legal_source_version') or obligation_inputs.get('legal_context_version') or ''),
+                'legal_context_version': obligation_inputs.get('legal_context_version') or '',
+                'law_as_of': str(element.get('law_as_of') or element.get('applicable_law_date') or ''),
+                'rules': selected_rules,
+            },
+            compiler={
+                'execution_identity': identity,
+                'formula_identity': versions.get('formula_identity') or '',
+                'source_map_identity': versions.get('source_map_identity') or '',
+                'canonical': (obligation_inputs.get('canonical_receipt') or {}).get('identities') if isinstance(obligation_inputs.get('canonical_receipt'), dict) else {},
+            },
+            compiler_config={
+                'max_obligations': obligation_inputs.get('max_obligations'),
+                'checker_version': versions.get('checker_version') or '',
+            },
+            proof_policy={
+                'required_trust': 'kernel',
+                'total_timeout_seconds': 1.5,
+                'stage_timeout_seconds': {
+                    'deterministic': 0.25,
+                    'native_logic': 0.25,
+                    'smt_atp': 0.25,
+                    'lean_reconstruction': 0.25,
+                },
+            },
+            chronology={
+                'contradictory_dates': bool((temporal_rule_profile or {}).get('has_contradictory_dates')) if isinstance(temporal_rule_profile, dict) else False,
+                'relative_only': relative_only,
+                'issues': issue_labels,
+            },
+        )
+
+        def _route_provider():
+            return route_bound_legal_ir_proof(
                 first_obligation,
                 premise_inventory=inventory if isinstance(inventory, dict) else None,
                 sample_or_document=obligation_inputs['sample_or_document'],
@@ -3712,14 +3771,51 @@ class ClaimSupportHook:
                 },
                 required_trust='kernel',
             )
+
+        try:
+            proof_evaluation = replay_satisfied_element_proof(cache_identity, provider=_route_provider)
         except Exception as exc:
+            proof_evaluation = {
+                'cache_identity': cache_identity.get('cache_identity'),
+                'satisfied': False,
+                'status': 'unavailable',
+                'reason': type(exc).__name__,
+                'provider_called': False,
+                'reused': False,
+                'recommended_follow_ups': [],
+                'result': {
+                    'schema_version': 'legal-ir-bound-proof-routing/v1',
+                    'outcome': 'unavailable',
+                    'reason': type(exc).__name__,
+                    'substantive_trust_satisfied': False,
+                    'entails_claim_element': False,
+                },
+            }
+        routed_result = proof_evaluation.get('result') if isinstance(proof_evaluation.get('result'), dict) else None
+        if routed_result is None:
             legal_ir_proof_routing = {
                 'schema_version': 'legal-ir-bound-proof-routing/v1',
-                'outcome': 'unavailable',
-                'reason': type(exc).__name__,
+                'outcome': 'unknown' if proof_evaluation.get('status') == 'uncertain' else str(proof_evaluation.get('status') or 'unknown'),
+                'reason': str(proof_evaluation.get('reason') or 'chronology_uncertain'),
                 'substantive_trust_satisfied': False,
                 'entails_claim_element': False,
+                'provider_called': False,
             }
+        else:
+            legal_ir_proof_routing = dict(routed_result)
+        legal_ir_proof_routing['proof_cache'] = {
+            'cache_identity': proof_evaluation.get('cache_identity') or cache_identity.get('cache_identity'),
+            'reused': bool(proof_evaluation.get('reused')),
+            'provider_called': bool(proof_evaluation.get('provider_called')),
+            'satisfied': bool(proof_evaluation.get('satisfied')),
+            'status': proof_evaluation.get('status'),
+            'reason': proof_evaluation.get('reason'),
+            'recommended_follow_ups': list(proof_evaluation.get('recommended_follow_ups') or []),
+        }
+        if proof_evaluation.get('status') == 'uncertain':
+            legal_ir_proof_routing['substantive_trust_satisfied'] = False
+            legal_ir_proof_routing['entails_claim_element'] = False
+            legal_ir_proof_routing['outcome'] = 'unknown'
         ontology_validation = validate_ontology(ontology_for_validation)
         ontology_workflow = build_validate_score_ontology(
             ontology_seed_text,
