@@ -8,7 +8,6 @@ import os
 import shutil
 import sys
 import textwrap
-import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -731,21 +730,6 @@ def _sync_controls_from_payload(user_id: str, payload: dict, inquiry: Optional[d
     return state
 
 
-def _provider_wait_interruptible() -> None:
-    raw = os.environ.get("COMPLAINT_TUI_PROVIDER_WAIT_SECONDS", "").strip()
-    if not raw:
-        return
-    try:
-        delay = float(raw)
-    except ValueError:
-        return
-    if delay <= 0:
-        return
-    terminal_echo("Waiting for provider...")
-    sys.stdout.flush()
-    deadline = time.monotonic() + delay
-    while time.monotonic() < deadline:
-        time.sleep(0.05)
 
 
 @app.command("chat")
@@ -880,18 +864,17 @@ def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
             terminal_echo("Stale concurrent answer rejected. The pending inquiry was kept.")
             payload = service.run_intake_chat_turn(user_id, interview_action="resume")
             continue
+        question_id = str(inquiry.get("question_id") or "") or None
         try:
-            _provider_wait_interruptible()
+            payload = service.run_intake_chat_turn(
+                user_id,
+                message=answer_text,
+                question_id=question_id,
+                expected_question_revision=inquiry.get("revision") if isinstance(inquiry.get("revision"), int) else None,
+                interview_action="answer" if question_id and question_id.startswith("inq-") else None,
+            )
         except KeyboardInterrupt:
             _pause_and_exit(user_id, "interrupted", EXIT_INTERRUPTED, inquiry)
-        question_id = str(inquiry.get("question_id") or "") or None
-        payload = service.run_intake_chat_turn(
-            user_id,
-            message=answer_text,
-            question_id=question_id,
-            expected_question_revision=inquiry.get("revision") if isinstance(inquiry.get("revision"), int) else None,
-            interview_action="answer" if question_id and question_id.startswith("inq-") else None,
-        )
         if answer_text.strip().lower() in _UNKNOWN_ANSWERS:
             fresh = load_terminal_state(user_id)
             _record_non_answer(fresh, inquiry, "unknown", answer_text.strip())

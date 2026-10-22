@@ -52,12 +52,19 @@ else:
 cli.service.ensure_private_case_key(user_id, user_id)
 _real_factory = cli.service._mediator_for_shared_interview
 def _fixture_backend(prompt, complaint_privacy_context=None, **kwargs):
+    if os.environ.get("TUI_CONTROLS_BLOCK_PROVIDER") == "1":
+        assert complaint_privacy_context["policy"]["permitted_remote"] == {"provider": "grok_cli", "model": "grok-4.7"}
+        print("Synthetic provider request started", flush=True)
+        while True:
+            signal.pause()
     return '{"entities":[],"relationships":[]}'
 def _fixture_mediator(owner_id, case_id):
     mediator = _real_factory(owner_id, case_id)
     mediator.backends = [_fixture_backend]
     return mediator
 cli.service._mediator_for_shared_interview = _fixture_mediator
+if os.environ.get("TUI_CONTROLS_BLOCK_PROVIDER") == "1":
+    cli.service.set_privacy_policy(user_id, "grok")
 cli.chat(user_id=user_id, max_turns=0)
 """
 
@@ -68,16 +75,18 @@ def _fail(message: str, transcript: str = "") -> None:
 
 
 def _prepare(tmp_path: Path, user_id: str) -> tuple[Path, Path, dict[str, str]]:
-    session_dir = tmp_path / "sessions"
-    home = tmp_path / "home"
+    fixture_root = tmp_path / user_id
+    fixture_root.mkdir(parents=True, exist_ok=True)
+    session_dir = fixture_root / "sessions"
+    home = fixture_root / "home"
     session_dir.mkdir(exist_ok=True)
     home.mkdir(exist_ok=True)
-    script = tmp_path / "_child.py"
+    script = fixture_root / "_child.py"
     script.write_text(CHILD, encoding="utf-8")
     env = os.environ.copy()
     env.update({
         "HOME": str(home),
-        "TMPDIR": str(tmp_path),
+        "TMPDIR": str(fixture_root),
         "TUI_CONTROLS_REPO_ROOT": str(REPO_ROOT),
         "TUI_CONTROLS_SESSION_DIR": str(session_dir),
         "TUI_CONTROLS_USER_ID": user_id,
@@ -86,7 +95,7 @@ def _prepare(tmp_path: Path, user_id: str) -> tuple[Path, Path, dict[str, str]]:
         "NO_COLOR": "1",
         "TERM": "dumb",
     })
-    env.pop("COMPLAINT_TUI_PROVIDER_WAIT_SECONDS", None)
+    env.pop("TUI_CONTROLS_BLOCK_PROVIDER", None)
     return session_dir, script, env
 
 
@@ -350,12 +359,12 @@ def test_pty_eof_and_interrupt_keep_pending_inquiry(tmp_path: Path) -> None:
 
     interrupt_user = "controls-interrupt"
     interrupt_dir, interrupt_script, interrupt_env = _prepare(tmp_path, interrupt_user)
-    interrupt_env["COMPLAINT_TUI_PROVIDER_WAIT_SECONDS"] = "30"
+    interrupt_env["TUI_CONTROLS_BLOCK_PROVIDER"] = "1"
     code, transcript = _run_pty(
         interrupt_script,
         interrupt_env,
         [(b"plain language", b"Synthetic interrupt narrative.\n")],
-        interrupt=b"Waiting for provider",
+        interrupt=b"Synthetic provider request started",
     )
     if code != 130:
         _fail(f"interrupt exited {code}", transcript)
@@ -364,9 +373,12 @@ def test_pty_eof_and_interrupt_keep_pending_inquiry(tmp_path: Path) -> None:
     if "exit 130" not in transcript:
         _fail("interrupt did not document its exit code", transcript)
     interrupted = _session(interrupt_dir, interrupt_user)
-    pending = (interrupted.get("terminal_controls") or {}).get("pending_inquiry") or {}
-    if not pending.get("question_id"):
-        _fail("interrupt lost the pending inquiry", json.dumps(interrupted.get("terminal_controls")))
+    controls = interrupted.get("terminal_controls") or {}
+    pending = controls.get("pending_inquiry") or {}
+    if pending.get("question_id") != "original_complaint":
+        _fail("interrupt lost the exact pending inquiry", json.dumps(controls))
+    if controls.get("stop_reason") != "interrupted" or controls.get("paused") is not True:
+        _fail("actual provider interruption did not persist a pause", json.dumps(controls))
     narrative = (interrupted.get("original_complaint") or {}).get("text") or ""
     if "Synthetic interrupt narrative" in narrative:
         _fail("interrupt committed the answer during the provider wait", narrative)
