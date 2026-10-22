@@ -91,9 +91,23 @@ _canonical_compiler_module, _canonical_compiler_error = import_module_optional(
 _canonical_source_map_module, _canonical_source_map_error = import_module_optional(
     "ipfs_datasets_py.logic.integration.reasoning.legal_ir_source_maps"
 )
+_legal_ir_obligations_module, _legal_ir_obligations_error = import_module_optional(
+    "ipfs_datasets_py.logic.integration.reasoning.legal_ir_obligations"
+)
 _CANONICAL_FORMALIZATION_RECEIPTS: Dict[str, Dict[str, Any]] = {}
 _CANONICAL_FORMALIZATION_CACHE: Dict[str, str] = {}
 _CANONICAL_SUPPORTED_EXECUTION: Dict[str, Any] | None = None
+_BOUND_OBLIGATION_RECEIPTS: Dict[str, Dict[str, Any]] = {}
+_BOUND_OBLIGATION_CACHE: Dict[str, str] = {}
+PROOF_OBLIGATION_ARTIFACT_SCHEMA = "legal-ir-bound-proof-obligations/v1"
+PROOF_OBLIGATION_PREMISE_SCHEMA = "legal-ir-premise-inventory/v1"
+PROOF_OBLIGATION_CHECKER_VERSION = "proof02-obligation-binder/v1"
+PROOF_OBLIGATION_POLICY_VERSION = "proof02-structural-not-entailment/v1"
+PROOF_OBLIGATION_BACKEND_IDENTITY = (
+    "ipfs_datasets_py.logic.integration.reasoning.legal_ir_obligations."
+    "generate_legal_ir_proof_obligations"
+)
+PROOF_OBLIGATION_TRUST_STRUCTURAL = "structural"
 
 _DEGRADED_OPERATION_REASONS = {
     FormalLogicOperation.TEXT_TO_FOL: (
@@ -3677,6 +3691,7 @@ def reset_canonical_formalization_cache() -> None:
     _CANONICAL_FORMALIZATION_RECEIPTS.clear()
     _CANONICAL_FORMALIZATION_CACHE.clear()
     _CANONICAL_SUPPORTED_EXECUTION = None
+    reset_bound_proof_obligation_cache()
 
 
 def inspect_canonical_formalization_receipt(receipt_id: str) -> Dict[str, Any] | None:
@@ -4577,6 +4592,763 @@ def audit_canonical_formalization_payload(payload: Mapping[str, Any]) -> Dict[st
         "identities": dict(payload.get("identities") or {}),
         "receipt_id": payload.get("receipt_id"),
     }
+
+
+def reset_bound_proof_obligation_cache() -> None:
+    """Drop the obligation reuse index. Stored receipts stay until this reset."""
+
+    _BOUND_OBLIGATION_RECEIPTS.clear()
+    _BOUND_OBLIGATION_CACHE.clear()
+
+
+def inspect_bound_proof_obligation_receipt(receipt_id: str) -> Dict[str, Any] | None:
+    """Return a stored obligation artifact without marking it reusable."""
+
+    stored = _BOUND_OBLIGATION_RECEIPTS.get(str(receipt_id or ""))
+    if stored is None:
+        return None
+    return deepcopy(stored)
+
+
+def _obligation_error_code(exc: BaseException) -> str:
+    name = type(exc).__name__ or "Error"
+    if not name.replace("_", "").isalnum():
+        return "generator_error"
+    return name
+
+
+def _mapping_or_empty(value: Any) -> Dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    if hasattr(value, "to_dict") and callable(value.to_dict):
+        try:
+            converted = value.to_dict()
+        except (TypeError, ValueError):
+            return {}
+        if isinstance(converted, Mapping):
+            return dict(converted)
+    return {}
+
+
+def _attr_or_key(value: Any, name: str, default: Any = None) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def _is_canonical_formalization_receipt(value: Any) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    schema = str(value.get("schema_version") or "")
+    return schema.startswith("canonical-formalization-receipt")
+
+
+def _is_pipeline_result(value: Any) -> bool:
+    if value is None or isinstance(value, (str, bytes, Mapping)):
+        return False
+    name = type(value).__name__
+    if name == "CompilerPipelineResult":
+        return True
+    return hasattr(value, "pipeline_cid") and hasattr(value, "result") and not hasattr(value, "formulas") and not hasattr(value, "modal_ir")
+
+
+def modal_ir_from_canonical_formalization(receipt: Mapping[str, Any]) -> Dict[str, Any]:
+    """Bridge a PROOF01 receipt into the ModalIR document the obligation generator accepts.
+
+    Canonical ``CompilerPipelineResult`` objects are not that schema. Character
+    spans on the receipt stay character offsets. Rule fields are copied only
+    when the stored canonical rule already has them.
+    """
+
+    source_text = str(receipt.get("source_text") or "")
+    source_map = receipt.get("source_map") if isinstance(receipt.get("source_map"), Mapping) else {}
+    rules_by_id: Dict[str, Dict[str, Any]] = {}
+    for node in source_map.get("nodes") or []:
+        if not isinstance(node, Mapping):
+            continue
+        metadata = node.get("metadata") if isinstance(node.get("metadata"), Mapping) else {}
+        rule = metadata.get("rule") if isinstance(metadata.get("rule"), Mapping) else None
+        if rule and rule.get("rule_cid"):
+            rules_by_id[str(rule["rule_cid"])] = dict(rule)
+    formulas: List[Dict[str, Any]] = []
+    for passage in receipt.get("passages") or []:
+        if not isinstance(passage, Mapping):
+            continue
+        rule_cid = str(passage.get("rule_cid") or "")
+        rule = rules_by_id.get(rule_cid, {})
+        formula: Dict[str, Any] = {
+            "formula_id": rule_cid or str(passage.get("field_path") or "formula"),
+            "provenance": {
+                "source_id": str(passage.get("source_cid") or receipt.get("source_cid") or ""),
+                "source_document_id": str(receipt.get("source_cid") or ""),
+                "citation": str(receipt.get("citation") or ""),
+                "start_char": passage.get("start"),
+                "end_char": passage.get("end"),
+                "span_unit": "character",
+            },
+        }
+        for key in ("operator", "predicate", "conditions", "exceptions"):
+            if key in rule:
+                formula[key] = deepcopy(rule[key])
+        formulas.append(formula)
+    return {
+        "document_id": str(receipt.get("source_cid") or receipt.get("request_id") or "canonical-formalization"),
+        "sample_id": str(receipt.get("request_id") or receipt.get("source_cid") or ""),
+        "normalized_text": source_text,
+        "formulas": formulas,
+        "bridge": "proof01_canonical_formalization_receipt",
+    }
+
+
+def _document_view(sample_or_document: Any) -> Any:
+    if isinstance(sample_or_document, Mapping) and isinstance(sample_or_document.get("modal_ir"), (Mapping, object)):
+        modal = sample_or_document.get("modal_ir")
+        if modal is not None and modal is not sample_or_document and (
+            isinstance(modal, Mapping) or hasattr(modal, "formulas") or hasattr(modal, "normalized_text")
+        ):
+            return modal
+    return sample_or_document
+
+
+def _normalized_text_of(sample_or_document: Any) -> str:
+    document = _document_view(sample_or_document)
+    text = _attr_or_key(sample_or_document, "normalized_text", None)
+    if text is None:
+        text = _attr_or_key(document, "normalized_text", "")
+    return str(text or "")
+
+
+def _formulas_of(sample_or_document: Any) -> List[Any]:
+    document = _document_view(sample_or_document)
+    raw = _attr_or_key(document, "formulas", None)
+    if raw is None:
+        raw = _attr_or_key(sample_or_document, "formulas", ())
+    if raw is None:
+        return []
+    return list(raw)
+
+
+def _formula_identity(formula: Any, index: int) -> str:
+    return str(_attr_or_key(formula, "formula_id", None) or f"formula-{index}")
+
+
+def _character_span_status(text: str, start: Any, end: Any) -> Dict[str, Any]:
+    try:
+        start_i = int(start)
+        end_i = int(end)
+    except (TypeError, ValueError):
+        return {"status": "invalid_offsets", "verified": False, "sha256": "", "character_length": 0, "byte_length": 0}
+    if start_i < 0 or end_i < start_i or end_i > len(text):
+        return {"status": "out_of_range", "verified": False, "sha256": "", "character_length": 0, "byte_length": 0}
+    selected = text[start_i:end_i]
+    if selected == "":
+        return {"status": "empty_slice", "verified": False, "sha256": "", "character_length": 0, "byte_length": 0}
+    encoded = selected.encode("utf-8")
+    return {
+        "status": "verified_characters",
+        "verified": True,
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "character_length": len(selected),
+        "byte_length": len(encoded),
+        "start": start_i,
+        "end": end_i,
+        "span_unit": "character",
+    }
+
+
+def _byte_span_status(text: str, start: Any, end: Any) -> Dict[str, Any]:
+    encoded = text.encode("utf-8")
+    try:
+        start_i = int(start)
+        end_i = int(end)
+    except (TypeError, ValueError):
+        return {"status": "invalid_offsets", "verified": False, "sha256": "", "character_length": 0, "byte_length": 0}
+    if start_i < 0 or end_i < start_i or end_i > len(encoded):
+        return {"status": "out_of_range", "verified": False, "sha256": "", "character_length": 0, "byte_length": 0}
+    sliced = encoded[start_i:end_i]
+    if sliced == b"":
+        return {"status": "empty_slice", "verified": False, "sha256": "", "character_length": 0, "byte_length": 0}
+    try:
+        decoded = sliced.decode("utf-8")
+    except UnicodeDecodeError:
+        return {"status": "utf8_boundary", "verified": False, "sha256": "", "character_length": 0, "byte_length": len(sliced)}
+    return {
+        "status": "verified_utf8_bytes",
+        "verified": True,
+        "sha256": hashlib.sha256(sliced).hexdigest(),
+        "character_length": len(decoded),
+        "byte_length": len(sliced),
+        "start": start_i,
+        "end": end_i,
+        "span_unit": "utf8_byte",
+    }
+
+
+def _prevalidate_modal_source_spans(sample_or_document: Any) -> List[Dict[str, Any]]:
+    """Check ModalIR character spans before generation.
+
+    Native ``source_span_sha256`` hashes the formula payload when the text
+    slice is absent. That fallback is not verified source bytes.
+    """
+
+    text = _normalized_text_of(sample_or_document)
+    checks: List[Dict[str, Any]] = []
+    labels: Dict[str, int] = {}
+    for index, formula in enumerate(_formulas_of(sample_or_document), start=1):
+        formula_id = _formula_identity(formula, index)
+        labels[formula_id] = labels.get(formula_id, 0) + 1
+        provenance = _attr_or_key(formula, "provenance", {}) or {}
+        provenance_map = _mapping_or_empty(provenance)
+        start = _attr_or_key(provenance, "start_char", provenance_map.get("start_char"))
+        end = _attr_or_key(provenance, "end_char", provenance_map.get("end_char"))
+        checked = _character_span_status(text, start, end)
+        checks.append(
+            {
+                "formula_id": formula_id,
+                "occurrence": labels[formula_id],
+                "binding_id": f"{formula_id}#{labels[formula_id]}",
+                "span_unit": "character",
+                "verified": checked["verified"],
+                "status": checked["status"],
+                "verified_source_sha256": checked["sha256"],
+                "character_length": checked["character_length"],
+                "byte_length": checked["byte_length"],
+                "native_hash_is_verified_source": bool(checked["verified"]),
+                "native_span_hash_is_fallback": not checked["verified"],
+            }
+        )
+    return checks
+
+
+def _duplicate_local_labels(checks: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    counts: Dict[str, List[str]] = {}
+    for item in checks:
+        counts.setdefault(str(item.get("formula_id") or ""), []).append(str(item.get("binding_id") or ""))
+    return [
+        {"formula_id": formula_id, "occurrences": len(binding_ids), "binding_ids": binding_ids}
+        for formula_id, binding_ids in counts.items()
+        if formula_id and len(binding_ids) > 1
+    ]
+
+
+def _text_of_premise(record: Mapping[str, Any]) -> str:
+    for key in ("text", "statement", "fact_text", "rule_text", "source_text"):
+        value = record.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
+
+
+def _premise_source_check(record: Mapping[str, Any], source_text: str) -> Dict[str, Any]:
+    """Validate a premise span. ModalIR offsets are characters. FACT01 spans are UTF-8 bytes."""
+
+    if not source_text:
+        return {"verified": False, "status": "source_text_absent", "span_unit": "", "sha256": ""}
+    unit = str(record.get("span_unit") or record.get("offset_unit") or "").strip().lower()
+    byte_keys = ("byte_start", "utf8_start", "start_byte")
+    char_keys = ("char_start", "start_char", "character_start")
+    has_byte = any(key in record for key in byte_keys)
+    has_char = any(key in record for key in char_keys)
+    if unit in {"utf8_byte", "byte", "bytes", "utf-8"} or (has_byte and unit not in {"character", "char", "characters"}):
+        start = next(record[key] for key in byte_keys if key in record)
+        end = record.get("byte_end", record.get("utf8_end", record.get("end_byte")))
+        checked = _byte_span_status(source_text, start, end)
+    elif has_char or unit in {"character", "char", "characters"}:
+        start = next((record[key] for key in char_keys if key in record), None)
+        end = record.get("char_end", record.get("end_char", record.get("character_end")))
+        checked = _character_span_status(source_text, start, end)
+    else:
+        return {"verified": False, "status": "span_absent", "span_unit": "", "sha256": ""}
+    expected = _text_of_premise(record)
+    if checked["verified"] and expected:
+        if checked["span_unit"] == "character":
+            actual = source_text[checked["start"]:checked["end"]]
+        else:
+            actual = source_text.encode("utf-8")[checked["start"]:checked["end"]].decode("utf-8")
+        if actual != expected:
+            return {
+                "verified": False,
+                "status": "span_text_mismatch",
+                "span_unit": checked["span_unit"],
+                "sha256": "",
+                "character_length": checked["character_length"],
+                "byte_length": checked["byte_length"],
+            }
+    return checked
+
+
+def _premise_entry(
+    record: Mapping[str, Any],
+    *,
+    role: str,
+    source_text: str,
+    index: int,
+) -> Dict[str, Any]:
+    original_id = str(
+        record.get("id")
+        or record.get("premise_id")
+        or record.get("fact_id")
+        or record.get("rule_id")
+        or record.get("assumption_id")
+        or ""
+    )
+    text = _text_of_premise(record)
+    revision = str(
+        record.get("revision")
+        or record.get("fact_revision")
+        or record.get("assertion_revision")
+        or record.get("version")
+        or "unversioned"
+    )
+    label = str(record.get("label") or record.get("assumption_label") or "")
+    if role == "assumption" and not label:
+        label = f"assumption-{index}"
+    span = _premise_source_check(record, source_text)
+    disputed = role == "disputed_fact" or bool(record.get("disputed"))
+    epistemic = {
+        "asserted_fact": "allegation",
+        "disputed_fact": "disputed",
+        "selected_legal_rule": "selected_legal_rule",
+        "assumption": "assumption",
+        "missing_fact": "missing",
+    }[role]
+    provenance = {
+        "original_id": original_id,
+        "support_ref": str(record.get("support_ref") or ""),
+        "source_table": str(record.get("source_table") or ""),
+        "citation": str(record.get("citation") or ""),
+        "authority_version": str(record.get("authority_version") or record.get("rule_version") or ""),
+        "content_hash": str(record.get("content_hash") or ""),
+        "span_unit": span.get("span_unit") or "",
+        "span_status": span.get("status") or "",
+        "character_span": {
+            "start": record.get("char_start", record.get("start_char")),
+            "end": record.get("char_end", record.get("end_char")),
+        }
+        if any(key in record for key in ("char_start", "start_char", "char_end", "end_char"))
+        else None,
+        "utf8_byte_span": {
+            "start": record.get("byte_start", record.get("utf8_start", record.get("start_byte"))),
+            "end": record.get("byte_end", record.get("utf8_end", record.get("end_byte"))),
+        }
+        if any(key in record for key in ("byte_start", "utf8_start", "start_byte", "byte_end", "utf8_end", "end_byte"))
+        else None,
+    }
+    return {
+        "premise_id": original_id or f"{role}-{index}",
+        "original_id": original_id,
+        "role": role,
+        "epistemic_status": epistemic,
+        "label": label,
+        "text": text,
+        "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest() if text else "",
+        "revision": revision,
+        "version": str(record.get("version") or record.get("authority_version") or record.get("rule_version") or ""),
+        "axiom": False,
+        "source_validated": bool(span.get("verified")),
+        "disputed": disputed,
+        "provenance": provenance,
+    }
+
+
+def _as_premise_records(values: Sequence[Any] | None) -> List[Mapping[str, Any]]:
+    records: List[Mapping[str, Any]] = []
+    for item in values or ():
+        if isinstance(item, str):
+            records.append({"text": item})
+        elif isinstance(item, Mapping):
+            records.append(item)
+    return records
+
+
+def build_legal_ir_premise_inventory(
+    *,
+    asserted_facts: Sequence[Any] | None = None,
+    disputed_facts: Sequence[Any] | None = None,
+    selected_legal_rules: Sequence[Any] | None = None,
+    assumptions: Sequence[Any] | None = None,
+    missing_facts: Sequence[Any] | None = None,
+    source_text: str = "",
+    coverage_status: str = "",
+) -> Dict[str, Any]:
+    """Separate allegations, disputes, selected rules, and labeled assumptions.
+
+    Missing and disputed statements stay out of the axiom set. A coverage
+    status of ``supported`` is not an axiom and not a proof.
+    """
+
+    selected: List[Dict[str, Any]] = []
+    rejected_rules: List[Dict[str, Any]] = []
+    for index, record in enumerate(_as_premise_records(selected_legal_rules), start=1):
+        applicable = record.get("applicable", record.get("selected", True))
+        entry = _premise_entry(record, role="selected_legal_rule", source_text=source_text, index=index)
+        if applicable is False:
+            entry["epistemic_status"] = "rejected_rule"
+            rejected_rules.append(entry)
+        else:
+            selected.append(entry)
+    asserted = [
+        _premise_entry(record, role="asserted_fact", source_text=source_text, index=index)
+        for index, record in enumerate(_as_premise_records(asserted_facts), start=1)
+        if not record.get("disputed") and str(record.get("validation_status") or "").lower() not in {"disputed", "contested"}
+    ]
+    disputed_input = list(_as_premise_records(disputed_facts))
+    disputed_input.extend(
+        record
+        for record in _as_premise_records(asserted_facts)
+        if record.get("disputed") or str(record.get("validation_status") or "").lower() in {"disputed", "contested"}
+    )
+    disputed = [
+        _premise_entry(record, role="disputed_fact", source_text=source_text, index=index)
+        for index, record in enumerate(disputed_input, start=1)
+    ]
+    assumed = [
+        _premise_entry(record, role="assumption", source_text=source_text, index=index)
+        for index, record in enumerate(_as_premise_records(assumptions), start=1)
+    ]
+    missing = [
+        _premise_entry(record, role="missing_fact", source_text=source_text, index=index)
+        for index, record in enumerate(_as_premise_records(missing_facts), start=1)
+    ]
+    return {
+        "schema_version": PROOF_OBLIGATION_PREMISE_SCHEMA,
+        "asserted_facts": asserted,
+        "disputed_facts": disputed,
+        "selected_legal_rules": selected,
+        "assumptions": assumed,
+        "missing_facts": missing,
+        "rejected_rules": rejected_rules,
+        "axioms": [],
+        "coverage_status": str(coverage_status or ""),
+        "coverage_status_is_proof": False,
+        "disputed_or_missing_promoted_to_axiom": False,
+    }
+
+
+def _source_map_identity(receipt: Mapping[str, Any] | None) -> str:
+    if not receipt:
+        return ""
+    source_map = receipt.get("source_map")
+    if not isinstance(source_map, Mapping):
+        return str(receipt.get("receipt_id") or "")
+    encoded = json.dumps(source_map, sort_keys=True, default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _formula_identity_digest(sample_or_document: Any) -> str:
+    rows = []
+    for index, formula in enumerate(_formulas_of(sample_or_document), start=1):
+        provenance = _mapping_or_empty(_attr_or_key(formula, "provenance", {}) or {})
+        operator = _mapping_or_empty(_attr_or_key(formula, "operator", {}) or {})
+        rows.append(
+            {
+                "formula_id": _formula_identity(formula, index),
+                "start_char": provenance.get("start_char", _attr_or_key(_attr_or_key(formula, "provenance", {}), "start_char", None)),
+                "end_char": provenance.get("end_char", _attr_or_key(_attr_or_key(formula, "provenance", {}), "end_char", None)),
+                "operator": operator.get("symbol") or _attr_or_key(_attr_or_key(formula, "operator", {}), "symbol", ""),
+            }
+        )
+    return _stable_payload_digest(rows)
+
+
+def _execution_identity(parts: Mapping[str, Any]) -> str:
+    return _stable_payload_digest(dict(parts))
+
+
+def _obligation_shell(
+    *,
+    status: str,
+    reason: str,
+    support: str,
+    backend_available: bool,
+    inventory: Mapping[str, Any],
+    versions: Mapping[str, Any],
+    extra: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    assumptions = [
+        {"premise_id": item.get("premise_id"), "label": item.get("label"), "revision": item.get("revision")}
+        for item in inventory.get("assumptions") or []
+        if isinstance(item, Mapping)
+    ]
+    body: Dict[str, Any] = {
+        "schema_version": PROOF_OBLIGATION_ARTIFACT_SCHEMA,
+        "status": status,
+        "support": support,
+        "reason": reason,
+        "backend": {
+            "identity": PROOF_OBLIGATION_BACKEND_IDENTITY,
+            "available": backend_available,
+            "module": "ipfs_datasets_py.logic.integration.reasoning.legal_ir_obligations",
+        },
+        "trust_level": PROOF_OBLIGATION_TRUST_STRUCTURAL if backend_available and status not in {"unavailable", "unsupported"} else "unavailable",
+        "structural_only": True,
+        "substantive_entailment": False,
+        "entails_claim_element": False,
+        "entails_applicability": False,
+        "coverage_status_promoted_to_proof": False,
+        "complete_coverage": False,
+        "complete_coverage_certificate": None,
+        "assumptions": assumptions,
+        "premise_inventory": deepcopy(dict(inventory)),
+        "versions": dict(versions),
+        "obligations": [],
+        "native_obligation_ids": [],
+        "native_schema_versions": [],
+        "operational_trace": [],
+        "reused": False,
+        "cache_outcome": "not_cached",
+        "prior_receipt_id": "",
+    }
+    if extra:
+        body.update(dict(extra))
+    identity = str(body["versions"].get("execution_identity") or _execution_identity(body["versions"]))
+    body["execution_identity"] = identity
+    body["receipt_id"] = "proof-obligation-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+    return body
+
+
+def _store_obligation_receipt(receipt: Mapping[str, Any], *, cache_key: str = "") -> Dict[str, Any]:
+    stored = deepcopy(dict(receipt))
+    receipt_id = str(stored.get("receipt_id") or "")
+    if receipt_id and receipt_id not in _BOUND_OBLIGATION_RECEIPTS:
+        _BOUND_OBLIGATION_RECEIPTS[receipt_id] = stored
+    elif receipt_id:
+        stored = deepcopy(_BOUND_OBLIGATION_RECEIPTS[receipt_id])
+    if cache_key and stored.get("status") in {"success", "truncated", "presence_diagnostic", "source_unverified"}:
+        _BOUND_OBLIGATION_CACHE[cache_key] = str(stored.get("receipt_id") or "")
+    return deepcopy(stored)
+
+
+def generate_bound_legal_ir_proof_obligations(
+    sample_or_document: Any = None,
+    *,
+    canonical_receipt: Mapping[str, Any] | None = None,
+    max_obligations: int | None = None,
+    claim_id: str = "",
+    element_id: str = "",
+    asserted_facts: Sequence[Any] | None = None,
+    disputed_facts: Sequence[Any] | None = None,
+    selected_legal_rules: Sequence[Any] | None = None,
+    assumptions: Sequence[Any] | None = None,
+    missing_facts: Sequence[Any] | None = None,
+    legal_context_version: str = "",
+    coverage_status: str = "",
+    structural_validation: Mapping[str, Any] | None = None,
+    source_text: str | None = None,
+    use_cache: bool = True,
+) -> Dict[str, Any]:
+    """Generate native Legal IR obligations and bind them to premise identity.
+
+    Native ``obligation_id`` and ``schema_version`` values are copied unchanged.
+    The first-party execution identity also covers source, rule, fact, claim,
+    assumption, and checker versions, which native ids omit. Structural checks
+    stay structural: they do not entail a claim element.
+    """
+
+    if _is_canonical_formalization_receipt(sample_or_document) and canonical_receipt is None:
+        canonical_receipt = sample_or_document
+        sample_or_document = None
+    bridge_name = ""
+    if sample_or_document is None and canonical_receipt is not None:
+        sample_or_document = modal_ir_from_canonical_formalization(canonical_receipt)
+        bridge_name = "proof01_canonical_formalization_receipt"
+    source = source_text if source_text is not None else _normalized_text_of(sample_or_document)
+    inventory = build_legal_ir_premise_inventory(
+        asserted_facts=asserted_facts,
+        disputed_facts=disputed_facts,
+        selected_legal_rules=selected_legal_rules,
+        assumptions=assumptions,
+        missing_facts=missing_facts,
+        source_text=source,
+        coverage_status=coverage_status,
+    )
+    span_checks = _prevalidate_modal_source_spans(sample_or_document) if sample_or_document is not None else []
+    duplicates = _duplicate_local_labels(span_checks)
+    document_hash = hashlib.sha256(source.encode("utf-8")).hexdigest() if source else ""
+    passage_hashes = [item["verified_source_sha256"] for item in span_checks if item.get("verified_source_sha256")]
+    versions = {
+        "document_sha256": document_hash,
+        "source_passage_sha256": passage_hashes,
+        "formula_identity": _formula_identity_digest(sample_or_document) if sample_or_document is not None else "",
+        "source_map_identity": _source_map_identity(canonical_receipt),
+        "legal_context_version": str(legal_context_version or (canonical_receipt or {}).get("authority_version") or ""),
+        "rule_versions": [
+            {
+                "premise_id": item.get("premise_id"),
+                "version": item.get("version"),
+                "revision": item.get("revision"),
+            }
+            for item in inventory["selected_legal_rules"]
+        ],
+        "claim_id": str(claim_id or ""),
+        "element_id": str(element_id or ""),
+        "fact_revisions": [
+            {"premise_id": item.get("premise_id"), "revision": item.get("revision"), "text_sha256": item.get("text_sha256")}
+            for item in [*inventory["asserted_facts"], *inventory["disputed_facts"], *inventory["missing_facts"]]
+        ],
+        "assumption_ids": [item.get("premise_id") for item in inventory["assumptions"]],
+        "assumption_labels": [item.get("label") for item in inventory["assumptions"]],
+        "checker_version": PROOF_OBLIGATION_CHECKER_VERSION,
+        "policy_version": PROOF_OBLIGATION_POLICY_VERSION,
+        "native_backend": PROOF_OBLIGATION_BACKEND_IDENTITY,
+        "coverage_status": str(coverage_status or ""),
+        "max_obligations": max_obligations,
+    }
+    versions["execution_identity"] = _execution_identity(versions)
+    cache_key = str(versions["execution_identity"])
+
+    def _unavailable(status: str, support: str, reason: str, *, code: str) -> Dict[str, Any]:
+        receipt = _obligation_shell(
+            status=status,
+            reason=reason,
+            support=support,
+            backend_available=False,
+            inventory=inventory,
+            versions=versions,
+            extra={
+                "bridge": bridge_name,
+                "source_span_checks": span_checks,
+                "duplicate_local_labels": duplicates,
+                "structural_validation": deepcopy(dict(structural_validation or {})),
+                "structural_validation_is_entailment": False,
+                "operational_trace": [{"code": code, "status": status}],
+                "cache_outcome": "not_cached",
+            },
+        )
+        return _store_obligation_receipt(receipt)
+
+    if _is_pipeline_result(sample_or_document):
+        return _unavailable(
+            "unsupported",
+            "unsupported",
+            "CompilerPipelineResult is not a ModalIR document. Use the PROOF01 formalization bridge.",
+            code="pipeline_result_not_modal_ir",
+        )
+    if _legal_ir_obligations_module is None or not hasattr(_legal_ir_obligations_module, "generate_legal_ir_proof_obligations"):
+        return _unavailable(
+            "unavailable",
+            "unsupported",
+            "Legal IR proof obligation generator is unavailable.",
+            code="generator_unavailable",
+        )
+    if use_cache and cache_key in _BOUND_OBLIGATION_CACHE:
+        cached = _BOUND_OBLIGATION_RECEIPTS.get(_BOUND_OBLIGATION_CACHE[cache_key])
+        if cached is not None:
+            reused = deepcopy(cached)
+            reused["reused"] = True
+            reused["cache_outcome"] = "reused"
+            return reused
+    prior = ""
+    if _BOUND_OBLIGATION_CACHE:
+        prior = next(reversed(_BOUND_OBLIGATION_CACHE.values()))
+    try:
+        native = _legal_ir_obligations_module.generate_legal_ir_proof_obligations(
+            sample_or_document,
+            max_obligations=max_obligations,
+        )
+    except Exception as exc:  # noqa: BLE001 - typed generator failure without premise text
+        return _unavailable(
+            "unavailable",
+            "unsupported",
+            "Legal IR proof obligation generator failed.",
+            code=_obligation_error_code(exc),
+        )
+    native_payloads = []
+    native_ids: List[str] = []
+    native_schemas: List[str] = []
+    for obligation in native or []:
+        payload = obligation.to_dict() if hasattr(obligation, "to_dict") else dict(obligation)
+        native_payloads.append(payload)
+        native_ids.append(str(payload.get("obligation_id") or ""))
+        schema = str(payload.get("schema_version") or "")
+        if schema and schema not in native_schemas:
+            native_schemas.append(schema)
+    kinds = {str(item.get("kind") or "") for item in native_payloads}
+    unbounded_count = None
+    truncated = False
+    if max_obligations is not None:
+        try:
+            limit = max(0, int(max_obligations))
+        except (TypeError, ValueError):
+            limit = 0
+        truncated = len(native_payloads) >= limit
+        if truncated:
+            try:
+                full = _legal_ir_obligations_module.generate_legal_ir_proof_obligations(sample_or_document)
+                unbounded_count = len(list(full))
+                truncated = unbounded_count > len(native_payloads)
+            except Exception:  # noqa: BLE001 - truncation stays marked without echoing the error
+                unbounded_count = None
+                truncated = True
+    spans_verified = bool(span_checks) and all(item.get("verified") for item in span_checks)
+    if not _formulas_of(sample_or_document):
+        status = "presence_diagnostic"
+    elif truncated:
+        status = "truncated"
+    elif span_checks and not spans_verified:
+        status = "source_unverified"
+    else:
+        status = "success"
+    for check in span_checks:
+        matched = next(
+            (
+                item.get("metadata", {}).get("source_span_sha256")
+                for item in native_payloads
+                if item.get("formula_id") == check["formula_id"] and isinstance(item.get("metadata"), Mapping)
+                and item.get("metadata", {}).get("source_span_sha256")
+            ),
+            "",
+        )
+        check["native_source_span_sha256"] = str(matched or "")
+        if check["verified"] and matched:
+            check["native_hash_matches_verified_source"] = matched == check["verified_source_sha256"]
+        elif not check["verified"]:
+            check["native_hash_matches_verified_source"] = False
+            check["native_span_hash_is_fallback"] = True
+    trace = [
+        {
+            "code": "native_obligations_generated",
+            "status": status,
+            "obligation_count": len(native_payloads),
+            "truncated": truncated,
+        }
+    ]
+    if duplicates:
+        trace.append({"code": "duplicate_local_labels", "status": "recorded", "count": len(duplicates)})
+    if any(not item.get("verified") for item in span_checks):
+        trace.append({"code": "source_span_unverified", "status": "native_hash_not_source_bytes"})
+    receipt = _obligation_shell(
+        status=status,
+        reason="",
+        support="executed",
+        backend_available=True,
+        inventory=inventory,
+        versions=versions,
+        extra={
+            "bridge": bridge_name,
+            "obligations": native_payloads,
+            "native_obligation_ids": native_ids,
+            "native_schema_versions": native_schemas,
+            "obligation_count": len(native_payloads),
+            "unbounded_obligation_count": unbounded_count,
+            "truncated": truncated,
+            "max_obligations": max_obligations,
+            "source_span_checks": span_checks,
+            "source_spans_verified": spans_verified,
+            "duplicate_local_labels": duplicates,
+            "structural_validation": deepcopy(dict(structural_validation or {})),
+            "structural_validation_is_entailment": False,
+            "obligation_kinds": sorted(kind for kind in kinds if kind and not kind.endswith("Error")),
+            "presence_diagnostic": "modal_formula_presence" in kinds,
+            "operational_trace": trace,
+            "cache_outcome": "stored",
+            "prior_receipt_id": prior if prior and prior != ("proof-obligation-" + hashlib.sha256(cache_key.encode()).hexdigest()[:32]) else "",
+            "checker_version": PROOF_OBLIGATION_CHECKER_VERSION,
+            "policy_version": PROOF_OBLIGATION_POLICY_VERSION,
+            "trust_level": PROOF_OBLIGATION_TRUST_STRUCTURAL,
+        },
+    )
+    return _store_obligation_receipt(receipt, cache_key=cache_key)
 
 
 def legacy_procedural_template_attributes() -> Dict[str, Any]:
