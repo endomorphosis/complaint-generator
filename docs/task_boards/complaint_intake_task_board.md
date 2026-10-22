@@ -651,7 +651,7 @@ Implementation instructions:
 
 ## CIMP-QUEST-02 Track question dispositions and deduplicate equivalent requests
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.questioning
