@@ -1848,7 +1848,8 @@ def _descendants(root: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [item for item in identities if item["pid"] in owned and item["pid"] != root["pid"]]
 
 
-def stop(state_dir: Path, *, timeout: float = 15.0) -> dict[str, Any]:
+def stop(state_dir: Path, *, timeout: float = 15.0,
+         retained_native_child_proof: Mapping[str, Any] | None = None) -> dict[str, Any]:
     with _lock(state_dir):
         path = state_dir / "launcher.json"
         record = _read_json(path)
@@ -1858,7 +1859,7 @@ def stop(state_dir: Path, *, timeout: float = 15.0) -> dict[str, Any]:
         except (OSError, ValueError, TypeError) as error:
             return {"status": "stop_incomplete", "signalled": False, "reason": str(error), "manual_holds_preserved": True}
         if not owns_process(record):
-            containers = close_campaign_containers(state_dir, record)
+            containers = close_campaign_containers(state_dir, record, retained_native_child_proof=retained_native_child_proof)
             if not containers["applicable"]:
                 return {"status": "not_owned_or_stopped", "signalled": False}
             if containers["quiesced"]:
@@ -1866,6 +1867,9 @@ def stop(state_dir: Path, *, timeout: float = 15.0) -> dict[str, Any]:
                 _atomic_json(path, record)
             return {"status": containers["status"], "signalled": False,
                     "container_shutdown": containers, "manual_holds_preserved": True}
+        if retained_native_child_proof is not None:
+            return {"status": "stop_incomplete", "signalled": False,
+                    "reason": "retained native observation cannot authorize live fencing", "manual_holds_preserved": True}
         identity = record["identity"]
         children = _descendants(identity)
         _signal_birth(identity, signal.SIGTERM)

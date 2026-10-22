@@ -719,7 +719,33 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
         runner._atomic_json(state / 'launcher.json', missing_record)
         running = _missing_marker_heartbeat(state, missing_record, child.pid)
         runner._atomic_json(heartbeat, running)
-        pid_path.unlink(); sidecar.unlink()
+        # Preserve the actual sealed identity, then use the public Native
+        # cleanup API. The archive remains observation input, never a marker.
+        archive = root / 'retained-native-identity.json'
+        archive.write_bytes(original[sidecar]); archive.chmod(0o600)
+        cleared = native.clear_child_pid_file(child)
+        assert cleared is True and not pid_path.exists() and not sidecar.exists()
+        public_clear = root / 'public-native-clear-result.json'
+        public_clear.write_text(json.dumps({'native_api': 'clear_child_pid_file',
+            'returned': cleared, 'canonical_pid_absent': not pid_path.exists(),
+            'canonical_identity_absent': not sidecar.exists(),
+            'signals_performed': False, 'completion_authority': False}))
+        public_clear.chmod(0o600)
+        def reference(path):
+            return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+        effect = {'schema': 'complaint-public-native-marker-clear-observation@1',
+            'api': 'supervisor_runtime.clear_child_pid_file', 'identity_record_id': identity.record_id,
+            'identity_sha256': reference(archive)['sha256'],
+            'launch_binding_sha256': shutdown._retained_launch_binding(missing_record,
+                shutdown._context(state, missing_record)),
+            'native_source': reference(Path(native.__file__).resolve()),
+            'canonical_pid_path': str(pid_path), 'canonical_identity_path': str(sidecar),
+            'result': reference(public_clear)}
+        effect_path = root / 'public-native-clear-observation.json'
+        effect_path.write_text(json.dumps(effect)); effect_path.chmod(0o600)
+        retained_proof = {'schema': 'complaint-retained-native-child-observation@1',
+            'identity': reference(archive), 'effect': reference(effect_path),
+            'worktree_submodule_paths': ['external/ipfs_datasets_py', 'external/ipfs_kit_py']}
         running_bytes = heartbeat.read_bytes()
         missing_context = shutdown._context(state, missing_record)
         observed = shutdown._parent_closed(state, missing_record, missing_context, False)
@@ -744,6 +770,85 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
             running) == {'old_births_alive': False, 'matching_processes': 0, 'native_shutdown_quiesced': True}
         assert heartbeat.read_bytes() == running_bytes
         assert not pid_path.exists() and not sidecar.exists()
+        # The real Native final heartbeat can lose daemon_pid after a blocked
+        # exit. Null remains refused without explicit retained observation.
+        null_heartbeat = {**running, 'status': 'termination_blocked', 'daemon_pid': None}
+        runner._atomic_json(heartbeat, null_heartbeat)
+        null_bytes = heartbeat.read_bytes()
+        current_record = json.loads((state / 'launcher.json').read_text())
+        current_context = shutdown._context(state, current_record)
+        with pytest.raises(ValueError, match='full launch scope'):
+            shutdown._parent_closed(state, current_record, current_context, False)
+        observed = shutdown._parent_closed(state, current_record, current_context, False, retained_proof)
+        assert observed['observations'] == 2 and observed['proc_census_complete'] is True
+        assert observed['sealed_native_identity_used'] is True and observed['daemon_birth_ticks_claimed'] is True
+        assert observed['retained_native_observation']['daemon_pid'] == child.pid
+        assert observed['retained_native_observation']['positive_execution_or_fencing_authority'] is False
+        assert observed['minimum_owned_start_ticks'] == record['identity']['start_ticks']
+        assert heartbeat.read_bytes() == null_bytes and not pid_path.exists() and not sidecar.exists()
+        for index, change in enumerate((
+                {'api': 'foreign'}, {'identity_record_id': 'foreign'},
+                {'identity_sha256': 'f' * 64}, {'launch_binding_sha256': 'f' * 64},
+                {'canonical_pid_path': str(root / 'foreign.pid')},
+                {'native_source': {**effect['native_source'], 'sha256': 'f' * 64}})):
+            invalid = root / f'invalid-retained-effect-{index}.json'
+            invalid.write_text(json.dumps({**effect, **change})); invalid.chmod(0o600)
+            with pytest.raises(ValueError):
+                shutdown._parent_closed(state, current_record, current_context, False,
+                    {**retained_proof, 'effect': reference(invalid)})
+        invalid_result = root / 'refused-public-clear-result.json'
+        invalid_result.write_text(json.dumps({**json.loads(public_clear.read_text()), 'returned': False}))
+        invalid_result.chmod(0o600)
+        invalid_effect = root / 'refused-public-clear-effect.json'
+        invalid_effect.write_text(json.dumps({**effect, 'result': reference(invalid_result)}))
+        invalid_effect.chmod(0o600)
+        with pytest.raises(ValueError, match='absence observation'):
+            shutdown._parent_closed(state, current_record, current_context, False,
+                {**retained_proof, 'effect': reference(invalid_effect)})
+        # A self-consistent typed record for another parent still has no scope.
+        foreign = replace(identity, process_birth=replace(identity.process_birth,
+            parent_pid=os.getpid()), record_id='')
+        foreign_path = root / 'foreign-retained-identity.json'
+        foreign_path.write_text(json.dumps(foreign.to_dict())); foreign_path.chmod(0o600)
+        foreign_effect = root / 'foreign-retained-effect.json'
+        foreign_effect.write_text(json.dumps({**effect, 'identity_record_id': foreign.record_id,
+            'identity_sha256': reference(foreign_path)['sha256']})); foreign_effect.chmod(0o600)
+        with pytest.raises(ValueError, match='birth/command/session'):
+            shutdown._parent_closed(state, current_record, current_context, False,
+                {**retained_proof, 'identity': reference(foreign_path), 'effect': reference(foreign_effect)})
+        with monkeypatch.context() as unknown:
+            unknown.setattr(native, 'supervised_child_identity_liveness', lambda _identity: native.OwnerLiveness.UNKNOWN)
+            with pytest.raises(ValueError, match='birth/command/session'):
+                shutdown._parent_closed(state, current_record, current_context, False, retained_proof)
+        with monkeypatch.context() as group:
+            group.setattr(shutdown, '_complete_process_inventory', lambda *_a: [
+                {'pid': 1073741826, 'uid': os.getuid() + 1, 'process_group': child.pid,
+                 'session': child.pid, 'argv': (), 'cwd': None}])
+            with pytest.raises(ValueError, match='group or session'):
+                shutdown._parent_closed(state, current_record, current_context, False, retained_proof)
+        actual_inventory = shutdown._complete_process_inventory
+        with monkeypatch.context() as changed:
+            def changed_archive(*args):
+                rows = actual_inventory(*args)
+                archive.write_bytes(original[sidecar] + b' ')
+                return rows
+            changed.setattr(shutdown, '_complete_process_inventory', changed_archive)
+            with pytest.raises(ValueError, match='hash changed'):
+                shutdown._parent_closed(state, current_record, current_context, False, retained_proof)
+        archive.write_bytes(original[sidecar]); archive.chmod(0o600)
+        fake.calls.clear(); fake.ps_count = 0
+        retained_stop = runner.stop(state, timeout=0, retained_native_child_proof=retained_proof)
+        assert retained_stop['status'] == 'stopped' and retained_stop['signalled'] is False
+        stored = json.loads((state / shutdown.RECEIPT_NAME).read_text())
+        assert stored['quiesced'] is True and stored['retained_native_child_proof'] == retained_proof
+        assert stored['process_closure']['observations'] == 2 and fake.effects == []
+        assert heartbeat.read_bytes() == null_bytes and not pid_path.exists() and not sidecar.exists()
+        # The ordinary subsequent start-side observer rederives stored evidence,
+        # never treating the previous closure as cached positive authority.
+        final_record = json.loads((state / 'launcher.json').read_text())
+        again = shutdown._parent_closed(state, final_record, shutdown._context(state, final_record), False)
+        assert again['observations'] == 2 and again['retained_native_observation']['daemon_pid'] == child.pid
+        assert heartbeat.read_bytes() == null_bytes and archive.read_bytes() == original[sidecar]
     finally:
         if parent is not None and parent.poll() is None:
             parent.kill(); parent.wait(timeout=3)
@@ -1219,3 +1324,11 @@ def test_foreign_login_cwd_proof_refuses_privileged_observer_before_io(monkeypat
         with pytest.raises(ValueError, match='ordinary unprivileged observer'):
             shutdown._foreign_login_cwd_proof(1073741800, 100)
     assert calls == []
+
+
+def test_retained_native_observation_never_authorizes_live_parent_signals(campaign, monkeypatch):
+    monkeypatch.setattr(runner, 'owns_process', lambda _record: True)
+    monkeypatch.setattr(runner, '_signal_birth', lambda *_a: pytest.fail('retained observation must not signal'))
+    result = runner.stop(campaign.state, timeout=0, retained_native_child_proof={})
+    assert result['status'] == 'stop_incomplete' and result['signalled'] is False
+    assert 'live fencing' in result['reason']

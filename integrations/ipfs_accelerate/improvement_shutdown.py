@@ -168,6 +168,25 @@ def _events(state_dir: Path, started_at: float, *, worktree_root: Path | None = 
     return workspaces, hashlib.sha256(raw).hexdigest()
 
 
+def _managed_native_command(record: Mapping[str, Any], context: Mapping[str, Any],
+                            submodules: tuple[str, ...] = ('external/ipfs_datasets_py', 'external/ipfs_kit_py')) -> tuple[str, ...]:
+    from . import improvement_runner as runner
+    state_dir = Path(context['state_dir'])
+    entrypoint = Path(context['repo_root']) / 'integrations/ipfs_accelerate/improvement_runner.py'
+    prefix = (record['argv'][0], str(entrypoint), '--interval', '10.0',
+        '--todo-path', record['board_path'], '--state-dir', str(state_dir),
+        '--task-prefix', runner.TASK_PREFIX, '--board-namespace', 'complaint-intake-improvement',
+        '--state-prefix', runner.STATE_PREFIX, '--max-task-attempts', '3',
+        '--task-source-kind', 'legacy-markdown', '--authority-mode', 'legacy_markdown',
+        '--validation-max-workers', '1', '--merge-target-branch', record['merge_target'],
+        '--merge-queue-dir', str(state_dir / 'merge-queue'), '--implement',
+        '--implementation-timeout', str(float(runner.TIMEOUT_SECONDS)),
+        '--worktree-root', context['worktree_root'],
+        )
+    return prefix + tuple(part for relative in submodules for part in ('--worktree-submodule-path', relative)) + (
+        '--task-shard-count', '1', '--task-shard-index', '0')
+
+
 def _sealed_managed_session_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[str, Any]) -> None:
     """Observe retained native markers after an independently performed fence.
 
@@ -211,18 +230,7 @@ def _sealed_managed_session_closed(state_dir: Path, record: Mapping[str, Any], c
              'daemon_entrypoint': str(entrypoint)}
     # This is the ordinary command emitted for the existing first-party
     # native_argv profile. No alternative entrypoint or extra option is admitted.
-    command = (record['argv'][0], str(entrypoint), '--interval', '10.0',
-        '--todo-path', record['board_path'], '--state-dir', str(state_dir),
-        '--task-prefix', runner.TASK_PREFIX, '--board-namespace', 'complaint-intake-improvement',
-        '--state-prefix', runner.STATE_PREFIX, '--max-task-attempts', '3',
-        '--task-source-kind', 'legacy-markdown', '--authority-mode', 'legacy_markdown',
-        '--validation-max-workers', '1', '--merge-target-branch', record['merge_target'],
-        '--merge-queue-dir', str(state_dir / 'merge-queue'), '--implement',
-        '--implementation-timeout', str(float(runner.TIMEOUT_SECONDS)),
-        '--worktree-root', context['worktree_root'],
-        '--worktree-submodule-path', 'external/ipfs_datasets_py',
-        '--worktree-submodule-path', 'external/ipfs_kit_py',
-        '--task-shard-count', '1', '--task-shard-index', '0')
+    command = _managed_native_command(record, context)
     if (dict(identity.owner_scope) != scope or identity.command != command
             or before[pid_path] != f'{birth.pid}\n'.encode('ascii')
             or birth.parent_pid != parent['pid'] or birth.pid == parent['pid']
@@ -520,8 +528,115 @@ def _complete_process_inventory(minimum_owned_start_ticks: int) -> list[dict[str
     return result
 
 
+def _retained_launch_binding(record: Mapping[str, Any], context: Mapping[str, Any]) -> str:
+    """Bind immutable launch scope while ordinary stop updates only its status."""
+    material = {key: record.get(key) for key in ('identity', 'argv', 'started_at',
+        'repo_root', 'spec_path', 'board_path', 'plan_id', 'merge_target', 'state_dir',
+        'provider', 'model', 'allow_fallback', 'worktree_root', 'worktree_root_binding')}
+    material['owner_token_sha256'] = context['owner_token_sha256']
+    return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(',', ':'),
+        ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+
+
+def _retained_native_observation(state_dir: Path, record: Mapping[str, Any],
+                                 context: Mapping[str, Any], proof: Mapping[str, Any]) -> dict[str, Any]:
+    """Read explicit retained evidence solely for negative historical census scope.
+
+    This is an operator-supplied observation under the owned-file trust boundary,
+    not a signed Native receipt or positive execution/fencing authority. The
+    external operator must authenticate its public-call provenance separately.
+    All death, marker absence and complete population checks remain fresh.
+    """
+    from .improvement_recovery import _owned_bytes
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as native
+    if (type(proof) is not dict or set(proof) != {'schema', 'identity', 'effect', 'worktree_submodule_paths'}
+            or proof.get('schema') != 'complaint-retained-native-child-observation@1'
+            or proof['worktree_submodule_paths'] not in (['external/ipfs_datasets_py'],
+                ['external/ipfs_datasets_py', 'external/ipfs_kit_py'])):
+        raise ValueError('retained native observation descriptor differs')
+    files = {}
+    def read_ref(value):
+        if (type(value) is not dict or set(value) != {'path', 'sha256'}
+                or not isinstance(value['path'], str) or not Path(value['path']).is_absolute()
+                or not isinstance(value['sha256'], str) or not re.fullmatch(r'[0-9a-f]{64}', value['sha256'])):
+            raise ValueError('retained native evidence reference differs')
+        path = Path(value['path'])
+        raw = _owned_bytes(path, 65536)
+        if hashlib.sha256(raw).hexdigest() != value['sha256']:
+            raise ValueError('retained native evidence hash changed')
+        files[str(path)] = value['sha256']
+        return raw
+    identity_raw = read_ref(proof['identity'])
+    payload = json.loads(identity_raw)
+    if type(payload) is not dict:
+        raise ValueError('retained native identity must be an object')
+    identity = native.SupervisedChildIdentity.from_dict(payload)
+    if identity is None or identity.to_dict() != payload:
+        raise ValueError('retained native identity is invalid')
+    effect = json.loads(read_ref(proof['effect']))
+    expected_keys = {'schema', 'api', 'identity_record_id', 'identity_sha256',
+        'launch_binding_sha256', 'native_source', 'canonical_pid_path',
+        'canonical_identity_path', 'result'}
+    if (type(effect) is not dict or set(effect) != expected_keys
+            or effect.get('schema') != 'complaint-public-native-marker-clear-observation@1'
+            or effect.get('api') != 'supervisor_runtime.clear_child_pid_file'
+            or effect.get('identity_record_id') != identity.record_id
+            or effect.get('identity_sha256') != proof['identity']['sha256']
+            or effect.get('launch_binding_sha256') != _retained_launch_binding(record, context)):
+        raise ValueError('retained public-clear observation scope differs')
+    source = effect['native_source']
+    native_path = Path(native.__file__).resolve(strict=True)
+    if (type(source) is not dict or set(source) != {'path', 'sha256'}
+            or source.get('path') != str(native_path)
+            or hashlib.sha256(_owned_bytes(native_path, 2_000_000, legacy_group_write=True)).hexdigest() != source.get('sha256')):
+        raise ValueError('retained public-clear Native source differs')
+    files[str(native_path)] = source['sha256']
+    pid_path = state_dir / 'complaint_intake_managed_daemon.pid'
+    identity_path = pid_path.with_suffix('.identity.json')
+    if (effect['canonical_pid_path'] != str(pid_path)
+            or effect['canonical_identity_path'] != str(identity_path)):
+        raise ValueError('retained public-clear canonical paths differ')
+    result = json.loads(read_ref(effect['result']))
+    if (type(result) is not dict or result.get('native_api') != 'clear_child_pid_file'
+            or result.get('returned') is not True or result.get('canonical_pid_absent') is not True
+            or result.get('canonical_identity_absent') is not True
+            or result.get('signals_performed') is not False or result.get('completion_authority') is not False):
+        raise ValueError('retained public-clear result is not an absence observation')
+    birth, parent = identity.process_birth, record['identity']
+    entrypoint = Path(context['repo_root']) / 'integrations/ipfs_accelerate/improvement_runner.py'
+    scope = {'repo_root': context['repo_root'], 'state_dir': str(state_dir),
+        'state_prefix': 'complaint_intake', 'todo_path': record['board_path'],
+        'daemon_entrypoint': str(entrypoint)}
+    if (dict(identity.owner_scope) != scope
+            or identity.command != _managed_native_command(record, context, tuple(proof['worktree_submodule_paths']))
+            or birth.parent_pid != parent['pid'] or birth.pid == parent['pid']
+            or birth.start_time_ticks <= parent['start_ticks'] or birth.boot_id != parent['boot_id']
+            or Path('/proc/sys/kernel/random/boot_id').read_text().strip() != parent['boot_id']
+            or not context['started_at'] <= _timestamp(identity.created_at) <= time.time()
+            or native.supervised_child_identity_liveness(identity) is not native.OwnerLiveness.DEAD
+            or not native._supervised_child_identity_session_quiesced(identity)):
+        raise ValueError('retained native birth/command/session is not bound and absent')
+    # Native's birth record stores PID/ticks/boot/parent, not historical SID.
+    # Identity-protected Native launch source requires a dedicated session;
+    # both Native's live census and our double census check its PID as PGID/SID.
+    # Neither a reused numeric PID nor a reappeared canonical marker is absence.
+    for path in (Path('/proc') / str(parent['pid']), Path('/proc') / str(birth.pid), pid_path, identity_path):
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        raise ValueError('retained native numeric birth or canonical marker is present')
+    return {'daemon_pid': birth.pid, 'daemon_start_ticks': birth.start_time_ticks,
+        'identity_record_id': identity.record_id, 'files': files,
+        'launch_binding_sha256': effect['launch_binding_sha256'],
+        'proof': json.loads(json.dumps(proof, sort_keys=True, allow_nan=False)),
+        'positive_execution_or_fencing_authority': False,
+        'native_public_result_provenance_requires_external_operator_review': True}
+
+
 def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
-                                   context: Mapping[str, Any]) -> dict[str, Any]:
+                                   context: Mapping[str, Any],
+                                   retained_native_child_proof: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Observe a crashed launch without restoring or inventing native markers.
 
     An owned heartbeat is historical scope, never a death/healthy declaration.
@@ -557,6 +672,12 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
     heartbeat = json.loads(before[1])
     repo = Path(context['repo_root'])
     daemon = heartbeat.get('daemon_pid')
+    retained = (_retained_native_observation(state_dir, record, context, retained_native_child_proof)
+        if retained_native_child_proof is not None else None)
+    if retained is not None:
+        if daemon is not None and daemon != retained['daemon_pid']:
+            raise ValueError('heartbeat and retained native identity disagree')
+        daemon = retained['daemon_pid']
     native_state = str(state_dir / f'{runner.STATE_PREFIX}_task_state.json')
     expected_paths = {'repo_root': str(repo), 'todo_path': record['board_path'],
         'state_path': native_state, 'current_status_path': native_state, 'progress_path': native_state,
@@ -623,14 +744,19 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         foreign_cwd_observations.append(foreign_cwd_proofs)
         return prelaunch_exclusions
     first_exclusions = scan()
+    if retained is not None and _retained_native_observation(state_dir, record, context, retained_native_child_proof) != retained:
+        raise ValueError('retained native observation changed during first census')
     if custody() != before:
         raise ValueError('missing-marker custody changed during process inventory')
     missing_markers()
     second_exclusions = scan()
+    if retained is not None and _retained_native_observation(state_dir, record, context, retained_native_child_proof) != retained:
+        raise ValueError('retained native observation changed during second census')
     if custody() != before or Path('/proc/sys/kernel/random/boot_id').read_text().strip() != boot:
         raise ValueError('missing-marker custody changed during second process inventory')
     missing_markers()
     return {'source': 'owned_historical_heartbeat_and_double_complete_proc_inventory',
+        'retained_native_observation': retained,
         'proc_census_complete': True, 'observations': 2, 'recorded_pids_absent': True,
         'scope_birth_policy': 'same_uid_birth_at_or_after_owned_launcher_requires_argv_and_cwd',
         'minimum_owned_start_ticks': parent['start_ticks'],
@@ -639,13 +765,14 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         'foreign_cwd_observations': foreign_cwd_observations,
         'all_births_group_and_session_checked': True,
         'matching_processes': 0, 'canonical_markers_absent': True,
-        'sealed_native_identity_used': False, 'daemon_birth_ticks_claimed': False,
+        'sealed_native_identity_used': retained is not None, 'daemon_birth_ticks_claimed': retained is not None,
         'heartbeat_status_preserved': heartbeat['status'],
         'heartbeat_sha256': hashlib.sha256(before[1]).hexdigest(),
         'signals_sent': False, 'completion_authority': False, 'attempt_refunded': False}
 
 
-def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[str, Any], supplied: bool) -> dict[str, Any] | None:
+def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[str, Any], supplied: bool,
+                   retained_native_child_proof: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
     from . import improvement_runner as runner
     from .improvement_recovery import _object
     birth = record['identity']
@@ -653,6 +780,8 @@ def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[
     if current and all(current.get(key) == birth.get(key) for key in ('pid', 'start_ticks', 'boot_id')):
         raise ValueError('recorded campaign parent is still alive')
     if supplied:
+        if retained_native_child_proof is not None:
+            raise ValueError('retained native observation never grants live fencing authority')
         return
     heartbeat = _object(state_dir / 'complaint_intake_supervisor_status.json', legacy_group_write=True)
     if (heartbeat.get('repo_root') != context['repo_root'] or heartbeat.get('supervisor_pid') != birth['pid']
@@ -664,14 +793,24 @@ def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[
         pid_path = state_dir / f'{runner.STATE_PREFIX}_managed_daemon.pid'
         identity_path = pid_path.with_suffix('.identity.json')
         if not os.path.lexists(pid_path) and not os.path.lexists(identity_path):
-            return _missing_marker_session_closed(state_dir, record, context)
+            if retained_native_child_proof is None and heartbeat.get('daemon_pid') is None:
+                try:
+                    (state_dir / RECEIPT_NAME).lstat()
+                except FileNotFoundError:
+                    previous = {}
+                else:
+                    previous = _object(state_dir / RECEIPT_NAME)
+                if runner._shutdown_verified(record, previous, Path(context['repo_root']), state_dir):
+                    retained_native_child_proof = previous.get('retained_native_child_proof')
+            return _missing_marker_session_closed(state_dir, record, context, retained_native_child_proof)
     if heartbeat.get('status') != 'termination_blocked':
         raise ValueError('historical campaign lacks current owned shutdown evidence')
     _sealed_managed_session_closed(state_dir, record, context)
 
 
 def close_campaign_containers(state_dir: Path, record: Mapping[str, Any], *, parent_quiesced: bool = False,
-                             remove_stopped: bool = True, timeout_seconds: float = 25.0) -> dict[str, Any]:
+                             remove_stopped: bool = True, timeout_seconds: float = 25.0,
+                             retained_native_child_proof: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Fence exact owned containers after the recorded parent is quiescent.
 
     All Docker calls use a trusted native CLI, local socket and empty config.
@@ -689,9 +828,12 @@ def close_campaign_containers(state_dir: Path, record: Mapping[str, Any], *, par
         if context is None:
             return {**result, 'applicable': False, 'status': 'not_applicable', 'reason': 'legacy_process_only_record'}
         result.update(context)
-        process_closure = _parent_closed(state_dir, record, context, parent_quiesced)
+        process_closure = _parent_closed(state_dir, record, context, parent_quiesced, retained_native_child_proof)
         if process_closure is not None:
             result['process_closure'] = process_closure
+            retained = process_closure.get('retained_native_observation')
+            if retained is not None:
+                result['retained_native_child_proof'] = retained['proof']
         starts, event_sha = _events(state_dir, context['started_at'], worktree_root=Path(context['worktree_root']))
         result['event_log_sha256'] = event_sha
         native = _native_runtime()
