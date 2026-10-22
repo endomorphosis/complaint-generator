@@ -2689,6 +2689,585 @@ def read_private_revision(
     return opened
 
 
+# --- Case manifest CAS (CIMP-DUR-004) --------------------------------------
+# One encrypted manifest binds answer, fact-graph, legal-rule-source,
+# evaluation, and proof revisions to an opaque parent generation. The public
+# head is only that generation and the manifest hash. Filenames, labels, and
+# provenance stay inside the envelope. Local publication is compare-and-swap.
+# IrohManifestStore.compare_and_swap is used only when the caller selects the
+# Iroh backend and supplies a store; importing this module does not start Iroh.
+
+_CASE_SCHEMA = "cg-case-manifest-v1"
+_CASE_ROLES = (
+    ("answer", "answer"),
+    ("fact_graph", "fact-graph"),
+    ("legal_rule_source", "legal-rule-source"),
+    ("evaluation", "evaluation"),
+    ("proof", "proof"),
+)
+_CASE_HEAD_NAME = "case-head"
+_CASE_GENERATIONS = "generations"
+_CASE_STAMP = "2026-01-01T00:00:00Z"
+
+
+class CaseManifestConflict(PrivateRevisionError):
+    """The expected head and hash were not the current head. Nothing was replaced."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "case manifest head conflict",
+            code="manifest_conflict",
+            state="conflict",
+        )
+
+
+@dataclass(frozen=True)
+class CaseManifestPublication:
+    """In-memory result of a case-manifest publish or recovery. Not a new receipt file."""
+
+    committed: bool
+    state: str
+    generation: str | None
+    parent_generation: str | None
+    manifest_hash: str | None
+    parent_hash: str | None
+    minted_completion: bool
+    backend: str
+    code: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "committed": self.committed,
+            "state": self.state,
+            "generation": self.generation,
+            "parent_generation": self.parent_generation,
+            "manifest_hash": self.manifest_hash,
+            "parent_hash": self.parent_hash,
+            "minted_completion": self.minted_completion,
+            "backend": self.backend,
+            "code": self.code,
+            "network_pinned": False,
+            "local_only": self.backend == "local",
+        }
+
+
+def _case_root(repository: str | Path) -> Path:
+    return Path(repository) / "case-manifest"
+
+
+def _hex_generation(value: str, label: str) -> str:
+    if not isinstance(value, str) or len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+        raise PrivateRevisionError(f"{label} is not an opaque ref", code="bad_ref", state="recoverable")
+    return value
+
+
+def _expected_ref(value: str | None, label: str) -> str:
+    if value in {None, ""}:
+        return ""
+    return _hex_generation(str(value), label)
+
+
+def _parse_case_head(raw: bytes | None) -> tuple[str, str]:
+    if raw is None or raw == b"":
+        return "", ""
+    try:
+        text = raw.decode("ascii")
+    except UnicodeError as exc:
+        raise PrivateRevisionError("case head is unreadable", code="corrupt_manifest", state="recoverable") from exc
+    if text.endswith("\n"):
+        text = text[:-1]
+    generation, separator, manifest_hash = text.partition(" ")
+    if separator != " " or not generation or not manifest_hash or " " in manifest_hash:
+        raise PrivateRevisionError("case head is unreadable", code="corrupt_manifest", state="recoverable")
+    return _hex_generation(generation, "generation"), _hex_generation(manifest_hash, "manifest_hash")
+
+
+def _case_head(root: Path) -> tuple[str, str]:
+    return _parse_case_head(_read_exact(root / _CASE_HEAD_NAME))
+
+
+def _write_case_head(root: Path, generation: str, manifest_hash: str, *, fsync_file, fsync_directory) -> None:
+    payload = f"{generation} {manifest_hash}\n".encode("ascii")
+    _atomic_write(root, _CASE_HEAD_NAME, payload, fsync_file=fsync_file, fsync_directory=fsync_directory)
+
+
+def _append_generation(root: Path, generation: str, manifest_hash: str, *, fsync_file, fsync_directory) -> None:
+    line = f"{generation} {manifest_hash}\n".encode("ascii")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(root / _CASE_GENERATIONS, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        view = memoryview(line)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise PrivateRevisionError("generation log write failed", code="write_error", state="recoverable")
+            view = view[written:]
+        _fsync_file(descriptor, fsync_file)
+    finally:
+        os.close(descriptor)
+    _fsync_directory(root, fsync_directory)
+
+
+def _generation_index(root: Path) -> list[tuple[str, str]]:
+    raw = _read_exact(root / _CASE_GENERATIONS)
+    if raw is None or raw == b"":
+        return []
+    if not raw.endswith(b"\n"):
+        raw = raw.rsplit(b"\n", 1)[0]
+        if raw and not raw.endswith(b"\n"):
+            raw += b"\n"
+        if not raw:
+            return []
+    found: list[tuple[str, str]] = []
+    for line in raw.splitlines():
+        try:
+            generation, manifest_hash = _parse_case_head(line)
+        except PrivateRevisionError as exc:
+            raise PrivateRevisionError(
+                "generation log is corrupt",
+                code="corrupt_manifest",
+                state="recoverable",
+            ) from exc
+        if generation:
+            found.append((generation, manifest_hash))
+    return found
+
+
+def _role_payload(artifacts: Mapping[str, Any], name: str) -> tuple[bytes, str]:
+    if name not in artifacts:
+        raise PrivateRevisionError("case role is missing", code="role_missing", state="recoverable")
+    value = artifacts[name]
+    if isinstance(value, (bytes, bytearray)):
+        body = bytes(value)
+        revision = name
+    elif isinstance(value, Mapping) and isinstance(value.get("body"), (bytes, bytearray)):
+        body = bytes(value["body"])
+        revision = str(value.get("revision") or name)
+    else:
+        raise PrivateRevisionError("case role payload is unusable", code="role_missing", state="recoverable")
+    if not body:
+        raise PrivateRevisionError("case role payload is empty", code="role_missing", state="recoverable")
+    _require_label(revision)
+    return body, revision
+
+
+def _open_case_document(
+    root: Path,
+    generation: str,
+    manifest_hash: str,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+) -> dict[str, Any] | None:
+    """Return the authenticated document, or None when the blob is missing or stale."""
+
+    if not generation:
+        return None
+    path = root / "o" / generation
+    raw = _read_exact(path)
+    if raw is None or _opaque_ref(raw) != generation:
+        return None
+    try:
+        body = _open_role(
+            raw,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            principal_id=principal_id,
+            kind="case-manifest",
+            revision=manifest_hash,
+            key=key,
+            key_id=key_id,
+        )
+        document = json.loads(body.decode("utf-8"))
+    except (PrivateStorageError, UnicodeError, json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(document, dict) or document.get("schema") != _CASE_SCHEMA:
+        return None
+    if _opaque_ref(_manifest_bytes(document)) != manifest_hash:
+        return None
+    if document.get("parent_generation") in {None, ""}:
+        if document.get("parent_hash") not in {None, ""}:
+            return None
+    else:
+        try:
+            _hex_generation(str(document.get("parent_generation")), "parent")
+            _hex_generation(str(document.get("parent_hash")), "parent_hash")
+        except PrivateRevisionError:
+            return None
+    return document
+
+
+def _chain_complete(root: Path, generation: str, manifest_hash: str, **options: Any) -> dict[str, Any] | None:
+    seen: set[str] = set()
+    current_generation = generation
+    current_hash = manifest_hash
+    document = None
+    while current_generation:
+        if current_generation in seen or len(seen) > 4096:
+            return None
+        seen.add(current_generation)
+        document = _open_case_document(root, current_generation, current_hash, **options)
+        if document is None:
+            return None
+        parent = str(document.get("parent_generation") or "")
+        parent_hash = str(document.get("parent_hash") or "")
+        if not parent:
+            return document if current_generation == generation else _open_case_document(root, generation, manifest_hash, **options)
+        current_generation = parent
+        current_hash = parent_hash
+    return None
+
+
+def _case_options(tenant_id: str, case_id: str, principal_id: str, key: bytes, key_id: str) -> dict[str, Any]:
+    return {
+        "tenant_id": tenant_id,
+        "case_id": case_id,
+        "principal_id": principal_id,
+        "key": key,
+        "key_id": key_id,
+    }
+
+
+def _publish_iroh_cas(
+    store: Any,
+    *,
+    namespace_id: str,
+    writer_id: str,
+    envelope: bytes,
+    parent_revision: int | None,
+    parent_manifest_hash: str,
+) -> tuple[int, str]:
+    """Delegate head publication to Kit IrohManifestStore. Does not start a sidecar."""
+
+    try:
+        import asyncio
+
+        from blake3 import blake3
+        from ipfs_kit_py.iroh.errors import IrohConflictError
+        from ipfs_kit_py.iroh.manifest import DirectoryManifest, IrohManifestStore, ManifestEntry, ParentRevision
+    except Exception as exc:
+        raise PrivateRevisionError(
+            "Iroh manifest store is unavailable",
+            code="iroh_unavailable",
+            state="unavailable",
+        ) from exc
+    if not isinstance(store, IrohManifestStore):
+        raise PrivateRevisionError(
+            "Iroh manifest store is unavailable",
+            code="iroh_unavailable",
+            state="unavailable",
+        )
+    ref = _opaque_ref(envelope)
+    entries = [
+        ManifestEntry.root(mtime=_CASE_STAMP),
+        ManifestEntry(
+            ref,
+            "file",
+            False,
+            0o600,
+            _CASE_STAMP,
+            {},
+            blake3(envelope).hexdigest(),
+            len(envelope),
+        ),
+    ]
+    if parent_manifest_hash == "":
+        async def run():
+            return await store.create_namespace(
+                namespace_id,
+                writer_id,
+                entries,
+                created_at=_CASE_STAMP,
+            )
+    else:
+        if parent_revision is None:
+            raise PrivateRevisionError(
+                "Iroh parent head is unavailable",
+                code="iroh_parent_unavailable",
+                state="recoverable",
+            )
+        manifest = DirectoryManifest.create(
+            namespace_id,
+            writer_id,
+            int(parent_revision) + 1,
+            entries,
+            parent_revision=ParentRevision(int(parent_revision), parent_manifest_hash),
+            created_at=_CASE_STAMP,
+        )
+
+        async def run():
+            return await store.publish(
+                manifest,
+                expected_revision=int(parent_revision),
+                expected_manifest_hash=parent_manifest_hash,
+            )
+
+    try:
+        snapshot = asyncio.run(run())
+    except IrohConflictError as exc:
+        raise CaseManifestConflict() from exc
+    return int(snapshot.head.revision), str(snapshot.head.manifest_hash)
+
+
+def publish_case_manifest(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    expected_head: str | None,
+    expected_hash: str | None,
+    artifacts: Mapping[str, Any],
+    private_names: Mapping[str, Any] | None = None,
+    backend: str = "local",
+    iroh_store: Any = None,
+    fsync_file: Callable[[int], None] | None = None,
+    fsync_directory: Callable[[int], None] | None = None,
+) -> CaseManifestPublication:
+    """Seal one case manifest and publish it only when the expected head still matches.
+
+    ``expected_head`` is the opaque parent generation. ``expected_hash`` is that
+    generation's manifest hash. A mismatch raises :class:`CaseManifestConflict`
+    and leaves the published head unchanged.
+    """
+
+    if backend not in {"local", "iroh"}:
+        raise PrivateRevisionError("case manifest backend is unknown", code="backend_rejected", state="unavailable")
+    root = _case_root(repository)
+    expected_generation = _expected_ref(expected_head, "expected_head")
+    expected_manifest_hash = _expected_ref(expected_hash, "expected_hash")
+    options = _case_options(tenant_id, case_id, principal_id, key, key_id)
+    names = dict(private_names or {})
+    sealed_roles: dict[str, bytes] = {}
+    role_index: dict[str, dict[str, str]] = {}
+    for public_name, kind in _CASE_ROLES:
+        body, revision = _role_payload(artifacts, public_name)
+        envelope = _seal_role(body, kind=kind, revision=revision, **options)
+        sealed_roles[public_name] = envelope
+        role_index[public_name] = {"revision": revision, "ref": _opaque_ref(envelope), "kind": kind}
+    process_lock = _process_lock(root)
+    process_lock.acquire()
+    lock = None
+    try:
+        lock = _acquire_lock(root)
+        try:
+            current_generation, current_hash = _case_head(root)
+        except PrivateRevisionError as exc:
+            raise PrivateRevisionError(str(exc), code="corrupt_manifest", state="recoverable") from exc
+        if current_generation != expected_generation or current_hash != expected_manifest_hash:
+            raise CaseManifestConflict()
+        parent = None
+        if current_generation:
+            parent = _chain_complete(root, current_generation, current_hash, **options)
+            if parent is None:
+                raise PrivateRevisionError(
+                    "current case head is not a verified complete manifest",
+                    code="stale_head",
+                    state="recoverable",
+                )
+        iroh_revision = None
+        iroh_hash = ""
+        if backend == "iroh":
+            parent_revision = None if parent is None else parent.get("iroh_revision")
+            parent_hash = "" if parent is None else str(parent.get("iroh_manifest_hash") or "")
+            if parent is not None and (not isinstance(parent_revision, int) or not parent_hash):
+                raise PrivateRevisionError(
+                    "Iroh parent head is unavailable",
+                    code="iroh_parent_unavailable",
+                    state="recoverable",
+                )
+            namespace_id = hmac.new(
+                _require_data_key(key),
+                b"cg-case-manifest-namespace\x00" + tenant_id.encode("utf-8") + b"\x00" + case_id.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            writer_id = hmac.new(
+                _require_data_key(key),
+                b"cg-case-manifest-writer\x00" + principal_id.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            # The Iroh document receives only the opaque ciphertext ref. The
+            # envelope is sealed below; this call happens before the local head
+            # moves so a conflict cannot hide the previous generation.
+            placeholder = _seal_role(
+                _manifest_bytes({"schema": _CASE_SCHEMA, "preview": role_index, "names": names, "parent": current_generation}),
+                kind="case-manifest",
+                revision=current_hash or "0",
+                **options,
+            )
+            iroh_revision, iroh_hash = _publish_iroh_cas(
+                iroh_store,
+                namespace_id=namespace_id,
+                writer_id=writer_id,
+                envelope=placeholder,
+                parent_revision=None if parent is None else int(parent_revision),
+                parent_manifest_hash=parent_hash,
+            )
+        for envelope in sealed_roles.values():
+            _store_object(root, envelope, fsync_file=fsync_file, fsync_directory=fsync_directory)
+        document = {
+            "schema": _CASE_SCHEMA,
+            "parent_generation": current_generation,
+            "parent_hash": current_hash,
+            "roles": role_index,
+            "private_names": names,
+            "iroh_revision": iroh_revision,
+            "iroh_manifest_hash": iroh_hash,
+            "backend": backend,
+        }
+        manifest_hash = _opaque_ref(_manifest_bytes(document))
+        manifest_envelope = _seal_role(
+            _manifest_bytes(document),
+            kind="case-manifest",
+            revision=manifest_hash,
+            **options,
+        )
+        generation = _store_object(root, manifest_envelope, fsync_file=fsync_file, fsync_directory=fsync_directory)
+        verified = _open_case_document(root, generation, manifest_hash, **options)
+        if verified != document:
+            raise PrivateRevisionError("case manifest readback failed", code="readback_mismatch", state="recoverable")
+        _write_case_head(root, generation, manifest_hash, fsync_file=fsync_file, fsync_directory=fsync_directory)
+        _append_generation(root, generation, manifest_hash, fsync_file=fsync_file, fsync_directory=fsync_directory)
+        return CaseManifestPublication(
+            True,
+            "committed",
+            generation,
+            current_generation or None,
+            manifest_hash,
+            current_hash or None,
+            True,
+            backend,
+        )
+    finally:
+        if lock is not None:
+            _release_lock(lock)
+        process_lock.release()
+
+
+def read_case_manifest(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+) -> dict[str, Any] | None:
+    """Open the current head. A missing or stale blob is recoverable and writes nothing."""
+
+    root = _case_root(repository)
+    before = _snapshot_bytes(root)
+    try:
+        if not (root / _CASE_HEAD_NAME).exists():
+            return None
+        generation, manifest_hash = _case_head(root)
+        options = _case_options(tenant_id, case_id, principal_id, key, key_id)
+        document = _chain_complete(root, generation, manifest_hash, **options)
+        if document is None:
+            raise PrivateRevisionError(
+                "case manifest blob is missing or stale",
+                code="stale_head",
+                state="recoverable",
+            )
+        opened: dict[str, Any] = {
+            "manifest": document,
+            "generation": generation,
+            "manifest_hash": manifest_hash,
+            "parent_generation": document.get("parent_generation") or None,
+            "roles": {},
+            "envelopes": {},
+            "private_names": document.get("private_names") or {},
+            "minted_completion": False,
+        }
+        for public_name, kind in _CASE_ROLES:
+            slot = (document.get("roles") or {}).get(public_name) or {}
+            ref = str(slot.get("ref") or "")
+            revision = str(slot.get("revision") or "")
+            envelope = _object_bytes(root, ref)
+            opened["envelopes"][public_name] = envelope
+            opened["roles"][public_name] = _open_role(
+                envelope,
+                kind=kind,
+                revision=revision,
+                **options,
+            )
+        return opened
+    finally:
+        if _snapshot_bytes(root) != before:
+            raise PrivateRevisionError("case manifest read changed bytes", code="journal_mutated", state="recoverable")
+
+
+def recover_case_manifest(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    fsync_file: Callable[[int], None] | None = None,
+    fsync_directory: Callable[[int], None] | None = None,
+) -> CaseManifestPublication:
+    """Point the head at the newest verified complete generation already on disk.
+
+    Recovery never seals a replacement manifest and never mints a completed
+    publication for a missing or stale blob.
+    """
+
+    root = _case_root(repository)
+    options = _case_options(tenant_id, case_id, principal_id, key, key_id)
+    process_lock = _process_lock(root)
+    process_lock.acquire()
+    lock = None
+    try:
+        if not root.exists():
+            return CaseManifestPublication(False, "recoverable", None, None, None, None, False, "local", "missing_repository")
+        lock = _acquire_lock(root)
+        candidates = _generation_index(root)
+        try:
+            head = _case_head(root)
+        except PrivateRevisionError:
+            head = ("", "")
+        if head[0] and head not in candidates:
+            candidates.append(head)
+        chosen: tuple[str, str] | None = None
+        chosen_document: dict[str, Any] | None = None
+        for generation, manifest_hash in candidates:
+            document = _chain_complete(root, generation, manifest_hash, **options)
+            if document is not None:
+                chosen = (generation, manifest_hash)
+                chosen_document = document
+        if chosen is None or chosen_document is None:
+            return CaseManifestPublication(
+                False, "recoverable", None, None, None, None, False, "local", "stale_head",
+            )
+        if head != chosen:
+            _write_case_head(root, chosen[0], chosen[1], fsync_file=fsync_file, fsync_directory=fsync_directory)
+        return CaseManifestPublication(
+            False,
+            "recovered",
+            chosen[0],
+            str(chosen_document.get("parent_generation") or "") or None,
+            chosen[1],
+            str(chosen_document.get("parent_hash") or "") or None,
+            False,
+            str(chosen_document.get("backend") or "local"),
+            "stale_head",
+        )
+    finally:
+        if lock is not None:
+            _release_lock(lock)
+        process_lock.release()
+
+
 def assert_store_isolated_from_exports(store_dir: str | Path, export_dir: str | Path) -> None:
     """Refuse to keep a key store inside or next to an encrypted export directory."""
 
@@ -2742,4 +3321,9 @@ __all__ = [
     "read_private_revision",
     "private_revision_readiness",
     "recover_private_revision",
+    "CaseManifestConflict",
+    "CaseManifestPublication",
+    "publish_case_manifest",
+    "read_case_manifest",
+    "recover_case_manifest",
 ]
