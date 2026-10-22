@@ -76,7 +76,7 @@ Implementation instructions:
 
 ## CIMP-TUI-04 Feed cited jurisdiction-specific legal requirements into intake
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.tui
