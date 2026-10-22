@@ -1,5 +1,9 @@
 import json
+import os
+import sys
 import shlex
+import shutil
+import textwrap
 import importlib.util
 from pathlib import Path
 from urllib import request
@@ -27,9 +31,103 @@ class CLI:
 		self.print_commands()
 		print('')
 
+		self._terminal_stop_reason = None
 		self.feed()
-		self.loop()
+		try:
+			self.loop()
+		except EOFError:
+			self._persist_terminal_stop('eof')
+			print('Recoverable pause after EOF (exit 1). Pending inquiry kept.')
+			raise SystemExit(1)
+		except KeyboardInterrupt:
+			self._persist_terminal_stop('interrupted')
+			print('\nRecoverable pause after interrupt (exit 130). Pending inquiry kept.')
+			raise SystemExit(130)
 
+
+	def _color_enabled(self):
+		if os.environ.get('NO_COLOR') or os.environ.get('COMPLAINT_CLI_NO_COLOR'):
+			return False
+		if str(os.environ.get('TERM') or '') == 'dumb':
+			return False
+		return sys.stdout.isatty() if hasattr(sys.stdout, 'isatty') else False
+
+	def _paint(self, code, text):
+		rendered = self._render_text(text)
+		if not self._color_enabled():
+			return rendered
+		return '\033[%sm%s\033[0m' % (code, rendered)
+
+	def _render_text(self, text):
+		raw = str(text or '')
+		if os.environ.get('COMPLAINT_CLI_ASCII') == '1':
+			raw = raw.encode('ascii', 'replace').decode('ascii')
+		columns = os.environ.get('COLUMNS', '')
+		width = int(columns) if str(columns).isdigit() else shutil.get_terminal_size(fallback=(80, 24)).columns
+		width = max(8, width)
+		lines = []
+		for paragraph in raw.splitlines() or ['']:
+			if len(paragraph) <= width:
+				lines.append(paragraph)
+			else:
+				lines.extend(textwrap.wrap(paragraph, width=width, break_long_words=True, replace_whitespace=False) or [paragraph])
+		return '\n'.join(lines)
+
+	def _persist_terminal_stop(self, reason):
+		self._terminal_stop_reason = reason
+		try:
+			self.save()
+		except Exception as exception:
+			self.print_error('pause save failed: %s' % exception)
+
+	def _slash_command(self, text):
+		stripped = str(text or '').strip()
+		if not stripped.startswith('/'):
+			return False
+		parts = stripped.split(None, 1)
+		command = parts[0].lower()
+		argument = parts[1] if len(parts) > 1 else ''
+		known = {'/help', '/status', '/why', '/skip', '/edit', '/pause', '/resume', '/quit'}
+		if command not in known:
+			self.print_error('Unknown command. It was not stored. Use /help.')
+			return True
+		if command == '/help':
+			self.print_commands()
+			print('Exit codes: 0 finished or /quit, 1 EOF recoverable pause, 130 Ctrl-C recoverable pause.')
+			print('Multiline input ends a line with \\. NO_COLOR and TERM=dumb disable color. COMPLAINT_CLI_ASCII=1 forces ASCII. COLUMNS wraps narrow terminals.')
+			print('Stale concurrent answers are rejected and are not saved.')
+		elif command == '/status':
+			self.print_response(self._format_status_output())
+		elif command == '/why':
+			payload_getter = getattr(self.mediator, 'get_current_inquiry_payload', None)
+			summary = ''
+			if callable(payload_getter):
+				try:
+					payload = payload_getter() or {}
+					explanation = payload.get('explanation') or {}
+					summary = str(explanation.get('summary') or explanation.get('why_this_matters') or '').strip()
+				except Exception:
+					summary = ''
+			self.print_response(summary or 'Why this question: it asks for a fact the interview still does not have. /why is not stored as an answer.')
+		elif command == '/skip':
+			self.mediator.state.answered_questions['last_skipped'] = 'skipped'
+			self.print_response('Recorded skipped. It does not satisfy the underlying legal requirement.')
+		elif command == '/edit':
+			if not argument.strip():
+				self.print_error('Usage: /edit replacement text. Nothing was changed.')
+			else:
+				self.mediator.state.answered_questions['last_edit'] = argument.strip()
+				self.print_response('Edited the last recorded answer. The pending question is unchanged.')
+		elif command == '/pause':
+			self._persist_terminal_stop('user_pause')
+			print('Chat paused. Resume with /resume. The pending inquiry is unchanged.')
+		elif command == '/resume':
+			self.resume()
+		elif command == '/quit':
+			self._persist_terminal_stop('user_quit')
+			print('Chat paused. Resume with the same session to continue the saved intake.')
+			raise SystemExit(0)
+		return True
 
 	def loop(self):
 		while True:
@@ -50,8 +148,12 @@ class CLI:
 			try:
 				text = input(last_question + '> ')
 			except EOFError:
-				print('\nExiting mediator CLI.')
-				return
+				raise
+			except KeyboardInterrupt:
+				raise
+			if text.strip().startswith('/'):
+				self._slash_command(text)
+				continue
 			self.mediator.state.answered_questions["last_question"] = text
 
 			if text == '':
@@ -119,8 +221,8 @@ class CLI:
 	def feed(self, text=None):
 		try:
 			if text is not None:
-				print('\033[96m%s\033[0m' % f'You: {text}')
-			print('\033[93m%s\033[0m' % 'Mediator is thinking...')
+				print(self._paint('96', f'You: {text}'))
+			print(self._paint('93', 'Mediator is thinking...'))
 			transition = getattr(self.mediator, 'transition_shared_interview', None)
 			if callable(transition):
 				response = transition(text)
@@ -134,7 +236,7 @@ class CLI:
 				explanation = payload.get('explanation') or {}
 				summary = str(explanation.get('summary') or '').strip()
 				if summary:
-					print('\033[90m%s\033[0m' % f"Why this question: {summary}")
+					print(self._paint('90', f"Why this question: {summary}"))
 		except UserPresentableException as exception:
 			self.print_error(exception.description)
 		except Exception as exception:
@@ -277,6 +379,15 @@ class CLI:
 				"current_inquiry_explanation": getattr(state, 'current_inquiry_explanation', None),
 				"data": getattr(state, 'data', {}),
 			},
+			"terminal_controls": {
+				"schema": "terminal-controls-v1",
+				"stop_reason": getattr(self, '_terminal_stop_reason', None),
+				"pending_question": self._resolve_prompt_text(),
+				"objective_id": str((getattr(state, 'current_inquiry', {}) or {}).get('objective_id') or '') if isinstance(getattr(state, 'current_inquiry', None), dict) else '',
+				"graph_revision": int((getattr(state, 'current_inquiry', {}) or {}).get('revision') or 0) if isinstance(getattr(state, 'current_inquiry', None), dict) else 0,
+				"unknown_answers": [value for value in (getattr(state, 'answered_questions', {}) or {}).values() if str(value).strip().lower() in {'unknown', 'not sure', 'unsure'}],
+				"skipped_answers": [getattr(state, 'answered_questions', {}).get('last_skipped')] if isinstance(getattr(state, 'answered_questions', None), dict) and getattr(state, 'answered_questions', {}).get('last_skipped') else [],
+			},
 			"shared_interview": self._shared_interview_projection(),
 		}
 
@@ -289,6 +400,14 @@ class CLI:
 		restorer = getattr(getattr(self.mediator, 'workflow_actions', None), 'restore_session_projection', None)
 		if isinstance(projection, dict) and callable(restorer):
 			restorer(projection)
+		controls = payload.get('terminal_controls') if isinstance(payload, dict) else None
+		if isinstance(controls, dict):
+			self._terminal_stop_reason = controls.get('stop_reason')
+			print('Restored pending question objective=%s revision=%s stop_reason=%s' % (
+				controls.get('objective_id') or '',
+				controls.get('graph_revision'),
+				controls.get('stop_reason') or '',
+			))
 		sync_chat_history = getattr(state, '_sync_chat_history_state', None)
 		if callable(sync_chat_history):
 			sync_chat_history()
@@ -1219,11 +1338,11 @@ class CLI:
 
 
 	def print_response(self, text):
-		print('\033[92m%s\033[0m' % 'Mediator response:')
-		print('\033[1m%s\033[0m' % text)
+		print(self._paint('92', 'Mediator response:'))
+		print(self._paint('1', text))
 
 	def print_error(self, text):
-		print('\033[91m%s\033[0m' % text)
+		print(self._paint('91', text))
 
 	def print_commands(self):
 		print('!help       show available commands')

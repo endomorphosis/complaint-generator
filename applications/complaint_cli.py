@@ -5,7 +5,10 @@ from functools import wraps
 import inspect
 import json
 import os
+import shutil
 import sys
+import textwrap
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -93,6 +96,37 @@ from .complaint_workspace import ComplaintWorkspaceService, WorkspaceAuthorizati
 DEFAULT_UI_UX_SCREENSHOT_TARGET = "playwright/tests/complaint-flow.spec.js"
 DEFAULT_UI_UX_OPTIMIZER_METHOD = "actor_critic"
 DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
+
+# Documented chat exit codes. EOF stays 1 so existing harnesses keep a
+# recoverable non-zero pause. Ctrl-C uses the conventional 128+SIGINT value.
+EXIT_OK = 0
+EXIT_EOF_PAUSE = 1
+EXIT_INTERRUPTED = 130
+TERMINAL_COMMANDS = ("/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit")
+_UNKNOWN_ANSWERS = {
+    "unknown", "i don't know", "i do not know", "idk", "not sure", "unsure", "n/a", "na",
+}
+_PAUSE_MESSAGE = "Chat paused. Resume with the same user ID to continue the saved intake."
+_HELP_TEXT = """
+Terminal controls (a command is never stored as an answer):
+  /help     show this help, exit codes, and input modes
+  /status   show the pending question, objective, graph revision, stop reason, and unknown/skipped answers
+  /why      explain why the pending question matters; the question stays pending
+  /skip     record the pending question as skipped; it does not satisfy the legal requirement
+  /edit     replace the last recorded answer: /edit new text
+  /pause    persist a recoverable pause and keep the pending inquiry
+  /resume   restore the saved pending question after /pause
+  /quit     persist stop reason user_quit and leave the pending inquiry in place
+Exit codes:
+  0   finished, /quit, or the turn limit
+  1   EOF recoverable pause (pending inquiry kept, no traceback)
+  130 Ctrl-C recoverable pause (pending inquiry kept, no traceback)
+Input:
+  End a line with \\ to continue a multiline answer.
+  NO_COLOR, COMPLAINT_CLI_NO_COLOR, or TERM=dumb disables color.
+  COMPLAINT_CLI_ASCII=1 prints ASCII only. COLUMNS wraps narrow terminals.
+  A stale concurrent answer is rejected and is not saved.
+""".strip()
 
 
 app = typer.Typer(help="Unified complaint workspace CLI.")
@@ -184,7 +218,6 @@ def _workspace_command_boundary(function):
         try:
             return function(*args, **kwargs)
         except EOFError:
-            # EOF/pause semantics are a separate terminal-controls contract.
             raise
         except Exception as error:
             # Typer/Rich may otherwise render private answer and storage locals.
@@ -316,7 +349,290 @@ def _read_narrative_file(path_text: str) -> str:
         raise ValueError("narrative file is not readable") from exc
 
 
-def read_original_complaint_input(stream=None, *, interactive: Optional[bool] = None) -> str:
+def terminal_color_enabled(stream=None) -> bool:
+    """Color is opt-in for a real terminal and never implied by NO_COLOR."""
+
+    if os.environ.get("NO_COLOR") or os.environ.get("COMPLAINT_CLI_NO_COLOR"):
+        return False
+    if str(os.environ.get("TERM") or "") == "dumb":
+        return False
+    target = sys.stdout if stream is None else stream
+    isatty = getattr(target, "isatty", None)
+    return bool(isatty()) if callable(isatty) else False
+
+
+def terminal_width() -> int:
+    raw = str(os.environ.get("COLUMNS") or "").strip()
+    if raw.isdigit():
+        return max(8, int(raw))
+    try:
+        return max(8, int(shutil.get_terminal_size(fallback=(80, 24)).columns))
+    except OSError:
+        return 80
+
+
+def format_terminal_text(text: str) -> str:
+    """Wrap for the active width and honor ASCII-only mode."""
+
+    raw = str(text or "")
+    if os.environ.get("COMPLAINT_CLI_ASCII") == "1":
+        raw = raw.encode("ascii", "replace").decode("ascii")
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        raw.encode(encoding)
+    except UnicodeEncodeError:
+        raw = raw.encode(encoding, "replace").decode(encoding, "replace")
+    width = terminal_width()
+    lines: list[str] = []
+    for paragraph in raw.splitlines() or [""]:
+        if len(paragraph) <= width:
+            lines.append(paragraph)
+            continue
+        lines.extend(
+            textwrap.wrap(
+                paragraph,
+                width=width,
+                break_long_words=True,
+                break_on_hyphens=False,
+                replace_whitespace=False,
+                drop_whitespace=False,
+            )
+            or [paragraph]
+        )
+    return "\n".join(lines)
+
+
+def terminal_echo(text: str) -> None:
+    typer.echo(format_terminal_text(text))
+
+
+def _prompt_prefix() -> str:
+    if terminal_color_enabled():
+        return "\033[36m>\033[0m "
+    return "> "
+
+
+def _controls(state: dict[str, Any]) -> dict[str, Any]:
+    controls = state.get("terminal_controls")
+    if not isinstance(controls, dict):
+        controls = {}
+        state["terminal_controls"] = controls
+    controls.setdefault("schema", "terminal-controls-v1")
+    controls.setdefault("paused", False)
+    controls.setdefault("stop_reason", None)
+    controls.setdefault("pending_inquiry", None)
+    controls.setdefault("objective_id", None)
+    controls.setdefault("graph_revision", 0)
+    controls.setdefault("unknown_answers", [])
+    controls.setdefault("skipped_answers", [])
+    controls.setdefault("edits", [])
+    controls.setdefault("fingerprint", None)
+    return controls
+
+
+def _projection_pending(state: dict[str, Any]) -> dict[str, Any]:
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+    pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else {}
+    return pending
+
+
+def _objective_id(state: dict[str, Any], inquiry: Optional[dict]) -> str:
+    explained = state.get("explained_inquiry") if isinstance(state.get("explained_inquiry"), dict) else {}
+    objective = str(explained.get("objective_id") or "").strip()
+    if objective:
+        return objective
+    pending = _projection_pending(state)
+    objective = str(pending.get("objective_id") or pending.get("inquiry_id") or "").strip()
+    if objective:
+        return objective
+    return str((inquiry or {}).get("question_id") or "narrative")
+
+
+def _graph_revision(state: dict[str, Any], inquiry: Optional[dict]) -> int:
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+    pending = _projection_pending(state)
+    for value in (
+        pending.get("revision"),
+        (inquiry or {}).get("revision"),
+        projection.get("question_revision"),
+        projection.get("session_revision"),
+    ):
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    narrative = state.get("original_complaint") if isinstance(state.get("original_complaint"), dict) else {}
+    try:
+        return int(narrative.get("revision") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def answer_fingerprint(state: dict[str, Any], inquiry: Optional[dict]) -> dict[str, Any]:
+    """Identity of the question currently shown to the user."""
+
+    pending = _projection_pending(state)
+    narrative = state.get("original_complaint") if isinstance(state.get("original_complaint"), dict) else {}
+    inquiry = inquiry or {}
+    return {
+        "inquiry_id": str(pending.get("inquiry_id") or inquiry.get("question_id") or ""),
+        "question_revision": _graph_revision(state, inquiry),
+        "session_revision": int((state.get("shared_interview") or {}).get("session_revision") or 0)
+        if isinstance(state.get("shared_interview"), dict)
+        else 0,
+        "history_len": len(state.get("intake_history") or []),
+        "narrative_revision": int(narrative.get("revision") or 0),
+        "objective_id": _objective_id(state, inquiry),
+    }
+
+
+def remember_pending_inquiry(state: dict[str, Any], inquiry: Optional[dict], *, stop_reason: Optional[str] = None, paused: Optional[bool] = None) -> dict[str, Any]:
+    controls = _controls(state)
+    snapshot = dict(inquiry or {})
+    snapshot["objective_id"] = _objective_id(state, inquiry)
+    snapshot["graph_revision"] = _graph_revision(state, inquiry)
+    controls["pending_inquiry"] = snapshot
+    controls["objective_id"] = snapshot["objective_id"]
+    controls["graph_revision"] = snapshot["graph_revision"]
+    controls["fingerprint"] = answer_fingerprint(state, inquiry)
+    if stop_reason is not None:
+        controls["stop_reason"] = stop_reason
+    if paused is not None:
+        controls["paused"] = paused
+    return controls
+
+
+def load_terminal_state(user_id: str) -> dict[str, Any]:
+    return service._load_state(user_id)
+
+
+def save_terminal_state(state: dict[str, Any]) -> None:
+    service._save_state(state)
+
+
+def stale_answer_rejection(user_id: str, shown: dict[str, Any]) -> Optional[str]:
+    """Reject an answer when another writer moved the pending inquiry."""
+
+    if not isinstance(shown, dict):
+        return None
+    try:
+        current = answer_fingerprint(load_terminal_state(user_id), {"question_id": shown.get("inquiry_id")})
+    except Exception:
+        return None
+    compared = ("inquiry_id", "question_revision", "session_revision", "history_len", "narrative_revision")
+    if any(current.get(key) != shown.get(key) for key in compared):
+        return "stale_question"
+    return None
+
+
+def _pause_and_exit(user_id: Optional[str], reason: str, code: int, inquiry: Optional[dict]) -> None:
+    if user_id:
+        try:
+            state = load_terminal_state(user_id)
+            controls = _controls(state)
+            stored_reason = reason
+            if reason in {"eof", "interrupted"} and controls.get("paused") and controls.get("stop_reason"):
+                stored_reason = str(controls.get("stop_reason"))
+            remember_pending_inquiry(state, inquiry, stop_reason=stored_reason, paused=True)
+            save_terminal_state(state)
+        except Exception:
+            terminal_echo("Recoverable pause could not be saved. The pending inquiry was not submitted.")
+    if reason == "eof":
+        terminal_echo(
+            "Recoverable pause after EOF (exit 1). Pending inquiry kept. "
+            "Resume with the same user ID."
+        )
+    elif reason == "interrupted":
+        terminal_echo(
+            "Recoverable pause after interrupt (exit 130). Pending inquiry kept. "
+            "Resume with the same user ID."
+        )
+    else:
+        terminal_echo(_PAUSE_MESSAGE)
+    raise SystemExit(code)
+
+
+def _status_text(state: dict[str, Any]) -> str:
+    controls = _controls(state)
+    pending = controls.get("pending_inquiry") if isinstance(controls.get("pending_inquiry"), dict) else {}
+    unknown = controls.get("unknown_answers") or []
+    skipped = controls.get("skipped_answers") or []
+    lines = [
+        "terminal-control"
+        f" question_id={pending.get('question_id') or ''}"
+        f" revision={controls.get('graph_revision')}"
+        f" objective={controls.get('objective_id') or ''}"
+        f" stop_reason={controls.get('stop_reason') or ''}"
+        f" paused={str(bool(controls.get('paused'))).lower()}",
+        f"unknown_answers={len(unknown)} skipped_answers={len(skipped)}",
+    ]
+    for item in unknown:
+        if isinstance(item, dict):
+            lines.append(f"unknown {item.get('question_id')}: {item.get('answer')}")
+    for item in skipped:
+        if isinstance(item, dict):
+            lines.append(
+                f"skipped {item.get('question_id')} satisfies_requirement=false"
+            )
+    prompt = str(pending.get("prompt") or pending.get("question") or "").strip()
+    if prompt:
+        lines.append(prompt)
+    return "\n".join(lines)
+
+
+def _record_non_answer(state: dict[str, Any], inquiry: dict, kind: str, answer: str) -> None:
+    controls = _controls(state)
+    entry = {
+        "question_id": str(inquiry.get("question_id") or ""),
+        "objective_id": _objective_id(state, inquiry),
+        "graph_revision": _graph_revision(state, inquiry),
+        "answer": answer,
+        "recorded_as": kind,
+        "satisfies_requirement": False,
+    }
+    key = "skipped_answers" if kind == "skipped" else "unknown_answers"
+    bucket = list(controls.get(key) or [])
+    bucket.append(entry)
+    controls[key] = bucket
+    history = state.setdefault("intake_history", [])
+    history.append({
+        "question_id": entry["question_id"],
+        "answer": answer,
+        "disposition": kind,
+        "satisfies_requirement": False,
+        "captured_at": state.get("updated_at"),
+    })
+
+
+def _apply_edit(state: dict[str, Any], replacement: str) -> str:
+    replacement = replacement.strip()
+    if not replacement:
+        return "Edit needs replacement text. The pending question is unchanged."
+    answers = state.setdefault("intake_answers", {})
+    history = state.setdefault("intake_history", [])
+    target = None
+    for item in reversed(history):
+        if isinstance(item, dict) and item.get("question_id") and item.get("disposition") not in {"skipped"}:
+            target = item
+            break
+    if target is None and not answers:
+        return "Nothing to edit yet. The pending question is unchanged."
+    question_id = str((target or {}).get("question_id") or next(iter(answers), ""))
+    previous = str(answers.get(question_id) or (target or {}).get("answer") or "")
+    if question_id:
+        answers[question_id] = replacement
+    if isinstance(target, dict):
+        target["answer"] = replacement
+        target["edited"] = True
+    _controls(state).setdefault("edits", []).append({
+        "question_id": question_id,
+        "previous": previous,
+        "replacement": replacement,
+    })
+    return "Edited the last recorded answer. The pending question is unchanged."
+
+
+def read_original_complaint_input(stream=None, *, interactive: Optional[bool] = None, first_line: Optional[str] = None) -> str:
     """Read a complaint narrative from the terminal, a pipe, or an ``@path`` file.
 
     A single interactive line is one narrative. End a line with ``\\`` to
@@ -341,7 +657,7 @@ def read_original_complaint_input(stream=None, *, interactive: Optional[bool] = 
             return None
         return line.rstrip("\n")
 
-    first = read_line()
+    first = first_line if first_line is not None else read_line()
     if first is None:
         raise EOFError
     stripped = first.strip()
@@ -373,46 +689,220 @@ def read_original_complaint_input(stream=None, *, interactive: Optional[bool] = 
     return text
 
 
-def _read_chat_answer(inquiry: dict) -> str:
-    if str(inquiry.get("question_id") or "") == "original_complaint":
-        return read_original_complaint_input()
-    answer_text = input("> ")
-    return answer_text.strip()
+def _read_prompt_line() -> Optional[str]:
+    try:
+        return input(_prompt_prefix())
+    except EOFError:
+        return None
+    except OSError:
+        return None
+
+
+def _read_multiline_from(first: str) -> str:
+    chunks = [first[:-1] if first.endswith("\\") else first]
+    pending_cont = first.endswith("\\")
+    while pending_cont:
+        nxt = _read_prompt_line()
+        if nxt is None:
+            break
+        if nxt.endswith("\\"):
+            chunks.append(nxt[:-1])
+            continue
+        chunks.append(nxt)
+        pending_cont = False
+    return "\n".join(chunks).strip()
+
+
+def _command_name(text: str) -> Optional[str]:
+    stripped = text.strip()
+    if not stripped.startswith("/"):
+        return None
+    word = stripped.split(None, 1)[0].lower()
+    if word in TERMINAL_COMMANDS:
+        return word
+    return ""
+
+
+def _sync_controls_from_payload(user_id: str, payload: dict, inquiry: Optional[dict]) -> dict[str, Any]:
+    del payload
+    state = load_terminal_state(user_id)
+    remember_pending_inquiry(state, inquiry, paused=bool(_controls(state).get("paused")))
+    save_terminal_state(state)
+    return state
+
+
+def _provider_wait_interruptible() -> None:
+    raw = os.environ.get("COMPLAINT_TUI_PROVIDER_WAIT_SECONDS", "").strip()
+    if not raw:
+        return
+    try:
+        delay = float(raw)
+    except ValueError:
+        return
+    if delay <= 0:
+        return
+    terminal_echo("Waiting for provider...")
+    sys.stdout.flush()
+    deadline = time.monotonic() + delay
+    while time.monotonic() < deadline:
+        time.sleep(0.05)
 
 
 @app.command("chat")
 @_workspace_command_boundary
 def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
+    try:
+        max_turns = int(max_turns)
+    except (TypeError, ValueError):
+        max_turns = 0
     payload = service.run_intake_chat_turn(user_id)
     accepted_turns = 0
+    paused = False
+    announced_restore = False
+    shown: dict[str, Any] = {}
 
     while True:
         _require_readable_session(payload)
         trace = (payload.get("session") or {}).get("router_trace") or {}
         if trace.get("diagnostics"):
-            typer.echo("Router diagnostics: " + json.dumps(trace["diagnostics"], sort_keys=True))
-        typer.echo(str(payload.get("message") or "").strip())
+            terminal_echo("Router diagnostics: " + json.dumps(trace["diagnostics"], sort_keys=True))
         inquiry = dict(payload.get("inquiry") or {})
+        try:
+            state = _sync_controls_from_payload(user_id, payload, inquiry or None)
+        except Exception:
+            state = {}
+        if state and not announced_restore:
+            controls = _controls(state)
+            if controls.get("stop_reason") and controls.get("paused"):
+                announced_restore = True
+                paused = True
+                pending = controls.get("pending_inquiry") if isinstance(controls.get("pending_inquiry"), dict) else {}
+                terminal_echo(
+                    "Restored pending question"
+                    f" question_id={pending.get('question_id') or inquiry.get('question_id') or ''}"
+                    f" revision={controls.get('graph_revision')}"
+                    f" objective={controls.get('objective_id') or ''}"
+                    f" stop_reason={controls.get('stop_reason')}"
+                )
+        if str(payload.get("message") or "").strip():
+            terminal_echo(str(payload.get("message") or "").strip())
         if not inquiry:
             break
+        shown = {}
+        if isinstance(state, dict) and state:
+            shown = dict(_controls(state).get("fingerprint") or {})
         if max_turns > 0 and accepted_turns >= max_turns:
-            typer.echo("Chat paused. Resume with the same user ID to continue the saved intake.")
-            break
+            _pause_and_exit(user_id, "turn_limit", EXIT_OK, inquiry)
         try:
-            answer_text = _read_chat_answer(inquiry)
-        except EOFError:
-            raise
-        if not answer_text:
-            typer.echo("Please enter a response or stop the command and resume later with the same user ID.")
+            line = _read_prompt_line()
+        except KeyboardInterrupt:
+            _pause_and_exit(user_id, "interrupted", EXIT_INTERRUPTED, inquiry)
+        if line is None:
+            _pause_and_exit(user_id, "eof", EXIT_EOF_PAUSE, inquiry)
+        command = _command_name(line)
+        if command == "":
+            terminal_echo("Unknown command. It was not stored. Use /help.")
             continue
+        if command == "/help":
+            terminal_echo(_HELP_TEXT)
+            continue
+        if command == "/status":
+            terminal_echo(_status_text(state if isinstance(state, dict) else load_terminal_state(user_id)))
+            continue
+        if command == "/why":
+            payload = service.run_intake_chat_turn(user_id, message="/why", question_id=str(inquiry.get("question_id") or "") or None)
+            continue
+        if command == "/pause":
+            paused = True
+            fresh = load_terminal_state(user_id)
+            remember_pending_inquiry(fresh, inquiry, stop_reason="user_pause", paused=True)
+            save_terminal_state(fresh)
+            terminal_echo(_PAUSE_MESSAGE)
+            continue
+        if command == "/resume":
+            paused = False
+            fresh = load_terminal_state(user_id)
+            remember_pending_inquiry(fresh, inquiry, stop_reason=_controls(fresh).get("stop_reason"), paused=False)
+            save_terminal_state(fresh)
+            terminal_echo(_status_text(fresh))
+            payload = service.run_intake_chat_turn(user_id, interview_action="resume")
+            continue
+        if command == "/quit":
+            _pause_and_exit(user_id, "user_quit", EXIT_OK, inquiry)
+        if paused:
+            terminal_echo("Paused. Use /resume to answer, or /quit to leave the pending inquiry saved.")
+            continue
+        if command == "/skip":
+            fresh = load_terminal_state(user_id)
+            _record_non_answer(fresh, inquiry, "skipped", "skipped")
+            remember_pending_inquiry(fresh, inquiry, stop_reason=None, paused=False)
+            question_id = str(inquiry.get("question_id") or "")
+            if question_id and question_id != "original_complaint":
+                answers = fresh.setdefault("intake_answers", {})
+                answers[question_id] = "skipped"
+            save_terminal_state(fresh)
+            if question_id == "original_complaint":
+                terminal_echo("Skipped the narrative. It does not satisfy a legal requirement. The question stays pending.")
+                continue
+            payload = service.run_intake_chat_turn(
+                user_id,
+                message="skipped",
+                question_id=question_id or None,
+                expected_question_revision=inquiry.get("revision") if isinstance(inquiry.get("revision"), int) else None,
+                interview_action="answer" if question_id.startswith("inq-") else None,
+            )
+            accepted_turns += 1
+            continue
+        if command == "/edit":
+            replacement = line.strip()[len("/edit"):].strip()
+            if not replacement:
+                terminal_echo("Usage: /edit replacement text. Nothing was changed.")
+                continue
+            fresh = load_terminal_state(user_id)
+            terminal_echo(_apply_edit(fresh, replacement))
+            remember_pending_inquiry(fresh, inquiry, paused=False)
+            save_terminal_state(fresh)
+            continue
+        if str(inquiry.get("question_id") or "") == "original_complaint":
+            try:
+                answer_text = read_original_complaint_input(first_line=line)
+            except EOFError:
+                _pause_and_exit(user_id, "eof", EXIT_EOF_PAUSE, inquiry)
+            except KeyboardInterrupt:
+                _pause_and_exit(user_id, "interrupted", EXIT_INTERRUPTED, inquiry)
+        else:
+            answer_text = _read_multiline_from(line)
+        if not answer_text:
+            terminal_echo("Please enter a response or stop the command and resume later with the same user ID.")
+            continue
+        rejection = stale_answer_rejection(user_id, shown)
+        if rejection:
+            terminal_echo("Stale concurrent answer rejected. The pending inquiry was kept.")
+            payload = service.run_intake_chat_turn(user_id, interview_action="resume")
+            continue
+        try:
+            _provider_wait_interruptible()
+        except KeyboardInterrupt:
+            _pause_and_exit(user_id, "interrupted", EXIT_INTERRUPTED, inquiry)
+        question_id = str(inquiry.get("question_id") or "") or None
         payload = service.run_intake_chat_turn(
             user_id,
             message=answer_text,
-            question_id=str(inquiry.get("question_id") or "") or None,
+            question_id=question_id,
+            expected_question_revision=inquiry.get("revision") if isinstance(inquiry.get("revision"), int) else None,
+            interview_action="answer" if question_id and question_id.startswith("inq-") else None,
         )
+        if answer_text.strip().lower() in _UNKNOWN_ANSWERS:
+            fresh = load_terminal_state(user_id)
+            _record_non_answer(fresh, inquiry, "unknown", answer_text.strip())
+            save_terminal_state(fresh)
+        interview = payload.get("interview") if isinstance(payload.get("interview"), dict) else {}
+        error = interview.get("error") if isinstance(interview.get("error"), dict) else {}
+        if error.get("code") == "stale_question" or payload.get("status") == "refused":
+            terminal_echo("Stale concurrent answer rejected. The pending inquiry was kept.")
         accepted_turns += 1
 
-    typer.echo(f"Current synopsis: {str(payload.get('case_synopsis') or '').strip() or 'No synopsis recorded yet.'}")
+    terminal_echo(f"Current synopsis: {str(payload.get('case_synopsis') or '').strip() or 'No synopsis recorded yet.'}")
 
 
 @app.command("add-evidence")
