@@ -2066,14 +2066,12 @@ def case_alias_cache_public_view(user_id: str, case_id: str) -> Dict[str, Any]:
 	user, case = _case_cache_key(user_id, case_id)
 	with _CASE_CACHE_LOCK:
 		slot = dict(_CASE_ALIAS_CACHE.get((user, case), {}))
-	bodies = [envelope.decode("latin1", errors="replace") for envelope in slot.values()]
 	return {
-		"user_id": user,
-		"case_id": case,
 		"entry_count": len(slot),
 		"encrypted": all(envelope.startswith(b"CGPE") for envelope in slot.values()) if slot else True,
 		"bodies_are_envelopes": True,
-		"joined_ciphertext": "".join(bodies),
+		"ciphertext_digests": [hashlib.sha256(envelope).hexdigest() for envelope in slot.values()],
+		"joined_ciphertext": "",
 	}
 
 
@@ -2102,9 +2100,7 @@ def store_private_embedding(
 	user, case = _case_cache_key(user_id, case_id)
 	if not isinstance(vector, list) or not vector:
 		raise ValueError("privacy_denied:malformed_embedding")
-	embedding_id = hashlib.sha256(
-		json.dumps({"user": user, "case": case, "vector": vector}, separators=(",", ":")).encode("utf-8")
-	).hexdigest()
+	embedding_id = os.urandom(32).hex()
 	payload = json.dumps(
 		{"vector": vector, "source_text": str(source_text or "")},
 		separators=(",", ":"),
@@ -2185,12 +2181,11 @@ def redact_generation_diagnostic(record: Mapping[str, Any] | None) -> Dict[str, 
 
 
 def public_query_reference(query: str) -> Dict[str, Any]:
-	"""Hash a claim-specific query. The query text is not a public field."""
+	"""Allocate an opaque public reference for a private query."""
 
-	text = str(query or "")
 	return {
 		"schema": "public-query-ref/v1",
-		"query_ref": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+		"query_ref": os.urandom(32).hex(),
 		"classification": "opaque_private_ref",
 	}
 

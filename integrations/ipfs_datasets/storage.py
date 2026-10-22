@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -1164,6 +1167,61 @@ PADDING_POLICY = {
 _public_index_lock = threading.Lock()
 _public_index: list[dict[str, Any]] = []
 _storage_logger = logging.getLogger(__name__)
+_PUBLIC_ALIAS_KEY = os.urandom(32)
+_PUBLIC_STATUSES = frozenset({"unknown", "available", "unavailable", "ready", "starting", "running",
+    "stored", "pending", "degraded", "failed", "error", "complete", "completed", "stopped",
+    "paused", "cancelled", "timeout", "denied", "not_found", "repairing", "healthy"})
+_PUBLIC_OPERATIONS = frozenset({"unspecified", "daemon", "store-private-artifact", "publish-reference",
+    "store", "load", "save", "restore", "export", "render", "optimize", "poll", "pause", "resume", "status"})
+_PUBLIC_ERRORS = frozenset({"", "operation_error", "backend_unavailable", "provider_unavailable",
+    "privacy_denied", "permission_denied", "auth_denied", "timeout", "offline", "not_found",
+    "invalid_input", "validation_error", "configuration_error", "cancelled", "network_unavailable", "export_failed"})
+_PUBLIC_SOURCE_LABELS = frozenset({"synthetic-unspecified", "fixture-source-a", "ui-optimizer-daemon"})
+_PUBLIC_FILENAME_KINDS = frozenset({"object", "attachment", "document", "complaint", "graph", "proof",
+    "index", "snapshot", "embedding", "backup", "evidence"})
+
+
+def _diagnostic_alias(value: str, domain: str, record: Mapping[str, Any]) -> str:
+    scope = [str(record.get(key) or "") for key in ("user_id", "case_id")]
+    material = json.dumps([domain, *scope, value], ensure_ascii=False, separators=(",", ":")).encode()
+    return domain + "-" + hmac.new(_PUBLIC_ALIAS_KEY, material, hashlib.sha256).hexdigest()[:24]
+
+
+def _public_content_reference(value: Any) -> str | None:
+    """Accept bounded digest references and canonical SHA-256 IPFS CIDs."""
+    if not isinstance(value, str) or len(value) > 200:
+        return None
+    if re.fullmatch(r"[0-9a-f]{64}", value):
+        return value
+    if re.fullmatch(r"Qm[1-9A-HJ-NP-Za-km-z]{44}", value):
+        alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+        number = 0
+        for character in value:
+            number = number * 58 + alphabet.index(character)
+        decoded = number.to_bytes((number.bit_length() + 7) // 8, "big")
+        return value if len(decoded) == 34 and decoded[:2] == b"\x12\x20" else None
+    if not re.fullmatch(r"b[a-z2-7]{10,190}", value):
+        return None
+    try:
+        payload = value[1:]
+        decoded = base64.b32decode(payload.upper() + "=" * (-len(payload) % 8))
+        position = 0
+        def varint():
+            nonlocal position
+            result = 0
+            for shift in range(0, 63, 7):
+                byte = decoded[position]; position += 1
+                result |= (byte & 127) << shift
+                if byte < 128:
+                    if shift and byte == 0:
+                        raise ValueError("noncanonical_varint")
+                    return result
+            raise ValueError("unbounded_varint")
+        version, codec, algorithm, size = varint(), varint(), varint(), varint()
+        canonical = "b" + base64.b32encode(decoded).decode().lower().rstrip("=")
+        return value if version == 1 and codec > 0 and algorithm == 0x12 and size == 32 and len(decoded) - position == 32 and canonical == value else None
+    except (ValueError, IndexError):
+        return None
 
 
 def _sensitive_hit(value: str, literals: Sequence[str]) -> bool:
@@ -1185,38 +1243,38 @@ def project_public_cid_metadata(
     case name, complaint excerpt, filename, graph label, or claim query are dropped.
     """
 
-    if not isinstance(raw, Mapping):
-        return {"schema": "public-cid-metadata/v1", "classification": "opaque_private_ref"}
-    projected: dict[str, Any] = {"schema": "public-cid-metadata/v1"}
-    for key, value in raw.items():
-        name = str(key)
-        if name in _FORBIDDEN_PUBLIC_KEYS or name not in _PUBLIC_METADATA_KEYS:
-            continue
-        if isinstance(value, str):
-            if _sensitive_hit(value, sensitive_literals):
-                continue
-            if name == "artifact_class" and value not in _PUBLIC_ARTIFACT_CLASSES:
-                continue
-            projected[name] = value
-        elif isinstance(value, bool) or value is None:
-            projected[name] = value
-        elif name == "classification" and isinstance(value, str):
-            projected[name] = value
-    artifact_class = projected.get("artifact_class")
-    if artifact_class not in _PUBLIC_ARTIFACT_CLASSES:
-        projected["artifact_class"] = "opaque_private_ref"
-        projected["classification"] = "private_derived" if raw.get("classification") == "private_derived" else "opaque"
-    if projected.get("classification") == "private_derived":
-        projected["artifact_class"] = "opaque_private_ref"
+    raw = raw if isinstance(raw, Mapping) else {}
+    artifact_class = raw.get("artifact_class")
+    if not isinstance(artifact_class, str) or artifact_class not in _PUBLIC_ARTIFACT_CLASSES:
+        artifact_class = "opaque_private_ref"
+    classification = raw.get("classification")
+    if not isinstance(classification, str) or classification not in {"opaque", "private_derived", "public"}:
+        classification = "public" if artifact_class == "public_legal_source" else "opaque"
+    if classification == "private_derived":
+        artifact_class = "opaque_private_ref"
+    projected: dict[str, Any] = {"schema": "public-cid-metadata/v1", "artifact_class": artifact_class,
+        "classification": classification}
+    cid = _public_content_reference(raw.get("cid"))
+    if cid is not None:
+        projected["cid"] = cid
+    if isinstance(raw.get("cid_kind"), str) and raw["cid_kind"] in {"opaque", "ipfs", "local", "sha256", "ciphertext", "encrypted"}:
+        projected["cid_kind"] = raw["cid_kind"]
+    if isinstance(raw.get("status"), str) and raw["status"] in _PUBLIC_STATUSES:
+        projected["status"] = raw["status"]
+    name = raw.get("opaque_name")
+    if isinstance(name, str) and any(re.fullmatch(re.escape(kind) + r"-[0-9a-f]{32}\.bin", name) for kind in _PUBLIC_FILENAME_KINDS):
+        projected["opaque_name"] = name
+    for field, value in list(projected.items()):
+        if isinstance(value, str) and _sensitive_hit(value, sensitive_literals):
+            del projected[field]
     return projected
 
 
 def opaque_storage_filename(kind: str, secret_name: str) -> str:
     """Filename for a stored object. The original document name is not recoverable."""
 
-    kind_text = _FILENAME_KIND.sub("-", str(kind or "object").lower()).strip("-")[:24] or "object"
-    digest = hashlib.sha256(str(secret_name or "").encode("utf-8")).hexdigest()[:32]
-    return f"{kind_text}-{digest}.bin"
+    kind_text = kind if isinstance(kind, str) and kind in _PUBLIC_FILENAME_KINDS else "object"
+    return f"{kind_text}-{os.urandom(16).hex()}.bin"
 
 
 def clear_public_index() -> None:
@@ -1270,6 +1328,8 @@ def redact_private_diagnostic(record: Mapping[str, Any] | None) -> dict[str, Any
         raw_duration = record.get("duration_ms")
         if isinstance(raw_duration, bool) or not isinstance(raw_duration, (int, float)):
             raw_duration = record.get("phase_elapsed_seconds")
+            if not isinstance(raw_duration, bool) and isinstance(raw_duration, (int, float)):
+                raw_duration *= 1000
         if isinstance(raw_duration, bool) or not isinstance(raw_duration, (int, float)):
             duration_ms = None
         else:
@@ -1282,12 +1342,15 @@ def redact_private_diagnostic(record: Mapping[str, Any] | None) -> dict[str, Any
         source = "synthetic-unspecified"
     if not error_category and isinstance(record, Mapping) and record.get("error"):
         error_category = "operation_error"
+    record = record if isinstance(record, Mapping) else {}
+    if duration_ms is not None and (duration_ms < 0 or duration_ms > 86400000 or not math.isfinite(duration_ms)):
+        duration_ms = None
     diagnostic = {
-        "operation_id": operation_id[:128],
-        "status": status[:64],
-        "error_category": error_category[:64],
+        "operation_id": operation_id if operation_id in _PUBLIC_OPERATIONS else _diagnostic_alias(operation_id, "op", record),
+        "status": status if status in _PUBLIC_STATUSES else "unknown",
+        "error_category": error_category if error_category in _PUBLIC_ERRORS else "operation_error",
         "duration_ms": duration_ms,
-        "synthetic_source": source[:64],
+        "synthetic_source": source if source in _PUBLIC_SOURCE_LABELS else _diagnostic_alias(source, "src", record),
     }
     return {key: diagnostic[key] for key in _DIAGNOSTIC_FIELDS}
 

@@ -345,3 +345,111 @@ def test_daemon_default_log_redacts_case_material(tmp_path: Path) -> None:
     assert diagnostic["synthetic_source"] == "ui-optimizer-daemon"
     query_ref_blob = log_text
     assert QUERY not in query_ref_blob
+
+
+@pytest.mark.parametrize("field", ["operation_id", "status", "error_category", "synthetic_source", "source_identity"])
+def test_untrusted_diagnostic_field_values_cannot_carry_private_text(field):
+    from integrations.ipfs_datasets.storage import redact_private_diagnostic
+    private = "private-synthetic-clinic-case"
+    assert private not in json.dumps(redact_private_diagnostic({field: private}))
+
+
+@pytest.mark.parametrize("field", ["cid", "cid_kind", "schema", "status", "classification", "opaque_name"])
+def test_public_metadata_values_are_checked_without_sensitive_literal_hints(field):
+    from integrations.ipfs_datasets.storage import project_public_cid_metadata
+    private = "private-synthetic-clinic-case"
+    assert private not in json.dumps(project_public_cid_metadata({field: private}))
+
+
+def test_public_index_rejects_private_text_in_allowed_field_values_by_default():
+    from integrations.ipfs_datasets.storage import clear_public_index, publish_public_index_entry, public_index_snapshot
+    clear_public_index()
+    private = "private-synthetic-clinic-case"
+    result = publish_public_index_entry({name: private for name in ("cid", "status", "schema", "cid_kind", "opaque_name")})
+    assert private not in json.dumps([result, public_index_snapshot()])
+
+
+def test_public_filename_kind_and_repeated_name_do_not_reveal_private_filename():
+    import hashlib
+    from integrations.ipfs_datasets.storage import opaque_storage_filename
+    private = "private-synthetic-clinic-case"
+    first, second = opaque_storage_filename(private, FILENAME), opaque_storage_filename(private, FILENAME)
+    assert private[:24] not in first and FILENAME not in first and first != second
+    assert hashlib.sha256(FILENAME.encode()).hexdigest()[:32] not in first
+    assert first.startswith("object-") and first.endswith(".bin")
+
+
+def test_public_metadata_retains_valid_ciphertext_content_references():
+    import base64
+    import hashlib
+    from integrations.ipfs_datasets.storage import project_public_cid_metadata
+    digest = hashlib.sha256(b"synthetic ciphertext").digest()
+    cid = "b" + base64.b32encode(b"\x01\x55\x12\x20" + digest).decode().lower().rstrip("=")
+    result = project_public_cid_metadata({"cid": cid, "cid_kind": "ipfs", "status": "stored"})
+    assert result["cid"] == cid and result["cid_kind"] == "ipfs" and result["status"] == "stored"
+    assert "cid" not in project_public_cid_metadata({"cid": cid[:-1] + "!"})
+
+
+def test_public_metadata_malformed_values_fail_closed_without_exposing_objects():
+    from integrations.ipfs_datasets.storage import project_public_cid_metadata
+    private = {"complaint": COMPLAINT}
+    result = project_public_cid_metadata({name: private for name in ("artifact_class", "classification", "cid", "cid_kind", "status", "opaque_name")})
+    _assert_absent(json.dumps(result))
+    assert result["artifact_class"] == "opaque_private_ref"
+
+
+def test_diagnostic_unknown_identifiers_are_opaque_and_separated_by_case():
+    from integrations.ipfs_datasets.storage import redact_private_diagnostic
+    record = {"operation_id": COMPLAINT, "synthetic_source": USER_NAME, "user_id": "user-a", "case_id": "case-a"}
+    first = redact_private_diagnostic(record)
+    assert first == redact_private_diagnostic(record)
+    other = redact_private_diagnostic({**record, "case_id": "case-b"})
+    assert first["operation_id"] != other["operation_id"] and first["synthetic_source"] != other["synthetic_source"]
+    _assert_absent(json.dumps([first, other]))
+
+
+@pytest.mark.parametrize("duration", [float("nan"), float("inf"), -1, True, "private-duration", 10**500])
+def test_diagnostic_duration_is_finite_bounded_numeric_metadata(duration):
+    from integrations.ipfs_datasets.storage import redact_private_diagnostic
+    value = redact_private_diagnostic({"duration_ms": duration})
+    assert value["duration_ms"] is None
+    json.dumps(value, allow_nan=False)
+
+
+def test_diagnostic_seconds_are_reported_in_milliseconds():
+    from integrations.ipfs_datasets.storage import redact_private_diagnostic
+    assert redact_private_diagnostic({"phase_elapsed_seconds": 1.25})["duration_ms"] == 1250
+
+
+def test_public_alias_inspection_withholds_private_scope_names_and_envelope_headers():
+    from integrations.ipfs_datasets.llm import clear_case_private_caches, remember_case_alias, case_alias_cache_public_view
+    clear_case_private_caches()
+    user, case = "private-synthetic-user", "private-synthetic-case"
+    remember_case_alias(user_id=user, case_id=case, alias="party-1", canonical=USER_NAME,
+        key=os.urandom(32), key_id="private-synthetic-key-id")
+    view = case_alias_cache_public_view(user, case)
+    encoded = json.dumps(view)
+    assert all(value not in encoded for value in (user, case, USER_NAME, "private-synthetic-key-id"))
+    assert view["entry_count"] == 1 and view["encrypted"] is True
+
+
+def test_public_query_references_cannot_be_matched_by_hashing_a_guessed_query():
+    import hashlib
+    from integrations.ipfs_datasets.llm import public_query_reference
+    first, second = public_query_reference(QUERY), public_query_reference(QUERY)
+    assert first["query_ref"] != second["query_ref"]
+    assert first["query_ref"] != hashlib.sha256(QUERY.encode()).hexdigest()
+    assert QUERY not in json.dumps([first, second])
+
+
+def test_identical_private_embeddings_receive_independent_public_references():
+    from integrations.ipfs_datasets.llm import clear_case_private_caches, store_private_embedding, open_private_embedding
+    from integrations.ipfs_datasets.storage import clear_public_index
+    clear_case_private_caches(); clear_public_index()
+    key = os.urandom(32)
+    kwargs = dict(user_id="user-a", case_id="case-a", vector=[0.25,0.5], source_text=COMPLAINT, key=key, key_id="key-a")
+    first, second = store_private_embedding(**kwargs), store_private_embedding(**kwargs)
+    assert first["embedding_id"] != second["embedding_id"]
+    for stored in (first, second):
+        opened = open_private_embedding(user_id="user-a", case_id="case-a", embedding_id=stored["embedding_id"], key=key, key_id="key-a")
+        assert opened["vector"] == kwargs["vector"] and opened["source_text"] == COMPLAINT
