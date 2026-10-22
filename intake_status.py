@@ -1177,6 +1177,32 @@ def build_intake_status_summary(
             summary["iteration_count"] = int(raw_status.get("iteration_count"))
         except (TypeError, ValueError):
             summary["iteration_count"] = 0
+    interview_stop = raw_status.get("interview_stop")
+    if isinstance(interview_stop, dict) and interview_stop:
+        summary["interview_stop"] = dict(interview_stop)
+        unresolved = interview_stop.get("unresolved_issue_summary")
+        if isinstance(unresolved, dict):
+            summary["unresolved_issue_summary"] = dict(unresolved)
+        stop_state = str(interview_stop.get("state") or "").strip()
+        summary["filing_ready"] = False
+        if stop_state in {
+            "needs_answer",
+            "deferred_unknown",
+            "provider_unavailable",
+            "cancelled",
+            "limit_reached",
+        }:
+            summary["ready_to_advance"] = False
+            summary["intake_complete"] = False
+        elif stop_state == "saturated":
+            summary["intake_complete"] = bool(interview_stop.get("intake_complete"))
+            summary["ready_to_advance"] = bool(interview_stop.get("intake_complete")) and summary["ready_to_advance"]
+    user_wait = raw_status.get("intentional_user_wait")
+    if isinstance(user_wait, dict) and user_wait:
+        summary["intentional_user_wait"] = dict(user_wait)
+        summary["awaiting_user"] = bool(user_wait.get("awaiting_user") or user_wait.get("status") == "awaiting_user")
+        summary["worker_stalled"] = False
+        summary["supervisory_restart"] = False
     chronology_readiness = _build_intake_chronology_readiness(raw_status)
     if chronology_readiness:
         summary["intake_chronology_readiness"] = chronology_readiness

@@ -187,6 +187,53 @@ class Mediator:
 		if isinstance(projection, dict) and callable(restorer):
 			restorer(projection)
 
+	def _intake_graphs_for_wait(self):
+		getter = getattr(getattr(self, 'phase_manager', None), 'get_phase_data', None)
+		if not callable(getter):
+			return None, None
+		try:
+			from complaint_phases.phase_manager import ComplaintPhase
+			knowledge = getter(ComplaintPhase.INTAKE, 'knowledge_graph')
+			dependency = getter(ComplaintPhase.INTAKE, 'dependency_graph')
+		except Exception:
+			return None, None
+		return knowledge, dependency
+
+	def pause_intentional_user_wait(self, reason='user_pause'):
+		"""Record an intentional user wait without changing assertion or rule truth."""
+		from complaint_phases.phase_manager import ComplaintPhase
+		knowledge, dependency = self._intake_graphs_for_wait()
+		receipt = self.denoiser.pause_intentional_user_wait(
+			reason=reason,
+			knowledge_graph=knowledge,
+			dependency_graph=dependency,
+		)
+		iteration_count = getattr(self.phase_manager, 'iteration_count', 0)
+		receipt = dict(receipt)
+		receipt['iteration_count'] = iteration_count
+		receipt['supervisory_restart'] = False
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intentional_user_wait', receipt)
+		return receipt
+
+	def resume_intentional_user_wait(self):
+		"""Resume the same user wait. Do not record an iteration or restart supervision."""
+		from complaint_phases.phase_manager import ComplaintPhase
+		knowledge, dependency = self._intake_graphs_for_wait()
+		before = self.denoiser.assertion_rule_fingerprint(knowledge, dependency)
+		iteration_count = getattr(self.phase_manager, 'iteration_count', 0)
+		receipt = self.denoiser.resume_intentional_user_wait(
+			knowledge_graph=knowledge,
+			dependency_graph=dependency,
+		)
+		after = self.denoiser.assertion_rule_fingerprint(knowledge, dependency)
+		receipt = dict(receipt)
+		receipt['iteration_count'] = iteration_count
+		receipt['assertion_rule_unchanged'] = before == after
+		receipt['supervisory_restart'] = False
+		receipt['worker_stalled'] = False
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intentional_user_wait', receipt)
+		return receipt
+
 	def transition_shared_interview(self, text=None, **kwargs):
 		"""Route narrative start, answer, resume, and status through one contract."""
 		service = self.workflow_actions
@@ -8825,8 +8872,28 @@ class Mediator:
 			'denoiser_policy': self.denoiser.get_policy_state() if hasattr(self.denoiser, 'get_policy_state') else None,
 		})
 		
-		# Check for convergence
-		converged = self.phase_manager.has_converged() or self.denoiser.is_exhausted()
+		# Loss plateaus, an empty question list, and the question-count cap are
+		# explicit incomplete stops. They do not mark the interview converged.
+		from complaint_phases.phase_manager import _DENOISING_MAX_ITERATIONS
+		provider_status = None
+		if isinstance(intake_case_file, dict):
+			interview_provider = intake_case_file.get('interview_provider')
+			if isinstance(interview_provider, dict):
+				provider_status = interview_provider.get('status')
+		interview_stop = self.denoiser.evaluate_interview_stop(
+			open_questions=questions,
+			intake_case_file=intake_case_file if isinstance(intake_case_file, dict) else None,
+			provider_status=provider_status,
+			iteration_count=self.phase_manager.iteration_count,
+			iteration_cap=_DENOISING_MAX_ITERATIONS,
+			loss_converged=self.phase_manager.has_converged(),
+			pool_empty=len(getattr(self.denoiser, 'questions_pool', []) or []) == 0,
+		)
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'interview_stop', interview_stop)
+		converged = (
+			interview_stop.get('state') == 'saturated'
+			and bool(interview_stop.get('intake_complete'))
+		)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'denoising_converged', converged)
 		
 		result = {
@@ -8834,6 +8901,9 @@ class Mediator:
 			'noise_level': noise,
 			'gaps_remaining': gaps,
 			'converged': converged,
+			'interview_stop': interview_stop,
+			'filing_ready': False,
+			'intake_complete': bool(interview_stop.get('intake_complete')),
 			'intake_matching_summary': self._summarize_intake_matching_pressure(intake_matching_pressure),
 			'intake_workflow_action_queue': intake_workflow_action_queue,
 			'intake_workflow_action_summary': self._summarize_intake_workflow_action_queue(intake_workflow_action_queue),
@@ -8848,9 +8918,17 @@ class Mediator:
 			'next_action': self.phase_manager.get_next_action(),
 		}
 		
-		# Check if ready to advance to Phase 2
-		if self.phase_manager.is_phase_complete(ComplaintPhase.INTAKE):
+		# Check if ready to advance to Phase 2. Incomplete stops never say so.
+		incomplete_stop = interview_stop.get('state') in {
+			'needs_answer', 'deferred_unknown', 'provider_unavailable', 'cancelled', 'limit_reached',
+		}
+		if incomplete_stop or not interview_stop.get('intake_complete'):
+			result['ready_for_evidence_phase'] = False
+			result['filing_ready'] = False
+			result['message'] = interview_stop.get('message')
+		elif self.phase_manager.is_phase_complete(ComplaintPhase.INTAKE):
 			result['ready_for_evidence_phase'] = True
+			result['filing_ready'] = False
 			result['message'] = 'Initial intake complete. Ready to gather evidence.'
 		if answer_event_id and kg is not None and hasattr(kg, "finish_answer_event"):
 			kg.finish_answer_event(
@@ -13541,6 +13619,16 @@ class Mediator:
 				'candidate_count': intake_readiness.get('contradiction_count', 0),
 				'candidates': intake_readiness.get('contradictions', []),
 			},
+			'interview_stop': (
+				dict(self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'interview_stop') or {})
+				if isinstance(self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'interview_stop'), dict)
+				else {}
+			),
+			'intentional_user_wait': (
+				dict(self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intentional_user_wait') or {})
+				if isinstance(self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intentional_user_wait'), dict)
+				else {}
+			),
 			'phase_completion': {
 				'intake': self.phase_manager.is_phase_complete(ComplaintPhase.INTAKE),
 				'evidence': self.phase_manager.is_phase_complete(ComplaintPhase.EVIDENCE),
@@ -13992,7 +14080,15 @@ class Mediator:
 			'legal_claims',
 			'prayer_for_relief',
 		]
-		return all(formal_complaint.get(section) for section in required_sections)
+		sections_ready = all(formal_complaint.get(section) for section in required_sections)
+		stop = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'interview_stop')
+		if isinstance(stop, dict) and stop.get('state') in {
+			'needs_answer', 'deferred_unknown', 'provider_unavailable', 'cancelled', 'limit_reached',
+		}:
+			return False
+		if isinstance(stop, dict) and stop.get('filing_ready') is False and stop.get('state') == 'saturated' and not stop.get('intake_complete'):
+			return False
+		return sections_ready
 
 	def build_formal_complaint_document_package(
 		self,

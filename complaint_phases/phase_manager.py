@@ -14,6 +14,13 @@ logger = logging.getLogger(__name__)
 _INTAKE_GAPS_THRESHOLD = 3
 _EVIDENCE_GAP_RATIO_THRESHOLD = 0.3
 _DENOISING_MAX_ITERATIONS = 20
+_INCOMPLETE_INTERVIEW_STOPS = frozenset({
+    'needs_answer',
+    'deferred_unknown',
+    'provider_unavailable',
+    'cancelled',
+    'limit_reached',
+})
 _EVIDENCE_REVIEWABLE_ESCALATION_STATUSES = {
     'awaiting_complainant_record',
     'awaiting_third_party_record',
@@ -500,6 +507,16 @@ class PhaseManager:
             normalized = str(blocker or '').strip()
             if normalized and normalized not in blockers:
                 blockers.append(normalized)
+
+        interview_stop = data.get('interview_stop') if isinstance(data.get('interview_stop'), dict) else {}
+        interview_state = str(interview_stop.get('state') or '').strip()
+        if interview_state in _INCOMPLETE_INTERVIEW_STOPS:
+            blocker_name = f'interview_{interview_state}'
+            if blocker_name not in blockers:
+                blockers.append(blocker_name)
+            criteria['interview_saturated'] = False
+        elif interview_state == 'saturated':
+            criteria['interview_saturated'] = True
 
         total_criteria = len(criteria)
         satisfied_criteria = sum(1 for satisfied in criteria.values() if satisfied)
@@ -1221,6 +1238,13 @@ class PhaseManager:
         - Gaps have been identified and addressed (or exhausted)
         - Denoising iterations have converged
         """
+        data = self.phase_data[ComplaintPhase.INTAKE]
+        stop = data.get('interview_stop') if isinstance(data.get('interview_stop'), dict) else {}
+        stop_state = str(stop.get('state') or '').strip()
+        if stop_state in _INCOMPLETE_INTERVIEW_STOPS:
+            return False
+        if stop_state == 'saturated' and not stop.get('intake_complete'):
+            return False
         readiness = self.get_intake_readiness()
         return readiness['ready']
     
@@ -1380,6 +1404,35 @@ class PhaseManager:
         data = self.phase_data[ComplaintPhase.INTAKE]
 
         readiness = self.get_intake_readiness()
+        wait = data.get('intentional_user_wait') if isinstance(data.get('intentional_user_wait'), dict) else {}
+        if wait.get('paused') and wait.get('intentional'):
+            return {
+                'action': 'awaiting_user',
+                'awaiting_user': True,
+                'worker_stalled': False,
+                'supervisory_restart': False,
+                'filing_ready': False,
+                'intake_complete': False,
+                'intake_readiness_score': readiness['score'],
+                'intake_blockers': readiness['blockers'],
+            }
+
+        stop = data.get('interview_stop') if isinstance(data.get('interview_stop'), dict) else {}
+        stop_state = str(stop.get('state') or '').strip()
+        if stop_state in _INCOMPLETE_INTERVIEW_STOPS or stop_state == 'saturated':
+            return {
+                'action': 'interview_saturated' if stop_state == 'saturated' else stop_state,
+                'interview_state': stop_state,
+                'awaiting_user': stop_state == 'needs_answer',
+                'worker_stalled': False,
+                'supervisory_restart': False,
+                'filing_ready': False,
+                'intake_complete': bool(stop.get('intake_complete')) and stop_state == 'saturated',
+                'unresolved_issue_summary': stop.get('unresolved_issue_summary') or {},
+                'message': stop.get('message'),
+                'intake_readiness_score': readiness['score'],
+                'intake_blockers': readiness['blockers'],
+            }
 
         if 'knowledge_graph' not in data:
             return {
@@ -1431,15 +1484,37 @@ class PhaseManager:
                 'intake_blockers': readiness['blockers'],
             }
 
-        if denoising_iteration_cap_hit or (data.get('denoising_converged', False) and remaining_gaps <= gap_threshold):
+        genuinely_ready = bool(data.get('denoising_converged', False) and remaining_gaps <= gap_threshold and readiness.get('ready'))
+        if denoising_iteration_cap_hit and not genuinely_ready:
+            return {
+                'action': 'limit_reached',
+                'interview_state': 'limit_reached',
+                'filing_ready': False,
+                'intake_complete': False,
+                'awaiting_user': False,
+                'worker_stalled': False,
+                'supervisory_restart': False,
+                'message': 'Iteration cap reached. Intake is not complete and the complaint is not ready to file.',
+                'intake_readiness_score': readiness['score'],
+                'intake_blockers': readiness['blockers'],
+            }
+
+        if genuinely_ready:
             return {
                 'action': 'complete_intake',
+                'filing_ready': False,
                 'intake_readiness_score': readiness['score'],
                 'intake_blockers': readiness['blockers'],
             }
 
         return {
-            'action': 'complete_intake',
+            'action': 'needs_answer',
+            'interview_state': 'needs_answer',
+            'filing_ready': False,
+            'intake_complete': False,
+            'awaiting_user': True,
+            'worker_stalled': False,
+            'supervisory_restart': False,
             'intake_readiness_score': readiness['score'],
             'intake_blockers': readiness['blockers'],
         }

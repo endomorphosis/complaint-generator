@@ -7,6 +7,7 @@ noise/ambiguity in the complaint information.
 
 import copy
 import hashlib
+import json
 import logging
 import re
 from typing import Dict, List, Any, Optional, Tuple, Set
@@ -6505,14 +6506,326 @@ class ComplaintDenoiser:
         
         return noise
     
+    INTERVIEW_STOP_STATES = (
+        "needs_answer",
+        "saturated",
+        "deferred_unknown",
+        "provider_unavailable",
+        "cancelled",
+        "limit_reached",
+    )
+    _INCOMPLETE_INTERVIEW_STOPS = frozenset({
+        "needs_answer",
+        "deferred_unknown",
+        "provider_unavailable",
+        "cancelled",
+        "limit_reached",
+    })
+    _PROVIDER_UNAVAILABLE_STATUSES = frozenset({
+        "unavailable",
+        "provider_unavailable",
+        "error",
+        "failed",
+        "timeout",
+        "backend_failure",
+    })
+    _UNKNOWN_DISPOSITIONS = frozenset({"unknown", "deferred"})
+    QUESTION_COUNT_LIMIT = 50
+
     def is_exhausted(self) -> bool:
+        """Return whether the interview itself is saturated.
+
+        An empty question list, a loss plateau, or more than
+        QUESTION_COUNT_LIMIT asked questions is not saturation.
         """
-        Check if we've exhausted the question pool.
-        
-        Returns:
-            True if no more questions can be asked
+        stop = getattr(self, "last_interview_stop", None)
+        return isinstance(stop, dict) and stop.get("state") == "saturated" and bool(stop.get("targets_accounted_for"))
+
+    def assertion_rule_fingerprint(
+        self,
+        knowledge_graph: Optional[KnowledgeGraph] = None,
+        dependency_graph: Optional[DependencyGraph] = None,
+    ) -> str:
+        """Stable fingerprint of assertion and rule truth, excluding wait flags."""
+        entities = []
+        if knowledge_graph is not None:
+            for entity_id in sorted((getattr(knowledge_graph, "entities", {}) or {})):
+                entity = knowledge_graph.entities[entity_id]
+                entities.append({
+                    "id": str(entity_id),
+                    "type": str(getattr(entity, "type", "") or ""),
+                    "name": str(getattr(entity, "name", "") or ""),
+                    "confidence": getattr(entity, "confidence", None),
+                })
+        nodes = []
+        if dependency_graph is not None:
+            for node_id in sorted((getattr(dependency_graph, "nodes", {}) or {})):
+                node = dependency_graph.nodes[node_id]
+                attributes = node.attributes if isinstance(getattr(node, "attributes", None), dict) else {}
+                nodes.append({
+                    "id": str(node_id),
+                    "name": str(getattr(node, "name", "") or ""),
+                    "satisfied": bool(getattr(node, "satisfied", False)),
+                    "value_status": str(attributes.get("value_status") or ""),
+                    "description": str(attributes.get("description") or ""),
+                })
+        dispositions = []
+        for record in self.question_disposition_records:
+            if not isinstance(record, dict):
+                continue
+            dispositions.append({
+                "target_id": str(record.get("target_id") or ""),
+                "target_revision": str(record.get("target_revision") or ""),
+                "disposition": str(record.get("disposition") or ""),
+                "reopened": bool(record.get("reopened")),
+            })
+        payload = {"entities": entities, "nodes": nodes, "dispositions": dispositions}
+        return json.dumps(payload, sort_keys=True, default=str)
+
+    def pause_intentional_user_wait(
+        self,
+        *,
+        reason: str = "user_pause",
+        knowledge_graph: Optional[KnowledgeGraph] = None,
+        dependency_graph: Optional[DependencyGraph] = None,
+    ) -> Dict[str, Any]:
+        """Pause for the user without rewriting assertions, rules, or iterations."""
+        fingerprint = self.assertion_rule_fingerprint(knowledge_graph, dependency_graph)
+        self.intentional_user_wait = {
+            "status": "awaiting_user",
+            "paused": True,
+            "resumed": False,
+            "intentional": True,
+            "awaiting_user": True,
+            "worker_stalled": False,
+            "supervisory_restart": False,
+            "reason": str(reason or "user_pause"),
+            "assertion_rule_fingerprint": fingerprint,
+        }
+        return dict(self.intentional_user_wait)
+
+    def resume_intentional_user_wait(
+        self,
+        *,
+        knowledge_graph: Optional[KnowledgeGraph] = None,
+        dependency_graph: Optional[DependencyGraph] = None,
+    ) -> Dict[str, Any]:
+        """Resume the same user wait. Do not restart supervision or mutate truth."""
+        current = self.assertion_rule_fingerprint(knowledge_graph, dependency_graph)
+        wait = getattr(self, "intentional_user_wait", None)
+        if not isinstance(wait, dict) or not wait.get("intentional"):
+            return {
+                "status": "needs_answer",
+                "paused": False,
+                "resumed": False,
+                "awaiting_user": False,
+                "worker_stalled": False,
+                "supervisory_restart": False,
+                "assertion_rule_changed": False,
+                "error": "no_intentional_wait",
+            }
+        changed = current != wait.get("assertion_rule_fingerprint")
+        resumed = {
+            "status": "awaiting_user",
+            "paused": False,
+            "resumed": not changed,
+            "intentional": True,
+            "awaiting_user": True,
+            "worker_stalled": False,
+            "supervisory_restart": False,
+            "reason": wait.get("reason"),
+            "assertion_rule_fingerprint": wait.get("assertion_rule_fingerprint"),
+            "assertion_rule_changed": changed,
+        }
+        if changed:
+            resumed["error"] = "assertion_rule_changed"
+            return resumed
+        self.intentional_user_wait = resumed
+        return dict(resumed)
+
+    def evaluate_interview_stop(
+        self,
+        *,
+        open_questions: Optional[List[Dict[str, Any]]] = None,
+        intake_case_file: Optional[Dict[str, Any]] = None,
+        provider_status: Any = None,
+        cancelled: bool = False,
+        iteration_count: Optional[int] = None,
+        iteration_cap: Optional[int] = None,
+        question_limit: Optional[int] = None,
+        loss_converged: bool = False,
+        pool_empty: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Classify the interview stop. Shortcuts cannot claim completion.
+
+        ``needs_answer`` means a relevant user-answerable target is still open.
+        ``saturated`` means every relevant answerable target is answered or
+        explicitly disposed, and the result carries an unresolved-issue summary.
+        ``deferred_unknown`` is an unknown-only stop and is not core-fact completion.
+        ``provider_unavailable``, ``cancelled``, and ``limit_reached`` never
+        advertise intake completion or filing readiness.
         """
-        return len(self.questions_pool) == 0 or len(self.questions_asked) > 50
+        if isinstance(intake_case_file, dict):
+            self.load_question_dispositions(intake_case_file)
+        limit = self.QUESTION_COUNT_LIMIT if question_limit is None else int(question_limit)
+        open_targets: List[Dict[str, Any]] = []
+        seen_open = set()
+        for question in open_questions or []:
+            if not isinstance(question, dict):
+                continue
+            bound = self._bind_unresolved_target(question)
+            target = bound.get("unresolved_target") if isinstance(bound.get("unresolved_target"), dict) else {}
+            target_id = str(target.get("target_id") or bound.get("target_id") or "").strip()
+            revision = str(target.get("target_revision") or bound.get("target_revision") or "").strip()
+            if not target_id or target.get("user_answerability") not in {None, "", "user_observable"}:
+                if target.get("user_answerability") not in {None, "", "user_observable"}:
+                    continue
+            if not target_id:
+                continue
+            if target.get("user_answerability") and target.get("user_answerability") != "user_observable":
+                continue
+            if self.is_question_target_closed(target_id, revision or None):
+                continue
+            if target_id in seen_open:
+                continue
+            seen_open.add(target_id)
+            open_targets.append({
+                "target_id": target_id,
+                "target_revision": revision or None,
+                "target_kind": str(target.get("target_kind") or bound.get("target_kind") or "") or None,
+                "reason": "open_answerable_target",
+            })
+
+        disposed: List[Dict[str, Any]] = []
+        unknown_only = True
+        answered_count = 0
+        for record in self.question_disposition_records:
+            if not isinstance(record, dict) or record.get("reopened"):
+                continue
+            target_id = str(record.get("target_id") or "").strip()
+            if not target_id:
+                continue
+            disposition = str(record.get("disposition") or "").strip().lower()
+            if disposition not in self._CLOSED_TARGET_DISPOSITIONS and disposition not in self._NON_FACT_DISPOSITIONS:
+                continue
+            if target_id in seen_open:
+                continue
+            item = {
+                "target_id": target_id,
+                "target_revision": str(record.get("target_revision") or "") or None,
+                "target_kind": record.get("target_kind"),
+                "disposition": disposition,
+                "reason": "explicit_disposition",
+            }
+            disposed.append(item)
+            if disposition == "answered":
+                answered_count += 1
+                unknown_only = False
+            elif disposition not in self._UNKNOWN_DISPOSITIONS:
+                unknown_only = False
+
+        provider_token = str(provider_status or "").strip().lower()
+        provider_down = provider_token in self._PROVIDER_UNAVAILABLE_STATUSES
+        asked_count = len(self.questions_asked)
+        over_question_limit = asked_count > limit
+        over_iteration_cap = (
+            iteration_count is not None
+            and iteration_cap is not None
+            and int(iteration_count) >= int(iteration_cap)
+        )
+        rejected_shortcuts = []
+        if pool_empty is None:
+            pool_empty = len(self.questions_pool) == 0 and not open_targets
+        if pool_empty and not disposed:
+            rejected_shortcuts.append("empty_question_list")
+        if loss_converged:
+            rejected_shortcuts.append("loss_convergence")
+        if over_question_limit:
+            rejected_shortcuts.append("question_count_limit")
+        if over_iteration_cap:
+            rejected_shortcuts.append("iteration_cap")
+
+        unresolved_items = list(open_targets)
+        for item in disposed:
+            if item.get("disposition") != "answered":
+                unresolved_items.append(dict(item))
+        for diagnostic in self.source_operator_diagnostics:
+            if isinstance(diagnostic, dict):
+                unresolved_items.append({
+                    "target_id": None,
+                    "reason": "source_operator_diagnostic",
+                    "message": diagnostic.get("message"),
+                })
+        summary = {
+            "items": unresolved_items,
+            "open_answerable_count": len(open_targets),
+            "disposed_count": len(disposed),
+            "answered_count": answered_count,
+            "legal_sufficiency": False,
+            "core_facts_complete": False,
+            "filing_ready": False,
+            "rejected_shortcuts": rejected_shortcuts,
+        }
+
+        if cancelled or provider_token == "cancelled":
+            state = "cancelled"
+        elif provider_down:
+            state = "provider_unavailable"
+        elif over_iteration_cap or over_question_limit:
+            state = "limit_reached"
+        elif open_targets:
+            state = "needs_answer"
+        elif disposed and unknown_only and answered_count == 0:
+            state = "deferred_unknown"
+        elif disposed and not open_targets:
+            state = "saturated"
+        elif self.source_operator_diagnostics and not disposed:
+            state = "provider_unavailable"
+        else:
+            state = "needs_answer"
+
+        targets_accounted_for = bool(disposed) and not open_targets and state == "saturated"
+        intake_complete = state == "saturated" and not unresolved_items
+        stop = {
+            "state": state,
+            "targets_accounted_for": targets_accounted_for,
+            "intake_complete": intake_complete,
+            "filing_ready": False,
+            "legal_sufficiency": False,
+            "ready_for_evidence_phase": False,
+            "awaiting_user": state == "needs_answer",
+            "worker_stalled": False,
+            "supervisory_restart": False,
+            "unresolved_issue_summary": summary,
+            "message": self._interview_stop_message(state, intake_complete),
+        }
+        self.last_interview_stop = stop
+        return stop
+
+    @staticmethod
+    def _interview_stop_message(state: str, intake_complete: bool) -> str:
+        if state == "saturated" and intake_complete:
+            return (
+                "Relevant answerable targets are resolved. "
+                "This is interview saturation, not filing readiness or legal sufficiency."
+            )
+        if state == "saturated":
+            return (
+                "Relevant answerable targets are resolved or explicitly disposed. "
+                "Unresolved issues remain. Intake is not fully complete and the complaint is not ready to file."
+            )
+        if state == "deferred_unknown":
+            return (
+                "Remaining targets are unknown or deferred. "
+                "Core facts are not complete and the complaint is not ready to file."
+            )
+        if state == "provider_unavailable":
+            return "The interview backend is unavailable. Intake is not complete and the complaint is not ready to file."
+        if state == "cancelled":
+            return "The interview was cancelled. Intake is not complete and the complaint is not ready to file."
+        if state == "limit_reached":
+            return "The interview iteration or question limit was reached. Intake is not complete and the complaint is not ready to file."
+        return "An answerable interview target still needs an answer. Intake is not complete and the complaint is not ready to file."
     
     def generate_evidence_questions(self,
                                    knowledge_graph: KnowledgeGraph,
