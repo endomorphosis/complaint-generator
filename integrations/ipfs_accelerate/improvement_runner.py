@@ -38,6 +38,7 @@ MODEL = "grok-4.7"
 STARTUP_SECONDS = 90
 STALL_SECONDS = 180
 TIMEOUT_SECONDS = 900
+MAX_EVENT_HISTORY_BYTES = 128 * 1024 * 1024
 _LOGGER = logging.getLogger(__name__)
 PRIVATE_PATHS_ENV = "IPFS_ACCELERATE_AGENT_GROK_PRIVATE_PATHS_JSON"
 REASONING_EFFORT_ENV = "IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"
@@ -1162,7 +1163,7 @@ def _owned_attempt_log_evidence(events_path: Path, state_dir: Path, binding: Map
                 or not log.is_relative_to(state_dir.resolve()) or not binding.get("task_cid")
                 or type(binding.get("attempt")) is not int or binding["attempt"] <= 0):
             return None
-        events = _owned_bytes(events_path, 32 * 1024 * 1024, legacy_group_write=True)
+        events = _owned_bytes(events_path, MAX_EVENT_HISTORY_BYTES, legacy_group_write=True)
         if not events.endswith(b"\n"):
             return None
         start = None
@@ -1595,7 +1596,7 @@ def _recovery_preimage(repo_root: Path, state_dir: Path, record: Mapping[str, An
             continue
         if path.resolve(strict=True) != path:
             raise ValueError("recovery evidence path is aliased")
-        raw = _owned_bytes(path, 32 * 1024 * 1024, legacy_group_write=True)
+        raw = _owned_bytes(path, MAX_EVENT_HISTORY_BYTES if path == state_dir / f"{STATE_PREFIX}_events.jsonl" else 32 * 1024 * 1024, legacy_group_write=True)
         info = path.lstat()
         result[str(path)] = (info.st_dev, info.st_ino, info.st_mode, hashlib.sha256(raw).hexdigest())
     payload, source = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")

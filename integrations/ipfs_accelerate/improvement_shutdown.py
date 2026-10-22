@@ -21,7 +21,7 @@ from typing import Any, Mapping
 SCHEMA = 'complaint-improvement-container-shutdown@1'
 RECEIPT_NAME = 'container_shutdown.json'
 MAX_CONTAINERS = 32
-MAX_EVENTS_BYTES = 16_000_000
+MAX_EVENTS_BYTES = 128 * 1024 * 1024
 MAX_INSPECT_BYTES = 262_144
 _CID = re.compile(r'[0-9a-f]{64}\Z')
 _EVENT_ID = re.compile(r'sha256:[0-9a-f]{64}\Z')

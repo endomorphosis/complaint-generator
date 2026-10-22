@@ -6,6 +6,7 @@ import json
 import re
 import hashlib
 from collections import Counter
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -3709,6 +3710,7 @@ class ClaimSupportHook:
             if not isinstance(rule, dict):
                 continue
             selected_rules.append({
+                **deepcopy(rule),
                 'rule_id': rule.get('rule_id') or rule.get('premise_id') or '',
                 'version': rule.get('version') or rule.get('authority_version') or '',
                 'source_id': rule.get('source_id') or rule.get('citation') or '',
@@ -3726,11 +3728,16 @@ class ClaimSupportHook:
                 'legal_context_version': obligation_inputs.get('legal_context_version') or '',
                 'law_as_of': str(element.get('law_as_of') or element.get('applicable_law_date') or ''),
                 'rules': selected_rules,
+                'premise_inventory': deepcopy(inventory) if isinstance(inventory, dict) else {},
+                'sample_or_document': deepcopy(obligation_inputs.get('sample_or_document')),
+                'canonical_receipt': deepcopy(obligation_inputs.get('canonical_receipt')),
             },
             compiler={
                 'execution_identity': identity,
                 'formula_identity': versions.get('formula_identity') or '',
                 'source_map_identity': versions.get('source_map_identity') or '',
+                'obligation_version': str(first_obligation.get('schema_version') or '') if isinstance(first_obligation, dict) else str(getattr(first_obligation, 'schema_version', '') or ''),
+                'premise_version': str((inventory or {}).get('digest') or '') if isinstance(inventory, dict) else '',
                 'canonical': (obligation_inputs.get('canonical_receipt') or {}).get('identities') if isinstance(obligation_inputs.get('canonical_receipt'), dict) else {},
             },
             compiler_config={
@@ -3762,6 +3769,10 @@ class ClaimSupportHook:
                 goal_statement=str(element.get('element_text') or ''),
                 execution_identity=identity,
                 expected_execution_identity=identity,
+                obligation_version=cache_identity['components']['compiler']['identities']['obligation_version'],
+                expected_obligation_version=cache_identity['components']['compiler']['identities']['obligation_version'],
+                premise_version=cache_identity['components']['compiler']['identities']['premise_version'],
+                expected_premise_version=cache_identity['components']['compiler']['identities']['premise_version'],
                 total_timeout_seconds=1.5,
                 stage_timeout_seconds={
                     'deterministic': 0.25,

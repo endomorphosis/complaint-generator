@@ -1332,3 +1332,46 @@ def test_retained_native_observation_never_authorizes_live_parent_signals(campai
     result = runner.stop(campaign.state, timeout=0, retained_native_child_proof={})
     assert result['status'] == 'stop_incomplete' and result['signalled'] is False
     assert 'live fencing' in result['reason']
+
+
+
+def test_owned_event_history_above_old_limit_preserves_native_chain_and_closure(campaign, docker, monkeypatch):
+    # The shared fixture helper writes a genuine Native sequence/hash chain;
+    # routine synthetic records stay below its per-event bound, no provider runs.
+    from tests.test_improvement_runner import _owned_growing_native_event_history
+    events = campaign.state / 'complaint_intake_events.jsonl'
+    monkeypatch.setenv('IPFS_ACCELERATE_AGENT_EVENT_LOG_MAX_BYTES', str(50 * 1024 * 1024))
+    event, original = _owned_growing_native_event_history(events, campaign.event, padding_records=33)
+    campaign.event = event
+    assert 16_000_000 < len(original) < shutdown.MAX_EVENTS_BYTES
+    expected_sha = hashlib.sha256(original).hexdigest()
+    starts, observed_sha = shutdown._events(campaign.state, campaign.started)
+    assert observed_sha == expected_sha
+    assert starts == {campaign.workspace: [{
+        'event_id': event['event_id'], 'started_at': datetime.fromisoformat(event['timestamp'].replace('Z', '+00:00')).timestamp(),
+        'task_id': event['task_id'], 'canonical_task_cid': event['canonical_task_cid'], 'attempt': 1,
+    }]}
+    fake, _ = docker
+    fake.containers = {CONTAINER: container(campaign)}
+    result = close(campaign)
+    assert result['status'] == 'stopped' and result['quiesced'] is True
+    assert result['event_log_sha256'] == expected_sha
+    assert result['containers'][0]['event_id'] == event['event_id']
+    assert fake.effects == [('stop', CONTAINER), ('rm', CONTAINER)]
+    assert events.read_bytes() == original
+    receipt = json.loads((campaign.state / shutdown.RECEIPT_NAME).read_text())
+    assert receipt['event_log_sha256'] == expected_sha
+    assert receipt['completion_authority'] is False and receipt['attempt_refunded'] is False
+
+
+def test_event_history_above_finite_limit_refuses_before_container_effects(campaign, docker):
+    events = campaign.state / 'complaint_intake_events.jsonl'
+    # A sparse private fixture crosses the finite bound without allocating a
+    # giant payload. The real owned-byte gate must refuse before reading it.
+    with events.open('wb') as output:
+        output.truncate(shutdown.MAX_EVENTS_BYTES + 1)
+    result = close(campaign)
+    assert result['status'] == 'stop_incomplete' and result['quiesced'] is False
+    assert result['reason'] == 'recovery evidence must be a bounded owned regular file'
+    assert not docker[0].calls and not docker[0].effects
+    assert events.stat().st_size == shutdown.MAX_EVENTS_BYTES + 1

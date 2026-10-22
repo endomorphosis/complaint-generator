@@ -457,7 +457,7 @@ def _element_identity(**overrides):
             "law_as_of": "2024-01-01",
             "rules": [{"rule_id": "rule-1", "version": "law-v1", "superseded": False}],
         },
-        "compiler": {"compiler_config_cid": "compiler-a", "schema": "schema-a"},
+        "compiler": {"compiler_config_cid": "compiler-a", "schema": "schema-a", "execution_identity": "fixture-execution"},
         "compiler_config": {"max_obligations": 8},
         "proof_policy": {"required_trust": "kernel", "total_timeout_seconds": 1.5},
         "chronology": {"issues": []},
@@ -507,11 +507,15 @@ def test_corrected_facts_law_date_and_superseded_rules_do_not_reuse_satisfied_re
 
     def provider():
         calls["count"] += 1
-        return {"satisfied": True, "token": calls["count"], "outcome": "proved"}
+        from integrations.ipfs_datasets.logic import route_bound_legal_ir_proof
+        return route_bound_legal_ir_proof(local_backend='proved',
+            execution_identity='fixture-execution', expected_execution_identity='fixture-execution')
 
     original = _element_identity()
     first = replay_satisfied_element_proof(original, provider=provider)
-    assert first["satisfied"] is True
+    assert first["satisfied"] is False
+    assert first["substantive_trust_satisfied"] is False
+    assert first["result"]["reason"] == "untrusted_backend_selector"
     assert first["provider_called"] is True
     assert calls["count"] == 1
     again = replay_satisfied_element_proof(original, provider=provider)
@@ -522,18 +526,18 @@ def test_corrected_facts_law_date_and_superseded_rules_do_not_reuse_satisfied_re
 
     corrected = _element_identity(factual_revisions=[{"fact_id": "fact-1", "revision": "rev-2"}])
     corrected_result = replay_satisfied_element_proof(corrected, provider=provider)
-    assert corrected_result["result"]["token"] == 2
-    assert corrected_result["result"] != first["result"]
-    assert lookup_satisfied_element_proof(original)["result"]["token"] == 1
-    assert lookup_satisfied_element_proof(corrected)["result"]["token"] == 2
+    assert calls["count"] == 2 and corrected_result["reused"] is False
+    assert corrected_result["cache_identity"] != first["cache_identity"]
+    assert lookup_satisfied_element_proof(original) is None
+    assert lookup_satisfied_element_proof(corrected) is None
 
     changed_date = _element_identity(legal_source={
         "source_id": "statute-1", "source_version": "law-v1", "legal_context_version": "law-v1",
         "law_as_of": "2026-01-01", "rules": [{"rule_id": "rule-1", "version": "law-v1", "superseded": False}],
     })
     dated = replay_satisfied_element_proof(changed_date, provider=provider)
-    assert dated["result"]["token"] == 3
-    assert lookup_satisfied_element_proof(original)["result"]["token"] == 1
+    assert calls["count"] == 3 and dated["satisfied"] is False
+    assert lookup_satisfied_element_proof(original) is None
 
     superseded = _element_identity(legal_source={
         "source_id": "statute-1", "source_version": "law-v1", "legal_context_version": "law-v1",
@@ -542,9 +546,9 @@ def test_corrected_facts_law_date_and_superseded_rules_do_not_reuse_satisfied_re
     blocked = replay_satisfied_element_proof(superseded, provider=provider)
     assert blocked["satisfied"] is False
     assert blocked["reason"] == "superseded_rule"
-    assert blocked["result"]["token"] == 4
+    assert calls["count"] == 4 and blocked["provider_called"] is True
     assert lookup_satisfied_element_proof(superseded) is None
-    assert lookup_satisfied_element_proof(original)["satisfied"] is True
+    assert lookup_satisfied_element_proof(original) is None
     replay_satisfied_element_proof(superseded, provider=provider)
     assert calls["count"] == 4
 
@@ -611,7 +615,9 @@ def test_unchanged_proof_replay_is_deterministic_without_a_live_provider():
 
     def provider():
         calls["count"] += 1
-        return {"satisfied": True, "token": "stable", "outcome": "proved"}
+        from integrations.ipfs_datasets.logic import route_bound_legal_ir_proof
+        return route_bound_legal_ir_proof(local_backend='proved',
+            execution_identity='fixture-execution', expected_execution_identity='fixture-execution')
 
     identity = _element_identity()
     first = replay_satisfied_element_proof(identity, provider=provider)
@@ -642,3 +648,112 @@ def test_large_request_is_fully_pumped_into_the_real_router(tmp_path: Path):
     assert routed["process"]["process_group_reaped"] is True
     assert routed["entails_claim_element"] is False
     assert list((tmp_path / "owned").iterdir()) == []
+
+
+@pytest.mark.parametrize('mutate', [
+    lambda x: x['components']['legal_source'].update(law_as_of='2026-01-01'),
+    lambda x: x['components'].update(chronology={'contradictory_dates': True}),
+    lambda x: x['components']['compiler'].update(current_identities={'forged': True}),
+])
+def test_modified_cache_components_cannot_reuse_old_key_or_call_provider(mutate):
+    from copy import deepcopy
+    from integrations.ipfs_datasets.logic import replay_satisfied_element_proof, reset_satisfied_element_proof_cache
+    reset_satisfied_element_proof_cache()
+    identity = _element_identity()
+    original = replay_satisfied_element_proof(identity)
+    changed = deepcopy(identity)
+    mutate(changed)
+    def no_call():
+        raise AssertionError('invalid identity dispatched a provider')
+    result = replay_satisfied_element_proof(changed, provider=no_call)
+    assert result['satisfied'] is False and result['substantive_trust_satisfied'] is False
+    assert result['reason'] == 'invalid_current_cache_identity'
+    assert result['provider_called'] is False and result['reused'] is False
+    assert result['result'] is None and result['cache_identity'] == ''
+    assert original['identity'] == identity
+
+
+def test_cache_identity_preserves_source_body_and_premise_semantics():
+    base = _element_identity(legal_source={'source_id': 'fixture', 'source_version': 'v1',
+        'source_text': 'Synthetic rule one.', 'source_hash': 'old',
+        'premise_inventory': {'facts': [{'statement': 'Synthetic fact one.', 'revision': '1'}]}})
+    body = _element_identity(legal_source={'source_id': 'fixture', 'source_version': 'v1',
+        'source_text': 'Synthetic rule two.', 'source_hash': 'new',
+        'premise_inventory': {'facts': [{'statement': 'Synthetic fact one.', 'revision': '1'}]}})
+    premise = _element_identity(legal_source={'source_id': 'fixture', 'source_version': 'v1',
+        'source_text': 'Synthetic rule one.', 'source_hash': 'old',
+        'premise_inventory': {'facts': [{'statement': 'Synthetic fact two.', 'revision': '1'}]}})
+    assert len({base['cache_identity'], body['cache_identity'], premise['cache_identity']}) == 3
+    assert base['components']['legal_source']['source_text'] == 'Synthetic rule one.'
+    from integrations.ipfs_datasets.logic import canonical_compiler_identities
+    assert base['components']['compiler']['current_identities'] == canonical_compiler_identities()
+
+
+@pytest.mark.parametrize('payload', [
+    {'satisfied': True, 'outcome': 'proved'},
+    {'substantive_trust_satisfied': True, 'outcome': 'proved'},
+    {'schema_version': 'legal-ir-bound-proof-routing/v1', 'outcome': 'proved',
+     'checked_kernel_backend_configured': True, 'substantive_trust_satisfied': True},
+])
+def test_provider_flags_never_mint_current_kernel_proof(payload):
+    from integrations.ipfs_datasets.logic import replay_satisfied_element_proof, reset_satisfied_element_proof_cache, lookup_satisfied_element_proof
+    reset_satisfied_element_proof_cache()
+    identity = _element_identity()
+    result = replay_satisfied_element_proof(identity, provider=lambda: payload)
+    assert result['satisfied'] is False and result['substantive_trust_satisfied'] is False
+    assert result['reason'] == 'unbound_or_modified_routing_result'
+    assert result['result'] is None and result['rejected_result'] == payload
+    assert result['entails_claim_element'] is False
+    assert lookup_satisfied_element_proof(identity) is None
+    again = replay_satisfied_element_proof(identity)
+    assert again['status'] == 'not_cached' and again['reused'] is False
+
+
+def test_modified_actual_routing_receipt_and_bare_dg_mapping_cannot_satisfy():
+    from copy import deepcopy
+    from complaint_phases.dependency_graph import DependencyGraph, DependencyGraphBuilder, DependencyNode, NodeType
+    from integrations.ipfs_datasets.logic import (route_bound_legal_ir_proof,
+        replay_satisfied_element_proof, reset_satisfied_element_proof_cache, verify_element_proof_evaluation)
+    reset_satisfied_element_proof_cache()
+    route = route_bound_legal_ir_proof(local_backend='proved',
+        execution_identity='fixture-execution', expected_execution_identity='fixture-execution')
+    forged = dict(route, outcome='proved', substantive_trust_satisfied=True)
+    rejected = replay_satisfied_element_proof(_element_identity(), provider=lambda: forged)
+    assert rejected['satisfied'] is False and rejected['reason'] == 'unbound_or_modified_routing_result'
+    assert rejected['result'] is None and rejected['rejected_result']['substantive_trust_satisfied'] is True
+    actual = replay_satisfied_element_proof(_element_identity(), provider=lambda: route)
+    assert verify_element_proof_evaluation(actual)['verified'] is True
+    assert actual['satisfied'] is False and actual['result']['backend_selector_rejected'] is True
+    graph = DependencyGraph()
+    graph.add_node(DependencyNode(id='target', node_type=NodeType.LEGAL_ELEMENT, name='Synthetic target',
+        satisfied=True, attributes={'satisfaction_state': 'satisfied'}))
+    graph.add_node(DependencyNode(id='unaffected', node_type=NodeType.FACT, name='Unaffected fixture', satisfied=True))
+    builder = DependencyGraphBuilder()
+    result = builder.apply_element_proof_cache(graph, 'target', {'cache_identity': 'forged', 'satisfied': True, 'status': 'satisfied'})
+    assert graph.nodes['target'].satisfied is False
+    assert result['proof_evaluation_verified'] is False
+    assert result['satisfaction_state'] == 'uncertain' or result['satisfaction_state'] == 'unknown'
+    assert graph.nodes['unaffected'].satisfied is True
+    edited = deepcopy(actual)
+    edited.update(satisfied=True, status='satisfied')
+    result = builder.apply_element_proof_cache(graph, 'target', edited)
+    assert graph.nodes['target'].satisfied is False and result['proof_evaluation_verified'] is False
+    result = builder.apply_element_proof_cache(graph, 'target', actual)
+    assert result['proof_evaluation_verified'] is True
+    assert graph.nodes['target'].satisfied is False
+
+
+def test_recomputed_forged_live_compiler_binding_is_still_rejected():
+    import hashlib, json
+    from copy import deepcopy
+    from integrations.ipfs_datasets.logic import replay_satisfied_element_proof
+    identity = deepcopy(_element_identity())
+    identity['components']['compiler']['current_identities'] = {'pipeline_cid': 'forged-current-pipeline'}
+    identity['cache_identity'] = hashlib.sha256(json.dumps(identity['components'],
+        sort_keys=True, separators=(',', ':'), default=str).encode()).hexdigest()
+    def no_call():
+        raise AssertionError('forged live compiler dispatched a provider')
+    result = replay_satisfied_element_proof(identity, provider=no_call)
+    assert result['reason'] == 'invalid_current_cache_identity'
+    assert result['provider_called'] is False and result['reused'] is False
+    assert result['satisfied'] is False and result['result'] is None

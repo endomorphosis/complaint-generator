@@ -2748,6 +2748,189 @@ class ComplaintDenoiser:
 
         return questions[:max_questions]
 
+    _LEGAL_CONTEXT_QUESTION_FIELDS = {
+        'legal_context.jurisdiction': 'jurisdiction',
+        'legal_context.event_dates': 'event_date',
+        'legal_context.applicable_law_date': 'applicable_law_date',
+        'legal_context.filing_reference_date': 'filing_reference_date',
+        'legal_context.claim_candidates': 'claim_candidates',
+    }
+
+    def _current_legal_context_question_targets(
+        self, knowledge_graph: KnowledgeGraph, intake_case_file: Optional[Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        """Rederive current open context fields without changing case or proof truth."""
+        if not isinstance(intake_case_file, dict):
+            return {}
+        import json
+        from complaint_phases.intake_case_file import refresh_explicit_legal_context
+        from integrations.ipfs_datasets.legal import intake_legal_selection
+
+        case = copy.deepcopy(intake_case_file)
+        context = refresh_explicit_legal_context(case)
+        claims = list(case.get('candidate_claims') or [])
+        if not claims:
+            claims = [
+                {'name': entity.name,
+                 'type': entity.attributes.get('claim_type', 'unknown'),
+                 'description': entity.attributes.get('description', '')}
+                for entity in (knowledge_graph.get_entities_by_type('claim') if knowledge_graph is not None else [])
+            ]
+        selection = intake_legal_selection(context, claims)
+        revision = context.get('context_revision')
+        if type(revision) is not int or revision < 0:
+            return {}
+        material = {
+            'context_revision': revision,
+            'jurisdiction': context.get('jurisdiction'),
+            'date_roles': {role: context.get(role) for role in (
+                'event_date', 'event_dates', 'applicable_law_date', 'filing_reference_date',
+            )},
+            'claim_candidates': selection.get('claim_candidates') or [],
+        }
+        try:
+            raw = json.dumps(material, sort_keys=True, separators=(',', ':'),
+                             ensure_ascii=False, allow_nan=False).encode('utf-8')
+        except (TypeError, ValueError):
+            return {}
+        target_revision = f"legal-context:{revision}:" + hashlib.sha256(raw).hexdigest()
+        targets: Dict[str, Dict[str, Any]] = {}
+        for question in selection.get('questions') or []:
+            if not isinstance(question, dict):
+                continue
+            question_id = str(question.get('question_id') or '')
+            field = self._LEGAL_CONTEXT_QUESTION_FIELDS.get(question_id)
+            if field is None or question.get('field') != field:
+                continue
+            prompt = str(question.get('prompt') or '').strip()
+            reason = str(question.get('reason') or '').strip()
+            if not prompt or not reason:
+                continue
+            targets[question_id] = {
+                'question_id': question_id, 'field': field, 'prompt': prompt,
+                'target_id': f"legal_context:{question_id}",
+                'target_revision': target_revision, 'target_kind': 'factual',
+                'provenance': {'candidate_source': 'canonical_legal_context',
+                               'question_id': question_id, 'field': field,
+                               'context_revision': revision},
+                'why_answer_helps': f"Clarifies the current unresolved intake context: {reason}.",
+                'expected_information': prompt, 'user_answerability': 'user_observable',
+                'dependency_impact': 3, 'uncertainty': 2,
+            }
+        return targets
+
+    def _bind_legal_context_question(
+        self, candidate: Dict[str, Any], targets: Optional[Dict[str, Dict[str, Any]]],
+    ) -> Dict[str, Any]:
+        """Accept only a currently open canonical field and refuse stale targets."""
+        enriched = dict(candidate)
+        question_id = str(enriched.get('question_id') or '')
+        current = (targets or {}).get(question_id)
+        prior = enriched.get('unresolved_target') if isinstance(enriched.get('unresolved_target'), dict) else {}
+        if (not current or enriched.get('field') != current['field']
+                or any(str(value) != current['target_revision'] for value in (
+                    enriched.get('target_revision'), prior.get('target_revision'),
+                ) if value not in (None, ''))
+                or (prior.get('target_id') not in (None, '', current['target_id']))):
+            enriched['unresolved_target'] = None
+            return enriched
+        target = {key: copy.deepcopy(value) for key, value in current.items()
+                  if key not in {'question_id', 'field', 'prompt'}}
+        # The current canonical prompt wins over caller text or assertion flags.
+        enriched.update({
+            'question': current['prompt'],
+            'candidate_source': 'canonical_legal_context',
+            'context': {'legal_context_field': current['field'],
+                        'question_id': question_id,
+                        'gap_id': current['target_id'] + '@' + current['target_revision'],
+                        'target_revision': current['target_revision']},
+            'unresolved_target': target,
+            **{key: target[key] for key in (
+                'target_id', 'target_revision', 'target_kind', 'why_answer_helps',
+                'expected_information', 'user_answerability', 'dependency_impact', 'uncertainty',
+            )},
+        })
+        explanation = dict(enriched.get('ranking_explanation') or {}) if isinstance(enriched.get('ranking_explanation'), dict) else {}
+        explanation['unresolved_target'] = copy.deepcopy(target)
+        enriched['ranking_explanation'] = explanation
+        return enriched
+
+    def _legal_context_case_file(self, source_context=None):
+        # Actual workflow state takes precedence over a caller's serialized case.
+        getter = getattr(getattr(self.mediator, 'phase_manager', None), 'get_phase_data', None)
+        if callable(getter):
+            from complaint_phases.phase_manager import ComplaintPhase
+            case = getter(ComplaintPhase.INTAKE, 'intake_case_file')
+            return case if isinstance(case, dict) else None
+        case = source_context.get('intake_case_file') if isinstance(source_context, dict) else None
+        return case if isinstance(case, dict) else None
+
+    def _process_legal_context_answer(self, question, answer, knowledge_graph,
+                                      source_context, disposition, factual_action=None):
+        """Update an explicitly requested current context field, never a fact or law."""
+        case = self._legal_context_case_file(source_context)
+        current = self._current_legal_context_question_targets(knowledge_graph, case)
+        bound = self._bind_legal_context_question(question, current)
+        supplied = question.get('unresolved_target') if isinstance(question.get('unresolved_target'), dict) else {}
+        target = bound.get('unresolved_target') or {}
+        # An answer needs the exact target emitted by this current case. Raw
+        # coordinate labels alone do not authorize changing intake context.
+        if (not target or factual_action or supplied.get('target_id') != target.get('target_id')
+                or supplied.get('target_revision') != target.get('target_revision')
+                or self.is_question_target_closed(target.get('target_id'), target.get('target_revision'))):
+            updates = self._non_fact_answer_updates('invalidated', {})
+            updates['context_answer_status'] = 'stale_or_unbound_context_target'
+            return updates
+        record = self.record_question_disposition(
+            bound, answer, disposition=disposition, intake_case_file=case,
+            creates_fact=False, satisfies_requirement=False,
+        )
+        updates = self._non_fact_answer_updates(disposition, record)
+        updates['context_fields_updated'] = []
+        if disposition in self._NON_FACT_DISPOSITIONS:
+            return updates
+        field = bound['field']
+        value = str(answer or '').strip()
+        if field == 'claim_candidates':
+            # Preserve the user's explicit candidate label; it is not a
+            # promoted claim, source admission, or satisfied legal requirement.
+            case['candidate_claims'] = [{'claim_type': value, 'type': value,
+                                         'name': value, 'source': 'user_context_answer'}]
+        else:
+            apply_context = getattr(self.mediator, 'apply_explicit_legal_context', None)
+            if callable(apply_context):
+                apply_context(case, **{field: value})
+            else:
+                from complaint_phases.intake_case_file import apply_explicit_legal_context
+                apply_explicit_legal_context(case, **{field: value})
+        resolver = getattr(self.mediator, 'resolve_intake_legal_selection', None)
+        manager = getattr(self.mediator, 'phase_manager', None)
+        if callable(resolver) and manager is not None:
+            from complaint_phases.phase_manager import ComplaintPhase
+            claims = [
+                {'name': entity.name, 'type': entity.attributes.get('claim_type', 'unknown'),
+                 'description': entity.attributes.get('description', '')}
+                for entity in (knowledge_graph.get_entities_by_type('claim') if knowledge_graph is not None else [])
+            ]
+            selection = resolver(claims, case)
+            manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', case)
+            manager.update_phase_data(ComplaintPhase.INTAKE, 'legal_selection', selection)
+        updates['context_fields_updated'] = [field]
+        unresolved = self._current_legal_context_question_targets(knowledge_graph, case).get(bound['question_id'])
+        if unresolved is not None:
+            # A partial or unrecognized value is new user input, not closure.
+            # Retain its disposition history and explicitly reopen this field.
+            reopened = self.reopen_disposed_question(
+                bound['target_id'], 'The explicit context answer leaves this field unresolved.',
+                target_revision=unresolved['target_revision'], intake_case_file=case,
+                evidence_change='explicit-context-answer:' + hashlib.sha256(value.encode('utf-8')).hexdigest(),
+            )
+            updates['context_answer_status'] = 'needs_context_clarification'
+            updates['question_reopened'] = reopened
+        else:
+            updates['context_answer_status'] = 'recorded_explicit_context'
+        return updates
+
     _CLOSED_TARGET_DISPOSITIONS = {
         'answered', 'unknown', 'declined', 'refused', 'skipped', 'deferred',
         'invalidated', 'contradictory',
@@ -2951,7 +3134,17 @@ class ComplaintDenoiser:
         contradictory_conclusion: bool = False,
     ) -> Dict[str, Any]:
         from complaint_phases.intake_case_file import record_question_disposition as persist_disposition
-        bound = self._bind_unresolved_target(question if isinstance(question, dict) else {})
+        legal_targets = None
+        if isinstance(question, dict) and str(question.get('type') or '').lower() == 'legal_context':
+            case = intake_case_file if isinstance(intake_case_file, dict) else self._legal_context_case_file()
+            graph = None
+            manager = getattr(self.mediator, 'phase_manager', None)
+            if manager is not None:
+                from complaint_phases.phase_manager import ComplaintPhase
+                graph = manager.get_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph')
+            legal_targets = self._current_legal_context_question_targets(graph, case)
+        bound = self._bind_unresolved_target(question if isinstance(question, dict) else {},
+                                             legal_context_targets=legal_targets)
         target_id, revision, kind = self._target_identity(bound if isinstance(bound, dict) else {})
         if not target_id and isinstance(question, dict):
             slot = self._standard_intake_slot(question)
@@ -3215,10 +3408,13 @@ class ComplaintDenoiser:
             if diagnostic not in self.source_operator_diagnostics:
                 self.source_operator_diagnostics.append(diagnostic)
 
-    def _bind_unresolved_target(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
+    def _bind_unresolved_target(self, candidate: Dict[str, Any], *,
+                                legal_context_targets: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
         if not isinstance(candidate, dict):
             return candidate
         enriched = dict(candidate)
+        if str(enriched.get('type') or enriched.get('question_type') or '').strip().lower() == 'legal_context':
+            return self._bind_legal_context_question(enriched, legal_context_targets)
         context = dict(enriched.get('context') or {}) if isinstance(enriched.get('context'), dict) else {}
         enriched['question'] = self._neutralize_question_text(str(enriched.get('question') or ''))
         if self._is_operator_source_gap(enriched):
@@ -3355,7 +3551,8 @@ class ComplaintDenoiser:
         enriched['ranking_explanation'] = explanation
         return enriched
 
-    def _finalize_neutral_targeted_questions(self, questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _finalize_neutral_targeted_questions(self, questions: List[Dict[str, Any]], *,
+                                             legal_context_targets: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """Keep only neutral user questions bound to an open unresolved target.
 
         An empty result is not saturation. Source and prover gaps become operator
@@ -3367,7 +3564,7 @@ class ComplaintDenoiser:
         for raw in questions or []:
             if not isinstance(raw, dict):
                 continue
-            candidate = self._bind_unresolved_target(raw)
+            candidate = self._bind_unresolved_target(raw, legal_context_targets=legal_context_targets)
             if self._is_operator_source_gap(candidate) or candidate.get('user_answerability') == 'operator_only':
                 diagnostic = {
                     'kind': 'source_operator_diagnostic',
@@ -3909,10 +4106,11 @@ class ComplaintDenoiser:
         *,
         max_questions: int = 10,
         selector: Any = None,
+        legal_context_targets: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """Select final question candidates, allowing a router/prover override."""
         normalized_candidates = [
-            self._bind_unresolved_target(candidate)
+            self._bind_unresolved_target(candidate, legal_context_targets=legal_context_targets)
             for candidate in (candidates or [])
             if isinstance(candidate, dict)
         ]
@@ -4367,6 +4565,15 @@ class ComplaintDenoiser:
             List of question dictionaries with type, question text, and context
         """
         self.load_question_dispositions(intake_case_file)
+        legal_context_targets = self._current_legal_context_question_targets(knowledge_graph, intake_case_file)
+        # Subsequent public answer turns do not pass additional_candidates.
+        # Rederive their open context prompts instead of losing them after turn one.
+        if additional_candidates is None:
+            additional_candidates = [
+                {'type': 'legal_context', 'question_id': item['question_id'],
+                 'field': item['field'], 'question': item['prompt'], 'priority': 'critical'}
+                for item in legal_context_targets.values()
+            ]
         questions = self.collect_question_candidates(
             knowledge_graph,
             dependency_graph,
@@ -4376,11 +4583,20 @@ class ComplaintDenoiser:
         # Context questions join the same selection pass as graph questions.
         questions = [candidate for candidate in (additional_candidates or [])
                      if isinstance(candidate, dict)] + questions
+        prepared = []
+        for candidate in questions:
+            if str(candidate.get('type') or candidate.get('question_type') or '').strip().lower() == 'legal_context':
+                candidate = self._bind_unresolved_target(candidate, legal_context_targets=legal_context_targets)
+                if not candidate.get('unresolved_target'):
+                    continue
+            prepared.append(candidate)
+        questions = prepared
         selector = getattr(self.mediator, 'select_intake_question_candidates', None) if self.mediator else None
         questions = self.select_question_candidates(
             questions,
             max_questions=max_questions,
             selector=selector,
+            legal_context_targets=legal_context_targets,
         )
 
         # Ensure we cover basic intake dimensions beyond evidence-only prompts.
@@ -4397,7 +4613,7 @@ class ComplaintDenoiser:
 
         self._record_source_capability_diagnostic(intake_case_file)
         self._record_operator_candidates(list(additional_candidates or []) + list(questions))
-        questions = self._finalize_neutral_targeted_questions(questions)
+        questions = self._finalize_neutral_targeted_questions(questions, legal_context_targets=legal_context_targets)
 
         # Track questions in pool
         self.questions_pool.extend(questions[:max_questions])
@@ -4447,6 +4663,19 @@ class ComplaintDenoiser:
         if explicit_disposition in (None, "") and isinstance(source_context, dict):
             explicit_disposition = source_context.get("disposition") or source_context.get("answer_disposition")
         classified_disposition = self.classify_answer_disposition(answer, explicit=explicit_disposition)
+        if isinstance(question, dict) and str(question.get('type') or '').strip().lower() == 'legal_context':
+            updates = self._process_legal_context_answer(
+                question, answer, knowledge_graph, source_context,
+                classified_disposition, factual_action=factual_action,
+            )
+            self.questions_asked.append({'question': question, 'answer': answer,
+                                         'answer_event_id': answer_event_id,
+                                         'disposition': updates['disposition'],
+                                         'creates_fact': False, 'satisfies_requirement': False})
+            if answer_event_id and knowledge_graph is not None:
+                knowledge_graph.finish_answer_event(answer_event_id, event_payload,
+                                                    denoiser_updates=dict(updates))
+            return updates
         if classified_disposition in self._NON_FACT_DISPOSITIONS:
             record = self.record_question_disposition(
                 question if isinstance(question, dict) else {},

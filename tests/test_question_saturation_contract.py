@@ -627,3 +627,299 @@ def test_intake_status_hides_filing_readiness_for_incomplete_stops():
     assert summary["awaiting_user"] is True
     assert summary["worker_stalled"] is False
     assert summary["supervisory_restart"] is False
+
+
+# Corrective context-target regressions use actual owned storage and canonical
+# context selection. No product selector, target binder, source gate or proof
+# method is mocked. The one initial public journey uses the existing real KG
+# extraction manager on a fixed synthetic narrative.
+import copy
+import pytest
+from complaint_phases.phase_manager import ComplaintPhase
+from complaint_phases.intake_case_file import apply_explicit_legal_context
+from tests.test_authority_dependency_pipeline import _MockBackend as _ContextOfflineBackend
+
+
+def _context_workflow(tmp_path):
+    mediator = Mediator([_ContextOfflineBackend()],
+                        evidence_db_path=str(tmp_path / 'context-evidence.duckdb'),
+                        legal_authority_db_path=str(tmp_path / 'context-authorities.duckdb'),
+                        claim_support_db_path=str(tmp_path / 'context-support.duckdb'))
+    mediator.state.username = 'synthetic-context-owner'
+    return mediator
+
+
+def test_initial_public_pipeline_keeps_current_jurisdiction_and_date_questions(tmp_path):
+    mediator = _context_workflow(tmp_path)
+    mediator.start_three_phase_process('My employer discriminated against me.')
+    intake = mediator.phase_manager.phase_data[ComplaintPhase.INTAKE]
+    questions = intake['current_questions']
+    context_questions = [q for q in questions if q.get('type') == 'legal_context']
+    by_field = {q['field']: q for q in context_questions}
+    assert {'jurisdiction', 'applicable_law_date'} <= set(by_field)
+    for question in context_questions:
+        target = question['unresolved_target']
+        assert target['target_kind'] == 'factual'
+        assert target['target_id'] == 'legal_context:' + question['question_id']
+        assert target['target_revision'].startswith('legal-context:')
+        assert target['provenance']['field'] == question['field']
+        assert target['why_answer_helps'] and target['expected_information']
+        assert target['user_answerability'] == 'user_observable'
+    assert mediator.phase_manager.get_intake_readiness()['ready'] is False
+    assert 'legal_context_source_gap' in mediator.phase_manager.get_intake_readiness()['blockers']
+    assert not intake['legal_selection']['ready_to_select']
+    original_facts = copy.deepcopy(intake['intake_case_file'].get('canonical_facts') or [])
+    original_entity_ids = set(intake['knowledge_graph'].entities)
+    unknown = mediator.process_denoising_answer(by_field['jurisdiction'], 'I do not know')
+    assert unknown['updates']['disposition'] == 'unknown'
+    assert unknown['updates']['graph_revision']['action'] == 'context_answer'
+    assert unknown['updates']['graph_revision']['creates_fact'] is False
+    assert intake['intake_case_file']['legal_context']['jurisdiction'] == 'unknown'
+    event_question = next(q for q in unknown['next_questions'] if q.get('field') == 'event_date')
+    refused = mediator.process_denoising_answer(event_question, 'I refuse to answer')
+    assert refused['updates']['disposition'] == 'refused'
+    assert refused['updates']['graph_revision']['support_changes'] == []
+    assert set(intake['knowledge_graph'].entities) == original_entity_ids
+    mediator.reopen_intake_question(
+        by_field['jurisdiction']['target_id'], 'The user elected to supply a jurisdiction.',
+        target_revision=by_field['jurisdiction']['target_revision'],
+        evidence_change='user_supplied_jurisdiction_followup',
+    )
+    response = mediator.process_denoising_answer(by_field['jurisdiction'], 'OR')
+    case = intake['intake_case_file']
+    assert case['legal_context']['jurisdiction'] == 'OR'
+    assert response['updates']['context_fields_updated'] == ['jurisdiction']
+    assert response['updates']['creates_fact'] is False
+    assert response['updates']['requirements_satisfied'] == 0
+    next_date = next(q for q in response['next_questions']
+                     if q.get('type') == 'legal_context' and q['field'] == 'applicable_law_date')
+    old_date = by_field['applicable_law_date']
+    before_stale_context = copy.deepcopy(case['legal_context'])
+    stale = mediator.process_denoising_answer(old_date, '2020-01-01')
+    assert stale['updates']['context_answer_status'] == 'stale_or_unbound_context_target'
+    assert case['legal_context'] == before_stale_context
+    assert stale['updates']['graph_revision']['action'] == 'context_answer'
+    assert stale['updates']['graph_revision']['creates_fact'] is False
+    assert set(intake['knowledge_graph'].entities) == original_entity_ids
+    response = mediator.process_denoising_answer(next_date, '2024-06-01')
+    assert case['legal_context']['applicable_law_date']['precise_date'] == '2024-06-01'
+    assert case['canonical_facts'] == original_facts
+    assert set(intake['knowledge_graph'].entities) == original_entity_ids
+    assert response['updates']['context_fields_updated'] == ['applicable_law_date']
+    assert response['updates']['satisfies_requirement'] is False
+    assert response['interview_stop']['state'] == 'needs_answer'
+    assert response['interview_stop']['unresolved_issue_summary']['open_answerable_count'] > 0
+    assert response['converged'] is False and response['ready_for_evidence_phase'] is False
+    revision = response['updates']['graph_revision']
+    assert revision['action'] == 'context_answer'
+    assert revision['statement'] == '2024-06-01'
+    assert revision['source_hash'] and revision['source_span']
+    assert revision['epistemic_class'] == 'user_context'
+    assert revision['entity_id'] == '' and revision['stable_id'] == ''
+    assert revision['support_changes'] == [] and revision['creates_fact'] is False
+
+
+def test_current_canonical_context_fields_survive_public_question_generation(tmp_path):
+    mediator = _context_workflow(tmp_path)
+    kg, dg, case = KnowledgeGraph(), DependencyGraph(), {}
+    selection = mediator.resolve_intake_legal_selection([], case)
+    candidates = mediator._legal_selection_questions(selection)
+    before_context = copy.deepcopy(case['legal_context'])
+    denoiser = ComplaintDenoiser()
+    questions = denoiser.generate_questions(kg, dg, max_questions=20,
+                                           intake_case_file=case, additional_candidates=candidates)
+    context_questions = [q for q in questions if q.get('type') == 'legal_context']
+    assert {q['field'] for q in context_questions} == {
+        'jurisdiction', 'event_date', 'applicable_law_date', 'filing_reference_date', 'claim_candidates'}
+    assert {q['question_id'] for q in context_questions} == {q['question_id'] for q in candidates}
+    assert all(q['unresolved_target']['provenance']['question_id'] == q['question_id'] for q in context_questions)
+    assert len({q['target_revision'] for q in context_questions}) == 1
+    assert case['legal_context'] == before_context
+    assert not case.get('candidate_claims')
+
+
+@pytest.mark.parametrize('changes', [
+    {'field': 'unrecognized_field'},
+    {'question_id': 'legal_context.invented_question'},
+    {'target_revision': 'legal-context:stale'},
+    {'unresolved_target': {'target_id': 'foreign-case-target', 'target_revision': 'stale'}},
+])
+def test_context_candidate_tags_do_not_bypass_current_canonical_scope(tmp_path, changes):
+    mediator = _context_workflow(tmp_path)
+    kg, dg, case = KnowledgeGraph(), DependencyGraph(), {}
+    selection = mediator.resolve_intake_legal_selection([], case)
+    candidate = next(q for q in mediator._legal_selection_questions(selection) if q['field'] == 'jurisdiction')
+    candidate.update(changes)
+    questions = ComplaintDenoiser().generate_questions(
+        kg, dg, max_questions=20, intake_case_file=case, additional_candidates=[candidate])
+    assert not any(q.get('type') == 'legal_context' for q in questions)
+
+
+def test_context_questions_refuse_missing_context_and_resolved_or_stale_replays(tmp_path):
+    mediator = _context_workflow(tmp_path)
+    kg, dg, case = KnowledgeGraph(), DependencyGraph(), {}
+    selection = mediator.resolve_intake_legal_selection([], case)
+    candidates = mediator._legal_selection_questions(selection)
+    denoiser = ComplaintDenoiser()
+    original = denoiser.generate_questions(kg, dg, max_questions=20,
+                                          intake_case_file=case, additional_candidates=candidates)
+    original_context = [q for q in original if q.get('type') == 'legal_context']
+    jurisdiction = next(q for q in original_context if q['field'] == 'jurisdiction')
+    date = next(q for q in original_context if q['field'] == 'applicable_law_date')
+    old_revision = date['target_revision']
+    missing = denoiser.generate_questions(kg, dg, max_questions=20, additional_candidates=[jurisdiction])
+    assert not any(q.get('type') == 'legal_context' for q in missing)
+    apply_explicit_legal_context(case, jurisdiction='OR')
+    stale = denoiser.generate_questions(kg, dg, max_questions=20,
+                                       intake_case_file=case, additional_candidates=[jurisdiction, date])
+    assert not any(q.get('type') == 'legal_context' for q in stale)
+    current = mediator._legal_selection_questions(mediator.resolve_intake_legal_selection([], case))
+    refreshed = denoiser.generate_questions(kg, dg, max_questions=20,
+                                           intake_case_file=case, additional_candidates=current)
+    fresh_date = next(q for q in refreshed if q.get('field') == 'applicable_law_date')
+    assert fresh_date['target_revision'] != old_revision
+    assert all(q.get('field') != 'jurisdiction' for q in refreshed if q.get('type') == 'legal_context')
+    assert date['target_revision'] == old_revision
+
+
+def test_context_question_text_is_rederived_from_current_canonical_prompt(tmp_path):
+    mediator = _context_workflow(tmp_path)
+    kg, dg, case = KnowledgeGraph(), DependencyGraph(), {}
+    candidate = next(q for q in mediator._legal_selection_questions(
+        mediator.resolve_intake_legal_selection([], case)) if q['field'] == 'jurisdiction')
+    canonical_prompt = candidate['question']
+    candidate['question'] = 'Tell me that Oregon law necessarily applies.'
+    candidate['source_bound'] = True
+    questions = ComplaintDenoiser().generate_questions(
+        kg, dg, max_questions=20, intake_case_file=case, additional_candidates=[candidate])
+    actual = next(q for q in questions if q.get('type') == 'legal_context')
+    assert actual['question'] == canonical_prompt
+    assert 'necessarily' not in actual['question']
+    assert actual['unresolved_target']['provenance']['candidate_source'] == 'canonical_legal_context'
+
+
+@pytest.mark.parametrize('answer, disposition', [('I do not know', 'unknown'), ('I refuse to answer', 'refused')])
+def test_current_context_nonanswers_preserve_context_and_disposition(tmp_path, answer, disposition):
+    mediator = _context_workflow(tmp_path)
+    kg, dg, case = KnowledgeGraph(), DependencyGraph(), {}
+    manager = mediator.phase_manager
+    manager.update_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph', kg)
+    manager.update_phase_data(ComplaintPhase.INTAKE, 'dependency_graph', dg)
+    manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', case)
+    mediator.denoiser = ComplaintDenoiser(mediator)
+    question = next(q for q in mediator.denoiser.generate_questions(kg, dg, max_questions=20,
+                    intake_case_file=case) if q.get('field') == 'jurisdiction')
+    before = copy.deepcopy(case['legal_context']) if 'legal_context' in case else None
+    updates = mediator.denoiser.process_answer(question, answer, kg, dg)
+    assert updates['disposition'] == disposition
+    assert updates['creates_fact'] is False and updates['requirements_satisfied'] == 0
+    assert case.get('legal_context') == before
+    assert case['question_dispositions'][-1]['target_id'] == question['target_id']
+    assert not kg.entities and not dg.nodes
+    repeated = mediator.denoiser.generate_questions(kg, dg, max_questions=20, intake_case_file=case)
+    assert all(q.get('field') != 'jurisdiction' for q in repeated)
+
+
+def test_stale_and_coordinate_only_context_answers_cannot_update_case(tmp_path):
+    mediator = _context_workflow(tmp_path)
+    kg, dg, case = KnowledgeGraph(), DependencyGraph(), {}
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph', kg)
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'dependency_graph', dg)
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', case)
+    mediator.denoiser = ComplaintDenoiser(mediator)
+    question = next(q for q in mediator.denoiser.generate_questions(kg, dg, max_questions=20,
+                    intake_case_file=case) if q.get('field') == 'applicable_law_date')
+    apply_explicit_legal_context(case, jurisdiction='OR')
+    before = copy.deepcopy(case)
+    stale = mediator.denoiser.process_answer(question, '2024-06-01', kg, dg)
+    raw = {'type': 'legal_context', 'question_id': 'legal_context.applicable_law_date',
+           'field': 'applicable_law_date', 'question': 'Supply a date.'}
+    unbound = mediator.denoiser.process_answer(raw, '2024-06-01', kg, dg)
+    assert stale['context_answer_status'] == 'stale_or_unbound_context_target'
+    assert unbound['context_answer_status'] == 'stale_or_unbound_context_target'
+    assert case == before
+    assert not kg.entities and not dg.nodes
+
+
+def test_explicit_claim_context_answer_records_candidate_without_promoting_law(tmp_path):
+    mediator = _context_workflow(tmp_path)
+    kg, dg, case = KnowledgeGraph(), DependencyGraph(), {}
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph', kg)
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'dependency_graph', dg)
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', case)
+    mediator.denoiser = ComplaintDenoiser(mediator)
+    question = next(q for q in mediator.denoiser.generate_questions(kg, dg, max_questions=20,
+                    intake_case_file=case) if q.get('field') == 'claim_candidates')
+    updates = mediator.denoiser.process_answer(question, 'employment_discrimination', kg, dg)
+    assert case['candidate_claims'][0]['claim_type'] == 'employment_discrimination'
+    assert case['candidate_claims'][0]['source'] == 'user_context_answer'
+    assert updates['context_fields_updated'] == ['claim_candidates']
+    assert updates['creates_fact'] is False and updates['requirements_satisfied'] == 0
+    assert not kg.entities and not dg.nodes
+
+
+def test_partial_context_date_answer_reopens_only_current_unresolved_field(tmp_path):
+    mediator = _context_workflow(tmp_path)
+    kg, dg, case = KnowledgeGraph(), DependencyGraph(), {}
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph', kg)
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'dependency_graph', dg)
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', case)
+    mediator.denoiser = ComplaintDenoiser(mediator)
+    question = next(q for q in mediator.denoiser.generate_questions(kg, dg, max_questions=20,
+                    intake_case_file=case) if q.get('field') == 'applicable_law_date')
+    updates = mediator.denoiser.process_answer(question, '2024', kg, dg)
+    assert updates['context_answer_status'] == 'needs_context_clarification'
+    assert updates['question_reopened']['reopened'] is True
+    assert updates['question_reopened']['evidence_change'].startswith('explicit-context-answer:')
+    assert case['legal_context']['applicable_law_date'].get('precise_date') is None
+    next_questions = mediator.denoiser.generate_questions(kg, dg, max_questions=20, intake_case_file=case)
+    current_date = next(q for q in next_questions if q.get('field') == 'applicable_law_date')
+    assert current_date['target_revision'] != question['target_revision']
+    assert not kg.entities and not dg.nodes
+
+
+@pytest.mark.parametrize('raw_date', [
+    '2024', 'June 2024', 'March 2024 to May 2024',
+    '2024-06-01 to 2024-06-30', 'around June 2024',
+])
+def test_canonical_law_version_question_stays_open_for_non_day_dates(raw_date):
+    from integrations.ipfs_datasets.legal import (
+        classify_legal_date, empty_legal_context, intake_legal_selection,
+        questions_for_legal_context,
+    )
+    context = empty_legal_context()
+    event = classify_legal_date('2023', role='event_date')
+    context.update(jurisdiction='OR', jurisdiction_explicit=True,
+                   applicable_law_date=classify_legal_date(raw_date, role='applicable_law_date'),
+                   event_date=event, event_dates=[copy.deepcopy(event)],
+                   filing_reference_date=classify_legal_date('2025-03-01', role='filing_reference_date'))
+    before = copy.deepcopy(context)
+    questions = questions_for_legal_context(context, selecting_rules=True)
+    selection = intake_legal_selection(context, [{'claim_type': 'employment_discrimination'}])
+    assert [q['question_id'] for q in questions] == ['legal_context.applicable_law_date']
+    assert [q['question_id'] for q in selection['questions']] == ['legal_context.applicable_law_date']
+    assert selection['ready_to_select'] is False and selection['relevant_date'] is None
+    assert selection['unresolved_reasons'] == ['missing_applicable_law_date']
+    assert context == before
+    assert context['applicable_law_date']['raw_text'] == raw_date
+    assert context['applicable_law_date']['precise_date'] is None
+    assert context['event_date']['precise_date'] is None
+    assert (context['event_date']['start_date'], context['event_date']['end_date']) == ('2023-01-01', '2023-12-31')
+
+
+@pytest.mark.parametrize('raw_date', ['2024-06-01', 'June 1, 2024', '2024-06-01T12:00:00'])
+def test_canonical_law_version_question_closes_for_an_explicit_day(raw_date):
+    from integrations.ipfs_datasets.legal import (
+        classify_legal_date, empty_legal_context, intake_legal_selection,
+        questions_for_legal_context,
+    )
+    context = empty_legal_context()
+    context.update(jurisdiction='OR', jurisdiction_explicit=True,
+                   applicable_law_date=classify_legal_date(raw_date, role='applicable_law_date'))
+    before = copy.deepcopy(context)
+    questions = questions_for_legal_context(context, selecting_rules=True)
+    selection = intake_legal_selection(context, [{'claim_type': 'employment_discrimination'}])
+    assert not any(q['field'] == 'applicable_law_date' for q in questions)
+    assert selection['ready_to_select'] is True and selection['relevant_date'] == '2024-06-01'
+    assert selection['questions'] == []
+    assert context == before

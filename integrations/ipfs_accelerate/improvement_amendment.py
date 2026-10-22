@@ -328,7 +328,7 @@ def _assert_quiescent(root: Path, state: Path, old_plan_id: str, old_cid: str, n
         raise ValueError("changed task has native worktree history")
     events = state / f"{runner.STATE_PREFIX}_events.jsonl"
     if events.exists():
-        for line in recovery._owned_bytes(events, 16_000_000, legacy_group_write=True).decode().splitlines():
+        for line in recovery._owned_bytes(events, runner.MAX_EVENT_HISTORY_BYTES, legacy_group_write=True).decode().splitlines():
             if not line.strip():
                 continue
             try:

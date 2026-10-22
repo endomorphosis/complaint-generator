@@ -129,6 +129,8 @@ PROOF_ROUTING_POLICY_VERSION = "proof03-open-world-substantive-trust/v1"
 PROOF_ELEMENT_CACHE_SCHEMA = "legal-ir-satisfied-element-cache/v1"
 PROOF_ELEMENT_CACHE_POLICY_VERSION = "proof04-versioned-invalidation/v1"
 _SATISFIED_ELEMENT_PROOF_CACHE: Dict[str, Dict[str, Any]] = {}
+_BOUND_ROUTING_RECEIPT_ORIGINS: Dict[str, Dict[str, Any]] = {}
+_ELEMENT_PROOF_EVALUATION_ORIGINS: Dict[str, Dict[str, Any]] = {}
 PROOF_ROUTING_OUTCOMES = (
     "proved",
     "refuted",
@@ -6212,6 +6214,9 @@ def _routing_receipt(
         "empty_enabled_routes_enables_all": True,
     }
     payload.update(dict(extra or {}))
+    origin = _stable_payload_digest(payload)
+    payload['routing_receipt_id'] = 'bound-routing-' + origin
+    _BOUND_ROUTING_RECEIPT_ORIGINS[payload['routing_receipt_id']] = deepcopy(payload)
     return payload
 
 
@@ -6446,6 +6451,7 @@ def proof_cache_identity(
         "element_id": str(element_id or ""),
         "factual_revisions": factual,
         "legal_source": {
+            **deepcopy(source),
             "source_id": str(source.get("source_id") or ""),
             "source_version": str(source.get("source_version") or source.get("legal_context_version") or ""),
             "legal_context_version": str(source.get("legal_context_version") or ""),
@@ -6457,6 +6463,7 @@ def proof_cache_identity(
             "obligation_schema": PROOF_OBLIGATION_ARTIFACT_SCHEMA,
             "routing_schema": PROOF_ROUTING_SCHEMA,
             "identities": compiler_identities,
+            "current_identities": deepcopy(canonical_compiler_identities()),
             "config": dict(compiler_config or {}),
         },
         "proof_policy": policy,
@@ -6469,20 +6476,111 @@ def proof_cache_identity(
     }
 
 
+def _validated_element_cache_identity(identity: Mapping[str, Any]) -> Dict[str, Any] | None:
+    if not isinstance(identity, Mapping) or set(identity) != {'schema_version', 'components', 'cache_identity'}:
+        return None
+    if identity.get('schema_version') != PROOF_ELEMENT_CACHE_SCHEMA:
+        return None
+    components = identity.get('components')
+    if (not isinstance(components, Mapping)
+            or set(components) != {'claim_id', 'element_id', 'factual_revisions', 'legal_source', 'compiler', 'proof_policy', 'chronology'}
+            or not isinstance(components.get('legal_source'), Mapping)
+            or not isinstance(components.get('chronology'), Mapping)
+            or not isinstance(components.get('factual_revisions'), list)):
+        return None
+    try:
+        if str(identity.get('cache_identity') or '') != _stable_payload_digest(components):
+            return None
+        compiler = components.get('compiler')
+        policy = components.get('proof_policy')
+        if not isinstance(compiler, Mapping) or not isinstance(policy, Mapping):
+            return None
+        if (compiler.get('schema_version') != PROOF_ELEMENT_CACHE_SCHEMA
+                or compiler.get('obligation_schema') != PROOF_OBLIGATION_ARTIFACT_SCHEMA
+                or compiler.get('routing_schema') != PROOF_ROUTING_SCHEMA
+                or compiler.get('current_identities') != canonical_compiler_identities()
+                or policy.get('obligation_policy') != PROOF_OBLIGATION_POLICY_VERSION
+                or policy.get('routing_policy') != PROOF_ROUTING_POLICY_VERSION
+                or policy.get('cache_policy') != PROOF_ELEMENT_CACHE_POLICY_VERSION):
+            return None
+        return deepcopy(dict(identity))
+    except (TypeError, ValueError):
+        return None
+
+
+def _current_routing_origin(result: Mapping[str, Any], identity: Mapping[str, Any]) -> bool:
+    if not isinstance(result, Mapping):
+        return False
+    receipt_id = str(result.get('routing_receipt_id') or '')
+    stored = _BOUND_ROUTING_RECEIPT_ORIGINS.get(receipt_id)
+    if stored is None or dict(result) != stored:
+        return False
+    payload = {key: value for key, value in result.items() if key != 'routing_receipt_id'}
+    if receipt_id != 'bound-routing-' + _stable_payload_digest(payload):
+        return False
+    versions = result.get('versions')
+    if (result.get('schema_version') != PROOF_ROUTING_SCHEMA
+            or result.get('policy_version') != PROOF_ROUTING_POLICY_VERSION
+            or not isinstance(versions, Mapping)
+            or versions.get('policy_version') != PROOF_ROUTING_POLICY_VERSION):
+        return False
+    components = identity['components']
+    requested = components['compiler'].get('identities') or {}
+    for key in ('execution_identity', 'obligation_version', 'premise_version'):
+        expected = str(requested.get(key) or '')
+        if expected and (versions.get(key) != expected or versions.get('expected_' + key) != expected):
+            return False
+    inventory = components['legal_source'].get('premise_inventory')
+    if isinstance(inventory, Mapping) and versions.get('premises') != _premise_identity(inventory):
+        return False
+    return True
+
+
+def _publish_element_evaluation(record: Mapping[str, Any], identity: Mapping[str, Any], *, cache: bool = False) -> Dict[str, Any]:
+    issued = deepcopy(dict(record))
+    issued['identity'] = deepcopy(dict(identity))
+    material = {key: value for key, value in issued.items() if key not in {'reused', 'provider_called'}}
+    issued['evaluation_id'] = 'element-evaluation-' + _stable_payload_digest(material)
+    _ELEMENT_PROOF_EVALUATION_ORIGINS[issued['evaluation_id']] = deepcopy(issued)
+    if cache:
+        _SATISFIED_ELEMENT_PROOF_CACHE[str(identity['cache_identity'])] = deepcopy(issued)
+    return deepcopy(issued)
+
+
+def verify_element_proof_evaluation(evaluation: Mapping[str, Any]) -> Dict[str, Any]:
+    """Verify issued/current evaluation lineage, without minting kernel trust."""
+    if not isinstance(evaluation, Mapping):
+        return {'verified': False, 'satisfied': False, 'reason': 'unbound_element_evaluation'}
+    stored = _ELEMENT_PROOF_EVALUATION_ORIGINS.get(str(evaluation.get('evaluation_id') or ''))
+    if stored is None:
+        return {'verified': False, 'satisfied': False, 'reason': 'unbound_element_evaluation'}
+    material = {key: value for key, value in evaluation.items() if key not in {'reused', 'provider_called', 'evaluation_id'}}
+    expected = {key: value for key, value in stored.items() if key not in {'reused', 'provider_called', 'evaluation_id'}}
+    identity = _validated_element_cache_identity(evaluation.get('identity'))
+    if material != expected or identity is None or evaluation.get('cache_identity') != identity['cache_identity']:
+        return {'verified': False, 'satisfied': False, 'reason': 'stale_or_modified_element_evaluation'}
+    # Current route_bound_legal_ir_proof never configures a checked substantive
+    # kernel backend. Neither a provider flag nor cached structure can add one.
+    return {'verified': True, 'satisfied': False, 'reason': 'checked_kernel_backend_not_configured',
+            'identity': identity, 'evaluation': deepcopy(dict(evaluation))}
+
+
 def reset_satisfied_element_proof_cache() -> None:
     _SATISFIED_ELEMENT_PROOF_CACHE.clear()
 
 
 def lookup_satisfied_element_proof(identity: Mapping[str, Any]) -> Dict[str, Any] | None:
-    """Return a stored satisfied result only when its cache identity matches."""
-
-    key = str((identity or {}).get("cache_identity") or "")
-    stored = _SATISFIED_ELEMENT_PROOF_CACHE.get(key)
-    if not stored or not stored.get("satisfied"):
+    """Only a current origin-bound substantive result could satisfy an element."""
+    current = _validated_element_cache_identity(identity)
+    if current is None or _element_cache_block(current):
+        return None
+    stored = _SATISFIED_ELEMENT_PROOF_CACHE.get(current['cache_identity'])
+    verified = verify_element_proof_evaluation(stored) if stored is not None else {}
+    if not verified.get('verified') or not verified.get('satisfied'):
         return None
     found = deepcopy(stored)
-    found["reused"] = True
-    found["provider_called"] = False
+    found['reused'] = True
+    found['provider_called'] = False
     return found
 
 
@@ -6511,81 +6609,59 @@ def replay_satisfied_element_proof(
     *,
     provider: Any = None,
 ) -> Dict[str, Any]:
-    """Replay a versioned element proof. Unchanged inputs do not call providers.
+    """Replay only rederived current inputs and actual issued routing results.
 
-    A corrected fact, law date, compiler identity, proof policy, or superseded
-    rule is a different identity and cannot return an earlier satisfied result.
-    Contradictory dates and relative-only chronology stay uncertain.
+    This configured adapter has structural routing and no checked kernel
+    backend. Replay preserves actual diagnostics, never substantive satisfaction.
     """
-
-    key = str(identity.get("cache_identity") or "")
-    if not key:
-        raise ValueError("proof cache identity is required")
+    current = _validated_element_cache_identity(identity)
+    if current is None:
+        return {'schema_version': PROOF_ELEMENT_CACHE_SCHEMA, 'cache_identity': '',
+                'satisfied': False, 'status': 'unknown', 'reason': 'invalid_current_cache_identity',
+                'substantive_trust_satisfied': False, 'entails_claim_element': False,
+                'recommended_follow_ups': [], 'reused': False, 'provider_called': False,
+                'deterministic': True, 'result': None}
+    key = current['cache_identity']
+    # Current chronology/source blockers are evaluated before any cached result.
+    block = _element_cache_block(current)
     stored = _SATISFIED_ELEMENT_PROOF_CACHE.get(key)
-    if stored is not None:
+    if stored is not None and verify_element_proof_evaluation(stored).get('verified'):
         replayed = deepcopy(stored)
-        replayed["reused"] = True
-        replayed["provider_called"] = False
-        replayed["deterministic"] = True
+        replayed['reused'] = True
+        replayed['provider_called'] = False
         return replayed
-    block = _element_cache_block(identity)
-    if block and not block.get("evaluate"):
-        record = {
-            "schema_version": PROOF_ELEMENT_CACHE_SCHEMA,
-            "cache_identity": key,
-            "satisfied": False,
-            "status": "uncertain",
-            "reason": block["reason"],
-            "substantive_trust_satisfied": False,
-            "entails_claim_element": False,
-            "recommended_follow_ups": list(block["recommended_follow_ups"]),
-            "reused": False,
-            "provider_called": False,
-            "deterministic": True,
-            "result": None,
-        }
-        _SATISFIED_ELEMENT_PROOF_CACHE[key] = deepcopy(record)
-        return deepcopy(record)
+    record = {'schema_version': PROOF_ELEMENT_CACHE_SCHEMA, 'cache_identity': key,
+              'satisfied': False, 'status': 'unknown', 'reason': '',
+              'substantive_trust_satisfied': False, 'entails_claim_element': False,
+              'recommended_follow_ups': [], 'reused': False, 'provider_called': False,
+              'deterministic': True, 'result': None}
+    if block and not block.get('evaluate'):
+        record.update(status='uncertain', reason=block['reason'],
+                      recommended_follow_ups=list(block['recommended_follow_ups']))
+        return _publish_element_evaluation(record, current, cache=True)
     if provider is None:
-        return {
-            "schema_version": PROOF_ELEMENT_CACHE_SCHEMA,
-            "cache_identity": key,
-            "satisfied": False,
-            "status": "not_cached",
-            "reason": "proof_cache_miss",
-            "substantive_trust_satisfied": False,
-            "entails_claim_element": False,
-            "recommended_follow_ups": [],
-            "reused": False,
-            "provider_called": False,
-            "deterministic": True,
-            "result": None,
-        }
+        record.update(status='not_cached', reason='proof_cache_miss')
+        return _publish_element_evaluation(record, current)
     produced = provider()
-    if not isinstance(produced, Mapping):
-        produced = {"value": produced}
-    produced_map = dict(produced)
-    satisfied = bool(produced_map.get("satisfied") is True or produced_map.get("substantive_trust_satisfied") is True)
-    reason = str(produced_map.get("reason") or "")
-    if block and block.get("reason") == "superseded_rule":
-        satisfied = False
-        reason = "superseded_rule"
-    record = {
-        "schema_version": PROOF_ELEMENT_CACHE_SCHEMA,
-        "cache_identity": key,
-        "satisfied": satisfied,
-        "status": "satisfied" if satisfied else str(produced_map.get("outcome") or produced_map.get("status") or "evaluated"),
-        "reason": reason,
-        "substantive_trust_satisfied": satisfied,
-        "entails_claim_element": False,
-        "recommended_follow_ups": [],
-        "reused": False,
-        "provider_called": True,
-        "deterministic": True,
-        "result": deepcopy(produced_map),
-    }
-    _SATISFIED_ELEMENT_PROOF_CACHE[key] = deepcopy(record)
-    return deepcopy(record)
+    produced_map = dict(produced) if isinstance(produced, Mapping) else {'value': produced}
+    record.update(provider_called=True, result=deepcopy(produced_map))
+    if not _current_routing_origin(produced_map, current):
+        record.update(reason='unbound_or_modified_routing_result', result=None,
+                      rejected_result=deepcopy(produced_map))
+        return _publish_element_evaluation(record, current)
+    if (produced_map.get('satisfied') is True or produced_map.get('substantive_trust_satisfied') is True
+            or produced_map.get('entails_claim_element') is True or produced_map.get('outcome') == 'proved'):
+        record.update(reason='unverified_substantive_proof', result=None,
+                      rejected_result=deepcopy(produced_map))
+        return _publish_element_evaluation(record, current)
+    record.update(status=str(produced_map.get('outcome') or 'unknown'),
+                  reason=str(produced_map.get('reason') or 'structural_or_unavailable_proof'))
+    if block and block.get('reason') == 'superseded_rule':
+        record.update(status='uncertain', reason='superseded_rule')
+    # Retry transient absence/errors; preserve a stable actual negative/structural
+    # observation only while source/premise/compiler/policy inputs remain current.
+    cacheable = produced_map.get('outcome') in {'unknown', 'unsupported', 'refuted'}
+    return _publish_element_evaluation(record, current, cache=cacheable)
 
 
 def legacy_procedural_template_attributes() -> Dict[str, Any]:
@@ -6657,5 +6733,6 @@ __all__ = [
     "proof_cache_identity",
     "reset_satisfied_element_proof_cache",
     "lookup_satisfied_element_proof",
+    "verify_element_proof_evaluation",
     "replay_satisfied_element_proof",
 ]

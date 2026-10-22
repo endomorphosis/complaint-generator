@@ -1444,3 +1444,99 @@ def test_native_resource_alarm_stops_remaining_filesystem_observations(tmp_path,
     assert all(observed['roles'][name]['reason'] == 'unobserved_after_timeout'
         for name in ('state', 'worktrees', 'home', 'temporary'))
     assert observed['paid_dispatch'] is False and observed['live_wait_or_lease_claimed'] is False
+
+
+
+def _owned_growing_native_event_history(path, start_event, *, padding_records):
+    """Create only synthetic owned fixture history through the actual Native writer."""
+    import hashlib
+    from ipfs_accelerate_py.agent_supervisor.runtime.event_log import append_jsonl_event
+    path.write_bytes(b'')
+    start = append_jsonl_event(path, 'implementation_started', {
+        key: value for key, value in start_event.items() if key not in {'type', 'event_id'}
+    })
+    padding = 'synthetic-history:' + 'x' * (512 * 1024)
+    for index in range(padding_records):
+        append_jsonl_event(path, 'synthetic_shutdown_history', {
+            'timestamp': start['timestamp'], 'index': index, 'detail': padding,
+        })
+    path.chmod(0o664)
+    original = path.read_bytes()
+    records = [json.loads(line) for line in original.splitlines()]
+    assert len(records) == padding_records + 1 and records[0] == start
+    previous = ''
+    for sequence, record in enumerate(records, 1):
+        material = {key: value for key, value in record.items() if key != 'event_id'}
+        canonical = json.dumps(material, sort_keys=True, separators=(',', ':'),
+                               ensure_ascii=False, allow_nan=False).encode('utf-8')
+        assert record['sequence'] == sequence and record['previous_event_id'] == previous
+        assert record['event_id'] == 'sha256:' + hashlib.sha256(canonical).hexdigest()
+        previous = record['event_id']
+    return start, original
+
+
+def test_growing_owned_event_history_preserves_progress_and_recovery_bounds(campaign, monkeypatch):
+    root, spec, state, generated = campaign
+    state.mkdir(mode=0o700)
+    monkeypatch.setenv('IPFS_ACCELERATE_AGENT_EVENT_LOG_MAX_BYTES', str(50 * 1024 * 1024))
+    monkeypatch.setenv(runner.ORCHESTRATION_DIR_ENV, str(state / 'control-plane'))
+    selected_at = time.time() - 30
+    execution = datetime.fromtimestamp(selected_at + 10, timezone.utc).isoformat()
+    selection = datetime.fromtimestamp(selected_at, timezone.utc).isoformat()
+    workspace = state / 'worktrees/workspace_history'
+    workspace.mkdir(parents=True)
+    log = state / 'attempt-1.log'
+    log.write_text('Task: CIMP-TUI-01 synthetic\nStarted: ' + execution + '\nWorkspace: ' + str(workspace)
+                   + '\n' + json.dumps({'type': 'usage', 'usage': {'input_tokens': 1}}) + '\n'
+                   + json.dumps({'type': 'tool_call', 'name': 'synthetic-read'}) + '\n')
+    log.chmod(0o600)
+    events = state / f'{runner.STATE_PREFIX}_events.jsonl'
+    start, original = _owned_growing_native_event_history(events, {
+        'timestamp': execution, 'task_id': 'CIMP-TUI-01', 'canonical_task_cid': 'b' + 'a' * 58,
+        'attempt': 1, 'worktree_path': str(workspace), 'log_path': str(log), 'execution_mode': 'model-assisted',
+    }, padding_records=65)
+    assert 32 * 1024 * 1024 < len(original) < runner.MAX_EVENT_HISTORY_BYTES
+    binding = {'task_id': start['task_id'], 'task_cid': start['canonical_task_cid'], 'attempt': 1,
+               'attempt_started_at': selection, 'execution_started_at': execution,
+               'worktree': str(workspace), 'log_prefix': str(log)}
+    progress = runner._owned_attempt_log_evidence(events, state, binding,
+        started_at=selected_at - 1, now=time.time())
+    assert progress is not None and progress['source'] == 'owned_attempt_log'
+    assert progress['progress_fresh'] is True and progress['provider_terminal_observed'] is False
+    assert progress['frame_counts'] == {'usage': 1, 'tool_call': 1}
+    assert progress['task_id'] == start['task_id'] and progress['task_cid'] == start['canonical_task_cid']
+    assert progress['completion_authority'] is False
+    record = _full_owner(root, spec, state, generated['receipt']['plan_id'])
+    runner._atomic_json(state / 'launcher.json', record)
+    runner._atomic_json(state / 'container_shutdown.json', _shutdown_receipt(record))
+    runner._atomic_json(state / f'{runner.STATE_PREFIX}_supervisor_status.json', {'status': 'stopped'})
+    strategy = state / f'{runner.STATE_PREFIX}_strategy.json'
+    runner._atomic_json(strategy, {})
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import portal_task_state_control_plane as plane
+    state_path = state / f'{runner.STATE_PREFIX}_task_state.json'
+    payload = {'implementation_attempts': {'CIMP-TUI-01': 1}, 'completed_task_ids': []}
+    plane.save_portal_task_state(state_path.stem, payload, state_path=state_path)
+    image = runner._recovery_preimage(root, state, record)
+    assert image[str(events)][3] == runner.hashlib.sha256(original).hexdigest()
+    assert image['native_payload']['implementation_attempts'] == payload['implementation_attempts']
+    assert image['native_source']['source'] == 'native_control_plane'
+    assert events.read_bytes() == original
+    # A board/spec record with the same basename is not this epoch's journal.
+    alternate = root / 'different-metadata' / f'{runner.STATE_PREFIX}_events.jsonl'
+    alternate.parent.mkdir(mode=0o700)
+    with alternate.open('wb') as output:
+        output.truncate(32 * 1024 * 1024 + 1)
+    for field in ('board_path', 'spec_path'):
+        with pytest.raises(ValueError, match='bounded owned regular file'):
+            runner._recovery_preimage(root, state, {**record, field: str(alternate)})
+    assert events.read_bytes() == original
+    # The event-specific increase must not enlarge provider-log or state reads.
+    with log.open('ab') as output:
+        output.truncate(32 * 1024 * 1024 + 1)
+    assert runner._owned_attempt_log_evidence(events, state, binding,
+        started_at=selected_at - 1, now=time.time()) is None
+    with strategy.open('wb') as output:
+        output.truncate(32 * 1024 * 1024 + 1)
+    with pytest.raises(ValueError, match='bounded owned regular file'):
+        runner._recovery_preimage(root, state, record)
+    assert events.read_bytes() == original

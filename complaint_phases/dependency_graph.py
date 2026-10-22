@@ -3777,6 +3777,11 @@ class DependencyGraphBuilder:
         node = graph.nodes.get(node_id)
         if node is None or not isinstance(node.attributes, dict):
             raise KeyError(node_id)
+        from integrations.ipfs_datasets.logic import verify_element_proof_evaluation
+        admission = verify_element_proof_evaluation(evaluation)
+        admitted = bool(admission.get('verified'))
+        observed = admission.get('evaluation') if admitted else {}
+        evaluation = observed if isinstance(observed, dict) else {}
         identity = str(evaluation.get("cache_identity") or "")
         previous = str(node.attributes.get("proof_cache_identity") or "")
         if previous and previous != identity:
@@ -3790,13 +3795,17 @@ class DependencyGraphBuilder:
                     "proof_cache_identity": previous,
                 }
             node.satisfied = False
-        satisfied = bool(evaluation.get("satisfied")) and evaluation.get("status") == "satisfied"
+        # A current, issued evaluation remains nonsubstantive until an actual
+        # checked kernel proof contract is configured and verified by the adapter.
+        satisfied = admitted and admission.get('satisfied') is True
+        node.attributes['proof_evaluation_verified'] = admitted
+        node.attributes['proof_evaluation_reason'] = admission.get('reason')
         node.attributes["proof_cache_identity"] = identity
         node.attributes["proof_cache"] = {
             "cache_identity": identity,
             "satisfied": satisfied,
-            "status": evaluation.get("status"),
-            "reason": evaluation.get("reason"),
+            "status": evaluation.get("status") or 'unknown',
+            "reason": evaluation.get("reason") or admission.get('reason'),
             "reusable": satisfied,
             "result": deepcopy(evaluation.get("result")),
         }

@@ -626,7 +626,9 @@ def questions_for_legal_context(
             ),
             "reason": "missing_event_dates",
         })
-    if (selecting_rules or _date_raw(legal_context.get("applicable_law_date"))) and not _resolved_legal_date(legal_context.get("applicable_law_date")):
+    # Rule-version selection needs one precise query day; a truthful range is
+    # still retained, but must not silently close this clarification question.
+    if (selecting_rules or _date_raw(legal_context.get("applicable_law_date"))) and not _parse_explicit_legal_date(_date_raw(legal_context.get("applicable_law_date"))).get("precise_date"):
         questions.append({
             "question_id": "legal_context.applicable_law_date",
             "field": "applicable_law_date",

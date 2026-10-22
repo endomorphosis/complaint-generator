@@ -8708,13 +8708,15 @@ class Mediator:
 		)
 		self._update_intake_contradiction_state(dg)
 		intake_case_file = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intake_case_file') or {}
-		intake_case_file = self._apply_intake_answer_to_case_file(
-			question,
-			answer,
-			intake_case_file,
-			kg,
-			factual_action=factual_action,
-		)
+		is_context_answer = str((question or {}).get('type') or '').strip().lower() == 'legal_context'
+		if not is_context_answer:
+			intake_case_file = self._apply_intake_answer_to_case_file(
+				question,
+				answer,
+				intake_case_file,
+				kg,
+				factual_action=factual_action,
+			)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', intake_case_file)
 		dg = self.dg_builder.sync_intake_timeline_to_graph(dg, intake_case_file)
 		question_type = str((question or {}).get('type') or '').strip().lower()
@@ -8734,71 +8736,100 @@ class Mediator:
 			dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph') or dg
 
 		from complaint_phases.intake_case_file import project_graph_revision_view
-		from complaint_phases.knowledge_graph import record_answer_graph_revision
-		from integrations.ipfs_datasets.graphs import classify_epistemic_class, statement_value_status
-		question_context = (question or {}).get("context") if isinstance((question or {}).get("context"), dict) else {}
-		explicit_class = str(question_context.get("epistemic_class") or (question or {}).get("epistemic_class") or "")
-		if explicit_class == "legal_authority":
-			explicit_class = ""
-		epistemic_class = classify_epistemic_class(answer, explicit=explicit_class)
-		value_status = statement_value_status(answer)
-		target_ids = {
-			str(item).strip()
-			for item in (
-				question_context.get("requirement_id"),
-				question_context.get("target_element_id"),
-				question_context.get("node_id"),
-				(question or {}).get("target_element_id"),
-			)
-			if str(item or "").strip()
-		}
-		support_changes = []
-		if dg is not None:
-			for node_id, snapshot in definition_snapshots.items():
-				node = dg.nodes.get(node_id)
-				if node is None:
-					continue
-				restore_requirement_definition(node, snapshot["definition"])
-				if node_id in target_ids and value_status == "unknown":
-					node.satisfied = snapshot["satisfied"]
-					node.attributes["value_status"] = "unknown"
-					node.attributes["unknown_value"] = answer
-				elif node_id in target_ids and value_status == "contradiction":
-					node.attributes["value_status"] = "contradiction"
-					node.attributes["contradiction_value"] = answer
-			for target_id in sorted(target_ids):
-				node = dg.nodes.get(target_id)
-				if node is None:
-					continue
-				change = {
-					"requirement_id": node.id,
-					"epistemic_class": epistemic_class,
-					"statement": answer,
-					"value_status": value_status,
-					"definition_unchanged": True,
-				}
-				node.attributes["element_support"] = list(node.attributes.get("element_support") or []) + [change]
-				support_changes.append(change)
-		if kg is not None and hasattr(kg, "append_revision"):
+		if is_context_answer:
+			# A context answer retains exact user-input provenance, but a bare
+			# jurisdiction/date/claim label is not a factual assertion or support.
+			from integrations.ipfs_datasets.graphs import exact_statement_provenance
 			answer_source = source_context if isinstance(source_context, dict) else {}
-			source_text = answer_source.get("source_text") if isinstance(answer_source.get("source_text"), str) and answer_source.get("source_text") else str(answer or "")
-			revision = record_answer_graph_revision(
-				kg,
-				answer=str(answer or ""),
-				source_text=source_text,
-				source_context=answer_source,
-				question=question if isinstance(question, dict) else {},
-				event_id=answer_event_id or "",
-				epistemic_class=epistemic_class,
-				value_status=value_status,
-				support_changes=support_changes,
-			)
-			if isinstance(updates, dict):
-				updates = dict(updates)
-				updates["graph_revision"] = revision
-				updates["epistemic_class"] = epistemic_class
-				updates["value_status"] = value_status
-				updates["support_changes"] = support_changes
+			source_text = answer_source.get('source_text')
+			if not isinstance(source_text, str) or not source_text:
+				source_text = str(answer or '')
+			provenance = exact_statement_provenance(source_text, str(answer or ''))
+			if kg is not None and hasattr(kg, 'append_revision'):
+				revision = kg.append_revision({
+					'action': 'context_answer', 'event_id': answer_event_id or '',
+					'statement': provenance.get('statement') or str(answer or ''),
+					'source_hash': provenance.get('source_hash'),
+					'source_span': provenance.get('source_span'),
+					'deficiency': provenance.get('deficiency') or '',
+					'epistemic_class': 'user_context', 'value_status': 'context_only',
+					'question': dict(question) if isinstance(question, dict) else {},
+					'disposition': updates.get('disposition'),
+					'context_answer_status': updates.get('context_answer_status') or updates.get('disposition'),
+					'context_fields_updated': list(updates.get('context_fields_updated') or []),
+					'creates_fact': False, 'satisfies_requirement': False,
+					'support_changes': [], 'entity_id': '', 'stable_id': '',
+					'audit_retained': True,
+					'provenance': dict(provenance),
+				})
+				updates = dict(updates, graph_revision=revision,
+				               epistemic_class='user_context', value_status='context_only', support_changes=[])
+		else:
+			from complaint_phases.knowledge_graph import record_answer_graph_revision
+			from integrations.ipfs_datasets.graphs import classify_epistemic_class, statement_value_status
+			question_context = (question or {}).get("context") if isinstance((question or {}).get("context"), dict) else {}
+			explicit_class = str(question_context.get("epistemic_class") or (question or {}).get("epistemic_class") or "")
+			if explicit_class == "legal_authority":
+				explicit_class = ""
+			epistemic_class = classify_epistemic_class(answer, explicit=explicit_class)
+			value_status = statement_value_status(answer)
+			target_ids = {
+				str(item).strip()
+				for item in (
+					question_context.get("requirement_id"),
+					question_context.get("target_element_id"),
+					question_context.get("node_id"),
+					(question or {}).get("target_element_id"),
+				)
+				if str(item or "").strip()
+			}
+			support_changes = []
+			if dg is not None:
+				for node_id, snapshot in definition_snapshots.items():
+					node = dg.nodes.get(node_id)
+					if node is None:
+						continue
+					restore_requirement_definition(node, snapshot["definition"])
+					if node_id in target_ids and value_status == "unknown":
+						node.satisfied = snapshot["satisfied"]
+						node.attributes["value_status"] = "unknown"
+						node.attributes["unknown_value"] = answer
+					elif node_id in target_ids and value_status == "contradiction":
+						node.attributes["value_status"] = "contradiction"
+						node.attributes["contradiction_value"] = answer
+				for target_id in sorted(target_ids):
+					node = dg.nodes.get(target_id)
+					if node is None:
+						continue
+					change = {
+						"requirement_id": node.id,
+						"epistemic_class": epistemic_class,
+						"statement": answer,
+						"value_status": value_status,
+						"definition_unchanged": True,
+					}
+					node.attributes["element_support"] = list(node.attributes.get("element_support") or []) + [change]
+					support_changes.append(change)
+			if kg is not None and hasattr(kg, "append_revision"):
+				answer_source = source_context if isinstance(source_context, dict) else {}
+				source_text = answer_source.get("source_text") if isinstance(answer_source.get("source_text"), str) and answer_source.get("source_text") else str(answer or "")
+				revision = record_answer_graph_revision(
+					kg,
+					answer=str(answer or ""),
+					source_text=source_text,
+					source_context=answer_source,
+					question=question if isinstance(question, dict) else {},
+					event_id=answer_event_id or "",
+					epistemic_class=epistemic_class,
+					value_status=value_status,
+					support_changes=support_changes,
+				)
+				if isinstance(updates, dict):
+					updates = dict(updates)
+					updates["graph_revision"] = revision
+					updates["epistemic_class"] = epistemic_class
+					updates["value_status"] = value_status
+					updates["support_changes"] = support_changes
 		intake_case_file = project_graph_revision_view(intake_case_file, kg)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', intake_case_file)
 		
