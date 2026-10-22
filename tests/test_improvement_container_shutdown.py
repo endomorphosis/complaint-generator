@@ -811,7 +811,7 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
         foreign_path = root / 'foreign-retained-identity.json'
         foreign_path.write_text(json.dumps(foreign.to_dict())); foreign_path.chmod(0o600)
         foreign_effect = root / 'foreign-retained-effect.json'
-        foreign_effect.write_text(json.dumps({**effect, 'identity_record_id': foreign.record_id,
+        foreign_effect.write_text(json.dumps({**effect, 'identity_record_id': foreign.to_dict()['record_id'],
             'identity_sha256': reference(foreign_path)['sha256']})); foreign_effect.chmod(0o600)
         with pytest.raises(ValueError, match='birth/command/session'):
             shutdown._parent_closed(state, current_record, current_context, False,
