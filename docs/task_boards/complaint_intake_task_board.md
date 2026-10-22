@@ -881,7 +881,7 @@ Implementation instructions:
 
 ## CIMP-DUR-004 Add authenticated private case manifests and conflict-safe head publication
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.durability
