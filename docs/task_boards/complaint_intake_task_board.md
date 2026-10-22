@@ -145,7 +145,7 @@ Implementation instructions:
 
 ## CIMP-TUI-07 Implement finite stopping with truthful completion reasons
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.tui
