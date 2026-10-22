@@ -582,7 +582,7 @@ Implementation instructions:
 
 ## CIMP-PROOF-03 Add bounded proof routing and explicit unknown outcomes
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.proof
