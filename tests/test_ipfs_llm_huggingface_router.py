@@ -468,7 +468,10 @@ def test_generate_text_with_metadata_reports_missing_openai_key(monkeypatch):
     )
 
     assert payload["status"] == "error"
-    assert payload["error"] == "OpenAI unavailable: missing API key. Set OPENAI_API_KEY."
+    assert payload["error"] == (
+        "OpenAI unavailable: missing API key. Set OPENAI_API_KEY, store one in the "
+        "ipfs_datasets_py vault/keyring, or log in with a compatible local OpenAI CLI config."
+    )
     assert payload["availability_hint"] == payload["error"]
 
 
