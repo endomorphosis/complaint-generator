@@ -122,46 +122,188 @@ def _graph_client() -> Any:
     return client
 
 
+def _client_graph_id(graph_id: str) -> str:
+    """Map an adapter id onto the slug GraphTarget accepts."""
+    identifier = str(graph_id or "complaint")
+    if re.fullmatch(r"[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?", identifier):
+        return identifier
+    return "graph-" + hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:48]
+
+
+def _graph_target_for(graph_id: str) -> Any:
+    from .loader import import_attr_optional
+
+    graph_target, error = import_attr_optional("ipfs_datasets_py.knowledge_graphs", "GraphTarget")
+    if graph_target is None:
+        raise ImportError(str(error or "GraphTarget unavailable"))
+    return graph_target(tenant="complaint-generator", graph_id=_client_graph_id(graph_id), branch="main")
+
+
+def _write_already_committed(client: Any, write_key: str) -> bool:
+    """True when this write key already committed a branch head.
+
+    ``Client.write`` mints a fresh revision nonce on every call, so a second
+    CAS for the same idempotency key conflicts. The catalog record is the
+    durable proof that the first commit landed.
+    """
+    service = getattr(client, "_service", None)
+    catalog = getattr(service, "catalog", None) if service is not None else None
+    getter = getattr(catalog, "get_idempotency", None)
+    if getter is None:
+        return False
+    try:
+        return getter(write_key) is not None
+    except Exception:
+        return False
+
+
+def _entity_key(entity: Mapping[str, Any]) -> str:
+    return str(entity.get("id") or entity.get("entity_id") or "")
+
+
+def _is_cross_graph_link(relationship: Mapping[str, Any]) -> bool:
+    if relationship.get("cross_graph") is True:
+        return True
+    kind = str(relationship.get("link_type") or relationship.get("type") or relationship.get("relation") or "")
+    if kind in {SUPPORT_LINK_KIND, CONTRADICTION_LINK_KIND, "cross_graph_link", "supports", "contradicts"}:
+        return True
+    return "rule_id" in relationship and (
+        "factual_assertion_id" in relationship or "source_entity_id" in relationship
+    )
+
+
+def resume_graph_revisions(graph_id: str) -> Dict[str, Any]:
+    """Reopen the durable client and rebuild revision, provenance, and links.
+
+    Head scans keep the latest entity rows. Older revisions stay in payload
+    storage, so a fresh client can still see superseded facts and cross-graph
+    links. Plaintext publication is not part of this read.
+    """
+    client = _graph_client()
+    target = _graph_target_for(graph_id)
+    service = getattr(client, "_service", None)
+    catalog = getattr(service, "catalog", None) if service is not None else None
+    storage = getattr(service, "storage", None) if service is not None else None
+    if catalog is None or storage is None:
+        raise RuntimeError("knowledge_graphs.Client catalog is unavailable")
+    records = catalog.list_revisions(target.tenant, target.graph_id)
+    revisions: List[Dict[str, Any]] = []
+    for record in records or []:
+        revision_id = str(getattr(record, "revision_id", "") or "")
+        if not revision_id:
+            continue
+        snapshot = storage.get_snapshot(target.tenant, target.graph_id, revision_id)
+        if snapshot is None:
+            continue
+        entities = [dict(item) for item in (getattr(snapshot, "entities", None) or []) if isinstance(item, Mapping)]
+        relationships = [
+            dict(item) for item in (getattr(snapshot, "relationships", None) or []) if isinstance(item, Mapping)
+        ]
+        metadata = dict(getattr(snapshot, "metadata", None) or {})
+        if metadata.get("bootstrap") and not entities and not relationships:
+            continue
+        revisions.append({
+            "revision_id": revision_id,
+            "parent_revision": getattr(record, "parent_revision", None),
+            "entities": entities,
+            "relationships": relationships,
+            "provenance": [
+                dict(item.get("provenance"))
+                for item in [*entities, *relationships]
+                if isinstance(item.get("provenance"), Mapping) and item.get("provenance")
+            ],
+            "cross_graph_links": [item for item in relationships if _is_cross_graph_link(item)],
+        })
+    head_entities = { _entity_key(item): item for item in (revisions[-1]["entities"] if revisions else []) if _entity_key(item) }
+    superseded: List[Dict[str, Any]] = []
+    seen_facts = set()
+    for revision in revisions[:-1]:
+        for entity in revision["entities"]:
+            key = _entity_key(entity)
+            current = head_entities.get(key)
+            if current == entity:
+                continue
+            fingerprint = json.dumps(entity, sort_keys=True, default=str)
+            if fingerprint in seen_facts:
+                continue
+            seen_facts.add(fingerprint)
+            superseded.append(dict(entity))
+    provenance: List[Dict[str, Any]] = []
+    seen_provenance = set()
+    links: List[Dict[str, Any]] = []
+    seen_links = set()
+    for revision in revisions:
+        for item in revision["provenance"]:
+            fingerprint = json.dumps(item, sort_keys=True, default=str)
+            if fingerprint in seen_provenance:
+                continue
+            seen_provenance.add(fingerprint)
+            provenance.append(item)
+        for link in revision["cross_graph_links"]:
+            fingerprint = json.dumps(link, sort_keys=True, default=str)
+            if fingerprint in seen_links:
+                continue
+            seen_links.add(fingerprint)
+            links.append(link)
+    return {
+        "graph_id": str(graph_id or ""),
+        "client_graph_id": target.graph_id,
+        "graph_persist_path": "knowledge_graphs.Client",
+        "revision_count": len(revisions),
+        "revisions": revisions,
+        "provenance": provenance,
+        "superseded_facts": superseded,
+        "cross_graph_links": links,
+        "plaintext_publication": False,
+    }
+
+
 def _persist_nodes_through_client(graph_id: str, graph_payload: Dict[str, Any]) -> Dict[str, Any]:
     contract = _graph_client_contract()
     try:
-        from .loader import import_attr_optional
-
-        graph_target, error = import_attr_optional("ipfs_datasets_py.knowledge_graphs", "GraphTarget")
-        if graph_target is None:
-            raise ImportError(str(error or "GraphTarget unavailable"))
         client = _graph_client()
         identifier = str(graph_id or "complaint")
-        # Adapter ids contain colons; GraphTarget accepts at most 64 slug
-        # characters. Hash non-slugs so distinct adapter ids cannot collide.
-        client_graph_id = identifier if re.fullmatch(r"[a-z0-9]([a-z0-9_-]{0,62}[a-z0-9])?", identifier) else (
-            "graph-" + hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:48]
-        )
-        target = graph_target(tenant="complaint-generator", graph_id=client_graph_id, branch="main")
+        target = _graph_target_for(identifier)
         mutations = {
             "entities": list(graph_payload.get("entities") or []),
             "relationships": list(graph_payload.get("relationships") or []),
         }
+        if not mutations["entities"] and not mutations["relationships"]:
+            mutations = {**mutations, "force_empty": True}
         write_identity = json.dumps([identifier, mutations], sort_keys=True, default=str)
         write_key = "write-" + hashlib.sha256(write_identity.encode("utf-8")).hexdigest()
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always", DeprecationWarning)
-            client.create(target, idempotency_key=f"create-{client_graph_id}", raise_on_error=False)
-            written = client.write(
-                target,
-                idempotency_key=write_key,
-                params=mutations,
-                raise_on_error=False,
-            )
+            client.create(target, idempotency_key=f"create-{target.graph_id}", raise_on_error=False)
+            if _write_already_committed(client, write_key):
+                written = type("IdempotentWrite", (), {"ok": True, "status": "success", "result": {"idempotent_retry": True}})()
+            else:
+                written = client.write(
+                    target,
+                    idempotency_key=write_key,
+                    params=mutations,
+                    raise_on_error=False,
+                )
         for item in caught:
             message = str(item.message)
             if "GraphEngine" in message or "GraphDatabase" in message:
                 warnings.warn(message, DeprecationWarning, stacklevel=2)
         contract.update(_graph_client_contract())
-        contract["client_write_ok"] = bool(getattr(written, "ok", False) or getattr(written, "status", "") == "success")
+        write_ok = bool(getattr(written, "ok", False) or getattr(written, "status", "") == "success")
+        if not write_ok and _write_already_committed(client, write_key):
+            write_ok = True
+        contract["client_write_ok"] = write_ok
+        result_payload = getattr(written, "result", None)
+        if isinstance(result_payload, Mapping):
+            contract["client_revision"] = str(result_payload.get("revision") or "")
+            contract["idempotent_retry"] = bool(result_payload.get("idempotent_retry"))
+        elif write_ok and _write_already_committed(client, write_key):
+            contract["idempotent_retry"] = True
+        contract["plaintext_publication"] = False
     except Exception as exc:
         contract["client_write_ok"] = False
         contract["client_error"] = str(exc)
+        contract["plaintext_publication"] = False
     return contract
 
 
@@ -2356,6 +2498,55 @@ def publish_private_graph_case_manifest(
     return public
 
 
+def _private_material_parts(graph_payload: Mapping[str, Any]) -> List[tuple]:
+    """Split private graph bytes that must be sealed before replication."""
+    parts: List[tuple] = []
+    source_text = graph_payload.get("source_text")
+    if isinstance(source_text, str) and source_text:
+        parts.append(("assertion-envelope", "source-text", source_text.encode("utf-8")))
+    elif isinstance(source_text, (bytes, bytearray)) and source_text:
+        parts.append(("assertion-envelope", "source-text", bytes(source_text)))
+    for kind, revision, key in (
+        ("index", "embeddings", "embeddings"),
+        ("index", "indexes", "indexes"),
+    ):
+        value = graph_payload.get(key)
+        if value in (None, "", [], (), {}):
+            continue
+        if isinstance(value, (bytes, bytearray)):
+            body = bytes(value)
+        else:
+            body = json.dumps(value, sort_keys=True, default=str).encode("utf-8")
+        parts.append((kind, revision, body))
+    return parts
+
+
+def _seal_private_materials(graph_payload: Mapping[str, Any], private_context: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Encrypt source text, embeddings, and indexes before any replicate call."""
+    from integrations.private_storage import store_private_artifact
+
+    replicate = private_context.get("replicate")
+    receipts: List[Dict[str, Any]] = []
+    for kind, revision, body in _private_material_parts(graph_payload):
+        receipts.append(store_private_artifact(
+            body,
+            access=private_context["access"],
+            tenant_id=str(private_context["tenant_id"]),
+            case_id=str(private_context["case_id"]),
+            principal_id=str(private_context.get("principal_id") or private_context["tenant_id"]),
+            artifact_kind=kind,
+            revision=str(revision),
+            key=private_context.get("key"),
+            key_id=private_context.get("key_id"),
+            key_provider=private_context.get("key_provider"),
+            backend=private_context.get("backend"),
+            backend_name=private_context.get("backend_name"),
+            pin_content=bool(private_context.get("pin_content", True)),
+            replicate=replicate if callable(replicate) else None,
+        ))
+    return receipts
+
+
 def persist_private_graph_snapshot(
     graph_payload: Dict[str, Any],
     private_context: Mapping[str, Any],
@@ -2368,31 +2559,37 @@ def persist_private_graph_snapshot(
     if not isinstance(private_context, Mapping):
         raise TypeError("private_context must be a mapping")
     if private_context.get("case_manifest_repository"):
-        return publish_private_graph_case_manifest(dict(graph_payload), private_context)
+        published = publish_private_graph_case_manifest(dict(graph_payload), private_context)
+        published["plaintext_publication"] = False
+        return published
     missing_key = private_context.get("key") is None and private_context.get("key_provider") is None
     if private_context.get("locked") or missing_key:
         return {"status": "unlock_needed", "persisted": False, "private_artifact": True,
                 "private_indexing": "unsupported", "plaintext_catalog": False,
                 "overwrites_existing": False}
-    from integrations.ipfs_datasets.storage import store_automatic_private_artifact, retrieve_bytes
+    from integrations.ipfs_datasets.storage import retrieve_bytes
     from integrations.private_storage import (
         PrivateArtifactBinding, PrivateKeyLockedError, PrivateStorageError,
         _resolve_key, assert_access_matches_binding, open_private_artifact,
     )
     try:
+        material_receipts = _seal_private_materials(graph_payload, private_context)
         body = json.dumps(dict(graph_payload), sort_keys=True, default=str).encode("utf-8")
         binding = PrivateArtifactBinding(
             tenant_id=str(private_context["tenant_id"]), case_id=str(private_context["case_id"]),
             principal_id=str(private_context.get("principal_id") or private_context["tenant_id"]),
             artifact_kind="fact-graph", revision=str(private_context.get("revision") or "fact-graph-1"),
         )
-        receipt = store_automatic_private_artifact(
+        from integrations.private_storage import store_private_artifact
+        replicate = private_context.get("replicate")
+        receipt = store_private_artifact(
             body, access=private_context["access"], tenant_id=binding.tenant_id,
             case_id=binding.case_id, principal_id=binding.principal_id,
             artifact_kind=binding.artifact_kind, revision=binding.revision,
             key=private_context.get("key"), key_id=private_context.get("key_id"),
             key_provider=private_context.get("key_provider"), backend=private_context.get("backend"),
             backend_name=private_context.get("backend_name"), pin_content=bool(private_context.get("pin_content", True)),
+            replicate=replicate if callable(replicate) else None,
         )
         destination = private_context.get("destination_dir")
         if destination is not None:
@@ -2416,8 +2613,10 @@ def persist_private_graph_snapshot(
                 "overwrites_existing": False}
     return {"status": "stored-private", "persisted": True, "private_artifact": True,
             "private_indexing": "unsupported", "plaintext_catalog": False, "plaintext_index": False,
+            "plaintext_publication": False, "replication_plaintext": False,
             "graph_id": str(graph_id or ""), "cid": receipt.get("cid"), "verified": receipt.get("verified") is True,
-            "deferred": receipt.get("deferred") is True, "receipt": receipt, "overwrites_existing": False}
+            "deferred": receipt.get("deferred") is True, "receipt": receipt,
+            "material_receipts": material_receipts, "overwrites_existing": False}
 
 
 def persist_graph_snapshot(
@@ -2507,6 +2706,17 @@ def persist_graph_snapshot(
             "content_hash": request["content_hash"],
             "provenance": dict(request["provenance"]),
         }
+        if client_contract.get("client_write_ok"):
+            try:
+                resumed = resume_graph_revisions(stable_graph_id)
+            except Exception:
+                resumed = {}
+            if resumed:
+                snapshot_record["revisions"] = list(resumed.get("revisions") or [])
+                snapshot_record["superseded_facts"] = list(resumed.get("superseded_facts") or [])
+                snapshot_record["cross_graph_links"] = list(resumed.get("cross_graph_links") or [])
+                snapshot_record["provenance_chain"] = list(resumed.get("provenance") or [])
+        snapshot_record["plaintext_publication"] = False
         _GRAPH_SNAPSHOT_REGISTRY[stable_graph_id] = snapshot_record
         payload = with_adapter_metadata(
             GraphSnapshotResult(
@@ -2875,6 +3085,8 @@ __all__ = [
     "prepare_private_extraction",
     "query_graph_support",
     "persist_graph_snapshot",
+    "persist_private_graph_snapshot",
+    "resume_graph_revisions",
     "query_graph_snapshot",
     "resolve_duplicate_entities",
     "attach_provenance_edges",

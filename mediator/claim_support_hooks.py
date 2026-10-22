@@ -7995,6 +7995,58 @@ class ClaimSupportHook:
                 'graph_snapshot': adapter_graph_snapshot,
             }
 
+    def resume_factual_graph(self, graph_id: str) -> Dict[str, Any]:
+        """Reopen committed graph revisions without publishing plaintext."""
+        from integrations.ipfs_datasets.graphs import resume_graph_revisions
+
+        try:
+            resumed = resume_graph_revisions(graph_id)
+        except Exception as exc:
+            self.mediator.log('factual_graph_resume_error', error=str(exc), graph_id=graph_id)
+            return {
+                'available': False,
+                'graph_id': graph_id,
+                'revisions': [],
+                'provenance': [],
+                'superseded_facts': [],
+                'cross_graph_links': [],
+                'plaintext_publication': False,
+                'error': str(exc),
+            }
+        resumed['available'] = True
+        resumed['plaintext_publication'] = False
+        return resumed
+
+    def persist_private_factual_graph(
+        self,
+        graph_payload: Dict[str, Any],
+        private_context: Dict[str, Any],
+        *,
+        graph_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Seal graph payload, source text, embeddings, and indexes before replication.
+
+        Plaintext publication stays disabled. The knowledge-graph client catalog
+        is not used for these private bytes.
+        """
+        from integrations.ipfs_datasets.graphs import persist_graph_snapshot
+
+        sealed = dict(private_context or {})
+        sealed.pop('publish_plaintext', None)
+        result = persist_graph_snapshot(
+            graph_payload if isinstance(graph_payload, dict) else {},
+            graph_id=graph_id,
+            private_context=sealed,
+        )
+        result['plaintext_publication'] = False
+        self.mediator.log(
+            'private_factual_graph_sealed',
+            graph_id=str(graph_id or ''),
+            persisted=bool(result.get('persisted')),
+            plaintext_publication=False,
+        )
+        return result
+
     def get_support_paths_for_element(
         self,
         user_id: str,
