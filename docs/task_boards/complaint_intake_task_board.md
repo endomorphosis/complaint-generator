@@ -168,7 +168,7 @@ Implementation instructions:
 
 ## CIMP-TUI-08 Provide accessible terminal controls and reliable resume
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.tui
