@@ -122,7 +122,7 @@ Implementation instructions:
 
 ## CIMP-TUI-06 Select explained questions from actionable graph gaps
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.tui
