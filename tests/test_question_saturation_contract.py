@@ -1,10 +1,11 @@
-"""QUEST-01 and QUEST-02: targeted questions and stable dispositions."""
+"""QUEST-01 through QUEST-03: targeted questions, dispositions, and stop states."""
 
 import pytest
 from unittest.mock import Mock
 
 from complaint_phases import (
     ComplaintDenoiser,
+    ComplaintPhase,
     Dependency,
     DependencyGraph,
     DependencyNode,
@@ -12,9 +13,11 @@ from complaint_phases import (
     Entity,
     KnowledgeGraph,
     NodeType,
+    PhaseManager,
     build_intake_case_file,
     refresh_intake_case_file,
 )
+from intake_status import build_intake_status_summary
 from complaint_phases.intake_case_file import (
     QUESTION_DISPOSITIONS,
     question_target_is_closed,
@@ -433,3 +436,194 @@ def test_mediator_records_disposition_and_reopens_with_reason():
     assert question_target_is_closed(case_file, "factual:standard-intake:timeline", "scope-b") is False
     refreshed = refresh_intake_case_file(case_file, kg)
     assert refreshed["question_dispositions"][-1]["status"] == "reopened"
+
+
+def _bound_question(denoiser, target_id, text="What date do you recall?"):
+    return denoiser._bind_unresolved_target(denoiser._question_candidate(
+        source="dependency_graph_requirement",
+        question_type="requirement",
+        question_text=text,
+        context={"requirement_id": target_id, "target_revision": "scope-a"},
+        priority="high",
+    ))
+
+
+def test_empty_pool_question_cap_and_loss_plateau_are_not_saturation():
+    denoiser = ComplaintDenoiser()
+    denoiser.questions_pool.clear()
+    denoiser.questions_asked.extend({"question": {"question": "q"}} for _ in range(51))
+    assert denoiser.is_exhausted() is False
+    capped = denoiser.evaluate_interview_stop(open_questions=[], loss_converged=True, pool_empty=True)
+    assert capped["state"] == "limit_reached"
+    assert capped["filing_ready"] is False
+    assert capped["intake_complete"] is False
+    assert capped["legal_sufficiency"] is False
+    assert "question_count_limit" in capped["unresolved_issue_summary"]["rejected_shortcuts"]
+    assert "loss_convergence" in capped["unresolved_issue_summary"]["rejected_shortcuts"]
+    assert "complete" in capped["message"]
+    assert "not ready to file" in capped["message"]
+
+    fresh = ComplaintDenoiser()
+    plateau = fresh.evaluate_interview_stop(open_questions=[], loss_converged=True, pool_empty=True)
+    assert plateau["state"] == "needs_answer"
+    assert plateau["intake_complete"] is False
+    assert plateau["filing_ready"] is False
+    assert fresh.is_exhausted() is False
+
+
+def test_saturated_stop_requires_disposed_targets_and_lists_unresolved_issues():
+    denoiser = ComplaintDenoiser()
+    kg, dg, _ = _graphs()
+    answered = _bound_question(denoiser, "req-protected")
+    refused = _bound_question(denoiser, "req-notice", "What document shows the notice date?")
+    denoiser.record_question_disposition(answered, "March 1, 2024", disposition="answered")
+    denoiser.record_question_disposition(refused, "I decline", disposition="refused")
+    stop = denoiser.evaluate_interview_stop(
+        open_questions=[answered, refused],
+        loss_converged=True,
+        pool_empty=True,
+        iteration_count=3,
+        iteration_cap=20,
+    )
+    assert stop["state"] == "saturated"
+    assert stop["targets_accounted_for"] is True
+    assert stop["filing_ready"] is False
+    assert stop["legal_sufficiency"] is False
+    assert stop["intake_complete"] is False
+    summary = stop["unresolved_issue_summary"]
+    assert summary["core_facts_complete"] is False
+    assert any(item.get("disposition") == "refused" for item in summary["items"])
+    assert denoiser.is_exhausted() is True
+
+
+def test_unknown_only_stop_is_deferred_unknown_not_completion():
+    denoiser = ComplaintDenoiser()
+    question = _bound_question(denoiser, "req-protected")
+    denoiser.record_question_disposition(question, "I don't know", disposition="unknown")
+    stop = denoiser.evaluate_interview_stop(open_questions=[question], pool_empty=True)
+    assert stop["state"] == "deferred_unknown"
+    assert stop["intake_complete"] is False
+    assert stop["filing_ready"] is False
+    assert stop["unresolved_issue_summary"]["core_facts_complete"] is False
+    assert stop["unresolved_issue_summary"]["items"]
+
+
+def test_provider_failure_and_cancellation_do_not_advertise_readiness():
+    denoiser = ComplaintDenoiser()
+    question = _bound_question(denoiser, "req-protected")
+    failed = denoiser.evaluate_interview_stop(
+        open_questions=[question],
+        provider_status="provider_unavailable",
+        iteration_count=20,
+        iteration_cap=20,
+    )
+    assert failed["state"] == "provider_unavailable"
+    assert failed["intake_complete"] is False
+    assert failed["filing_ready"] is False
+    assert failed["ready_for_evidence_phase"] is False
+    cancelled = denoiser.evaluate_interview_stop(open_questions=[question], cancelled=True)
+    assert cancelled["state"] == "cancelled"
+    assert cancelled["intake_complete"] is False
+    assert cancelled["filing_ready"] is False
+
+
+def test_iteration_cap_action_is_limit_reached_and_blocks_intake_completion():
+    pm = PhaseManager()
+    pm.update_phase_data(ComplaintPhase.INTAKE, "knowledge_graph", {})
+    pm.update_phase_data(ComplaintPhase.INTAKE, "dependency_graph", {})
+    pm.update_phase_data(ComplaintPhase.INTAKE, "remaining_gaps", 5)
+    pm.update_phase_data(ComplaintPhase.INTAKE, "denoising_converged", False)
+    pm.update_phase_data(ComplaintPhase.INTAKE, "current_gaps", [])
+    pm.iteration_count = 20
+    action = pm.get_next_action()
+    assert action["action"] == "limit_reached"
+    assert action["filing_ready"] is False
+    assert action["intake_complete"] is False
+    assert pm.is_phase_complete(ComplaintPhase.INTAKE) is False
+    assert "not ready to file" in action["message"]
+
+    pm.update_phase_data(ComplaintPhase.INTAKE, "interview_stop", {
+        "state": "provider_unavailable",
+        "intake_complete": False,
+        "filing_ready": False,
+        "message": "backend down",
+        "unresolved_issue_summary": {"items": [{"reason": "backend"}], "legal_sufficiency": False},
+    })
+    blocked = pm.get_next_action()
+    assert blocked["action"] == "provider_unavailable"
+    assert blocked["filing_ready"] is False
+    assert pm.is_phase_complete(ComplaintPhase.INTAKE) is False
+    assert pm.get_intake_readiness()["ready"] is False
+
+
+def test_pause_and_resume_preserve_assertion_truth_without_supervisory_restart():
+    mediator = Mediator(backends=[Mock(id="test-backend")])
+    kg, dg, _ = _graphs()
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, "knowledge_graph", kg)
+    mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, "dependency_graph", dg)
+    mediator.phase_manager.iteration_count = 4
+    before_entities = [(entity.id, entity.name, entity.confidence) for entity in kg.entities.values()]
+    before_nodes = [(node.id, node.satisfied, node.name) for node in dg.nodes.values()]
+    paused = mediator.pause_intentional_user_wait("user_pause")
+    assert paused["status"] == "awaiting_user"
+    assert paused["paused"] is True
+    assert paused["worker_stalled"] is False
+    assert paused["supervisory_restart"] is False
+    assert paused["iteration_count"] == 4
+    assert [(entity.id, entity.name, entity.confidence) for entity in kg.entities.values()] == before_entities
+    assert [(node.id, node.satisfied, node.name) for node in dg.nodes.values()] == before_nodes
+    assert mediator.phase_manager.get_next_action()["action"] == "awaiting_user"
+    assert mediator.phase_manager.get_next_action()["supervisory_restart"] is False
+    resumed = mediator.resume_intentional_user_wait()
+    assert resumed["resumed"] is True
+    assert resumed["supervisory_restart"] is False
+    assert resumed["worker_stalled"] is False
+    assert resumed["assertion_rule_unchanged"] is True
+    assert resumed["iteration_count"] == 4
+    assert mediator.phase_manager.iteration_count == 4
+    assert [(entity.id, entity.name, entity.confidence) for entity in kg.entities.values()] == before_entities
+    assert [(node.id, node.satisfied, node.name) for node in dg.nodes.values()] == before_nodes
+
+
+def test_intake_status_hides_filing_readiness_for_incomplete_stops():
+    class _Mediator:
+        def get_three_phase_status(self):
+            return {
+                "current_phase": "intake",
+                "intake_readiness": {
+                    "ready_to_advance": True,
+                    "score": 1,
+                    "remaining_gap_count": 0,
+                    "contradiction_count": 0,
+                    "blockers": [],
+                    "criteria": {},
+                },
+                "interview_stop": {
+                    "state": "limit_reached",
+                    "intake_complete": False,
+                    "filing_ready": False,
+                    "legal_sufficiency": False,
+                    "unresolved_issue_summary": {
+                        "items": [{"reason": "iteration_cap"}],
+                        "legal_sufficiency": False,
+                        "core_facts_complete": False,
+                    },
+                },
+                "intentional_user_wait": {
+                    "status": "awaiting_user",
+                    "awaiting_user": True,
+                    "paused": True,
+                    "worker_stalled": False,
+                    "supervisory_restart": False,
+                },
+            }
+
+    summary = build_intake_status_summary(_Mediator())
+    assert summary["interview_stop"]["state"] == "limit_reached"
+    assert summary["ready_to_advance"] is False
+    assert summary["filing_ready"] is False
+    assert summary["intake_complete"] is False
+    assert summary["unresolved_issue_summary"]["items"]
+    assert summary["awaiting_user"] is True
+    assert summary["worker_stalled"] is False
+    assert summary["supervisory_restart"] is False
