@@ -2,12 +2,18 @@ from __future__ import annotations
 
 from collections import Counter
 from copy import deepcopy
+from contextlib import contextmanager
+from dataclasses import replace
 from datetime import date
 from enum import Enum
 import hashlib
 import inspect
 import json
+import math
+import os
 import re
+import threading
+import time
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from lib.formal_logic.capabilities import (
@@ -94,6 +100,15 @@ _canonical_source_map_module, _canonical_source_map_error = import_module_option
 _legal_ir_obligations_module, _legal_ir_obligations_error = import_module_optional(
     "ipfs_datasets_py.logic.integration.reasoning.legal_ir_obligations"
 )
+_proof_router_module, _proof_router_error = import_module_optional(
+    "ipfs_datasets_py.logic.integration.reasoning.legal_ir_proof_router"
+)
+_hammer_module, _hammer_error = import_module_optional(
+    "ipfs_datasets_py.logic.integration.reasoning.hammer"
+)
+_process_lifecycle_module, _process_lifecycle_error = import_module_optional(
+    "ipfs_datasets_py.logic.hammers.process_lifecycle"
+)
 _CANONICAL_FORMALIZATION_RECEIPTS: Dict[str, Dict[str, Any]] = {}
 _CANONICAL_FORMALIZATION_CACHE: Dict[str, str] = {}
 _CANONICAL_SUPPORTED_EXECUTION: Dict[str, Any] | None = None
@@ -108,6 +123,40 @@ PROOF_OBLIGATION_BACKEND_IDENTITY = (
     "generate_legal_ir_proof_obligations"
 )
 PROOF_OBLIGATION_TRUST_STRUCTURAL = "structural"
+PROOF_ROUTING_SCHEMA = "legal-ir-bound-proof-routing/v1"
+PROOF_ROUTING_POLICY_VERSION = "proof03-open-world-substantive-trust/v1"
+PROOF_ROUTING_OUTCOMES = (
+    "proved",
+    "refuted",
+    "inconsistent",
+    "unknown",
+    "unsupported",
+    "timeout",
+    "cancelled",
+    "unavailable",
+)
+PROOF_ROUTING_SUBSTANTIVE_TRUST = "kernel"
+_PROOF_ROUTING_SAFE_ROUTES = (
+    "deterministic_syntax",
+    "deterministic_graph",
+    "deterministic_contract",
+)
+_PROOF_ROUTING_INSTALL_PRONE_ROUTES = ("native_flogic",)
+_UNTRUSTED_ROUTE_METADATA_KEYS = {
+    "deterministic_syntax_valid",
+    "deterministic_graph_valid",
+    "deterministic_contract_valid",
+    "native_tdfol_result",
+    "native_cec_result",
+    "native_flogic_result",
+    "native_tdfol_prover",
+    "native_cec_prover",
+    "native_flogic_prover",
+}
+_INSTALL_DISABLE_ENV = {
+    "IPFS_DATASETS_PY_LAZY_INSTALL_PROVERS": "0",
+    "IPFS_DATASETS_PY_AUTO_INSTALL_PROVERS": "0",
+}
 
 _DEGRADED_OPERATION_REASONS = {
     FormalLogicOperation.TEXT_TO_FOL: (
@@ -5351,6 +5400,648 @@ def generate_bound_legal_ir_proof_obligations(
     return _store_obligation_receipt(receipt, cache_key=cache_key)
 
 
+def _positive_finite(value: Any, label: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be positive and finite") from exc
+    if not math.isfinite(number) or number <= 0:
+        raise ValueError(f"{label} must be positive and finite")
+    return number
+
+
+@contextmanager
+def _prover_installs_disabled():
+    previous = {key: os.environ.get(key) for key in _INSTALL_DISABLE_ENV}
+    os.environ.update(_INSTALL_DISABLE_ENV)
+    try:
+        yield
+    finally:
+        for key, old in previous.items():
+            if old is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old
+
+
+def _default_stage_budgets() -> Dict[str, float]:
+    return {
+        "deterministic": 0.25,
+        "native_logic": 0.5,
+        "smt_atp": 0.75,
+        "lean_reconstruction": 0.75,
+    }
+
+
+def _routing_modules_available() -> bool:
+    return (
+        _proof_router_module is not None
+        and _hammer_module is not None
+        and hasattr(_proof_router_module, "LegalIRProofRouter")
+        and hasattr(_proof_router_module, "ProofRoutingPolicy")
+    )
+
+
+def _clean_obligation_metadata(metadata: Mapping[str, Any] | None) -> Tuple[Dict[str, Any], List[str]]:
+    rejected: List[str] = []
+    cleaned: Dict[str, Any] = {}
+    for key, value in dict(metadata or {}).items():
+        if key in _UNTRUSTED_ROUTE_METADATA_KEYS or callable(value):
+            rejected.append(str(key))
+            continue
+        if isinstance(value, bool):
+            rejected.append(str(key))
+            continue
+        cleaned[str(key)] = value
+    return cleaned, rejected
+
+
+def _coerce_obligation(obligation: Any, goal_statement: str) -> Tuple[Any, List[str]]:
+    if not _routing_modules_available():
+        raise RuntimeError("proof router unavailable")
+    obligation_type = _legal_ir_obligations_module.LegalIRProofObligation if (
+        _legal_ir_obligations_module is not None and hasattr(_legal_ir_obligations_module, "LegalIRProofObligation")
+    ) else None
+    if obligation is None:
+        if obligation_type is None:
+            raise RuntimeError("obligation type unavailable")
+        return obligation_type(
+            obligation_id="unbound-goal",
+            statement=str(goal_statement or "unknown_goal"),
+            kind="claim_element",
+            legal_ir_view="intake",
+            logic_family="unspecified",
+        ), []
+    if obligation_type is not None and isinstance(obligation, obligation_type):
+        metadata, rejected = _clean_obligation_metadata(obligation.metadata)
+        return replace(obligation, metadata=metadata), rejected
+    if isinstance(obligation, Mapping):
+        metadata, rejected = _clean_obligation_metadata(
+            obligation.get("metadata") if isinstance(obligation.get("metadata"), Mapping) else {}
+        )
+        if obligation_type is None:
+            raise RuntimeError("obligation type unavailable")
+        return obligation_type(
+            obligation_id=str(obligation.get("obligation_id") or "unbound-goal"),
+            statement=str(obligation.get("statement") or goal_statement or "unknown_goal"),
+            kind=str(obligation.get("kind") or "claim_element"),
+            legal_ir_view=str(obligation.get("legal_ir_view") or "intake"),
+            logic_family=str(obligation.get("logic_family") or "unspecified"),
+            sample_id=str(obligation.get("sample_id") or ""),
+            formula_id=str(obligation.get("formula_id") or ""),
+            metadata=metadata,
+        ), rejected
+    raise TypeError("obligation must be a LegalIRProofObligation or a mapping")
+
+
+def _hammer_premises(premise_inventory: Mapping[str, Any] | None, premises: Sequence[Any] | None) -> List[Any]:
+    hammer_premise = _hammer_module.HammerPremise
+    built: List[Any] = []
+    if premises:
+        for item in premises:
+            if isinstance(item, hammer_premise):
+                built.append(item)
+            elif isinstance(item, Mapping) and item.get("role") != "missing_fact":
+                built.append(
+                    hammer_premise(
+                        name=str(item.get("premise_id") or item.get("name") or "premise"),
+                        statement=str(item.get("statement") or item.get("text") or ""),
+                        metadata={
+                            "role": str(item.get("role") or ""),
+                            "premise_id": str(item.get("premise_id") or ""),
+                            "revision": str(item.get("revision") or ""),
+                            "axiom": False,
+                        },
+                    )
+                )
+        return built
+    inventory = premise_inventory or {}
+    for role in ("selected_legal_rules", "asserted_facts", "assumptions"):
+        for item in inventory.get(role) or []:
+            if not isinstance(item, Mapping):
+                continue
+            built.append(
+                hammer_premise(
+                    name=str(item.get("premise_id") or role),
+                    statement=str(item.get("text") or item.get("label") or ""),
+                    metadata={
+                        "role": role,
+                        "premise_id": str(item.get("premise_id") or ""),
+                        "revision": str(item.get("revision") or ""),
+                        "version": str(item.get("version") or ""),
+                        "axiom": False,
+                        "epistemic_status": str(item.get("epistemic_status") or ""),
+                    },
+                )
+            )
+    return built
+
+
+def _premise_identity(premise_inventory: Mapping[str, Any] | None) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    inventory = premise_inventory or {}
+    for role in ("asserted_facts", "disputed_facts", "selected_legal_rules", "assumptions", "missing_facts"):
+        for item in inventory.get(role) or []:
+            if not isinstance(item, Mapping):
+                continue
+            rows.append(
+                {
+                    "role": role,
+                    "premise_id": str(item.get("premise_id") or ""),
+                    "revision": str(item.get("revision") or ""),
+                    "version": str(item.get("version") or ""),
+                    "text_sha256": str(item.get("text_sha256") or ""),
+                }
+            )
+    return rows
+
+
+def _missing_fact_values(premise_inventory: Mapping[str, Any] | None) -> List[Dict[str, Any]]:
+    values: List[Dict[str, Any]] = []
+    for item in (premise_inventory or {}).get("missing_facts") or []:
+        if not isinstance(item, Mapping):
+            continue
+        values.append(
+            {
+                "premise_id": str(item.get("premise_id") or ""),
+                "value": None,
+                "interpreted_as_false": False,
+                "open_world": True,
+            }
+        )
+    return values
+
+
+def _owned_backend(local_backend: str, goal_statement: str) -> Any:
+    """Closed local backend. Callers cannot supply a prover callback."""
+
+    status_type = _hammer_module.HammerBackendStatus
+    result_type = _hammer_module.HammerBackendResult
+    runner_type = _hammer_module.CallableHammerBackendRunner
+
+    def run(translation: Any, timeout_seconds: float) -> Any:
+        del timeout_seconds
+        if local_backend == "disproved":
+            return result_type(
+                backend="local-bound",
+                status=status_type.DISPROVED,
+                proved=False,
+                elapsed_seconds=0.0,
+                translation_format=getattr(translation, "target_format", ""),
+                proof_trace=f"bound-counterexample:{goal_statement}",
+                metadata={"bound_to_goal": True, "negative_proof": True},
+            )
+        if local_backend == "unavailable":
+            return result_type(
+                backend="local-bound",
+                status=status_type.UNAVAILABLE,
+                proved=False,
+                elapsed_seconds=0.0,
+                translation_format=getattr(translation, "target_format", ""),
+                error="tool_missing",
+            )
+        if local_backend == "timeout":
+            return result_type(
+                backend="local-bound",
+                status=status_type.TIMEOUT,
+                proved=False,
+                elapsed_seconds=0.0,
+                translation_format=getattr(translation, "target_format", ""),
+                timed_out=True,
+            )
+        proved = local_backend in {"proved", "reconstruction_failed"}
+        return result_type(
+            backend="local-bound",
+            status=status_type.PROVED if proved else status_type.UNKNOWN,
+            proved=proved,
+            elapsed_seconds=0.0,
+            translation_format=getattr(translation, "target_format", ""),
+            proof_trace=f"bound-goal:{goal_statement}" if proved else "",
+            metadata={"bound_to_goal": proved, "goal_statement": goal_statement},
+        )
+
+    return runner_type("local-bound", "smt-lib", run)
+
+
+def _owned_verifier(local_backend: str, goal_statement: str):
+    verification_type = _hammer_module.HammerVerification
+
+    def verify(itp: str, script: str, goal: Any, premises: Sequence[Any]) -> Any:
+        del itp, premises
+        statement = str(getattr(goal, "statement", "") or "")
+        verified = (
+            local_backend == "proved"
+            and statement == goal_statement
+            and bool(goal_statement)
+            and goal_statement in str(script or "")
+        )
+        return verification_type(
+            verified=verified,
+            checker="bound-local-kernel",
+            elapsed_seconds=0.0,
+            output="kernel_bound_to_goal" if verified else "reconstruction_not_a_counterexample",
+        )
+
+    return verify
+
+
+def _run_managed_command(
+    command: Sequence[str],
+    *,
+    wall_time_seconds: float,
+    cancellation_event: Any,
+    state_directory: str,
+) -> Dict[str, Any]:
+    if _process_lifecycle_module is None:
+        return {
+            "available": False,
+            "process_group_reaped": False,
+            "timed_out": False,
+            "cancelled": False,
+            "error": "process_supervisor_unavailable",
+        }
+    limits = _process_lifecycle_module.ProcessLimits(
+        wall_time_seconds=wall_time_seconds,
+        graceful_shutdown_seconds=0.2,
+        forced_cleanup_seconds=0.4,
+    )
+    supervisor = _process_lifecycle_module.ProcessSupervisor(
+        state_directory=state_directory,
+        heartbeat_interval_seconds=0.05,
+        recover=False,
+    )
+    started = time.monotonic()
+    result = supervisor.run(
+        list(command),
+        limits=limits,
+        cancel_event=cancellation_event,
+    )
+    payload = result.to_dict() if hasattr(result, "to_dict") else {}
+    payload["available"] = True
+    payload["adapter_elapsed_seconds"] = max(0.0, time.monotonic() - started)
+    payload["process_group_reaped"] = bool(getattr(result, "process_group_reaped", False))
+    payload["timed_out"] = bool(getattr(result, "timed_out", False))
+    payload["cancelled"] = bool(getattr(result, "cancelled", False))
+    return payload
+
+
+def _classify_route(
+    *,
+    native_status: str,
+    native_trust: str,
+    native_reason: str,
+    attempt_metadata: Sequence[Mapping[str, Any]],
+    missing_facts: Sequence[Mapping[str, Any]],
+    versions_match: bool,
+    similarity_score: Any,
+    model_assertion: Any,
+    process: Mapping[str, Any] | None,
+    local_backend: str,
+    goal_bound_kernel: bool,
+) -> Dict[str, Any]:
+    structural_proved = any(
+        str(item.get("status") or "") == "proved" and str(item.get("route") or "").startswith("deterministic_")
+        for item in attempt_metadata
+    )
+    premise_consistency = ""
+    negative_bound = local_backend == "disproved" or native_reason == "backend_counterexample"
+    for item in attempt_metadata:
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
+        if metadata.get("premise_consistency"):
+            premise_consistency = str(metadata.get("premise_consistency"))
+        if metadata.get("negative_proof") is True and metadata.get("bound_to_goal") is True:
+            negative_bound = True
+    if process and process.get("available") and process.get("cancelled"):
+        outcome = "cancelled"
+    elif process and process.get("available") and process.get("timed_out"):
+        outcome = "timeout"
+    elif local_backend == "timeout" or native_status == "timeout":
+        outcome = "timeout"
+    elif native_status == "cancelled":
+        outcome = "cancelled"
+    elif not versions_match:
+        outcome = "unknown"
+    elif missing_facts:
+        outcome = "unknown"
+    elif local_backend == "unsat_premises" or premise_consistency == "unsat":
+        outcome = "inconsistent"
+    elif local_backend == "sat" or premise_consistency == "sat":
+        outcome = "unknown"
+    elif local_backend == "unavailable" or native_reason == "tool_missing":
+        outcome = "unavailable"
+    elif native_status in {"unsupported_translation", "unsupported"} or local_backend == "unsupported":
+        outcome = "unsupported"
+    elif native_status == "theorem_failed" and negative_bound and local_backend == "disproved":
+        outcome = "refuted"
+    elif native_status == "theorem_failed":
+        outcome = "unsupported"
+    elif (
+        native_status == "proved"
+        and native_trust == "kernel"
+        and goal_bound_kernel
+        and local_backend == "proved"
+        and not structural_proved
+    ):
+        outcome = "proved"
+    elif native_status == "error":
+        outcome = "unavailable" if "unavailable" in native_reason or native_reason == "tool_missing" else "unknown"
+    else:
+        outcome = "unknown"
+    substantive = outcome == "proved"
+    return {
+        "outcome": outcome,
+        "substantive_trust_satisfied": substantive,
+        "structural_proof_is_substantive": False,
+        "structural_route_proved": structural_proved,
+        "similarity_score_ignored": similarity_score is not None,
+        "model_assertion_ignored": model_assertion is not None,
+        "consistency_is_entailment": False,
+        "unsat_proves_arbitrary_claim": False,
+        "theorem_failed_is_counterexample": outcome == "refuted",
+        "premise_consistency": premise_consistency or ("unsat" if local_backend == "unsat_premises" else "sat" if local_backend == "sat" else ""),
+        "native_status": native_status,
+        "native_trust": native_trust,
+        "native_reason": native_reason,
+    }
+
+
+def _routing_receipt(
+    *,
+    outcome: str,
+    reason: str,
+    policy: Mapping[str, Any] | None,
+    versions: Mapping[str, Any],
+    extra: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    payload = {
+        "schema_version": PROOF_ROUTING_SCHEMA,
+        "policy_version": PROOF_ROUTING_POLICY_VERSION,
+        "outcome": outcome,
+        "reason": reason,
+        "outcomes": list(PROOF_ROUTING_OUTCOMES),
+        "substantive_trust_floor": PROOF_ROUTING_SUBSTANTIVE_TRUST,
+        "substantive_trust_satisfied": outcome == "proved",
+        "structural_proof_is_substantive": False,
+        "missing_facts_are_false": False,
+        "policy": dict(policy or {}),
+        "versions": dict(versions),
+        "installs_disabled": dict(_INSTALL_DISABLE_ENV),
+        "empty_enabled_routes_enables_all": True,
+    }
+    payload.update(dict(extra or {}))
+    return payload
+
+
+def route_bound_legal_ir_proof(
+    obligation: Any = None,
+    *,
+    premises: Sequence[Any] | None = None,
+    premise_inventory: Mapping[str, Any] | None = None,
+    sample_or_document: Any = None,
+    goal_statement: str = "",
+    required_trust: str = PROOF_ROUTING_SUBSTANTIVE_TRUST,
+    total_timeout_seconds: float = 2.0,
+    stage_timeout_seconds: Mapping[str, float] | None = None,
+    enabled_routes: Sequence[str] | None = None,
+    cancellation_event: Any = None,
+    managed_command: Sequence[str] | None = None,
+    managed_state_directory: str | None = None,
+    managed_wall_time_seconds: float | None = None,
+    local_backend: str = "",
+    similarity_score: Any = None,
+    model_assertion: Any = None,
+    execution_identity: str = "",
+    expected_execution_identity: str = "",
+    obligation_version: str = "",
+    expected_obligation_version: str = "",
+    premise_version: str = "",
+    expected_premise_version: str = "",
+) -> Dict[str, Any]:
+    """Route one obligation through LegalIRProofRouter without minting proof trust.
+
+    Structural deterministic successes stay below the substantive kernel floor.
+    Missing facts stay unknown. Timeout and cancellation are process-scoped:
+    a managed child is reaped before this function returns.
+    """
+
+    total = _positive_finite(total_timeout_seconds, "total_timeout_seconds")
+    stage_input = dict(stage_timeout_seconds or _default_stage_budgets())
+    stages = {key: _positive_finite(stage_input[key], key) for key in _default_stage_budgets()}
+    if stage_timeout_seconds is not None:
+        for key in _default_stage_budgets():
+            if key not in stage_timeout_seconds:
+                raise ValueError(f"missing stage budget: {key}")
+    rejected_empty_enabled_routes = enabled_routes is not None and len(tuple(enabled_routes)) == 0
+    requested_routes = tuple(
+        str(item) for item in (enabled_routes if enabled_routes is not None and not rejected_empty_enabled_routes else _PROOF_ROUTING_SAFE_ROUTES)
+    )
+    dropped_install_routes = [item for item in requested_routes if item in _PROOF_ROUTING_INSTALL_PRONE_ROUTES]
+    safe_routes = tuple(item for item in requested_routes if item not in _PROOF_ROUTING_INSTALL_PRONE_ROUTES)
+    if not safe_routes:
+        safe_routes = _PROOF_ROUTING_SAFE_ROUTES
+    local_backend = str(local_backend or "")
+    if local_backend in {"proved", "disproved", "reconstruction_failed", "unavailable", "timeout"}:
+        safe_routes = tuple(dict.fromkeys((*safe_routes, "smt_atp_portfolio", "native_lean_reconstruction")))
+    versions = {
+        "execution_identity": str(execution_identity or ""),
+        "expected_execution_identity": str(expected_execution_identity or execution_identity or ""),
+        "obligation_version": str(obligation_version or ""),
+        "expected_obligation_version": str(expected_obligation_version or obligation_version or ""),
+        "premise_version": str(premise_version or ""),
+        "expected_premise_version": str(expected_premise_version or premise_version or ""),
+        "policy_version": PROOF_ROUTING_POLICY_VERSION,
+        "premises": _premise_identity(premise_inventory),
+    }
+    versions_match = (
+        versions["execution_identity"] == versions["expected_execution_identity"]
+        and versions["obligation_version"] == versions["expected_obligation_version"]
+        and versions["premise_version"] == versions["expected_premise_version"]
+    )
+    missing = _missing_fact_values(premise_inventory)
+    if not _routing_modules_available():
+        return _routing_receipt(
+            outcome="unavailable",
+            reason="legal_ir_proof_router_unavailable",
+            policy=None,
+            versions=versions,
+            extra={"missing_facts": missing, "backend_available": False},
+        )
+    try:
+        bound_obligation, rejected_metadata = _coerce_obligation(obligation, goal_statement)
+    except Exception as exc:  # noqa: BLE001 - typed boundary failure
+        return _routing_receipt(
+            outcome="unavailable",
+            reason=type(exc).__name__,
+            policy=None,
+            versions=versions,
+            extra={"missing_facts": missing, "backend_available": False},
+        )
+    goal_text = str(goal_statement or bound_obligation.statement or "")
+    policy = _proof_router_module.ProofRoutingPolicy(
+        required_trust=required_trust,
+        total_timeout_seconds=total,
+        stage_timeout_seconds={
+            _proof_router_module.ProofRouteStage.DETERMINISTIC: stages["deterministic"],
+            _proof_router_module.ProofRouteStage.NATIVE_LOGIC: stages["native_logic"],
+            _proof_router_module.ProofRouteStage.SMT_ATP: stages["smt_atp"],
+            _proof_router_module.ProofRouteStage.LEAN_RECONSTRUCTION: stages["lean_reconstruction"],
+        },
+        enabled_routes=safe_routes,
+        stop_on_theorem_failure=True,
+    )
+    process_payload: Dict[str, Any] | None = None
+    if managed_command:
+        if not managed_state_directory:
+            raise ValueError("managed_state_directory is required when a managed command is set")
+        wall = _positive_finite(managed_wall_time_seconds or total, "managed_wall_time_seconds")
+        process_payload = _run_managed_command(
+            managed_command,
+            wall_time_seconds=min(wall, total),
+            cancellation_event=cancellation_event,
+            state_directory=managed_state_directory,
+        )
+        if not process_payload.get("available"):
+            return _routing_receipt(
+                outcome="unavailable",
+                reason="process_supervisor_unavailable",
+                policy=policy.to_dict(),
+                versions=versions,
+                extra={"process": process_payload, "missing_facts": missing},
+            )
+    route_runners: Dict[str, Any] = {}
+    if local_backend in {"unsat_premises", "sat"}:
+        consistency = "unsat" if local_backend == "unsat_premises" else "sat"
+
+        def _consistency_runner(request: Any, marker: str = consistency) -> Any:
+            del request
+            return _proof_router_module.ProofRouteOutcome(
+                status=_proof_router_module.ProofRouteStatus.UNKNOWN,
+                trust_level=_proof_router_module.ProofTrustLevel.NONE,
+                reason="premise_consistency_is_not_entailment",
+                metadata={"premise_consistency": marker},
+            )
+
+        route_runners["deterministic_syntax"] = _consistency_runner
+    backends: List[Any] = []
+    verifier = None
+    if local_backend in {"proved", "disproved", "reconstruction_failed", "unavailable", "timeout"}:
+        backends.append(_owned_backend(local_backend, goal_text))
+        verifier = _owned_verifier(local_backend, goal_text)
+    pipeline = _hammer_module.HammerPipeline(backends=backends, kernel_verifier=verifier)
+    router = _proof_router_module.LegalIRProofRouter(
+        pipeline,
+        policy=policy,
+        route_runners=route_runners or None,
+    )
+    goal = _hammer_module.HammerGoal(
+        statement=goal_text,
+        name=str(bound_obligation.obligation_id),
+        metadata={"logic_family": bound_obligation.logic_family, "substantive_goal": True},
+    )
+    hammer_premises = _hammer_premises(premise_inventory, premises)
+    if local_backend and not hammer_premises:
+        hammer_premises = [
+            _hammer_module.HammerPremise(
+                name="bound-check",
+                statement="bound_check_premise(p)",
+                metadata={"role": "bound_artifact", "axiom": False},
+            )
+        ]
+    with _prover_installs_disabled():
+        native = router.route(
+            bound_obligation,
+            goal,
+            hammer_premises,
+            sample_or_document=sample_or_document,
+            cancellation_event=None if process_payload else cancellation_event,
+        )
+    native_payload = native.to_dict()
+    attempts = list(native_payload.get("attempts") or [])
+    goal_bound_kernel = bool(
+        local_backend == "proved"
+        and getattr(getattr(native, "hammer_result", None), "reconstruction", None) is not None
+        and bool(getattr(native.hammer_result.reconstruction, "verified", False))
+    )
+    # A deterministic structural pass can be the only proved attempt. Kernel
+    # trust still has to be the winning native trust, scoped to this goal.
+    if any(str(item.get("route") or "").startswith("deterministic_") and item.get("status") == "proved" for item in attempts):
+        if str(native_payload.get("trust_level") or "") != "kernel":
+            goal_bound_kernel = False
+    classified = _classify_route(
+        native_status=str(native_payload.get("status") or ""),
+        native_trust=str(native_payload.get("trust_level") or ""),
+        native_reason=str(native_payload.get("stop_reason") or ""),
+        attempt_metadata=attempts,
+        missing_facts=missing,
+        versions_match=versions_match,
+        similarity_score=similarity_score,
+        model_assertion=model_assertion,
+        process=process_payload,
+        local_backend=local_backend,
+        goal_bound_kernel=goal_bound_kernel,
+    )
+    reason = classified["outcome"]
+    if process_payload and process_payload.get("timed_out"):
+        reason = "managed_child_deadline"
+    elif process_payload and process_payload.get("cancelled"):
+        reason = "managed_child_cancelled"
+    elif not versions_match:
+        reason = "stale_source_or_policy_version"
+    elif missing and classified["outcome"] == "unknown":
+        reason = "missing_fact_open_world"
+    elif classified["outcome"] == "unsupported" and native_payload.get("status") == "theorem_failed":
+        reason = "theorem_failed_without_bound_negative_proof"
+    elif classified["outcome"] == "refuted":
+        reason = "bound_negative_proof"
+    elif classified["outcome"] == "inconsistent":
+        reason = "premise_set_unsatisfiable"
+    elif classified["outcome"] == "proved":
+        reason = "kernel_bound_to_goal"
+    elif structural_only := classified["structural_route_proved"]:
+        del structural_only
+        reason = "structural_check_below_substantive_trust"
+    return _routing_receipt(
+        outcome=classified["outcome"],
+        reason=reason,
+        policy=policy.to_dict(),
+        versions=versions,
+        extra={
+            "backend_available": True,
+            "router": "ipfs_datasets_py.logic.integration.reasoning.legal_ir_proof_router.LegalIRProofRouter",
+            "router_schema_version": str(native_payload.get("schema_version") or ""),
+            "native_status": native_payload.get("status"),
+            "native_trust": native_payload.get("trust_level"),
+            "native_required_trust": native_payload.get("required_trust"),
+            "native_stop_reason": native_payload.get("stop_reason"),
+            "native_proved": bool(native_payload.get("proved")),
+            "native_trust_satisfied": bool(native_payload.get("trust_satisfied")),
+            "attempts": attempts,
+            "rejected_untrusted_metadata": rejected_metadata,
+            "dropped_install_prone_routes": dropped_install_routes,
+            "rejected_empty_enabled_routes": rejected_empty_enabled_routes,
+            "requested_trust": str(required_trust),
+            "missing_facts": missing,
+            "process": process_payload,
+            "assumption_ids": [
+                str(item.get("premise_id") or "")
+                for item in (premise_inventory or {}).get("assumptions") or []
+                if isinstance(item, Mapping)
+            ],
+            "goal_statement_sha256": hashlib.sha256(goal_text.encode("utf-8")).hexdigest(),
+            "obligation_id": str(bound_obligation.obligation_id),
+            "substantive_trust_satisfied": classified["substantive_trust_satisfied"],
+            "structural_route_proved": classified["structural_route_proved"],
+            "similarity_score_ignored": classified["similarity_score_ignored"],
+            "model_assertion_ignored": classified["model_assertion_ignored"],
+            "consistency_is_entailment": False,
+            "unsat_proves_arbitrary_claim": False,
+            "theorem_failed_is_counterexample": classified["theorem_failed_is_counterexample"],
+            "legacy_no_contradiction_is_certified_consistency": False,
+            "entails_claim_element": classified["outcome"] == "proved",
+        },
+    )
+
+
 def legacy_procedural_template_attributes() -> Dict[str, Any]:
     return {
         "category": "civil_procedure",
@@ -5412,4 +6103,7 @@ __all__ = [
     "inspect_canonical_formalization_receipt",
     "reset_canonical_formalization_cache",
     "verify_canonical_formalization_receipt",
+    "route_bound_legal_ir_proof",
+    "PROOF_ROUTING_SCHEMA",
+    "PROOF_ROUTING_OUTCOMES",
 ]
