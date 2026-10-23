@@ -2892,6 +2892,188 @@ def dispatch_private_turn(
 	return result
 
 
+RECOVERY_SCHEMA = "intake-model-recovery/v1"
+RECOVERY_MAX_ATTEMPTS = 3
+RECOVERY_BACKOFF_BASE_S = 0.25
+RECOVERY_BACKOFF_CAP_S = 0.20
+_RECOVERY_RETRYABLE = frozenset({"rate_limit", "delayed", "disconnect"})
+_RECOVERY_TERMINAL = frozenset({
+	"auth_failure", "quota", "malformed", "schema_drift", "cancelled",
+	"wrong_model", "wrong_provider",
+})
+_RECOVERY_INJECTIONS = _RECOVERY_RETRYABLE | _RECOVERY_TERMINAL | frozenset({"available"})
+
+
+def intake_recovery_idempotency_key(request_id: str) -> str:
+	"""One stable key for every attempt of the same synthetic interview turn."""
+
+	if type(request_id) is not str or _REQUEST_ID.fullmatch(request_id) is None:
+		raise ValueError("request_id must be 32 lowercase hex characters")
+	return "intake-recovery:" + request_id
+
+
+def _recovery_backoff_seconds(failed_attempts: int) -> float:
+	if type(failed_attempts) is not int or failed_attempts < 1:
+		raise ValueError("failed_attempts")
+	delay = RECOVERY_BACKOFF_BASE_S * (2 ** (failed_attempts - 1))
+	if delay > RECOVERY_BACKOFF_CAP_S:
+		delay = RECOVERY_BACKOFF_CAP_S
+	return delay
+
+
+def _optional_live_canary(*, include_live_canary: bool, canary_transport: Any) -> Dict[str, Any]:
+	"""Label an optional canary without letting it decide the offline result.
+
+	Injected transports can claim ``live_canary``; that claim is ignored.
+	"""
+
+	record: Dict[str, Any] = {
+		"label": "optional_live_canary" if include_live_canary else "not_requested",
+		"blocks_offline_completion": False,
+		"live_canary": False,
+		"status": "not_requested",
+		"fabricated_pass": False,
+	}
+	if not include_live_canary:
+		return record
+	record["status"] = "unverified"
+	if canary_transport is None:
+		record["status"] = "not_dispatched"
+		return record
+	if not callable(canary_transport):
+		raise ValueError("canary_transport must be callable")
+	try:
+		raw = canary_transport(**pinned_grok47_canary_kwargs())
+	except Exception:
+		record["status"] = "unavailable"
+		return record
+	projected = interpret_canary_dispatch(raw)
+	record["canary_dispatch"] = projected.get("canary_dispatch", "unverified")
+	record["status"] = "unverified"
+	record["live_canary"] = False
+	return record
+
+
+def qualify_intake_model_recovery(
+	interview_state: Mapping[str, Any],
+	*,
+	provider: str,
+	model_name: str,
+	request_id: str,
+	script: list,
+	transport: Any = None,
+	sleeper: Any = None,
+	deadline_s: float = 5.0,
+	include_live_canary: bool = False,
+	canary_transport: Any = None,
+	cancel_event: Any = None,
+) -> Dict[str, Any]:
+	"""Replay one synthetic interview turn under injected provider faults.
+
+	``interview_state`` is only read. Eligible transient faults (``rate_limit``,
+	``delayed``, ``disconnect``) retry with one idempotency key and a capped
+	backoff. Auth, quota, broken JSON, schema drift, cancellation, and a wrong
+	model or provider stop immediately. The optional live canary is a separate
+	labeled record and cannot turn an offline run into a live pass.
+	"""
+
+	if not isinstance(interview_state, Mapping):
+		raise TypeError("interview_state must be a mapping")
+	if type(include_live_canary) is not bool:
+		raise ValueError("include_live_canary must be an explicit boolean")
+	if type(script) is not list or not 1 <= len(script) <= 8:
+		raise ValueError("script must list one to eight dispositions")
+	if any(type(item) is not str or item not in _RECOVERY_INJECTIONS for item in script):
+		raise ValueError("script contains an unknown disposition")
+	if type(deadline_s) not in (int, float) or not math.isfinite(float(deadline_s)) or deadline_s <= 0:
+		raise ValueError("deadline_s must be a positive finite number")
+	if sleeper is None:
+		sleeper = time.sleep
+	if not callable(sleeper):
+		raise ValueError("sleeper must be callable")
+	if transport is not None and not callable(transport):
+		raise ValueError("transport must be callable")
+	before = deepcopy(dict(interview_state))
+	key = intake_recovery_idempotency_key(request_id)
+	deadline = time.monotonic() + float(deadline_s)
+	calls: list[str] = []
+	backoffs: list[float] = []
+
+	def finish(disposition: str, *, attempts: int, dispatch: str) -> Dict[str, Any]:
+		canary = _optional_live_canary(
+			include_live_canary=include_live_canary,
+			canary_transport=canary_transport,
+		)
+		preserved = deepcopy(dict(interview_state)) == before
+		pinned = disposition not in {"wrong_model", "wrong_provider"}
+		if any(item > RECOVERY_BACKOFF_CAP_S for item in backoffs) or len(set(calls)) > 1:
+			disposition = "idempotency_or_backoff_violation"
+			preserved = False
+		return {
+			"schema": RECOVERY_SCHEMA,
+			"request_id": request_id,
+			"disposition": disposition,
+			"failure_kind": "" if disposition == "available" else disposition,
+			"attempts": attempts,
+			"dispatch": dispatch,
+			"idempotency_key": key,
+			"idempotency_keys": list(calls),
+			"backoff_seconds": list(backoffs),
+			"backoff_cap_seconds": RECOVERY_BACKOFF_CAP_S,
+			"max_attempts": RECOVERY_MAX_ATTEMPTS,
+			"retryable": disposition in _RECOVERY_RETRYABLE,
+			"state_preserved": preserved,
+			"interview_state": before,
+			"live_canary": False,
+			"offline_unit_complete": preserved,
+			"optional_live_canary": canary,
+			"provider": PINNED_GROK_PROVIDER if pinned else "",
+			"model_name": PINNED_GROK_MODEL if pinned else "",
+			"requested_provider": str(provider or ""),
+			"requested_model": str(model_name or ""),
+		}
+
+	provider_text = str(provider or "").strip()
+	model_text = str(model_name or "").strip()
+	if provider_text != PINNED_GROK_PROVIDER or model_text != PINNED_GROK_MODEL:
+		disposition = "wrong_model" if provider_text == PINNED_GROK_PROVIDER else "wrong_provider"
+		return finish(disposition, attempts=0, dispatch="none")
+	if script[0] == "auth_failure":
+		return finish("auth_failure", attempts=0, dispatch="none")
+
+	attempts = 0
+	disposition = script[-1]
+	for index, injection in enumerate(script):
+		if attempts >= RECOVERY_MAX_ATTEMPTS:
+			break
+		if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
+			return finish("cancelled", attempts=attempts, dispatch="attempted" if attempts else "none")
+		if deadline - time.monotonic() <= 0:
+			return finish("delayed", attempts=attempts, dispatch="attempted" if attempts else "none")
+		if transport is not None:
+			transport(attempt=attempts + 1, idempotency_key=key, injection=injection)
+		calls.append(key)
+		attempts += 1
+		disposition = injection
+		if injection == "available":
+			return finish("available", attempts=attempts, dispatch="attempted")
+		if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
+			return finish("cancelled", attempts=attempts, dispatch="attempted")
+		if injection not in _RECOVERY_RETRYABLE:
+			return finish(injection, attempts=attempts, dispatch="attempted")
+		if index + 1 >= len(script) or attempts >= RECOVERY_MAX_ATTEMPTS:
+			return finish(injection, attempts=attempts, dispatch="attempted")
+		delay = _recovery_backoff_seconds(attempts)
+		remaining = deadline - time.monotonic()
+		if remaining <= 0:
+			return finish(injection, attempts=attempts, dispatch="attempted")
+		if delay > remaining:
+			delay = remaining
+		sleeper(delay)
+		backoffs.append(delay)
+	return finish(disposition, attempts=attempts, dispatch="attempted" if attempts else "none")
+
+
 def redact_generation_diagnostic(record: Mapping[str, Any] | None) -> Dict[str, Any]:
 	"""Private generation diagnostics share the storage allow-list."""
 
@@ -2952,6 +3134,11 @@ __all__ = [
 	"ARCH_CLASSIFICATION_BLOCKED",
 	"build_minimal_turn_prompt",
 	"dispatch_private_turn",
+	"RECOVERY_SCHEMA",
+	"RECOVERY_MAX_ATTEMPTS",
+	"RECOVERY_BACKOFF_CAP_S",
+	"intake_recovery_idempotency_key",
+	"qualify_intake_model_recovery",
 	"PROVIDER_EGRESS_SCHEMA",
 	"tui_processing_setting",
 	"record_case_cloud_consent",
