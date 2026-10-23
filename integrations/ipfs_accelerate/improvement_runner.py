@@ -15,6 +15,7 @@ import fcntl
 import hashlib
 import json
 import logging
+import math
 import multiprocessing
 import os
 from pathlib import Path
@@ -27,6 +28,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Any, Mapping
 
@@ -1931,6 +1933,342 @@ def _read_validation_watchdog_authority(path: Path) -> dict[str, Any] | None:
         return None
 
 
+_VALIDATION_ACTIVITY_INTERVAL_SECONDS = 5.0
+
+
+def _validation_activity_modules():
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as daemon
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as supervisor
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import portal_task_state_control_plane as plane
+    return daemon, supervisor, plane
+
+
+def _validation_activity_directory(path: Path, *, private=False):
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise ValueError("validation_activity_path_unavailable")
+    value = path.lstat()
+    if (not stat.S_ISDIR(value.st_mode) or value.st_uid != os.getuid()
+            or value.st_mode & (0o077 if private else 0o002)):
+        raise ValueError("validation_activity_directory_unavailable")
+    return path
+
+
+def _validation_activity_log_identity(path: Path):
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise ValueError("validation_activity_log_aliased")
+    value = path.lstat()
+    if (not stat.S_ISREG(value.st_mode) or value.st_uid != os.getuid()
+            or value.st_nlink != 1 or stat.S_IMODE(value.st_mode) != 0o600):
+        raise ValueError("validation_activity_log_not_private")
+    return value.st_dev, value.st_ino
+
+
+def _validation_activity_binding(workspace: Path, task: Mapping[str, Any], context: Mapping[str, Any], *, now_ts: float, owner_pid=None):
+    """Read one exact live Native validation owner without changing its state."""
+    from types import SimpleNamespace
+
+    try:
+        daemon, native, plane = _validation_activity_modules()
+        campaign = _validation_activity_directory(Path(context["campaign_state_dir"]), private=True)
+        target = _validation_activity_directory(Path(context["target_source_root"]))
+        workspace = _validation_activity_directory(Path(workspace))
+        if target != Path(__file__).resolve().parents[2]:
+            return None
+        state_path = campaign / f"{STATE_PREFIX}_task_state.json"
+        snapshot = plane.read_portal_task_state_snapshot(state_path)
+        if not isinstance(snapshot, dict) or type(snapshot.get("revision")) is not int:
+            return None
+        state = snapshot.get("body")
+        if not isinstance(state, dict):
+            return None
+        expected = {"task_id": task["id"], "canonical_task_cid": context["task_cid"],
+                    "canonical_task_key": context["task_key"], "attempt": state.get("active_attempt")}
+        if (not expected["task_id"] or not expected["canonical_task_cid"] or not expected["canonical_task_key"]
+                or context.get("task_id") != expected["task_id"]
+                or type(expected["attempt"]) is not int or not 1 <= expected["attempt"] <= 3
+                or state.get("active_phase") != "validating" or state.get("implementation_in_progress") is not True
+                or state.get("active_task_id") != expected["task_id"]
+                or state.get("last_implementation_task_id") != expected["task_id"]
+                or state.get("active_task_cid") != expected["canonical_task_cid"]
+                or state.get("active_task_key") != expected["canonical_task_key"]
+                or state.get("active_worktree_path") != str(workspace)):
+            return None
+        started = native.parse_timestamp(state.get("active_phase_started_at"))
+        provider_started = native.parse_timestamp(state.get("last_implementation_started_at"))
+        finished = native.parse_timestamp(state.get("last_implementation_finished_at"))
+        if (started is None or provider_started is None or started < provider_started
+                or finished is not None and finished >= provider_started
+                or not 0 <= now_ts - started.timestamp() < float(TIMEOUT_SECONDS)):
+            return None
+        lease = _read_validation_watchdog_authority(campaign / "implementation.lock")
+        claim_path = daemon.PortalImplementationDaemon._implementation_task_claim_path(
+            SimpleNamespace(repo_root=target), expected["task_id"], canonical_task_cid=expected["canonical_task_cid"])
+        claim = _read_validation_watchdog_authority(claim_path)
+        identity = native.load_supervised_child_identity(campaign / f"{STATE_PREFIX}_managed_daemon.identity.json")
+        owner_pid = os.getpid() if owner_pid is None else owner_pid
+        if type(owner_pid) is not int or owner_pid <= 1:
+            return None
+        birth = native.read_process_birth(owner_pid)
+        if lease is None or claim is None or identity is None or birth is None:
+            return None
+        scope = {"repo_root": str(target), "state_dir": str(campaign), "state_prefix": STATE_PREFIX,
+                 "todo_path": str(target / "docs/task_boards/complaint_intake_task_board.md"),
+                 "daemon_entrypoint": str(Path(__file__).resolve())}
+        if (dict(identity.owner_scope) != scope or identity.process_birth != birth or birth.pid != owner_pid
+                or native.ProcessBirthIdentity.from_dict(claim.get("owner_process_birth")) != birth
+                or lease.get("kind") != "implementation" or lease.get("lease_role") == "supervisor_maintenance"
+                or claim.get("kind") != native.IMPLEMENTATION_TASK_CLAIM_LOCK_KIND
+                or claim.get("lease_role") != native.IMPLEMENTATION_DISPATCH_INTENT_LEASE_ROLE
+                or not lease.get("lease_id") or not claim.get("lease_id")
+                or type(lease.get("pid")) is not int or type(claim.get("pid")) is not int
+                or lease["pid"] != birth.pid or claim["pid"] != birth.pid
+                or any(lease.get(key) != value or claim.get(key) != value for key, value in expected.items())
+                or lease.get("repo_root") != str(target) or lease.get("state_dir") != str(campaign)
+                or claim.get("state_dir") != str(campaign) or claim.get("state_path") != str(state_path)
+                or not native.checkout_lock_repository_matches(claim, target)
+                or claim.get("dispatch_authority_cid") != daemon.PortalImplementationDaemon._implementation_dispatch_authority_cid(claim)):
+            return None
+        launcher = _read_validation_watchdog_authority(campaign / "launcher.json")
+        if (launcher is None or launcher.get("repo_root") != str(target)
+                or launcher.get("state_dir") != str(campaign)):
+            return None
+        worktree_root, _ = recorded_worktree_root(launcher, campaign)
+        if workspace == worktree_root or not workspace.is_relative_to(worktree_root):
+            return None
+        log_path = Path(state.get("active_log_path") or "")
+        if (state.get("last_implementation_log_path") != str(log_path)
+                or log_path.parent != campaign / "implementation_logs"
+                or re.fullmatch(re.escape(expected["task_id"].lower()) + r"-attempt-" + str(expected["attempt"]) + r"-[0-9a-f]{32}\.log", log_path.name) is None):
+            return None
+        log_identity = _validation_activity_log_identity(log_path)
+        return {**expected, "workspace": str(workspace), "state_dir": str(campaign), "repo_root": str(target),
+                "log_path": str(log_path), "log_identity": log_identity, "owner_record_id": identity.record_id,
+                "owner_birth": birth.to_dict(), "lease_id": lease["lease_id"], "claim_lease_id": claim["lease_id"],
+                "dispatch_authority_cid": claim["dispatch_authority_cid"],
+                "phase_started_at": state["active_phase_started_at"],
+                "phase_deadline": started.timestamp() + float(TIMEOUT_SECONDS)}
+    except Exception:
+        return None
+
+
+def _validation_activity_path(binding, *, create=False):
+    campaign = _validation_activity_directory(Path(binding["state_dir"]), private=True)
+    directory = campaign / "validation-activity"
+    if create:
+        directory.mkdir(mode=0o700, exist_ok=True)
+    _validation_activity_directory(directory, private=True)
+    key = hashlib.sha256((binding["task_id"] + "\0" + binding["canonical_task_cid"] + "\0" + str(binding["attempt"])).encode()).hexdigest()
+    return directory / (key + ".json")
+
+
+def _read_validation_activity(path):
+    from .improvement_recovery import _owned_bytes
+    if path.resolve(strict=True) != path:
+        raise ValueError("validation_activity_record_aliased")
+    if stat.S_IMODE(path.lstat().st_mode) != 0o600:
+        raise ValueError("validation_activity_record_not_private")
+    value = json.loads(_owned_bytes(path, 65536))
+    if not isinstance(value, dict):
+        raise ValueError("validation_activity_record_malformed")
+    return value
+
+
+def _validation_activity_record_valid(value, binding, *, now_ts):
+    from .improvement_plan import _digest
+    if (not isinstance(value, dict) or value.get("schema") != "complaint-owned-validation-activity@1"
+            or value.get("state") != "running" or value.get("completion_authority") is not False
+            or re.fullmatch(r"[0-9a-f]{32}", str(value.get("activity_id", ""))) is None
+            or value.get("binding_sha256") != _digest(binding)
+            or _digest(value.get("binding")) != _digest(binding)):
+        return False
+    numbers = [value.get(key) for key in ("started_at", "observed_at", "deadline_at")]
+    if any(isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number) for number in numbers):
+        return False
+    started, observed, deadline = numbers
+    phase_started = binding["phase_deadline"] - float(TIMEOUT_SECONDS)
+    return bool(phase_started <= started <= observed <= now_ts < deadline
+                and deadline <= min(binding["phase_deadline"], started + float(TIMEOUT_SECONDS))
+                and now_ts - observed <= 2 * _VALIDATION_ACTIVITY_INTERVAL_SECONDS + 1)
+
+
+def _publish_validation_activity(binding, *, activity_id, started_at, deadline_at):
+    from .improvement_plan import _digest
+    path = _validation_activity_path(binding, create=True)
+    if os.path.lexists(path):
+        previous = _read_validation_activity(path)
+        if previous.get("activity_id") != activity_id or previous.get("binding_sha256") != _digest(binding):
+            return False
+    value = {"schema": "complaint-owned-validation-activity@1", "state": "running",
+             "activity_id": activity_id, "binding": binding, "binding_sha256": _digest(binding),
+             "started_at": started_at, "observed_at": time.time(), "deadline_at": deadline_at,
+             "completion_authority": False}
+    if not _validation_activity_record_valid(value, binding, now_ts=value["observed_at"]):
+        return False
+    _atomic_json(path, value)
+    return True
+
+
+def _clear_validation_activity(binding, activity_id):
+    from .improvement_plan import _digest
+    try:
+        path = _validation_activity_path(binding)
+        value = _read_validation_activity(path)
+        if value.get("activity_id") != activity_id or value.get("binding_sha256") != _digest(binding):
+            return
+        # A failed unlink must leave an explicitly closed observation.
+        _atomic_json(path, {**value, "state": "closed"})
+        path.unlink()
+    except Exception:
+        return
+
+
+def _hold_validation_activity_log_inode(binding):
+    """Keep the admitted inode allocated throughout the real executor call."""
+    daemon, _, _ = _validation_activity_modules()
+    parent, filename = daemon._open_no_follow_parent(Path(binding["log_path"]))
+    descriptor = -1
+    try:
+        descriptor = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
+        opened = os.fstat(descriptor)
+        named = os.stat(filename, dir_fd=parent, follow_symlinks=False)
+        if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid() or opened.st_nlink != 1
+                or stat.S_IMODE(opened.st_mode) != 0o600
+                or (opened.st_dev, opened.st_ino) != binding["log_identity"]
+                or daemon._private_file_identity(opened) != daemon._private_file_identity(named)):
+            raise OSError("validation_activity_log_inode_changed")
+        result, descriptor = descriptor, -1
+        return result
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        os.close(parent)
+
+
+def _owned_validation_activity(supervisor, state, *, now_ts, owner_pid):
+    try:
+        context = {"campaign_state_dir": str(supervisor.config.state_dir),
+                   "target_source_root": str(supervisor.config.repo_root),
+                   "task_id": state.active_task_id, "task_cid": state.active_task_cid,
+                   "task_key": state.active_task_key}
+        binding = _validation_activity_binding(Path(state.active_worktree_path), {"id": state.active_task_id},
+                                               context, now_ts=now_ts, owner_pid=owner_pid)
+        if (binding is None or binding["attempt"] != state.active_attempt
+                or binding["phase_started_at"] != state.active_phase_started_at):
+            return False
+        value = _read_validation_activity(_validation_activity_path(binding))
+        return _validation_activity_record_valid(value, binding, now_ts=now_ts)
+    except Exception:
+        return False
+
+
+def _validation_activity_pulse(binding, workspace, task, context, *, deadline: float, stopped, activity_lock,
+                               activity_id, started_at, deadline_at):
+    """Append host activity metadata only to the same private Native log inode."""
+    if time.monotonic() >= deadline:
+        return False
+    fresh = _validation_activity_binding(workspace, task, context, now_ts=time.time())
+    if fresh != binding:
+        return False
+    daemon, _, _ = _validation_activity_modules()
+    path = Path(binding["log_path"])
+    # Use Native's private-log parent traversal, but open without O_CREAT:
+    # a removed/replaced log must never be recreated by a liveness observation.
+    parent, filename = daemon._open_no_follow_parent(path)
+    descriptor = -1
+    try:
+        descriptor = os.open(filename, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
+        opened = os.fstat(descriptor)
+        named = os.stat(filename, dir_fd=parent, follow_symlinks=False)
+        if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid() or opened.st_nlink != 1
+                or stat.S_IMODE(opened.st_mode) != 0o600
+                or (opened.st_dev, opened.st_ino) != binding["log_identity"]
+                or daemon._private_file_identity(opened) != daemon._private_file_identity(named)
+                or time.monotonic() >= deadline):
+            return False
+        value = {"schema": "complaint-owned-validation-activity@1", "activity": "canonical_native_executor_in_flight",
+                 "timestamp": datetime.now(timezone.utc).isoformat(), "task_id": binding["task_id"],
+                 "canonical_task_cid": binding["canonical_task_cid"], "attempt": binding["attempt"],
+                 "completion_authority": False}
+        raw = ("\n[host validation activity] " + json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        if len(raw) > 2048:
+            return False
+        with activity_lock:
+            if stopped.is_set() or time.monotonic() >= deadline:
+                return False
+            if os.write(descriptor, raw) != len(raw):
+                return False
+            return _publish_validation_activity(binding, activity_id=activity_id,
+                                                started_at=started_at, deadline_at=deadline_at)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        os.close(parent)
+
+
+def _call_validation_with_activity(*, executor, spec, workspace_path, timeout_seconds, environment, task, context):
+    """Keep quiet real validation observable, without renewing any deadline."""
+    if not isinstance(context, Mapping) or any(not isinstance(context.get(key), str) or not context[key]
+            for key in ("campaign_state_dir", "target_source_root", "task_id", "task_cid", "task_key")):
+        return executor(spec=spec, workspace_path=workspace_path, timeout_seconds=timeout_seconds, environment=environment)
+    daemon, _, _ = _validation_activity_modules()
+    if executor is not daemon.PortalImplementationDaemon._validation_command_runner:
+        return executor(spec=spec, workspace_path=workspace_path, timeout_seconds=timeout_seconds, environment=environment)
+    binding = _validation_activity_binding(workspace_path, task, context or {}, now_ts=time.time())
+    if binding is None:
+        return executor(spec=spec, workspace_path=workspace_path, timeout_seconds=timeout_seconds, environment=environment)
+    if (isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float))
+            or not math.isfinite(timeout_seconds) or timeout_seconds <= 0):
+        raise TimeoutError("subprocess_timeout")
+    remaining = min(float(timeout_seconds), float(TIMEOUT_SECONDS), binding["phase_deadline"] - time.time())
+    if remaining <= 0:
+        raise TimeoutError("subprocess_timeout")
+    deadline = time.monotonic() + remaining
+    started_at = time.time()
+    deadline_at = min(binding["phase_deadline"], started_at + remaining)
+    activity_id = secrets.token_hex(16)
+    stopped = threading.Event()
+    activity_lock = threading.Lock()
+    try:
+        inode_guard = _hold_validation_activity_log_inode(binding)
+    except OSError:
+        return executor(spec=spec, workspace_path=workspace_path, timeout_seconds=remaining, environment=environment)
+
+    def heartbeat():
+        while not stopped.wait(_VALIDATION_ACTIVITY_INTERVAL_SECONDS):
+            try:
+                if not _validation_activity_pulse(binding, workspace_path, task, context or {}, deadline=deadline,
+                                                  stopped=stopped, activity_lock=activity_lock,
+                                                  activity_id=activity_id, started_at=started_at, deadline_at=deadline_at):
+                    return
+            except Exception:
+                # Losing observation never creates authority or hides the
+                # canonical executor's own result/exception.
+                return
+
+    worker = threading.Thread(target=heartbeat, name="complaint-validation-activity", daemon=True)
+    try:
+        worker.start()
+    except RuntimeError:
+        try:
+            remaining = min(remaining, deadline - time.monotonic())
+            if remaining <= 0:
+                raise TimeoutError("subprocess_timeout")
+            return executor(spec=spec, workspace_path=workspace_path, timeout_seconds=remaining, environment=environment)
+        finally:
+            os.close(inode_guard)
+    try:
+        remaining = min(remaining, deadline - time.monotonic())
+        if remaining <= 0:
+            raise TimeoutError("subprocess_timeout")
+        return executor(spec=spec, workspace_path=workspace_path, timeout_seconds=remaining, environment=environment)
+    finally:
+        with activity_lock:
+            stopped.set()
+        worker.join(timeout=1.0)
+        _clear_validation_activity(binding, activity_id)
+        os.close(inode_guard)
+
+
 def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
     """Observe a fixed validation deadline without refreshing any task clock.
 
@@ -1990,7 +2328,8 @@ def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
                 or not native.checkout_lock_repository_matches(claim, supervisor.config.repo_root)
                 or claim.get("dispatch_authority_cid") != native.PortalImplementationDaemon._implementation_dispatch_authority_cid(claim)):
             return False
-        return bool(supervisor._active_validation_subprocess_exists())
+        return bool(supervisor._active_validation_subprocess_exists()
+                    or _owned_validation_activity(supervisor, state, now_ts=now_ts, owner_pid=birth.pid))
     except (OSError, TypeError, ValueError, AttributeError, KeyError):
         return False
 
@@ -2672,6 +3011,18 @@ def _preserve_existing_behavioral_definitions(root: Path, paths, *, trusted_root
                 if path.is_symlink() or path.resolve(strict=True) != path or not path.is_file():
                     raise ValueError("existing_behavioral_definition_changed")
             original_bytes, candidate_bytes = baseline.read_bytes(), candidate.read_bytes()
+            if original_bytes == candidate_bytes:
+                # Some legacy modules repeat a Python definition name. Exact
+                # source equality preserves every occurrence, including code
+                # shadowed at import; changed ambiguous definitions still fail.
+                def count_definitions(body):
+                    return sum(1 + (count_definitions(node.body) if isinstance(node, ast.ClassDef) else 0)
+                        for node in body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))
+                count = count_definitions(ast.parse(original_bytes).body)
+                digest = hashlib.sha256(original_bytes).hexdigest()
+                records.append({"path": relative, "trusted_sha256": digest, "candidate_sha256": digest,
+                    "preserved_definition_count": count})
+                continue
             original = definitions(ast.parse(original_bytes).body)
             current = definitions(ast.parse(candidate_bytes).body)
         except (OSError, SyntaxError, UnicodeError):
@@ -2909,6 +3260,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     replica_binding = _private_replica_acceptance_binding(root, task, impacted)
     replica_capability = None
     replica_kit_before = None
+    release_qualification_before = None
+    release_qualification_after = None
     preserved_behavioral_definitions = None
     release_script = (task.get("id") == "CIMP-REL-03" and
         observation_command == "python scripts/validate_complaint_intake.py --phase pre-admission" and
@@ -2938,16 +3291,18 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         remaining = timeout_seconds - (time.monotonic() - start)
         if remaining <= 0:
             raise TimeoutError("subprocess_timeout")
-        result = runner(spec=SimpleNamespace(command=instrumented, raw_command=command),
-                        workspace_path=root, timeout_seconds=remaining, environment=environment)
+        result = _call_validation_with_activity(executor=runner,
+                        spec=SimpleNamespace(command=instrumented, raw_command=command),
+                        workspace_path=root, timeout_seconds=remaining, environment=environment,
+                        task=task, context=context)
         _atomic_json(run / (mode + "-native-result.json"), result)
         results.append({"mode": mode, "original_command": command, "instrumented_command": instrumented, "executed_command": result.get("command"),
                         "returncode": result.get("returncode"), "timed_out": bool(result.get("timed_out")),
                         "validation_python_launcher": result.get("validation_python_launcher", {})})
-        if result.get("validation_python_launcher", {}).get("sealed") is not True:
-            raise ValueError("sealed_execution_unavailable")
         if result.get("timed_out") or result.get("error") == "subprocess_timeout":
             raise TimeoutError("subprocess_timeout")
+        if result.get("validation_python_launcher", {}).get("sealed") is not True:
+            raise ValueError("sealed_execution_unavailable")
         if not manifest.is_file():
             raise ValueError("missing_phase_manifest")
         guard_path = manifest.with_suffix(".guard.json")
@@ -2972,17 +3327,50 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         if release_script:
             if time.monotonic() - start >= timeout_seconds:
                 raise TimeoutError("subprocess_timeout")
-            original = runner(spec=SimpleNamespace(command=original_command, raw_command=original_command),
-                workspace_path=root, timeout_seconds=max(0.001, timeout_seconds - (time.monotonic() - start)), environment=environment)
+            release_environment = dict(environment)
+            if (context or {}).get("campaign_state_dir"):
+                # The trusted parent supplies locators, never completion data.
+                campaign = Path(context["campaign_state_dir"])
+                target = Path(context.get("target_source_root") or Path(__file__).resolve().parents[2])
+                if (not campaign.is_absolute() or campaign.resolve() != campaign
+                        or campaign.stat().st_uid != os.getuid() or stat.S_IMODE(campaign.stat().st_mode) != 0o700
+                        or not target.is_absolute() or target.resolve() != target):
+                    raise ValueError("release_context_unavailable")
+                from .improvement_plan import SPEC_RELATIVE as release_spec_relative
+                launch = _read_json(campaign / "launcher.json")
+                if (not _full_launch_record(launch)
+                        or not _campaign_tuple_matches(launch, target, target / release_spec_relative, campaign)):
+                    raise ValueError("release_context_unavailable")
+                release_environment["COMPLAINT_INTAKE_RELEASE_CAMPAIGN_STATE_DIR"] = str(campaign)
+                release_environment["COMPLAINT_INTAKE_RELEASE_TARGET_SOURCE_ROOT"] = str(target)
+                # Native owns and removes its temporary HOME after execution.
+                # Keep nested proof under this already private measured run.
+                release_runtime = run / "release-runtime"
+                release_runtime.mkdir(mode=0o700)
+                release_environment["COMPLAINT_INTAKE_RELEASE_RUNTIME_DIR"] = str(release_runtime)
+                from .release_evidence import read_current_release_qualification
+                release_qualification_before = read_current_release_qualification(
+                    root, root / release_spec_relative, campaign, phase="pre-admission",
+                    validation_environment=environment)
+            original = _call_validation_with_activity(executor=runner,
+                spec=SimpleNamespace(command=original_command, raw_command=original_command),
+                workspace_path=root, timeout_seconds=max(0.001, timeout_seconds - (time.monotonic() - start)),
+                environment=release_environment, task=task, context=context)
             _atomic_json(run / "declared-script-result.json", original)
             artifacts.append({"path": str(run / "declared-script-result.json"), "sha256": _hash_file(run / "declared-script-result.json")})
             results.append({"mode": "declared_script", "original_command": original_command,
                 "instrumented_command": original_command, "returncode": original.get("returncode"),
                 "validation_python_launcher": original.get("validation_python_launcher", {})})
-            if original.get("validation_python_launcher", {}).get("sealed") is not True:
-                raise ValueError("sealed_execution_unavailable")
+            if (context or {}).get("campaign_state_dir"):
+                release_qualification_after = read_current_release_qualification(
+                    root, root / release_spec_relative, campaign, phase="pre-admission",
+                    validation_environment=environment)
+                if release_qualification_before != release_qualification_after:
+                    raise ValueError("release_current_qualification_changed")
             if original.get("timed_out"):
                 raise TimeoutError("subprocess_timeout")
+            if original.get("validation_python_launcher", {}).get("sealed") is not True:
+                raise ValueError("sealed_execution_unavailable")
             if original.get("returncode") != 0:
                 raise ValueError("declared_command_failed")
             command = command[:-len("python scripts/validate_complaint_intake.py --phase pre-admission")] + "python -m pytest -q --run-llm --run-network --run-heavy tests/test_intake_release_gate.py"
@@ -3030,7 +3418,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         if any(imported.get(p) != h for p, h in collected_hashes.items()):
             raise ValueError("stale_source_hash")
     except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
-        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed"} else "host_measurement_unavailable"
+        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed"} else "host_measurement_unavailable"
     try:
         if replica_binding != _private_replica_acceptance_binding(root, task, impacted):
             reason = "trusted_replica_acceptance_changed"
@@ -3062,6 +3450,15 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                 "completion_authority": False, "run_path": str(run),
                 "lane_basis": "native_host_validation", "live_node_verified": False, "impacted_checks": impacted,
                 "behavioral_companion": "tests/test_intake_release_gate.py" if release_script else None,
+                "current_release_qualification": ({
+                    "before_after_equal": release_qualification_before == release_qualification_after,
+                    "host_binding": release_qualification_before.get("host_binding"),
+                    "qualification": release_qualification_before.get("qualification"),
+                    "producer": release_qualification_before.get("producer"),
+                    "source_identity": release_qualification_before.get("source_identity"),
+                    "required_case_count": release_qualification_before.get("required_case_count"),
+                    "completion_authority": False,
+                } if release_qualification_before is not None else None),
                 "private_replica_acceptance": {"binding": replica_binding, "capability": replica_capability,
                                                "kit_compatibility": replica_kit_before},
                 "environment_policy": {"effective_PATH": environment.get("PATH"), "python": environment.get("IPFS_ACCELERATE_VALIDATION_PYTHON_EXECUTABLE"),
@@ -3117,7 +3514,9 @@ class EvidenceValidationScheduler:
                 runner=delegate, environment=environment, timeout_seconds=timeout_seconds,
                 declared_command=task["validation_commands"][spec.ordinal] if spec.ordinal < len(task["validation_commands"]) else None,
                 context={"campaign_state_dir": str(self.state_dir.resolve()),
+                         "target_source_root": str(Path(__file__).resolve().parents[2]),
                          "task_id": native_task.task_id, "task_cid": str(getattr(native_task, "canonical_task_cid", "")),
+                         "task_key": str(getattr(native_task, "canonical_task_key", "")),
                          "proposal_id": str(getattr(getattr(args[0], "proposal", None), "proposal_id", "")) if method == "run_validated" else "",
                          "proposal_context_id": str(getattr(getattr(args[0], "proposal", None), "context_id", "")) if method == "run_validated" else "",
                          "proposal_replay_nonce_sha256": hashlib.sha256(str(getattr(getattr(args[0], "proposal", None), "replay_nonce", "")).encode()).hexdigest() if method == "run_validated" else "",

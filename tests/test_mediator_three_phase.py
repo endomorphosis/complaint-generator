@@ -3483,6 +3483,15 @@ class TestMediatorThreePhaseIntegration:
             "proof_leads": [],
         }
 
+        # This ranking fixture has explicit user-provided legal context;
+        # otherwise the current intake correctly asks for it first.
+        from complaint_phases.intake_case_file import apply_explicit_legal_context
+        from integrations.ipfs_datasets.legal import intake_legal_selection
+        intake_case_file = apply_explicit_legal_context(
+            intake_case_file, jurisdiction="federal", applicable_law_date="2024-06-01"
+        )
+        selection = intake_legal_selection(intake_case_file["legal_context"], intake_case_file["candidate_claims"])
+        assert selection["ready_to_select"] is True and selection["questions"] == []
         questions = mediator.denoiser.generate_questions(kg, dg, max_questions=5, intake_case_file=intake_case_file)
 
         assert questions

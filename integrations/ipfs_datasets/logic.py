@@ -5814,8 +5814,10 @@ if libc.prctl(36,1,0,0,0)!=0: raise SystemExit(2)
 call_source = CALL_SOURCE_LITERAL
 selector = None
 def check_execution():
- if cancelled: raise InterruptedError()
+ # The owner also sends SIGTERM when this execution budget expires. That
+ # generic signal must not relabel an elapsed deadline as caller cancellation.
  if time.monotonic()>=execution_deadline: raise TimeoutError()
+ if cancelled: raise InterruptedError()
 def read_request():
  # Current DataSupervisor cannot resume large stdin writes after a heartbeat
  # timeout. Read immutable anonymous memory instead; never stage facts on disk.
@@ -6142,7 +6144,12 @@ def _run_owned_proof_router(request: Mapping[str, Any], *, deadline: float, canc
             process["retained_state_directory"] = str(root)
         process["timed_out"] = process["timed_out"] or envelope.get("outcome") == "timeout"
         process["timed_out"] = process["timed_out"] or time.monotonic() >= deadline
-        process["cancelled"] = process["cancelled"] or envelope.get("outcome") == "cancelled"
+        # Native's owner records why it sent the generic termination signal.
+        # Explicit owner cancellation remains authoritative even if cleanup
+        # crosses the request deadline; an owner timeout cannot be overridden
+        # by the manager interpreting the same SIGTERM as cancellation.
+        process["cancelled"] = bool(result.cancelled) or (
+            envelope.get("outcome") == "cancelled" and not bool(result.timed_out))
         payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else {}
         if payload.get("status") == "timeout":
             process["timed_out"] = True

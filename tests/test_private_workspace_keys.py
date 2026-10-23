@@ -312,7 +312,7 @@ def test_export_directory_cannot_hold_the_key_store(tmp_path: Path) -> None:
 
 @pytest.fixture
 def private_key_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Import the real CLI only after isolating its global workspace service."""
+    """Resolve the real lazy CLI service inside an explicit fixture workspace."""
     import applications
     import complaint_generator
     import applications.complaint_workspace as workspace
@@ -323,7 +323,9 @@ def private_key_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     parents = ((applications, "complaint_cli"), (complaint_generator, "cli"))
     previous_attributes = [(package, name, getattr(package, name, missing)) for package, name in parents]
     with monkeypatch.context() as isolated:
-        isolated.setattr(workspace, "_SESSION_DIR", tmp_path / "isolated-cli-workspace")
+        private_directory = tmp_path / "isolated-cli-workspace"
+        isolated.setattr(workspace, "_SESSION_DIR", private_directory)
+        isolated.setenv("COMPLAINT_WORKSPACE_SESSION_DIR", str(private_directory))
         for name in names:
             sys.modules.pop(name, None)
         for package, name in parents:
@@ -332,8 +334,14 @@ def private_key_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         try:
             cli = importlib.import_module("complaint_generator.cli")
             implementation = importlib.import_module("applications.complaint_cli")
-            assert implementation.service._session_dir == tmp_path / "isolated-cli-workspace"
-            assert implementation.service.request_handlers.workspace is implementation.service
+            assert implementation.session_dir_from_environment() == private_directory
+            # The public handler owns the concrete workspace behind the lazy
+            # proxy. Keep the ownership/isolation assertions on that instance.
+            concrete_service = implementation.service.request_handlers.workspace
+            assert isinstance(concrete_service, implementation.TerminalComplaintWorkspaceService)
+            assert concrete_service._session_dir == private_directory
+            assert concrete_service.request_handlers.workspace is concrete_service
+            isolated.setattr(implementation, "service", concrete_service)
             assert Path(cli.__file__).resolve() == Path(__file__).resolve().parents[1] / "complaint_generator/cli.py"
             yield cli
         finally:

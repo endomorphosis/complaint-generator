@@ -276,10 +276,20 @@ if libc.prctl(1, 9, 0, 0, 0) != 0 or os.getppid() != owner:
     raise RuntimeError("probe_parent_changed")
 root, workspace, operation, packages, control = sys.argv[2:]
 control=Path(control)
-fd=os.open(control/"ready",os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-with os.fdopen(fd,"w") as stream:
-    json.dump(dict(pid=os.getpid(),owner=os.getppid()),stream)
-    stream.flush();os.fsync(stream.fileno())
+ready_temporary=control/(".ready-"+str(os.getpid())+".tmp")
+fd=os.open(ready_temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+try:
+    with os.fdopen(fd,"w") as stream:
+        json.dump(dict(pid=os.getpid(),owner=os.getppid()),stream)
+        stream.flush();os.fsync(stream.fileno())
+    os.link(ready_temporary,control/"ready",follow_symlinks=False)
+finally:
+    os.unlink(ready_temporary)
+directory_fd=os.open(control,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+try:
+    os.fsync(directory_fd)
+finally:
+    os.close(directory_fd)
 barrier_deadline=time.monotonic()+2.0
 while not (control/"go").exists():
     if time.monotonic()>=barrier_deadline or os.getppid()!=owner:
@@ -491,9 +501,19 @@ class _ProbeCustody:
             os.close(descriptor)
             raise
         self.child, self.child_fd = before, descriptor
-        fd = os.open(control / "go", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(b"go"); stream.flush(); os.fsync(stream.fileno())
+        temporary = control / (".go-" + str(self.owner) + ".tmp")
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(b"go"); stream.flush(); os.fsync(stream.fileno())
+            os.link(temporary, control / "go", follow_symlinks=False)
+        finally:
+            os.unlink(temporary)
+        directory_fd = os.open(control, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
 
     def close(self):
         import signal

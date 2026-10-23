@@ -31,6 +31,32 @@ NODE_A = "tests/test_improvement_evidence_gate.py::test_local_node_evidence_comp
 NODE_B = "tests/test_improvement_evidence_gate.py::test_recompute_invalidates_dependents"
 
 
+@pytest.fixture(autouse=True)
+def _explicit_new_rel03_parent_baseline(tmp_path, monkeypatch, request):
+    """Retain the original new-output scenario for five synthetic REL03 cases.
+
+    The real release gate did not exist in their installed parent source.
+    Production test preservation stays enabled; only this explicit unit parent
+    supplies that original absence while copying the real phase bootstrap.
+    """
+    names = {
+        "test_exact_rel03_script_and_trusted_behavioral_companion_are_both_required",
+        "test_real_rel03_two_command_contract_preserves_each_command_identity",
+        "test_rel03_unknown_extra_command_does_not_gain_script_companion_dispatch",
+    }
+    if getattr(request.node, "originalname", None) not in names:
+        return
+    from integrations.ipfs_accelerate import improvement_runner as runner
+    actual = Path(runner.__file__).resolve().parents[2]
+    parent = tmp_path.parent / ("trusted-rel03-parent-" + tmp_path.name)
+    parent.mkdir(mode=0o700)
+    bootstrap = parent / "integrations/ipfs_accelerate/improvement_plan.py"
+    bootstrap.parent.mkdir(parents=True)
+    bootstrap.write_bytes((actual / "integrations/ipfs_accelerate/improvement_plan.py").read_bytes())
+    assert not (parent / "tests/test_intake_release_gate.py").exists()
+    monkeypatch.setattr(runner, "__file__", str(bootstrap.with_name("improvement_runner.py")))
+
+
 def _task(task_id: str = "CIMP-OPS-04", *, depends=None, command: str = COMMAND) -> dict:
     return {
         "id": task_id,
