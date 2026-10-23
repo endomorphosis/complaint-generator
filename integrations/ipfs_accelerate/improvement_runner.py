@@ -1861,6 +1861,14 @@ def stop(state_dir: Path, *, timeout: float = 15.0,
         except (OSError, ValueError, TypeError) as error:
             return {"status": "stop_incomplete", "signalled": False, "reason": str(error), "manual_holds_preserved": True}
         if not owns_process(record):
+            orphan_fence = None
+            if retained_native_child_proof is None:
+                from .improvement_shutdown import fence_owned_orphan_native_child
+                try:
+                    orphan_fence = fence_owned_orphan_native_child(state_dir, record)
+                except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+                    return {"status": "stop_incomplete", "signalled": False,
+                            "reason": "owned_orphan_native_fence_refused", "manual_holds_preserved": True}
             containers = close_campaign_containers(state_dir, record, retained_native_child_proof=retained_native_child_proof)
             if not containers["applicable"]:
                 return {"status": "not_owned_or_stopped", "signalled": False}
@@ -1868,7 +1876,8 @@ def stop(state_dir: Path, *, timeout: float = 15.0,
                 record.update(status="stopped", stopped_at=time.time())
                 _atomic_json(path, record)
             return {"status": containers["status"], "signalled": False,
-                    "container_shutdown": containers, "manual_holds_preserved": True}
+                    "container_shutdown": containers, "orphan_native_fence": orphan_fence,
+                    "manual_holds_preserved": True}
         if retained_native_child_proof is not None:
             return {"status": "stop_incomplete", "signalled": False,
                     "reason": "retained native observation cannot authorize live fencing", "manual_holds_preserved": True}
@@ -2474,13 +2483,19 @@ def recompute_dependent_readiness(repo_root: Path, state_dir: Path, spec: Mappin
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare, run and observe the Grok-only complaint improvement campaign.")
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("prepare", "doctor", "start", "status", "recover", "stop", "_run"):
+    for command in ("prepare", "doctor", "start", "status", "recover", "stop", "watch", "_run"):
         child = commands.add_parser(command, help=argparse.SUPPRESS if command == "_run" else command)
         child.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
         child.add_argument("--spec", type=Path)
         child.add_argument("--state-dir", type=Path)
         if command in {"doctor", "start", "_run"}:
             child.add_argument("--worktree-root", type=Path, help="Existing dedicated canonical UID-owned0700 external directory; persisted for future starts.")
+        if command in {"start", "watch"}:
+            child.add_argument("--monitor-seconds", type=float, default=21600,
+                               help="One bounded monitor window, at most six hours.")
+        if command == "start":
+            child.add_argument("--watch", action="store_true",
+                               help="Watch this launch and close its verified orphan if the launcher exits.")
         if command == "_run":
             child.add_argument("--owner-token", required=True)
             child.add_argument("--merge-target", required=True)
@@ -2488,6 +2503,9 @@ def main(argv: list[str] | None = None) -> int:
     root = args.repo_root.resolve()
     spec = (args.spec or root / SPEC_RELATIVE).resolve()
     try:
+        if args.command == "start" and args.watch:
+            from .improvement_monitor import validate_monitor_duration
+            validate_monitor_duration(args.monitor_seconds)
         if args.state_dir is not None:
             state = args.state_dir.resolve()
         else:
@@ -2498,11 +2516,21 @@ def main(argv: list[str] | None = None) -> int:
             return run_internal(root, spec, state, args.owner_token, args.merge_target, worktree_root=args.worktree_root)
         if args.command == "stop":
             result = stop(state)
+        elif args.command == "watch":
+            from .improvement_monitor import watch_owned_launch
+            result = watch_owned_launch(root, spec, state, maximum_seconds=args.monitor_seconds)
         else:
             keywords = {"worktree_root": args.worktree_root} if getattr(args, "worktree_root", None) is not None else {}
             result = {"prepare": prepare, "doctor": doctor, "start": start, "status": status, "recover": recover_stalled_worker}[args.command](root, spec, state, **keywords)
+            if args.command == "start" and args.watch and result.get("status") in {"starting", "already_running"}:
+                from .improvement_monitor import watch_owned_launch
+                initial = result
+                result = watch_owned_launch(root, spec, state, maximum_seconds=args.monitor_seconds)
+                result["start_result"] = initial
         print(json.dumps(result, indent=2, sort_keys=True))
-        return 2 if result.get("status") in {"not_ready", "board_error", "state_error", "identity_mismatch", "stop_incomplete"} else 0
+        return 2 if result.get("status") in {"not_ready", "board_error", "state_error", "identity_mismatch", "stop_incomplete",
+            "monitor_refused", "monitor_window_consumed", "monitor_owner_changed", "monitor_source_changed",
+            "monitor_owner_unknown", "monitor_stop_incomplete"} else 0
     except (OSError, ValueError, RuntimeError) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}), file=sys.stderr)
         return 2

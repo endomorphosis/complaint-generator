@@ -410,3 +410,29 @@ def test_initial_board_different_plan_winner_preserves_prior_plan(tmp_path, spec
         generate(path, tmp_path)
     assert (tmp_path / BOARD_RELATIVE).read_bytes() == winner
     assert (tmp_path / PLAN_RELATIVE).read_bytes() == prior
+
+
+def test_new_boards_allow_only_native_gated_no_change_without_identity_drift(tmp_path, spec):
+    from integrations.ipfs_accelerate import improvement_plan as compiler
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
+    plan = build_improvement_work_plan(spec)
+    current = compiler._render_board(spec, plan.plan_id)
+    legacy = current.replace("- No-change completion: allowed\n", "")
+    before = compiler._parsed_projection(legacy, tmp_path)
+    after = compiler._parsed_projection(current, tmp_path)
+    assert {key: (task.canonical_task_cid, task.canonical_task_key) for key, task in before.items()} == {
+        key: (task.canonical_task_cid, task.canonical_task_key) for key, task in after.items()}
+    assert all(PortalImplementationDaemon._no_change_completion_mode(task) == "allowed" for task in after.values())
+    assert all(task.completion == "validation" and task.validation for task in after.values())
+
+
+def test_existing_legacy_board_keeps_its_policy_and_progress_bytes(tmp_path, spec):
+    path = _write_spec(tmp_path, spec)
+    generate(path, tmp_path)
+    board = tmp_path / BOARD_RELATIVE
+    legacy = board.read_text().replace("- No-change completion: allowed\n", "")
+    legacy = legacy.replace("- Status: todo", "- Status: completed", 1)
+    board.write_text(legacy)
+    before = board.read_bytes()
+    generate(path, tmp_path)
+    assert board.read_bytes() == before

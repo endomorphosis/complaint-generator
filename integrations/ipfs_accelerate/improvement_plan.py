@@ -225,7 +225,8 @@ def _render_board(spec: Mapping[str, Any], plan_id: str) -> str:
     for task in spec["tasks"]:
         lines.extend([
             f"## {task['id']} {task['title']}", "",
-            "- Status: todo", "- Completion: validation", f"- Priority: {task['priority']}",
+            "- Status: todo", "- Completion: validation", "- No-change completion: allowed",
+            f"- Priority: {task['priority']}",
             f"- Goal: {task['goal_id']}", f"- Subgoal: {task['subgoal_id']}",
             f"- Depends on: {', '.join(task['depends_on'])}",
             f"- Outputs: {', '.join(task['targets'])}",
@@ -315,6 +316,7 @@ def _require_emitted_projection(text: str, spec: Mapping[str, Any], root: Path) 
             "implementation provider": "grok", "provider role": "grok-only",
             "model": _PROVIDER["model"], "router": _PROVIDER["router"],
             "provider fallback": "disabled",
+            "no-change completion": "allowed",
         }
         if (task.title != item["title"] or task.priority != item["priority"]
                 or task.outputs != item["targets"] or task.depends_on != item["depends_on"]

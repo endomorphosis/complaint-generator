@@ -574,7 +574,9 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
         with pytest.raises(ValueError, match='not proven absent'):
             shutdown._parent_closed(state, record, context, False)
         assert native.supervised_child_identity_liveness(identity) is native.OwnerLiveness.ALIVE
-        assert native.terminate_supervised_child(child, grace_seconds=.1, clear_pid_file=False) is True
+        orphan_fence = shutdown.fence_owned_orphan_native_child(state, record)
+        assert orphan_fence['status'] == 'fenced' and orphan_fence['fenced'] is True
+        assert orphan_fence['markers_preserved'] is True
         try:
             os.waitpid(child.pid, 0)
         except ChildProcessError:
@@ -1449,3 +1451,68 @@ def test_failed_preflight_still_requires_complete_empty_fresh_process_censuses(f
     monkeypatch.setattr(shutdown, '_complete_process_inventory', lambda *_args: [process])
     result = runner.stop(fixture.state)
     assert result['status'] == 'stop_incomplete' and not docker[0].calls
+
+
+def test_monitor_closes_only_its_dead_launch_through_public_stop(campaign, docker):
+    from integrations.ipfs_accelerate.improvement_monitor import watch_owned_launch
+    fake, _ = docker
+    original = (campaign.state / "complaint_intake_events.jsonl").read_bytes()
+    result = watch_owned_launch(campaign.repo, campaign.spec, campaign.state, maximum_seconds=1)
+    assert result["status"] == "stopped_after_launcher_exit"
+    assert result["stop_result"]["container_shutdown"]["quiesced"] is True
+    assert result["provider_dispatched"] is result["attempt_refunded"] is False
+    assert (campaign.state / "complaint_intake_events.jsonl").read_bytes() == original
+    assert fake.effects == []
+
+
+def test_monitor_refuses_replacement_owner_without_stopping_it(campaign, monkeypatch):
+    from integrations.ipfs_accelerate import improvement_monitor as monitor
+    monkeypatch.setattr(runner, "owns_process", lambda record: True)
+    monkeypatch.setattr(runner, "stop", lambda *_a, **_k: pytest.fail("replacement owner must not be stopped"))
+    def replace_owner(_delay):
+        record = deepcopy(campaign.record)
+        record["owner_token"] = "replacement-owner"
+        runner._atomic_json(campaign.state / "launcher.json", record)
+    monkeypatch.setattr(monitor.time, "sleep", replace_owner)
+    result = monitor.watch_owned_launch(campaign.repo, campaign.spec, campaign.state, maximum_seconds=1)
+    assert result["status"] == "monitor_owner_changed"
+
+
+def test_monitor_never_fences_a_reused_numeric_launcher_pid(campaign, monkeypatch):
+    from integrations.ipfs_accelerate.improvement_monitor import watch_owned_launch
+    record = deepcopy(campaign.record)
+    record["identity"].update(pid=os.getpid(), session=os.getpid(), process_group=os.getpid())
+    runner._atomic_json(campaign.state / "launcher.json", record)
+    monkeypatch.setattr(runner, "stop", lambda *_a, **_k: pytest.fail("reused PID must not be stopped"))
+    result = watch_owned_launch(campaign.repo, campaign.spec, campaign.state, maximum_seconds=1)
+    assert result["status"] == "monitor_owner_unknown"
+
+
+def test_monitor_expiry_consumes_one_permanent_owner_window(campaign, monkeypatch):
+    from integrations.ipfs_accelerate import improvement_monitor as monitor
+    monkeypatch.setattr(runner, "owns_process", lambda record: True)
+    monkeypatch.setattr(runner, "stop", lambda *_a, **_k: pytest.fail("live owner must not be stopped"))
+    first = monitor.watch_owned_launch(campaign.repo, campaign.spec, campaign.state, maximum_seconds=.005)
+    second = monitor.watch_owned_launch(campaign.repo, campaign.spec, campaign.state, maximum_seconds=.005)
+    assert first["status"] == "monitor_expired"
+    assert second["status"] == "monitor_window_consumed"
+    windows = list((campaign.state / "monitor-owner-windows").iterdir())
+    assert len(windows) == 1 and windows[0].stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("duration", [0, -1, 21601, float("nan"), float("inf"), True])
+def test_monitor_rejects_unbounded_or_invalid_windows_before_effects(tmp_path, duration):
+    from integrations.ipfs_accelerate.improvement_monitor import watch_owned_launch
+    before = list(tmp_path.iterdir())
+    with pytest.raises(ValueError, match="monitor duration"):
+        watch_owned_launch(tmp_path, tmp_path / "missing", tmp_path / "absent", maximum_seconds=duration)
+    assert list(tmp_path.iterdir()) == before
+
+
+def test_monitor_refuses_changed_source_before_stop(campaign, monkeypatch):
+    from integrations.ipfs_accelerate import improvement_monitor as monitor
+    fingerprints = iter(({"source": "original"}, {"source": "changed"}))
+    monkeypatch.setattr(monitor, "_source_snapshot", lambda: next(fingerprints))
+    monkeypatch.setattr(runner, "stop", lambda *_a, **_k: pytest.fail("changed source must not authorize stop"))
+    result = monitor.watch_owned_launch(campaign.repo, campaign.spec, campaign.state, maximum_seconds=1)
+    assert result["status"] == "monitor_source_changed"

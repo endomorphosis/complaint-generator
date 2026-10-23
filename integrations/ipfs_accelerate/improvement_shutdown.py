@@ -187,6 +187,100 @@ def _managed_native_command(record: Mapping[str, Any], context: Mapping[str, Any
         '--task-shard-count', '1', '--task-shard-index', '0')
 
 
+def fence_owned_orphan_native_child(state_dir: Path, record: Mapping[str, Any]) -> dict[str, Any]:
+    """Fence the exact sealed child of an absent launcher during explicit stop.
+
+    This does not reconcile task state, release claims, or grant a retry. The
+    ordinary shutdown verifier must still prove process and container closure.
+    """
+    from . import improvement_runner as runner
+    from .improvement_recovery import _owned_bytes
+
+    context = _context(state_dir, record)
+    if context is None:
+        return {'status': 'not_applicable', 'fenced': False}
+    parent = record['identity']
+    if (Path('/proc') / str(parent['pid'])).exists():
+        raise ValueError('orphan launcher numeric PID is still present')
+    pid_path = state_dir / f'{runner.STATE_PREFIX}_managed_daemon.pid'
+    identity_path = pid_path.with_suffix('.identity.json')
+    if not os.path.lexists(pid_path) and not os.path.lexists(identity_path):
+        return {'status': 'markers_absent', 'fenced': False}
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as native
+
+    launcher_path = state_dir / 'launcher.json'
+    paths = (launcher_path, pid_path, identity_path)
+    captured = {path: _owned_bytes(path, 65536, legacy_group_write=path != launcher_path)
+                for path in paths}
+    if json.loads(captured[launcher_path]) != record:
+        raise ValueError('orphan launch custody changed')
+    identity = native.SupervisedChildIdentity.from_dict(json.loads(captured[identity_path]))
+    if identity is None or identity.to_dict() != json.loads(captured[identity_path]):
+        raise ValueError('orphan native identity is invalid')
+    birth = identity.process_birth
+    repo = Path(context['repo_root'])
+    scope = {'repo_root': str(repo), 'state_dir': str(state_dir),
+             'state_prefix': runner.STATE_PREFIX, 'todo_path': record['board_path'],
+             'daemon_entrypoint': str(repo / 'integrations/ipfs_accelerate/improvement_runner.py')}
+    if (dict(identity.owner_scope) != scope or identity.command != _managed_native_command(record, context)
+            or captured[pid_path] != f'{birth.pid}\n'.encode('ascii')
+            or birth.parent_pid != parent['pid'] or birth.pid == parent['pid']
+            or birth.start_time_ticks <= parent['start_ticks']
+            or birth.boot_id != parent['boot_id']
+            or Path('/proc/sys/kernel/random/boot_id').read_text().strip() != parent['boot_id']
+            or not context['started_at'] <= _timestamp(identity.created_at) <= time.time()):
+        raise ValueError('orphan native identity differs from owned launch')
+    live = native.supervised_child_identity_liveness(identity)
+    process = Path('/proc') / str(birth.pid)
+    if live is native.OwnerLiveness.DEAD:
+        if process.exists():
+            raise ValueError('orphan native numeric PID was reused')
+        return {'status': 'already_closed', 'fenced': False}
+    if (live is not native.OwnerLiveness.ALIVE or process.stat().st_uid != os.getuid()
+            or os.getpgid(birth.pid) != birth.pid or os.getsid(birth.pid) != birth.pid
+            or native.read_process_command_argv(birth.pid) != identity.command):
+        raise ValueError('orphan native process custody is unavailable')
+    if (any(_owned_bytes(path, 65536, legacy_group_write=path != launcher_path) != raw
+            for path, raw in captured.items()) or (Path('/proc') / str(parent['pid'])).exists()
+            or native.load_supervised_child_identity(identity_path) != identity):
+        raise ValueError('orphan custody changed before native fence')
+    handle = native.SupervisedChild(
+        pid=birth.pid, command=identity.command,
+        log_path=state_dir / 'complaint_intake_managed_daemon.latest.log',
+        child_pid_path=pid_path, identity_path=identity_path,
+        started_at=identity.created_at, identity_record_id=identity.record_id,
+        identity_process_birth=birth, owned_process_group_id=birth.pid)
+    if native.terminate_supervised_child(handle, grace_seconds=10.0, clear_pid_file=False) is not True:
+        raise ValueError('owned orphan native fence refused')
+    # A subreaper may have adopted this exact orphan. Native's signal fence can
+    # finish before its zombie is reaped. Reap only the captured birth, without
+    # blocking or treating a reused numeric PID as the original process.
+    reap_deadline = time.monotonic() + 1.0
+    while process.exists() and time.monotonic() < reap_deadline:
+        try:
+            info = process.stat()
+            raw_stat = (process / 'stat').read_text()
+            fields = raw_stat[raw_stat.rfind(')') + 2:].split()
+            if (info.st_uid != os.getuid() or len(fields) < 20
+                    or int(fields[19]) != birth.start_time_ticks):
+                break
+            try:
+                os.waitpid(birth.pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+        except FileNotFoundError:
+            break
+        if process.exists():
+            time.sleep(.025)
+    if (process.exists() or (Path('/proc') / str(parent['pid'])).exists()
+            or any(_owned_bytes(path, 65536, legacy_group_write=path != launcher_path) != raw
+                   for path, raw in captured.items())):
+        raise ValueError('owned orphan native fence closure is unavailable')
+    return {'status': 'fenced', 'fenced': True, 'native_pid': birth.pid,
+            'native_start_ticks': birth.start_time_ticks, 'markers_preserved': True,
+            'completion_authority': False, 'attempt_refunded': False}
+
+
 def _sealed_managed_session_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[str, Any]) -> None:
     """Observe retained native markers after an independently performed fence.
 

@@ -2182,3 +2182,9 @@ def test_real_native_recovery_instance_keeps_identity_and_native_receipt_checks(
     mismatch = daemon._reconciliation_accepted_proposal_context(task=task,
         branch_name="rescue/worktree/synthetic", baseline_ref="f" * 40)
     assert mismatch["segment_mismatches"] == ("repository_tree_id",)
+
+
+def test_invalid_monitor_window_cannot_start_an_unmonitored_runner(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "start", lambda *_a, **_k: pytest.fail("invalid monitor window started a runner"))
+    result = runner.main(["start", "--watch", "--monitor-seconds", "nan", "--repo-root", str(ROOT), "--state-dir", str(tmp_path)])
+    assert result == 2
