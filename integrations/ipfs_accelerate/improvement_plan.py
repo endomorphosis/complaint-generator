@@ -723,6 +723,11 @@ def assess_behavioral_evidence(task: Mapping[str, Any], observation: Mapping[str
     measurement_reason = _host_evidence_reason(observation, task)
     if measurement_reason:
         return reject(measurement_reason)
+    if task.get("id") == "CIMP-TUI-12":
+        from .supervisor_terminal_acceptance import terminal_measurement_reason
+        terminal_reason = terminal_measurement_reason(observation, task)
+        if terminal_reason:
+            return reject(terminal_reason)
     receipt["host_measurement"] = observation["host_measurement"]
     receipt["measurement_record"] = observation.measurement_record
     receipt["task_contract_digest"] = observation["host_measurement"]["task_contract_digest"]

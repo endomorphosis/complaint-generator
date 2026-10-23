@@ -9,6 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from tests.test_tui_interview_acceptance import _block_network_and_provider_subprocesses
+from tests.test_tui_terminal_unlock import terminal
 
 from integrations.ipfs_accelerate.supervisor_terminal_acceptance import (
     MAX_EXTERNAL_RETRIES,
@@ -20,6 +22,7 @@ from integrations.ipfs_accelerate.supervisor_terminal_acceptance import (
     mark_terminal_complete,
     refuse_unstick_action,
     source_identity,
+    terminal_measurement_reason,
 )
 
 
@@ -82,7 +85,8 @@ def test_executed_lanes_attach_receipts_and_source_identity(tmp_path: Path) -> N
         substring_check={"source_text": "Status: completed", "needle": "Status: completed"},
     )
     assert calls and [item[0] for item in calls] == ["pty", "graph", "privacy"]
-    assert receipt["completion"] is True
+    assert receipt["completion"] is False
+    assert receipt["evidence_class"] == "unit_fixture"
     assert receipt["passed"] == ["pty", "graph", "privacy"]
     assert receipt["skipped"] == []
     assert receipt["live_canary"] == {"requested": False, "executed": False, "status": "not_requested"}
@@ -92,7 +96,8 @@ def test_executed_lanes_attach_receipts_and_source_identity(tmp_path: Path) -> N
     assert [row["lane"] for row in receipt["output_receipts"]] == ["pty", "graph", "privacy"]
     assert all(row["executed"] is True and row["digest"] for row in receipt["output_receipts"])
     decision = mark_terminal_complete({"receipt": receipt, "source_identity_digest": receipt["source_identity"]["digest"]})
-    assert decision["completion"] is True
+    assert decision["completion"] is False
+    assert decision["reason"] == "host_measurement_required"
 
 
 def test_skipped_lane_is_not_passed_and_blocks_completion(tmp_path: Path) -> None:
@@ -105,12 +110,12 @@ def test_skipped_lane_is_not_passed_and_blocks_completion(tmp_path: Path) -> Non
 
 def test_live_canary_is_reported_separately_from_passed_lanes(tmp_path: Path) -> None:
     not_run = _receipt(tmp_path, live_canary={"requested": True, "executed": False, "status": "passed"})
-    assert not_run["completion"] is True
+    assert not_run["completion"] is False
     assert not_run["passed"] == ["pty", "graph", "privacy"]
     assert not_run["live_canary"] == {"requested": True, "executed": False, "status": "not_executed"}
 
     failed = _receipt(tmp_path, live_canary={"requested": True, "executed": True, "status": "failed"})
-    assert failed["completion"] is True
+    assert failed["completion"] is False
     assert "live_canary" not in failed["passed"]
     assert failed["live_canary"]["status"] == "failed"
     assert failed["skipped"] == []
@@ -237,3 +242,46 @@ def test_missing_source_identity_blocks_completion(tmp_path: Path) -> None:
     assert receipt["reason"] == "missing_source_identity"
     assert receipt["source_identity"]["digest"] == ""
     assert receipt["passed"] == ["pty", "graph", "privacy"]
+
+
+
+def test_actual_native_terminal_pty_journey(monkeypatch, request):
+    # Execute the real bounded canonical PTY, encryption and cold-resume checks.
+    from tests.test_tui_intake_baseline import test_canonical_pty_first_answer_and_cold_encrypted_resume
+    test_canonical_pty_first_answer_and_cold_encrypted_resume(monkeypatch, request)
+
+
+def test_actual_native_shared_graph_journey(tmp_path):
+    from tests.test_tui_interview_acceptance import test_coherent_complaint_keeps_provenance_support_and_unresolved_stop
+    test_coherent_complaint_keeps_provenance_support_and_unresolved_stop(tmp_path)
+
+
+def test_actual_native_private_unlock_journey(terminal, tmp_path):
+    from tests.test_tui_terminal_unlock import test_fresh_package_chat_unlocks_without_an_injected_service
+    test_fresh_package_chat_unlocks_without_an_injected_service(terminal, tmp_path)
+
+
+def test_forged_serialized_success_never_authorizes_completion(tmp_path):
+    receipt = _receipt(tmp_path)
+    receipt.update(completion=True, completion_authority="executed_synthetic_acceptance")
+    decision = mark_terminal_complete({"receipt": receipt, "source_identity_digest": receipt["source_identity"]["digest"]})
+    assert decision["completion"] is False and decision["reason"] == "host_measurement_required"
+    assert terminal_measurement_reason({"required_nodeids": [], "cases": []}, {"id": "CIMP-TUI-12"}) == "host_measurement_required"
+
+
+def test_actual_assessment_pipeline_requires_the_terminal_gate(monkeypatch, tmp_path):
+    import integrations.ipfs_accelerate.improvement_plan as plan
+    import integrations.ipfs_accelerate.supervisor_terminal_acceptance as gate
+    from tests.test_improvement_evidence_gate import _task, _write_output, _observation
+    task = _task("CIMP-TUI-12")
+    _write_output(tmp_path, task["id"])
+    observed = _observation(tmp_path, task["id"])
+    monkeypatch.setattr(plan, "_host_evidence_reason", lambda *_args: "")
+    calls = []
+    def refuse(observation, selected):
+        calls.append(selected["id"])
+        return "terminal_public_journeys_not_measured"
+    monkeypatch.setattr(gate, "terminal_measurement_reason", refuse)
+    result = plan.assess_behavioral_evidence(task, observed, source_binding=plan.bind_sources(tmp_path, task["targets"]))
+    assert calls == ["CIMP-TUI-12"]
+    assert result["admitted"] is False and result["reason"] == "terminal_public_journeys_not_measured"

@@ -20,7 +20,33 @@ MAX_PTY_TURNS = 8
 MAX_EXTERNAL_RETRIES = 3
 DEFAULT_STALL_SECONDS = 120
 
+# These are executed by the existing Native measured pytest command. The
+# installed behavioral-definition guard preserves their reviewed implementations.
+REQUIRED_TERMINAL_JOURNEYS = (
+    "tests/test_tui_supervisor_acceptance.py::test_actual_native_terminal_pty_journey",
+    "tests/test_tui_supervisor_acceptance.py::test_actual_native_shared_graph_journey",
+    "tests/test_tui_supervisor_acceptance.py::test_actual_native_private_unlock_journey",
+)
+
 LaneRunner = Callable[[Mapping[str, Any]], Mapping[str, Any]]
+
+
+def terminal_measurement_reason(observation, task: Mapping[str, Any]) -> str:
+    """Require owned sealed measurements of all three real public journeys.
+
+    This is admission evidence. Native's callback remains the sole task
+    completion authority. Caller-supplied receipt dictionaries cannot qualify.
+    """
+    from .improvement_plan import _host_evidence_reason
+    reason = _host_evidence_reason(observation, task)
+    if reason:
+        return reason
+    required = observation.get("required_nodeids", [])
+    measured = {row["nodeid"]: row["outcome"] for row in observation.get("cases", [])}
+    if any(node not in required or measured.get(node) != "passed" for node in REQUIRED_TERMINAL_JOURNEYS):
+        return "terminal_public_journeys_not_measured"
+    return ""
+
 
 
 class TerminalAcceptanceError(ValueError):
@@ -193,8 +219,9 @@ def execute_bounded_acceptance(
     product_session: Mapping[str, Any] | None = None,
     substring_check: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Run PTY, graph, and privacy acceptance and attach source identity.
+    """Validate fixture structure and attach diagnostic source identity.
 
+    Fixture processing is a unit lane and never authorizes completion.
     ``substring_check`` is recorded and never authorizes completion.
     """
 
@@ -227,14 +254,14 @@ def execute_bounded_acceptance(
     canary = _live_canary_status(live_canary)
     issues = _session_issues(product_session)
     substring = _substring_observation(substring_check)
-    completion = bool(
+    fixture_valid = bool(
         not failed
         and not skipped
         and passed == list(REQUIRED_LANES)
         and identity["digest"]
         and substring["authoritative"] is False
     )
-    reason = "executed_synthetic_acceptance" if completion else _rejection_reason(failed, skipped, identity)
+    reason = "fixture_validation_only" if fixture_valid else _rejection_reason(failed, skipped, identity)
     return {
         "schema": SCHEMA,
         "task_id": task_id,
@@ -244,8 +271,10 @@ def execute_bounded_acceptance(
         "skipped": skipped,
         "failed": failed,
         "live_canary": canary,
-        "completion": completion,
-        "completion_authority": "executed_synthetic_acceptance" if completion else "none",
+        "completion": False,
+        "completion_authority": "none",
+        "evidence_class": "unit_fixture",
+        "fixture_valid": fixture_valid,
         "reason": reason,
         "substring_check": substring,
         "unresolved_legal_user_issues": issues,
@@ -315,7 +344,7 @@ def _legal_status(session: Mapping[str, Any] | None) -> str:
 
 
 def mark_terminal_complete(evidence: Mapping[str, Any]) -> dict[str, Any]:
-    """Accept only an execution receipt. Source-substring evidence cannot complete."""
+    """Serialized receipts remain observations, including self-asserted success."""
 
     method = evidence.get("method")
     if method == "source_substring":
@@ -340,7 +369,9 @@ def mark_terminal_complete(evidence: Mapping[str, Any]) -> dict[str, Any]:
         return rejected
     if receipt.get("substring_check", {}).get("authoritative") is True:
         raise TerminalAcceptanceError("a substring check cannot be marked authoritative")
-    return dict(receipt)
+    rejected = dict(receipt)
+    rejected.update(completion=False, completion_authority="none", reason="host_measurement_required", evidence_class="serialized_observation")
+    return rejected
 
 
 def distinguish_wait(observation: Mapping[str, Any]) -> dict[str, Any]:

@@ -1,22 +1,20 @@
-# CIMP-TUI-12 terminal evidence note
+# CIMP-TUI-12 measured terminal evidence
 
-This note describes the supervisor completion gate in
-`integrations/ipfs_accelerate/supervisor_terminal_acceptance.py`. It does not
-mark CIMP-TUI-12 complete. Completion stays with the validation gate.
+The Native behavioral admission path in `improvement_plan.assess_behavioral_evidence`
+requires the three `test_actual_native_*_journey` cases in
+`tests/test_tui_supervisor_acceptance.py`. They execute the real canonical PTY
+and cold encrypted resume, public shared graph/provenance processing, and a
+fresh package CLI unlock without an injected unlocked service. The existing
+host verifier checks collection, all test phases, JUnit, AST seals, artifact
+hashes and unchanged source. Existing behavioral definitions remain protected.
 
-The supervisor runs bounded synthetic PTY, graph, and privacy acceptance and
-attaches each lane receipt plus the source-file digest. A source substring,
-including the text "Status: completed", is recorded and is never completion
-authority.
+Caller-supplied fixture runners and serialized receipts are diagnostic unit
+observations. They cannot authorize completion, even if they claim success.
+Only actual owned measurements can admit evidence; Native's normal callback
+remains the sole task completion authority. A live canary is optional and
+reported separately.
 
-`passed`, `skipped`, and `live_canary` are separate fields. A skipped required
-lane is not listed as passed. A live canary result does not move into `passed`.
-
-An end-user interview in `awaiting_user` is a legitimate wait. A development
-worker with a missing or stale heartbeat is a stalled worker. Neither path
-fabricates a user answer or forces legal completion.
-
-Development continues on a synthetic fixture when one exists. An irreducible
-external dependency returns a named diagnostic, increments a bounded retry, and
-keeps the prior checkpoint. Product-session legal and user issues stay on the
-session and are copied onto the receipt.
+`awaiting_user` is a legitimate product state. Recovery recommendations never
+supply user answers, close legal issues, schedule a Native retry, or change
+paid attempt counts. Actual lifecycle monitoring and bounded retries remain
+owned by the existing Native supervisor and verified owner monitor.
