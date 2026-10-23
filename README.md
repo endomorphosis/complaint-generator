@@ -157,6 +157,19 @@ projection is `docs/task_boards/complaint_intake_task_board.md`.
 The baseline audit records a working terminal pause/resume flow and the remaining
 gaps in graph-driven questioning, truthful stopping, and encrypted persistence.
 
+The one primary intake terminal command is `python -m complaint_generator.cli chat --user-id USER_ID`.
+It uses the pinned `llm-router-grok-4.7` route (`grok-4.7`) from `config.llm_router.json`. New cases default to local processing; unlocking storage does not authorize a remote call.
+To authorize remote processing for this case, use `python -m complaint_generator.cli chat --user-id USER_ID --privacy-mode grok`.
+To revoke it for future calls, use `python -m complaint_generator.cli chat --user-id USER_ID --privacy-mode local`. Omitting the option preserves the saved choice.
+Inside that session, `/status`, `/why`, `/skip`, `/edit`, `/pause`, `/resume`, and `/privacy local` or `/privacy grok` are controls, not stored answers.
+Run the same command again with the same user id to reopen a saved pause.
+Session files default to `.complaint_workspace/sessions` in the checkout. Set `COMPLAINT_WORKSPACE_SESSION_DIR` to another real directory when you want an explicit location.
+Key unlock, recovery export/import, workspace export, and supervisor `start` / `status` / `stop` are separate commands.
+Resume of a supervisor epoch is `start` with the same `--state-dir`, not a second verb.
+The operator guide is `docs/COMPLAINT_INTAKE_OPERATOR_GUIDE.md`.
+It states the limits: factual assertions are not applicable legal requirements, interview saturation is not legal sufficiency, remote model processing is not encryption at rest, and local deletion is not remote erasure.
+Commands use `python` on `PATH` after `git submodule update --init` of the pinned submodules. They do not embed a user home, an editor profile, or an interpreter path.
+
 Use `python scripts/run_complaint_improvement_supervisor.py prepare`, then
 `doctor`, `start`, and `status` to prepare and monitor the native supervisor.
 For a bounded launch with automatic recovery when its launcher exits, use

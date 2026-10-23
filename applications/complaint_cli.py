@@ -101,7 +101,7 @@ DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
 EXIT_OK = 0
 EXIT_EOF_PAUSE = 1
 EXIT_INTERRUPTED = 130
-TERMINAL_COMMANDS = ("/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit")
+TERMINAL_COMMANDS = ("/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy")
 _UNKNOWN_ANSWERS = {
     "unknown", "i don't know", "i do not know", "idk", "not sure", "unsure", "n/a", "na",
 }
@@ -109,6 +109,7 @@ _PAUSE_MESSAGE = "Chat paused. Resume with the same user ID to continue the save
 _HELP_TEXT = """
 Terminal controls (a command is never stored as an answer):
   /help     show this help, exit codes, and input modes
+  /privacy  select /privacy local or /privacy grok for this case; remote Grok receives submitted prompts
   /status   show the pending question, objective, graph revision, stop reason, and unknown/skipped answers
   /why      explain why the pending question matters; the question stays pending
   /skip     record the pending question as skipped; it does not satisfy the legal requirement
@@ -179,7 +180,136 @@ class TerminalComplaintWorkspaceService(ComplaintWorkspaceService):
         return receipt
 
 
-service = TerminalComplaintWorkspaceService()
+def session_dir_from_environment() -> Optional[Path]:
+    """Use an explicit session directory when the operator sets one.
+
+    The default remains the checkout's ``.complaint_workspace/sessions``.
+    A relative override is resolved from the current working directory.
+    Nothing here reads a user home, a Codex profile, or a fixed interpreter path.
+    """
+
+    raw = os.environ.get("COMPLAINT_WORKSPACE_SESSION_DIR", "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return Path(os.path.abspath(path))
+
+
+class _LazyTerminalService:
+    """Build the workspace on first use so importing the CLI does not create a store."""
+
+    def __init__(self) -> None:
+        self._service: TerminalComplaintWorkspaceService | None = None
+
+    def _load(self) -> TerminalComplaintWorkspaceService:
+        if self._service is None:
+            override = session_dir_from_environment()
+            self._service = (
+                TerminalComplaintWorkspaceService(override)
+                if override is not None
+                else TerminalComplaintWorkspaceService()
+            )
+        return self._service
+
+    def __getattr__(self, name: str):
+        return getattr(self._load(), name)
+
+
+service = _LazyTerminalService()
+
+# One primary terminal interview command. Slash controls are typed inside it.
+# Placeholders are literal tokens the operator replaces. They are not home paths.
+PRIMARY_TUI_COMMAND = "python -m complaint_generator.cli chat --user-id USER_ID"
+INTAKE_OPERATOR_EXAMPLES = (
+    {
+        "id": "primary-tui-grok-4.7",
+        "command": PRIMARY_TUI_COMMAND,
+        "model": "grok-4.7",
+        "backend_id": "llm-router-grok-4.7",
+        "config_path": "config.llm_router.json",
+        "controls": ["/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy local", "/privacy grok"],
+        "notes": "Save is /pause or a recoverable exit. Resume is the same command with the same USER_ID, then /resume.",
+    },
+    {
+        "id": "primary-tui-explicit-grok-consent",
+        "command": PRIMARY_TUI_COMMAND + " --privacy-mode grok",
+        "remote_processing_opt_in": True,
+    },
+    {
+        "id": "primary-tui-revoke-remote-consent",
+        "command": PRIMARY_TUI_COMMAND + " --privacy-mode local",
+        "remote_processing_opt_in": False,
+    },
+    {
+        "id": "router-live-canary-not-requested",
+        "command": "python -m complaint_generator.cli router-live-canary --config-path config.llm_router.json --backend-id llm-router-grok-4.7",
+        "model": "grok-4.7",
+        "sends_complaint_data": False,
+        "confirm_live": False,
+    },
+    {
+        "id": "keys-status",
+        "command": "python -m complaint_generator.cli keys-status --store-dir STORE_DIR",
+    },
+    {
+        "id": "keys-init",
+        "command": "python -m complaint_generator.cli keys-init --store-dir STORE_DIR --protection passphrase",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "keys-unlock",
+        "command": "python -m complaint_generator.cli keys-unlock --store-dir STORE_DIR",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "keys-recover-export",
+        "command": "python -m complaint_generator.cli keys-recover-export --store-dir STORE_DIR --tenant-id TENANT_ID --case-id CASE_ID --destination RECOVERY_FILE",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "keys-recover-import",
+        "command": "python -m complaint_generator.cli keys-recover-import --store-dir STORE_DIR --tenant-id TENANT_ID --case-id CASE_ID --source RECOVERY_FILE",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "workspace-export",
+        "command": "python -m complaint_generator.cli workspace-export --store-dir STORE_DIR --tenant-id TENANT_ID --case-id CASE_ID --principal-id PRINCIPAL_ID --repository REPOSITORY_DIR --export-dir EXPORT_DIR --recovery-destination RECOVERY_FILE",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "supervisor-start",
+        "command": "python scripts/run_complaint_improvement_supervisor.py start --repo-root REPO_ROOT --spec SPEC_PATH --state-dir STATE_DIR --watch --monitor-seconds 21600",
+        "model": "grok-4.7",
+        "resume": "same start command and same STATE_DIR after stop",
+    },
+    {
+        "id": "supervisor-status",
+        "command": "python scripts/run_complaint_improvement_supervisor.py status --repo-root REPO_ROOT --spec SPEC_PATH --state-dir STATE_DIR",
+    },
+    {
+        "id": "supervisor-stop",
+        "command": "python scripts/run_complaint_improvement_supervisor.py stop --repo-root REPO_ROOT --spec SPEC_PATH --state-dir STATE_DIR",
+    },
+)
+
+
+def intake_operator_catalog() -> dict[str, Any]:
+    return {
+        "primary_tui_command": PRIMARY_TUI_COMMAND,
+        "interpreter": "python",
+        "python_requires": ">=3.12",
+        "session_dir_env": "COMPLAINT_WORKSPACE_SESSION_DIR",
+        "default_session_dir": ".complaint_workspace/sessions",
+        "pinned_submodules": [
+            "external/ipfs_accelerate_py",
+            "external/ipfs_datasets_py",
+            "external/ipfs_kit_py",
+        ],
+        "optional_dependencies": ["cryptography>=41.0.0", "typer>=0.12.0"],
+        "examples": list(INTAKE_OPERATOR_EXAMPLES),
+    }
 
 
 def _emit_workspace_failure(error: Exception) -> None:
@@ -188,7 +318,7 @@ def _emit_workspace_failure(error: Exception) -> None:
     codes = {
         "unlock_needed", "authentication_failed", "corrupt_session", "read_error",
         "binding_missing", "owner_mismatch", "overwrite_blocked", "key_unavailable",
-        "private_persistence_unavailable", "migration_required",
+        "private_persistence_unavailable", "migration_required", "invalid_privacy_mode", "privacy_denied",
     }
     status, code = "unavailable", "workspace_operation_failed"
     if isinstance(error, WorkspacePersistenceError):
@@ -201,8 +331,8 @@ def _emit_workspace_failure(error: Exception) -> None:
     typer.echo(json.dumps({
         "status": status,
         "code": code,
-        "message": "The private workspace operation could not continue. Unlock or recover the selected case, then retry.",
-        "actions": ["unlock_selected_case", "recover_selected_case", "retry"],
+        "message": "Choose privacy mode local or grok." if code == "invalid_privacy_mode" else "The private workspace operation could not continue. Unlock or recover the selected case, then retry.",
+        "actions": ["choose_local_or_grok"] if code == "invalid_privacy_mode" else ["unlock_selected_case", "recover_selected_case", "retry"],
         "awaiting_user": True,
         "persistence_outcome": "unverified",
         "privacy_bypassed": False,
@@ -732,6 +862,13 @@ def _sync_controls_from_payload(user_id: str, payload: dict, inquiry: Optional[d
 
 
 
+@app.command("intake-operator-examples")
+def intake_operator_examples() -> None:
+    """Print the documented intake, key, and supervisor command catalog."""
+
+    _print(intake_operator_catalog())
+
+
 def _unlock_private_chat_case(user_id: str) -> None:
     """Unlock in this terminal process; credentials never cross argv or env."""
     from integrations.private_storage import PrivateKeyMaterialError, read_unlock_passphrase
@@ -763,12 +900,20 @@ def _unlock_private_chat_case(user_id: str) -> None:
 
 @app.command("chat")
 @_workspace_command_boundary
-def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
+def chat(user_id: str = "demo-user", max_turns: int = 0, privacy_mode: str = "") -> None:
+    selected_privacy = privacy_mode.strip().lower()
+    if selected_privacy not in {"", "local", "grok"}:
+        raise WorkspacePersistenceError("Choose privacy mode local or grok.", code="invalid_privacy_mode", public_status="unavailable")
     try:
         _unlock_private_chat_case(user_id)
     except KeyboardInterrupt:
         terminal_echo("Private workspace unlock cancelled.")
         raise SystemExit(EXIT_INTERRUPTED) from None
+    if selected_privacy:
+        policy = service.set_privacy_policy(user_id, selected_privacy)
+        if policy.get("updated") is not True:
+            raise WorkspacePersistenceError("Private processing choice could not be saved.", code="privacy_denied", public_status="unavailable")
+        terminal_echo("Remote Grok processing authorized for this case." if selected_privacy == "grok" else "Local processing selected; future remote calls are disabled.")
     try:
         max_turns = int(max_turns)
     except (TypeError, ValueError):
@@ -820,6 +965,14 @@ def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
         command = _command_name(line)
         if command == "":
             terminal_echo("Unknown command. It was not stored. Use /help.")
+            continue
+        if command == "/privacy":
+            parts = line.strip().lower().split()
+            if len(parts) != 2 or parts[1] not in {"local", "grok"}:
+                terminal_echo("Use /privacy local or /privacy grok. Remote Grok processing sends submitted prompts to the provider.")
+                continue
+            payload = service.run_intake_chat_turn(user_id, message="/privacy " + parts[1],
+                question_id=str(inquiry.get("question_id") or "") or None)
             continue
         if command == "/help":
             terminal_echo(_HELP_TEXT)
