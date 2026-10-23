@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import fcntl
 import hashlib
 import hmac
 import json
@@ -9,9 +10,11 @@ import math
 import os
 import re
 import shutil
+import stat
 import threading
+import uuid
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .loader import get_repo_paths, import_attr_optional
 from .types import with_adapter_metadata
@@ -1076,6 +1079,7 @@ AUTOMATIC_PRIVATE_ARTIFACT_KINDS = frozenset({
     "extracted-text",
     "assertion-envelope",
     "fact-graph",
+    "legal-graph",
     "rule-evaluation",
     "annotation",
     "draft",
@@ -1085,6 +1089,11 @@ AUTOMATIC_PRIVATE_ARTIFACT_KINDS = frozenset({
     "backup-manifest",
     "embedding",
     "case-alias",
+    "interview-snapshot",
+    "complaint-text",
+    "transcript",
+    "export",
+    "durability-payload",
 })
 
 # Public CID metadata, filenames, the global index, and default logs may carry
@@ -1570,6 +1579,623 @@ def upstream_replica_fixture_qualification() -> dict[str, Any]:
     }
 
 
+INTERVIEW_SNAPSHOT_SCHEMA = "interview-snapshot-v1"
+INTERVIEW_HEAD_SCHEMA = "interview-snapshot-head-v1"
+UNENCRYPTED_INTERVIEW_NAME = "unencrypted-interview-snapshot.json"
+_INTERVIEW_PROTECTIONS = frozenset({"user_chosen_encrypted", "user_chosen_plaintext"})
+_INTERVIEW_PART_KINDS = (
+    "complaint-text",
+    "transcript",
+    "fact-graph",
+    "legal-graph",
+    "export",
+    "durability-payload",
+    "interview-snapshot",
+)
+_INTERVIEW_REQUIRED = (
+    "schema_version",
+    "snapshot_id",
+    "session_id",
+    "revision",
+    "revisions",
+    "outcome_reason",
+    "pending_inquiry",
+    "provenance",
+    "graphs",
+    "unknown_items",
+    "deferred_items",
+    "complaint_text",
+    "transcript",
+    "exports",
+    "durability_payload",
+)
+
+
+class InterviewSnapshotError(RuntimeError):
+    """Private interview snapshot could not be committed or opened."""
+
+    def __init__(self, message: str, *, code: str, public_status: str = "recoverable") -> None:
+        super().__init__(message)
+        self.code = code
+        self.public_status = public_status
+
+
+def assemble_interview_snapshot(
+    *,
+    session_id: str,
+    revision: str,
+    outcome_reason: str,
+    pending_inquiry: Mapping[str, Any],
+    knowledge_graph: Mapping[str, Any],
+    dependency_graph: Mapping[str, Any],
+    provenance: Mapping[str, Any],
+    unknown_items: Sequence[Any],
+    deferred_items: Sequence[Any],
+    complaint_text: str,
+    transcript: Sequence[Any],
+    exports: Mapping[str, Any],
+    durability_payload: Mapping[str, Any],
+    revisions: Mapping[str, Any],
+    snapshot_id: str | None = None,
+) -> dict[str, Any]:
+    """Build one complete snapshot. Missing sections stay explicit, not omitted."""
+
+    document = {
+        "schema_version": INTERVIEW_SNAPSHOT_SCHEMA,
+        "snapshot_id": snapshot_id or ("snap-" + uuid.uuid4().hex),
+        "session_id": str(session_id),
+        "revision": str(revision),
+        "revisions": {
+            "session_revision": revisions.get("session_revision", "unknown"),
+            "question_revision": revisions.get("question_revision", "unknown"),
+            "graph_revision": revisions.get("graph_revision", "unknown"),
+        },
+        "outcome_reason": str(outcome_reason or "unknown"),
+        "pending_inquiry": dict(pending_inquiry) if isinstance(pending_inquiry, Mapping) else {"status": "unknown"},
+        "provenance": dict(provenance) if isinstance(provenance, Mapping) else {"status": "unknown"},
+        "graphs": {
+            "knowledge_graph": dict(knowledge_graph) if isinstance(knowledge_graph, Mapping) else {"status": "unknown"},
+            "dependency_graph": dict(dependency_graph) if isinstance(dependency_graph, Mapping) else {"status": "unknown"},
+        },
+        "unknown_items": [item for item in unknown_items],
+        "deferred_items": [item for item in deferred_items],
+        "complaint_text": str(complaint_text),
+        "transcript": [item for item in transcript],
+        "exports": dict(exports) if isinstance(exports, Mapping) else {"status": "unknown"},
+        "durability_payload": dict(durability_payload) if isinstance(durability_payload, Mapping) else {"status": "unknown"},
+        "explicit_dispositions": {"unknown": "recorded", "deferred": "recorded"},
+    }
+    return validate_interview_snapshot(document)
+
+
+def validate_interview_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(document, Mapping):
+        raise InterviewSnapshotError("snapshot must be an object", code="snapshot_invalid")
+    missing = [key for key in _INTERVIEW_REQUIRED if key not in document]
+    if missing:
+        raise InterviewSnapshotError("snapshot is missing required sections", code="snapshot_invalid")
+    if document.get("schema_version") != INTERVIEW_SNAPSHOT_SCHEMA:
+        raise InterviewSnapshotError("unsupported snapshot schema", code="unsupported_schema")
+    graphs = document.get("graphs")
+    if not isinstance(graphs, Mapping) or "knowledge_graph" not in graphs or "dependency_graph" not in graphs:
+        raise InterviewSnapshotError("both graphs are required", code="snapshot_invalid")
+    revisions = document.get("revisions")
+    if not isinstance(revisions, Mapping):
+        raise InterviewSnapshotError("revisions are required", code="snapshot_invalid")
+    for key in ("session_revision", "question_revision", "graph_revision"):
+        if key not in revisions:
+            raise InterviewSnapshotError("graph and question revisions are required", code="snapshot_invalid")
+    if not isinstance(document.get("unknown_items"), list) or not isinstance(document.get("deferred_items"), list):
+        raise InterviewSnapshotError("unknown and deferred items must be explicit lists", code="snapshot_invalid")
+    if not isinstance(document.get("pending_inquiry"), Mapping):
+        raise InterviewSnapshotError("pending inquiry is required", code="snapshot_invalid")
+    if not isinstance(document.get("provenance"), Mapping):
+        raise InterviewSnapshotError("provenance is required", code="snapshot_invalid")
+    if not isinstance(document.get("outcome_reason"), str) or not document.get("outcome_reason"):
+        raise InterviewSnapshotError("outcome reason is required", code="snapshot_invalid")
+    if not isinstance(document.get("complaint_text"), str):
+        raise InterviewSnapshotError("complaint text must be a string", code="snapshot_invalid")
+    if not isinstance(document.get("transcript"), list):
+        raise InterviewSnapshotError("transcript must be a list", code="snapshot_invalid")
+    copied = json.loads(json.dumps(document, sort_keys=True))
+    return copied
+
+
+def interview_snapshot_receipt(
+    snapshot: Mapping[str, Any],
+    *,
+    status: str,
+    operation_id: str,
+    protection: str,
+    error_category: str = "",
+    recovered_from: str | None = None,
+) -> dict[str, Any]:
+    """Identifiers and operational status only. No complaint text and no key."""
+
+    receipt = {
+        "operation_id": operation_id,
+        "status": status,
+        "error_category": error_category,
+        "protection": protection,
+        "schema_version": INTERVIEW_SNAPSHOT_SCHEMA,
+        "snapshot_id": str(snapshot.get("snapshot_id") or ""),
+        "session_id": str(snapshot.get("session_id") or ""),
+        "revision": str(snapshot.get("revision") or ""),
+        "outcome_reason": str(snapshot.get("outcome_reason") or ""),
+        "parts": list(_INTERVIEW_PART_KINDS),
+        "recovered_from": recovered_from,
+    }
+    encoded = json.dumps(receipt, sort_keys=True)
+    complaint = snapshot.get("complaint_text")
+    if isinstance(complaint, str) and len(complaint) >= 8 and complaint in encoded:
+        raise InterviewSnapshotError("receipt leaked complaint text", code="receipt_leak")
+    emit_default_storage_log({
+        "operation_id": "save" if operation_id.endswith("commit") else "load",
+        "status": "available" if status in {"available", "recovered"} else "failed",
+        "error_category": "operation_error" if error_category else "",
+        "synthetic_source": "fixture-source-a",
+    })
+    return receipt
+
+
+def _interview_prepare(directory: Path) -> int:
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(directory, 0o700)
+    for name in ("revisions", "parts"):
+        child = directory / name
+        child.mkdir(mode=0o700, exist_ok=True)
+        os.chmod(child, 0o700)
+    metadata = directory.lstat()
+    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid():
+        raise InterviewSnapshotError("snapshot directory is not private", code="permission_denied", public_status="unavailable")
+    if metadata.st_mode & 0o077:
+        os.chmod(directory, 0o700)
+    return os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+
+
+def _interview_write_exclusive(dir_fd: int, relative: str, payload: bytes) -> str:
+    parent, _, name = relative.rpartition("/")
+    parent_fd = dir_fd
+    close_parent = False
+    if parent:
+        parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+        close_parent = True
+    temporary = "." + name + "." + uuid.uuid4().hex + ".tmp"
+    fd = -1
+    try:
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent_fd)
+        os.fchmod(fd, 0o600)
+        view = memoryview(payload)
+        while view:
+            written = os.write(fd, view)
+            view = view[written:]
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.replace(temporary, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        return relative
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(temporary, dir_fd=parent_fd)
+        except FileNotFoundError:
+            pass
+        if close_parent:
+            os.close(parent_fd)
+
+
+def _interview_read(dir_fd: int, relative: str) -> bytes:
+    fd = os.open(relative, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
+            raise InterviewSnapshotError("snapshot file is not a private regular file", code="permission_denied", public_status="unavailable")
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _interview_lock(dir_fd: int) -> int:
+    fd = os.open(".interview-write.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
+    os.fchmod(fd, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
+
+
+def _seal_part(payload: bytes, *, kind: str, revision: str, tenant_id: str, case_id: str, principal_id: str, key: bytes, key_id: str) -> bytes:
+    from integrations.private_storage import PrivateArtifactBinding, PrivateArtifactIntegrityError, PrivateCryptoCapabilityError, PrivateStorageError, seal_private_artifact
+
+    binding = PrivateArtifactBinding(
+        tenant_id=tenant_id,
+        case_id=case_id,
+        artifact_kind=kind,
+        revision=revision,
+        principal_id=principal_id,
+    )
+    try:
+        return seal_private_artifact(payload, binding=binding, key=key, key_id=key_id)
+    except PrivateCryptoCapabilityError as exc:
+        raise InterviewSnapshotError(str(exc), code="private_crypto_unavailable", public_status="unavailable") from None
+    except (PrivateStorageError, PrivateArtifactIntegrityError) as exc:
+        raise InterviewSnapshotError("private snapshot seal failed", code="authentication_failed") from exc
+
+
+def _open_part(envelope: bytes, *, kind: str, revision: str, tenant_id: str, case_id: str, principal_id: str, key: bytes, key_id: str) -> bytes:
+    from integrations.private_storage import PrivateArtifactBinding, PrivateArtifactIntegrityError, PrivateCryptoCapabilityError, open_private_artifact
+
+    binding = PrivateArtifactBinding(
+        tenant_id=tenant_id,
+        case_id=case_id,
+        artifact_kind=kind,
+        revision=revision,
+        principal_id=principal_id,
+    )
+    try:
+        return open_private_artifact(envelope, binding=binding, key=key, expected_key_id=key_id)
+    except PrivateCryptoCapabilityError as exc:
+        raise InterviewSnapshotError(str(exc), code="private_crypto_unavailable", public_status="unavailable") from None
+    except PrivateArtifactIntegrityError as exc:
+        raise InterviewSnapshotError("private snapshot authentication failed", code="authentication_failed") from exc
+
+
+def _head_document(dir_fd: int) -> dict[str, Any] | None:
+    try:
+        raw = _interview_read(dir_fd, "head.json")
+    except FileNotFoundError:
+        return None
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InterviewSnapshotError("snapshot head is corrupt", code="corrupt_head") from exc
+    if not isinstance(payload, dict) or payload.get("schema_version") != INTERVIEW_HEAD_SCHEMA:
+        raise InterviewSnapshotError("snapshot head is corrupt", code="corrupt_head")
+    return payload
+
+
+def _legacy_bytes(dir_fd: int) -> bytes | None:
+    try:
+        return _interview_read(dir_fd, UNENCRYPTED_INTERVIEW_NAME)
+    except FileNotFoundError:
+        return None
+
+
+def _part_bodies(snapshot: Mapping[str, Any]) -> dict[str, bytes]:
+    graphs = snapshot["graphs"]
+    return {
+        "complaint-text": str(snapshot["complaint_text"]).encode("utf-8"),
+        "transcript": json.dumps(snapshot["transcript"], sort_keys=True).encode("utf-8"),
+        "fact-graph": json.dumps(graphs["knowledge_graph"], sort_keys=True).encode("utf-8"),
+        "legal-graph": json.dumps(graphs["dependency_graph"], sort_keys=True).encode("utf-8"),
+        "export": json.dumps(snapshot["exports"], sort_keys=True).encode("utf-8"),
+        "durability-payload": json.dumps(snapshot["durability_payload"], sort_keys=True).encode("utf-8"),
+        "interview-snapshot": json.dumps(snapshot, sort_keys=True).encode("utf-8"),
+    }
+
+
+def persist_interview_snapshot(
+    directory: str | Path,
+    snapshot: Mapping[str, Any],
+    *,
+    protection: str,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes | None = None,
+    key_id: str | None = None,
+    expected_revision: str | None = None,
+    migrate_plaintext: bool = False,
+    fail_before_head: bool = False,
+    writer: Callable[[bytes], None] | None = None,
+) -> dict[str, Any]:
+    """Commit one interview snapshot with private atomic files.
+
+    Encrypted mode seals complaint text, transcripts, both graphs, exports,
+    and the durability payload. A locked or missing key never writes plaintext.
+    An existing unencrypted snapshot is left byte-for-byte in place.
+    """
+
+    if protection not in _INTERVIEW_PROTECTIONS:
+        raise InterviewSnapshotError("protection state required", code="protection_required", public_status="unavailable")
+    if protection == "user_chosen_encrypted" and (key is None or key_id is None):
+        raise InterviewSnapshotError("Private interview keys require unlock.", code="unlock_needed", public_status="unlock_needed")
+    document = validate_interview_snapshot(snapshot)
+    root_fd = _interview_prepare(Path(directory))
+    lock_fd = -1
+    try:
+        lock_fd = _interview_lock(root_fd)
+        legacy = _legacy_bytes(root_fd)
+        if protection == "user_chosen_encrypted":
+            if legacy is not None and not migrate_plaintext:
+                raise InterviewSnapshotError(
+                    "Prior unencrypted snapshot requires explicit migration.",
+                    code="migration_required",
+                )
+        try:
+            head = _head_document(root_fd)
+        except InterviewSnapshotError as exc:
+            if exc.code != "corrupt_head":
+                raise
+            head = None
+        if head and head.get("protection") == "user_chosen_encrypted" and protection == "user_chosen_plaintext":
+            raise InterviewSnapshotError(
+                "Encrypted interview snapshots do not fall back to plaintext.",
+                code="plaintext_fallback_refused",
+            )
+        current = str((head or {}).get("revision") or "0")
+        expected = "0" if expected_revision in {None, ""} else str(expected_revision)
+        if current != expected:
+            raise InterviewSnapshotError(
+                "The interview snapshot changed; retry from its current revision.",
+                code="revision_conflict",
+            )
+        next_revision = str(int(current) + 1)
+        document["revision"] = next_revision
+        document["durability_payload"] = {
+            **dict(document.get("durability_payload") or {}),
+            "previous_revision": current,
+            "committed_revision": next_revision,
+        }
+        document = validate_interview_snapshot(document)
+        revision_label = "snapshot-rev-" + next_revision
+        part_names: dict[str, str] = {}
+        if protection == "user_chosen_encrypted":
+            assert key is not None and key_id is not None
+            for kind, body in _part_bodies(document).items():
+                envelope = _seal_part(
+                    body, kind=kind, revision=revision_label, tenant_id=tenant_id,
+                    case_id=case_id, principal_id=principal_id, key=key, key_id=key_id,
+                )
+                opened = _open_part(
+                    envelope, kind=kind, revision=revision_label, tenant_id=tenant_id,
+                    case_id=case_id, principal_id=principal_id, key=key, key_id=key_id,
+                )
+                if opened != body:
+                    raise InterviewSnapshotError("snapshot readback failed", code="readback_mismatch")
+                if writer is not None:
+                    writer(envelope)
+                relative = "parts/" + opaque_storage_filename("snapshot", kind)
+                _interview_write_exclusive(root_fd, relative, envelope)
+                part_names[kind] = relative
+            blob_body = _interview_read(root_fd, part_names["interview-snapshot"])
+        else:
+            blob_body = json.dumps(document, sort_keys=True).encode("utf-8")
+            if writer is not None:
+                writer(blob_body)
+            relative = "revisions/plain-" + revision_label + "-" + uuid.uuid4().hex + ".json"
+            _interview_write_exclusive(root_fd, relative, blob_body)
+            part_names = {kind: relative for kind in _INTERVIEW_PART_KINDS}
+        if fail_before_head:
+            raise InterviewSnapshotError(
+                "durability head was not committed; the previous revision stands",
+                code="durability_unproven",
+            )
+        history = [item for item in list((head or {}).get("history") or []) if isinstance(item, dict)]
+        history.append({
+            "revision": next_revision,
+            "blob": part_names["interview-snapshot"],
+            "digest": hashlib.sha256(blob_body).hexdigest(),
+            "protection": protection,
+        })
+        new_head = {
+            "schema_version": INTERVIEW_HEAD_SCHEMA,
+            "revision": next_revision,
+            "protection": protection,
+            "snapshot_id": document["snapshot_id"],
+            "session_id": document["session_id"],
+            "blob": part_names["interview-snapshot"],
+            "digest": hashlib.sha256(blob_body).hexdigest(),
+            "parts": part_names,
+            "history": history,
+            "status": "committed",
+            "migrated_plaintext": bool(legacy is not None and migrate_plaintext),
+        }
+        encoded_head = json.dumps(new_head, sort_keys=True).encode("utf-8")
+        if document["complaint_text"] and document["complaint_text"] in encoded_head.decode("utf-8"):
+            raise InterviewSnapshotError("head leaked complaint text", code="receipt_leak")
+        _interview_write_exclusive(root_fd, "head.json", encoded_head)
+        os.fsync(root_fd)
+        if legacy is not None and _legacy_bytes(root_fd) != legacy:
+            raise InterviewSnapshotError("unencrypted snapshot was overwritten", code="legacy_overwritten")
+        receipt = interview_snapshot_receipt(
+            document, status="available", operation_id="interview_snapshot_commit", protection=protection,
+        )
+        return {"snapshot": document, "receipt": receipt, "head": new_head}
+    finally:
+        if lock_fd >= 0:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            finally:
+                os.close(lock_fd)
+        os.close(root_fd)
+
+
+def _decode_snapshot_blob(
+    raw: bytes,
+    *,
+    protection: str,
+    revision: str,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes | None,
+    key_id: str | None,
+) -> dict[str, Any]:
+    if protection == "user_chosen_plaintext":
+        payload = json.loads(raw.decode("utf-8"))
+        return validate_interview_snapshot(payload)
+    if key is None or key_id is None:
+        raise InterviewSnapshotError("Private interview keys require unlock.", code="unlock_needed", public_status="unlock_needed")
+    opened = _open_part(
+        raw, kind="interview-snapshot", revision="snapshot-rev-" + revision,
+        tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, key=key, key_id=key_id,
+    )
+    payload = json.loads(opened.decode("utf-8"))
+    return validate_interview_snapshot(payload)
+
+
+def load_interview_snapshot(
+    directory: str | Path,
+    *,
+    protection: str,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes | None = None,
+    key_id: str | None = None,
+) -> dict[str, Any]:
+    """Open the latest valid snapshot. Wrong keys never return plaintext."""
+
+    if protection not in _INTERVIEW_PROTECTIONS:
+        raise InterviewSnapshotError("protection state required", code="protection_required", public_status="unavailable")
+    if protection == "user_chosen_encrypted" and (key is None or key_id is None):
+        raise InterviewSnapshotError("Private interview keys require unlock.", code="unlock_needed", public_status="unlock_needed")
+    root_fd = _interview_prepare(Path(directory))
+    lock_fd = -1
+    try:
+        lock_fd = _interview_lock(root_fd)
+        legacy = _legacy_bytes(root_fd)
+        try:
+            head = _head_document(root_fd)
+        except InterviewSnapshotError as exc:
+            if exc.code != "corrupt_head":
+                raise
+            head = None
+        if head is None:
+            if protection == "user_chosen_encrypted":
+                raise InterviewSnapshotError(
+                    "No encrypted interview snapshot is committed.",
+                    code="migration_required" if legacy is not None else "snapshot_missing",
+                )
+            if legacy is None:
+                raise InterviewSnapshotError("No interview snapshot is committed.", code="snapshot_missing")
+            payload = validate_interview_snapshot(json.loads(legacy.decode("utf-8")))
+            receipt = interview_snapshot_receipt(
+                payload, status="available", operation_id="interview_snapshot_load", protection=protection,
+            )
+            return {"snapshot": payload, "receipt": receipt, "recovered": False}
+        if head.get("protection") == "user_chosen_encrypted" and protection != "user_chosen_encrypted":
+            raise InterviewSnapshotError(
+                "Encrypted interview snapshots do not fall back to plaintext.",
+                code="plaintext_fallback_refused",
+            )
+        if protection == "user_chosen_encrypted" and head.get("protection") != "user_chosen_encrypted":
+            raise InterviewSnapshotError(
+                "Prior unencrypted snapshot requires explicit migration.",
+                code="migration_required",
+            )
+        candidates = list(reversed([item for item in list(head.get("history") or []) if isinstance(item, dict)]))
+        if not candidates:
+            candidates = [{"revision": head.get("revision"), "blob": head.get("blob"), "digest": head.get("digest"), "protection": head.get("protection")}]
+        auth_failed = False
+        for item in candidates:
+            blob_name = str(item.get("blob") or "")
+            revision = str(item.get("revision") or "")
+            item_protection = str(item.get("protection") or head.get("protection") or "")
+            if protection == "user_chosen_encrypted" and item_protection != "user_chosen_encrypted":
+                continue
+            if not blob_name or blob_name.endswith(".json") and protection == "user_chosen_encrypted":
+                continue
+            try:
+                raw = _interview_read(root_fd, blob_name)
+            except (FileNotFoundError, OSError):
+                continue
+            digest = str(item.get("digest") or "")
+            if digest and hashlib.sha256(raw).hexdigest() != digest:
+                continue
+            try:
+                payload = _decode_snapshot_blob(
+                    raw, protection=item_protection, revision=revision, tenant_id=tenant_id,
+                    case_id=case_id, principal_id=principal_id, key=key, key_id=key_id,
+                )
+            except InterviewSnapshotError as exc:
+                if exc.code == "authentication_failed":
+                    auth_failed = True
+                    continue
+                if exc.code in {"snapshot_invalid", "unsupported_schema"}:
+                    continue
+                raise
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            recovered = str(payload.get("revision")) != str(head.get("revision"))
+            receipt = interview_snapshot_receipt(
+                payload,
+                status="recovered" if recovered else "available",
+                operation_id="interview_snapshot_load",
+                protection=protection,
+                error_category="operation_error" if recovered else "",
+                recovered_from=str(head.get("revision") or "") if recovered else None,
+            )
+            return {"snapshot": payload, "receipt": receipt, "recovered": recovered}
+        if auth_failed:
+            raise InterviewSnapshotError("private snapshot authentication failed", code="authentication_failed")
+        raise InterviewSnapshotError("no valid interview revision remains", code="corrupt_snapshot")
+    finally:
+        if lock_fd >= 0:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            finally:
+                os.close(lock_fd)
+        os.close(root_fd)
+
+
+def migrate_unencrypted_interview_snapshot(
+    directory: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+) -> dict[str, Any]:
+    """Seal a preserved plaintext snapshot without replacing its original bytes."""
+
+    root = Path(directory)
+    root_fd = _interview_prepare(root)
+    try:
+        legacy = _legacy_bytes(root_fd)
+        try:
+            head = _head_document(root_fd)
+        except InterviewSnapshotError as exc:
+            if exc.code != "corrupt_head":
+                raise
+            head = None
+    finally:
+        os.close(root_fd)
+    if legacy is None:
+        raise InterviewSnapshotError("No owned unencrypted snapshot was found.", code="legacy_missing")
+    if head and head.get("protection") == "user_chosen_encrypted":
+        return {
+            "status": "complete",
+            "legacy_plaintext_retained": True,
+            "source_bytes_preserved": True,
+            "existing_private_preserved": True,
+            "revision": head.get("revision"),
+        }
+    try:
+        document = validate_interview_snapshot(json.loads(legacy.decode("utf-8")))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InterviewSnapshotError("Unencrypted snapshot is corrupt and was preserved.", code="corrupt_snapshot") from exc
+    result = persist_interview_snapshot(
+        root, document, protection="user_chosen_encrypted", tenant_id=tenant_id, case_id=case_id,
+        principal_id=principal_id, key=key, key_id=key_id, migrate_plaintext=True,
+        expected_revision=str((head or {}).get("revision") or "0"),
+    )
+    preserved = (root / UNENCRYPTED_INTERVIEW_NAME).read_bytes()
+    if preserved != legacy:
+        raise InterviewSnapshotError("unencrypted snapshot was overwritten", code="legacy_overwritten")
+    result["legacy_plaintext_retained"] = True
+    result["source_bytes_preserved"] = True
+    return result
+
+
 def storage_backend_status() -> dict[str, Any]:
     probe = _runtime_backend_probe()
     backend = probe["backend"]
@@ -1634,4 +2260,13 @@ __all__ = [
     "redact_private_diagnostic",
     "emit_default_storage_log",
     "optional_size_padding",
+    "INTERVIEW_SNAPSHOT_SCHEMA",
+    "InterviewSnapshotError",
+    "assemble_interview_snapshot",
+    "validate_interview_snapshot",
+    "interview_snapshot_receipt",
+    "persist_interview_snapshot",
+    "load_interview_snapshot",
+    "migrate_unencrypted_interview_snapshot",
+    "UNENCRYPTED_INTERVIEW_NAME",
 ]

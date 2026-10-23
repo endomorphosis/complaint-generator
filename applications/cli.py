@@ -1282,7 +1282,166 @@ class CLI:
 		return '\n'.join(lines)
 
 
+	def build_complete_interview_snapshot(self, *, revision='0'):
+		from integrations.ipfs_datasets.storage import assemble_interview_snapshot
+		state = self.mediator.state
+		projection = self._shared_interview_projection() or {}
+		answered = getattr(state, 'answered_questions', {}) or {}
+		if not isinstance(answered, dict):
+			answered = {}
+		unknown_items = []
+		deferred_items = []
+		unknown_tokens = {'unknown', 'not sure', 'unsure', "i don't know", 'i do not know'}
+		deferred_tokens = {'skipped', 'deferred', 'later', 'not now'}
+		for field_name, value in answered.items():
+			text = str(value).strip().lower()
+			if text in unknown_tokens:
+				unknown_items.append({'field': str(field_name), 'disposition': 'unknown'})
+			elif text in deferred_tokens:
+				deferred_items.append({'field': str(field_name), 'disposition': 'deferred'})
+		graphs = {
+			'knowledge_graph': projection.get('knowledge_graph') if isinstance(projection.get('knowledge_graph'), dict) else {'status': 'unknown'},
+			'dependency_graph': projection.get('dependency_graph') if isinstance(projection.get('dependency_graph'), dict) else {'status': 'unknown'},
+		}
+		pending = projection.get('pending_inquiry')
+		if not isinstance(pending, dict):
+			current = getattr(state, 'current_inquiry', None)
+			pending = current if isinstance(current, dict) else {'status': 'unknown', 'reason': 'not_recorded'}
+		provenance = {}
+		if isinstance(graphs['knowledge_graph'], dict):
+			provenance = graphs['knowledge_graph'].get('provenance') if isinstance(graphs['knowledge_graph'].get('provenance'), dict) else {}
+		if not provenance:
+			provenance = {'status': 'unknown', 'source': 'interview-snapshot'}
+		inquiry = pending if isinstance(pending, dict) else {}
+		revisions = {
+			'session_revision': projection.get('session_revision', 'unknown'),
+			'question_revision': projection.get('question_revision', inquiry.get('revision', 'unknown')),
+			'graph_revision': inquiry.get('revision', projection.get('question_revision', 'unknown')),
+		}
+		transcript = []
+		chat_history = getattr(state, 'chat_history', {}) or {}
+		if isinstance(chat_history, dict):
+			for timestamp, entry in chat_history.items():
+				if isinstance(entry, dict):
+					transcript.append({'at': str(timestamp), 'sender': str(entry.get('sender') or ''), 'message': str(entry.get('message') or entry.get('question') or '')})
+				else:
+					transcript.append({'at': str(timestamp), 'message': str(entry)})
+		complaint_text = str(getattr(state, 'original_complaint', None) or getattr(state, 'complaint_summary', None) or '')
+		return assemble_interview_snapshot(
+			session_id=str(projection.get('session_id') or getattr(state, 'username', None) or 'unknown-session'),
+			revision=str(revision),
+			outcome_reason=str(getattr(self, '_terminal_stop_reason', None) or 'unknown'),
+			pending_inquiry=pending,
+			knowledge_graph=graphs['knowledge_graph'],
+			dependency_graph=graphs['dependency_graph'],
+			provenance=provenance,
+			unknown_items=unknown_items,
+			deferred_items=deferred_items,
+			complaint_text=complaint_text,
+			transcript=transcript,
+			exports={'status': 'unknown' if not getattr(state, 'complaint', None) else 'present'},
+			durability_payload={'writer': 'cli', 'status': 'pending'},
+			revisions=revisions,
+		)
+
+	def _interview_protection_settings(self):
+		protection = getattr(self, '_interview_protection', None) or os.environ.get('COMPLAINT_INTERVIEW_PROTECTION')
+		directory = getattr(self, '_interview_snapshot_dir', None) or os.environ.get('COMPLAINT_INTERVIEW_SNAPSHOT_DIR')
+		key = getattr(self, '_interview_key', None)
+		key_id = getattr(self, '_interview_key_id', None)
+		if key is None:
+			encoded = os.environ.get('COMPLAINT_INTERVIEW_KEY_HEX') or ''
+			if encoded:
+				key = bytes.fromhex(encoded)
+		if key_id is None:
+			key_id = os.environ.get('COMPLAINT_INTERVIEW_KEY_ID')
+		tenant = getattr(self, '_interview_tenant_id', None) or os.environ.get('COMPLAINT_INTERVIEW_TENANT') or 'synthetic-user'
+		case_id = getattr(self, '_interview_case_id', None) or os.environ.get('COMPLAINT_INTERVIEW_CASE') or tenant
+		return {
+			'protection': protection,
+			'directory': directory,
+			'key': key,
+			'key_id': key_id,
+			'tenant_id': str(tenant),
+			'case_id': str(case_id),
+		}
+
+	def save_private_interview_snapshot(self, *, expected_revision=None, migrate_plaintext=False, fail_before_head=False):
+		from integrations.ipfs_datasets.storage import InterviewSnapshotError, persist_interview_snapshot
+		settings = self._interview_protection_settings()
+		protection = settings['protection']
+		if protection != 'user_chosen_encrypted':
+			raise InterviewSnapshotError('encrypted interview protection is required', code='protection_required', public_status='unavailable')
+		if not settings['directory'] or settings['key'] is None or not settings['key_id']:
+			raise InterviewSnapshotError('Private interview keys require unlock.', code='unlock_needed', public_status='unlock_needed')
+		snapshot = self.build_complete_interview_snapshot()
+		result = persist_interview_snapshot(
+			settings['directory'],
+			snapshot,
+			protection='user_chosen_encrypted',
+			tenant_id=settings['tenant_id'],
+			case_id=settings['case_id'],
+			principal_id=settings['tenant_id'],
+			key=settings['key'],
+			key_id=settings['key_id'],
+			expected_revision=expected_revision,
+			migrate_plaintext=migrate_plaintext,
+			fail_before_head=fail_before_head,
+		)
+		self._last_interview_receipt = result['receipt']
+		log.info('interview snapshot committed revision=%s session_id=%s status=%s', result['receipt'].get('revision'), result['receipt'].get('session_id'), result['receipt'].get('status'))
+		return result
+
+	def resume_private_interview_snapshot(self):
+		from integrations.ipfs_datasets.storage import load_interview_snapshot
+		settings = self._interview_protection_settings()
+		if settings['protection'] != 'user_chosen_encrypted':
+			raise RuntimeError('encrypted interview protection is required')
+		if not settings['directory'] or settings['key'] is None or not settings['key_id']:
+			from integrations.ipfs_datasets.storage import InterviewSnapshotError
+			raise InterviewSnapshotError('Private interview keys require unlock.', code='unlock_needed', public_status='unlock_needed')
+		loaded = load_interview_snapshot(
+			settings['directory'],
+			protection='user_chosen_encrypted',
+			tenant_id=settings['tenant_id'],
+			case_id=settings['case_id'],
+			principal_id=settings['tenant_id'],
+			key=settings['key'],
+			key_id=settings['key_id'],
+		)
+		snapshot = loaded['snapshot']
+		graphs = snapshot.get('graphs') if isinstance(snapshot.get('graphs'), dict) else {}
+		knowledge = graphs.get('knowledge_graph') if isinstance(graphs.get('knowledge_graph'), dict) else {}
+		dependency = graphs.get('dependency_graph') if isinstance(graphs.get('dependency_graph'), dict) else {}
+		shared = None
+		if knowledge.get('status') != 'unknown' and dependency.get('status') != 'unknown' and 'entities' in knowledge:
+			shared = {
+				'schema_version': 'shared-interview-session-v1',
+				'session_id': snapshot.get('session_id'),
+				'session_revision': snapshot.get('revisions', {}).get('session_revision'),
+				'question_revision': snapshot.get('revisions', {}).get('question_revision'),
+				'pending_inquiry': snapshot.get('pending_inquiry'),
+				'knowledge_graph': knowledge,
+				'dependency_graph': dependency,
+			}
+		self._restore_local_session_payload({'state': {
+			'original_complaint': snapshot.get('complaint_text'),
+			'current_inquiry': snapshot.get('pending_inquiry'),
+			'chat_history': {str(index): item for index, item in enumerate(snapshot.get('transcript') or [])},
+		}, 'shared_interview': shared, 'terminal_controls': {
+			'stop_reason': snapshot.get('outcome_reason'),
+			'objective_id': (snapshot.get('pending_inquiry') or {}).get('objective_id') if isinstance(snapshot.get('pending_inquiry'), dict) else '',
+			'graph_revision': snapshot.get('revisions', {}).get('graph_revision'),
+		}})
+		self._last_interview_receipt = loaded['receipt']
+		return loaded
+
 	def save(self):
+		settings = self._interview_protection_settings()
+		if settings['protection'] == 'user_chosen_encrypted':
+			result = self.save_private_interview_snapshot()
+			print('Interview snapshot saved revision=%s status=%s' % (result['receipt'].get('revision'), result['receipt'].get('status')))
+			return result
 		if self._using_temporary_session():
 			output_dir = self._local_state_dir()
 			output_dir.mkdir(parents=True, exist_ok=True)
@@ -1310,6 +1469,11 @@ class CLI:
 		print("Profile saved")
 	
 	def resume(self):
+		settings = self._interview_protection_settings()
+		if settings['protection'] == 'user_chosen_encrypted':
+			loaded = self.resume_private_interview_snapshot()
+			print('Resumed encrypted interview snapshot revision=%s' % loaded['receipt'].get('revision'))
+			return loaded
 		if self._using_temporary_session():
 			state_dir = self._local_state_dir()
 			files = sorted(state_dir.glob('temporary-cli-session-*.json'))

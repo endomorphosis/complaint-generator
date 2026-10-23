@@ -3621,6 +3621,113 @@ class ComplaintWorkspaceService:
             raise WorkspacePersistenceError("Private artifact storage is unavailable.", code="artifact_unavailable", public_status="unavailable") from None
         return {"status": "available", "written": True, "artifacts": artifacts, "plaintext_disk": False}
 
+    def interview_snapshot_directory(self, user_id: str) -> Path:
+        resolved = self._check_access(user_id, ability="write")
+        return self._session_dir / "interview-snapshots" / self._namespace_filename(resolved)
+
+    def _interview_snapshot_key(self, user_id: str, case_id: Optional[str] = None) -> Dict[str, Any]:
+        from integrations.private_storage import PrivateArtifactBinding, PrivateKeyLockedError, PrivateKeyMaterialError
+        try:
+            context = self._private_artifact_context(user_id, case_id)
+            binding_key = context["key_provider"].resolve(PrivateArtifactBinding(
+                tenant_id=context["tenant_id"],
+                case_id=context["case_id"],
+                artifact_kind="interview-snapshot",
+                revision="snapshot-rev-0",
+                principal_id=context["principal_id"],
+            ))
+        except (PrivateKeyLockedError, PrivateKeyMaterialError):
+            raise WorkspacePersistenceError(
+                "Private interview keys require unlock.",
+                code="unlock_needed",
+                public_status="unlock_needed",
+            ) from None
+        context["key_id"], context["key"] = binding_key
+        return context
+
+    def persist_complete_interview_snapshot(
+        self,
+        user_id: str,
+        snapshot: Mapping[str, Any],
+        *,
+        protection: str = "user_chosen_encrypted",
+        case_id: Optional[str] = None,
+        expected_revision: Optional[str] = None,
+        migrate_plaintext: bool = False,
+        fail_before_head: bool = False,
+    ) -> Dict[str, Any]:
+        """Persist one complete interview snapshot inside the private session tree."""
+        from integrations.ipfs_datasets.storage import InterviewSnapshotError, persist_interview_snapshot
+
+        if protection == "user_chosen_encrypted":
+            context = self._interview_snapshot_key(user_id, case_id)
+        else:
+            context = {"tenant_id": user_id, "case_id": str(case_id or user_id), "principal_id": user_id, "key": None, "key_id": None}
+        directory = self.interview_snapshot_directory(str(context["tenant_id"]))
+        try:
+            result = persist_interview_snapshot(
+                directory,
+                snapshot,
+                protection=protection,
+                tenant_id=str(context["tenant_id"]),
+                case_id=str(context["case_id"]),
+                principal_id=str(context["principal_id"]),
+                key=context.get("key"),
+                key_id=context.get("key_id"),
+                expected_revision=expected_revision,
+                migrate_plaintext=migrate_plaintext,
+                fail_before_head=fail_before_head,
+            )
+        except InterviewSnapshotError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.public_status) from None
+        receipt = dict(result["receipt"])
+        receipt["plaintext_disk"] = protection != "user_chosen_encrypted"
+        return {"snapshot": result["snapshot"], "receipt": receipt}
+
+    def load_complete_interview_snapshot(
+        self,
+        user_id: str,
+        *,
+        protection: str = "user_chosen_encrypted",
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import InterviewSnapshotError, load_interview_snapshot
+
+        if protection == "user_chosen_encrypted":
+            context = self._interview_snapshot_key(user_id, case_id)
+        else:
+            context = {"tenant_id": user_id, "case_id": str(case_id or user_id), "principal_id": user_id, "key": None, "key_id": None}
+        directory = self.interview_snapshot_directory(str(context["tenant_id"]))
+        try:
+            return load_interview_snapshot(
+                directory,
+                protection=protection,
+                tenant_id=str(context["tenant_id"]),
+                case_id=str(context["case_id"]),
+                principal_id=str(context["principal_id"]),
+                key=context.get("key"),
+                key_id=context.get("key_id"),
+            )
+        except InterviewSnapshotError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.public_status) from None
+
+    def migrate_plaintext_interview_snapshot(self, user_id: str, *, case_id: Optional[str] = None) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import InterviewSnapshotError, migrate_unencrypted_interview_snapshot
+
+        context = self._interview_snapshot_key(user_id, case_id)
+        directory = self.interview_snapshot_directory(str(context["tenant_id"]))
+        try:
+            return migrate_unencrypted_interview_snapshot(
+                directory,
+                tenant_id=str(context["tenant_id"]),
+                case_id=str(context["case_id"]),
+                principal_id=str(context["principal_id"]),
+                key=context["key"],
+                key_id=context["key_id"],
+            )
+        except InterviewSnapshotError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.public_status) from None
+
     def export_readable_filing(
         self,
         user_id: str,
