@@ -12313,6 +12313,37 @@ class ComplaintWorkspaceService:
         self._user_owned_keys = session
         return task_key_receipt(state)
 
+    def prepare_private_terminal_case(self, user_id: str) -> Dict[str, Any]:
+        """Use an unlocked case key; initialize only a demonstrably new profile."""
+        self._require_local_filesystem_access()
+        user = self._resolve_user_id(user_id)
+        self._require_private_case_key_access(user, user, principal_id=user)
+        from integrations.private_storage import PrivateArtifactBinding, PrivateKeyMaterialError
+
+        keys = self._private_key_session()
+        if not keys.unlocked:
+            raise WorkspacePersistenceError("Private workspace keys require unlock.", code="unlock_needed", public_status="unlock_needed")
+        binding = PrivateArtifactBinding(tenant_id=user, case_id=user, principal_id=user,
+                                         artifact_kind="session", revision="session-v1")
+        try:
+            self.private_key_provider().resolve(binding)
+        except PrivateKeyMaterialError:
+            # Missing keys for an existing profile mean recovery, never a new
+            # identity. Unindexed ciphertext is also insufficient proof that
+            # creating a fresh case key is safe.
+            base = self._namespace_filename(user)
+            existing = [self._session_dir / base, self._session_dir / (base + ".cgpe"),
+                        self._legacy_session_path(user), self.joined_revision_repository(user, user),
+                        self.interview_snapshot_directory(user, user),
+                        self._session_dir / "private-artifacts", self._session_dir / "private-migrations"]
+            if any(os.path.lexists(path) for path in existing):
+                raise WorkspacePersistenceError("Recover the selected private case key before continuing.",
+                                                code="key_unavailable", public_status="unlock_needed") from None
+            ready = self.ensure_private_case_key(user, user)
+            if ready.get("unlocked") is not True:
+                raise WorkspacePersistenceError("Private workspace keys require unlock.", code="unlock_needed", public_status="unlock_needed")
+        return {"status": "ready", "unlock_is_remote_consent": False, "data_reset": False}
+
     def ensure_private_case_key(self, tenant_id: str, case_id: str) -> Dict[str, Any]:
         """Mint or reload one case data key. The key id is opaque; bytes stay in memory."""
 

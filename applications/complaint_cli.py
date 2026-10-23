@@ -732,9 +732,39 @@ def _sync_controls_from_payload(user_id: str, payload: dict, inquiry: Optional[d
 
 
 
+def _unlock_private_chat_case(user_id: str) -> None:
+    """Unlock in this terminal process; credentials never cross argv or env."""
+    from integrations.private_storage import PrivateKeyMaterialError, read_unlock_passphrase
+
+    state = service.private_key_status()
+    if state.get("unlocked") is not True:
+        protection = state.get("protection")
+        if protection == "passphrase":
+            if not sys.stdin.isatty():
+                raise WorkspacePersistenceError("Unlock requires a private terminal.", code="unlock_needed", public_status="unlock_needed")
+            try:
+                phrase = read_unlock_passphrase("Private workspace passphrase")
+            except PrivateKeyMaterialError:
+                raise WorkspacePersistenceError("No private passphrase was accepted.", code="unlock_needed", public_status="unlock_needed") from None
+            try:
+                state = service.unlock_private_keys(passphrase=phrase)
+            finally:
+                phrase = None
+        elif protection == "keyring":
+            state = service.unlock_private_keys()
+        else:
+            terminal_echo("Create or recover the selected workspace's private key store before starting chat.")
+            raise WorkspacePersistenceError("Private workspace keys require setup.", code="unlock_needed", public_status="unlock_needed")
+        if state.get("unlocked") is not True:
+            code = "authentication_failed" if state.get("code") == "authentication_failed" else "unlock_needed"
+            raise WorkspacePersistenceError("Private workspace unlock did not succeed.", code=code, public_status="unlock_needed")
+    service.prepare_private_terminal_case(user_id)
+
+
 @app.command("chat")
 @_workspace_command_boundary
 def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
+    _unlock_private_chat_case(user_id)
     try:
         max_turns = int(max_turns)
     except (TypeError, ValueError):
