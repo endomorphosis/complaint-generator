@@ -656,58 +656,60 @@ def test_rel03_unknown_extra_command_does_not_gain_script_companion_dispatch(tmp
 
 
 def test_actual_private_storage_change_measures_all_finite_impacted_companions(tmp_path, monkeypatch):
+    """Bind the production impact policy; execute its finite selector in an isolated unit fixture.
+
+    The real replica companion keeps its separate process/crypto acceptance.
+    This fixture deliberately retains its absolute process/network denial.
+    """
     import shlex
-    from integrations.ipfs_accelerate.improvement_runner import (
-        _impacted_behavioral_checks, measure_behavioral_command,
-    )
+    import integrations.ipfs_accelerate.improvement_runner as runtime
     _write_output(tmp_path, "CIMP-OPS-04")
-    _, executor, environment = _gate(
-        tmp_path, _task(), _observation(tmp_path), _return_measurement=True)
+    _, executor, environment = _gate(tmp_path, _task(), _observation(tmp_path), _return_measurement=True)
     product = tmp_path / "integrations/private_storage.py"
     product.parent.mkdir()
     product.write_text("SOURCE_KIND = 'synthetic private storage impact fixture'\n")
     companions = {
-        "tests/test_private_workspace_crypto.py":"test_crypto_companion_selected",
-        "tests/test_private_workspace_keys.py":"test_key_companion_selected",
-        "tests/test_private_storage_adapter.py":"test_adapter_companion_selected",
+        "tests/test_private_workspace_crypto.py": "test_crypto_companion_selected",
+        "tests/test_private_workspace_keys.py": "test_key_companion_selected",
+        "tests/test_private_storage_adapter.py": "test_adapter_companion_selected",
     }
     for relative, function in companions.items():
         (tmp_path / relative).write_text("def " + function + "():\n assert 2 + 2 == 4\n")
-    # The private-storage impact set also requires the real, pinned replica
-    # companion. Copy its exact bytes; a stub must not stand in for it.
     trusted = "tests/test_private_replica_acceptance.py"
-    (tmp_path / trusted).write_bytes((Path(__file__).resolve().parent / "test_private_replica_acceptance.py").read_bytes())
-    expected_modules = sorted([*companions, trusted])
-    assert _impacted_behavioral_checks(tmp_path, ["integrations/private_storage.py"]) == expected_modules
-    assert _impacted_behavioral_checks(tmp_path, ["integrations/ipfs_datasets/private_storage.py"]) == []
-    # The three small companions above are deliberately synthetic fixtures.
-    # Exercise preservation against their separate, reviewed fixture baseline,
-    # rather than replacing the installed product's larger regression suites.
-    import integrations.ipfs_accelerate.improvement_runner as runtime
+    with pytest.raises(ValueError, match="impacted_check_missing"):
+        runtime._impacted_behavioral_checks(tmp_path, ["integrations/private_storage.py"])
+    trusted_bytes = (Path(__file__).resolve().parent / "test_private_replica_acceptance.py").read_bytes()
+    (tmp_path / trusted).write_bytes(trusted_bytes)
+    assert runtime._impacted_behavioral_checks(tmp_path, ["integrations/private_storage.py"]) == sorted([*companions, trusted])
+    binding = runtime._private_replica_acceptance_binding(tmp_path, _task(), [trusted])
+    assert binding["sha256"]
+    (tmp_path / trusted).write_bytes(trusted_bytes + b"\n# synthetic fixture tampering\n")
+    with pytest.raises(ValueError, match="trusted_replica_acceptance_changed"):
+        runtime._private_replica_acceptance_binding(tmp_path, _task(), [trusted])
+    (tmp_path / trusted).write_bytes(trusted_bytes)
+    # A named unit-only policy key exercises actual collection/instrumentation
+    # without relabeling the real crypto/probe suite as a stub or disabling its guard.
+    fixture_key = "unit-fixture/private-storage-impact"
+    monkeypatch.setitem(runtime._IMPACTED_BEHAVIORAL_CHECKS, fixture_key, tuple(companions))
     reviewed = tmp_path / "reviewed-fixture-baseline"
-    for relative in expected_modules:
+    for relative in companions:
         target = reviewed / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((tmp_path / relative).read_bytes())
     real_preserve = runtime._preserve_existing_behavioral_definitions
-    def preserve_fixture(root, paths):
-        return real_preserve(root, paths, trusted_root=reviewed)
-    monkeypatch.setattr(runtime, "_preserve_existing_behavioral_definitions", preserve_fixture)
+    monkeypatch.setattr(runtime, "_preserve_existing_behavioral_definitions",
+        lambda root, paths: real_preserve(root, paths, trusted_root=reviewed))
     task = _task()
-    observed = measure_behavioral_command(
-        tmp_path, tmp_path / "private-impact-runs", task,
+    observed = runtime.measure_behavioral_command(tmp_path, tmp_path / "private-impact-runs", task,
         "PYTHONPATH=" + shlex.quote(environment["PYTHONPATH"]) + " " + COMMAND,
         runner=executor, environment=environment, timeout_seconds=45, declared_command=COMMAND,
-        context={"changed_paths":["integrations/private_storage.py"],
-                 "require_child_guard":True, "pytest_guard_plugin":"complaint_fixture_guard"})
+        context={"changed_paths": [fixture_key], "require_child_guard": True,
+                 "pytest_guard_plugin": "complaint_fixture_guard"})
     assert observed["host_measurement"]["reason"] == ""
-    assert observed["host_measurement"]["impacted_checks"] == expected_modules
-    # This population was independently collected from the unchanged pinned
-    # companion. Require every parametrized case, not only its function names.
-    expected_trusted = {'tests/test_private_replica_acceptance.py::test_reconcile_rechecks_previously_counted_provider[corrupt]', 'tests/test_private_replica_acceptance.py::test_provider_blocking_is_bounded_and_owned[deadline_restore]', 'tests/test_private_replica_acceptance.py::test_other_owner_cannot_overwrite_existing_case[principal_id]', 'tests/test_private_replica_acceptance.py::test_exact_upstream_replication_suites_are_not_presence_success', 'tests/test_private_replica_acceptance.py::test_reconcile_rechecks_previously_counted_provider[unavailable]', 'tests/test_private_replica_acceptance.py::test_other_owner_cannot_overwrite_existing_case[case_id]', 'tests/test_private_replica_acceptance.py::test_replica_api_capability_is_explicit', 'tests/test_private_replica_acceptance.py::test_provider_blocking_is_bounded_and_owned[deadline_reconcile]', 'tests/test_private_replica_acceptance.py::test_reconcile_rechecks_actual_local_primary[corrupt]', 'tests/test_private_replica_acceptance.py::test_replica_count_requires_ciphertext_readback_not_placement[queued]', 'tests/test_private_replica_acceptance.py::test_provider_blocking_is_bounded_and_owned[deadline_publish]', 'tests/test_private_replica_acceptance.py::test_probe_custody_reaps_an_inert_escaped_session', 'tests/test_private_replica_acceptance.py::test_other_owner_cannot_overwrite_existing_case[tenant_id]', 'tests/test_private_replica_acceptance.py::test_real_crypto_triplet_restores_in_a_new_process', 'tests/test_private_replica_acceptance.py::test_replica_count_requires_ciphertext_readback_not_placement[corrupt]', 'tests/test_private_replica_acceptance.py::test_concurrent_publications_do_not_mix_ledger_and_ciphertext', 'tests/test_private_replica_acceptance.py::test_interrupted_publication_preserves_one_complete_generation', 'tests/test_private_replica_acceptance.py::test_reconcile_rechecks_actual_local_primary[missing]'}
-    expected = {NODE_A, NODE_B} | {path + "::" + function for path, function in companions.items()} | expected_trusted
+    assert observed["host_measurement"]["impacted_checks"] == sorted(companions)
+    expected = {NODE_A, NODE_B} | {path + "::" + function for path, function in companions.items()}
     assert set(observed["required_nodeids"]) == expected
-    assert observed["collected_count"] == len(expected) == 23
+    assert observed["collected_count"] == 5
     assert all(row["outcome"] == "passed" for row in observed["cases"])
     assert observed["host_measurement"]["completion_authority"] is False
 
