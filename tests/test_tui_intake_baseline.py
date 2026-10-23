@@ -856,9 +856,13 @@ def test_canonical_pty_first_answer_and_cold_encrypted_resume(monkeypatch: pytes
         if answers.get("protected_activity"):
             _fail("third intake answer was stored before resume")
         history = saved.get("intake_history") or []
-        if [item.get("question_id") for item in history] != ["original_complaint"]:
-            _fail("canonical graph answer created a legacy structured answer entry")
+        expected_history_ids = ["original_complaint", answered[0]["inquiry_id"]]
+        if [item.get("question_id") for item in history] != expected_history_ids:
+            _fail("audit history did not preserve exactly the narrative and accepted canonical answer")
         _require_same("narrative provenance history", history[0].get("answer"), NARRATIVE)
+        _require_same("canonical answer provenance history", history[1].get("answer"), CANONICAL_ANSWER)
+        if any(question_id in answers for question_id in expected_history_ids):
+            _fail("canonical answers leaked into the legacy seven-field answer map")
 
         fresh = _unlocked_service(session_dir, SMOKE_USER_ID)
         again = _unlocked_service(session_dir, SMOKE_USER_ID)
