@@ -159,6 +159,18 @@ gaps in graph-driven questioning, truthful stopping, and encrypted persistence.
 
 Use `python scripts/run_complaint_improvement_supervisor.py prepare`, then
 `doctor`, `start`, and `status` to prepare and monitor the native supervisor.
+For a bounded launch with automatic recovery when its launcher exits, use
+`python scripts/run_complaint_improvement_supervisor.py start --watch --monitor-seconds 21600`.
+Use `watch --monitor-seconds 21600` to attach that same monitor to an existing
+owned launch. Each launch has one recorded monitoring window, capped at six
+hours. A replacement launcher, reused process ID, changed monitor source, or
+unverified process ownership makes monitoring refuse further effects. The public
+`stop` command fences a surviving worker only after it verifies the worker's
+sealed birth identity and the original launcher's absence, then checks process
+and container closure. Monitoring preserves task attempts, claims, and history.
+Newly generated taskboards permit Native's validated no-change completion path;
+existing taskboard policy and progress are retained when preparing again.
+
 `doctor` and `start` accept `--worktree-root /absolute/private/directory` for
 new workspaces on a larger volume. Create an empty dedicated directory owned by
 your user with mode `0700`; aliases, shared directories and existing unrelated
