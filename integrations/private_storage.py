@@ -1210,6 +1210,8 @@ class UserOwnedKeySession:
     def ensure_data_key(self, tenant_id: str, case_id: str) -> str:
         _require_label(tenant_id)
         _require_label(case_id)
+        if self._case_was_destroyed(tenant_id, case_id):
+            raise PrivateKeyMaterialError("case_key_destroyed")
         if not self.unlocked or self._master is None or self._document is None:
             raise PrivateKeyLockedError(
                 "The case key is locked, so encrypted state was left unchanged.",
@@ -1323,6 +1325,8 @@ class UserOwnedKeySession:
         declared_case = str(document_in.get("case_id") or "")
         if declared_tenant != tenant_id or declared_case != case_id:
             raise PrivateArtifactBindingError("foreign_case")
+        if self._case_was_destroyed(tenant_id, case_id):
+            raise PrivateKeyMaterialError("case_key_destroyed")
         key_id = str(document_in.get("data_key_id") or "")
         kdf = document_in.get("kdf")
         if not isinstance(kdf, Mapping):
@@ -1723,6 +1727,79 @@ class UserOwnedKeySession:
         })
         _PORTABILITY_LOG.info("retained keys revoked after verified backup migration")
         return state
+
+    def _case_was_destroyed(self, tenant_id: str, case_id: str) -> bool:
+        document = self._document
+        if not isinstance(document, dict):
+            return False
+        destroyed = document.get("destroyed_cases") or {}
+        if not isinstance(destroyed, Mapping):
+            return False
+        item = destroyed.get(f"{tenant_id}\n{case_id}")
+        return isinstance(item, Mapping) and item.get("status") == "destroyed"
+
+    def destroy_case_keys(self, tenant_id: str, case_id: str) -> dict[str, Any]:
+        """Destroy one case's data keys. The master key and other cases stay."""
+
+        _require_label(tenant_id)
+        _require_label(case_id)
+        if self._document is None:
+            raise PrivateKeyMaterialError("key_store_absent")
+        slot = f"{tenant_id}\n{case_id}"
+        if self._case_was_destroyed(tenant_id, case_id):
+            prior = dict((self._document.get("destroyed_cases") or {}).get(slot) or {})
+            return {
+                "destroyed": True,
+                "idempotent": True,
+                "master_key_destroyed": False,
+                "other_cases_retained": True,
+                "data_key_ids": list(prior.get("data_key_ids") or []),
+            }
+        self._require_unlocked("Destroying a case key requires an unlocked session. Nothing was erased.")
+        document = dict(self._document)
+        cases = dict(document.get("cases") or {})
+        record = cases.pop(slot, None)
+        key_ids: list[str] = []
+        if isinstance(record, Mapping):
+            active = str(record.get("data_key_id") or "")
+            if active:
+                key_ids.append(active)
+            pending = record.get("pending_data_key")
+            if isinstance(pending, Mapping) and pending.get("data_key_id"):
+                key_ids.append(str(pending.get("data_key_id")))
+            for item in record.get("retained_data_keys") or []:
+                if isinstance(item, Mapping) and item.get("data_key_id"):
+                    key_ids.append(str(item.get("data_key_id")))
+        destroyed = dict(document.get("destroyed_cases") or {})
+        destroyed[slot] = {
+            "tenant_id": tenant_id,
+            "case_id": case_id,
+            "status": "destroyed",
+            "data_key_ids": key_ids,
+        }
+        document["cases"] = cases
+        document["destroyed_cases"] = destroyed
+        self._write_document(document)
+        self._document = document
+        self._zero_case_keys(tenant_id, case_id)
+        return {
+            "destroyed": True,
+            "idempotent": False,
+            "master_key_destroyed": False,
+            "other_cases_retained": True,
+            "data_key_ids": key_ids,
+        }
+
+    def _zero_case_keys(self, tenant_id: str, case_id: str) -> None:
+        identity = (tenant_id, case_id)
+        for pool in (self._data_keys, self._pending_data_keys):
+            found = pool.pop(identity, None)
+            if found is not None:
+                buffer = bytearray(found[1])
+                buffer[:] = b"\x00" * len(buffer)
+        for _key_id, key in self._retained_data_keys.pop(identity, []):
+            buffer = bytearray(key)
+            buffer[:] = b"\x00" * len(buffer)
 
     def assert_no_raw_key_files(self) -> None:
         if not self.directory.exists():
@@ -4486,6 +4563,7 @@ def restore_encrypted_workspace(
     """Open the local primary, or repair it from a verified ciphertext replica."""
 
     del clock
+    _reject_tombstoned_case(repository, tenant_id, case_id)
     ledger = _workspace_ledger(repository)
     identity = _workspace_identity(tenant_id, case_id, principal_id, key_id)
     _assert_workspace_owner(ledger, identity)
@@ -5014,6 +5092,7 @@ def read_private_workspace_generation(
 ) -> dict[str, Any]:
     """Open the active generation, or a retained generation after a partial rotation."""
 
+    _reject_deleted_private_case(repository, tenant_id, case_id, session)
     session._require_unlocked("Reading a private workspace requires an unlocked session.")
     ledger = _workspace_ledger(repository)
     identity = _workspace_identity(tenant_id, case_id, principal_id, "")
@@ -5076,6 +5155,7 @@ def stage_private_workspace(
 ) -> dict[str, Any]:
     """Seal one case, fact graph, and proof revision into the local ciphertext ledger."""
 
+    _reject_tombstoned_case(repository, tenant_id, case_id)
     session.ensure_data_key(tenant_id, case_id)
     key_id, key = session._require_case_key(tenant_id, case_id)
     _publish_workspace_replica(
@@ -5213,6 +5293,7 @@ def import_encrypted_workspace(
     _require_label(tenant_id)
     _require_label(case_id)
     _require_label(principal_id)
+    _reject_tombstoned_case(repository, tenant_id, case_id)
     recovery_file = Path(recovery_path)
     if not recovery_file.is_file():
         raise PrivatePortabilityError(
@@ -5322,6 +5403,745 @@ def import_encrypted_workspace(
     return restored
 
 
+DELETION_SCHEMA = "private-case-deletion"
+DELETION_VERSION = 1
+DELETION_POLICIES = ("retain_keys", "destroy_case_keys")
+DELETION_PHASES = (
+    "references_removed",
+    "local_deleted",
+    "unpinned",
+    "remote_requested",
+    "keys_destroyed",
+    "tombstoned",
+)
+_PUBLIC_IPFS_LIMITATION = (
+    "Unpin and remote deletion requests cover only managed replicas this workspace tracks. "
+    "They do not erase copies on public IPFS or unmanaged external peers."
+)
+
+
+def _case_scope_token(tenant_id: str, case_id: str) -> str:
+    _require_label(tenant_id)
+    _require_label(case_id)
+    return hashlib.sha256(f"{tenant_id}\n{case_id}".encode("utf-8")).hexdigest()
+
+
+def _deletion_root(repository: str | Path) -> Path:
+    return Path(repository)
+
+
+def _scope_dir(repository: str | Path, tenant_id: str, case_id: str) -> Path:
+    return _deletion_root(repository) / "deletion-scopes" / _case_scope_token(tenant_id, case_id)
+
+
+def _tombstone_path(repository: str | Path, tenant_id: str, case_id: str) -> Path:
+    return _deletion_root(repository) / "tombstones" / f"{_case_scope_token(tenant_id, case_id)}.json"
+
+
+def _deletion_journal_path(repository: str | Path, tenant_id: str, case_id: str) -> Path:
+    return _deletion_root(repository) / "deletion-journals" / f"{_case_scope_token(tenant_id, case_id)}.json"
+
+
+def _shared_legal_index_path(repository: str | Path) -> Path:
+    return _deletion_root(repository) / "shared-legal-index.json"
+
+
+def _managed_pin_index_path(repository: str | Path) -> Path:
+    return _deletion_root(repository) / "managed-pins.json"
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    document = _read_json_file(path)
+    return document or {}
+
+
+def _write_json_object(path: Path, document: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
+    _write_mode600(path, _json_bytes(document))
+
+
+def _remove_tree(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+        return
+    for child in sorted(path.iterdir(), reverse=True):
+        _remove_tree(child)
+    path.rmdir()
+
+
+def read_case_tombstone(repository: str | Path, tenant_id: str, case_id: str) -> dict[str, Any] | None:
+    """Return the case tombstone, if deletion already committed one."""
+
+    document = _read_json_file(_tombstone_path(repository, tenant_id, case_id))
+    if document is None:
+        return None
+    if document.get("schema") != DELETION_SCHEMA or document.get("status") != "tombstoned":
+        raise PrivateStorageError("deletion tombstone is unreadable", code="corrupt_manifest")
+    return document
+
+
+def _reject_tombstoned_case(repository: str | Path, tenant_id: str, case_id: str) -> None:
+    tombstone = read_case_tombstone(repository, tenant_id, case_id)
+    if tombstone is None:
+        return
+    code = "case_key_destroyed" if tombstone.get("case_keys_destroyed") else "tombstoned"
+    raise PrivatePortabilityError(
+        "A deletion tombstone blocks stale recovery from resurrecting this case's private state.",
+        code=code,
+        actions=("inspect_deletion_receipt",),
+    )
+
+
+def _reject_deleted_private_case(
+    repository: str | Path,
+    tenant_id: str,
+    case_id: str,
+    session: UserOwnedKeySession | None,
+) -> None:
+    if session is not None and session._case_was_destroyed(tenant_id, case_id):
+        raise PrivatePortabilityError(
+            "The deleted case key is inaccessible. Stale recovery cannot open this private state.",
+            code="case_key_destroyed",
+            actions=("inspect_deletion_receipt",),
+        )
+    _reject_tombstoned_case(repository, tenant_id, case_id)
+
+
+def normal_reset_retention_receipt() -> dict[str, Any]:
+    """Normal reset keeps the encryption key and the recovery path."""
+
+    return {
+        "operation": "normal_reset",
+        "retention_policy": "normal_reset_retains_keys",
+        "policy_explicit": True,
+        "encryption_key_destroyed": False,
+        "recovery_path_destroyed": False,
+        "key_destruction": "not_performed",
+        "irreversible_recovery_path_destroyed": False,
+        "data_reset": False,
+        "universal_erasure": False,
+        "public_ipfs_erased": False,
+        "message": "Normal reset does not destroy the encryption key or the recovery path.",
+    }
+
+
+def bind_shared_legal_artifact(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    name: str,
+    payload: bytes,
+) -> dict[str, Any]:
+    """Record one shared legal-source blob and this case's reference to it."""
+
+    _require_label(name)
+    if not isinstance(payload, (bytes, bytearray)):
+        raise PrivateStorageError("legal source payload rejected", code="bad_ref")
+    body = bytes(payload)
+    digest = hashlib.sha256(body).hexdigest()
+    token = _case_scope_token(tenant_id, case_id)
+    root = _deletion_root(repository)
+    shared = root / "shared-legal" / digest
+    if not shared.exists():
+        shared.parent.mkdir(parents=True, exist_ok=True)
+        _write_mode600(shared, body)
+    index = _read_json_object(_shared_legal_index_path(repository))
+    entry = dict(index.get(digest) or {})
+    cases = sorted(set(list(entry.get("cases") or []) + [token]))
+    index[digest] = {"cases": cases, "name": name}
+    _write_json_object(_shared_legal_index_path(repository), index)
+    scope = _scope_dir(repository, tenant_id, case_id)
+    references = _read_json_object(scope / "references.json")
+    artifacts = [dict(item) for item in references.get("legal_sources") or [] if isinstance(item, Mapping)]
+    if not any(item.get("digest") == digest for item in artifacts):
+        artifacts.append({"name": name, "digest": digest, "shared": True})
+    references["legal_sources"] = artifacts
+    references["tenant_id"] = tenant_id
+    references["case_id"] = case_id
+    _write_json_object(scope / "references.json", references)
+    return {"digest": digest, "shared": True, "referencing_cases": len(cases)}
+
+
+def write_case_local_private_file(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    kind: str,
+    name: str,
+    payload: bytes,
+) -> Path:
+    """Write ciphertext, cache, or temp bytes that belong only to one case."""
+
+    if kind not in {"ciphertext", "cache", "temp"}:
+        raise PrivateStorageError("private file kind rejected", code="bad_ref")
+    _require_label(name)
+    if "/" in name or "\\" in name or name in {".", ".."}:
+        raise PrivateStorageError("private file name rejected", code="bad_ref")
+    if not isinstance(payload, (bytes, bytearray)):
+        raise PrivateStorageError("private file payload rejected", code="bad_ref")
+    path = _scope_dir(repository, tenant_id, case_id) / kind / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_mode600(path, bytes(payload))
+    return path
+
+
+def record_managed_replica(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    cid: str,
+    provider_id: str,
+) -> dict[str, Any]:
+    """Track a managed replica pin. Shared CIDs stay pinned while another case uses them."""
+
+    _require_label(cid)
+    _require_label(provider_id)
+    token = _case_scope_token(tenant_id, case_id)
+    index = _read_json_object(_managed_pin_index_path(repository))
+    entry = dict(index.get(cid) or {})
+    cases = sorted(set(list(entry.get("cases") or []) + [token]))
+    entry["cases"] = cases
+    entry["provider_id"] = provider_id
+    index[cid] = entry
+    _write_json_object(_managed_pin_index_path(repository), index)
+    scope = _scope_dir(repository, tenant_id, case_id)
+    references = _read_json_object(scope / "references.json")
+    pins = [dict(item) for item in references.get("managed_replicas") or [] if isinstance(item, Mapping)]
+    if not any(item.get("cid") == cid for item in pins):
+        pins.append({"cid": cid, "provider_id": provider_id})
+    references["managed_replicas"] = pins
+    references["tenant_id"] = tenant_id
+    references["case_id"] = case_id
+    _write_json_object(scope / "references.json", references)
+    return {"cid": cid, "provider_id": provider_id, "referencing_cases": len(cases)}
+
+
+def _load_deletion_journal(repository: str | Path, tenant_id: str, case_id: str) -> dict[str, Any]:
+    path = _deletion_journal_path(repository, tenant_id, case_id)
+    document = _read_json_file(path)
+    if document is None:
+        return {
+            "schema": DELETION_SCHEMA,
+            "schema_version": DELETION_VERSION,
+            "tenant_id": tenant_id,
+            "case_id": case_id,
+            "completed": [],
+            "phases": {},
+            "plan": {},
+        }
+    if document.get("schema") != DELETION_SCHEMA:
+        raise PrivateStorageError("deletion journal is unreadable", code="corrupt_manifest")
+    document.setdefault("completed", [])
+    document.setdefault("phases", {})
+    document.setdefault("plan", {})
+    return document
+
+
+def _save_deletion_journal(repository: str | Path, journal: Mapping[str, Any]) -> None:
+    tenant_id = str(journal.get("tenant_id") or "")
+    case_id = str(journal.get("case_id") or "")
+    _write_json_object(_deletion_journal_path(repository, tenant_id, case_id), journal)
+
+
+def _capture_deletion_plan(repository: str | Path, tenant_id: str, case_id: str) -> dict[str, Any]:
+    token = _case_scope_token(tenant_id, case_id)
+    references = _read_json_object(_scope_dir(repository, tenant_id, case_id) / "references.json")
+    legal = [dict(item) for item in references.get("legal_sources") or [] if isinstance(item, Mapping)]
+    pins = [dict(item) for item in references.get("managed_replicas") or [] if isinstance(item, Mapping)]
+    index = _read_json_object(_shared_legal_index_path(repository))
+    pin_index = _read_json_object(_managed_pin_index_path(repository))
+    exclusive_digests = []
+    preserved_digests = []
+    for item in legal:
+        digest = str(item.get("digest") or "")
+        holders = list((index.get(digest) or {}).get("cases") or [])
+        if holders in ([], [token]) or holders == [token]:
+            exclusive_digests.append(digest)
+        else:
+            preserved_digests.append(digest)
+    exclusive_cids = []
+    shared_cids = []
+    for item in pins:
+        cid = str(item.get("cid") or "")
+        holders = list((pin_index.get(cid) or {}).get("cases") or [])
+        if not holders or holders == [token]:
+            exclusive_cids.append(cid)
+        else:
+            shared_cids.append(cid)
+    ledger = _workspace_ledger(repository)
+    owner = _read_json_file(ledger / _WORKSPACE_OWNER) or {}
+    ledger_owned = owner.get("tenant_id") == tenant_id and owner.get("case_id") == case_id
+    return {
+        "token": token,
+        "legal_sources": legal,
+        "managed_replicas": pins,
+        "exclusive_digests": exclusive_digests,
+        "preserved_digests": preserved_digests,
+        "exclusive_cids": exclusive_cids,
+        "shared_cids": shared_cids,
+        "ledger_owned": ledger_owned,
+    }
+
+
+def _remove_case_references(repository: str | Path, plan: Mapping[str, Any]) -> dict[str, Any]:
+    token = str(plan["token"])
+    index = _read_json_object(_shared_legal_index_path(repository))
+    for digest in list(index):
+        entry = dict(index[digest])
+        cases = [item for item in entry.get("cases") or [] if item != token]
+        entry["cases"] = cases
+        index[digest] = entry
+    _write_json_object(_shared_legal_index_path(repository), index)
+    pins = _read_json_object(_managed_pin_index_path(repository))
+    for cid in list(pins):
+        entry = dict(pins[cid])
+        entry["cases"] = [item for item in entry.get("cases") or [] if item != token]
+        pins[cid] = entry
+    _write_json_object(_managed_pin_index_path(repository), pins)
+    scope = _deletion_root(repository) / "deletion-scopes" / token
+    references = scope / "references.json"
+    if references.exists():
+        _write_json_object(references, {"removed": True, "tenant_token": token})
+    return {
+        "step": "remove_case_references",
+        "status": "completed",
+        "references_removed": True,
+        "preserved_shared_digests": list(plan.get("preserved_digests") or []),
+        "exclusive_digests": list(plan.get("exclusive_digests") or []),
+    }
+
+
+def _delete_local_private_bytes(repository: str | Path, tenant_id: str, case_id: str, plan: Mapping[str, Any]) -> dict[str, Any]:
+    scope = _scope_dir(repository, tenant_id, case_id)
+    removed_kinds = []
+    for kind in ("ciphertext", "cache", "temp"):
+        target = scope / kind
+        if target.exists():
+            _remove_tree(target)
+            removed_kinds.append(kind)
+    deleted_shared = []
+    preserved = []
+    index = _read_json_object(_shared_legal_index_path(repository))
+    for digest in list(plan.get("exclusive_digests") or []):
+        holders = list((index.get(digest) or {}).get("cases") or [])
+        if holders:
+            preserved.append(digest)
+            continue
+        path = _deletion_root(repository) / "shared-legal" / str(digest)
+        if path.exists():
+            path.unlink()
+        index.pop(str(digest), None)
+        deleted_shared.append(digest)
+    for digest in list(plan.get("preserved_digests") or []):
+        path = _deletion_root(repository) / "shared-legal" / str(digest)
+        if path.is_file():
+            preserved.append(digest)
+    _write_json_object(_shared_legal_index_path(repository), index)
+    ledger_removed = False
+    if plan.get("ledger_owned"):
+        ledger = _workspace_ledger(repository)
+        for name in (_WORKSPACE_FRAME, _WORKSPACE_CATALOG, _WORKSPACE_PENDING, _WORKSPACE_OWNER, "rotation-data.json"):
+            path = ledger / name
+            if path.is_file():
+                path.unlink()
+                ledger_removed = True
+        generations = ledger / "generations"
+        if generations.exists():
+            _remove_tree(generations)
+            ledger_removed = True
+    return {
+        "step": "delete_local_ciphertext_cache_temp",
+        "status": "completed",
+        "local_kinds_removed": removed_kinds,
+        "shared_artifacts_deleted": deleted_shared,
+        "shared_artifacts_preserved": preserved,
+        "ledger_ciphertext_removed": ledger_removed,
+    }
+
+
+def _provider_method(provider: Any, *names: str) -> Callable[..., Any] | None:
+    for name in names:
+        method = getattr(provider, name, None)
+        if callable(method):
+            return method
+    return None
+
+
+def _provider_status(result: Any) -> str:
+    if not isinstance(result, Mapping):
+        return "unreachable"
+    status = str(result.get("status") or result.get("state") or "unreachable")
+    if status in {"unpinned", "deleted", "accepted", "requested", "pending", "unreachable", "unavailable"}:
+        return "unreachable" if status in {"unavailable", "timeout"} else status
+    if status in {"timeout", "error"}:
+        return "unreachable"
+    return "unreachable"
+
+
+def _unpin_managed_replicas(
+    repository: str | Path,
+    plan: Mapping[str, Any],
+    providers: Mapping[str, Any] | None,
+    timeout_seconds: float | None,
+) -> dict[str, Any]:
+    pins = _read_json_object(_managed_pin_index_path(repository))
+    unpinned = []
+    left_shared = []
+    unreachable = []
+    for cid in list(plan.get("exclusive_cids") or []):
+        entry = dict(pins.get(cid) or {})
+        if entry.get("cases"):
+            left_shared.append({"cid": cid, "reason": "still_referenced"})
+            continue
+        provider_id = str(entry.get("provider_id") or "")
+        provider = (providers or {}).get(provider_id)
+        method = _provider_method(provider, "unpin") if provider is not None else None
+        if method is None:
+            unreachable.append({"cid": cid, "provider_id": provider_id, "status": "unreachable", "reason": "unpin_unavailable"})
+            continue
+        try:
+            result = _bounded_provider_call(method, timeout_seconds, cid=cid)
+        except Exception:
+            result = {"status": "unreachable"}
+        status = _provider_status(result)
+        if status == "unpinned":
+            pins.pop(cid, None)
+            unpinned.append({"cid": cid, "provider_id": provider_id, "status": "unpinned"})
+        else:
+            unreachable.append({"cid": cid, "provider_id": provider_id, "status": "unreachable", "reason": status})
+    for cid in list(plan.get("shared_cids") or []):
+        left_shared.append({"cid": cid, "reason": "shared_with_another_case"})
+    _write_json_object(_managed_pin_index_path(repository), pins)
+    return {
+        "step": "unpin_managed_replicas",
+        "status": "completed" if not unreachable else "partial",
+        "unpinned": unpinned,
+        "left_in_place": left_shared,
+        "unreachable": unreachable,
+    }
+
+
+def _request_remote_deletion(
+    plan: Mapping[str, Any],
+    providers: Mapping[str, Any] | None,
+    timeout_seconds: float | None,
+) -> dict[str, Any]:
+    requested = []
+    pending = []
+    unreachable = []
+    external = []
+    by_cid = {
+        str(item.get("cid") or ""): str(item.get("provider_id") or "")
+        for item in plan.get("managed_replicas") or []
+        if isinstance(item, Mapping)
+    }
+    residual = []
+    for cid in list(plan.get("shared_cids") or []):
+        residual.append({
+            "cid": cid,
+            "provider_id": by_cid.get(cid, ""),
+            "status": "not_requested",
+            "erased": False,
+            "reason": "shared_with_another_case",
+        })
+    replicas = [
+        {"cid": cid, "provider_id": by_cid.get(cid, "")}
+        for cid in list(plan.get("exclusive_cids") or [])
+    ]
+    for item in replicas:
+        cid = str(item.get("cid") or "")
+        provider_id = str(item.get("provider_id") or "")
+        provider = (providers or {}).get(provider_id)
+        method = _provider_method(provider, "request_deletion", "delete") if provider is not None else None
+        if method is None:
+            row = {
+                "cid": cid,
+                "provider_id": provider_id,
+                "status": "external_replica",
+                "erased": False,
+                "reason": "no_managed_deletion_api",
+            }
+            external.append(row)
+            continue
+        try:
+            result = _bounded_provider_call(method, timeout_seconds, cid=cid)
+        except Exception:
+            result = {"status": "unreachable"}
+        status = _provider_status(result)
+        row = {"cid": cid, "provider_id": provider_id, "erased": False, "status": status}
+        if status == "pending":
+            row["reason"] = "remote_removal_pending"
+            pending.append(row)
+        elif status in {"deleted", "accepted", "requested"}:
+            row["status"] = "requested"
+            row["reason"] = "managed_deletion_requested_not_universal"
+            requested.append(row)
+        else:
+            row["status"] = "unreachable"
+            row["reason"] = "remote_removal_unreachable"
+            unreachable.append(row)
+    residual.extend(external)
+    residual.extend(pending)
+    residual.extend(unreachable)
+    residual.extend(requested)
+    residual.append({
+        "kind": "public_ipfs",
+        "erased": False,
+        "managed": False,
+        "status": "not_erased",
+        "reason": "public IPFS copies are outside this workspace and were not erased",
+    })
+    if pending:
+        remote_status = "pending"
+    elif unreachable or external:
+        remote_status = "unreachable"
+    elif requested:
+        remote_status = "requested"
+    else:
+        remote_status = "not_applicable"
+    return {
+        "step": "request_remote_deletion",
+        "status": remote_status,
+        "requested": requested,
+        "pending": pending,
+        "unreachable": unreachable,
+        "external_replicas": external,
+        "residual_replicas": residual,
+        "universal_erasure": False,
+        "public_ipfs_erased": False,
+        "external_replica_limitation": _PUBLIC_IPFS_LIMITATION,
+    }
+
+
+def _deletion_receipt(journal: Mapping[str, Any], *, idempotent: bool, resumed_from: str | None) -> dict[str, Any]:
+    phases = dict(journal.get("phases") or {})
+    remote = dict(phases.get("remote_requested") or {})
+    keys = dict(phases.get("keys_destroyed") or {})
+    local = dict(phases.get("local_deleted") or {})
+    references = dict(phases.get("references_removed") or {})
+    unpinned = dict(phases.get("unpinned") or {})
+    destroyed = bool(keys.get("encryption_key_destroyed"))
+    steps = [
+        references or {"step": "remove_case_references", "status": "not_started"},
+        local or {"step": "delete_local_ciphertext_cache_temp", "status": "not_started"},
+        unpinned or {"step": "unpin_managed_replicas", "status": "not_started"},
+        remote or {"step": "request_remote_deletion", "status": "not_started"},
+        keys or {"step": "destroy_case_keys", "status": "not_started"},
+    ]
+    completed = list(journal.get("completed") or [])
+    status = "completed" if "tombstoned" in completed else "partial"
+    return {
+        "operation": "delete_private_case",
+        "status": status,
+        "code": status,
+        "tenant_id": journal.get("tenant_id"),
+        "case_id": journal.get("case_id"),
+        "retention_policy": journal.get("retention_policy"),
+        "policy_explicit": True,
+        "legal_hold": False,
+        "workspace_required": False,
+        "steps": steps,
+        "remove_case_references": references,
+        "delete_local_ciphertext_cache_temp": local,
+        "unpin_managed_replicas": unpinned,
+        "request_remote_deletion": remote,
+        "destroy_case_keys": keys,
+        "shared_artifacts_preserved": list(local.get("shared_artifacts_preserved") or references.get("preserved_shared_digests") or []),
+        "encryption_key_destroyed": destroyed,
+        "recovery_path_destroyed": destroyed,
+        "irreversible_recovery_path_destroyed": destroyed,
+        "master_key_destroyed": False,
+        "universal_erasure": False,
+        "public_ipfs_erased": False,
+        "external_replica_limitation": remote.get("external_replica_limitation") or _PUBLIC_IPFS_LIMITATION,
+        "residual_replicas": list(remote.get("residual_replicas") or []),
+        "pending_remote_removals": list(remote.get("pending") or []),
+        "unreachable_remote_removals": list(remote.get("unreachable") or []),
+        "tombstone": journal.get("tombstone"),
+        "idempotent": idempotent,
+        "resumed_from": resumed_from,
+        "data_reset": False,
+        "message": "Scoped deletion finished. Public IPFS and unmanaged replicas are not universally erased.",
+    }
+
+
+def _refused_deletion_receipt(
+    *,
+    tenant_id: str,
+    case_id: str,
+    policy: str,
+    code: str,
+    message: str,
+) -> dict[str, Any]:
+    empty = {"status": "not_started"}
+    return {
+        "operation": "delete_private_case",
+        "status": "refused",
+        "code": code,
+        "tenant_id": tenant_id,
+        "case_id": case_id,
+        "retention_policy": policy,
+        "policy_explicit": True,
+        "legal_hold": code == "legal_hold",
+        "workspace_required": code == "workspace_required",
+        "steps": [
+            {"step": "remove_case_references", **empty},
+            {"step": "delete_local_ciphertext_cache_temp", **empty},
+            {"step": "unpin_managed_replicas", **empty},
+            {"step": "request_remote_deletion", **empty},
+            {"step": "destroy_case_keys", **empty},
+        ],
+        "encryption_key_destroyed": False,
+        "recovery_path_destroyed": False,
+        "irreversible_recovery_path_destroyed": False,
+        "universal_erasure": False,
+        "public_ipfs_erased": False,
+        "external_replica_limitation": _PUBLIC_IPFS_LIMITATION,
+        "residual_replicas": [],
+        "idempotent": False,
+        "data_reset": False,
+        "message": message,
+    }
+
+
+def delete_private_case(
+    repository: str | Path,
+    session: UserOwnedKeySession | None,
+    *,
+    tenant_id: str,
+    case_id: str,
+    policy: str,
+    legal_hold: bool = False,
+    workspace_required: bool = False,
+    providers: Mapping[str, Any] | None = None,
+    timeout_seconds: float | None = None,
+    crash_at: str | None = None,
+) -> dict[str, Any]:
+    """Delete one case's private state without touching another case's shared sources.
+
+    ``crash_at`` persists that phase and then raises so a later call can resume.
+    A second call after the tombstone is committed is idempotent.
+    """
+
+    _require_label(tenant_id)
+    _require_label(case_id)
+    if policy not in DELETION_POLICIES:
+        raise PrivatePortabilityError(
+            "Deletion needs an explicit retention policy. Nothing was erased.",
+            code="retention_policy",
+            actions=DELETION_POLICIES,
+        )
+    if crash_at not in {None, *DELETION_PHASES}:
+        raise PrivateKeyMaterialError("deletion_phase")
+    if legal_hold:
+        return _refused_deletion_receipt(
+            tenant_id=tenant_id,
+            case_id=case_id,
+            policy=policy,
+            code="legal_hold",
+            message="Legal hold is an explicit retention need. The case was not deleted.",
+        )
+    if workspace_required:
+        return _refused_deletion_receipt(
+            tenant_id=tenant_id,
+            case_id=case_id,
+            policy=policy,
+            code="workspace_required",
+            message="The workspace still requires this case. The case was not deleted.",
+        )
+    existing = read_case_tombstone(repository, tenant_id, case_id)
+    journal = _load_deletion_journal(repository, tenant_id, case_id)
+    if existing is not None and "tombstoned" in (journal.get("completed") or []):
+        journal["tombstone"] = existing
+        receipt = _deletion_receipt(journal, idempotent=True, resumed_from=None)
+        receipt["tombstone"] = existing
+        return receipt
+    journal["retention_policy"] = policy
+    if not journal.get("plan"):
+        journal["plan"] = _capture_deletion_plan(repository, tenant_id, case_id)
+        _save_deletion_journal(repository, journal)
+    plan = journal["plan"]
+    completed = list(journal.get("completed") or [])
+    resumed_from = completed[-1] if completed else None
+    phases = dict(journal.get("phases") or {})
+
+    def _finish(phase: str, result: Mapping[str, Any]) -> None:
+        phases[phase] = dict(result)
+        if phase not in completed:
+            completed.append(phase)
+        journal["completed"] = completed
+        journal["phases"] = phases
+        _save_deletion_journal(repository, journal)
+        if crash_at == phase:
+            raise PrivateRevisionInterrupted(phase, _case_scope_token(tenant_id, case_id))
+
+    if "references_removed" not in completed:
+        _finish("references_removed", _remove_case_references(repository, plan))
+    if "local_deleted" not in completed:
+        _finish("local_deleted", _delete_local_private_bytes(repository, tenant_id, case_id, plan))
+    if "unpinned" not in completed:
+        _finish("unpinned", _unpin_managed_replicas(repository, plan, providers, timeout_seconds))
+    if "remote_requested" not in completed:
+        _finish("remote_requested", _request_remote_deletion(plan, providers, timeout_seconds))
+    if "keys_destroyed" not in completed:
+        if policy == "retain_keys":
+            key_result = {
+                "step": "destroy_case_keys",
+                "status": "retained_by_policy",
+                "encryption_key_destroyed": False,
+                "recovery_path_destroyed": False,
+                "master_key_destroyed": False,
+            }
+        else:
+            if session is None:
+                raise PrivateKeyMaterialError("key_unavailable")
+            destroyed = session.destroy_case_keys(tenant_id, case_id)
+            key_result = {
+                "step": "destroy_case_keys",
+                "status": "destroyed",
+                "encryption_key_destroyed": True,
+                "recovery_path_destroyed": True,
+                "master_key_destroyed": False,
+                "other_cases_retained": True,
+                "data_key_ids": list(destroyed.get("data_key_ids") or []),
+            }
+        _finish("keys_destroyed", key_result)
+    if "tombstoned" not in completed:
+        remote = dict(phases.get("remote_requested") or {})
+        keys = dict(phases.get("keys_destroyed") or {})
+        tombstone = {
+            "schema": DELETION_SCHEMA,
+            "schema_version": DELETION_VERSION,
+            "status": "tombstoned",
+            "tenant_id": tenant_id,
+            "case_id": case_id,
+            "case_keys_destroyed": bool(keys.get("encryption_key_destroyed")),
+            "universal_erasure": False,
+            "public_ipfs_erased": False,
+            "external_replica_limitation": _PUBLIC_IPFS_LIMITATION,
+            "residual_replicas": list(remote.get("residual_replicas") or []),
+            "pending_remote_removals": list(remote.get("pending") or []),
+            "unreachable_remote_removals": list(remote.get("unreachable") or []),
+        }
+        _write_json_object(_tombstone_path(repository, tenant_id, case_id), tombstone)
+        journal["tombstone"] = tombstone
+        _finish("tombstoned", {"step": "tombstone", "status": "tombstoned"})
+    receipt = _deletion_receipt(journal, idempotent=False, resumed_from=resumed_from)
+    if resumed_from is not None:
+        receipt["idempotent"] = False
+        receipt["resumed"] = True
+    else:
+        receipt["resumed"] = False
+    receipt["tombstone"] = read_case_tombstone(repository, tenant_id, case_id)
+    return receipt
+
+
 def assert_store_isolated_from_exports(store_dir: str | Path, export_dir: str | Path) -> None:
     """Refuse to keep a key store inside or next to an encrypted export directory."""
 
@@ -5399,4 +6219,12 @@ __all__ = [
     "count_verified_ciphertext_replicas",
     "remote_storage_activation_count",
     "upstream_replication_fixture_qualification",
+    "DELETION_PHASES",
+    "DELETION_POLICIES",
+    "bind_shared_legal_artifact",
+    "delete_private_case",
+    "normal_reset_retention_receipt",
+    "read_case_tombstone",
+    "record_managed_replica",
+    "write_case_local_private_file",
 ]
