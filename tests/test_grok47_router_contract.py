@@ -665,3 +665,32 @@ def test_native_canary_observation_consumer_with_authored_process_fixtures(monke
     else:
         assert receipt["status"] == "unverified" and receipt["live_canary"] is False
     _assert_quiet(receipt)
+
+
+def test_recovery_rejects_wrong_route_and_does_not_fabricate_canary(monkeypatch):
+    """Offline recovery stays on the pinned route and cannot self-certify a live canary."""
+    from integrations.ipfs_datasets.llm import qualify_intake_model_recovery
+
+    calls = []
+    monkeypatch.setattr(llm, "generate_text", lambda **_kwargs: calls.append("generate"))
+    state = {"facts": [], "questions": [], "revision": 1}
+    wrong = qualify_intake_model_recovery(
+        state,
+        provider=PINNED_GROK_PROVIDER,
+        model_name="grok-4",
+        request_id="c" * 32,
+        script=["available"],
+        transport=lambda **_kwargs: calls.append("transport"),
+        sleeper=lambda _delay: calls.append("sleep"),
+        include_live_canary=True,
+        canary_transport=lambda **_kwargs: {"live_canary": True, "status": "available"},
+    )
+    assert calls == []
+    assert wrong["disposition"] == "wrong_model"
+    assert wrong["dispatch"] == "none"
+    assert wrong["live_canary"] is False
+    assert wrong["offline_unit_complete"] is True
+    assert wrong["optional_live_canary"]["label"] == "optional_live_canary"
+    assert wrong["optional_live_canary"]["live_canary"] is False
+    assert state == {"facts": [], "questions": [], "revision": 1}
+    _assert_quiet(wrong)
