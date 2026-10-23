@@ -198,7 +198,7 @@ def test_pty_flow_asks_graph_followups_and_stops_unresolved(tmp_path: Path):
             assert revision.isascii() and revision.isdigit()
             frame = frame[7 + revision_length:]
         envelope = parse_private_envelope(frame)
-        assert envelope["schema_version"] == 1
+        assert envelope["schema_version"] == 2
         assert len(envelope["nonce"]) == 12
         assert len(envelope["ciphertext"]) >= 16
 
