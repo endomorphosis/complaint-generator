@@ -655,7 +655,7 @@ def test_rel03_unknown_extra_command_does_not_gain_script_companion_dispatch(tmp
     assert observed["host_measurement"]["completion_authority"] is False
 
 
-def test_actual_private_storage_change_measures_all_finite_impacted_companions(tmp_path):
+def test_actual_private_storage_change_measures_all_finite_impacted_companions(tmp_path, monkeypatch):
     import shlex
     from integrations.ipfs_accelerate.improvement_runner import (
         _impacted_behavioral_checks, measure_behavioral_command,
@@ -680,6 +680,19 @@ def test_actual_private_storage_change_measures_all_finite_impacted_companions(t
     expected_modules = sorted([*companions, trusted])
     assert _impacted_behavioral_checks(tmp_path, ["integrations/private_storage.py"]) == expected_modules
     assert _impacted_behavioral_checks(tmp_path, ["integrations/ipfs_datasets/private_storage.py"]) == []
+    # The three small companions above are deliberately synthetic fixtures.
+    # Exercise preservation against their separate, reviewed fixture baseline,
+    # rather than replacing the installed product's larger regression suites.
+    import integrations.ipfs_accelerate.improvement_runner as runtime
+    reviewed = tmp_path / "reviewed-fixture-baseline"
+    for relative in expected_modules:
+        target = reviewed / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((tmp_path / relative).read_bytes())
+    real_preserve = runtime._preserve_existing_behavioral_definitions
+    def preserve_fixture(root, paths):
+        return real_preserve(root, paths, trusted_root=reviewed)
+    monkeypatch.setattr(runtime, "_preserve_existing_behavioral_definitions", preserve_fixture)
     task = _task()
     observed = measure_behavioral_command(
         tmp_path, tmp_path / "private-impact-runs", task,
