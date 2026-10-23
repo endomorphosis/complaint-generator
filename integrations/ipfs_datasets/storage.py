@@ -1425,6 +1425,151 @@ def retrieve_private_artifact(*args: Any, **kwargs: Any) -> dict[str, Any]:
     return _retrieve_private_artifact(*args, **kwargs)
 
 
+def configure_replica_policy(**kwargs: Any) -> Any:
+    """Explicit desired/minimum replica policy. Does not open a network client."""
+
+    from integrations.private_storage import configure_replica_policy as _configure
+
+    return _configure(**kwargs)
+
+
+def replica_policy(**kwargs: Any) -> Any:
+    """Workspace desired/minimum policy. Does not open a network client."""
+
+    from integrations.private_storage import replica_policy as _policy
+
+    return _policy(**kwargs)
+
+
+def select_private_storage_mode(mode: str) -> Any:
+    """Local private mode constructs no remote store and performs no pin."""
+
+    from integrations.private_storage import select_private_storage_mode as _select
+
+    return _select(mode)
+
+
+def remote_storage_activation_count() -> int:
+    from integrations.private_storage import remote_storage_activation_count as _count
+
+    return _count()
+
+
+def publish_encrypted_replicas(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from integrations.private_storage import publish_encrypted_replicas as _publish
+
+    return _publish(*args, **kwargs)
+
+
+def reconcile_encrypted_replicas(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from integrations.private_storage import reconcile_encrypted_replicas as _reconcile
+
+    return _reconcile(*args, **kwargs)
+
+
+def restore_encrypted_replicas(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from integrations.private_storage import restore_encrypted_replicas as _restore
+
+    return _restore(*args, **kwargs)
+
+
+def restore_encrypted_workspace(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from integrations.private_storage import restore_encrypted_workspace as _restore
+
+    return _restore(*args, **kwargs)
+
+
+def count_verified_ciphertext_replicas(observations: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    from integrations.private_storage import count_verified_ciphertext_replicas as _count
+
+    return _count(observations)
+
+
+UPSTREAM_REPLICA_FIXTURES = (
+    "tests/unit/test_wallet_storage_factory.py",
+    "tests/unit/test_wallet_storage_replicas_optional.py",
+)
+
+
+def upstream_replication_fixture_qualification(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Acceptance-suite qualification. Missing upstream suites are not passes."""
+
+    from integrations.private_storage import upstream_replication_fixture_qualification as _qualify
+
+    return _qualify(*args, **kwargs)
+
+
+def upstream_replica_fixture_qualification() -> dict[str, Any]:
+    """Run datasets wallet replica fixtures in that package tree and report them separately.
+
+    A missing fixture is not a pass. The report never replaces first-party assertions.
+    """
+
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[2] / "external" / "ipfs_datasets_py"
+    suites = []
+    for relative in UPSTREAM_REPLICA_FIXTURES:
+        path = root / relative
+        if not path.is_file():
+            suites.append({
+                "suite": relative,
+                "status": "missing",
+                "passed": False,
+                "counts_as_passed": False,
+                "returncode": None,
+            })
+            continue
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")
+        env["PYTHONNOUSERSITE"] = "1"
+        env["IPFS_DATASETS_AUTO_INSTALL"] = "false"
+        env["IPFS_AUTO_INSTALL"] = "false"
+        env["IPFS_DATASETS_PY_MINIMAL_IMPORTS"] = "1"
+        env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+        try:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "--override-ini",
+                    "addopts=",
+                    "-p",
+                    "no:cacheprovider",
+                    "--noconftest",
+                    relative,
+                ],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
+            passed = completed.returncode == 0
+            status = "passed" if passed else "failed"
+            returncode = completed.returncode
+        except (OSError, subprocess.TimeoutExpired):
+            passed = False
+            status = "failed"
+            returncode = None
+        suites.append({
+            "suite": relative,
+            "status": status,
+            "passed": passed,
+            "counts_as_passed": False if status == "missing" else passed,
+            "returncode": returncode,
+        })
+    return {
+        "package_root": str(root),
+        "intended_environment": "ipfs_datasets_py",
+        "substitutes_first_party": False,
+        "suites": suites,
+    }
+
+
 def storage_backend_status() -> dict[str, Any]:
     probe = _runtime_backend_probe()
     backend = probe["backend"]
@@ -1463,6 +1608,18 @@ __all__ = [
     "retrieve_bytes",
     "retrieve_private_artifact",
     "pin_cid",
+    "configure_replica_policy",
+    "replica_policy",
+    "select_private_storage_mode",
+    "remote_storage_activation_count",
+    "publish_encrypted_replicas",
+    "reconcile_encrypted_replicas",
+    "restore_encrypted_replicas",
+    "restore_encrypted_workspace",
+    "count_verified_ciphertext_replicas",
+    "upstream_replica_fixture_qualification",
+    "upstream_replication_fixture_qualification",
+    "UPSTREAM_REPLICA_FIXTURES",
     "storage_backend_status",
     "translate_kit_operation_result",
     "IPFS_AVAILABLE",

@@ -48,9 +48,11 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -3268,6 +3270,1116 @@ def recover_case_manifest(
         process_lock.release()
 
 
+# Replica policy is explicit. Importing this module, publishing in local private
+# mode, and ordinary case reads do not open a remote provider. A replica counts
+# only after readback matches the ciphertext digest and the requested version.
+# Queued, deferred, and offline pin acknowledgements stay uncounted. An
+# unavailable provider returns a reconciliation receipt with the next retry and
+# does not sleep on the caller.
+
+_REMOTE_STORAGE_ACTIVATIONS = 0
+_REPLICA_MODES = frozenset({"local_private", "private_remote"})
+_UNCOUNTED_REPLICA_STATES = frozenset({"queued", "deferred", "offline", "unavailable", "pin_requested"})
+_REPLICA_NAME = re.compile(r"^(?:o/[0-9a-f]{64}|case-head|generations)$")
+
+
+def remote_storage_activation_count() -> int:
+    """How many times this process invoked a remote replica provider."""
+
+    return _REMOTE_STORAGE_ACTIVATIONS
+
+
+@dataclass(frozen=True)
+class ReplicaPolicy:
+    """Desired and minimum verified ciphertext replicas, including the local primary."""
+
+    desired: int
+    minimum: int
+    mode: str = "local_private"
+    max_attempts: int = 3
+    base_backoff_seconds: float = 1.0
+    max_backoff_seconds: float = 30.0
+
+    def __post_init__(self) -> None:
+        if type(self.desired) is not int or type(self.minimum) is not int:
+            raise ValueError("replica_policy_not_integral")
+        if self.desired < 1 or self.minimum < 1 or self.minimum > self.desired:
+            raise ValueError("replica_policy_bounds")
+        if self.mode not in _REPLICA_MODES:
+            raise ValueError("replica_policy_mode")
+        if type(self.max_attempts) is not int or self.max_attempts < 1:
+            raise ValueError("replica_policy_attempts")
+        if (
+            isinstance(self.base_backoff_seconds, bool)
+            or isinstance(self.max_backoff_seconds, bool)
+            or not isinstance(self.base_backoff_seconds, (int, float))
+            or not isinstance(self.max_backoff_seconds, (int, float))
+            or self.base_backoff_seconds < 0
+            or self.max_backoff_seconds < self.base_backoff_seconds
+        ):
+            raise ValueError("replica_policy_backoff")
+
+
+def configure_replica_policy(
+    *,
+    desired: int,
+    minimum: int,
+    mode: str = "local_private",
+    max_attempts: int = 3,
+    base_backoff_seconds: float = 1.0,
+    max_backoff_seconds: float = 30.0,
+) -> ReplicaPolicy:
+    """Build a replica policy. ``local_private`` never contacts remote providers."""
+
+    return ReplicaPolicy(
+        desired=desired,
+        minimum=minimum,
+        mode=mode,
+        max_attempts=max_attempts,
+        base_backoff_seconds=base_backoff_seconds,
+        max_backoff_seconds=max_backoff_seconds,
+    )
+
+
+def select_private_storage_mode(mode: str) -> ReplicaPolicy:
+    """Choose local private storage without constructing a remote client."""
+
+    if mode != "local_private":
+        raise ValueError("remote_mode_requires_explicit_policy")
+    return configure_replica_policy(desired=1, minimum=1, mode="local_private")
+
+
+def _replica_digest(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _replica_clock(clock: Callable[[], float] | None) -> float:
+    if clock is None:
+        return time.time()
+    value = clock()
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("replica_clock")
+    return float(value)
+
+
+def _backoff_seconds(policy: ReplicaPolicy, attempts: int) -> float:
+    shift = max(0, attempts - 1)
+    delay = float(policy.base_backoff_seconds) * (2 ** min(shift, 20))
+    return min(float(policy.max_backoff_seconds), delay)
+
+
+def _ciphertext_catalog(root: Path, version: str) -> list[dict[str, str]]:
+    catalog: list[dict[str, str]] = []
+    objects = root / "o"
+    names: list[Path] = []
+    if objects.is_dir():
+        names.extend(path for path in objects.iterdir() if path.is_file() and not path.is_symlink())
+    for label in (_CASE_HEAD_NAME, _CASE_GENERATIONS):
+        path = root / label
+        if path.is_file() and not path.is_symlink():
+            names.append(path)
+    for path in sorted(names, key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix()
+        if _REPLICA_NAME.fullmatch(relative) is None:
+            continue
+        payload = path.read_bytes()
+        catalog.append({"name": relative, "digest": _replica_digest(payload), "version": version})
+    return catalog
+
+
+def _catalog_bytes(root: Path, entry: Mapping[str, str]) -> bytes:
+    relative = str(entry.get("name") or "")
+    if _REPLICA_NAME.fullmatch(relative) is None:
+        raise PrivateRevisionError("replica name rejected", code="bad_ref", state="recoverable")
+    path = root.joinpath(*relative.split("/"))
+    payload = _read_exact(path)
+    if payload is None or _replica_digest(payload) != entry.get("digest"):
+        raise PrivateRevisionError("replica source missing", code="missing_object", state="recoverable")
+    return payload
+
+
+def _local_replica_observations(root: Path, catalog: Sequence[Mapping[str, str]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for entry in catalog:
+        relative = str(entry["name"])
+        payload = root.joinpath(*relative.split("/")).read_bytes()
+        matched = _replica_digest(payload) == entry["digest"]
+        rows.append({
+            "provider_id": "local-primary",
+            "role": "primary",
+            "name": relative,
+            "state": "verified" if matched else "readback_mismatch",
+            "counted": matched,
+            "digest_match": matched,
+            "version_match": True,
+            "version": entry["version"],
+        })
+    return rows
+
+
+def _provider_id(provider: Any, index: int) -> str:
+    value = getattr(provider, "provider_id", None)
+    if isinstance(value, str) and value and value != "local-primary" and "/" not in value and "\\" not in value:
+        return value
+    return f"remote-{index}"
+
+
+def _observe_remote_provider(
+    provider: Any,
+    provider_id: str,
+    root: Path,
+    catalog: Sequence[Mapping[str, str]],
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    global _REMOTE_STORAGE_ACTIVATIONS
+    rows: list[dict[str, Any]] = []
+    try:
+        for entry in catalog:
+            payload = _catalog_bytes(root, entry)
+            _REMOTE_STORAGE_ACTIVATIONS += 1
+            acknowledgement = provider.put(
+                entry["name"],
+                payload,
+                digest=entry["digest"],
+                version=entry["version"],
+            )
+            if not isinstance(acknowledgement, Mapping):
+                acknowledgement = {}
+            state = str(acknowledgement.get("state") or "unavailable")
+            digest_match = acknowledgement.get("digest") == entry["digest"]
+            version_match = acknowledgement.get("version") == entry["version"]
+            readback_match = False
+            if state == "verified" and digest_match and version_match:
+                try:
+                    loaded = provider.get(entry["name"])
+                except Exception:
+                    loaded = None
+                    state = "unavailable"
+                readback_match = isinstance(loaded, (bytes, bytearray)) and bytes(loaded) == payload
+            counted = state == "verified" and digest_match and version_match and readback_match
+            if state in _UNCOUNTED_REPLICA_STATES:
+                counted = False
+            rows.append({
+                "provider_id": provider_id,
+                "role": "remote",
+                "name": entry["name"],
+                "state": state,
+                "counted": counted,
+                "digest_match": digest_match and readback_match,
+                "version_match": version_match,
+                "version": entry["version"],
+            })
+    except Exception:
+        return [], {
+            "provider_id": provider_id,
+            "error_category": "unavailable",
+            "attempts": 1,
+            "exhausted": False,
+        }
+    return rows, None
+
+
+def _replica_receipt(
+    policy: ReplicaPolicy,
+    catalog: Sequence[Mapping[str, str]],
+    observations: Sequence[Mapping[str, Any]],
+    unavailable: Sequence[Mapping[str, Any]],
+    *,
+    now: float,
+    generation: str | None,
+    manifest_hash: str | None,
+    network_sharing_started: bool,
+) -> dict[str, Any]:
+    by_provider: dict[str, list[Mapping[str, Any]]] = {}
+    for row in observations:
+        by_provider.setdefault(str(row["provider_id"]), []).append(row)
+    verified = [
+        provider_id
+        for provider_id, rows in by_provider.items()
+        if rows and all(bool(item.get("counted")) for item in rows) and len(rows) == len(catalog)
+    ]
+    uncounted = [
+        {"provider_id": row["provider_id"], "name": row["name"], "state": row["state"]}
+        for row in observations
+        if not row.get("counted")
+    ]
+    pending = []
+    for item in unavailable:
+        attempts = int(item["attempts"])
+        exhausted = bool(item.get("exhausted")) or attempts >= policy.max_attempts
+        if item.get("preserve_schedule"):
+            next_at = None if exhausted else item.get("next_retry_at")
+        else:
+            delay = None if exhausted else _backoff_seconds(policy, attempts)
+            next_at = None if delay is None else now + delay
+        pending.append({
+            "provider_id": item["provider_id"],
+            "error_category": "unavailable",
+            "attempts": attempts,
+            "exhausted": exhausted,
+            "next_retry_at": next_at,
+        })
+    verified_count = len(verified)
+    return {
+        "status": "reconciliation_required" if pending else "ready",
+        "mode": policy.mode,
+        "desired": policy.desired,
+        "minimum": policy.minimum,
+        "verified_replicas": verified_count,
+        "verified_providers": verified,
+        "meets_minimum": verified_count >= policy.minimum,
+        "meets_desired": verified_count >= policy.desired,
+        "uncounted": uncounted,
+        "unavailable_providers": pending,
+        "catalog": [dict(entry) for entry in catalog],
+        "generation": generation,
+        "manifest_hash": manifest_hash,
+        "network_sharing_started": bool(network_sharing_started),
+        "synchronous_wait_seconds": 0,
+        "waited": False,
+    }
+
+
+_WORKSPACE_LEDGER = "replica-ledger"
+_WORKSPACE_FRAME = "primary.frame"
+_WORKSPACE_OWNER = "owner.json"
+_WORKSPACE_CATALOG = "catalog.json"
+_WORKSPACE_PENDING = "publication.json"
+_WORKSPACE_KIND = "workspace-replica"
+_WORKSPACE_BINDING_REVISION = "current"
+_UPSTREAM_REPLICATION_SUITES = (
+    "tests/runtime_readiness/replication/test_replica_contracts.py",
+    "tests/runtime_readiness/replication/test_reconciler.py",
+    "tests/runtime_readiness/replication/test_joined_convergence.py",
+)
+_PLACED_REPLICA_STATES = frozenset({"stored", "pinned", "available", "verified"})
+
+
+def replica_policy(
+    *,
+    desired_replicas: int,
+    minimum_replicas: int,
+    mode: str = "local_private",
+    remote_providers: Sequence[str] = (),
+    max_attempts: int = 3,
+    base_backoff_seconds: float = 1.0,
+    max_backoff_seconds: float = 30.0,
+) -> ReplicaPolicy:
+    """Explicit workspace replica policy. Naming providers does not contact them."""
+
+    del remote_providers
+    return configure_replica_policy(
+        desired=desired_replicas,
+        minimum=minimum_replicas,
+        mode=mode,
+        max_attempts=max_attempts,
+        base_backoff_seconds=base_backoff_seconds,
+        max_backoff_seconds=max_backoff_seconds,
+    )
+
+
+def _workspace_root(repository: str | Path) -> Path:
+    return Path(repository)
+
+
+def _workspace_ledger(repository: str | Path) -> Path:
+    return _workspace_root(repository) / _WORKSPACE_LEDGER
+
+
+def _pack_workspace_generation(revision: str, complaint: bytes, fact_graph: bytes, proof: bytes) -> bytes:
+    if not isinstance(revision, str) or not revision or len(revision) > 128:
+        raise PrivateStorageError("replica revision rejected", code="bad_ref")
+
+    def _part(blob: bytes) -> bytes:
+        if not isinstance(blob, (bytes, bytearray)) or isinstance(blob, memoryview):
+            raise PrivateStorageError("replica payload rejected", code="bad_ref")
+        payload = bytes(blob)
+        if len(payload) > 8_000_000:
+            raise PrivateStorageError("replica payload rejected", code="bad_ref")
+        return len(payload).to_bytes(4, "big") + payload
+
+    return _part(revision.encode("utf-8")) + _part(complaint) + _part(fact_graph) + _part(proof)
+
+
+def _unpack_workspace_generation(payload: bytes) -> dict[str, Any]:
+    view = memoryview(payload)
+    parts: list[bytes] = []
+    for _ in range(4):
+        if len(view) < 4:
+            raise PrivateStorageError("replica generation is incomplete", code="readback_mismatch")
+        size = int.from_bytes(view[:4], "big")
+        view = view[4:]
+        if size > len(view):
+            raise PrivateStorageError("replica generation is incomplete", code="readback_mismatch")
+        parts.append(bytes(view[:size]))
+        view = view[size:]
+    if view:
+        raise PrivateStorageError("replica generation is incomplete", code="readback_mismatch")
+    try:
+        revision = parts[0].decode("utf-8")
+    except UnicodeError as exc:
+        raise PrivateStorageError("replica generation is incomplete", code="readback_mismatch") from exc
+    return {
+        "revision": revision,
+        "complaint": parts[1],
+        "fact_graph": parts[2],
+        "proof": parts[3],
+    }
+
+
+def _seal_workspace_frame(
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    revision: str,
+    complaint: bytes,
+    fact_graph: bytes,
+    proof: bytes,
+) -> bytes:
+    return _seal_role(
+        _pack_workspace_generation(revision, complaint, fact_graph, proof),
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        kind=_WORKSPACE_KIND,
+        revision=_WORKSPACE_BINDING_REVISION,
+        key=key,
+        key_id=key_id,
+    )
+
+
+def _open_workspace_frame(
+    frame: bytes,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+) -> dict[str, Any]:
+    try:
+        opened = _open_role(
+            frame,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            principal_id=principal_id,
+            kind=_WORKSPACE_KIND,
+            revision=_WORKSPACE_BINDING_REVISION,
+            key=key,
+            key_id=key_id,
+        )
+        return _unpack_workspace_generation(opened)
+    except PrivateStorageError:
+        raise
+    except Exception as exc:
+        raise PrivateStorageError("replica generation is unreadable", code="readback_mismatch") from exc
+
+
+def _read_json_file(path: Path) -> dict[str, Any] | None:
+    raw = _read_exact(path)
+    if raw is None:
+        return None
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise PrivateStorageError("replica ledger is unreadable", code="corrupt_manifest") from exc
+    if not isinstance(value, dict):
+        raise PrivateStorageError("replica ledger is unreadable", code="corrupt_manifest")
+    return value
+
+
+def _workspace_identity(tenant_id: str, case_id: str, principal_id: str, key_id: str) -> dict[str, str]:
+    return {
+        "tenant_id": tenant_id,
+        "case_id": case_id,
+        "principal_id": principal_id,
+        "key_id": key_id,
+    }
+
+
+def _assert_workspace_owner(ledger: Path, identity: Mapping[str, str]) -> None:
+    current = _read_json_file(ledger / _WORKSPACE_OWNER)
+    if current is None:
+        return
+    for field in ("tenant_id", "case_id", "principal_id"):
+        if current.get(field) != identity[field]:
+            raise PrivateStorageError("replica owner mismatch", code="owner_conflict")
+
+
+def _bounded_provider_call(method: Callable[..., Any], timeout_seconds: float | None, **kwargs: Any) -> Any:
+    call_kwargs = dict(kwargs)
+    call_kwargs["timeout_seconds"] = timeout_seconds
+
+    def _invoke() -> Any:
+        try:
+            return method(**call_kwargs)
+        except Exception as exc:
+            return {"status": "unavailable", "error_category": type(exc).__name__}
+
+    if timeout_seconds is None:
+        timeout_seconds = 5.0
+    if (isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float))
+            or not 0 < timeout_seconds <= 60):
+        raise PrivateStorageError("replica timeout rejected", code="replica_timeout")
+    box: dict[str, Any] = {}
+
+    def _run() -> None:
+        box["value"] = _invoke()
+
+    worker = threading.Thread(target=_run, name="replica-provider-call", daemon=True)
+    started = time.monotonic()
+    worker.start()
+    worker.join(float(timeout_seconds))
+    if worker.is_alive() or "value" not in box:
+        return {"status": "unavailable", "error_category": "timeout", "elapsed": time.monotonic() - started}
+    return box["value"]
+
+
+def _workspace_receipt(
+    policy: ReplicaPolicy,
+    *,
+    primary_verified: bool,
+    placements: list[dict[str, Any]],
+) -> dict[str, Any]:
+    verified = sum(1 for row in placements if row.get("counted"))
+    unavailable = [str(row["provider"]) for row in placements if row.get("provider") != "local-primary" and not row.get("counted")]
+    if not primary_verified or verified < policy.minimum:
+        status = "unavailable"
+    elif verified < policy.desired or unavailable:
+        status = "degraded"
+    else:
+        status = "ready"
+    return {
+        "status": status,
+        "primary_verified": primary_verified,
+        "verified_replica_count": verified,
+        "meets_minimum": verified >= policy.minimum and primary_verified,
+        "meets_desired": verified >= policy.desired and primary_verified,
+        "unavailable_providers": unavailable,
+        "placements": placements,
+        "synchronous_wait_seconds": 0,
+        "waited": False,
+        "mode": policy.mode,
+    }
+
+
+def _local_frame_placement(ledger: Path, digest: str) -> tuple[bool, dict[str, Any]]:
+    path = ledger / _WORKSPACE_FRAME
+    payload = _read_exact(path)
+    matched = payload is not None and _replica_digest(payload) == digest
+    return matched, {
+        "provider": "local-primary",
+        "counted": matched,
+        "state": "verified" if matched else "readback_mismatch",
+        "digest_match": matched,
+    }
+
+
+def _observe_workspace_provider(
+    name: str,
+    provider: Any,
+    *,
+    digest: str,
+    version: str,
+    frame: bytes,
+    timeout_seconds: float | None,
+    place: bool,
+) -> dict[str, Any]:
+    global _REMOTE_STORAGE_ACTIVATIONS
+    _REMOTE_STORAGE_ACTIVATIONS += 1
+    state = "unavailable"
+    if place:
+        placed = _bounded_provider_call(
+            provider.place,
+            timeout_seconds,
+            digest=digest,
+            version=version,
+            frame=frame,
+        )
+        if not isinstance(placed, Mapping):
+            placed = {}
+        state = str(placed.get("status") or placed.get("state") or "unavailable")
+        if state not in _PLACED_REPLICA_STATES or state in _UNCOUNTED_REPLICA_STATES:
+            return {"provider": name, "counted": False, "state": state, "digest_match": False, "version_match": False}
+    loaded = _bounded_provider_call(provider.readback, timeout_seconds, digest=digest, version=version)
+    if not isinstance(loaded, Mapping):
+        loaded = {}
+    remote_frame = loaded.get("frame")
+    digest_match = isinstance(remote_frame, (bytes, bytearray)) and _replica_digest(bytes(remote_frame)) == digest and bytes(remote_frame) == frame
+    version_match = loaded.get("version") == version
+    status = str(loaded.get("status") or "unavailable")
+    counted = status == "available" and digest_match and version_match and status not in _UNCOUNTED_REPLICA_STATES
+    return {
+        "provider": name,
+        "counted": counted,
+        "state": status if not counted else "verified",
+        "digest_match": digest_match,
+        "version_match": version_match,
+    }
+
+
+def _write_workspace_bytes(ledger: Path, name: str, payload: bytes) -> None:
+    _atomic_write(ledger, name, payload, fsync_file=None, fsync_directory=None)
+
+
+def _publish_workspace_replica(
+    repository: str | Path,
+    *,
+    policy: ReplicaPolicy,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    revision: str,
+    complaint: bytes,
+    fact_graph: bytes,
+    proof: bytes,
+    providers: Mapping[str, Any] | None,
+    timeout_seconds: float | None,
+) -> dict[str, Any]:
+    if not isinstance(policy, ReplicaPolicy):
+        raise ValueError("replica_policy_required")
+    if not isinstance(complaint, (bytes, bytearray)) or not isinstance(fact_graph, (bytes, bytearray)) or not isinstance(proof, (bytes, bytearray)):
+        raise PrivateStorageError("replica payload rejected", code="bad_ref")
+    ledger = _workspace_ledger(repository)
+    identity = _workspace_identity(tenant_id, case_id, principal_id, key_id)
+    frame = _seal_workspace_frame(
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        key=key,
+        key_id=key_id,
+        revision=revision,
+        complaint=bytes(complaint),
+        fact_graph=bytes(fact_graph),
+        proof=bytes(proof),
+    )
+    digest = _replica_digest(frame)
+    lock = _process_lock(ledger)
+    lock.acquire()
+    descriptor = None
+    try:
+        descriptor = _acquire_lock(ledger)
+        _assert_workspace_owner(ledger, identity)
+        if _read_json_file(ledger / _WORKSPACE_OWNER) is None:
+            _write_workspace_bytes(ledger, _WORKSPACE_OWNER, json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        catalog = {
+            "digest": digest,
+            "version": revision,
+            "revision": revision,
+            "desired": policy.desired,
+            "minimum": policy.minimum,
+            "mode": policy.mode,
+            "providers": sorted(str(name) for name in (providers or {})),
+        }
+        # Record the exact predecessor and complete next catalog before the
+        # frame replacement. Recovery accepts only this interrupted transition.
+        previous_catalog = _read_exact(ledger / _WORKSPACE_CATALOG) or b""
+        intent = {"previous_catalog_sha256": _replica_digest(previous_catalog), "catalog": catalog}
+        _write_workspace_bytes(ledger, _WORKSPACE_PENDING,
+                               json.dumps(intent, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        _write_workspace_bytes(ledger, _WORKSPACE_FRAME, frame)
+        _write_workspace_bytes(ledger, _WORKSPACE_CATALOG, json.dumps(catalog, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    finally:
+        if descriptor is not None:
+            _release_lock(descriptor)
+        lock.release()
+    primary_verified, local_row = _local_frame_placement(ledger, digest)
+    placements = [local_row]
+    if policy.mode == "private_remote" and providers:
+        for name, provider in providers.items():
+            placements.append(
+                _observe_workspace_provider(
+                    str(name),
+                    provider,
+                    digest=digest,
+                    version=revision,
+                    frame=frame,
+                    timeout_seconds=timeout_seconds,
+                    place=True,
+                )
+            )
+    return _workspace_receipt(policy, primary_verified=primary_verified, placements=placements)
+
+
+def _catalog_policy(catalog: Mapping[str, Any] | None) -> ReplicaPolicy:
+    if not catalog:
+        return configure_replica_policy(desired=1, minimum=1, mode="local_private")
+    return configure_replica_policy(
+        desired=int(catalog.get("desired") or 1),
+        minimum=int(catalog.get("minimum") or 1),
+        mode=str(catalog.get("mode") or "local_private"),
+    )
+
+
+def _reconcile_workspace_replicas(
+    repository: str | Path,
+    *,
+    providers: Mapping[str, Any] | None,
+    timeout_seconds: float | None,
+) -> dict[str, Any]:
+    ledger = _workspace_ledger(repository)
+    catalog = _read_json_file(ledger / _WORKSPACE_CATALOG)
+    policy = _catalog_policy(catalog)
+    digest = str((catalog or {}).get("digest") or "")
+    version = str((catalog or {}).get("version") or "")
+    primary_verified, local_row = _local_frame_placement(ledger, digest) if digest else (False, {
+        "provider": "local-primary",
+        "counted": False,
+        "state": "missing",
+        "digest_match": False,
+    })
+    frame = _read_exact(ledger / _WORKSPACE_FRAME) if primary_verified else b""
+    placements = [local_row]
+    selected = providers or {}
+    if policy.mode == "private_remote":
+        for name, provider in selected.items():
+            placements.append(
+                _observe_workspace_provider(
+                    str(name),
+                    provider,
+                    digest=digest,
+                    version=version,
+                    frame=frame if primary_verified else b"",
+                    timeout_seconds=timeout_seconds,
+                    place=False,
+                )
+            )
+    return _workspace_receipt(policy, primary_verified=primary_verified, placements=placements)
+
+
+def restore_encrypted_workspace(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    providers: Mapping[str, Any] | None = None,
+    timeout_seconds: float | None = None,
+    clock: Callable[[], float] | None = None,
+) -> dict[str, Any]:
+    """Open the local primary, or repair it from a verified ciphertext replica."""
+
+    del clock
+    ledger = _workspace_ledger(repository)
+    identity = _workspace_identity(tenant_id, case_id, principal_id, key_id)
+    _assert_workspace_owner(ledger, identity)
+    options = {
+        "tenant_id": tenant_id,
+        "case_id": case_id,
+        "principal_id": principal_id,
+        "key": key,
+        "key_id": key_id,
+    }
+    lock = _process_lock(ledger)
+    with lock:
+        descriptor = _acquire_lock(ledger)
+        try:
+            _assert_workspace_owner(ledger, identity)
+            local = _read_exact(ledger / _WORKSPACE_FRAME)
+            catalog_bytes = _read_exact(ledger / _WORKSPACE_CATALOG) or b""
+            catalog = _read_json_file(ledger / _WORKSPACE_CATALOG)
+            digest_matches = local is not None and (catalog is None or _replica_digest(local) == catalog.get("digest"))
+            interrupted_catalog = None
+            if local is not None and not digest_matches:
+                intent = _read_json_file(ledger / _WORKSPACE_PENDING) or {}
+                following = intent.get("catalog")
+                if (isinstance(following, dict)
+                        and intent.get("previous_catalog_sha256") == _replica_digest(catalog_bytes)
+                        and following.get("digest") == _replica_digest(local)):
+                    interrupted_catalog = following
+            if digest_matches or interrupted_catalog is not None:
+                opened = _open_workspace_frame(local, **options)
+                if interrupted_catalog is not None:
+                    if opened["revision"] != interrupted_catalog.get("version"):
+                        raise PrivateStorageError("replica publication version mismatch", code="readback_mismatch")
+                    _write_workspace_bytes(ledger, _WORKSPACE_CATALOG,
+                                           json.dumps(interrupted_catalog, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+                    catalog = interrupted_catalog
+                opened["source"] = "local"
+                opened["status"] = "ready"
+                return opened
+        finally:
+            _release_lock(descriptor)
+    if not catalog or not catalog.get("digest") or not catalog.get("version"):
+        raise PrivateStorageError("verified replica unavailable", code="replica_unavailable")
+    digest = str(catalog["digest"])
+    version = str(catalog["version"])
+    timed_out = False
+    for provider in (providers or {}).values():
+        loaded = _bounded_provider_call(provider.readback, timeout_seconds, digest=digest, version=version)
+        if not isinstance(loaded, Mapping):
+            continue
+        if loaded.get("error_category") == "timeout" or loaded.get("status") == "timeout":
+            timed_out = True
+            continue
+        remote = loaded.get("frame")
+        if loaded.get("status") != "available" or loaded.get("version") != version:
+            continue
+        if not isinstance(remote, (bytes, bytearray)) or _replica_digest(bytes(remote)) != digest:
+            continue
+        frame = bytes(remote)
+        try:
+            opened = _open_workspace_frame(frame, **options)
+        except PrivateStorageError:
+            continue
+        lock = _process_lock(ledger)
+        lock.acquire()
+        descriptor = None
+        try:
+            descriptor = _acquire_lock(ledger)
+            _assert_workspace_owner(ledger, identity)
+            current_catalog = _read_json_file(ledger / _WORKSPACE_CATALOG)
+            if current_catalog != catalog:
+                raise PrivateStorageError("replica revision changed during restore", code="revision_conflict")
+            _write_workspace_bytes(ledger, _WORKSPACE_FRAME, frame)
+        finally:
+            if descriptor is not None:
+                _release_lock(descriptor)
+            lock.release()
+        opened["source"] = "replica"
+        opened["status"] = "ready"
+        opened["verified_replica_count"] = 1
+        return opened
+    if timed_out:
+        raise PrivateStorageError("replica provider timed out", code="replica_timeout")
+    raise PrivateStorageError("verified replica unavailable", code="replica_unavailable")
+
+
+def upstream_replication_fixture_qualification(workspace: str | Path | None = None) -> dict[str, Any]:
+    """Report upstream replication suites separately. A missing suite is not a pass."""
+
+    root = Path(workspace) if workspace is not None else Path(__file__).resolve().parents[1]
+    roots = (
+        root / "external" / "ipfs_datasets_py",
+        root / "external" / "ipfs_kit_py",
+    )
+    suites = []
+    for relative in _UPSTREAM_REPLICATION_SUITES:
+        found = any((root / relative).is_file() for root in roots)
+        suites.append({
+            "suite": relative,
+            "status": "present" if found else "missing",
+            "passed": False,
+            "counts_as_passed": False,
+            "returncode": None,
+        })
+    executed = False
+    return {
+        "executed": executed,
+        "passed": False,
+        "substitutes_first_party": False,
+        "intended_environment": "ipfs_datasets_py",
+        "suites": suites,
+    }
+
+
+def publish_encrypted_replicas(
+    repository: str | Path,
+    *,
+    policy: ReplicaPolicy,
+    providers: Sequence[Any] | Mapping[str, Any] = (),
+    clock: Callable[[], float] | None = None,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    expected_head: str | None = None,
+    expected_hash: str | None = None,
+    artifacts: Mapping[str, Any] | None = None,
+    private_names: Mapping[str, Any] | None = None,
+    fsync_file: Callable[[int], None] | None = None,
+    fsync_directory: Callable[[int], None] | None = None,
+    complaint: bytes | None = None,
+    fact_graph: bytes | None = None,
+    proof: bytes | None = None,
+    revision: str = "r1",
+    timeout_seconds: float | None = None,
+) -> dict[str, Any]:
+    """Publish the sealed case locally, then optionally copy ciphertext to explicit providers.
+
+    Remote providers are ignored in local private mode. This function never sleeps.
+    A complaint/fact-graph/proof publication uses the workspace replica ledger.
+    """
+
+    if complaint is not None or fact_graph is not None or proof is not None:
+        return _publish_workspace_replica(
+            repository,
+            policy=policy,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            principal_id=principal_id,
+            key=key,
+            key_id=key_id,
+            revision=revision,
+            complaint=complaint if complaint is not None else b"",
+            fact_graph=fact_graph if fact_graph is not None else b"",
+            proof=proof if proof is not None else b"",
+            providers=providers if isinstance(providers, Mapping) else None,
+            timeout_seconds=timeout_seconds,
+        )
+    if artifacts is None or expected_head is None or expected_hash is None:
+        raise ValueError("replica_publication_incomplete")
+    if not isinstance(policy, ReplicaPolicy):
+        raise ValueError("replica_policy_required")
+    publication = publish_case_manifest(
+        repository,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        key=key,
+        key_id=key_id,
+        expected_head=expected_head,
+        expected_hash=expected_hash,
+        artifacts=artifacts,
+        private_names=private_names,
+        backend="local",
+        fsync_file=fsync_file,
+        fsync_directory=fsync_directory,
+    )
+    root = _case_root(repository)
+    version = str(publication.generation or "")
+    catalog = _ciphertext_catalog(root, version)
+    observations = _local_replica_observations(root, catalog)
+    unavailable: list[dict[str, Any]] = []
+    activations_before = _REMOTE_STORAGE_ACTIVATIONS
+    if policy.mode == "private_remote":
+        for index, provider in enumerate(providers):
+            provider_id = _provider_id(provider, index)
+            rows, failure = _observe_remote_provider(provider, provider_id, root, catalog)
+            observations.extend(rows)
+            if failure is not None:
+                unavailable.append(failure)
+    receipt = _replica_receipt(
+        policy,
+        catalog,
+        observations,
+        unavailable,
+        now=_replica_clock(clock),
+        generation=publication.generation,
+        manifest_hash=publication.manifest_hash,
+        network_sharing_started=_REMOTE_STORAGE_ACTIVATIONS > activations_before,
+    )
+    receipt["publication_state"] = publication.state
+    receipt["minted_completion"] = publication.minted_completion
+    return receipt
+
+
+def reconcile_encrypted_replicas(
+    repository: str | Path,
+    receipt: Mapping[str, Any] | None = None,
+    *,
+    policy: ReplicaPolicy | None = None,
+    providers: Sequence[Any] | Mapping[str, Any] = (),
+    clock: Callable[[], float] | None = None,
+    timeout_seconds: float | None = None,
+) -> dict[str, Any]:
+    """Retry providers whose next retry is due. A future retry returns immediately.
+
+    A workspace reconcile with no manifest receipt rechecks the local primary
+    and any supplied providers against the stored ciphertext digest.
+    """
+
+    if receipt is None or isinstance(providers, Mapping):
+        del clock
+        return _reconcile_workspace_replicas(
+            repository,
+            providers=providers if isinstance(providers, Mapping) else None,
+            timeout_seconds=timeout_seconds,
+        )
+    if not isinstance(policy, ReplicaPolicy):
+        raise ValueError("replica_policy_required")
+    now = _replica_clock(clock)
+    root = _case_root(repository)
+    catalog = [dict(entry) for entry in receipt.get("catalog") or []]
+    if policy.mode != "private_remote":
+        refreshed = dict(receipt)
+        refreshed["synchronous_wait_seconds"] = 0
+        refreshed["waited"] = False
+        refreshed["network_sharing_started"] = False
+        return refreshed
+    due = {
+        str(item.get("provider_id")): item
+        for item in receipt.get("unavailable_providers") or []
+        if isinstance(item, Mapping)
+        and item.get("next_retry_at") is not None
+        and float(item["next_retry_at"]) <= now
+        and not item.get("exhausted")
+    }
+    activations_before = _REMOTE_STORAGE_ACTIVATIONS
+    observations: list[dict[str, Any]] = []
+    unavailable: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, provider in enumerate(providers):
+        provider_id = _provider_id(provider, index)
+        seen.add(provider_id)
+        previous = due.get(provider_id)
+        if previous is None:
+            continue
+        rows, failure = _observe_remote_provider(provider, provider_id, root, catalog)
+        if failure is not None:
+            failure["attempts"] = int(previous.get("attempts") or 1) + 1
+            unavailable.append(failure)
+        else:
+            observations.extend(rows)
+    for item in receipt.get("unavailable_providers") or []:
+        if not isinstance(item, Mapping):
+            continue
+        provider_id = str(item.get("provider_id"))
+        if provider_id in due:
+            continue
+        unavailable.append({
+            "provider_id": provider_id,
+            "error_category": "unavailable",
+            "attempts": int(item.get("attempts") or 1),
+            "exhausted": bool(item.get("exhausted")),
+            "next_retry_at": item.get("next_retry_at"),
+            "preserve_schedule": True,
+        })
+    kept = [
+        row for row in _observations_from_receipt(receipt)
+        if str(row.get("provider_id")) not in due and str(row.get("provider_id")) != "local-primary"
+    ]
+    local_rows = _local_replica_observations(root, catalog) if all(
+        root.joinpath(*str(entry["name"]).split("/")).is_file() for entry in catalog
+    ) else []
+    refreshed = _replica_receipt(
+        policy,
+        catalog,
+        [*local_rows, *kept, *observations],
+        unavailable,
+        now=now,
+        generation=receipt.get("generation") if isinstance(receipt.get("generation"), str) else None,
+        manifest_hash=receipt.get("manifest_hash") if isinstance(receipt.get("manifest_hash"), str) else None,
+        network_sharing_started=_REMOTE_STORAGE_ACTIVATIONS > activations_before,
+    )
+    refreshed["synchronous_wait_seconds"] = 0
+    refreshed["waited"] = False
+    return refreshed
+
+
+def _observations_from_receipt(receipt: Mapping[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    catalog = list(receipt.get("catalog") or [])
+    for provider_id in receipt.get("verified_providers") or []:
+        if provider_id == "local-primary":
+            continue
+        for entry in catalog:
+            rows.append({
+                "provider_id": provider_id,
+                "role": "remote",
+                "name": entry["name"],
+                "state": "verified",
+                "counted": True,
+                "digest_match": True,
+                "version_match": True,
+                "version": entry["version"],
+            })
+    for item in receipt.get("uncounted") or []:
+        if not isinstance(item, Mapping) or item.get("provider_id") == "local-primary":
+            continue
+        rows.append({
+            "provider_id": item.get("provider_id"),
+            "role": "remote",
+            "name": item.get("name"),
+            "state": item.get("state"),
+            "counted": False,
+            "digest_match": False,
+            "version_match": False,
+            "version": "",
+        })
+    return rows
+
+
+def restore_encrypted_replicas(
+    repository: str | Path,
+    receipt: Mapping[str, Any],
+    *,
+    providers: Sequence[Any],
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    fsync_file: Callable[[int], None] | None = None,
+    fsync_directory: Callable[[int], None] | None = None,
+) -> dict[str, Any]:
+    """Restore a missing local primary from a remote replica whose readback matches the catalog.
+
+    The user key opens the restored ciphertext. A replica that fails digest or
+    version checks is not used.
+    """
+
+    catalog = [dict(entry) for entry in receipt.get("catalog") or []]
+    if not catalog:
+        raise PrivateRevisionError("replica catalog missing", code="missing_object", state="recoverable")
+    version = str(catalog[0].get("version") or "")
+    selected: list[tuple[str, bytes]] | None = None
+    for index, provider in enumerate(providers):
+        restored: list[tuple[str, bytes]] = []
+        try:
+            for entry in catalog:
+                relative = str(entry["name"])
+                if _REPLICA_NAME.fullmatch(relative) is None or entry.get("version") != version:
+                    raise PrivateRevisionError("replica rejected", code="readback_mismatch", state="recoverable")
+                loaded = provider.get(relative)
+                if not isinstance(loaded, (bytes, bytearray)) or _replica_digest(bytes(loaded)) != entry["digest"]:
+                    raise PrivateRevisionError("replica readback mismatch", code="readback_mismatch", state="recoverable")
+                restored.append((relative, bytes(loaded)))
+        except Exception:
+            continue
+        selected = restored
+        break
+    if selected is None:
+        raise PrivateRevisionError("verified replica unavailable", code="replica_unavailable", state="recoverable")
+    root = _case_root(repository)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "o").mkdir(parents=True, exist_ok=True)
+    for relative, payload in selected:
+        parent_name, _, leaf = relative.rpartition("/")
+        parent = root / parent_name if parent_name else root
+        parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(parent, leaf, payload, fsync_file=fsync_file, fsync_directory=fsync_directory)
+    opened = read_case_manifest(
+        repository,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        key=key,
+        key_id=key_id,
+    )
+    if opened is None:
+        raise PrivateRevisionError("restored case is unreadable", code="stale_head", state="recoverable")
+    return opened
+
+
+def count_verified_ciphertext_replicas(observations: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Count providers whose every object survived digest and version readback."""
+
+    grouped: dict[str, list[bool]] = {}
+    rejected: list[dict[str, str]] = []
+    for row in observations:
+        provider_id = str(row.get("provider_id") or "")
+        state = str(row.get("state") or "")
+        counted = (
+            state == "verified"
+            and row.get("digest_match") is True
+            and row.get("version_match") is True
+            and state not in _UNCOUNTED_REPLICA_STATES
+        )
+        grouped.setdefault(provider_id, []).append(counted)
+        if not counted:
+            rejected.append({"provider_id": provider_id, "state": state})
+    verified = [provider_id for provider_id, flags in grouped.items() if flags and all(flags)]
+    return {"verified_replicas": len(verified), "verified_providers": verified, "uncounted": rejected}
+
+
 def assert_store_isolated_from_exports(store_dir: str | Path, export_dir: str | Path) -> None:
     """Refuse to keep a key store inside or next to an encrypted export directory."""
 
@@ -3326,4 +4438,15 @@ __all__ = [
     "publish_case_manifest",
     "read_case_manifest",
     "recover_case_manifest",
+    "ReplicaPolicy",
+    "configure_replica_policy",
+    "replica_policy",
+    "select_private_storage_mode",
+    "publish_encrypted_replicas",
+    "reconcile_encrypted_replicas",
+    "restore_encrypted_replicas",
+    "restore_encrypted_workspace",
+    "count_verified_ciphertext_replicas",
+    "remote_storage_activation_count",
+    "upstream_replication_fixture_qualification",
 ]
