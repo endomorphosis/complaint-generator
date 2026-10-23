@@ -5,6 +5,10 @@ from integrations.private_storage import parse_private_envelope
 
 def private_session_path(directory: Path, user_id: str) -> Path:
     from applications.complaint_workspace import namespace_filename
+    from applications.complaint_workspace import ComplaintWorkspaceService
+    joined = ComplaintWorkspaceService(root_dir=directory).joined_revision_repository(user_id, user_id) / "head.cgpe"
+    if joined.is_file():
+        return joined
     base = directory / namespace_filename(user_id)
     successor = base.with_name(base.name + ".cgpe")
     return successor if successor.exists() else base

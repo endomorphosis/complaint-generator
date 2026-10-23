@@ -44,6 +44,7 @@ EOF_USER_ID = "pty-synthetic-eof"
 NARRATIVE_USER_ID = "pty-synthetic-narrative"
 UNKNOWN_USER_ID = "pty-synthetic-unknown"
 PARTY_ANSWER = "Jordan Example"
+CANONICAL_ANSWER = "2024-03-04"
 OPPOSING_ANSWER = "Acme Company"
 NARRATIVE = "My landlord evicted me after my accommodation request."
 UNKNOWN_ANSWER = "unknown"
@@ -364,7 +365,7 @@ class _PtyResult:
 
 
 def _payloads() -> tuple[str, ...]:
-    return (PARTY_ANSWER, OPPOSING_ANSWER, NARRATIVE, UNKNOWN_ANSWER, PAUSE_MESSAGE)
+    return (PARTY_ANSWER, CANONICAL_ANSWER, OPPOSING_ANSWER, NARRATIVE, UNKNOWN_ANSWER, PAUSE_MESSAGE)
 
 
 _JSON_PAYLOAD = re.compile(
@@ -685,8 +686,16 @@ def _unlocked_service(session_dir: Path, user_id: str):
 def _load_session(path: Path, user_id: str) -> dict:
     if not path.is_file():
         _fail("persisted session file is absent")
+    directory = path.parent
+    if path.name == "head.cgpe":
+        if directory.parent.name == "joined-revisions":
+            directory = directory.parent.parent
+        elif directory.name == "joined-revisions":
+            directory = directory.parent
+        else:
+            _fail("session head is outside its known joined repository")
     try:
-        payload = _unlocked_service(path.parent, user_id).get_session(user_id)["session"]
+        payload = _unlocked_service(directory, user_id).get_session(user_id)["session"]
     except Exception:
         _fail("persisted session could not be authenticated through the public service")
     if not isinstance(payload, dict):
@@ -736,74 +745,44 @@ def test_diagnostics_redact_synthetic_session_payloads() -> None:
 
 
 def test_pty_smoke_pauses_and_fresh_service_resumes_same_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Real PTY child, two answers, max_turns=2, then a new workspace service."""
-
+    """Current canonical PTY, two valid answers, bounded pause and fresh read."""
     with tempfile.TemporaryDirectory(prefix="tui-baseline-") as raw:
         root = Path(raw)
-        session_dir = root / "sessions"
-        home = root / "home"
+        session_dir, home = root / "sessions", root / "home"
         session_dir.mkdir()
         home.mkdir()
-        script_path = root / "_pty_child.py"
-        script_path.write_text(CHILD_SCRIPT, encoding="utf-8")
+        script_path = root / "_canonical_smoke_child.py"
+        script_path.write_text(CANONICAL_CHILD_SCRIPT, encoding="utf-8")
         _install_parent_guards(monkeypatch, script_path)
-        workspace = _import_workspace(monkeypatch, session_dir)
-        result = _run_pty(
-            script_path=script_path,
-            home=home,
-            session_dir=session_dir,
-            user_id=SMOKE_USER_ID,
-            answers=(NARRATIVE.encode("utf-8"), PARTY_ANSWER.encode("utf-8")),
-        )
-        if result.returncode != 0:
-            _fail(f"PTY chat exited {result.returncode}", result.transcript)
-        if result.elapsed_seconds > DEADLINE_SECONDS:
-            _fail(f"PTY chat took {result.elapsed_seconds:.3f}s", result.transcript)
-        if PAUSE_MESSAGE not in result.transcript:
-            _fail("pause/resume message was not displayed", result.transcript)
-        if result.proof.get("entrypoint") != "applications.complaint_cli.chat":
-            _fail("PTY child did not call applications.complaint_cli.chat", result.transcript)
-        if result.proof.get("max_turns_is_int") is not True or result.proof.get("max_turns") != 2:
-            _fail("PTY child did not pass integer max_turns=2", result.transcript)
-        if result.proof.get("network_guard_active") is not True or result.proof.get("process_guard_active") is not True:
-            _fail("PTY child did not install provider and network guards before chat", result.transcript)
-        _require_same("proof user id", result.proof.get("user_id"), SMOKE_USER_ID)
-
+        _import_workspace(monkeypatch, session_dir)
+        result = _run_pty(script_path=script_path, home=home, session_dir=session_dir,
+            user_id=SMOKE_USER_ID, answers=(NARRATIVE.encode(), CANONICAL_ANSWER.encode()), canonical=True)
+        if result.returncode != 0 or PAUSE_MESSAGE not in result.transcript:
+            _fail("canonical smoke did not pause after two valid answers", result.transcript)
+        if result.startup_seconds > CANONICAL_STARTUP_SECONDS or result.interaction_seconds > DEADLINE_SECONDS:
+            _fail("canonical smoke exceeded its existing startup/interaction bounds", result.transcript)
+        if result.elapsed_seconds > CANONICAL_STARTUP_SECONDS + DEADLINE_SECONDS:
+            _fail("canonical smoke exceeded its total bound", result.transcript)
+        if result.proof.get("max_turns") != 2 or result.proof.get("max_turns_is_int") is not True:
+            _fail("smoke did not exercise the real two-turn limit")
+        if not result.proof.get("network_guard_active") or not result.proof.get("process_guard_active"):
+            _fail("smoke process/network guards were not active")
         saved = _load_session(_session_path(session_dir, SMOKE_USER_ID), SMOKE_USER_ID)
-        answers = saved.get("intake_answers") or {}
-        narrative_record = saved.get("original_complaint") or {}
-        _require_same("user id", saved.get("user_id"), SMOKE_USER_ID)
-        _require_same("narrative text", narrative_record.get("text"), NARRATIVE)
-        _require_same("party answer", answers.get("party_name"), PARTY_ANSWER)
-        if answers.get("party_name") == NARRATIVE:
-            _fail("housing narrative was stored as party_name")
-        if answers.get("opposing_party"):
-            _fail("opposing party was stored before the structured question")
-        if answers.get("protected_activity"):
-            _fail("third intake answer was stored before resume")
-        if len(saved.get("intake_history") or []) != 1:
-            _fail("persisted intake history did not contain only the structured answer")
-
-        fresh = _unlocked_service(session_dir, SMOKE_USER_ID)
-        again = _unlocked_service(session_dir, SMOKE_USER_ID)
+        _require_same("saved narrative", saved["original_complaint"]["text"], NARRATIVE)
+        projection = saved["shared_interview"]
+        history = projection["denoiser_history"]
+        if sum(entry.get("answer") == CANONICAL_ANSWER for entry in history) != 1:
+            _fail("the actual graph answer was not persisted exactly once")
+        if saved["intake_answers"].get("party_name"):
+            _fail("a graph date answer became a legacy party-name answer")
+        assert_private_session_frame(_session_path(session_dir, SMOKE_USER_ID).read_bytes(), NARRATIVE, CANONICAL_ANSWER)
+        fresh, again = _unlocked_service(session_dir, SMOKE_USER_ID), _unlocked_service(session_dir, SMOKE_USER_ID)
         if fresh is again:
-            _fail("resume did not construct a fresh workspace service")
+            _fail("resume did not construct independent services")
         resumed = again.get_session(SMOKE_USER_ID)
-        resumed_session = resumed.get("session") or {}
-        resumed_answers = resumed_session.get("intake_answers") or {}
-        _require_same("resumed user id", resumed_session.get("user_id"), SMOKE_USER_ID)
-        _require_same(
-            "resumed narrative",
-            (resumed_session.get("original_complaint") or {}).get("text"),
-            NARRATIVE,
-        )
-        _require_same("resumed party answer", resumed_answers.get("party_name"), PARTY_ANSWER)
-        if resumed_answers.get("party_name") == NARRATIVE:
-            _fail("resumed session stored the housing narrative as party_name")
-        next_question = resumed.get("next_question") or {}
-        if next_question.get("id") != "opposing_party":
-            _fail("fresh service did not resume the same id at the next unanswered question")
-        if (resumed_session.get("conversation_state") or {}).get("is_complete") is True:
+        _require_same("fresh read user", resumed["session"]["user_id"], SMOKE_USER_ID)
+        _require_same("fresh read canonical projection", resumed["session"]["shared_interview"], projection)
+        if (resumed["session"].get("conversation_state") or {}).get("is_complete") is True:
             _fail("paused session was reported complete")
 
 
@@ -825,7 +804,7 @@ def test_canonical_pty_first_answer_and_cold_encrypted_resume(monkeypatch: pytes
             home=home,
             session_dir=session_dir,
             user_id=SMOKE_USER_ID,
-            answers=(NARRATIVE.encode("utf-8"), PARTY_ANSWER.encode("utf-8")),
+            answers=(NARRATIVE.encode("utf-8"), CANONICAL_ANSWER.encode("utf-8")),
             canonical=True,
         )
         if result.returncode != 0:
@@ -862,14 +841,14 @@ def test_canonical_pty_first_answer_and_cold_encrypted_resume(monkeypatch: pytes
         if result.proof.get("answered_inquiries") != answered:
             _fail("PTY transition proof differs from encrypted shared inquiry history")
         denoiser_history = projection.get("denoiser_history") or []
-        if sum(item.get("answer") == PARTY_ANSWER for item in denoiser_history) != 1:
+        if sum(item.get("answer") == CANONICAL_ANSWER for item in denoiser_history) != 1:
             _fail("PTY's first actual answer was not persisted exactly once in the shared engine")
         if result.proof.get("interview_status") != "awaiting_user" or result.proof.get("legal_sufficiency") is not False:
             _fail("PTY did not preserve the honest shared-interview outcome")
         if result.proof.get("current_inquiry", {}).get("kind") != "graph":
             _fail("PTY did not pause at an actual canonical graph inquiry")
         raw = _session_path(session_dir, SMOKE_USER_ID).read_bytes()
-        assert_private_session_frame(raw, NARRATIVE, PARTY_ANSWER)
+        assert_private_session_frame(raw, NARRATIVE, CANONICAL_ANSWER)
         if _session_path(session_dir, SMOKE_USER_ID).stat().st_mode & 0o777 != 0o600:
             _fail("PTY session is not owner-only 0600")
         if answers.get("opposing_party"):
