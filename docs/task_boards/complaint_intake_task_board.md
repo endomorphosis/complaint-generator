@@ -1088,7 +1088,7 @@ Implementation instructions:
 
 ## CIMP-ROUTE-03 Enforce privacy policy at the last remote inference boundary
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.router
