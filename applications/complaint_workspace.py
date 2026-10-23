@@ -11748,6 +11748,59 @@ class ComplaintWorkspaceService:
         payload["updated"] = True
         return payload
 
+    def dispatch_private_llm_turn(
+        self,
+        user_id: Optional[str],
+        *,
+        relevant_facts: list,
+        rule_gaps: list,
+        unrelated_evidence: Optional[list] = None,
+        sensitive_literals: Optional[list] = None,
+        key: bytes,
+        key_id: str,
+        provider: Optional[str] = None,
+        model_name: Optional[str] = None,
+        timeout: Any = None,
+        campaign_settings: Optional[Mapping[str, Any]] = None,
+        stored_user_complaint: bool = False,
+        turn_id: str = "",
+        **options: Any,
+    ) -> Dict[str, Any]:
+        """Apply the persisted cloud choice, then the minimal-prompt router gate."""
+
+        from integrations.ipfs_datasets.llm import dispatch_private_turn
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        helpers = _privacy_helpers()
+        case_id = _state_case_id(state, resolved_user_id)
+        privacy_context = helpers["build_complaint_privacy_context"](
+            state.get("privacy_policy"),
+            user_id=resolved_user_id,
+            case_id=case_id,
+            data_class="raw_intake",
+        )
+        result = dispatch_private_turn(
+            privacy_context=privacy_context,
+            relevant_facts=relevant_facts,
+            rule_gaps=rule_gaps,
+            unrelated_evidence=unrelated_evidence,
+            sensitive_literals=sensitive_literals,
+            key=key,
+            key_id=key_id,
+            provider=provider,
+            model_name=model_name,
+            timeout=timeout,
+            campaign_settings=campaign_settings,
+            stored_user_complaint=stored_user_complaint,
+            principal_id=resolved_user_id,
+            turn_id=turn_id,
+            **options,
+        )
+        result["user_id"] = resolved_user_id
+        result["case_id"] = case_id
+        return result
+
     def inventory_private_data_classes(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Describe private case classes without reading other sessions, evidence, exports, or secrets."""
 

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from applications.complaint_workspace import (
     ComplaintWorkspaceService,
@@ -532,6 +532,43 @@ def set_privacy_policy(
         user_id,
         mode,
         case_id=case_id,
+    )
+
+
+def dispatch_private_llm_turn(
+    user_id: Optional[str],
+    *,
+    relevant_facts: list,
+    rule_gaps: list,
+    unrelated_evidence: list | None = None,
+    sensitive_literals: list | None = None,
+    key: bytes,
+    key_id: str,
+    provider: str | None = None,
+    model_name: str | None = None,
+    timeout: Any = None,
+    campaign_settings: Mapping[str, Any] | None = None,
+    stored_user_complaint: bool = False,
+    turn_id: str = "",
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+    **options: Any,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).dispatch_private_llm_turn(
+        user_id,
+        relevant_facts=relevant_facts,
+        rule_gaps=rule_gaps,
+        unrelated_evidence=unrelated_evidence,
+        sensitive_literals=sensitive_literals,
+        key=key,
+        key_id=key_id,
+        provider=provider,
+        model_name=model_name,
+        timeout=timeout,
+        campaign_settings=campaign_settings,
+        stored_user_complaint=stored_user_complaint,
+        turn_id=turn_id,
+        **options,
     )
 
 
@@ -1101,6 +1138,7 @@ __all__ = [
     "get_provider_diagnostics",
     "get_privacy_policy",
     "set_privacy_policy",
+    "dispatch_private_llm_turn",
     "inventory_private_data_classes",
     "get_packaged_docket_operator_dashboard",
     "load_packaged_docket_operator_dashboard_report",
