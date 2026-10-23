@@ -191,7 +191,7 @@ Implementation instructions:
 
 ## CIMP-TUI-09 Persist complete interview snapshots through private durable storage
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.tui
