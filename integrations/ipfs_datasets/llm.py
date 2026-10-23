@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 import hashlib
 import importlib
@@ -27,6 +28,7 @@ from integrations.ipfs_accelerate.routers import (
 	normalize_accelerate_provider,
 	pinned_grok47_canary_kwargs,
 	pinned_grok47_dispatch_kwargs,
+	development_campaign_authorizes_user_complaint_egress,
 	unpinned_grok_route_reason,
 	vetted_route_observation,
 )
@@ -773,6 +775,21 @@ def _build_arch_router_prompt(prompt: str, routes: list[Dict[str, str]], context
 	)
 
 
+# Set while a private complaint turn is being prepared. Architecture-router
+# classification must not receive that prompt, and a refusal must not fall
+# through to another cloud model.
+_BLOCK_ARCH_CLASSIFICATION: ContextVar[bool] = ContextVar(
+	"complaint_block_arch_classification",
+	default=False,
+)
+ARCH_CLASSIFICATION_BLOCKED = "privacy_denied:architecture_classification_blocked"
+MINIMAL_TURN_SCHEMA = "complaint-minimal-turn-prompt/v1"
+PRIVATE_TURN_TIMEOUT_SECONDS = 60.0
+_PRIVATE_REQUEST_CACHE: list[Dict[str, Any]] = []
+_PRIVATE_REQUEST_TRACES: list[Dict[str, Any]] = []
+_PRIVATE_REQUEST_LOCK = threading.Lock()
+
+
 def _select_huggingface_arch_route(
 	prompt: str,
 	*,
@@ -784,6 +801,15 @@ def _select_huggingface_arch_route(
 	fallback_model_name: Optional[str],
 ) -> Dict[str, str]:
 	routes = list(arch_router_config.get("routes") or [])
+	if _BLOCK_ARCH_CLASSIFICATION.get():
+		# Do not copy `prompt` into the route receipt or hand it to a model.
+		return {
+			"arch_router_status": "refused",
+			"arch_router_selected_route": "",
+			"arch_router_selected_model": "",
+			"arch_router_model_name": "",
+			"arch_router_error": ARCH_CLASSIFICATION_BLOCKED,
+		}
 	if not arch_router_config.get("enabled") or not routes or generate_text is None:
 		return {}
 
@@ -903,6 +929,17 @@ def _build_huggingface_router_request(
 			"arch_router_selected_model": str(effective_model_name or ""),
 			"arch_router_model_name": str(arch_router_config.get("model") or HF_ARCH_ROUTER_MODEL),
 			"arch_router_error": str(exc),
+		}
+	if str(route_selection.get("arch_router_status") or "") == "refused":
+		# Classification refused. Do not keep a fallback cloud model or the
+		# original prompt as an outbound request.
+		return "", None, {}, {}, {
+			"requested_provider_name": provider or "",
+			"effective_provider_name": "",
+			"effective_model_name": "",
+			"router_base_url": "",
+			"dispatch": "none",
+			**route_selection,
 		}
 	selected_model_name = str(route_selection.get("arch_router_selected_model") or "").strip()
 	if selected_model_name:
@@ -1134,15 +1171,17 @@ def generate_text_via_router(
 	route_block = unpinned_grok_route_reason(provider, model_name)
 	if route_block:
 		raise RuntimeError("private_generation_preflight_unavailable" if privacy_context is not None else route_block)
-	effective_provider, effective_model_name, call_options, env_overrides, _ = _prepare_generate_text_call(
+	effective_provider, effective_model_name, call_options, env_overrides, prepared = _prepare_generate_text_call(
 		prompt,
 		provider=provider,
 		model_name=model_name,
 		**kwargs,
 	)
+	if str(prepared.get("arch_router_status") or "") == "refused":
+		raise RuntimeError(ARCH_CLASSIFICATION_BLOCKED)
 	preflight_error = _provider_preflight_error(
 		effective_provider=effective_provider,
-		metadata=_,
+		metadata=prepared,
 		env_overrides=env_overrides,
 	)
 	if preflight_error:
@@ -1249,6 +1288,28 @@ def generate_text_with_metadata(
 		model_name=model_name,
 		**kwargs,
 	)
+	if str(metadata.get("arch_router_status") or "") == "refused":
+		return with_adapter_metadata(
+			{
+				"status": "error",
+				"text": "",
+				"provider_name": provider or "",
+				"model_name": model_name or "",
+				**metadata,
+				"error": ARCH_CLASSIFICATION_BLOCKED,
+				"privacy_decision": "denied",
+				"resumable": True,
+				"dispatch": "none",
+				"live_canary": False,
+				"request_id": request_id,
+				"inference_owner": INFERENCE_OWNER,
+				"failure_kind": "privacy_denied",
+				"prompt_logged": False,
+			},
+			operation="generate_text",
+			backend_available=True,
+			implementation_status="available",
+		)
 	preflight_error = _provider_preflight_error(
 		effective_provider=effective_provider,
 		metadata=metadata,
@@ -2172,6 +2233,299 @@ def open_private_embedding(
 	}
 
 
+def _bounded_private_timeout(value: Any) -> float:
+	if value is None:
+		return PRIVATE_TURN_TIMEOUT_SECONDS
+	if type(value) not in (int, float) or isinstance(value, bool) or not math.isfinite(float(value)) or float(value) <= 0:
+		raise ValueError("privacy_denied:malformed_timeout")
+	return min(float(value), PRIVATE_TURN_TIMEOUT_SECONDS)
+
+
+def _apply_case_aliases(text: str, replacements: list[tuple[str, str]]) -> str:
+	rendered = str(text)
+	for literal, alias in replacements:
+		rendered = rendered.replace(literal, alias)
+	return rendered
+
+
+def build_minimal_turn_prompt(
+	*,
+	user_id: str,
+	case_id: str,
+	relevant_facts: list,
+	rule_gaps: list,
+	unrelated_evidence: Optional[list] = None,
+	sensitive_literals: Optional[list] = None,
+	key: bytes,
+	key_id: str,
+	principal_id: str = "",
+	turn_id: str = "",
+) -> Dict[str, Any]:
+	"""Build one reversible, case-local prompt from facts and rule gaps.
+
+	Unrelated evidence is not copied into the prompt. Sensitive literals are
+	replaced with aliases that ``resolve_case_alias`` can open for this user
+	and case only.
+	"""
+
+	if not isinstance(relevant_facts, list) or not relevant_facts:
+		raise ValueError("privacy_denied:malformed_turn")
+	if not isinstance(rule_gaps, list) or not rule_gaps:
+		raise ValueError("privacy_denied:malformed_turn")
+	facts: list[tuple[str, str, list[str]]] = []
+	for item in relevant_facts:
+		if not isinstance(item, Mapping):
+			raise ValueError("privacy_denied:malformed_turn")
+		fact_id = str(item.get("fact_id") or "").strip()
+		text = str(item.get("text") or "")
+		rules = [str(rule).strip() for rule in list(item.get("supports_rules") or []) if str(rule).strip()]
+		if not fact_id or not text.strip():
+			raise ValueError("privacy_denied:malformed_turn")
+		facts.append((fact_id, text, rules))
+	gaps: list[tuple[str, str]] = []
+	for item in rule_gaps:
+		if not isinstance(item, Mapping):
+			raise ValueError("privacy_denied:malformed_turn")
+		rule_id = str(item.get("rule_id") or "").strip()
+		missing = str(item.get("missing") or "").strip()
+		if not rule_id or not missing:
+			raise ValueError("privacy_denied:malformed_turn")
+		gaps.append((rule_id, missing))
+	unrelated = [str(item) for item in list(unrelated_evidence or []) if str(item)]
+	literals: list[str] = []
+	for raw in list(sensitive_literals or []) + unrelated:
+		literal = str(raw or "")
+		if literal and literal not in literals:
+			literals.append(literal)
+	literals.sort(key=len, reverse=True)
+	replacements: list[tuple[str, str]] = []
+	alias_rows: list[Dict[str, Any]] = []
+	for index, literal in enumerate(literals):
+		digest = hashlib.sha256(f"{user_id}\0{case_id}\0{index}\0{literal}".encode("utf-8")).hexdigest()[:12]
+		alias = f"alias_{digest}"
+		if literal in alias:
+			raise ValueError("privacy_denied:malformed_alias")
+		remember_case_alias(
+			user_id=user_id,
+			case_id=case_id,
+			alias=alias,
+			canonical=literal,
+			key=key,
+			key_id=key_id,
+			principal_id=principal_id or user_id,
+		)
+		replacements.append((literal, alias))
+		alias_rows.append({"alias": alias, "reversible": True, "case_local": True})
+	lines = [
+		f"schema: {MINIMAL_TURN_SCHEMA}",
+		f"turn_id: {str(turn_id or 'turn').strip() or 'turn'}",
+		"relevant_facts:",
+	]
+	preserved_fact_ids: list[str] = []
+	for fact_id, text, rules in facts:
+		rendered = _apply_case_aliases(text, replacements)
+		rule_text = ",".join(rules)
+		lines.append(f"- {fact_id} [{rule_text}]: {rendered}")
+		preserved_fact_ids.append(fact_id)
+	lines.append("rule_gaps:")
+	preserved_rules: list[str] = []
+	for rule_id, missing in gaps:
+		lines.append(f"- {rule_id}: {_apply_case_aliases(missing, replacements)}")
+		preserved_rules.append(rule_id)
+	prompt = "\n".join(lines)
+	for literal, _alias in replacements:
+		if literal in prompt:
+			raise ValueError("privacy_denied:literal_survived")
+	for blob in unrelated:
+		if blob in prompt:
+			raise ValueError("privacy_denied:unrelated_evidence_included")
+	return {
+		"schema": MINIMAL_TURN_SCHEMA,
+		"prompt": prompt,
+		"aliases": alias_rows,
+		"preserved_fact_ids": preserved_fact_ids,
+		"preserved_rule_ids": preserved_rules,
+		"excluded_evidence_count": len(unrelated),
+		"user_id": str(user_id or ""),
+		"case_id": str(case_id or ""),
+	}
+
+
+def private_llm_request_cache() -> list[Dict[str, Any]]:
+	"""Final private-turn payloads. Callers assert model, timeout, and aliases."""
+
+	with _PRIVATE_REQUEST_LOCK:
+		return [dict(item) for item in _PRIVATE_REQUEST_CACHE]
+
+
+def private_llm_request_traces() -> list[Dict[str, Any]]:
+	"""Redacted traces. Prompt bodies are omitted."""
+
+	with _PRIVATE_REQUEST_LOCK:
+		return [dict(item) for item in _PRIVATE_REQUEST_TRACES]
+
+
+def clear_private_llm_request_cache() -> None:
+	with _PRIVATE_REQUEST_LOCK:
+		_PRIVATE_REQUEST_CACHE.clear()
+		_PRIVATE_REQUEST_TRACES.clear()
+
+
+def _privacy_choice_from_context(context: Mapping[str, Any]) -> Dict[str, Any]:
+	policy = context.get("policy") if isinstance(context.get("policy"), Mapping) else {}
+	permitted = policy.get("permitted_remote") if isinstance(policy.get("permitted_remote"), Mapping) else {}
+	return {
+		"processing_mode": str(policy.get("processing_mode") or ""),
+		"cloud_processing_enabled": bool(policy.get("cloud_processing_enabled")),
+		"provider": str(permitted.get("provider") or ""),
+		"model": str(permitted.get("model") or ""),
+		"scope": str(policy.get("scope") or ""),
+		"persisted_opt_in": str(policy.get("processing_mode") or "") == PRIVACY_PROCESSING_GROK,
+		"consent_status": str((policy.get("consent") or {}).get("status") or "") if isinstance(policy.get("consent"), Mapping) else "",
+	}
+
+
+def _private_turn_denial(reason: str) -> Dict[str, Any]:
+	return {
+		"status": "error",
+		"text": "",
+		"error": reason,
+		"privacy_decision": "denied",
+		"dispatch": "none",
+		"prompt_logged": False,
+		"campaign_authorizes_stored_complaints": False,
+		"authorized_by": "",
+		"timeout_seconds": None,
+		"provider_name": "",
+		"model_name": "",
+		"resumable": True,
+	}
+
+
+def dispatch_private_turn(
+	*,
+	privacy_context: Any,
+	relevant_facts: list,
+	rule_gaps: list,
+	unrelated_evidence: Optional[list] = None,
+	sensitive_literals: Optional[list] = None,
+	key: bytes,
+	key_id: str,
+	provider: Optional[str] = None,
+	model_name: Optional[str] = None,
+	timeout: Any = None,
+	campaign_settings: Optional[Mapping[str, Any]] = None,
+	stored_user_complaint: bool = False,
+	principal_id: str = "",
+	turn_id: str = "",
+	**options: Any,
+) -> Dict[str, Any]:
+	"""Send one minimal prompt only after an explicit Grok opt-in.
+
+	Local private mode returns before preparation, architecture classification,
+	provider dispatch, and request caching. A campaign model setting cannot
+	supply that opt-in.
+	"""
+
+	campaign_authorizes = development_campaign_authorizes_user_complaint_egress(campaign_settings)
+	if campaign_authorizes:
+		return _private_turn_denial(PRIVACY_DENIAL_MALFORMED)
+	block = _privacy_context_block_reason(
+		privacy_context,
+		provider=provider or PRIVACY_GROK_PROVIDER,
+		model_name=model_name or PRIVACY_GROK_MODEL,
+		options={key: value for key, value in options.items() if key in _PRIVATE_GENERATION_OPTIONS},
+	)
+	if privacy_context is None or block:
+		reason = block or PRIVACY_DENIAL_CLOUD_DISABLED
+		if stored_user_complaint and campaign_settings is not None and reason == PRIVACY_DENIAL_CLOUD_DISABLED:
+			reason = PRIVACY_DENIAL_CLOUD_DISABLED
+		return _private_turn_denial(str(reason))
+	if not isinstance(privacy_context, Mapping):
+		return _private_turn_denial(PRIVACY_DENIAL_MALFORMED)
+	choice = _privacy_choice_from_context(privacy_context)
+	if choice["provider"] != PRIVACY_GROK_PROVIDER or choice["model"] != PRIVACY_GROK_MODEL:
+		return _private_turn_denial(PRIVACY_DENIAL_SCOPE)
+	if provider is not None and str(provider).strip() not in {"", PRIVACY_GROK_PROVIDER}:
+		return _private_turn_denial(PRIVACY_DENIAL_SCOPE)
+	if model_name is not None and str(model_name).strip() not in {"", PRIVACY_GROK_MODEL}:
+		return _private_turn_denial(PRIVACY_DENIAL_SCOPE)
+	try:
+		bounded_timeout = _bounded_private_timeout(timeout if timeout is not None else options.get("timeout"))
+		minimal = build_minimal_turn_prompt(
+			user_id=str(privacy_context.get("user_id") or ""),
+			case_id=str(privacy_context.get("case_id") or ""),
+			relevant_facts=relevant_facts,
+			rule_gaps=rule_gaps,
+			unrelated_evidence=unrelated_evidence,
+			sensitive_literals=sensitive_literals,
+			key=key,
+			key_id=key_id,
+			principal_id=principal_id,
+			turn_id=turn_id,
+		)
+	except ValueError as exc:
+		code = str(exc)
+		if not code.startswith("privacy_denied:"):
+			code = "privacy_denied:malformed_turn"
+		return _private_turn_denial(code)
+	prompt = str(minimal["prompt"])
+	payload = {
+		"provider": PRIVACY_GROK_PROVIDER,
+		"model": PRIVACY_GROK_MODEL,
+		"timeout_seconds": bounded_timeout,
+		"prompt": prompt,
+		"privacy_choice": choice,
+		"allow_local_fallback": False,
+		"allow_cross_provider_fallback": False,
+	}
+	trace = {
+		"provider": PRIVACY_GROK_PROVIDER,
+		"model": PRIVACY_GROK_MODEL,
+		"timeout_seconds": bounded_timeout,
+		"privacy_choice": dict(choice),
+		"prompt_included": False,
+		"dispatch": "attempted",
+		"allow_local_fallback": False,
+		"allow_cross_provider_fallback": False,
+	}
+	with _PRIVATE_REQUEST_LOCK:
+		_PRIVATE_REQUEST_CACHE.append(dict(payload))
+		_PRIVATE_REQUEST_TRACES.append(dict(trace))
+	forward = {
+		key: value
+		for key, value in options.items()
+		if key in _PRIVATE_GENERATION_OPTIONS and key not in {"timeout", "allow_local_fallback", "allow_cross_provider_fallback"}
+	}
+	token = _BLOCK_ARCH_CLASSIFICATION.set(True)
+	try:
+		generated = generate_text_with_metadata(
+			prompt,
+			provider=PRIVACY_GROK_PROVIDER,
+			model_name=PRIVACY_GROK_MODEL,
+			timeout=bounded_timeout,
+			allow_local_fallback=False,
+			allow_cross_provider_fallback=False,
+			complaint_privacy_context=privacy_context,
+			**forward,
+		)
+	finally:
+		_BLOCK_ARCH_CLASSIFICATION.reset(token)
+	if not isinstance(generated, dict):
+		generated = _private_turn_denial("private_generation_failed")
+	result = dict(generated)
+	result.pop("prompt", None)
+	result["privacy_choice"] = choice
+	result["timeout_seconds"] = bounded_timeout
+	result["campaign_authorizes_stored_complaints"] = False
+	result["authorized_by"] = "explicit_grok_opt_in"
+	result["minimal_turn_schema"] = MINIMAL_TURN_SCHEMA
+	result["preserved_fact_ids"] = list(minimal["preserved_fact_ids"])
+	result["preserved_rule_ids"] = list(minimal["preserved_rule_ids"])
+	result["excluded_evidence_count"] = minimal["excluded_evidence_count"]
+	return result
+
+
 def redact_generation_diagnostic(record: Mapping[str, Any] | None) -> Dict[str, Any]:
 	"""Private generation diagnostics share the storage allow-list."""
 
@@ -2227,4 +2581,12 @@ __all__ = [
 	"open_private_embedding",
 	"redact_generation_diagnostic",
 	"public_query_reference",
+	"MINIMAL_TURN_SCHEMA",
+	"PRIVATE_TURN_TIMEOUT_SECONDS",
+	"ARCH_CLASSIFICATION_BLOCKED",
+	"build_minimal_turn_prompt",
+	"dispatch_private_turn",
+	"private_llm_request_cache",
+	"private_llm_request_traces",
+	"clear_private_llm_request_cache",
 ]

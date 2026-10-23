@@ -275,6 +275,17 @@ def interpret_canary_dispatch(result: Any) -> dict[str, Any]:
     }
 
 
+def development_campaign_authorizes_user_complaint_egress(settings: Mapping[str, Any] | None) -> bool:
+    """A supervisor campaign's Grok model setting is not user consent.
+
+    Development runs use source and synthetic fixtures. Selecting grok-4.7
+    for the campaign does not authorize transmission of stored complaints.
+    """
+
+    del settings
+    return False
+
+
 def router_symbol_status(loader_name: str) -> dict[str, Any]:
     """Return availability for one accelerate router without raising."""
 
@@ -316,4 +327,5 @@ __all__ = [
     "router_symbol_status",
     "unpinned_grok_route_reason",
     "vetted_route_observation",
+    "development_campaign_authorizes_user_complaint_egress",
 ]
