@@ -2218,6 +2218,282 @@ def storage_backend_status() -> dict[str, Any]:
     )
 
 
+# Local filesystem readback is the only tier that may be marked complete.
+# Hermetic fakes and permitted remote-provider captures stay evidence, not completion.
+_INTAKE_COMPLETE_TIER = "local_node"
+_INTAKE_MEASUREMENT_TIERS = {
+    "measured-hermetic": "hermetic_fake",
+    "measured-local-node": "local_node",
+    "permitted-remote-provider": "remote_provider",
+}
+_INTAKE_ANSWERS = {
+    "jurisdiction": "Oregon",
+    "event_date": "2024-03-01",
+    "applicable_law_date": "2024-03-01",
+    "filing_reference_date": "2024-04-15",
+    "claim_candidates": "wrongful_termination",
+}
+_INTAKE_REQUIREMENT = {
+    "requirement_id": "synthetic-or-wt-1",
+    "jurisdiction": "Oregon",
+    "name": "written notice",
+    "locator": "synthetic-local-statute",
+    "source_kind": "synthetic_local_statute",
+}
+
+
+def source_binding(path: str | Path) -> dict[str, Any]:
+    """Hash one source file. Callers compare this with the bytes they imported."""
+
+    raw = Path(path).read_bytes()
+    return {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest(), "byte_length": len(raw)}
+
+
+def classify_intake_evidence(
+    *,
+    measurement: str,
+    assertions: Sequence[Mapping[str, Any]],
+    source_bindings: Sequence[Mapping[str, Any]],
+    cid: str = "",
+) -> dict[str, Any]:
+    """Score one readiness receipt.
+
+    A nonempty CID, a task-id substring, or a hermetic/remote label cannot set
+    ``complete``. Only a locally measured tier with matching behavioral
+    assertions and source hashes can.
+    """
+
+    label = str(measurement or "")
+    tier = _INTAKE_MEASUREMENT_TIERS.get(label, "unmeasured")
+    scored: list[dict[str, Any]] = []
+    for item in assertions:
+        record = dict(item)
+        kind = str(record.get("kind") or "")
+        passed = kind == "behavioral" and record.get("observed") == record.get("expected") and record.get("observed") not in (None, "", [], {})
+        record["passed"] = passed
+        scored.append(record)
+    bindings = [dict(row) for row in source_bindings]
+    bindings_ok = bool(bindings) and all(
+        isinstance(row.get("sha256"), str) and len(row["sha256"]) == 64 and int(row.get("byte_length") or 0) > 0
+        for row in bindings
+    )
+    complete = bool(
+        tier == _INTAKE_COMPLETE_TIER and bindings_ok and scored and all(row["passed"] for row in scored)
+    )
+    return {
+        "measurement": label,
+        "tier": tier,
+        "complete": complete,
+        "cid": str(cid or ""),
+        "cid_closes_task": False,
+        "assertions": scored,
+        "source_bindings": bindings,
+    }
+
+
+def _intake_identity() -> dict[str, Any]:
+    return {
+        "protection": "user_chosen_encrypted",
+        "tenant_id": "dur006-tenant",
+        "case_id": "dur006-case",
+        "principal_id": "dur006-tenant",
+    }
+
+
+def _intake_gap(context: Mapping[str, Any], claims: Sequence[Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    from integrations.ipfs_datasets.legal import intake_legal_selection
+
+    selection = intake_legal_selection(dict(context), list(claims))
+    questions = [item for item in selection.get("questions") or [] if isinstance(item, dict)]
+    return (questions[0] if questions else None), selection
+
+
+def _apply_one_gap(context: Mapping[str, Any], claims: list[str], facts: dict[str, Any], question: Mapping[str, Any]) -> dict[str, Any]:
+    from integrations.ipfs_datasets.legal import apply_legal_context_update
+
+    field = str(question.get("field") or "")
+    if field in facts:
+        raise InterviewSnapshotError("answered gap was asked again", code="duplicate_question")
+    if field not in _INTAKE_ANSWERS:
+        raise InterviewSnapshotError("synthetic intake has no answer for this gap", code="gap_unscripted")
+    answer = _INTAKE_ANSWERS[field]
+    facts[field] = {
+        "fact_id": "fact-" + field,
+        "field": field,
+        "value": answer,
+        "source_span": [0, len(answer)],
+    }
+    if field == "claim_candidates":
+        if answer in claims:
+            raise InterviewSnapshotError("claim fact was recorded twice", code="duplicate_fact")
+        claims.append(answer)
+        return dict(context)
+    return apply_legal_context_update(dict(context), {field: answer})
+
+
+def _map_requirement(context: Mapping[str, Any], selection: Mapping[str, Any]) -> dict[str, Any]:
+    from integrations.ipfs_datasets.legal import select_requirement_applicability
+
+    decision = select_requirement_applicability(dict(_INTAKE_REQUIREMENT), dict(context))
+    node_id = str(_INTAKE_REQUIREMENT["requirement_id"])
+    if selection.get("ready_to_select") and decision.get("selected") is True:
+        return {
+            "mapping_status": "selected",
+            "nodes": {
+                node_id: {
+                    "requirement_id": node_id,
+                    "applicability": decision.get("applicability"),
+                    "locator": _INTAKE_REQUIREMENT["locator"],
+                    "source_kind": _INTAKE_REQUIREMENT["source_kind"],
+                    "jurisdiction": decision.get("jurisdiction"),
+                }
+            },
+        }
+    return {"mapping_status": "unresolved", "nodes": {}, "reason": decision.get("reason")}
+
+
+def _redacted_gap_prompt(question: Mapping[str, Any], facts: Mapping[str, Any], complaint_text: str) -> str:
+    fields = ",".join(sorted(str(name) for name in facts))
+    prompt = "gap=%s fields=%s alias=CASE-ALIAS-1" % (question.get("question_id"), fields)
+    if complaint_text and complaint_text in prompt:
+        raise InterviewSnapshotError("redacted prompt included complaint text", code="egress_leak")
+    return prompt
+
+
+def _dispatch_gap(mode: str, question: Mapping[str, Any], facts: Mapping[str, Any], complaint_text: str, transport: Callable[..., Any] | None, captures: list[dict[str, Any]]) -> None:
+    from integrations.ipfs_accelerate.routers import pinned_grok47_dispatch_kwargs
+
+    if mode == "local_private":
+        return
+    if mode != "cloud_grok":
+        raise InterviewSnapshotError("intake mode is unknown", code="mode_rejected")
+    if transport is None:
+        raise InterviewSnapshotError("cloud intake requires an injected transport", code="transport_required")
+    route = pinned_grok47_dispatch_kwargs()
+    prompt = _redacted_gap_prompt(question, facts, complaint_text)
+    payload = {**route, "prompt": prompt, "timeout": 5, "max_tokens": 64}
+    captures.append({
+        "provider": payload["provider"],
+        "model_name": payload["model_name"],
+        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        "prompt": prompt,
+        "allow_local_fallback": payload["allow_local_fallback"],
+        "allow_cross_provider_fallback": payload["allow_cross_provider_fallback"],
+    })
+    transport(payload)
+
+
+def run_one_gap_intake(
+    directory: str | Path,
+    *,
+    mode: str = "local_private",
+    key: bytes,
+    key_id: str,
+    complaint_text: str,
+    transport: Callable[..., Any] | None = None,
+    turns: int | None = None,
+) -> dict[str, Any]:
+    """Answer one legal gap per turn, seal it, and resume from ciphertext.
+
+    In-memory progress is dropped after every commit. The next gap is read
+    back from the encrypted snapshot so a restart cannot repeat a fact.
+    """
+
+    from integrations.ipfs_datasets.legal import empty_legal_context
+
+    if mode == "local_private" and transport is not None:
+        raise InterviewSnapshotError("local private mode forbids a provider transport", code="egress_forbidden")
+    root = Path(directory)
+    identity = _intake_identity()
+    context: dict[str, Any] = empty_legal_context()
+    claims: list[str] = []
+    facts: dict[str, Any] = {}
+    asked: list[str] = []
+    captures: list[dict[str, Any]] = []
+    expected: str | None = None
+    limit = 8 if turns is None else int(turns)
+    history: list[dict[str, Any]] = []
+    for _ in range(limit):
+        if expected is not None:
+            loaded = load_interview_snapshot(root, key=key, key_id=key_id, **identity)
+            payload = loaded["snapshot"]["durability_payload"]
+            context = dict(payload["legal_context"])
+            claims = list(payload["claims"])
+            facts = {key_name: dict(value) for key_name, value in payload["facts"].items()}
+            asked = list(payload["asked"])
+        gap, selection = _intake_gap(context, claims)
+        if gap is None:
+            break
+        question_id = str(gap.get("question_id") or "")
+        if question_id in asked:
+            raise InterviewSnapshotError("resume repeated a question", code="duplicate_question")
+        _dispatch_gap(mode, gap, facts, complaint_text, transport, captures)
+        context = _apply_one_gap(context, claims, facts, gap)
+        asked.append(question_id)
+        _, selection = _intake_gap(context, claims)
+        mapping = _map_requirement(context, selection)
+        pending, _ = _intake_gap(context, claims)
+        snapshot = assemble_interview_snapshot(
+            session_id="dur006-session",
+            revision="0",
+            outcome_reason="awaiting_user" if pending else "gaps_resolved",
+            pending_inquiry=pending or {"status": "none", "reason": "no_open_gap"},
+            knowledge_graph={
+                "entities": facts,
+                "provenance": {"source": "synthetic-one-gap", "fact_count": len(facts)},
+            },
+            dependency_graph=mapping,
+            provenance={"source": "synthetic-one-gap", "mode": mode},
+            unknown_items=[],
+            deferred_items=[],
+            complaint_text=complaint_text,
+            transcript=[{"sender": "user", "field": name, "message": item["value"]} for name, item in facts.items()],
+            exports={"status": "not_filed"},
+            durability_payload={
+                "legal_context": context,
+                "claims": claims,
+                "facts": facts,
+                "asked": asked,
+                "mode": mode,
+            },
+            revisions={"session_revision": len(asked), "question_revision": len(asked), "graph_revision": len(facts)},
+        )
+        saved = persist_interview_snapshot(
+            root, snapshot, key=key, key_id=key_id, expected_revision=expected, **identity,
+        )
+        expected = str(saved["snapshot"]["revision"])
+        history.append({
+            "revision": expected,
+            "question_id": question_id,
+            "field": gap.get("field"),
+            "fact_ids": sorted(item["fact_id"] for item in facts.values()),
+            "mapping_status": mapping.get("mapping_status"),
+            "pending_question_id": None if pending is None else pending.get("question_id"),
+        })
+        context = {}
+        claims = []
+        facts = {}
+        asked = []
+    loaded = load_interview_snapshot(root, key=key, key_id=key_id, **identity)
+    body = loaded["snapshot"]
+    restored_facts = body["durability_payload"]["facts"]
+    fact_ids = [item["fact_id"] for item in restored_facts.values()]
+    if len(fact_ids) != len(set(fact_ids)):
+        raise InterviewSnapshotError("resumed facts were duplicated", code="duplicate_fact")
+    if len(history) != len(body["durability_payload"]["asked"]):
+        raise InterviewSnapshotError("resume dropped or repeated a turn", code="turn_mismatch")
+    return {
+        "turns": history,
+        "snapshot": body,
+        "receipt": loaded["receipt"],
+        "captures": captures,
+        "mode": mode,
+        "fact_ids": fact_ids,
+        "asked": list(body["durability_payload"]["asked"]),
+        "mapping_status": body["graphs"]["dependency_graph"].get("mapping_status"),
+    }
+
+
 __all__ = [
     "add_bytes",
     "cat",
