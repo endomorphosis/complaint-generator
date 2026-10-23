@@ -3629,9 +3629,15 @@ class ComplaintWorkspaceService:
             raise WorkspacePersistenceError("Private artifact storage is unavailable.", code="artifact_unavailable", public_status="unavailable") from None
         return {"status": "available", "written": True, "artifacts": artifacts, "plaintext_disk": False}
 
-    def interview_snapshot_directory(self, user_id: str) -> Path:
+    def interview_snapshot_directory(self, user_id: str, case_id: Optional[str] = None) -> Path:
         resolved = self._check_access(user_id, ability="write")
-        return self._session_dir / "interview-snapshots" / self._namespace_filename(resolved)
+        directory = self._session_dir / "interview-snapshots" / self._namespace_filename(resolved)
+        # Preserve the existing default-case location; other cases have their
+        # own head and revision clock beneath the private user namespace.
+        case = str(case_id or resolved)
+        if case != resolved:
+            directory = directory / ("case-" + self._namespace_filename(case))
+        return directory
 
     def _interview_snapshot_key(self, user_id: str, case_id: Optional[str] = None) -> Dict[str, Any]:
         from integrations.private_storage import PrivateArtifactBinding, PrivateKeyLockedError, PrivateKeyMaterialError
@@ -3671,7 +3677,7 @@ class ComplaintWorkspaceService:
             context = self._interview_snapshot_key(user_id, case_id)
         else:
             context = {"tenant_id": user_id, "case_id": str(case_id or user_id), "principal_id": user_id, "key": None, "key_id": None}
-        directory = self.interview_snapshot_directory(str(context["tenant_id"]))
+        directory = self.interview_snapshot_directory(str(context["tenant_id"]), str(context["case_id"]))
         try:
             result = persist_interview_snapshot(
                 directory,
@@ -3705,7 +3711,7 @@ class ComplaintWorkspaceService:
             context = self._interview_snapshot_key(user_id, case_id)
         else:
             context = {"tenant_id": user_id, "case_id": str(case_id or user_id), "principal_id": user_id, "key": None, "key_id": None}
-        directory = self.interview_snapshot_directory(str(context["tenant_id"]))
+        directory = self.interview_snapshot_directory(str(context["tenant_id"]), str(context["case_id"]))
         try:
             return load_interview_snapshot(
                 directory,
@@ -3723,7 +3729,7 @@ class ComplaintWorkspaceService:
         from integrations.ipfs_datasets.storage import InterviewSnapshotError, migrate_unencrypted_interview_snapshot
 
         context = self._interview_snapshot_key(user_id, case_id)
-        directory = self.interview_snapshot_directory(str(context["tenant_id"]))
+        directory = self.interview_snapshot_directory(str(context["tenant_id"]), str(context["case_id"]))
         try:
             return migrate_unencrypted_interview_snapshot(
                 directory,

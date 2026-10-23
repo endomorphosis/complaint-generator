@@ -1349,10 +1349,6 @@ class CLI:
 		directory = getattr(self, '_interview_snapshot_dir', None) or os.environ.get('COMPLAINT_INTERVIEW_SNAPSHOT_DIR')
 		key = getattr(self, '_interview_key', None)
 		key_id = getattr(self, '_interview_key_id', None)
-		if key is None:
-			encoded = os.environ.get('COMPLAINT_INTERVIEW_KEY_HEX') or ''
-			if encoded:
-				key = bytes.fromhex(encoded)
 		if key_id is None:
 			key_id = os.environ.get('COMPLAINT_INTERVIEW_KEY_ID')
 		tenant = getattr(self, '_interview_tenant_id', None) or os.environ.get('COMPLAINT_INTERVIEW_TENANT') or 'synthetic-user'
@@ -1374,6 +1370,9 @@ class CLI:
 			raise InterviewSnapshotError('encrypted interview protection is required', code='protection_required', public_status='unavailable')
 		if not settings['directory'] or settings['key'] is None or not settings['key_id']:
 			raise InterviewSnapshotError('Private interview keys require unlock.', code='unlock_needed', public_status='unlock_needed')
+		scope = (str(Path(settings['directory']).resolve()), settings['tenant_id'], settings['case_id'], settings['key_id'])
+		if expected_revision is None and getattr(self, '_interview_revision_scope', None) == scope:
+			expected_revision = getattr(self, '_interview_committed_revision', None)
 		snapshot = self.build_complete_interview_snapshot()
 		result = persist_interview_snapshot(
 			settings['directory'],
@@ -1389,6 +1388,8 @@ class CLI:
 			fail_before_head=fail_before_head,
 		)
 		self._last_interview_receipt = result['receipt']
+		self._interview_revision_scope = scope
+		self._interview_committed_revision = result['receipt']['revision']
 		log.info('interview snapshot committed revision=%s session_id=%s status=%s', result['receipt'].get('revision'), result['receipt'].get('session_id'), result['receipt'].get('status'))
 		return result
 
@@ -1434,6 +1435,8 @@ class CLI:
 			'graph_revision': snapshot.get('revisions', {}).get('graph_revision'),
 		}})
 		self._last_interview_receipt = loaded['receipt']
+		self._interview_revision_scope = (str(Path(settings['directory']).resolve()), settings['tenant_id'], settings['case_id'], settings['key_id'])
+		self._interview_committed_revision = loaded['receipt']['revision']
 		return loaded
 
 	def save(self):

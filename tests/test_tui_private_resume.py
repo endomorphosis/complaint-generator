@@ -309,3 +309,116 @@ def test_cli_encrypted_save_and_resume_skip_plaintext(tmp_path: Path, caplog: py
     assert loaded["snapshot"]["complaint_text"] == COMPLAINT
     assert fresh_state.original_complaint == COMPLAINT
     assert fresh._terminal_stop_reason == "eof"
+
+
+def _configured_snapshot_cli(directory):
+    from types import SimpleNamespace
+    state = SimpleNamespace(username="tenant-a", original_complaint=COMPLAINT,
+        complaint_summary=None, complaint=None, current_inquiry={"inquiry_id": "inq-1"},
+        answered_questions={}, chat_history={})
+    cli = object.__new__(CLI)
+    cli.mediator = SimpleNamespace(state=state, workflow_actions=None)
+    cli._interview_protection = "user_chosen_encrypted"
+    cli._interview_snapshot_dir = str(directory)
+    cli._interview_key = KEY
+    cli._interview_key_id = KEY_ID
+    cli._interview_tenant_id = "tenant-a"
+    cli._interview_case_id = "case-a"
+    return cli
+
+
+def test_snapshot_cli_does_not_accept_raw_key_material_from_environment(monkeypatch):
+    monkeypatch.setenv("COMPLAINT_INTERVIEW_KEY_HEX", KEY.hex())
+    cli = object.__new__(CLI)
+    assert cli._interview_protection_settings()["key"] is None
+
+
+def test_encrypted_cli_save_advances_its_current_revision(tmp_path):
+    cli = _configured_snapshot_cli(tmp_path / "case")
+    first = cli.save()
+    second = cli.save()
+    assert first["receipt"]["revision"] == "1"
+    assert second["receipt"]["revision"] == "2"
+    assert _load(tmp_path / "case")["snapshot"]["revision"] == "2"
+
+
+def test_snapshot_alias_refusal_does_not_chmod_the_target(tmp_path):
+    target = tmp_path / "outside"
+    target.mkdir(mode=0o755)
+    target.chmod(0o755)
+    alias = tmp_path / "alias"
+    alias.symlink_to(target, target_is_directory=True)
+    before = target.stat().st_mode
+    with pytest.raises((InterviewSnapshotError, OSError)):
+        _persist(alias)
+    assert target.stat().st_mode == before
+    assert list(target.iterdir()) == []
+
+
+def test_snapshot_head_cannot_read_a_frame_outside_its_directory(tmp_path):
+    directory = tmp_path / "case"
+    result = _persist(directory)
+    head_path = directory / "head.json"
+    head = json.loads(head_path.read_text())
+    original = directory / head["blob"]
+    outside = tmp_path / "outside-frame.bin"
+    outside.write_bytes(original.read_bytes())
+    outside.chmod(0o600)
+    original.unlink()
+    head["history"][-1]["blob"] = "../outside-frame.bin"
+    head["blob"] = "../outside-frame.bin"
+    head_path.write_text(json.dumps(head))
+    with pytest.raises(InterviewSnapshotError):
+        _load(directory)
+    assert outside.read_bytes()
+
+
+def test_snapshot_wrong_owner_cannot_replace_a_committed_head(tmp_path):
+    directory = tmp_path / "case"
+    _persist(directory)
+    before = {p.relative_to(directory).as_posix(): p.read_bytes() for p in directory.rglob("*") if p.is_file()}
+    with pytest.raises(InterviewSnapshotError):
+        _persist(directory, tenant_id="tenant-b", case_id="case-b", principal_id="tenant-b",
+                 key=OTHER_KEY, key_id="other-key", expected_revision="1")
+    assert {p.relative_to(directory).as_posix(): p.read_bytes() for p in directory.rglob("*") if p.is_file()} == before
+    assert _load(directory)["snapshot"]["revision"] == "1"
+
+
+def test_distinct_cases_have_independent_snapshot_heads(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "service")
+    service.initialize_private_keys(protection="passphrase", passphrase="synthetic-case-snapshot-passphrase")
+    service.ensure_private_case_key("tenant-a", "case-a")
+    service.ensure_private_case_key("tenant-a", "case-b")
+    first = _snapshot()
+    second = _snapshot()
+    second["complaint_text"] = "SYNTHETIC independent second case"
+    service.persist_complete_interview_snapshot("tenant-a", first, case_id="case-a")
+    service.persist_complete_interview_snapshot("tenant-a", second, case_id="case-b")
+    assert service.load_complete_interview_snapshot("tenant-a", case_id="case-a")["snapshot"]["complaint_text"] == COMPLAINT
+    assert service.load_complete_interview_snapshot("tenant-a", case_id="case-b")["snapshot"]["complaint_text"] == second["complaint_text"]
+
+
+def test_snapshot_public_metadata_does_not_expose_private_identifiers(tmp_path):
+    document = _snapshot()
+    secrets = ("PRIVATE-SESSION-NAME-SENTINEL", "PRIVATE-SNAPSHOT-NAME-SENTINEL", "PRIVATE-OUTCOME-SENTINEL")
+    document.update(session_id=secrets[0], snapshot_id=secrets[1], outcome_reason=secrets[2])
+    result = _persist(tmp_path / "case", document)
+    public = json.dumps(result["receipt"]) + json.dumps(result["head"])
+    assert all(secret not in public for secret in secrets)
+    assert result["snapshot"]["session_id"] == secrets[0]
+
+
+def test_snapshot_part_entries_are_fsynced_before_publishing_head(tmp_path, monkeypatch):
+    import os
+    synced = set()
+    original = os.fsync
+    def record(fd):
+        info = os.fstat(fd)
+        if stat.S_ISDIR(info.st_mode):
+            synced.add((info.st_dev, info.st_ino))
+        return original(fd)
+    monkeypatch.setattr(os, "fsync", record)
+    directory = tmp_path / "case"
+    _persist(directory)
+    parts = (directory / "parts").stat()
+    assert (parts.st_dev, parts.st_ino) in synced

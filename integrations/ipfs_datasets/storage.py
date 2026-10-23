@@ -1709,49 +1709,72 @@ def interview_snapshot_receipt(
     protection: str,
     error_category: str = "",
     recovered_from: str | None = None,
+    case_scope: tuple[str, str, str] | None = None,
 ) -> dict[str, Any]:
     """Identifiers and operational status only. No complaint text and no key."""
 
+    scope = json.dumps(case_scope or (), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    scope_key = hmac.new(_PUBLIC_ALIAS_KEY, b"interview-receipt\0" + scope, hashlib.sha256).digest()
+    def reference(kind: str, value: Any) -> str:
+        digest = hmac.new(scope_key, kind.encode() + b"\0" + str(value or "").encode("utf-8"), hashlib.sha256).hexdigest()
+        return kind + "-" + digest[:32]
+    def revision(value: Any) -> str:
+        text = str(value or "")
+        return text if text.isascii() and text.isdigit() and 0 < len(text) <= 20 else "unknown"
+    reasons = {"unknown", "user_pause", "eof", "cancelled", "interrupted", "paused",
+               "needs_answer", "saturated", "deferred_unknown", "provider_unavailable", "limit_reached"}
     receipt = {
-        "operation_id": operation_id,
-        "status": status,
-        "error_category": error_category,
-        "protection": protection,
+        "operation_id": operation_id if operation_id in {"interview_snapshot_commit", "interview_snapshot_load"} else "interview_snapshot_unknown",
+        "status": status if status in {"available", "recovered", "failed", "unavailable", "unlock_needed", "recoverable"} else "unknown",
+        "error_category": error_category if error_category in _PUBLIC_ERRORS else "operation_error",
+        "protection": protection if protection in _INTERVIEW_PROTECTIONS else "unknown",
         "schema_version": INTERVIEW_SNAPSHOT_SCHEMA,
-        "snapshot_id": str(snapshot.get("snapshot_id") or ""),
-        "session_id": str(snapshot.get("session_id") or ""),
-        "revision": str(snapshot.get("revision") or ""),
-        "outcome_reason": str(snapshot.get("outcome_reason") or ""),
+        "snapshot_id": reference("snapshot", snapshot.get("snapshot_id")),
+        "session_id": reference("session", snapshot.get("session_id")),
+        "revision": revision(snapshot.get("revision")),
+        "outcome_reason": snapshot.get("outcome_reason") if snapshot.get("outcome_reason") in reasons else "unknown",
         "parts": list(_INTERVIEW_PART_KINDS),
-        "recovered_from": recovered_from,
+        "recovered_from": revision(recovered_from) if recovered_from is not None else None,
     }
-    encoded = json.dumps(receipt, sort_keys=True)
-    complaint = snapshot.get("complaint_text")
-    if isinstance(complaint, str) and len(complaint) >= 8 and complaint in encoded:
-        raise InterviewSnapshotError("receipt leaked complaint text", code="receipt_leak")
     emit_default_storage_log({
         "operation_id": "save" if operation_id.endswith("commit") else "load",
         "status": "available" if status in {"available", "recovered"} else "failed",
         "error_category": "operation_error" if error_category else "",
-        "synthetic_source": "fixture-source-a",
     })
     return receipt
 
 
 def _interview_prepare(directory: Path) -> int:
-    directory = Path(directory)
+    directory = Path(os.path.abspath(directory))
+    # Check aliases before any mkdir/chmod, including existing ancestors.
+    if directory.resolve(strict=False) != directory:
+        raise InterviewSnapshotError("snapshot directory must be canonical", code="unsafe_path", public_status="unavailable")
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(directory, 0o700)
-    for name in ("revisions", "parts"):
-        child = directory / name
-        child.mkdir(mode=0o700, exist_ok=True)
-        os.chmod(child, 0o700)
     metadata = directory.lstat()
     if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid():
-        raise InterviewSnapshotError("snapshot directory is not private", code="permission_denied", public_status="unavailable")
-    if metadata.st_mode & 0o077:
-        os.chmod(directory, 0o700)
-    return os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        raise InterviewSnapshotError("snapshot directory is not owned", code="permission_denied", public_status="unavailable")
+    root_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        actual = os.fstat(root_fd)
+        if (actual.st_dev, actual.st_ino) != (metadata.st_dev, metadata.st_ino):
+            raise InterviewSnapshotError("snapshot directory changed", code="unsafe_path")
+        os.fchmod(root_fd, 0o700)
+        for name in ("revisions", "parts"):
+            try:
+                os.mkdir(name, mode=0o700, dir_fd=root_fd)
+            except FileExistsError:
+                pass
+            child_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
+            try:
+                if os.fstat(child_fd).st_uid != os.getuid():
+                    raise InterviewSnapshotError("snapshot child directory is not owned", code="permission_denied")
+                os.fchmod(child_fd, 0o700)
+            finally:
+                os.close(child_fd)
+        return root_fd
+    except BaseException:
+        os.close(root_fd)
+        raise
 
 
 def _interview_write_exclusive(dir_fd: int, relative: str, payload: bytes) -> str:
@@ -1774,6 +1797,7 @@ def _interview_write_exclusive(dir_fd: int, relative: str, payload: bytes) -> st
         os.close(fd)
         fd = -1
         os.replace(temporary, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        os.fsync(parent_fd)
         return relative
     finally:
         if fd >= 0:
@@ -1787,20 +1811,41 @@ def _interview_write_exclusive(dir_fd: int, relative: str, payload: bytes) -> st
 
 
 def _interview_read(dir_fd: int, relative: str) -> bytes:
-    fd = os.open(relative, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    path = Path(relative)
+    parts = path.parts
+    if (not isinstance(relative, str) or not parts or path.is_absolute() or len(parts) > 2
+            or any(part in {".", ".."} or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}", part) is None for part in parts)
+            or len(parts) == 2 and parts[0] not in {"parts", "revisions"}):
+        raise InterviewSnapshotError("snapshot path is outside its directory", code="unsafe_path")
+    parent_fd = dir_fd
+    fd = -1
     try:
+        if len(parts) == 2:
+            parent_fd = os.open(parts[0], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+            parent = os.fstat(parent_fd)
+            if parent.st_uid != os.getuid() or parent.st_mode & 0o077:
+                raise InterviewSnapshotError("snapshot parent is not private", code="permission_denied")
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
         metadata = os.fstat(fd)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
-            raise InterviewSnapshotError("snapshot file is not a private regular file", code="permission_denied", public_status="unavailable")
-        chunks: list[bytes] = []
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid()
+                or metadata.st_mode & 0o077 or metadata.st_nlink != 1 or metadata.st_size > 64 * 1024**2):
+            raise InterviewSnapshotError("snapshot file is not a bounded private regular file", code="permission_denied", public_status="unavailable")
+        chunks = []
+        size = 0
         while True:
             chunk = os.read(fd, 65536)
             if not chunk:
                 break
+            size += len(chunk)
+            if size > 64 * 1024**2:
+                raise InterviewSnapshotError("snapshot file exceeds its bound", code="snapshot_invalid")
             chunks.append(chunk)
         return b"".join(chunks)
     finally:
-        os.close(fd)
+        if fd >= 0:
+            os.close(fd)
+        if parent_fd != dir_fd:
+            os.close(parent_fd)
 
 
 def _interview_lock(dir_fd: int) -> int:
@@ -1918,17 +1963,35 @@ def persist_interview_snapshot(
                     "Prior unencrypted snapshot requires explicit migration.",
                     code="migration_required",
                 )
-        try:
-            head = _head_document(root_fd)
-        except InterviewSnapshotError as exc:
-            if exc.code != "corrupt_head":
-                raise
-            head = None
+        head = _head_document(root_fd)
         if head and head.get("protection") == "user_chosen_encrypted" and protection == "user_chosen_plaintext":
             raise InterviewSnapshotError(
                 "Encrypted interview snapshots do not fall back to plaintext.",
                 code="plaintext_fallback_refused",
             )
+        if head and head.get("protection") == "user_chosen_encrypted":
+            authenticated = False
+            history = head.get("history") or [head]
+            for prior in reversed(history):
+                if not isinstance(prior, Mapping) or prior.get("protection", head.get("protection")) != "user_chosen_encrypted":
+                    continue
+                try:
+                    raw = _interview_read(root_fd, str(prior.get("blob") or ""))
+                    if hashlib.sha256(raw).hexdigest() != prior.get("digest"):
+                        continue
+                    _decode_snapshot_blob(raw, protection="user_chosen_encrypted", revision=str(prior.get("revision") or ""),
+                                          tenant_id=tenant_id, case_id=case_id, principal_id=principal_id,
+                                          key=key, key_id=key_id)
+                    authenticated = True
+                    break
+                except InterviewSnapshotError as exc:
+                    if exc.code in {"private_crypto_unavailable", "unlock_needed"}:
+                        raise
+                    continue
+                except OSError:
+                    continue
+            if not authenticated:
+                raise InterviewSnapshotError("existing private snapshot owner could not be authenticated", code="authentication_failed")
         current = str((head or {}).get("revision") or "0")
         expected = "0" if expected_revision in {None, ""} else str(expected_revision)
         if current != expected:
@@ -1963,6 +2026,10 @@ def persist_interview_snapshot(
                     writer(envelope)
                 relative = "parts/" + opaque_storage_filename("snapshot", kind)
                 _interview_write_exclusive(root_fd, relative, envelope)
+                stored = _interview_read(root_fd, relative)
+                if _open_part(stored, kind=kind, revision=revision_label, tenant_id=tenant_id,
+                              case_id=case_id, principal_id=principal_id, key=key, key_id=key_id) != body:
+                    raise InterviewSnapshotError("snapshot disk readback failed", code="readback_mismatch")
                 part_names[kind] = relative
             blob_body = _interview_read(root_fd, part_names["interview-snapshot"])
         else:
@@ -1988,8 +2055,6 @@ def persist_interview_snapshot(
             "schema_version": INTERVIEW_HEAD_SCHEMA,
             "revision": next_revision,
             "protection": protection,
-            "snapshot_id": document["snapshot_id"],
-            "session_id": document["session_id"],
             "blob": part_names["interview-snapshot"],
             "digest": hashlib.sha256(blob_body).hexdigest(),
             "parts": part_names,
@@ -2006,6 +2071,7 @@ def persist_interview_snapshot(
             raise InterviewSnapshotError("unencrypted snapshot was overwritten", code="legacy_overwritten")
         receipt = interview_snapshot_receipt(
             document, status="available", operation_id="interview_snapshot_commit", protection=protection,
+            case_scope=(tenant_id, case_id, principal_id),
         )
         return {"snapshot": document, "receipt": receipt, "head": new_head}
     finally:
@@ -2079,6 +2145,7 @@ def load_interview_snapshot(
             payload = validate_interview_snapshot(json.loads(legacy.decode("utf-8")))
             receipt = interview_snapshot_receipt(
                 payload, status="available", operation_id="interview_snapshot_load", protection=protection,
+                case_scope=(tenant_id, case_id, principal_id),
             )
             return {"snapshot": payload, "receipt": receipt, "recovered": False}
         if head.get("protection") == "user_chosen_encrypted" and protection != "user_chosen_encrypted":
@@ -2132,6 +2199,7 @@ def load_interview_snapshot(
                 protection=protection,
                 error_category="operation_error" if recovered else "",
                 recovered_from=str(head.get("revision") or "") if recovered else None,
+                case_scope=(tenant_id, case_id, principal_id),
             )
             return {"snapshot": payload, "receipt": receipt, "recovered": recovered}
         if auth_failed:
