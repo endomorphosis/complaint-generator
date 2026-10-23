@@ -1080,6 +1080,20 @@ def _generate_intake_with_metadata(prompt, *, provider, model_name, request_id, 
 		remaining = deadline - time.monotonic()
 		if remaining <= 0:
 			return fail("timeout")
+		try:
+			sealed = intercept_final_provider_request({
+				"schema": PROVIDER_EGRESS_SCHEMA,
+				"provider": PINNED_GROK_PROVIDER,
+				"model": PINNED_GROK_MODEL,
+				"prompt": provider_prompt,
+				"timeout_seconds": remaining,
+				"allow_local_fallback": False,
+				"allow_cross_provider_fallback": False,
+				"request_id": request_id,
+			})
+		except RuntimeError:
+			return fail("privacy_denied")
+		provider_prompt = sealed["prompt"]
 
 		def progress(_summary):
 			if cancel_event is not None and cancel_event.is_set():
@@ -1191,12 +1205,43 @@ def generate_text_via_router(
 		raise RuntimeError(_public_error(preflight_error, prompt))
 	try:
 		with _temporary_env(env_overrides):
+			if privacy_context is not None:
+				sealed = intercept_final_provider_request({
+					"schema": PROVIDER_EGRESS_SCHEMA,
+					"provider": PRIVACY_GROK_PROVIDER,
+					"model": PRIVACY_GROK_MODEL,
+					"prompt": prompt,
+					"timeout_seconds": call_options.get("timeout", 60.0),
+					"allow_local_fallback": False,
+					"allow_cross_provider_fallback": False,
+					"request_id": str(call_options.get("request_id") or ""),
+					**_optional_egress_fields(call_options),
+				})
+				forward = {key: sealed[key] for key in _PROVIDER_EGRESS_OPTIONAL if key in sealed}
+				return generate_text(
+					prompt=sealed["prompt"],
+					provider=PRIVACY_GROK_PROVIDER,
+					model_name=PRIVACY_GROK_MODEL,
+					timeout=sealed["timeout_seconds"],
+					allow_local_fallback=False,
+					allow_cross_provider_fallback=False,
+					**forward,
+				)
 			return generate_text(
 				prompt=prompt,
 				provider=effective_provider or None,
 				model_name=effective_model_name,
 				**call_options,
 			)
+	except RuntimeError as exc:
+		if privacy_context is not None and str(exc).startswith("privacy_denied:"):
+			raise
+		if privacy_context is not None:
+			raise RuntimeError("private_generation_failed") from None
+		# A native grok_cli failure must not retry and must not echo the body.
+		if effective_provider == PINNED_GROK_PROVIDER:
+			raise RuntimeError("provider_exception") from None
+		raise
 	except Exception:
 		if privacy_context is not None:
 			raise RuntimeError("private_generation_failed") from None
@@ -1344,6 +1389,27 @@ def generate_text_with_metadata(
 
 	try:
 		with _temporary_env(env_overrides):
+			if privacy_context is not None:
+				sealed = intercept_final_provider_request({
+					"schema": PROVIDER_EGRESS_SCHEMA,
+					"provider": PRIVACY_GROK_PROVIDER,
+					"model": PRIVACY_GROK_MODEL,
+					"prompt": prompt,
+					"timeout_seconds": call_options.get("timeout", 60.0),
+					"allow_local_fallback": False,
+					"allow_cross_provider_fallback": False,
+					"request_id": request_id,
+					**_optional_egress_fields(call_options),
+				})
+				prompt = sealed["prompt"]
+				call_options = {
+					"timeout": sealed["timeout_seconds"],
+					"allow_local_fallback": False,
+					"allow_cross_provider_fallback": False,
+					**{key: sealed[key] for key in _PROVIDER_EGRESS_OPTIONAL if key in sealed},
+				}
+				effective_provider = PRIVACY_GROK_PROVIDER
+				effective_model_name = PRIVACY_GROK_MODEL
 			text = generate_text(
 				prompt=prompt,
 				provider=effective_provider or None,
@@ -1351,6 +1417,14 @@ def generate_text_with_metadata(
 				**call_options,
 			)
 	except Exception as exc:
+		if privacy_context is not None and isinstance(exc, RuntimeError) and str(exc).startswith("privacy_denied:"):
+			return with_adapter_metadata(
+				{"status": "error", "text": "", "provider_name": provider or "",
+				 "model_name": model_name or "", "error": str(exc),
+				 "privacy_decision": "denied", "dispatch": "none", "prompt_logged": False,
+				 "request_id": request_id, "failure_kind": "privacy_denied"},
+				operation="generate_text", backend_available=True, implementation_status="available",
+			)
 		private_failure = privacy_context is not None
 		grok_failure = str(effective_provider or "") == PINNED_GROK_PROVIDER
 		kind = classify_router_failure(exc)
@@ -2004,6 +2078,272 @@ def _private_generation_options(options: Mapping[str, Any]) -> Dict[str, Any]:
 	}
 
 
+# Last remote boundary. Only this object may be copied into a Grok 4.7 call.
+# Host CLI controls (progress, cancellation, fixed tool flags) are not fields
+# of the serialized provider request and cannot carry case payloads.
+PROVIDER_EGRESS_SCHEMA = "complaint-grok47-egress/v1"
+_PROVIDER_EGRESS_REQUIRED = frozenset({
+	"schema", "provider", "model", "prompt", "timeout_seconds",
+	"allow_local_fallback", "allow_cross_provider_fallback", "request_id",
+})
+_PROVIDER_EGRESS_OPTIONAL = frozenset({
+	"temperature", "max_tokens", "max_output_tokens", "top_p", "top_k",
+	"frequency_penalty", "presence_penalty", "seed", "stop", "response_format",
+})
+_PROVIDER_EGRESS_FIELDS = _PROVIDER_EGRESS_REQUIRED | _PROVIDER_EGRESS_OPTIONAL
+_PROMPT_JSON_KEYS = frozenset({
+	"schema_version", "operation", "request_id", "source_text",
+	"allowed_target_refs", "schema", "instructions", "prompt",
+	"questions", "facts",
+})
+_FORBIDDEN_EGRESS_KEYS = frozenset({
+	"trace", "trace_jsonl_path", "trace_dir", "embedding", "embeddings",
+	"embedding_cache", "enrichment", "enrichment_route", "fallback",
+	"fallback_provider", "fallback_model", "provider_instance", "deps",
+	"base_url", "api_key", "authorization", "secret", "headers", "messages",
+	"cache", "usage_messages", "allocation_path", "allocation_session_id",
+})
+_BYPASS_KINDS = frozenset({
+	"enrichment", "trace", "embedding_cache", "fallback", "alternate_provider",
+})
+_CASE_CONSENT: Dict[tuple[str, str], Dict[str, Any]] = {}
+_PROVIDER_EGRESS_LOG: list[Dict[str, Any]] = []
+_EGRESS_LOCK = threading.Lock()
+
+
+def tui_processing_setting(policy: Any = None) -> Dict[str, Any]:
+	"""Plain-language processing choice for one case. Safe to render in the TUI."""
+
+	mode = PRIVACY_PROCESSING_LOCAL
+	provider = ""
+	model = ""
+	if isinstance(policy, Mapping):
+		mode = str(policy.get("processing_mode") or PRIVACY_PROCESSING_LOCAL)
+		permitted = policy.get("permitted_remote") if isinstance(policy.get("permitted_remote"), Mapping) else {}
+		provider = str(permitted.get("provider") or "")
+		model = str(permitted.get("model") or "")
+	local = mode != PRIVACY_PROCESSING_GROK
+	if local:
+		value_label = "Local private"
+		summary = "Local private: this case never calls a remote provider."
+	else:
+		value_label = "Grok 4.7 for this case"
+		summary = (
+			"Grok 4.7 for this case: only sanitized fields go to grok_cli / grok-4.7. "
+			"This choice is saved for this case and reused on later turns."
+		)
+	return {
+		"setting_id": "case_processing_mode",
+		"label": "Processing",
+		"value": PRIVACY_PROCESSING_LOCAL if local else PRIVACY_PROCESSING_GROK,
+		"value_label": value_label,
+		"summary": summary,
+		"scope": "per_case",
+		"reusable": True,
+		"remote_provider": "" if local else provider,
+		"remote_model": "" if local else model,
+		"choices": [
+			{
+				"value": PRIVACY_PROCESSING_LOCAL,
+				"label": "Local private",
+				"detail": "Never send this case to a remote provider.",
+			},
+			{
+				"value": PRIVACY_PROCESSING_GROK,
+				"label": "Grok 4.7 for this case",
+				"detail": "Send only sanitized fields to grok_cli / grok-4.7. Saved per case and reused.",
+			},
+		],
+	}
+
+
+def record_case_cloud_consent(*, user_id: str, case_id: str, mode: str) -> Dict[str, Any]:
+	"""Persist one explicit processing choice for this user and case only."""
+
+	policy = privacy_policy_for_mode(user_id, case_id, mode)
+	user, case = _case_cache_key(user_id, case_id)
+	with _EGRESS_LOCK:
+		_CASE_CONSENT[(user, case)] = deepcopy(policy)
+	return tui_processing_setting(policy)
+
+
+def recorded_case_privacy_context(*, user_id: str, case_id: str, data_class: str) -> Dict[str, Any]:
+	"""Reuse the recorded choice. A missing record stays local-private."""
+
+	user, case = _case_cache_key(user_id, case_id)
+	with _EGRESS_LOCK:
+		policy = deepcopy(_CASE_CONSENT.get((user, case)))
+	if policy is None:
+		policy = _local_privacy_policy(user, case)
+	return build_complaint_privacy_context(policy, user_id=user, case_id=case, data_class=data_class)
+
+
+def clear_case_processing_consent() -> None:
+	with _EGRESS_LOCK:
+		_CASE_CONSENT.clear()
+
+
+def provider_egress_captures() -> list[Dict[str, Any]]:
+	"""Final serialized requests that passed the last-hop allowlist."""
+
+	with _EGRESS_LOCK:
+		return deepcopy(_PROVIDER_EGRESS_LOG)
+
+
+def clear_provider_egress_captures() -> None:
+	with _EGRESS_LOCK:
+		_PROVIDER_EGRESS_LOG.clear()
+
+
+def _drop_forbidden_egress(value: Any) -> Any:
+	if isinstance(value, Mapping):
+		return {
+			str(key): _drop_forbidden_egress(item)
+			for key, item in value.items()
+			if str(key) not in _FORBIDDEN_EGRESS_KEYS
+		}
+	if isinstance(value, list):
+		return [_drop_forbidden_egress(item) for item in value]
+	if isinstance(value, tuple):
+		return [_drop_forbidden_egress(item) for item in value]
+	return value
+
+
+def _sanitize_provider_prompt(prompt: str) -> str:
+	stripped = prompt.strip()
+	if not stripped.startswith("{") or not stripped.endswith("}"):
+		return prompt
+	try:
+		parsed = json.loads(prompt)
+	except (json.JSONDecodeError, RecursionError, ValueError):
+		return prompt
+	if not isinstance(parsed, dict):
+		return prompt
+	cleaned = _drop_forbidden_egress(parsed)
+	kept = {key: cleaned[key] for key in sorted(cleaned) if key in _PROMPT_JSON_KEYS}
+	return json.dumps(kept, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _optional_egress_fields(source: Mapping[str, Any]) -> Dict[str, Any]:
+	fields: Dict[str, Any] = {}
+	for key in _PROVIDER_EGRESS_OPTIONAL:
+		if key not in source:
+			continue
+		value = source[key]
+		if key == "stop":
+			if isinstance(value, str):
+				fields[key] = value
+			elif isinstance(value, (list, tuple)) and all(isinstance(item, str) for item in value):
+				fields[key] = list(value)
+			continue
+		if key == "response_format":
+			if isinstance(value, Mapping):
+				fields[key] = _drop_forbidden_egress(dict(value))
+			continue
+		if key in {"seed", "max_tokens", "max_output_tokens", "top_k"}:
+			if type(value) is int and not isinstance(value, bool):
+				fields[key] = value
+			continue
+		if type(value) in (int, float) and not isinstance(value, bool) and math.isfinite(float(value)):
+			fields[key] = value
+	return fields
+
+
+def intercept_final_provider_request(request: Mapping[str, Any]) -> Dict[str, Any]:
+	"""Fail closed. The returned object is the only serialized provider request.
+
+	Unknown fields, alternate providers, traces, embeddings, enrichment payloads
+	and fallbacks are rejected. Nothing is appended unless the allowlist holds.
+	"""
+
+	if not isinstance(request, Mapping):
+		raise RuntimeError(PRIVACY_DENIAL_MALFORMED)
+	if any(str(key) in _FORBIDDEN_EGRESS_KEYS for key in request.keys()):
+		raise RuntimeError(PRIVACY_DENIAL_SCOPE)
+	if set(request.keys()) - _PROVIDER_EGRESS_FIELDS:
+		raise RuntimeError(PRIVACY_DENIAL_SCOPE)
+	if str(request.get("schema") or "") != PROVIDER_EGRESS_SCHEMA:
+		raise RuntimeError(PRIVACY_DENIAL_MALFORMED)
+	if str(request.get("provider") or "") != PRIVACY_GROK_PROVIDER:
+		raise RuntimeError(PRIVACY_DENIAL_SCOPE)
+	if str(request.get("model") or "") != PRIVACY_GROK_MODEL:
+		raise RuntimeError(PRIVACY_DENIAL_SCOPE)
+	if request.get("allow_local_fallback") is not False or request.get("allow_cross_provider_fallback") is not False:
+		raise RuntimeError(PRIVACY_DENIAL_SCOPE)
+	prompt = request.get("prompt")
+	if type(prompt) is not str:
+		raise RuntimeError(PRIVACY_DENIAL_MALFORMED)
+	timeout = request.get("timeout_seconds")
+	if type(timeout) not in (int, float) or isinstance(timeout, bool) or not math.isfinite(float(timeout)) or float(timeout) <= 0:
+		raise RuntimeError(PRIVACY_DENIAL_MALFORMED)
+	request_id = request.get("request_id")
+	if type(request_id) is not str:
+		raise RuntimeError(PRIVACY_DENIAL_MALFORMED)
+	sealed: Dict[str, Any] = {
+		"schema": PROVIDER_EGRESS_SCHEMA,
+		"provider": PRIVACY_GROK_PROVIDER,
+		"model": PRIVACY_GROK_MODEL,
+		"prompt": _sanitize_provider_prompt(prompt),
+		"timeout_seconds": float(timeout),
+		"allow_local_fallback": False,
+		"allow_cross_provider_fallback": False,
+		"request_id": request_id,
+	}
+	sealed.update(_optional_egress_fields(request))
+	if set(sealed) - _PROVIDER_EGRESS_FIELDS:
+		raise RuntimeError(PRIVACY_DENIAL_SCOPE)
+	with _EGRESS_LOCK:
+		_PROVIDER_EGRESS_LOG.append(deepcopy(sealed))
+		del _PROVIDER_EGRESS_LOG[:-8]
+	return sealed
+
+
+def attempt_remote_bypass(kind: str, *, privacy_context: Any, payload: Mapping[str, Any]) -> Dict[str, Any]:
+	"""Enrichment, trace, embedding cache, fallback and alternate providers stop here.
+
+	The payload is not copied into the egress log and no provider is invoked.
+	"""
+
+	normalized = str(kind or "")
+	if normalized not in _BYPASS_KINDS:
+		normalized = "unknown"
+	# Touch the context so a local or cloud choice cannot unlock another route.
+	_privacy_context_block_reason(
+		privacy_context,
+		provider=PRIVACY_GROK_PROVIDER,
+		model_name=PRIVACY_GROK_MODEL,
+		options={},
+	)
+	if isinstance(payload, Mapping):
+		# A bypass is never a legal provider request. Force a rejected field so
+		# a well-formed payload cannot be appended or dispatched from here.
+		probe = dict(payload)
+		probe["schema"] = PROVIDER_EGRESS_SCHEMA
+		if normalized == "alternate_provider":
+			probe["provider"] = "codex"
+		elif normalized == "fallback":
+			probe["allow_local_fallback"] = True
+			probe["fallback_provider"] = "codex"
+		else:
+			probe[normalized] = True
+		try:
+			intercept_final_provider_request(probe)
+		except RuntimeError:
+			pass
+		else:
+			with _EGRESS_LOCK:
+				if _PROVIDER_EGRESS_LOG:
+					_PROVIDER_EGRESS_LOG.pop()
+	return {
+		"status": "error",
+		"error": f"privacy_denied:bypass_{normalized}",
+		"privacy_decision": "denied",
+		"dispatch": "none",
+		"provider_invoked": False,
+		"prompt_logged": False,
+	}
+
+
 # Per-case alias and embedding caches. Keys are (user_id, case_id). Values are
 # sealed envelopes only. A lookup never reads another pair's slot.
 _CASE_ALIAS_CACHE: Dict[tuple[str, str], Dict[str, bytes]] = {}
@@ -2595,6 +2935,15 @@ __all__ = [
 	"ARCH_CLASSIFICATION_BLOCKED",
 	"build_minimal_turn_prompt",
 	"dispatch_private_turn",
+	"PROVIDER_EGRESS_SCHEMA",
+	"tui_processing_setting",
+	"record_case_cloud_consent",
+	"recorded_case_privacy_context",
+	"clear_case_processing_consent",
+	"provider_egress_captures",
+	"clear_provider_egress_captures",
+	"intercept_final_provider_request",
+	"attempt_remote_bypass",
 	"private_llm_request_cache",
 	"private_llm_request_traces",
 	"clear_private_llm_request_cache",
