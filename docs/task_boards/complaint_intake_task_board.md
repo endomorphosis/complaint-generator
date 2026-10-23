@@ -237,7 +237,7 @@ Implementation instructions:
 
 ## CIMP-TUI-11 Validate adverse interview scenarios across shared surfaces
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.release
