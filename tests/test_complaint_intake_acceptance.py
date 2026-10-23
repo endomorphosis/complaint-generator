@@ -14,6 +14,7 @@ import json
 import os
 import pty
 import select
+import socket
 import subprocess
 import sys
 import threading
@@ -36,6 +37,7 @@ from tests.test_tui_interview_acceptance import (
     CONTRADICTORY,
     PASSPHRASE,
     UNKNOWN_ANSWER,
+    _block_network_and_provider_subprocesses,  # Apply the autouse guard here too.
     _assert_graph_case,
     _assert_not_legally_complete,
     _entities,
@@ -148,6 +150,15 @@ def drive_pty_interview(service: ComplaintWorkspaceService, user_id: str, lines:
     return "\n".join(transcript)
 
 
+def test_acceptance_module_blocks_network_and_provider_processes():
+    with pytest.raises(RuntimeError, match="network socket blocked"):
+        socket.create_connection(("192.0.2.1", 9), timeout=0.1)
+    with pytest.raises(RuntimeError, match="provider subprocess blocked"):
+        subprocess.run(["grok", "--version"], check=False)
+    assert isinstance(subprocess.Popen, type)
+    assert subprocess.Popen[bytes].__origin__ is subprocess.Popen
+
+
 def test_pty_flow_asks_graph_followups_and_stops_unresolved(tmp_path: Path):
     user_id = "pty-user"
     narrative = f"On March 4, 2024 supervisor Alex Rivera fired me. {_NARRATIVE_TOKEN}"
@@ -175,7 +186,7 @@ def test_pty_flow_asks_graph_followups_and_stops_unresolved(tmp_path: Path):
     assert _plaintext_hits(Path(service._session_dir), narrative) == []
     sealed = list(Path(service._session_dir).rglob("*.cgpe"))
     assert sealed
-    assert all(path.read_bytes()[:4] == b"CGPE" or path.name.endswith(".cgpe") for path in sealed)
+    assert all(path.read_bytes()[:4] == b"CGPE" for path in sealed)
 
 
 def test_complete_unknown_and_contradictory_answers_do_not_finish_the_law(tmp_path: Path):
