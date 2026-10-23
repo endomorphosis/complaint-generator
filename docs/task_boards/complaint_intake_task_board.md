@@ -1295,7 +1295,7 @@ Implementation instructions:
 
 ## CIMP-REL-02 Document usable terminal commands, privacy/key recovery and operational limits
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.release
