@@ -47,6 +47,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import stat
@@ -710,6 +711,18 @@ KEY_STORE_VERSION = 1
 KEY_RECOVERY_SCHEMA = "complaint-generator/private-key-recovery"
 KEY_RECOVERY_VERSION = 1
 KEY_STORE_FILENAME = "keystore.json"
+PORTABILITY_SCHEMA = "complaint-generator/private-workspace-export"
+PORTABILITY_VERSION = 1
+ROTATION_SCHEMA = "complaint-generator/private-key-rotation"
+ROTATION_VERSION = 1
+WRAP_ROTATION_PHASES = ("prepared", "candidate", "committed")
+DATA_ROTATION_PHASES = ("prepared", "sealed", "committed")
+RETENTION_POLICIES = ("retain", "revoke_after_verified_migration")
+UNRECOVERED_KEY_EXPLANATION = (
+    "An unrecovered encryption key cannot be reconstructed by the system. "
+    "Encrypted state was not reset."
+)
+_PORTABILITY_LOG = logging.getLogger("integrations.private_storage.portability")
 MASTER_WRAP_AAD = b"complaint-generator/private-key/master-wrap@1\x00"
 DATA_WRAP_DOMAIN = b"complaint-generator/private-key/data-wrap@1\x00"
 RECOVERY_WRAP_DOMAIN = b"complaint-generator/private-key/recovery@1\x00"
@@ -737,7 +750,55 @@ _RECEIPT_FIELDS = (
     "privacy_bypassed",
     "deliberate_export",
     "automatic_backup",
+    "operation",
+    "rotation_phase",
+    "reencrypt",
+    "previous_wrapping_retained",
+    "previous_data_key_retained",
+    "data_key_changed",
+    "recovery_separated",
+    "unwrapped_master_included",
+    "manifest_version",
+    "revision",
+    "imported",
+    "data_reset",
+    "keys_reconstructed",
+    "retention_policy",
+    "revoked",
+    "verified_backup_migration",
+    "only_recovery_path_erased",
 )
+
+
+class PrivatePortabilityError(PrivateStorageError):
+    """Export, import, or rotation failed without resetting encrypted state."""
+
+    def __init__(self, message: str, *, code: str, actions: Sequence[str] = ("retry", "recovery_import")) -> None:
+        super().__init__(str(message), code=code)
+        self.message = str(message)
+        self.actions = tuple(actions)
+        self.data_reset = False
+        self.keys_reconstructed = False
+        self.overwrites_encrypted_state = False
+
+    def public_state(self) -> dict[str, Any]:
+        return {
+            "status": "portability_failed",
+            "code": self.code,
+            "message": self.message,
+            "actions": list(self.actions),
+            "awaiting_user": True,
+            "worker_may_continue": True,
+            "worker_state": "ready_for_independent_tasks",
+            "data_reset": False,
+            "keys_reconstructed": False,
+            "overwrites_encrypted_state": False,
+            "raw_key_persisted": False,
+            "unwrapped_master_included": False,
+            "only_recovery_path_erased": False,
+            "cloud_processing_enabled": False,
+            "unlock_is_remote_consent": False,
+        }
 
 
 class PrivateKeyLockedError(PrivateKeyMaterialError):
@@ -970,6 +1031,8 @@ class UserOwnedKeySession:
         self._master: bytes | None = None
         self._master_id: str | None = None
         self._data_keys: dict[tuple[str, str], tuple[str, bytes]] = {}
+        self._retained_data_keys: dict[tuple[str, str], list[tuple[str, bytes]]] = {}
+        self._pending_data_keys: dict[tuple[str, str], tuple[str, bytes]] = {}
         if self.path.exists():
             self._document = self._load_document()
 
@@ -1087,11 +1150,7 @@ class UserOwnedKeySession:
         if int(kdf.get("n") or 0) != SCRYPT_N or int(kdf.get("r") or 0) != SCRYPT_R or int(kdf.get("p") or 0) != SCRYPT_P:
             raise PrivateArtifactIntegrityError("malformed")
         try:
-            master = _unwrap_secret(
-                _kdf_bytes(passphrase, _b64d(str(kdf.get("salt") or ""))),
-                document.get("wrapped_master") or {},
-                MASTER_WRAP_AAD,
-            )
+            master = self._open_master_with_passphrase(document, passphrase)
         except PrivateArtifactIntegrityError as exc:
             self.lock()
             raise PrivateArtifactIntegrityError(exc.reason) from None
@@ -1143,6 +1202,8 @@ class UserOwnedKeySession:
             self._master = bytes(DATA_KEY_BYTES)
             self._master = None
         self._data_keys.clear()
+        self._retained_data_keys.clear()
+        self._pending_data_keys.clear()
         self._master_id = None
         return self.public_state()
 
@@ -1305,6 +1366,362 @@ class UserOwnedKeySession:
         state["imported"] = True
         state["deliberate_export"] = True
         state["automatic_backup"] = False
+        state["keys_reconstructed"] = False
+        state["data_reset"] = False
+        return state
+
+    def lookup_data_key(self, tenant_id: str, case_id: str, key_id: str) -> bytes | None:
+        """Return an unlocked active, pending, or retained data key."""
+
+        active = self._data_keys.get((tenant_id, case_id))
+        if active is not None and active[0] == key_id:
+            return active[1]
+        pending = self._pending_data_keys.get((tenant_id, case_id))
+        if pending is not None and pending[0] == key_id:
+            return pending[1]
+        for retained_id, retained_key in self._retained_data_keys.get((tenant_id, case_id), []):
+            if retained_id == key_id:
+                return retained_key
+        return None
+
+    def rotate_wrapping_key(
+        self,
+        new_passphrase: str,
+        *,
+        policy: str = "retain",
+        crash_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Rewrap the same master key. Ciphertext and data keys stay in place.
+
+        ``crash_at`` persists that phase and then raises. Each phase leaves a
+        passphrase that still opens the current generation. This does not revoke
+        the previous wrapping.
+        """
+
+        self._require_unlocked("Wrapping rotation requires an unlocked session. Nothing was written.")
+        if policy not in RETENTION_POLICIES:
+            raise PrivateKeyMaterialError("retention_policy")
+        if crash_at not in {None, *WRAP_ROTATION_PHASES}:
+            raise PrivateKeyMaterialError("rotation_phase")
+        _require_passphrase(new_passphrase)
+        if self._master is None or self._document is None:
+            raise PrivateKeyMaterialError("key_unavailable")
+        token = _opaque_key_id("rot-")
+        prepared = {
+            "schema": ROTATION_SCHEMA,
+            "schema_version": ROTATION_VERSION,
+            "kind": "rewrap",
+            "operation": "rewrap",
+            "reencrypt": False,
+            "phase": "prepared",
+            "rotation_id": token,
+            "retention_policy": policy,
+            "readable_generation": "previous",
+            "data_key_changed": False,
+        }
+        self._write_rotation_journal(prepared)
+        self._interrupt(crash_at, "prepared", token)
+        salt = os.urandom(16)
+        candidate = {
+            "wrapping_id": _opaque_key_id("w-"),
+            "protection": "passphrase",
+            "kdf": _kdf_metadata(salt),
+            "wrapped_master": _wrap_secret(_kdf_bytes(new_passphrase, salt), self._master, MASTER_WRAP_AAD),
+            "status": "candidate",
+        }
+        staged = dict(prepared)
+        staged["phase"] = "candidate"
+        staged["candidate"] = candidate
+        self._write_rotation_journal(staged)
+        self._interrupt(crash_at, "candidate", token)
+        document = dict(self._document)
+        previous = {
+            "wrapping_id": str(document.get("active_wrapping_id") or "initial"),
+            "protection": document.get("protection"),
+            "kdf": document.get("kdf"),
+            "wrapped_master": dict(document.get("wrapped_master") or {}),
+            "status": "retained",
+        }
+        if document.get("keyring_account"):
+            previous["keyring_account"] = document.get("keyring_account")
+        retained = [dict(item) for item in document.get("retained_wrappings") or []]
+        retained.append(previous)
+        document["retained_wrappings"] = retained
+        document["protection"] = "passphrase"
+        document["kdf"] = dict(candidate["kdf"])
+        document["wrapped_master"] = dict(candidate["wrapped_master"])
+        document["active_wrapping_id"] = candidate["wrapping_id"]
+        document["retention_policy"] = policy
+        document.pop("keyring_account", None)
+        document.pop("keyring_service", None)
+        self._write_document(document)
+        self._document = document
+        committed = dict(prepared)
+        committed["phase"] = "committed"
+        committed["previous_wrapping_retained"] = True
+        self._write_rotation_journal(committed)
+        self._interrupt(crash_at, "committed", token)
+        state = self.public_state()
+        state.update({
+            "operation": "rewrap",
+            "reencrypt": False,
+            "rotation_phase": "committed",
+            "previous_wrapping_retained": True,
+            "data_key_changed": False,
+            "retention_policy": policy,
+            "revoked": False,
+            "keys_reconstructed": False,
+            "data_reset": False,
+            "only_recovery_path_erased": False,
+            "unwrapped_master_included": False,
+        })
+        _PORTABILITY_LOG.info("wrapping key rewrapped; data keys were not reencrypted")
+        return state
+
+    def rotate_data_key(
+        self,
+        tenant_id: str,
+        case_id: str,
+        repository: str | Path,
+        principal_id: str,
+        *,
+        policy: str = "retain",
+        crash_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Reencrypt workspace ciphertext under a new data key.
+
+        The previous data key and its ciphertext generation stay until an
+        explicit verified revocation. A crash after any phase still leaves one
+        intact generation.
+        """
+
+        self._require_unlocked("Data-key rotation requires an unlocked session. Nothing was written.")
+        if policy not in RETENTION_POLICIES:
+            raise PrivateKeyMaterialError("retention_policy")
+        if crash_at not in {None, *DATA_ROTATION_PHASES}:
+            raise PrivateKeyMaterialError("rotation_phase")
+        _require_label(tenant_id)
+        _require_label(case_id)
+        _require_label(principal_id)
+        if self._master is None or self._document is None:
+            raise PrivateKeyMaterialError("key_unavailable")
+        current_id, current_key = self._require_case_key(tenant_id, case_id)
+        opened = read_private_workspace_generation(
+            repository,
+            self,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            principal_id=principal_id,
+        )
+        token = _opaque_key_id("rot-")
+        new_id = _opaque_key_id("d-")
+        new_key = _random_secret()
+        slot, record = self._case_record(tenant_id, case_id)
+        record["pending_data_key"] = {
+            "data_key_id": new_id,
+            "wrapped_data_key": _wrap_secret(self._master, new_key, _data_aad(tenant_id, case_id, new_id)),
+            "status": "pending",
+        }
+        self._store_case_record(slot, record)
+        self._pending_data_keys[(tenant_id, case_id)] = (new_id, new_key)
+        ledger = _workspace_ledger(repository)
+        generations = ledger / "generations"
+        generations.mkdir(parents=True, exist_ok=True)
+        primary = _read_exact(ledger / _WORKSPACE_FRAME)
+        if primary is None:
+            raise PrivatePortabilityError(
+                "No ciphertext generation is available to rotate.",
+                code="ciphertext_missing",
+                actions=("export_retry", "restore_generation"),
+            )
+        retained_frame = generations / f"{current_id}.frame"
+        if not retained_frame.exists():
+            _write_mode600(retained_frame, primary)
+        journal = {
+            "schema": ROTATION_SCHEMA,
+            "schema_version": ROTATION_VERSION,
+            "kind": "reencrypt",
+            "operation": "reencrypt",
+            "reencrypt": True,
+            "phase": "prepared",
+            "rotation_id": token,
+            "retention_policy": policy,
+            "previous_key_id": current_id,
+            "pending_key_id": new_id,
+            "readable_generation": "previous",
+        }
+        _write_mode600(ledger / "rotation-data.json", _json_bytes(journal))
+        self._interrupt(crash_at, "prepared", token)
+        sealed = _seal_workspace_frame(
+            tenant_id=tenant_id,
+            case_id=case_id,
+            principal_id=principal_id,
+            key=new_key,
+            key_id=new_id,
+            revision=str(opened["revision"]),
+            complaint=bytes(opened["complaint"]),
+            fact_graph=bytes(opened["fact_graph"]),
+            proof=bytes(opened["proof"]),
+        )
+        _write_mode600(generations / f"{new_id}.frame", sealed)
+        journal["phase"] = "sealed"
+        journal["pending_digest"] = _replica_digest(sealed)
+        _write_mode600(ledger / "rotation-data.json", _json_bytes(journal))
+        self._interrupt(crash_at, "sealed", token)
+        retained_keys = [dict(item) for item in record.get("retained_data_keys") or []]
+        retained_keys.append({
+            "data_key_id": current_id,
+            "wrapped_data_key": dict(record.get("wrapped_data_key") or {}),
+            "status": "retained",
+        })
+        record["retained_data_keys"] = retained_keys
+        record["data_key_id"] = new_id
+        record["wrapped_data_key"] = dict(record["pending_data_key"]["wrapped_data_key"])
+        record.pop("pending_data_key", None)
+        self._store_case_record(slot, record)
+        self._data_keys[(tenant_id, case_id)] = (new_id, new_key)
+        self._retained_data_keys.setdefault((tenant_id, case_id), []).append((current_id, current_key))
+        self._pending_data_keys.pop((tenant_id, case_id), None)
+        catalog = {
+            "digest": _replica_digest(sealed),
+            "version": str(opened["revision"]),
+            "revision": str(opened["revision"]),
+            "desired": 1,
+            "minimum": 1,
+            "mode": "local_private",
+            "providers": [],
+        }
+        previous_catalog = _read_exact(ledger / _WORKSPACE_CATALOG) or b""
+        intent = {"previous_catalog_sha256": _replica_digest(previous_catalog), "catalog": catalog}
+        _write_workspace_bytes(ledger, _WORKSPACE_PENDING, _json_bytes(intent))
+        _write_workspace_bytes(ledger, _WORKSPACE_FRAME, sealed)
+        _write_workspace_bytes(ledger, _WORKSPACE_CATALOG, _json_bytes(catalog))
+        journal["phase"] = "committed"
+        journal["previous_data_key_retained"] = True
+        _write_mode600(ledger / "rotation-data.json", _json_bytes(journal))
+        self._interrupt(crash_at, "committed", token)
+        state = self.public_state()
+        state.update({
+            "operation": "reencrypt",
+            "reencrypt": True,
+            "rotation_phase": "committed",
+            "previous_data_key_retained": True,
+            "data_key_changed": True,
+            "retention_policy": policy,
+            "revoked": False,
+            "revision": opened["revision"],
+            "keys_reconstructed": False,
+            "data_reset": False,
+            "only_recovery_path_erased": False,
+            "unwrapped_master_included": False,
+        })
+        _PORTABILITY_LOG.info("data key reencrypted; previous generation retained")
+        return state
+
+    def revoke_retained_keys(
+        self,
+        tenant_id: str,
+        case_id: str,
+        repository: str | Path,
+        *,
+        policy: str,
+        verified_backup_migration: bool,
+        export_dir: str | Path | None = None,
+        recovery_path: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Revoke retained keys only after a verified migration of the active generation.
+
+        Rotation never calls this. A missing verified backup, or a recovery file
+        that is the only path to the active key, leaves every retained key in place.
+        """
+
+        self._require_unlocked("Revocation requires an unlocked session. Nothing was erased.")
+        if policy != "revoke_after_verified_migration":
+            raise PrivatePortabilityError(
+                "Old keys stay retained until revocation is an explicit verified-migration policy. Nothing was erased.",
+                code="retention_policy",
+                actions=("retain", "revoke_after_verified_migration"),
+            )
+        if verified_backup_migration is not True:
+            raise PrivatePortabilityError(
+                "Old keys stay retained until a verified backup migration. Nothing was erased.",
+                code="revocation_requires_verified_migration",
+                actions=("retain", "export_then_verify"),
+            )
+        if export_dir is None or recovery_path is None:
+            raise PrivatePortabilityError(
+                "Refusing to erase the only recovery path. Export a separate recovery file and verify it. " + UNRECOVERED_KEY_EXPLANATION,
+                code="only_recovery_path",
+                actions=("recovery_export", "retain"),
+            )
+        recovery_file = Path(recovery_path)
+        if not recovery_file.is_file():
+            raise PrivatePortabilityError(
+                "Recovery material is missing, so retained keys were not erased. " + UNRECOVERED_KEY_EXPLANATION,
+                code="recovery_key_missing",
+                actions=("recovery_import", "retain"),
+            )
+        _assert_recovery_separated(export_dir, recovery_file)
+        manifest = _load_portability_manifest(Path(export_dir))
+        frame = _read_exact(Path(export_dir) / str(manifest["ciphertext"]))
+        active_frame = _read_exact(_workspace_ledger(repository) / _WORKSPACE_FRAME)
+        if frame is None or active_frame is None or frame != active_frame:
+            raise PrivatePortabilityError(
+                "The export archive does not match the active ciphertext. Retained keys were kept.",
+                code="migration_not_verified",
+                actions=("export_then_verify", "retain"),
+            )
+        if manifest.get("ciphertext_sha256") != _replica_digest(active_frame):
+            raise PrivatePortabilityError(
+                "The export manifest digest does not match the active ciphertext. Retained keys were kept.",
+                code="migration_not_verified",
+                actions=("export_then_verify", "retain"),
+            )
+        recovery = _parse_recovery(recovery_file.read_bytes())
+        active_id = self._require_case_key(tenant_id, case_id)[0]
+        if str(recovery.get("data_key_id") or "") != active_id or str(manifest.get("data_key_id") or "") != active_id:
+            raise PrivatePortabilityError(
+                "The recovery file does not protect the active data key. Refusing to erase the only recovery path.",
+                code="only_recovery_path",
+                actions=("recovery_export", "retain"),
+            )
+        if self._document is None:
+            raise PrivateKeyMaterialError("key_store_absent")
+        document = dict(self._document)
+        retained_wrappings = []
+        for item in document.get("retained_wrappings") or []:
+            if isinstance(item, Mapping):
+                updated = dict(item)
+                updated["status"] = "revoked"
+                retained_wrappings.append(updated)
+        document["retained_wrappings"] = retained_wrappings
+        document["retention_policy"] = policy
+        slot, record = self._case_record(tenant_id, case_id)
+        retained_keys = []
+        for item in record.get("retained_data_keys") or []:
+            if isinstance(item, Mapping):
+                updated = dict(item)
+                updated["status"] = "revoked"
+                retained_keys.append(updated)
+        record["retained_data_keys"] = retained_keys
+        cases = dict(document.get("cases") or {})
+        cases[slot] = record
+        document["cases"] = cases
+        self._write_document(document)
+        self._document = document
+        self._retained_data_keys[(tenant_id, case_id)] = []
+        state = self.public_state()
+        state.update({
+            "operation": "revoke_retained",
+            "retention_policy": policy,
+            "verified_backup_migration": True,
+            "revoked": True,
+            "only_recovery_path_erased": False,
+            "data_reset": False,
+            "keys_reconstructed": False,
+            "unwrapped_master_included": False,
+        })
+        _PORTABILITY_LOG.info("retained keys revoked after verified backup migration")
         return state
 
     def assert_no_raw_key_files(self) -> None:
@@ -1321,6 +1738,8 @@ class UserOwnedKeySession:
 
     def _install_master(self, document: Mapping[str, Any], master: bytes) -> None:
         loaded: dict[tuple[str, str], tuple[str, bytes]] = {}
+        retained: dict[tuple[str, str], list[tuple[str, bytes]]] = {}
+        pending: dict[tuple[str, str], tuple[str, bytes]] = {}
         cases = document.get("cases") or {}
         if not isinstance(cases, Mapping):
             raise PrivateArtifactIntegrityError("malformed")
@@ -1332,9 +1751,28 @@ class UserOwnedKeySession:
             key_id = str(item.get("data_key_id") or "")
             opened = _unwrap_secret(master, item.get("wrapped_data_key") or {}, _data_aad(tenant, case, key_id))
             loaded[(tenant, case)] = (key_id, opened)
+            kept: list[tuple[str, bytes]] = []
+            for prior in item.get("retained_data_keys") or []:
+                if not isinstance(prior, Mapping) or prior.get("status") == "revoked":
+                    continue
+                prior_id = str(prior.get("data_key_id") or "")
+                kept.append((
+                    prior_id,
+                    _unwrap_secret(master, prior.get("wrapped_data_key") or {}, _data_aad(tenant, case, prior_id)),
+                ))
+            retained[(tenant, case)] = kept
+            pending_doc = item.get("pending_data_key")
+            if isinstance(pending_doc, Mapping) and pending_doc.get("status") != "revoked":
+                pending_id = str(pending_doc.get("data_key_id") or "")
+                pending[(tenant, case)] = (
+                    pending_id,
+                    _unwrap_secret(master, pending_doc.get("wrapped_data_key") or {}, _data_aad(tenant, case, pending_id)),
+                )
         self._master = master
         self._master_id = str(document.get("master_key_id") or "")
         self._data_keys = loaded
+        self._retained_data_keys = retained
+        self._pending_data_keys = pending
 
     def _new_document(
         self,
@@ -1387,6 +1825,88 @@ class UserOwnedKeySession:
         if document.get("raw_key_persisted") is not False:
             raise PrivateKeyMaterialError("raw_key_persisted")
         return document
+
+    def _require_unlocked(self, message: str) -> None:
+        if not self.unlocked:
+            raise PrivateKeyLockedError(
+                message,
+                actions=self.public_state()["actions"],
+                protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
+            )
+
+    def _require_case_key(self, tenant_id: str, case_id: str) -> tuple[str, bytes]:
+        found = self._data_keys.get((tenant_id, case_id))
+        if found is None:
+            self.ensure_data_key(tenant_id, case_id)
+            found = self._data_keys.get((tenant_id, case_id))
+        if found is None:
+            raise PrivateKeyMaterialError("key_unavailable")
+        return found
+
+    def _case_record(self, tenant_id: str, case_id: str) -> tuple[str, dict[str, Any]]:
+        if self._document is None:
+            raise PrivateKeyMaterialError("key_store_absent")
+        slot = f"{tenant_id}\n{case_id}"
+        cases = self._document.get("cases") or {}
+        current = cases.get(slot)
+        if not isinstance(current, Mapping):
+            raise PrivateKeyMaterialError("key_unavailable")
+        return slot, dict(current)
+
+    def _store_case_record(self, slot: str, record: Mapping[str, Any]) -> None:
+        if self._document is None:
+            raise PrivateKeyMaterialError("key_store_absent")
+        document = dict(self._document)
+        cases = dict(document.get("cases") or {})
+        cases[slot] = dict(record)
+        document["cases"] = cases
+        self._write_document(document)
+        self._document = document
+
+    def _rotation_journal_path(self) -> Path:
+        return self.directory / "rotation-wrapping.json"
+
+    def _write_rotation_journal(self, document: Mapping[str, Any]) -> None:
+        _write_mode600(self._rotation_journal_path(), _json_bytes(document))
+
+    def _open_master_with_passphrase(self, document: Mapping[str, Any], passphrase: str) -> bytes:
+        candidates: list[Mapping[str, Any]] = [{
+            "kdf": document.get("kdf"),
+            "wrapped_master": document.get("wrapped_master"),
+            "status": "active",
+            "protection": document.get("protection"),
+        }]
+        for item in document.get("retained_wrappings") or []:
+            if isinstance(item, Mapping):
+                candidates.append(item)
+        authenticated = False
+        for item in candidates:
+            if item.get("status") == "revoked":
+                continue
+            if item.get("protection") not in {"passphrase", None}:
+                continue
+            kdf = item.get("kdf")
+            if not isinstance(kdf, Mapping) or kdf.get("name") != "scrypt":
+                continue
+            if int(kdf.get("n") or 0) != SCRYPT_N or int(kdf.get("r") or 0) != SCRYPT_R or int(kdf.get("p") or 0) != SCRYPT_P:
+                continue
+            try:
+                return _unwrap_secret(
+                    _kdf_bytes(passphrase, _b64d(str(kdf.get("salt") or ""))),
+                    item.get("wrapped_master") or {},
+                    MASTER_WRAP_AAD,
+                )
+            except PrivateArtifactIntegrityError:
+                authenticated = True
+                continue
+        if authenticated:
+            raise PrivateArtifactIntegrityError("authentication_failed")
+        raise PrivateArtifactIntegrityError("malformed")
+
+    @staticmethod
+    def _interrupt(crash_at: str | None, phase: str, token: str) -> None:
+        if crash_at == phase:
+            raise PrivateRevisionInterrupted(phase, token)
 
 
 def _parse_recovery(payload: bytes | str | Mapping[str, Any]) -> Mapping[str, Any]:
@@ -4380,6 +4900,428 @@ def count_verified_ciphertext_replicas(observations: Sequence[Mapping[str, Any]]
     return {"verified_replicas": len(verified), "verified_providers": verified, "uncounted": rejected}
 
 
+def _json_bytes(document: Mapping[str, Any]) -> bytes:
+    return json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _write_mode600(path: Path, payload: bytes) -> None:
+    """Persist bytes as owner-read/write without requiring a private parent mode."""
+
+    _reject_secret_path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        view = payload
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise PrivateStorageError("private write failed", code="key_store_io")
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.chmod(path, 0o600)
+
+
+def _assert_recovery_separated(export_dir: str | Path, recovery_path: str | Path) -> None:
+    export = Path(export_dir).resolve()
+    recovery = Path(recovery_path).resolve()
+    if recovery == export or export in recovery.parents or recovery.parent == export:
+        raise PrivateKeyMaterialError("recovery_inside_export")
+
+
+def _reject_unwrapped_key(blob: bytes, secret: bytes) -> None:
+    if not secret:
+        return
+    if secret in blob or _b64e(secret).encode("ascii") in blob:
+        raise PrivateKeyMaterialError("unwrapped_key_in_export")
+
+
+def assert_tree_excludes_unwrapped_keys(root: str | Path, secrets: Sequence[bytes]) -> None:
+    """Refuse an export tree that contains raw key bytes or their base64 form."""
+
+    directory = Path(root)
+    if not directory.exists():
+        return
+    for path in directory.rglob("*"):
+        if not path.is_file():
+            continue
+        blob = path.read_bytes()
+        for secret in secrets:
+            _reject_unwrapped_key(blob, secret)
+
+
+def _load_portability_manifest(export_dir: Path) -> dict[str, Any]:
+    raw = _read_exact(export_dir / "manifest.json")
+    if raw is None:
+        raise PrivatePortabilityError(
+            "The ciphertext archive has no versioned manifest. Nothing was restored.",
+            code="manifest_missing",
+            actions=("export_retry",),
+        )
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise PrivatePortabilityError(
+            "The versioned manifest is unreadable. Encrypted state was not reset.",
+            code="corrupt_manifest",
+            actions=("export_retry",),
+        ) from exc
+    if not isinstance(document, dict):
+        raise PrivatePortabilityError(
+            "The versioned manifest is unreadable. Encrypted state was not reset.",
+            code="corrupt_manifest",
+            actions=("export_retry",),
+        )
+    if document.get("schema") != PORTABILITY_SCHEMA or int(document.get("schema_version") or 0) != PORTABILITY_VERSION:
+        raise PrivatePortabilityError(
+            "The archive manifest version is not supported. Encrypted state was not reset.",
+            code="unsupported_version",
+            actions=("export_retry",),
+        )
+    if document.get("recovery_included") is not False or document.get("unwrapped_master_included") is not False:
+        raise PrivateKeyMaterialError("unwrapped_key_in_export")
+    if document.get("key_material_included") is not False:
+        raise PrivateKeyMaterialError("unwrapped_key_in_export")
+    return document
+
+
+def _workspace_frames(ledger: Path) -> list[tuple[str, bytes]]:
+    frames: list[tuple[str, bytes]] = []
+    primary = _read_exact(ledger / _WORKSPACE_FRAME)
+    if primary is not None:
+        frames.append(("primary", primary))
+    generations = ledger / "generations"
+    if generations.is_dir():
+        for path in sorted(generations.glob("*.frame")):
+            payload = _read_exact(path)
+            if payload is not None:
+                frames.append((path.name, payload))
+    return frames
+
+
+def read_private_workspace_generation(
+    repository: str | Path,
+    session: UserOwnedKeySession,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+) -> dict[str, Any]:
+    """Open the active generation, or a retained generation after a partial rotation."""
+
+    session._require_unlocked("Reading a private workspace requires an unlocked session.")
+    ledger = _workspace_ledger(repository)
+    identity = _workspace_identity(tenant_id, case_id, principal_id, "")
+    _assert_workspace_owner(ledger, identity)
+    opened_frames: list[dict[str, Any]] = []
+    for name, frame in _workspace_frames(ledger):
+        try:
+            parsed = parse_private_envelope(frame)
+        except PrivateArtifactIntegrityError:
+            continue
+        key = session.lookup_data_key(tenant_id, case_id, str(parsed["key_id"]))
+        if key is None:
+            continue
+        try:
+            opened = _open_workspace_frame(
+                frame,
+                tenant_id=tenant_id,
+                case_id=case_id,
+                principal_id=principal_id,
+                key=key,
+                key_id=str(parsed["key_id"]),
+            )
+        except PrivateStorageError:
+            continue
+        opened["data_key_id"] = str(parsed["key_id"])
+        opened["source_name"] = name
+        opened["frame_sha256"] = _replica_digest(frame)
+        opened_frames.append(opened)
+    if not opened_frames:
+        raise PrivatePortabilityError(
+            "No retained or active key opened a ciphertext generation. " + UNRECOVERED_KEY_EXPLANATION,
+            code="recovery_key_missing",
+            actions=("passphrase_unlock", "recovery_import"),
+        )
+    active = session._data_keys.get((tenant_id, case_id))
+    active_id = active[0] if active is not None else ""
+    for opened in opened_frames:
+        if opened["source_name"] == "primary" and opened["data_key_id"] == active_id:
+            opened["generation"] = "active"
+            return opened
+    for opened in opened_frames:
+        if opened["data_key_id"] == active_id:
+            opened["generation"] = "active"
+            return opened
+    opened_frames[0]["generation"] = "retained"
+    return opened_frames[0]
+
+
+def stage_private_workspace(
+    repository: str | Path,
+    session: UserOwnedKeySession,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    complaint: bytes,
+    fact_graph: bytes,
+    proof: bytes,
+) -> dict[str, Any]:
+    """Seal one case, fact graph, and proof revision into the local ciphertext ledger."""
+
+    session.ensure_data_key(tenant_id, case_id)
+    key_id, key = session._require_case_key(tenant_id, case_id)
+    _publish_workspace_replica(
+        repository,
+        policy=select_private_storage_mode("local_private"),
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        key=key,
+        key_id=key_id,
+        revision=revision,
+        complaint=bytes(complaint),
+        fact_graph=bytes(fact_graph),
+        proof=bytes(proof),
+        providers=None,
+        timeout_seconds=None,
+    )
+    return read_private_workspace_generation(
+        repository,
+        session,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+    )
+
+
+def export_encrypted_workspace(
+    repository: str | Path,
+    export_dir: str | Path,
+    recovery_path: str | Path,
+    session: UserOwnedKeySession,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    recovery_passphrase: str,
+) -> dict[str, Any]:
+    """Write a ciphertext archive and a separate recovery file. No raw master key."""
+
+    session._require_unlocked("Export requires an unlocked session. Nothing was written.")
+    assert_store_isolated_from_exports(session.directory, export_dir)
+    _assert_recovery_separated(export_dir, recovery_path)
+    opened = read_private_workspace_generation(
+        repository,
+        session,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+    )
+    if opened.get("generation") == "retained":
+        raise PrivatePortabilityError(
+            "The active generation is not the readable generation. Export was not written.",
+            code="rotation_incomplete",
+            actions=("resume_rotation", "retain"),
+        )
+    frame = _read_exact(_workspace_ledger(repository) / _WORKSPACE_FRAME)
+    if frame is None or _replica_digest(frame) != opened["frame_sha256"]:
+        raise PrivatePortabilityError(
+            "The active ciphertext does not match the opened generation. Nothing was written.",
+            code="readback_mismatch",
+            actions=("restore_generation",),
+        )
+    key_id = str(opened["data_key_id"])
+    manifest = {
+        "schema": PORTABILITY_SCHEMA,
+        "schema_version": PORTABILITY_VERSION,
+        "manifest_version": PORTABILITY_VERSION,
+        "tenant_id": tenant_id,
+        "case_id": case_id,
+        "principal_id": principal_id,
+        "revision": opened["revision"],
+        "data_key_id": key_id,
+        "ciphertext": "ciphertext.frame",
+        "ciphertext_sha256": _replica_digest(frame),
+        "roles": ["complaint", "fact_graph", "proof"],
+        "recovery_included": False,
+        "unwrapped_master_included": False,
+        "key_material_included": False,
+    }
+    destination = Path(export_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+    os.chmod(destination, 0o700)
+    _write_mode600(destination / "manifest.json", _json_bytes(manifest))
+    _write_mode600(destination / "ciphertext.frame", frame)
+    session.export_recovery(tenant_id, case_id, recovery_passphrase, recovery_path)
+    secrets = [session._master or b""]
+    active = session._data_keys.get((tenant_id, case_id))
+    if active is not None:
+        secrets.append(active[1])
+    assert_tree_excludes_unwrapped_keys(destination, secrets)
+    recovery_blob = Path(recovery_path).read_bytes()
+    for secret in secrets:
+        _reject_unwrapped_key(recovery_blob, secret)
+    _PORTABILITY_LOG.info("exported versioned ciphertext manifest without key material")
+    return {
+        "status": "exported",
+        "code": "exported",
+        "operation": "export",
+        "manifest_version": PORTABILITY_VERSION,
+        "revision": opened["revision"],
+        "recovery_separated": True,
+        "unwrapped_master_included": False,
+        "deliberate_export": True,
+        "automatic_backup": False,
+        "keys_reconstructed": False,
+        "data_reset": False,
+        "only_recovery_path_erased": False,
+        "raw_key_persisted": False,
+        "protection": (session._document or {}).get("protection"),
+        "unlocked": True,
+        "message": "Wrote a ciphertext archive and a separate recovery file.",
+        "actions": ["import_archive", "lock"],
+        "awaiting_user": False,
+        "worker_may_continue": True,
+        "worker_state": "ready_for_independent_tasks",
+        "cloud_processing_enabled": False,
+        "unlock_is_remote_consent": False,
+    }
+
+
+def import_encrypted_workspace(
+    repository: str | Path,
+    export_dir: str | Path,
+    recovery_path: str | Path,
+    store_dir: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    recovery_passphrase: str,
+    store_passphrase: str | None = None,
+) -> dict[str, Any]:
+    """Restore an archive into a workspace. Failures do not reset existing ciphertext."""
+
+    _require_label(tenant_id)
+    _require_label(case_id)
+    _require_label(principal_id)
+    recovery_file = Path(recovery_path)
+    if not recovery_file.is_file():
+        raise PrivatePortabilityError(
+            "Recovery material is missing, so the encryption key is unrecovered. " + UNRECOVERED_KEY_EXPLANATION,
+            code="recovery_key_missing",
+            actions=("recovery_import", "retry_with_recovery_file"),
+        )
+    manifest = _load_portability_manifest(Path(export_dir))
+    if manifest.get("tenant_id") != tenant_id or manifest.get("case_id") != case_id or manifest.get("principal_id") != principal_id:
+        raise PrivateArtifactBindingError("foreign_case")
+    frame_name = str(manifest.get("ciphertext") or "")
+    if frame_name != "ciphertext.frame":
+        raise PrivatePortabilityError(
+            "The archive ciphertext name is not the versioned frame. Nothing was restored.",
+            code="corrupt_manifest",
+            actions=("export_retry",),
+        )
+    frame = _read_exact(Path(export_dir) / frame_name)
+    if frame is None or _replica_digest(frame) != manifest.get("ciphertext_sha256"):
+        raise PrivatePortabilityError(
+            "The ciphertext archive does not match its manifest. Encrypted state was not reset.",
+            code="readback_mismatch",
+            actions=("export_retry",),
+        )
+    session = UserOwnedKeySession(store_dir)
+    try:
+        session.import_recovery(
+            recovery_file.read_bytes(),
+            tenant_id=tenant_id,
+            case_id=case_id,
+            recovery_passphrase=recovery_passphrase,
+            store_passphrase=store_passphrase if store_passphrase is not None else recovery_passphrase,
+        )
+    except PrivateArtifactIntegrityError as exc:
+        raise PrivatePortabilityError(
+            "The recovery passphrase did not authenticate. " + UNRECOVERED_KEY_EXPLANATION,
+            code="authentication_failed",
+            actions=("retry_passphrase", "recovery_import"),
+        ) from exc
+    except PrivateKeyLockedError:
+        raise
+    key_id = str(manifest.get("data_key_id") or "")
+    key = session.lookup_data_key(tenant_id, case_id, key_id)
+    if key is None:
+        raise PrivatePortabilityError(
+            "The recovery file did not provide the archive data key. " + UNRECOVERED_KEY_EXPLANATION,
+            code="recovery_key_missing",
+            actions=("recovery_import",),
+        )
+    try:
+        opened = _open_workspace_frame(
+            frame,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            principal_id=principal_id,
+            key=key,
+            key_id=key_id,
+        )
+    except PrivateStorageError as exc:
+        raise PrivatePortabilityError(
+            "The archive did not open with the recovered key. " + UNRECOVERED_KEY_EXPLANATION,
+            code="authentication_failed",
+            actions=("recovery_import",),
+        ) from exc
+    if opened["revision"] != manifest.get("revision"):
+        raise PrivatePortabilityError(
+            "The opened revision does not match the manifest. The destination workspace was not replaced.",
+            code="revision_mismatch",
+            actions=("export_retry",),
+        )
+    ledger = _workspace_ledger(repository)
+    identity = _workspace_identity(tenant_id, case_id, principal_id, key_id)
+    _assert_workspace_owner(ledger, identity)
+    if _read_json_file(ledger / _WORKSPACE_OWNER) is None:
+        _write_workspace_bytes(ledger, _WORKSPACE_OWNER, _json_bytes(identity))
+    catalog = {
+        "digest": _replica_digest(frame),
+        "version": opened["revision"],
+        "revision": opened["revision"],
+        "desired": 1,
+        "minimum": 1,
+        "mode": "local_private",
+        "providers": [],
+    }
+    _write_workspace_bytes(ledger, _WORKSPACE_FRAME, frame)
+    _write_workspace_bytes(ledger, _WORKSPACE_CATALOG, _json_bytes(catalog))
+    restored = read_private_workspace_generation(
+        repository,
+        session,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+    )
+    _PORTABILITY_LOG.info("imported ciphertext archive with a separate recovery file")
+    restored.update({
+        "status": "imported",
+        "code": "imported",
+        "operation": "import",
+        "manifest_version": int(manifest.get("manifest_version") or 0),
+        "imported": True,
+        "keys_reconstructed": False,
+        "data_reset": False,
+        "unwrapped_master_included": False,
+        "recovery_separated": True,
+        "message": "Restored the case, fact graph, and proof revision from the ciphertext archive.",
+    })
+    return restored
+
+
 def assert_store_isolated_from_exports(store_dir: str | Path, export_dir: str | Path) -> None:
     """Refuse to keep a key store inside or next to an encrypted export directory."""
 
@@ -4421,8 +5363,16 @@ __all__ = [
     "KEY_RECOVERY_SCHEMA",
     "PrivateKeyLockedError",
     "UserOwnedKeySession",
+    "PORTABILITY_SCHEMA",
+    "UNRECOVERED_KEY_EXPLANATION",
+    "PrivatePortabilityError",
     "assert_store_isolated_from_exports",
+    "assert_tree_excludes_unwrapped_keys",
+    "export_encrypted_workspace",
+    "import_encrypted_workspace",
+    "read_private_workspace_generation",
     "read_unlock_passphrase",
+    "stage_private_workspace",
     "task_key_receipt",
     "PrivateRevisionError",
     "PrivateRevisionInterrupted",

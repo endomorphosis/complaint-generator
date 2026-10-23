@@ -20,8 +20,13 @@ __all__ = [
     "keys_lock",
     "keys_recover_export",
     "keys_recover_import",
+    "keys_revoke_retained",
+    "keys_rotate_data",
+    "keys_rotate_wrapping",
     "keys_status",
     "keys_unlock",
+    "workspace_export",
+    "workspace_import",
 ]
 
 
@@ -266,6 +271,249 @@ def keys_recover_import(
     _emit(state)
 
 
+def _unlock_session(session, protection: str = ""):
+    from integrations.private_storage import PrivateArtifactIntegrityError, PrivateKeyLockedError
+
+    if session.unlocked:
+        return session
+    chosen = protection or str(session.public_state().get("protection") or "")
+    try:
+        if chosen == "keyring":
+            session.unlock_keyring()
+        else:
+            session.unlock_passphrase(_prompt("Private key passphrase"))
+    except PrivateKeyLockedError as exc:
+        _emit(exc.public_state())
+        raise SystemExit(2) from None
+    except PrivateArtifactIntegrityError:
+        _emit(session.public_state() | {
+            "status": "unlock_needed",
+            "code": "authentication_failed",
+            "message": "The passphrase or wrapped key did not authenticate. Encrypted state was not overwritten.",
+            "awaiting_user": True,
+            "keys_reconstructed": False,
+            "data_reset": False,
+        })
+        raise SystemExit(2) from None
+    return session
+
+
+@_key_command_boundary
+def workspace_export(
+    store_dir: str = "",
+    tenant_id: str = "",
+    case_id: str = "",
+    principal_id: str = "",
+    repository: str = "",
+    export_dir: str = "",
+    recovery_destination: str = "",
+) -> None:
+    """Export a ciphertext archive and a separate recovery file."""
+
+    _reject_secret_argv()
+    from integrations.private_storage import PrivatePortabilityError, UserOwnedKeySession, export_encrypted_workspace
+
+    if not all((store_dir, tenant_id, case_id, principal_id, repository, export_dir, recovery_destination)):
+        raise SystemExit("store, tenant, case, principal, repository, export directory, and recovery destination are required")
+    session = _unlock_session(UserOwnedKeySession(store_dir))
+    try:
+        receipt = export_encrypted_workspace(
+            repository,
+            export_dir,
+            recovery_destination,
+            session,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            principal_id=principal_id,
+            recovery_passphrase=_prompt("Recovery export passphrase"),
+        )
+    except PrivatePortabilityError as exc:
+        _emit(exc.public_state())
+        raise SystemExit(2) from None
+    _emit(receipt)
+
+
+@_key_command_boundary
+def workspace_import(
+    store_dir: str = "",
+    tenant_id: str = "",
+    case_id: str = "",
+    principal_id: str = "",
+    repository: str = "",
+    export_dir: str = "",
+    recovery_source: str = "",
+) -> None:
+    """Restore a ciphertext archive with a separate recovery file."""
+
+    _reject_secret_argv()
+    from integrations.private_storage import (
+        PrivateKeyLockedError,
+        PrivatePortabilityError,
+        import_encrypted_workspace,
+    )
+
+    if not all((store_dir, tenant_id, case_id, principal_id, repository, export_dir, recovery_source)):
+        raise SystemExit("store, tenant, case, principal, repository, export directory, and recovery source are required")
+    recovery_passphrase = _prompt("Recovery import passphrase")
+    store_passphrase = _prompt("New store passphrase")
+    try:
+        restored = import_encrypted_workspace(
+            repository,
+            export_dir,
+            recovery_source,
+            store_dir,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            principal_id=principal_id,
+            recovery_passphrase=recovery_passphrase,
+            store_passphrase=store_passphrase,
+        )
+    except PrivatePortabilityError as exc:
+        _emit(exc.public_state())
+        raise SystemExit(2) from None
+    except PrivateKeyLockedError as exc:
+        _emit(exc.public_state())
+        raise SystemExit(2) from None
+    _emit({
+        "status": "imported",
+        "code": "imported",
+        "operation": "import",
+        "revision": restored.get("revision"),
+        "manifest_version": restored.get("manifest_version"),
+        "imported": True,
+        "keys_reconstructed": False,
+        "data_reset": False,
+        "unwrapped_master_included": False,
+        "recovery_separated": True,
+        "message": restored.get("message"),
+        "actions": ["unlock", "lock"],
+        "awaiting_user": False,
+        "worker_may_continue": True,
+        "worker_state": "ready_for_independent_tasks",
+        "raw_key_persisted": False,
+        "cloud_processing_enabled": False,
+        "unlock_is_remote_consent": False,
+        "deliberate_export": True,
+        "automatic_backup": False,
+    })
+
+
+@_key_command_boundary
+def keys_rotate_wrapping(store_dir: str = "", policy: str = "retain") -> None:
+    """Rewrap the master key. This does not reencrypt case ciphertext."""
+
+    _reject_secret_argv()
+    from integrations.private_storage import PrivatePortabilityError, PrivateRevisionInterrupted, UserOwnedKeySession
+
+    if not store_dir:
+        raise SystemExit("store directory is required")
+    session = _unlock_session(UserOwnedKeySession(store_dir))
+    try:
+        state = session.rotate_wrapping_key(_prompt("New wrapping passphrase"), policy=policy)
+    except PrivateRevisionInterrupted as exc:
+        _emit({
+            "status": "interrupted",
+            "code": "interrupted",
+            "operation": "rewrap",
+            "reencrypt": False,
+            "rotation_phase": exc.boundary,
+            "message": "Wrapping rotation stopped at a crash boundary. The previous generation is still readable.",
+            "data_reset": False,
+            "keys_reconstructed": False,
+            "revoked": False,
+            "awaiting_user": False,
+            "worker_may_continue": True,
+            "worker_state": "ready_for_independent_tasks",
+            "raw_key_persisted": False,
+            "cloud_processing_enabled": False,
+            "unlock_is_remote_consent": False,
+        })
+        raise SystemExit(2) from None
+    except PrivatePortabilityError as exc:
+        _emit(exc.public_state())
+        raise SystemExit(2) from None
+    _emit(state)
+
+
+@_key_command_boundary
+def keys_rotate_data(
+    store_dir: str = "",
+    tenant_id: str = "",
+    case_id: str = "",
+    principal_id: str = "",
+    repository: str = "",
+    policy: str = "retain",
+) -> None:
+    """Reencrypt the case under a new data key and retain the previous generation."""
+
+    _reject_secret_argv()
+    from integrations.private_storage import PrivatePortabilityError, PrivateRevisionInterrupted, UserOwnedKeySession
+
+    if not all((store_dir, tenant_id, case_id, principal_id, repository)):
+        raise SystemExit("store, tenant, case, principal, and repository are required")
+    session = _unlock_session(UserOwnedKeySession(store_dir))
+    try:
+        state = session.rotate_data_key(tenant_id, case_id, repository, principal_id, policy=policy)
+    except PrivateRevisionInterrupted as exc:
+        _emit({
+            "status": "interrupted",
+            "code": "interrupted",
+            "operation": "reencrypt",
+            "reencrypt": True,
+            "rotation_phase": exc.boundary,
+            "message": "Data-key rotation stopped at a crash boundary. A valid generation is still readable.",
+            "data_reset": False,
+            "keys_reconstructed": False,
+            "revoked": False,
+            "awaiting_user": False,
+            "worker_may_continue": True,
+            "worker_state": "ready_for_independent_tasks",
+            "raw_key_persisted": False,
+            "cloud_processing_enabled": False,
+            "unlock_is_remote_consent": False,
+        })
+        raise SystemExit(2) from None
+    except PrivatePortabilityError as exc:
+        _emit(exc.public_state())
+        raise SystemExit(2) from None
+    _emit(state)
+
+
+@_key_command_boundary
+def keys_revoke_retained(
+    store_dir: str = "",
+    tenant_id: str = "",
+    case_id: str = "",
+    repository: str = "",
+    export_dir: str = "",
+    recovery_path: str = "",
+    verified_backup_migration: str = "",
+) -> None:
+    """Revoke retained keys only when the caller proves a migrated backup."""
+
+    _reject_secret_argv()
+    from integrations.private_storage import PrivatePortabilityError, UserOwnedKeySession
+
+    if not all((store_dir, tenant_id, case_id, repository, export_dir, recovery_path)):
+        raise SystemExit("store, tenant, case, repository, export directory, and recovery path are required")
+    verified = verified_backup_migration == "yes"
+    session = _unlock_session(UserOwnedKeySession(store_dir))
+    try:
+        state = session.revoke_retained_keys(
+            tenant_id,
+            case_id,
+            repository,
+            policy="revoke_after_verified_migration",
+            verified_backup_migration=verified,
+            export_dir=export_dir,
+            recovery_path=recovery_path,
+        )
+    except PrivatePortabilityError as exc:
+        _emit(exc.public_state())
+        raise SystemExit(2) from None
+    _emit(state)
+
+
 def _register_key_commands() -> None:
     registrar = getattr(app, "command", None)
     if registrar is None:
@@ -276,6 +524,11 @@ def _register_key_commands() -> None:
     registrar("keys-lock")(keys_lock)
     registrar("keys-recover-export")(keys_recover_export)
     registrar("keys-recover-import")(keys_recover_import)
+    registrar("keys-rotate-wrapping")(keys_rotate_wrapping)
+    registrar("keys-rotate-data")(keys_rotate_data)
+    registrar("keys-revoke-retained")(keys_revoke_retained)
+    registrar("workspace-export")(workspace_export)
+    registrar("workspace-import")(workspace_import)
 
 
 _register_key_commands()
@@ -285,6 +538,8 @@ def main() -> None:
     key_commands = {
         "keys-status", "keys-init", "keys-unlock", "keys-lock",
         "keys-recover-export", "keys-recover-import",
+        "keys-rotate-wrapping", "keys-rotate-data", "keys-revoke-retained",
+        "workspace-export", "workspace-import",
     }
     if any(token in key_commands for token in sys.argv[1:]):
         # Refuse before argument-parser diagnostics can repeat an argv secret.

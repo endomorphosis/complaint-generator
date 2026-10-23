@@ -728,6 +728,96 @@ def sync_mike_final_draft(
     )
 
 
+def export_encrypted_workspace(
+    repository: str | Path,
+    export_dir: str | Path,
+    recovery_path: str | Path,
+    session: Any,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    recovery_passphrase: str,
+) -> dict[str, Any]:
+    """Export ciphertext plus a versioned manifest, with recovery kept separate."""
+
+    from integrations.private_storage import export_encrypted_workspace as _export
+
+    return _export(
+        repository,
+        export_dir,
+        recovery_path,
+        session,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        recovery_passphrase=recovery_passphrase,
+    )
+
+
+def import_encrypted_workspace(
+    repository: str | Path,
+    export_dir: str | Path,
+    recovery_path: str | Path,
+    store_dir: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    recovery_passphrase: str,
+    store_passphrase: str | None = None,
+) -> dict[str, Any]:
+    """Restore a ciphertext archive in this process. A fresh process can call it too."""
+
+    from integrations.private_storage import import_encrypted_workspace as _import
+
+    return _import(
+        repository,
+        export_dir,
+        recovery_path,
+        store_dir,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        recovery_passphrase=recovery_passphrase,
+        store_passphrase=store_passphrase,
+    )
+
+
+def rotate_wrapping_key(session: Any, new_passphrase: str, *, policy: str = "retain", crash_at: str | None = None) -> dict[str, Any]:
+    """Rewrap the master key without reencrypting case ciphertext."""
+
+    return session.rotate_wrapping_key(new_passphrase, policy=policy, crash_at=crash_at)
+
+
+def rotate_data_key(
+    session: Any,
+    tenant_id: str,
+    case_id: str,
+    repository: str | Path,
+    principal_id: str,
+    *,
+    policy: str = "retain",
+    crash_at: str | None = None,
+) -> dict[str, Any]:
+    """Reencrypt the workspace under a new data key and retain the previous generation."""
+
+    return session.rotate_data_key(
+        tenant_id,
+        case_id,
+        repository,
+        principal_id,
+        policy=policy,
+        crash_at=crash_at,
+    )
+
+
+def revoke_retained_keys(session: Any, tenant_id: str, case_id: str, repository: str | Path, **options: Any) -> dict[str, Any]:
+    """Apply explicit retention policy. Rotation does not erase the only recovery path."""
+
+    return session.revoke_retained_keys(tenant_id, case_id, repository, **options)
+
+
 def export_complaint_packet(
     user_id: Optional[str],
     *,
@@ -1122,6 +1212,11 @@ __all__ = [
     "get_workspace_data_schema",
     "create_identity",
     "create_complaint_workspace_router",
+    "export_encrypted_workspace",
+    "import_encrypted_workspace",
+    "rotate_wrapping_key",
+    "rotate_data_key",
+    "revoke_retained_keys",
     "export_complaint_packet",
     "export_complaint_markdown",
     "export_complaint_pdf",
