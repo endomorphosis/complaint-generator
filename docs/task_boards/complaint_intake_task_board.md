@@ -973,7 +973,7 @@ Implementation instructions:
 
 ## CIMP-PRIV-007 Provide tested encrypted export, recovery import and key rotation
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.privacy
