@@ -541,7 +541,7 @@ def main() -> None:
         "keys-rotate-wrapping", "keys-rotate-data", "keys-revoke-retained",
         "workspace-export", "workspace-import",
     }
-    if any(token in key_commands for token in sys.argv[1:]):
+    if any(token in key_commands | {"chat"} for token in sys.argv[1:]):
         # Refuse before argument-parser diagnostics can repeat an argv secret.
         _reject_secret_argv()
     _workspace_main()
