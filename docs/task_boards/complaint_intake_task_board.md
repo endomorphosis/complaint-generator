@@ -996,7 +996,7 @@ Implementation instructions:
 
 ## CIMP-PRIV-008 Implement scoped retention, unpin and key destruction receipts
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.privacy
