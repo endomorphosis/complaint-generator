@@ -1019,7 +1019,7 @@ Implementation instructions:
 
 ## CIMP-DUR-006 Qualify TUI intake resume with private graphs, replicas and Grok egress policy
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.durability
