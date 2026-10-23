@@ -30,7 +30,14 @@ There is one primary TUI command:
 python -m complaint_generator.cli chat --user-id USER_ID
 ```
 
-That process loads backend id `llm-router-grok-4.7` and model `grok-4.7` from `config.llm_router.json`. A live generation sends the prompt, including complaint text placed in that prompt, to the remote Grok provider. Starting the command does not by itself send a case.
+The terminal uses backend id `llm-router-grok-4.7` and model `grok-4.7` from `config.llm_router.json`. A live generation sends the prompt, including complaint text placed in that prompt, to the remote Grok provider. Starting the command does not by itself send a case.
+
+A new case defaults to local processing. To authorize remote Grok processing for this case, use the explicit option below after reading the remote-processing limits. To revoke it for future calls, select local. Omitting the option preserves the saved choice; it never creates consent.
+
+```bash
+python -m complaint_generator.cli chat --user-id USER_ID --privacy-mode grok
+python -m complaint_generator.cli chat --user-id USER_ID --privacy-mode local
+```
 
 Create the wrapped key store with `keys-init` before the first chat. Chat then prompts for the passphrase in the same process, unlocks that store, and ensures the case data key. A missing store stops with exit 2 and does not invent a key. The prompt is not an answer and is not a process argument.
 
@@ -106,7 +113,7 @@ The start example attaches a bounded monitor for at most six hours. It verifies 
 
 **Factual assertions versus applicable legal requirements.** A factual assertion is something the interview recorded from the operator or from a supplied narrative: who did what, when, and where. An applicable legal requirement is an element or dependency derived from a cited authority for a claim. Recording a fact does not mean a requirement is met. `/skip` and answers such as "unknown" leave the requirement unresolved. A missing or uncertain authority stays uncertain.
 
-**Saturation versus legal sufficiency.** Saturation means the interview stopped asking: the graph has no further question it will ask, the turn limit was reached, or the operator paused or quit. Legal sufficiency is a separate judgment about whether the recorded facts and authorities would support a filing. A structurally consistent graph, a finished question list, or a generated draft is not legal sufficiency and is not legal advice.
+**Saturation versus legal sufficiency.** Saturation means no further answerable question remains under the current policy. A turn limit, pause, or quit is a separate recoverable stop and does not establish saturation. Legal sufficiency is a separate judgment about whether the recorded facts and authorities would support a filing. A structurally consistent graph, a finished question list, or a generated draft is not legal sufficiency and is not legal advice.
 
 **Remote model processing versus encryption at rest.** Encryption at rest wraps local session and key bytes so a locked store is not plaintext on disk. Remote model processing is different: a live `grok-4.7` call sends the generation prompt to the provider. Encryption of the local store does not cover bytes already sent, and it does not make a remote call local. Unlocking the store does not authorize that call.
 

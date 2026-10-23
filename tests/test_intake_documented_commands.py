@@ -337,3 +337,41 @@ def test_session_directory_alias_is_rejected_before_any_profile_effect(tmp_path,
     before=target.stat().st_mode
     with pytest.raises(WorkspaceAuthorizationDenied):_LazyTerminalService().private_key_status()
     assert list(target.iterdir())==[]and target.stat().st_mode==before
+
+
+@pytest.mark.parametrize("mode", ["grok", "local"])
+def test_fresh_terminal_processing_choice_is_explicit_and_case_bound(tmp_path: Path, mode: str) -> None:
+    from applications.complaint_workspace import ComplaintWorkspaceService
+    home = tmp_path / "home"
+    home.mkdir()
+    sessions = tmp_path / "sessions"
+    service = ComplaintWorkspaceService(root_dir=sessions)
+    service.initialize_private_keys(protection="passphrase", passphrase="synthetic-policy-passphrase")
+    service.ensure_private_case_key("synthetic-policy", "synthetic-policy")
+    if mode == "local":
+        service.set_privacy_policy("synthetic-policy", "grok")
+    service.lock_private_keys()
+    env = _operator_env(home, {"COMPLAINT_WORKSPACE_SESSION_DIR": str(sessions)})
+    argv = _python_argv(PRIMARY, {"USER_ID": "synthetic-policy"}) + ["--privacy-mode", mode]
+    code, output = _pty_run(argv, cwd=REPO_ROOT, env=env,
+        steps=[("passphrase", "synthetic-policy-passphrase\n"), (">", "/quit\n")])
+    assert code == 0, output[-2000:]
+    assert "synthetic-policy-passphrase" not in output
+    restarted = ComplaintWorkspaceService(root_dir=sessions)
+    restarted.unlock_private_keys(passphrase="synthetic-policy-passphrase")
+    policy = restarted.get_privacy_policy("synthetic-policy")
+    assert policy["user_id"] == policy["case_id"] == "synthetic-policy"
+    assert policy["policy"]["cloud_processing_enabled"] is (mode == "grok")
+    assert restarted.get_session("synthetic-policy")["session"]["intake_history"] == []
+    assert not restarted.get_session("synthetic-policy")["session"].get("router_trace", {}).get("receipts")
+
+
+def test_invalid_terminal_processing_choice_has_no_store_side_effects(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    sessions = tmp_path / "sessions"
+    env = _operator_env(home, {"COMPLAINT_WORKSPACE_SESSION_DIR": str(sessions)})
+    result = _run(_python_argv(PRIMARY, {"USER_ID": "synthetic-policy"}) + ["--privacy-mode", "invalid"], cwd=REPO_ROOT, env=env)
+    assert result.returncode == 2
+    assert "invalid_privacy_mode" in result.stdout
+    assert not sessions.exists()

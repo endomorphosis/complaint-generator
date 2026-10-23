@@ -232,6 +232,16 @@ INTAKE_OPERATOR_EXAMPLES = (
         "notes": "Save is /pause or a recoverable exit. Resume is the same command with the same USER_ID, then /resume.",
     },
     {
+        "id": "primary-tui-explicit-grok-consent",
+        "command": PRIMARY_TUI_COMMAND + " --privacy-mode grok",
+        "remote_processing_opt_in": True,
+    },
+    {
+        "id": "primary-tui-revoke-remote-consent",
+        "command": PRIMARY_TUI_COMMAND + " --privacy-mode local",
+        "remote_processing_opt_in": False,
+    },
+    {
         "id": "router-live-canary-not-requested",
         "command": "python -m complaint_generator.cli router-live-canary --config-path config.llm_router.json --backend-id llm-router-grok-4.7",
         "model": "grok-4.7",
@@ -889,12 +899,20 @@ def _unlock_private_chat_case(user_id: str) -> None:
 
 @app.command("chat")
 @_workspace_command_boundary
-def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
+def chat(user_id: str = "demo-user", max_turns: int = 0, privacy_mode: str = "") -> None:
+    selected_privacy = privacy_mode.strip().lower()
+    if selected_privacy not in {"", "local", "grok"}:
+        raise WorkspacePersistenceError("Choose privacy mode local or grok.", code="invalid_privacy_mode", public_status="unavailable")
     try:
         _unlock_private_chat_case(user_id)
     except KeyboardInterrupt:
         terminal_echo("Private workspace unlock cancelled.")
         raise SystemExit(EXIT_INTERRUPTED) from None
+    if selected_privacy:
+        policy = service.set_privacy_policy(user_id, selected_privacy)
+        if policy.get("updated") is not True:
+            raise WorkspacePersistenceError("Private processing choice could not be saved.", code="privacy_denied", public_status="unavailable")
+        terminal_echo("Remote Grok processing authorized for this case." if selected_privacy == "grok" else "Local processing selected; future remote calls are disabled.")
     try:
         max_turns = int(max_turns)
     except (TypeError, ValueError):

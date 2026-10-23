@@ -158,7 +158,9 @@ The baseline audit records a working terminal pause/resume flow and the remainin
 gaps in graph-driven questioning, truthful stopping, and encrypted persistence.
 
 The one primary intake terminal command is `python -m complaint_generator.cli chat --user-id USER_ID`.
-It loads the pinned `llm-router-grok-4.7` route (`grok-4.7`) from `config.llm_router.json`.
+It uses the pinned `llm-router-grok-4.7` route (`grok-4.7`) from `config.llm_router.json`. New cases default to local processing; unlocking storage does not authorize a remote call.
+To authorize remote processing for this case, use `python -m complaint_generator.cli chat --user-id USER_ID --privacy-mode grok`.
+To revoke it for future calls, use `python -m complaint_generator.cli chat --user-id USER_ID --privacy-mode local`. Omitting the option preserves the saved choice.
 Inside that session, `/status`, `/why`, `/skip`, `/edit`, `/pause`, and `/resume` are controls, not stored answers.
 Run the same command again with the same user id to reopen a saved pause.
 Session files default to `.complaint_workspace/sessions` in the checkout. Set `COMPLAINT_WORKSPACE_SESSION_DIR` to another real directory when you want an explicit location.
