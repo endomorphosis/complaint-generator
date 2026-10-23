@@ -2467,10 +2467,10 @@ def generate_decentralized_id() -> Dict[str, Any]:
 
 
 _PRIVACY_MODE_NOTICE = (
-    "Privacy mode is local private processing for this case. "
-    "A remote model cannot read submitted content unless you separately enable Grok with /privacy grok. "
-    "At-rest protection is plaintext/pending. Encryption at rest would not by itself stop a remote model from reading submitted content. "
-    "Use /privacy local or /privacy grok once; this setting is saved and is not confirmed again on every step."
+    "Processing choice is saved per case. Remote Grok processing requires explicit consent, "
+    "and Grok can read submitted prompt content when you authorize it. "
+    "Local encryption at rest is separate from remote processing. "
+    "Use /privacy local to disable future remote calls, or /privacy grok to authorize them."
 )
 
 
