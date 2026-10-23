@@ -421,9 +421,9 @@ def test_documented_workspace_export_authenticates_in_a_fresh_store(tmp_path: Pa
     assert recovery.parent != export_dir and stat.S_IMODE(recovery.stat().st_mode) == 0o600
     assert all(COMPLAINT not in path.read_bytes() for path in export_dir.rglob("*") if path.is_file())
     new_store, restored_repository = tmp_path / "fresh-keys", tmp_path / "fresh-repository"
-    import_encrypted_workspace(repository, export_dir, recovery, new_store,
+    import_encrypted_workspace(restored_repository, export_dir, recovery, new_store,
         tenant_id=TENANT, case_id=CASE, principal_id=PRINCIPAL,
-        recovery_passphrase=RECOVERY, store_passphrase="synthetic-export-restore-passphrase", destination=restored_repository)
+        recovery_passphrase=RECOVERY, store_passphrase="synthetic-export-restore-passphrase")
     restored = UserOwnedKeySession(new_store)
     restored.unlock_passphrase("synthetic-export-restore-passphrase")
     opened = read_private_workspace_generation(restored_repository, restored, tenant_id=TENANT, case_id=CASE, principal_id=PRINCIPAL)
