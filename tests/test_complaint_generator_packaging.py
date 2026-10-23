@@ -164,6 +164,20 @@ def test_workspace_cli_is_exposed_through_package_entrypoint(monkeypatch, tmp_pa
     assert payload["session"]["intake_answers"]["protected_activity"] == "Reported retaliation to HR"
 
 
+def test_package_interview_turn_exposes_graph_inquiry_and_provenance(tmp_path):
+    """Package entry uses the same interview transition the acceptance suite drives."""
+
+    from tests.test_tui_interview_acceptance import COHERENT, _assert_graph_case, _service
+
+    service = _service(tmp_path, "pkg-accept-user")
+    payload = run_intake_chat_turn("pkg-accept-user", message=COHERENT, service=service)
+    assert run_intake_chat_turn is complaint_workspace_module.run_intake_chat_turn
+    _assert_graph_case(payload, COHERENT)
+    assert payload["interview"]["inquiry"]["inquiry_id"].startswith("inq-")
+    assert payload["stopping_policy"]["legal_sufficiency"] is False
+    assert payload["interview"]["graph"]["provenance"]["keys"]
+
+
 def test_package_exposes_shared_intake_chat_turn_wrapper(tmp_path):
     service = ComplaintWorkspaceService(root_dir=tmp_path / "workspace-chat-sessions")
     service.initialize_private_keys(protection="passphrase", passphrase="synthetic-package-fixture-passphrase")

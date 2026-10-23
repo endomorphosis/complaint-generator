@@ -446,6 +446,30 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert any(item["id"] == "workspace_schema_refresh" for item in package_payload["schema_guided_recommendations"])
 
 
+def test_mcp_and_cli_interview_transitions_match_package_graph_revision(monkeypatch, tmp_path):
+    """MCP and terminal chat turns keep the package inquiry id and graph revision."""
+
+    from tests.test_tui_interview_acceptance import (
+        COHERENT,
+        _graph_revision_fingerprint,
+        _mcp_turn,
+        _service,
+        _terminal_turn,
+    )
+    from complaint_generator.workspace import run_intake_chat_turn
+
+    package = _service(tmp_path / "package", "tools-package-user")
+    mcp = _service(tmp_path / "mcp", "tools-mcp-user")
+    terminal = _service(tmp_path / "terminal", "tools-terminal-user")
+    package_payload = run_intake_chat_turn("tools-package-user", message=COHERENT, service=package)
+    mcp_payload = _mcp_turn(mcp, "tools-mcp-user", COHERENT)
+    terminal_payload = _terminal_turn(terminal, "tools-terminal-user", COHERENT, monkeypatch)
+    assert _graph_revision_fingerprint(package_payload) == _graph_revision_fingerprint(mcp_payload)
+    assert _graph_revision_fingerprint(package_payload) == _graph_revision_fingerprint(terminal_payload)
+    assert package_payload["stopping_policy"]["outcome"] == "awaiting_user"
+    assert package_payload["interview"]["legal_sufficiency"] is False
+
+
 def test_intake_chat_turn_is_exposed_across_cli_mcp_and_api(monkeypatch, tmp_path):
     runner = CliRunner()
     service = ComplaintWorkspaceService(root_dir=tmp_path / "intake-chat-sessions")
