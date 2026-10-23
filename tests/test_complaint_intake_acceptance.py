@@ -186,7 +186,21 @@ def test_pty_flow_asks_graph_followups_and_stops_unresolved(tmp_path: Path):
     assert _plaintext_hits(Path(service._session_dir), narrative) == []
     sealed = list(Path(service._session_dir).rglob("*.cgpe"))
     assert sealed
-    assert all(path.read_bytes()[:4] == b"CGPE" for path in sealed)
+    from integrations.private_storage import parse_private_envelope
+
+    for path in sealed:
+        frame = path.read_bytes()
+        if frame.startswith(b"CGJH\x01"):
+            assert path.name == "head.cgpe"
+            revision_length = int.from_bytes(frame[5:7], "big")
+            assert 0 < revision_length <= 128
+            revision = frame[7:7 + revision_length]
+            assert revision.isascii() and revision.isdigit()
+            frame = frame[7 + revision_length:]
+        envelope = parse_private_envelope(frame)
+        assert envelope["schema_version"] == 1
+        assert len(envelope["nonce"]) == 12
+        assert len(envelope["ciphertext"]) >= 16
 
 
 def test_complete_unknown_and_contradictory_answers_do_not_finish_the_law(tmp_path: Path):
