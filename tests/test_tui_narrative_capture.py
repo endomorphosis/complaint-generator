@@ -24,6 +24,7 @@ from applications.complaint_workspace import (
 )
 from applications.complaint_workspace_api import attach_complaint_workspace_routes
 from complaint_generator.workspace import run_intake_chat_turn
+from tests.private_session_assertions import assert_private_session_frame, private_session_path
 
 pytestmark = [
     pytest.mark.no_auto_llm,
@@ -102,15 +103,15 @@ def test_housing_narrative_never_becomes_party_name(tmp_path: Path) -> None:
     service = _service(tmp_path, "housing-user")
     payload = service.run_intake_chat_turn("housing-user", message=HOUSING)
     _assert_narrative_then_name(payload, HOUSING)
-    encoded = (tmp_path / "sessions" / namespace_filename("housing-user")).read_bytes()
-    protected = encoded.startswith(b"CGPE") and HOUSING.encode() not in encoded
-    assert protected, "session writer exposed narrative plaintext"
+    encoded = private_session_path(tmp_path / "sessions", "housing-user").read_bytes()
+    assert_private_session_frame(encoded, HOUSING)
     saved = service.get_session("housing-user")["session"]
     assert saved["intake_answers"].get("party_name") in (None, "")
     assert saved["original_complaint"]["text"] == HOUSING
     assert HOUSING not in json.dumps(saved["intake_answers"])
     history = saved.get("intake_history") or []
-    assert history == []
+    assert [item["question_id"] for item in history] == ["original_complaint"]
+    assert history[0]["answer"] == HOUSING
 
 
 def test_saved_seven_field_session_migrates_without_rewriting_answers(tmp_path: Path) -> None:
@@ -144,11 +145,12 @@ def test_saved_seven_field_session_migrates_without_rewriting_answers(tmp_path: 
     assert (session.get("intake_answers") or {}).get("party_name") == "saved-party_name"
     follow = service.run_intake_chat_turn(user_id)
     assert (follow.get("inquiry") or None) is None
-    assert str(follow.get("message") or "").startswith("Intake complete")
+    assert "saturation" in str(follow.get("message") or "").lower()
+    assert follow["legal_sufficiency"] is False
+    assert follow["stopping_policy"]["legal_sufficiency"] is False
     assert target.read_bytes() == original_bytes
     successor = target.with_name(target.name + ".cgpe").read_bytes()
-    protected = successor.startswith(b"CGPE") and b"saved-party_name" not in successor
-    assert protected, "legacy successor was not encrypted separately"
+    assert_private_session_frame(successor, "saved-party_name")
     persisted = service.get_session(user_id)["session"]
     assert persisted["intake_answers"] == answers
     assert persisted["original_complaint"]["text"] == ""
@@ -181,7 +183,8 @@ def test_multiline_answer_revisions_stay_distinct(tmp_path: Path) -> None:
     assert answers.get("party_name") == "Jordan Example"
     assert "Line one" not in str(answers.get("party_name") or "")
     history = (revised.get("session") or {}).get("intake_history") or []
-    assert [item.get("question_id") for item in history] == ["party_name"]
+    assert [item.get("question_id") for item in history] == ["original_complaint", "party_name", "original_complaint"]
+    assert [item["answer"] for item in history] == [narrative, "Jordan Example", record["text"]]
     assert (revised.get("legacy_inquiry") or {}).get("question_id") == "opposing_party"
     assert revised["inquiry"]["question_id"] == revised["interview"]["inquiry"]["inquiry_id"]
     assert revised["inquiry"]["revision"] == revised["interview"]["expected_question_revision"]

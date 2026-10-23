@@ -100,8 +100,6 @@ def drive_pty_interview(service: ComplaintWorkspaceService, user_id: str, lines:
 
     import applications.complaint_workspace as workspace
 
-    workspace._SESSION_DIR = Path(service._session_dir)
-    sys.modules.pop("applications.complaint_cli", None)
     complaint_cli = importlib.import_module("applications.complaint_cli")
 
     master, slave = pty.openpty()
@@ -110,6 +108,8 @@ def drive_pty_interview(service: ComplaintWorkspaceService, user_id: str, lines:
 
     def _run() -> None:
         saved_in, saved_out = sys.stdin, sys.stdout
+        saved_service = complaint_cli.service
+        saved_env = {key: os.environ.get(key) for key in ("NO_COLOR", "COMPLAINT_CLI_NO_COLOR", "TERM")}
         sys.stdin = os.fdopen(os.dup(slave), "r", buffering=1, closefd=True)
         sys.stdout = os.fdopen(os.dup(slave), "w", buffering=1, closefd=True)
         os.close(slave)
@@ -129,7 +129,16 @@ def drive_pty_interview(service: ComplaintWorkspaceService, user_id: str, lines:
                 sys.stdout.flush()
             except Exception:
                 pass
+            terminal_in, terminal_out = sys.stdin, sys.stdout
             sys.stdin, sys.stdout = saved_in, saved_out
+            terminal_in.close()
+            terminal_out.close()
+            complaint_cli.service = saved_service
+            for key, value in saved_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
     thread = threading.Thread(target=_run)
     thread.start()

@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from tests.private_session_assertions import assert_private_session_frame, private_session_path
 
 
 pytestmark = [
@@ -91,7 +92,13 @@ def _install_guards():
 
     net.socket = _GuardedSocket
     net.create_connection = _blocked
-    process.Popen = _blocked
+    class _BlockedPopen:
+        @classmethod
+        def __class_getitem__(cls, _item):
+            return cls
+        def __new__(cls, *_args, **_kwargs):
+            return _blocked()
+    process.Popen = _BlockedPopen
     process.call = _blocked
     process.check_call = _blocked
     process.check_output = _blocked
@@ -119,9 +126,29 @@ def _install_guards():
     ):
         if hasattr(os, name):
             setattr(os, name, _blocked)
-    return net, process, _GuardedSocket, _blocked
+    return net, process, _GuardedSocket, _BlockedPopen
 
-net, process, _GuardedSocket, _blocked = _install_guards()
+net, process, _GuardedSocket, _BlockedPopen = _install_guards()
+# Use the installed real library without ctypes spawning ldconfig under the
+# intentionally absolute process denial. No process or library implementation
+# is faked; only this known library's discovery path is supplied explicitly.
+import ctypes.util
+import stat
+_magic_path = None
+for _candidate in (Path("/lib"), Path("/usr/lib")):
+    for _alias in sorted(_candidate.glob("*/libmagic.so.1"))[:16]:
+        _resolved = _alias.resolve(strict=True)
+        _info = _resolved.stat()
+        if _info.st_uid == 0 and stat.S_ISREG(_info.st_mode) and not (_info.st_mode & 0o022):
+            _magic_path = _resolved
+            break
+    if _magic_path is not None:
+        break
+assert _magic_path is not None, "installed libmagic fixture dependency unavailable"
+_real_find_library = ctypes.util.find_library
+def _fixture_find_library(name):
+    return str(_magic_path) if name == "magic" else _real_find_library(name)
+ctypes.util.find_library = _fixture_find_library
 repo_root = os.environ["TUI_BASELINE_REPO_ROOT"]
 if repo_root not in sys.path:
     sys.path.insert(1, repo_root)
@@ -149,7 +176,7 @@ proof = {
     "max_turns_is_int": True,
     "user_id": user_id,
     "network_guard_active": net.socket is _GuardedSocket,
-    "process_guard_active": process.Popen is _blocked,
+    "process_guard_active": process.Popen is _BlockedPopen,
 }
 proof_path = Path(os.environ["TUI_BASELINE_PROOF"])
 with proof_path.open("w", encoding="utf-8") as handle:
@@ -631,7 +658,7 @@ def _run_pty(
 def _session_path(session_dir: Path, user_id: str) -> Path:
     from applications.complaint_workspace import namespace_filename
 
-    return session_dir / namespace_filename(user_id)
+    return private_session_path(session_dir, user_id)
 
 
 def _unlocked_service(session_dir: Path, user_id: str):
@@ -842,16 +869,17 @@ def test_canonical_pty_first_answer_and_cold_encrypted_resume(monkeypatch: pytes
         if result.proof.get("current_inquiry", {}).get("kind") != "graph":
             _fail("PTY did not pause at an actual canonical graph inquiry")
         raw = _session_path(session_dir, SMOKE_USER_ID).read_bytes()
-        if not raw.startswith(b"CGPE") or NARRATIVE.encode() in raw or PARTY_ANSWER.encode() in raw:
-            _fail("PTY session exposed synthetic complaint or answer plaintext")
+        assert_private_session_frame(raw, NARRATIVE, PARTY_ANSWER)
         if _session_path(session_dir, SMOKE_USER_ID).stat().st_mode & 0o777 != 0o600:
             _fail("PTY session is not owner-only 0600")
         if answers.get("opposing_party"):
             _fail("opposing party was stored before the structured question")
         if answers.get("protected_activity"):
             _fail("third intake answer was stored before resume")
-        if saved.get("intake_history"):
-            _fail("canonical graph answer mutated the independent legacy intake history")
+        history = saved.get("intake_history") or []
+        if [item.get("question_id") for item in history] != ["original_complaint"]:
+            _fail("canonical graph answer created a legacy structured answer entry")
+        _require_same("narrative provenance history", history[0].get("answer"), NARRATIVE)
 
         fresh = _unlocked_service(session_dir, SMOKE_USER_ID)
         again = _unlocked_service(session_dir, SMOKE_USER_ID)
@@ -1022,8 +1050,7 @@ def test_receipt_records_gaps_independently_of_baseline_smoke(monkeypatch: pytes
             )
         session_path = _session_path(session_dir, UNKNOWN_USER_ID)
         raw = session_path.read_bytes()
-        if not raw.startswith(b"CGPE"):
-            _fail("automatic session storage did not use the private envelope")
+        assert_private_session_frame(raw, UNKNOWN_ANSWER)
         if UNKNOWN_ANSWER.encode() in raw:
             _fail("automatic encrypted session exposed the synthetic answer")
         session_mode = session_path.stat().st_mode & 0o777

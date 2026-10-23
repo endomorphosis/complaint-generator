@@ -12,6 +12,7 @@ import time
 import uuid
 
 import pytest
+from tests.private_session_assertions import assert_private_session_frame, private_session_path
 
 import backends.llm_router_backend as module
 from backends.llm_router_backend import (
@@ -374,7 +375,9 @@ def test_actual_shared_cli_saves_invocation_with_encrypted_cold_resume(terminal_
     monkeypatch.setattr(llm, 'load_observed_llm_symbols', lambda: (generate, result_type, observation_type))
     narrative = 'SYNTHETIC_NARRATIVE_FOR_ROUTER_TEST'
     monkeypatch.setattr(sys, 'stdin', io.StringIO(narrative + '\n.\nSynthetic Person\n'))
-    cli.chat(user_id='synthetic-user', max_turns=2)
+    with pytest.raises(SystemExit) as paused:
+        cli.chat(user_id='synthetic-user', max_turns=2)
+    assert paused.value.code == 0
     assert calls, 'default canonical chat never reached the observed router backend'
     assert {json.loads(call['prompt'])['operation'] for call in calls} == {'extract_facts', 'propose_questions'}
     assert len({call['observation_request_id'] for call in calls}) == len(calls)
@@ -390,9 +393,8 @@ def test_actual_shared_cli_saves_invocation_with_encrypted_cold_resume(terminal_
     assert all(entry['router_receipt']['live_canary'] is False for entry in receipts)
     assert narrative not in json.dumps(session['router_trace'])
     from applications.complaint_workspace import namespace_filename
-    encrypted = service._session_dir / namespace_filename('synthetic-user')
-    assert encrypted.read_bytes().startswith(b'CGPE')
-    assert narrative.encode() not in encrypted.read_bytes()
+    encrypted = private_session_path(service._session_dir, 'synthetic-user')
+    assert_private_session_frame(encrypted.read_bytes(), narrative)
     restarted = cli.TerminalComplaintWorkspaceService(root_dir=service._session_dir)
     restarted.unlock_private_keys(passphrase='synthetic-test-passphrase')
     resumed = restarted.run_intake_chat_turn('synthetic-user')
