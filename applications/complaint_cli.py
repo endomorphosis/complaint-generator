@@ -317,7 +317,7 @@ def _emit_workspace_failure(error: Exception) -> None:
     codes = {
         "unlock_needed", "authentication_failed", "corrupt_session", "read_error",
         "binding_missing", "owner_mismatch", "overwrite_blocked", "key_unavailable",
-        "private_persistence_unavailable", "migration_required",
+        "private_persistence_unavailable", "migration_required", "invalid_privacy_mode", "privacy_denied",
     }
     status, code = "unavailable", "workspace_operation_failed"
     if isinstance(error, WorkspacePersistenceError):
@@ -330,8 +330,8 @@ def _emit_workspace_failure(error: Exception) -> None:
     typer.echo(json.dumps({
         "status": status,
         "code": code,
-        "message": "The private workspace operation could not continue. Unlock or recover the selected case, then retry.",
-        "actions": ["unlock_selected_case", "recover_selected_case", "retry"],
+        "message": "Choose privacy mode local or grok." if code == "invalid_privacy_mode" else "The private workspace operation could not continue. Unlock or recover the selected case, then retry.",
+        "actions": ["choose_local_or_grok"] if code == "invalid_privacy_mode" else ["unlock_selected_case", "recover_selected_case", "retry"],
         "awaiting_user": True,
         "persistence_outcome": "unverified",
         "privacy_bypassed": False,
