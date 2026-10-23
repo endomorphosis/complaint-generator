@@ -260,7 +260,7 @@ Implementation instructions:
 
 ## CIMP-TUI-12 Gate supervisor completion on reproducible terminal evidence
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.release
