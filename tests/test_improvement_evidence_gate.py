@@ -673,7 +673,12 @@ def test_actual_private_storage_change_measures_all_finite_impacted_companions(t
     }
     for relative, function in companions.items():
         (tmp_path / relative).write_text("def " + function + "():\n assert 2 + 2 == 4\n")
-    assert _impacted_behavioral_checks(tmp_path, ["integrations/private_storage.py"]) == sorted(companions)
+    # The private-storage impact set also requires the real, pinned replica
+    # companion. Copy its exact bytes; a stub must not stand in for it.
+    trusted = "tests/test_private_replica_acceptance.py"
+    (tmp_path / trusted).write_bytes((Path(__file__).resolve().parent / "test_private_replica_acceptance.py").read_bytes())
+    expected_modules = sorted([*companions, trusted])
+    assert _impacted_behavioral_checks(tmp_path, ["integrations/private_storage.py"]) == expected_modules
     assert _impacted_behavioral_checks(tmp_path, ["integrations/ipfs_datasets/private_storage.py"]) == []
     task = _task()
     observed = measure_behavioral_command(
@@ -683,10 +688,13 @@ def test_actual_private_storage_change_measures_all_finite_impacted_companions(t
         context={"changed_paths":["integrations/private_storage.py"],
                  "require_child_guard":True, "pytest_guard_plugin":"complaint_fixture_guard"})
     assert observed["host_measurement"]["reason"] == ""
-    assert observed["host_measurement"]["impacted_checks"] == sorted(companions)
-    expected = {NODE_A, NODE_B} | {path + "::" + function for path, function in companions.items()}
+    assert observed["host_measurement"]["impacted_checks"] == expected_modules
+    # This population was independently collected from the unchanged pinned
+    # companion. Require every parametrized case, not only its function names.
+    expected_trusted = {'tests/test_private_replica_acceptance.py::test_reconcile_rechecks_previously_counted_provider[corrupt]', 'tests/test_private_replica_acceptance.py::test_provider_blocking_is_bounded_and_owned[deadline_restore]', 'tests/test_private_replica_acceptance.py::test_other_owner_cannot_overwrite_existing_case[principal_id]', 'tests/test_private_replica_acceptance.py::test_exact_upstream_replication_suites_are_not_presence_success', 'tests/test_private_replica_acceptance.py::test_reconcile_rechecks_previously_counted_provider[unavailable]', 'tests/test_private_replica_acceptance.py::test_other_owner_cannot_overwrite_existing_case[case_id]', 'tests/test_private_replica_acceptance.py::test_replica_api_capability_is_explicit', 'tests/test_private_replica_acceptance.py::test_provider_blocking_is_bounded_and_owned[deadline_reconcile]', 'tests/test_private_replica_acceptance.py::test_reconcile_rechecks_actual_local_primary[corrupt]', 'tests/test_private_replica_acceptance.py::test_replica_count_requires_ciphertext_readback_not_placement[queued]', 'tests/test_private_replica_acceptance.py::test_provider_blocking_is_bounded_and_owned[deadline_publish]', 'tests/test_private_replica_acceptance.py::test_probe_custody_reaps_an_inert_escaped_session', 'tests/test_private_replica_acceptance.py::test_other_owner_cannot_overwrite_existing_case[tenant_id]', 'tests/test_private_replica_acceptance.py::test_real_crypto_triplet_restores_in_a_new_process', 'tests/test_private_replica_acceptance.py::test_replica_count_requires_ciphertext_readback_not_placement[corrupt]', 'tests/test_private_replica_acceptance.py::test_concurrent_publications_do_not_mix_ledger_and_ciphertext', 'tests/test_private_replica_acceptance.py::test_interrupted_publication_preserves_one_complete_generation', 'tests/test_private_replica_acceptance.py::test_reconcile_rechecks_actual_local_primary[missing]'}
+    expected = {NODE_A, NODE_B} | {path + "::" + function for path, function in companions.items()} | expected_trusted
     assert set(observed["required_nodeids"]) == expected
-    assert observed["collected_count"] == 5
+    assert observed["collected_count"] == len(expected) == 23
     assert all(row["outcome"] == "passed" for row in observed["cases"])
     assert observed["host_measurement"]["completion_authority"] is False
 

@@ -276,6 +276,9 @@ def test_actual_assessment_pipeline_requires_the_terminal_gate(monkeypatch, tmp_
     task = _task("CIMP-TUI-12")
     _write_output(tmp_path, task["id"])
     observed = _observation(tmp_path, task["id"])
+    artifact = tmp_path / "artifacts" / (task["id"] + ".json")
+    import hashlib
+    observed["artifacts"] = [{"present": True, "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest()}]
     monkeypatch.setattr(plan, "_host_evidence_reason", lambda *_args: "")
     calls = []
     def refuse(observation, selected):
@@ -283,5 +286,5 @@ def test_actual_assessment_pipeline_requires_the_terminal_gate(monkeypatch, tmp_
         return "terminal_public_journeys_not_measured"
     monkeypatch.setattr(gate, "terminal_measurement_reason", refuse)
     result = plan.assess_behavioral_evidence(task, observed, source_binding=plan.bind_sources(tmp_path, task["targets"]))
-    assert calls == ["CIMP-TUI-12"]
+    assert calls == ["CIMP-TUI-12"], result["reason"]
     assert result["admitted"] is False and result["reason"] == "terminal_public_journeys_not_measured"
