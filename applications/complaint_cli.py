@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+from functools import wraps
 import inspect
 import json
 import os
+import shutil
 import sys
+import textwrap
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 try:
     import typer
@@ -84,18 +87,303 @@ except ModuleNotFoundError:
     typer = _MiniTyperModule()
 
 from complaint_generator.legacy_session_migration import migrate_legacy_session
-from applications.ui_review import run_ui_review_workflow
+from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
 
-from .complaint_workspace import ComplaintWorkspaceService
+from .complaint_workspace import ComplaintWorkspaceService, WorkspaceAuthorizationDenied, WorkspacePersistenceError, _state_case_id
 
 
 DEFAULT_UI_UX_SCREENSHOT_TARGET = "playwright/tests/complaint-flow.spec.js"
 DEFAULT_UI_UX_OPTIMIZER_METHOD = "actor_critic"
 DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
 
+# Documented chat exit codes. EOF stays 1 so existing harnesses keep a
+# recoverable non-zero pause. Ctrl-C uses the conventional 128+SIGINT value.
+EXIT_OK = 0
+EXIT_EOF_PAUSE = 1
+EXIT_INTERRUPTED = 130
+TERMINAL_COMMANDS = ("/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy")
+_UNKNOWN_ANSWERS = {
+    "unknown", "i don't know", "i do not know", "idk", "not sure", "unsure", "n/a", "na",
+}
+_PAUSE_MESSAGE = "Chat paused. Resume with the same user ID to continue the saved intake."
+_HELP_TEXT = """
+Terminal controls (a command is never stored as an answer):
+  /help     show this help, exit codes, and input modes
+  /privacy  select /privacy local or /privacy grok for this case; remote Grok receives submitted prompts
+  /status   show the pending question, objective, graph revision, stop reason, and unknown/skipped answers
+  /why      explain why the pending question matters; the question stays pending
+  /skip     record the pending question as skipped; it does not satisfy the legal requirement
+  /edit     replace the last recorded answer: /edit new text
+  /pause    persist a recoverable pause and keep the pending inquiry
+  /resume   restore the saved pending question after /pause
+  /quit     persist stop reason user_quit and leave the pending inquiry in place
+Exit codes:
+  0   finished, /quit, or the turn limit
+  1   EOF recoverable pause (pending inquiry kept, no traceback)
+  130 Ctrl-C recoverable pause (pending inquiry kept, no traceback)
+Input:
+  End a line with \\ to continue a multiline answer.
+  NO_COLOR, COMPLAINT_CLI_NO_COLOR, or TERM=dumb disables color.
+  COMPLAINT_CLI_ASCII=1 prints ASCII only. COLUMNS wraps narrow terminals.
+  A stale concurrent answer is rejected and is not saved.
+""".strip()
+
 
 app = typer.Typer(help="Unified complaint workspace CLI.")
-service = ComplaintWorkspaceService()
+class TerminalComplaintWorkspaceService(ComplaintWorkspaceService):
+    """Keep the canonical interview and its encrypted transaction, with a traced backend.
+
+    The superclass still owns admission, graph/cache construction and transitions.
+    Trace receipts are attached to the state already being saved by that request;
+    diagnostics never reload and overwrite a concurrently changed session.
+    """
+
+    def _mediator_for_shared_interview(self, user_id: str, case_id: str):
+        mediator = super()._mediator_for_shared_interview(user_id, case_id)
+        from backends.llm_router_backend import load_terminal_router_backend
+        if not hasattr(mediator, "_terminal_router_backend"):
+            backend = load_terminal_router_backend(str(Path(__file__).resolve().parents[1] / "config.llm_router.json"))
+            mediator.backends = [backend]
+            mediator._terminal_router_backend = backend
+        return mediator
+
+    def apply_shared_interview(self, state, **kwargs):
+        receipt = super().apply_shared_interview(state, **kwargs)
+        user_id = str(state.get("user_id") or "")
+        mediator = self._interview_mediators.get((user_id, _state_case_id(state, user_id)))
+        backend = getattr(mediator, "_terminal_router_backend", None)
+        if backend is not None:
+            from copy import deepcopy
+            projection = state.get("shared_interview") or {}
+            previous = state.get("router_trace") or {}
+            stored = list(previous.get("receipts") or [])
+            known = {(item.get("router_receipt") or {}).get("request_id") for item in stored}
+            # Only real calls/errors enter history. Cold resume preserves the
+            # original invocation association rather than inventing a dispatch.
+            for item in backend.task_receipts:
+                if item.get("request_id") and item["request_id"] in known:
+                    continue
+                if item in [entry.get("router_receipt") for entry in stored]:
+                    continue
+                entry = {"router_receipt": deepcopy(item),
+                         "interview_session_id": projection.get("session_id"),
+                         "interview_revision": projection.get("session_revision")}
+                stored.append(entry)
+                if item.get("request_id"):
+                    known.add(item["request_id"])
+            if backend.task_receipts:
+                state["router_trace"] = {"diagnostics": backend.sanitized_session_diagnostics(),
+                                         "receipts": stored[-32:]}
+            elif not previous:
+                state["router_trace"] = {"diagnostics": backend.sanitized_session_diagnostics(), "receipts": []}
+            receipt["router_diagnostics"] = deepcopy((state.get("router_trace") or {}).get("diagnostics") or {})
+        return receipt
+
+
+def session_dir_from_environment() -> Optional[Path]:
+    """Use an explicit session directory when the operator sets one.
+
+    The default remains the checkout's ``.complaint_workspace/sessions``.
+    A relative override is resolved from the current working directory.
+    Nothing here reads a user home, a Codex profile, or a fixed interpreter path.
+    """
+
+    raw = os.environ.get("COMPLAINT_WORKSPACE_SESSION_DIR", "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return Path(os.path.abspath(path))
+
+
+class _LazyTerminalService:
+    """Build the workspace on first use so importing the CLI does not create a store."""
+
+    def __init__(self) -> None:
+        self._service: TerminalComplaintWorkspaceService | None = None
+
+    def _load(self) -> TerminalComplaintWorkspaceService:
+        if self._service is None:
+            override = session_dir_from_environment()
+            self._service = (
+                TerminalComplaintWorkspaceService(override)
+                if override is not None
+                else TerminalComplaintWorkspaceService()
+            )
+        return self._service
+
+    def __getattr__(self, name: str):
+        return getattr(self._load(), name)
+
+
+service = _LazyTerminalService()
+
+# One primary terminal interview command. Slash controls are typed inside it.
+# Placeholders are literal tokens the operator replaces. They are not home paths.
+PRIMARY_TUI_COMMAND = "python -m complaint_generator.cli chat --user-id USER_ID"
+INTAKE_OPERATOR_EXAMPLES = (
+    {
+        "id": "primary-tui-grok-4.7",
+        "command": PRIMARY_TUI_COMMAND,
+        "model": "grok-4.7",
+        "backend_id": "llm-router-grok-4.7",
+        "config_path": "config.llm_router.json",
+        "controls": ["/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy local", "/privacy grok"],
+        "notes": "Save is /pause or a recoverable exit. Resume is the same command with the same USER_ID, then /resume.",
+    },
+    {
+        "id": "primary-tui-explicit-grok-consent",
+        "command": PRIMARY_TUI_COMMAND + " --privacy-mode grok",
+        "remote_processing_opt_in": True,
+    },
+    {
+        "id": "primary-tui-revoke-remote-consent",
+        "command": PRIMARY_TUI_COMMAND + " --privacy-mode local",
+        "remote_processing_opt_in": False,
+    },
+    {
+        "id": "router-live-canary-not-requested",
+        "command": "python -m complaint_generator.cli router-live-canary --config-path config.llm_router.json --backend-id llm-router-grok-4.7",
+        "model": "grok-4.7",
+        "sends_complaint_data": False,
+        "confirm_live": False,
+    },
+    {
+        "id": "keys-status",
+        "command": "python -m complaint_generator.cli keys-status --store-dir STORE_DIR",
+    },
+    {
+        "id": "keys-init",
+        "command": "python -m complaint_generator.cli keys-init --store-dir STORE_DIR --protection passphrase",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "keys-unlock",
+        "command": "python -m complaint_generator.cli keys-unlock --store-dir STORE_DIR",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "keys-recover-export",
+        "command": "python -m complaint_generator.cli keys-recover-export --store-dir STORE_DIR --tenant-id TENANT_ID --case-id CASE_ID --destination RECOVERY_FILE",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "keys-recover-import",
+        "command": "python -m complaint_generator.cli keys-recover-import --store-dir STORE_DIR --tenant-id TENANT_ID --case-id CASE_ID --source RECOVERY_FILE",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "workspace-export",
+        "command": "python -m complaint_generator.cli workspace-export --store-dir STORE_DIR --tenant-id TENANT_ID --case-id CASE_ID --principal-id PRINCIPAL_ID --repository REPOSITORY_DIR --export-dir EXPORT_DIR --recovery-destination RECOVERY_FILE",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "supervisor-start",
+        "command": "python scripts/run_complaint_improvement_supervisor.py start --repo-root REPO_ROOT --spec SPEC_PATH --state-dir STATE_DIR --watch --monitor-seconds 21600",
+        "model": "grok-4.7",
+        "resume": "same start command and same STATE_DIR after stop",
+    },
+    {
+        "id": "supervisor-status",
+        "command": "python scripts/run_complaint_improvement_supervisor.py status --repo-root REPO_ROOT --spec SPEC_PATH --state-dir STATE_DIR",
+    },
+    {
+        "id": "supervisor-stop",
+        "command": "python scripts/run_complaint_improvement_supervisor.py stop --repo-root REPO_ROOT --spec SPEC_PATH --state-dir STATE_DIR",
+    },
+)
+
+
+def intake_operator_catalog() -> dict[str, Any]:
+    return {
+        "primary_tui_command": PRIMARY_TUI_COMMAND,
+        "interpreter": "python",
+        "python_requires": ">=3.12",
+        "session_dir_env": "COMPLAINT_WORKSPACE_SESSION_DIR",
+        "default_session_dir": ".complaint_workspace/sessions",
+        "pinned_submodules": [
+            "external/ipfs_accelerate_py",
+            "external/ipfs_datasets_py",
+            "external/ipfs_kit_py",
+        ],
+        "optional_dependencies": ["cryptography>=41.0.0", "typer>=0.12.0"],
+        "examples": list(INTAKE_OPERATOR_EXAMPLES),
+    }
+
+
+def _emit_workspace_failure(error: Exception) -> None:
+    """Close the terminal exception boundary without exposing callback locals."""
+
+    codes = {
+        "unlock_needed", "authentication_failed", "corrupt_session", "read_error",
+        "binding_missing", "owner_mismatch", "overwrite_blocked", "key_unavailable",
+        "private_persistence_unavailable", "migration_required", "invalid_privacy_mode", "privacy_denied",
+    }
+    status, code = "unavailable", "workspace_operation_failed"
+    if isinstance(error, WorkspacePersistenceError):
+        if error.public_status in {"unlock_needed", "recoverable", "unavailable"}:
+            status = error.public_status
+        if isinstance(error.code, str) and error.code in codes:
+            code = error.code
+    elif isinstance(error, WorkspaceAuthorizationDenied):
+        code = "authorization_denied"
+    typer.echo(json.dumps({
+        "status": status,
+        "code": code,
+        "message": "Choose privacy mode local or grok." if code == "invalid_privacy_mode" else "The private workspace operation could not continue. Unlock or recover the selected case, then retry.",
+        "actions": ["choose_local_or_grok"] if code == "invalid_privacy_mode" else ["unlock_selected_case", "recover_selected_case", "retry"],
+        "awaiting_user": True,
+        "persistence_outcome": "unverified",
+        "privacy_bypassed": False,
+        "unlock_is_remote_consent": False,
+    }, sort_keys=True))
+    raise SystemExit(2) from None
+
+
+def _workspace_command_boundary(function):
+    @wraps(function)
+    def invoke(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except EOFError:
+            raise
+        except Exception as error:
+            # Typer/Rich may otherwise render private answer and storage locals.
+            # SystemExit and KeyboardInterrupt keep their existing semantics.
+            _emit_workspace_failure(error)
+
+    return invoke
+
+
+def _require_readable_session(payload: dict[str, Any]) -> None:
+    state = payload.get("session") if isinstance(payload.get("session"), dict) else payload
+    if state.get("session_readable") is False or state.get("existing_unreadable") is True:
+        status = state.get("status")
+        code = state.get("code")
+        raise WorkspacePersistenceError(
+            "Private session is not readable",
+            code=code if isinstance(code, str) else "private_persistence_unavailable",
+            public_status=status if isinstance(status, str) else "unavailable",
+        )
+
+
+def run_ui_review_workflow(*args, **kwargs):
+    """Load screenshot/model review dependencies only for UI review requests."""
+
+    from applications.ui_review import run_ui_review_workflow as workflow
+
+    return workflow(*args, **kwargs)
+
+
+def _require_ipfs_attr(module_name: str, attr_name: str) -> Any:
+    """Resolve an optional provider attribute through the integration boundary."""
+
+    value, error = import_attr_optional(module_name, attr_name)
+    if value is not None and error is None:
+        return value
+    message = import_failure_message(error) or f"missing attribute {attr_name}"
+    raise ImportError(f"Unable to import {module_name}.{attr_name}: {message}")
 
 
 def _print(payload) -> None:
@@ -160,6 +448,7 @@ def answer(user_id: str = "demo-user", question_id: str = "", answer_text: str =
 
 
 @app.command("chat-turn")
+@_workspace_command_boundary
 def chat_turn(
     user_id: str = "demo-user",
     message: Optional[str] = None,
@@ -174,31 +463,616 @@ def chat_turn(
     )
 
 
+def _read_narrative_file(path_text: str) -> str:
+    """Read a narrative file by literal path. The path is never passed to a shell."""
+
+    literal = str(path_text or "").strip()
+    if not literal or "\x00" in literal:
+        raise ValueError("narrative file path is empty")
+    path = Path(literal)
+    try:
+        if not path.is_file():
+            raise ValueError("narrative file is not readable")
+        return path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ValueError("narrative file is not readable") from exc
+
+
+def terminal_color_enabled(stream=None) -> bool:
+    """Color is opt-in for a real terminal and never implied by NO_COLOR."""
+
+    if os.environ.get("NO_COLOR") or os.environ.get("COMPLAINT_CLI_NO_COLOR"):
+        return False
+    if str(os.environ.get("TERM") or "") == "dumb":
+        return False
+    target = sys.stdout if stream is None else stream
+    isatty = getattr(target, "isatty", None)
+    return bool(isatty()) if callable(isatty) else False
+
+
+def terminal_width() -> int:
+    raw = str(os.environ.get("COLUMNS") or "").strip()
+    if raw.isdigit():
+        return max(8, int(raw))
+    try:
+        return max(8, int(shutil.get_terminal_size(fallback=(80, 24)).columns))
+    except OSError:
+        return 80
+
+
+def format_terminal_text(text: str) -> str:
+    """Wrap for the active width and honor ASCII-only mode."""
+
+    raw = str(text or "")
+    if os.environ.get("COMPLAINT_CLI_ASCII") == "1":
+        raw = raw.encode("ascii", "replace").decode("ascii")
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        raw.encode(encoding)
+    except UnicodeEncodeError:
+        raw = raw.encode(encoding, "replace").decode(encoding, "replace")
+    width = terminal_width()
+    lines: list[str] = []
+    for paragraph in raw.splitlines() or [""]:
+        if len(paragraph) <= width:
+            lines.append(paragraph)
+            continue
+        lines.extend(
+            textwrap.wrap(
+                paragraph,
+                width=width,
+                break_long_words=True,
+                break_on_hyphens=False,
+                replace_whitespace=False,
+                drop_whitespace=False,
+            )
+            or [paragraph]
+        )
+    return "\n".join(lines)
+
+
+def terminal_echo(text: str) -> None:
+    typer.echo(format_terminal_text(text))
+
+
+def _prompt_prefix() -> str:
+    if terminal_color_enabled():
+        return "\033[36m>\033[0m "
+    return "> "
+
+
+def _controls(state: dict[str, Any]) -> dict[str, Any]:
+    controls = state.get("terminal_controls")
+    if not isinstance(controls, dict):
+        controls = {}
+        state["terminal_controls"] = controls
+    controls.setdefault("schema", "terminal-controls-v1")
+    controls.setdefault("paused", False)
+    controls.setdefault("stop_reason", None)
+    controls.setdefault("pending_inquiry", None)
+    controls.setdefault("objective_id", None)
+    controls.setdefault("graph_revision", 0)
+    controls.setdefault("unknown_answers", [])
+    controls.setdefault("skipped_answers", [])
+    controls.setdefault("edits", [])
+    controls.setdefault("fingerprint", None)
+    return controls
+
+
+def _projection_pending(state: dict[str, Any]) -> dict[str, Any]:
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+    pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else {}
+    return pending
+
+
+def _objective_id(state: dict[str, Any], inquiry: Optional[dict]) -> str:
+    explained = state.get("explained_inquiry") if isinstance(state.get("explained_inquiry"), dict) else {}
+    objective = str(explained.get("objective_id") or "").strip()
+    if objective:
+        return objective
+    pending = _projection_pending(state)
+    objective = str(pending.get("objective_id") or pending.get("inquiry_id") or "").strip()
+    if objective:
+        return objective
+    return str((inquiry or {}).get("question_id") or "narrative")
+
+
+def _graph_revision(state: dict[str, Any], inquiry: Optional[dict]) -> int:
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+    pending = _projection_pending(state)
+    for value in (
+        pending.get("revision"),
+        (inquiry or {}).get("revision"),
+        projection.get("question_revision"),
+        projection.get("session_revision"),
+    ):
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    narrative = state.get("original_complaint") if isinstance(state.get("original_complaint"), dict) else {}
+    try:
+        return int(narrative.get("revision") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def answer_fingerprint(state: dict[str, Any], inquiry: Optional[dict]) -> dict[str, Any]:
+    """Identity of the question currently shown to the user."""
+
+    pending = _projection_pending(state)
+    narrative = state.get("original_complaint") if isinstance(state.get("original_complaint"), dict) else {}
+    inquiry = inquiry or {}
+    return {
+        "inquiry_id": str(pending.get("inquiry_id") or inquiry.get("question_id") or ""),
+        "question_revision": _graph_revision(state, inquiry),
+        "session_revision": int((state.get("shared_interview") or {}).get("session_revision") or 0)
+        if isinstance(state.get("shared_interview"), dict)
+        else 0,
+        "history_len": len(state.get("intake_history") or []),
+        "narrative_revision": int(narrative.get("revision") or 0),
+        "objective_id": _objective_id(state, inquiry),
+    }
+
+
+def remember_pending_inquiry(state: dict[str, Any], inquiry: Optional[dict], *, stop_reason: Optional[str] = None, paused: Optional[bool] = None) -> dict[str, Any]:
+    controls = _controls(state)
+    snapshot = dict(inquiry or {})
+    snapshot["objective_id"] = _objective_id(state, inquiry)
+    snapshot["graph_revision"] = _graph_revision(state, inquiry)
+    controls["pending_inquiry"] = snapshot
+    controls["objective_id"] = snapshot["objective_id"]
+    controls["graph_revision"] = snapshot["graph_revision"]
+    controls["fingerprint"] = answer_fingerprint(state, inquiry)
+    if stop_reason is not None:
+        controls["stop_reason"] = stop_reason
+    if paused is not None:
+        controls["paused"] = paused
+    return controls
+
+
+def load_terminal_state(user_id: str) -> dict[str, Any]:
+    return service._load_state(user_id)
+
+
+def save_terminal_state(state: dict[str, Any]) -> None:
+    service._save_state(state)
+
+
+def stale_answer_rejection(user_id: str, shown: dict[str, Any]) -> Optional[str]:
+    """Reject an answer when another writer moved the pending inquiry."""
+
+    if not isinstance(shown, dict):
+        return None
+    try:
+        current = answer_fingerprint(load_terminal_state(user_id), {"question_id": shown.get("inquiry_id")})
+    except Exception:
+        return None
+    compared = ("inquiry_id", "question_revision", "session_revision", "history_len", "narrative_revision")
+    if any(current.get(key) != shown.get(key) for key in compared):
+        return "stale_question"
+    return None
+
+
+def _pause_and_exit(user_id: Optional[str], reason: str, code: int, inquiry: Optional[dict]) -> None:
+    if user_id:
+        try:
+            state = load_terminal_state(user_id)
+            controls = _controls(state)
+            stored_reason = reason
+            if reason in {"eof", "interrupted"} and controls.get("paused") and controls.get("stop_reason"):
+                stored_reason = str(controls.get("stop_reason"))
+            remember_pending_inquiry(state, inquiry, stop_reason=stored_reason, paused=True)
+            save_terminal_state(state)
+        except Exception:
+            terminal_echo("Recoverable pause could not be saved. The pending inquiry was not submitted.")
+    if reason == "eof":
+        terminal_echo(
+            "Recoverable pause after EOF (exit 1). Pending inquiry kept. "
+            "Resume with the same user ID."
+        )
+    elif reason == "interrupted":
+        terminal_echo(
+            "Recoverable pause after interrupt (exit 130). Pending inquiry kept. "
+            "Resume with the same user ID."
+        )
+    else:
+        terminal_echo(_PAUSE_MESSAGE)
+    raise SystemExit(code)
+
+
+def _status_text(state: dict[str, Any]) -> str:
+    controls = _controls(state)
+    pending = controls.get("pending_inquiry") if isinstance(controls.get("pending_inquiry"), dict) else {}
+    unknown = controls.get("unknown_answers") or []
+    skipped = controls.get("skipped_answers") or []
+    lines = [
+        "terminal-control"
+        f" question_id={pending.get('question_id') or ''}"
+        f" revision={controls.get('graph_revision')}"
+        f" objective={controls.get('objective_id') or ''}"
+        f" stop_reason={controls.get('stop_reason') or ''}"
+        f" paused={str(bool(controls.get('paused'))).lower()}",
+        f"unknown_answers={len(unknown)} skipped_answers={len(skipped)}",
+    ]
+    for item in unknown:
+        if isinstance(item, dict):
+            lines.append(f"unknown {item.get('question_id')}: {item.get('answer')}")
+    for item in skipped:
+        if isinstance(item, dict):
+            lines.append(
+                f"skipped {item.get('question_id')} satisfies_requirement=false"
+            )
+    prompt = str(pending.get("prompt") or pending.get("question") or "").strip()
+    if prompt:
+        lines.append(prompt)
+    return "\n".join(lines)
+
+
+def _record_non_answer(state: dict[str, Any], inquiry: dict, kind: str, answer: str) -> None:
+    controls = _controls(state)
+    entry = {
+        "question_id": str(inquiry.get("question_id") or ""),
+        "objective_id": _objective_id(state, inquiry),
+        "graph_revision": _graph_revision(state, inquiry),
+        "answer": answer,
+        "recorded_as": kind,
+        "satisfies_requirement": False,
+    }
+    key = "skipped_answers" if kind == "skipped" else "unknown_answers"
+    bucket = list(controls.get(key) or [])
+    bucket.append(entry)
+    controls[key] = bucket
+    history = state.setdefault("intake_history", [])
+    history.append({
+        "question_id": entry["question_id"],
+        "answer": answer,
+        "disposition": kind,
+        "satisfies_requirement": False,
+        "captured_at": state.get("updated_at"),
+    })
+
+
+def _apply_edit(state: dict[str, Any], replacement: str) -> str:
+    replacement = replacement.strip()
+    if not replacement:
+        return "Edit needs replacement text. The pending question is unchanged."
+    answers = state.setdefault("intake_answers", {})
+    history = state.setdefault("intake_history", [])
+    target = None
+    for item in reversed(history):
+        if isinstance(item, dict) and item.get("question_id") and item.get("disposition") not in {"skipped"}:
+            target = item
+            break
+    if target is None and not answers:
+        return "Nothing to edit yet. The pending question is unchanged."
+    question_id = str((target or {}).get("question_id") or next(iter(answers), ""))
+    previous = str(answers.get(question_id) or (target or {}).get("answer") or "")
+    if question_id:
+        answers[question_id] = replacement
+    if isinstance(target, dict):
+        target["answer"] = replacement
+        target["edited"] = True
+    _controls(state).setdefault("edits", []).append({
+        "question_id": question_id,
+        "previous": previous,
+        "replacement": replacement,
+    })
+    return "Edited the last recorded answer. The pending question is unchanged."
+
+
+def read_original_complaint_input(stream=None, *, interactive: Optional[bool] = None, first_line: Optional[str] = None) -> str:
+    """Read a complaint narrative from the terminal, a pipe, or an ``@path`` file.
+
+    A single interactive line is one narrative. End a line with ``\\`` to
+    continue, or on a pipe finish the narrative with a blank line or a line
+    that is only ``.``. ``@path`` reads that file directly and does not run
+    the path as a command. Structured answers do not use this reader.
+    """
+
+    source = sys.stdin if stream is None else stream
+    if interactive is None:
+        isatty = getattr(source, "isatty", None)
+        interactive = bool(isatty()) if callable(isatty) else False
+
+    def read_line() -> Optional[str]:
+        if interactive and source is sys.stdin:
+            try:
+                return input("> ")
+            except EOFError:
+                return None
+        line = source.readline()
+        if line == "":
+            return None
+        return line.rstrip("\n")
+
+    first = first_line if first_line is not None else read_line()
+    if first is None:
+        raise EOFError
+    stripped = first.strip()
+    if stripped.startswith("@") and stripped[1:].strip():
+        return _read_narrative_file(stripped[1:])
+
+    chunks: list[str] = []
+    pending = first
+    while True:
+        if pending.endswith("\\"):
+            chunks.append(pending[:-1])
+            nxt = read_line()
+            if nxt is None:
+                break
+            pending = nxt
+            continue
+        if pending.strip() == ".":
+            break
+        chunks.append(pending)
+        if interactive:
+            break
+        nxt = read_line()
+        if nxt is None or nxt.strip() in {"", "."}:
+            break
+        pending = nxt
+    text = "\n".join(chunks).strip()
+    if text == "":
+        raise EOFError
+    return text
+
+
+def _read_prompt_line() -> Optional[str]:
+    try:
+        return input(_prompt_prefix())
+    except EOFError:
+        return None
+    except OSError:
+        return None
+
+
+def _read_multiline_from(first: str) -> str:
+    chunks = [first[:-1] if first.endswith("\\") else first]
+    pending_cont = first.endswith("\\")
+    while pending_cont:
+        nxt = _read_prompt_line()
+        if nxt is None:
+            break
+        if nxt.endswith("\\"):
+            chunks.append(nxt[:-1])
+            continue
+        chunks.append(nxt)
+        pending_cont = False
+    return "\n".join(chunks).strip()
+
+
+def _command_name(text: str) -> Optional[str]:
+    stripped = text.strip()
+    if not stripped.startswith("/"):
+        return None
+    word = stripped.split(None, 1)[0].lower()
+    if word in TERMINAL_COMMANDS:
+        return word
+    return ""
+
+
+def _sync_controls_from_payload(user_id: str, payload: dict, inquiry: Optional[dict]) -> dict[str, Any]:
+    del payload
+    state = load_terminal_state(user_id)
+    remember_pending_inquiry(state, inquiry, paused=bool(_controls(state).get("paused")))
+    save_terminal_state(state)
+    return state
+
+
+
+
+@app.command("intake-operator-examples")
+def intake_operator_examples() -> None:
+    """Print the documented intake, key, and supervisor command catalog."""
+
+    _print(intake_operator_catalog())
+
+
+def _unlock_private_chat_case(user_id: str) -> None:
+    """Unlock in this terminal process; credentials never cross argv or env."""
+    from integrations.private_storage import PrivateKeyMaterialError, read_unlock_passphrase
+
+    state = service.private_key_status()
+    if state.get("unlocked") is not True:
+        protection = state.get("protection")
+        if protection == "passphrase":
+            if not sys.stdin.isatty():
+                raise WorkspacePersistenceError("Unlock requires a private terminal.", code="unlock_needed", public_status="unlock_needed")
+            try:
+                phrase = read_unlock_passphrase("Private workspace passphrase")
+            except PrivateKeyMaterialError:
+                raise WorkspacePersistenceError("No private passphrase was accepted.", code="unlock_needed", public_status="unlock_needed") from None
+            try:
+                state = service.unlock_private_keys(passphrase=phrase)
+            finally:
+                phrase = None
+        elif protection == "keyring":
+            state = service.unlock_private_keys()
+        else:
+            terminal_echo("Create or recover the selected workspace's private key store before starting chat.")
+            raise WorkspacePersistenceError("Private workspace keys require setup.", code="unlock_needed", public_status="unlock_needed")
+        if state.get("unlocked") is not True:
+            code = "authentication_failed" if state.get("code") == "authentication_failed" else "unlock_needed"
+            raise WorkspacePersistenceError("Private workspace unlock did not succeed.", code=code, public_status="unlock_needed")
+    service.prepare_private_terminal_case(user_id)
+
+
 @app.command("chat")
-def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
+@_workspace_command_boundary
+def chat(user_id: str = "demo-user", max_turns: int = 0, privacy_mode: str = "") -> None:
+    selected_privacy = privacy_mode.strip().lower()
+    if selected_privacy not in {"", "local", "grok"}:
+        raise WorkspacePersistenceError("Choose privacy mode local or grok.", code="invalid_privacy_mode", public_status="unavailable")
+    try:
+        _unlock_private_chat_case(user_id)
+    except KeyboardInterrupt:
+        terminal_echo("Private workspace unlock cancelled.")
+        raise SystemExit(EXIT_INTERRUPTED) from None
+    if selected_privacy:
+        policy = service.set_privacy_policy(user_id, selected_privacy)
+        if policy.get("updated") is not True:
+            raise WorkspacePersistenceError("Private processing choice could not be saved.", code="privacy_denied", public_status="unavailable")
+        terminal_echo("Remote Grok processing authorized for this case." if selected_privacy == "grok" else "Local processing selected; future remote calls are disabled.")
+    try:
+        max_turns = int(max_turns)
+    except (TypeError, ValueError):
+        max_turns = 0
     payload = service.run_intake_chat_turn(user_id)
     accepted_turns = 0
+    paused = False
+    announced_restore = False
+    shown: dict[str, Any] = {}
 
     while True:
-        typer.echo(str(payload.get("message") or "").strip())
+        _require_readable_session(payload)
+        trace = (payload.get("session") or {}).get("router_trace") or {}
+        if trace.get("diagnostics"):
+            terminal_echo("Router diagnostics: " + json.dumps(trace["diagnostics"], sort_keys=True))
         inquiry = dict(payload.get("inquiry") or {})
+        try:
+            state = _sync_controls_from_payload(user_id, payload, inquiry or None)
+        except Exception:
+            state = {}
+        if state and not announced_restore:
+            controls = _controls(state)
+            if controls.get("stop_reason") and controls.get("paused"):
+                announced_restore = True
+                paused = True
+                pending = controls.get("pending_inquiry") if isinstance(controls.get("pending_inquiry"), dict) else {}
+                terminal_echo(
+                    "Restored pending question"
+                    f" question_id={pending.get('question_id') or inquiry.get('question_id') or ''}"
+                    f" revision={controls.get('graph_revision')}"
+                    f" objective={controls.get('objective_id') or ''}"
+                    f" stop_reason={controls.get('stop_reason')}"
+                )
+        if str(payload.get("message") or "").strip():
+            terminal_echo(str(payload.get("message") or "").strip())
         if not inquiry:
             break
+        shown = {}
+        if isinstance(state, dict) and state:
+            shown = dict(_controls(state).get("fingerprint") or {})
         if max_turns > 0 and accepted_turns >= max_turns:
-            typer.echo("Chat paused. Resume with the same user ID to continue the saved intake.")
-            break
-        answer_text = input("> ").strip()
-        if not answer_text:
-            typer.echo("Please enter a response or stop the command and resume later with the same user ID.")
+            _pause_and_exit(user_id, "turn_limit", EXIT_OK, inquiry)
+        try:
+            line = _read_prompt_line()
+        except KeyboardInterrupt:
+            _pause_and_exit(user_id, "interrupted", EXIT_INTERRUPTED, inquiry)
+        if line is None:
+            _pause_and_exit(user_id, "eof", EXIT_EOF_PAUSE, inquiry)
+        command = _command_name(line)
+        if command == "":
+            terminal_echo("Unknown command. It was not stored. Use /help.")
             continue
-        payload = service.run_intake_chat_turn(
-            user_id,
-            message=answer_text,
-            question_id=str(inquiry.get("question_id") or "") or None,
-        )
+        if command == "/privacy":
+            parts = line.strip().lower().split()
+            if len(parts) != 2 or parts[1] not in {"local", "grok"}:
+                terminal_echo("Use /privacy local or /privacy grok. Remote Grok processing sends submitted prompts to the provider.")
+                continue
+            payload = service.run_intake_chat_turn(user_id, message="/privacy " + parts[1],
+                question_id=str(inquiry.get("question_id") or "") or None)
+            continue
+        if command == "/help":
+            terminal_echo(_HELP_TEXT)
+            continue
+        if command == "/status":
+            terminal_echo(_status_text(state if isinstance(state, dict) else load_terminal_state(user_id)))
+            continue
+        if command == "/why":
+            payload = service.run_intake_chat_turn(user_id, message="/why", question_id=str(inquiry.get("question_id") or "") or None)
+            continue
+        if command == "/pause":
+            paused = True
+            fresh = load_terminal_state(user_id)
+            remember_pending_inquiry(fresh, inquiry, stop_reason="user_pause", paused=True)
+            save_terminal_state(fresh)
+            terminal_echo(_PAUSE_MESSAGE)
+            continue
+        if command == "/resume":
+            paused = False
+            fresh = load_terminal_state(user_id)
+            remember_pending_inquiry(fresh, inquiry, stop_reason=_controls(fresh).get("stop_reason"), paused=False)
+            save_terminal_state(fresh)
+            terminal_echo(_status_text(fresh))
+            payload = service.run_intake_chat_turn(user_id, interview_action="resume")
+            continue
+        if command == "/quit":
+            _pause_and_exit(user_id, "user_quit", EXIT_OK, inquiry)
+        if paused:
+            terminal_echo("Paused. Use /resume to answer, or /quit to leave the pending inquiry saved.")
+            continue
+        if command == "/skip":
+            fresh = load_terminal_state(user_id)
+            _record_non_answer(fresh, inquiry, "skipped", "skipped")
+            remember_pending_inquiry(fresh, inquiry, stop_reason=None, paused=False)
+            question_id = str(inquiry.get("question_id") or "")
+            if question_id and question_id != "original_complaint":
+                answers = fresh.setdefault("intake_answers", {})
+                answers[question_id] = "skipped"
+            save_terminal_state(fresh)
+            if question_id == "original_complaint":
+                terminal_echo("Skipped the narrative. It does not satisfy a legal requirement. The question stays pending.")
+                continue
+            payload = service.run_intake_chat_turn(
+                user_id,
+                message="skipped",
+                question_id=question_id or None,
+                expected_question_revision=inquiry.get("revision") if isinstance(inquiry.get("revision"), int) else None,
+                interview_action="answer" if question_id.startswith("inq-") else None,
+            )
+            accepted_turns += 1
+            continue
+        if command == "/edit":
+            replacement = line.strip()[len("/edit"):].strip()
+            if not replacement:
+                terminal_echo("Usage: /edit replacement text. Nothing was changed.")
+                continue
+            fresh = load_terminal_state(user_id)
+            terminal_echo(_apply_edit(fresh, replacement))
+            remember_pending_inquiry(fresh, inquiry, paused=False)
+            save_terminal_state(fresh)
+            continue
+        if str(inquiry.get("question_id") or "") == "original_complaint":
+            try:
+                answer_text = read_original_complaint_input(first_line=line)
+            except EOFError:
+                _pause_and_exit(user_id, "eof", EXIT_EOF_PAUSE, inquiry)
+            except KeyboardInterrupt:
+                _pause_and_exit(user_id, "interrupted", EXIT_INTERRUPTED, inquiry)
+        else:
+            answer_text = _read_multiline_from(line)
+        if not answer_text:
+            terminal_echo("Please enter a response or stop the command and resume later with the same user ID.")
+            continue
+        rejection = stale_answer_rejection(user_id, shown)
+        if rejection:
+            terminal_echo("Stale concurrent answer rejected. The pending inquiry was kept.")
+            payload = service.run_intake_chat_turn(user_id, interview_action="resume")
+            continue
+        question_id = str(inquiry.get("question_id") or "") or None
+        try:
+            payload = service.run_intake_chat_turn(
+                user_id,
+                message=answer_text,
+                question_id=question_id,
+                expected_question_revision=inquiry.get("revision") if isinstance(inquiry.get("revision"), int) else None,
+                interview_action="answer" if question_id and question_id.startswith("inq-") else None,
+            )
+        except KeyboardInterrupt:
+            _pause_and_exit(user_id, "interrupted", EXIT_INTERRUPTED, inquiry)
+        if answer_text.strip().lower() in _UNKNOWN_ANSWERS:
+            fresh = load_terminal_state(user_id)
+            _record_non_answer(fresh, inquiry, "unknown", answer_text.strip())
+            save_terminal_state(fresh)
+        interview = payload.get("interview") if isinstance(payload.get("interview"), dict) else {}
+        error = interview.get("error") if isinstance(interview.get("error"), dict) else {}
+        if error.get("code") == "stale_question" or payload.get("status") == "refused":
+            terminal_echo("Stale concurrent answer rejected. The pending inquiry was kept.")
         accepted_turns += 1
 
-    typer.echo(f"Current synopsis: {str(payload.get('case_synopsis') or '').strip() or 'No synopsis recorded yet.'}")
+    terminal_echo(f"Current synopsis: {str(payload.get('case_synopsis') or '').strip() or 'No synopsis recorded yet.'}")
 
 
 @app.command("add-evidence")
@@ -262,12 +1136,12 @@ def import_gmail_evidence_command(
 ) -> None:
     import anyio
 
-    from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
-    from ipfs_datasets_py.processors.legal_data.email_corpus import (
-        build_email_duckdb_artifacts,
-        search_email_graphrag_duckdb,
-    )
-    from ipfs_datasets_py.processors.legal_data.email_import import import_gmail_evidence
+    from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+    resolve_gmail_credentials = load_legal_symbol("resolve_gmail_credentials", module="email_auth")
+    build_email_duckdb_artifacts = load_legal_symbol("build_email_duckdb_artifacts", module="email_corpus")
+    search_email_graphrag_duckdb = load_legal_symbol("search_email_graphrag_duckdb", module="email_corpus")
+    import_gmail_evidence = load_legal_symbol("import_gmail_evidence", module="email_import")
 
     parser = argparse.ArgumentParser(prog="complaint-workspace import-gmail-evidence")
     if not collect_all_messages and not list(address or []):
@@ -407,8 +1281,10 @@ def run_gmail_duckdb_pipeline_command(
 ) -> None:
     import anyio
 
-    from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
-    from ipfs_datasets_py.processors.legal_data.email_pipeline import run_gmail_duckdb_pipeline
+    from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+    resolve_gmail_credentials = load_legal_symbol("resolve_gmail_credentials", module="email_auth")
+    run_gmail_duckdb_pipeline = load_legal_symbol("run_gmail_duckdb_pipeline", module="email_pipeline")
 
     parser = argparse.ArgumentParser(prog="complaint-workspace run-gmail-duckdb-pipeline")
     if not collect_all_messages and not list(address or []):
@@ -476,7 +1352,9 @@ def search_email_duckdb_command(
     bm25_k1: float = typer.Option(1.2, "--bm25-k1"),
     bm25_b: float = typer.Option(0.75, "--bm25-b"),
 ) -> None:
-    from ipfs_datasets_py.processors.legal_data.email_pipeline import search_email_duckdb_corpus
+    from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+    search_email_duckdb_corpus = load_legal_symbol("search_email_duckdb_corpus", module="email_pipeline")
 
     _print(
         search_email_duckdb_corpus(
@@ -735,6 +1613,77 @@ def sync_mike_draft(
     )
 
 
+@app.command("get-draft-proof-report")
+@app.command("draft-proof-report")
+def draft_proof_report(
+    user_id: str = "demo-user",
+    state_code: Optional[str] = None,
+    allow_live_scrape_fallback: bool = False,
+) -> None:
+    _print(service.get_draft_proof_report(
+        user_id,
+        state_code=state_code,
+        allow_live_scrape_fallback=allow_live_scrape_fallback,
+    ))
+
+
+@app.command("render-draft-proof-report")
+def render_draft_proof_report(
+    user_id: str = "demo-user",
+    state_code: Optional[str] = None,
+    claim_id: str = "",
+) -> None:
+    _print(service.render_draft_proof_report(
+        user_id, state_code=state_code, claim_id=claim_id,
+    ))
+
+
+@app.command("pin-draft-proof-report")
+def pin_draft_proof_report(
+    user_id: str = "demo-user",
+    state_code: Optional[str] = None,
+    claim_id: str = "",
+) -> None:
+    _print(service.pin_draft_proof_report(
+        user_id, state_code=state_code, claim_id=claim_id,
+    ))
+
+
+@app.command("score-draft-quality")
+def score_draft_quality(
+    user_id: str = "demo-user",
+    state_code: Optional[str] = None,
+    persist: bool = True,
+) -> None:
+    _print(service.score_draft_quality(user_id, state_code=state_code, persist=persist))
+
+
+@app.command("improve-draft")
+def improve_draft(
+    user_id: str = "demo-user",
+    state_code: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    config_path: Optional[str] = None,
+    backend_id: Optional[str] = None,
+    max_suggestions: int = 3,
+) -> None:
+    _print(service.improve_draft(
+        user_id,
+        state_code=state_code,
+        provider=provider,
+        model=model,
+        config_path=config_path,
+        backend_id=backend_id,
+        max_suggestions=max_suggestions,
+    ))
+
+
+@app.command("proof-history")
+def proof_history(user_id: str = "demo-user") -> None:
+    _print(service.get_proof_history(user_id))
+
+
 @app.command("export-packet")
 def export_packet(user_id: str = "demo-user") -> None:
     _print(service.export_complaint_packet(user_id))
@@ -773,6 +1722,32 @@ def filing_provenance(user_id: str = "demo-user") -> None:
 @app.command("provider-diagnostics")
 def provider_diagnostics(user_id: str = "demo-user") -> None:
     _print(service.get_provider_diagnostics(user_id))
+
+
+@app.command("router-session-diagnostics")
+@_workspace_command_boundary
+def router_session_diagnostics(user_id: str = "demo-user") -> None:
+    """Read the actual case's encrypted diagnostics without probing a provider."""
+    session = service.get_session(user_id)["session"]
+    _print((session.get("router_trace") or {}).get("diagnostics") or {"status": "not_dispatched", "prompt_logged": False})
+
+
+@app.command("router-task-receipt")
+@_workspace_command_boundary
+def router_task_receipt(user_id: str = "demo-user") -> None:
+    session = service.get_session(user_id)["session"]
+    _print({"session_retained": True, "receipts": (session.get("router_trace") or {}).get("receipts") or []})
+
+
+@app.command("router-live-canary")
+@_workspace_command_boundary
+def router_live_canary(config_path: str = "config.llm_router.json", backend_id: str = "llm-router-grok-4.7", confirm_live: bool = False) -> None:
+    """Opt-in synthetic canary. It does not read or send complaint sessions."""
+
+    from backends.llm_router_backend import load_terminal_router_backend
+
+    backend = load_terminal_router_backend(config_path, backend_id)
+    _print(backend.run_synthetic_live_canary(confirm_live=confirm_live))
 
 
 @app.command("docket-view")
@@ -1083,6 +2058,7 @@ def ui_optimizer_stop(
     _print(payload)
 
 
+@_workspace_command_boundary
 def main() -> None:
     app()
 

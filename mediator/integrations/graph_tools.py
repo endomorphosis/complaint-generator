@@ -1,7 +1,11 @@
 import hashlib
+import logging
 import re
 import time
 from typing import Any, Dict, List, Set
+
+
+logger = logging.getLogger(__name__)
 
 
 class GraphRetrievalAugmentor:
@@ -120,20 +124,28 @@ class GraphAwareRetrievalReranker:
         priority_terms: List[str] = []
 
         try:
+            readiness_priority_terms: List[str] = []
             readiness = dg.get_claim_readiness() if hasattr(dg, "get_claim_readiness") else {}
             if isinstance(readiness, dict):
                 readiness_value = readiness.get("overall_readiness", 1.0)
-                overall_readiness = 1.0 if readiness_value is None else float(readiness_value)
+                parsed_readiness = 1.0 if readiness_value is None else float(readiness_value)
                 for claim in readiness.get("incomplete_claim_details", []) or []:
                     if not isinstance(claim, dict):
                         continue
                     claim_name = str(claim.get("claim_name", "") or "")
                     if claim_name:
-                        priority_terms.append(claim_name)
+                        readiness_priority_terms.append(claim_name)
+                overall_readiness = parsed_readiness
+                priority_terms.extend(readiness_priority_terms)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to extract dependency-graph claim readiness; "
+                "using neutral readiness defaults",
+                exc_info=True,
+            )
 
         try:
+            unsatisfied_priority_terms: List[str] = []
             unsatisfied = (
                 dg.find_unsatisfied_requirements()
                 if hasattr(dg, "find_unsatisfied_requirements")
@@ -144,15 +156,20 @@ class GraphAwareRetrievalReranker:
                     continue
                 node_name = str(item.get("node_name", "") or "")
                 if node_name:
-                    priority_terms.append(node_name)
+                    unsatisfied_priority_terms.append(node_name)
                 for missing in item.get("missing_dependencies", []) or []:
                     if not isinstance(missing, dict):
                         continue
                     source_name = str(missing.get("source_name", "") or "")
                     if source_name and source_name.lower() != "unknown":
-                        priority_terms.append(source_name)
+                        unsatisfied_priority_terms.append(source_name)
+            priority_terms.extend(unsatisfied_priority_terms)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to extract unsatisfied dependency-graph requirements; "
+                "continuing without requirement priority terms",
+                exc_info=True,
+            )
 
         return {
             "overall_readiness": max(0.0, min(1.0, overall_readiness)),
@@ -166,12 +183,18 @@ class GraphAwareRetrievalReranker:
 
         try:
             from complaint_phases import ComplaintPhase, NodeType
-        except Exception:
+        except ImportError:
+            logger.warning(
+                "Complaint phase graph types are unavailable; "
+                "continuing without graph-derived retrieval terms",
+                exc_info=True,
+            )
             return []
 
         terms: List[str] = []
 
         try:
+            knowledge_graph_terms: List[str] = []
             kg = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "knowledge_graph")
             if kg is not None and hasattr(kg, "get_entities_by_type"):
                 for entity_type in ("claim", "fact", "organization"):
@@ -179,15 +202,21 @@ class GraphAwareRetrievalReranker:
                     for entity in entities:
                         name = str(getattr(entity, "name", "") or "")
                         if name:
-                            terms.append(name)
+                            knowledge_graph_terms.append(name)
                         attrs = getattr(entity, "attributes", {}) or {}
                         for value in attrs.values():
                             if isinstance(value, str):
-                                terms.append(value)
+                                knowledge_graph_terms.append(value)
+            terms.extend(knowledge_graph_terms)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to extract knowledge-graph retrieval terms; "
+                "continuing with other graph sources",
+                exc_info=True,
+            )
 
         try:
+            dependency_graph_terms: List[str] = []
             dg = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
             if dg is not None and hasattr(dg, "get_nodes_by_type"):
                 claim_nodes = dg.get_nodes_by_type(NodeType.CLAIM) or []
@@ -195,24 +224,35 @@ class GraphAwareRetrievalReranker:
                     node_name = str(getattr(node, "name", "") or "")
                     node_description = str(getattr(node, "description", "") or "")
                     if node_name:
-                        terms.append(node_name)
+                        dependency_graph_terms.append(node_name)
                     if node_description:
-                        terms.append(node_description)
+                        dependency_graph_terms.append(node_description)
+            terms.extend(dependency_graph_terms)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to extract dependency-graph retrieval terms; "
+                "continuing without dependency-graph terms",
+                exc_info=True,
+            )
 
         try:
+            legal_graph_terms: List[str] = []
             legal_graph = phase_manager.get_phase_data(ComplaintPhase.FORMALIZATION, "legal_graph")
             if legal_graph is not None and hasattr(legal_graph, "elements"):
                 for element in list(getattr(legal_graph, "elements", {}).values())[:50]:
                     element_name = str(getattr(element, "name", "") or "")
                     element_description = str(getattr(element, "description", "") or "")
                     if element_name:
-                        terms.append(element_name)
+                        legal_graph_terms.append(element_name)
                     if element_description:
-                        terms.append(element_description)
+                        legal_graph_terms.append(element_description)
+            terms.extend(legal_graph_terms)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to extract legal-graph retrieval terms; "
+                "continuing with other graph sources",
+                exc_info=True,
+            )
 
         deduped: List[str] = []
         seen = set()

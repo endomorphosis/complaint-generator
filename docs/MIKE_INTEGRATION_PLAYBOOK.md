@@ -1,5 +1,7 @@
 # Mike Integration Operator Playbook
 
+Current boundary: Mike is the editor at `external/mike`. The handoff field `mike_llm_patch` is a compatibility stamp. Grounded drafting is the MCP connector published as `mike_integration.transport = mcp_connector`. Register complaint-generator at `COMPLAINT_MCP_CONNECTOR_URL` (default `http://localhost:8000/api/complaint-workspace/mcp/rpc`) and call `complaint.generate_grounded_text`, `complaint.search_corpus`, `complaint.get_handoff`, and `complaint.sync_draft`. Sync returns `document_version_content_sha256` for the title plus body. Complaint-generator does not patch Mike's TypeScript LLM router.
+
 This playbook defines the current end-to-end complaint drafting workflow between `complaint-generator` and the `mike` editor submodule.
 
 ## 1) Prepare the complaint workspace record

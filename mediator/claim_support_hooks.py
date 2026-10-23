@@ -6,6 +6,8 @@ import json
 import re
 import hashlib
 from collections import Counter
+from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -17,13 +19,41 @@ from integrations.ipfs_datasets.graphrag import (
     score_support_path_quality,
 )
 from integrations.ipfs_datasets.graphs import persist_graph_snapshot, query_graph_snapshot
-from integrations.ipfs_datasets.logic import check_contradictions, prove_claim_elements, run_hybrid_reasoning
+from integrations.ipfs_datasets.logic import (
+    build_legal_ir_premise_inventory,
+    check_contradictions,
+    generate_bound_legal_ir_proof_obligations,
+    proof_cache_identity,
+    replay_satisfied_element_proof,
+    route_bound_legal_ir_proof,
+    prove_claim_elements,
+    run_hybrid_reasoning,
+)
 from complaint_analysis.temporal_rule_profiles import (
     enrich_follow_up,
     evaluate_temporal_rule_profile,
     rank_follow_ups,
 )
 from claim_support_review import _merge_intake_summary_handoff_metadata
+from ._claim_support_reasoning import (
+    extract_logic_contradiction_count as _extract_logic_contradiction_count_payload,
+    extract_logic_proof_counts as _extract_logic_proof_counts_payload,
+    extract_ontology_validation_signal as _extract_ontology_validation_signal_payload,
+    summarize_adapter_result as _summarize_adapter_result_payload,
+    summarize_claim_reasoning_diagnostics as _summarize_claim_reasoning_diagnostics_payload,
+    summarize_claim_validation_decisions as _summarize_claim_validation_decisions_payload,
+)
+from ._claim_support_trace import (
+    ARTIFACT_FAMILY_CORPUS_FAMILY,
+    CONTENT_ORIGIN_ARTIFACT_FAMILY,
+    build_graph_trace as _build_graph_trace_payload,
+    build_support_packet_lineage_summary as _build_support_packet_lineage_summary_payload,
+    build_support_trace as _build_support_trace_payload,
+    extract_record_parse_summary as _extract_record_parse_summary_payload,
+    normalize_graph_summary as _normalize_graph_summary_payload,
+    resolve_artifact_identity as _resolve_artifact_identity_payload,
+    summarize_graph_traces as _summarize_graph_traces_payload,
+)
 
 try:
     import duckdb
@@ -31,6 +61,24 @@ try:
 except ImportError:
     DUCKDB_AVAILABLE = False
     duckdb = None
+
+
+@dataclass(frozen=True)
+class ClaimSupportPathSummaryDTO:
+    """Stable review DTO for trace, packet, and optional graph path summaries."""
+
+    support_trace_summary: Dict[str, Any]
+    support_packet_summary: Dict[str, Any]
+    graph_trace_summary: Optional[Dict[str, Any]] = None
+
+    def to_payload(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            'support_trace_summary': dict(self.support_trace_summary),
+            'support_packet_summary': dict(self.support_packet_summary),
+        }
+        if self.graph_trace_summary is not None:
+            payload['graph_trace_summary'] = dict(self.graph_trace_summary)
+        return payload
 
 
 _ENRICHMENT_QUEUE_DDL = """
@@ -51,19 +99,8 @@ _ENRICHMENT_QUEUE_DDL = """
 class ClaimSupportHook:
     """Track which evidence and authorities support each claim type."""
 
-    _CONTENT_ORIGIN_ARTIFACT_FAMILY = {
-        'historical_archive_capture': 'archived_web_page',
-        'live_web_capture': 'live_web_page',
-        'authority_full_text': 'legal_authority_text',
-        'authority_reference_fallback': 'legal_authority_reference',
-    }
-
-    _ARTIFACT_FAMILY_CORPUS_FAMILY = {
-        'archived_web_page': 'web_page',
-        'live_web_page': 'web_page',
-        'legal_authority_text': 'legal_authority',
-        'legal_authority_reference': 'legal_authority',
-    }
+    _CONTENT_ORIGIN_ARTIFACT_FAMILY = CONTENT_ORIGIN_ARTIFACT_FAMILY
+    _ARTIFACT_FAMILY_CORPUS_FAMILY = ARTIFACT_FAMILY_CORPUS_FAMILY
 
     def __init__(self, mediator, db_path: Optional[str] = None):
         self.mediator = mediator
@@ -96,22 +133,36 @@ class ClaimSupportHook:
         artifact_family: str = '',
         corpus_family: str = '',
     ) -> Dict[str, str]:
-        resolved_artifact_family = artifact_family or self._CONTENT_ORIGIN_ARTIFACT_FAMILY.get(content_origin, '')
-        resolved_corpus_family = corpus_family or self._ARTIFACT_FAMILY_CORPUS_FAMILY.get(resolved_artifact_family, '')
-        return {
-            'artifact_family': resolved_artifact_family,
-            'corpus_family': resolved_corpus_family,
-        }
+        return _resolve_artifact_identity_payload(
+            content_origin=content_origin,
+            artifact_family=artifact_family,
+            corpus_family=corpus_family,
+            content_origin_artifact_family=self._CONTENT_ORIGIN_ARTIFACT_FAMILY,
+            artifact_family_corpus_family=self._ARTIFACT_FAMILY_CORPUS_FAMILY,
+        )
 
     def _prepare_duckdb_path(self):
+        """Prepare the filesystem path used by DuckDB.
+
+        An empty file is not a valid DuckDB database, but callers commonly
+        supply a path created by ``NamedTemporaryFile``. Remove that empty
+        placeholder so DuckDB can initialize the database itself. Preparation
+        remains best-effort because ``_initialize_schema`` owns the connection
+        error path, while filesystem failures are logged here for diagnosis.
+        """
         try:
             path = Path(self.db_path)
             if path.parent and not path.parent.exists():
                 path.parent.mkdir(parents=True, exist_ok=True)
             if path.exists() and path.is_file() and path.stat().st_size == 0:
                 path.unlink()
-        except Exception:
-            pass
+        except OSError as exc:
+            self.mediator.log(
+                'claim_support_db_path_prepare_error',
+                db_path=self.db_path,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
 
     def _check_duckdb_availability(self):
         if not DUCKDB_AVAILABLE:
@@ -720,17 +771,12 @@ class ClaimSupportHook:
         default_entity_count: int = 0,
         default_relationship_count: int = 0,
     ) -> Dict[str, Any]:
-        if isinstance(graph_payload, dict):
-            return {
-                'status': graph_payload.get('status', default_status),
-                'entity_count': len(graph_payload.get('entities', []) or []),
-                'relationship_count': len(graph_payload.get('relationships', []) or []),
-            }
-        return {
-            'status': default_status,
-            'entity_count': default_entity_count,
-            'relationship_count': default_relationship_count,
-        }
+        return _normalize_graph_summary_payload(
+            graph_payload=graph_payload,
+            default_status=default_status,
+            default_entity_count=default_entity_count,
+            default_relationship_count=default_relationship_count,
+        )
 
     def _build_graph_trace(
         self,
@@ -741,67 +787,16 @@ class ClaimSupportHook:
         graph_summary: Dict[str, Any],
         graph_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        normalized_metadata = graph_metadata if isinstance(graph_metadata, dict) else {}
-        snapshot = normalized_metadata.get('graph_snapshot', {})
-        snapshot = snapshot if isinstance(snapshot, dict) else {}
-        adapter_metadata = {
-            key: value
-            for key, value in normalized_metadata.items()
-            if key != 'graph_snapshot'
-        }
-        lineage = snapshot.get('metadata', {}) if isinstance(snapshot.get('metadata'), dict) else {}
-        return {
-            'source_table': source_table or '',
-            'support_ref': support_ref or '',
-            'record_id': record_id,
-            'summary': graph_summary,
-            'snapshot': snapshot,
-            'metadata': adapter_metadata,
-            'lineage': lineage.get('lineage', {}) if isinstance(lineage.get('lineage'), dict) else {},
-        }
+        return _build_graph_trace_payload(
+            source_table=source_table,
+            support_ref=support_ref,
+            record_id=record_id,
+            graph_summary=graph_summary,
+            graph_metadata=graph_metadata,
+        )
 
     def _summarize_graph_traces(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
-        traced_link_count = 0
-        snapshot_created_count = 0
-        snapshot_reused_count = 0
-        source_table_counts: Dict[str, int] = {}
-        graph_status_counts: Dict[str, int] = {}
-        seen_graph_ids = set()
-
-        for item in items or []:
-            if not isinstance(item, dict):
-                continue
-            graph_trace = item.get('graph_trace', {})
-            if not isinstance(graph_trace, dict) or not graph_trace:
-                continue
-            traced_link_count += 1
-
-            source_table = str(graph_trace.get('source_table') or 'unknown')
-            source_table_counts[source_table] = source_table_counts.get(source_table, 0) + 1
-
-            summary = graph_trace.get('summary', {})
-            if isinstance(summary, dict):
-                graph_status = str(summary.get('status') or 'unknown')
-                graph_status_counts[graph_status] = graph_status_counts.get(graph_status, 0) + 1
-
-            snapshot = graph_trace.get('snapshot', {})
-            if isinstance(snapshot, dict):
-                if bool(snapshot.get('created')):
-                    snapshot_created_count += 1
-                if bool(snapshot.get('reused')):
-                    snapshot_reused_count += 1
-                graph_id = str(snapshot.get('graph_id') or '')
-                if graph_id:
-                    seen_graph_ids.add(graph_id)
-
-        return {
-            'traced_link_count': traced_link_count,
-            'snapshot_created_count': snapshot_created_count,
-            'snapshot_reused_count': snapshot_reused_count,
-            'source_table_counts': source_table_counts,
-            'graph_status_counts': graph_status_counts,
-            'graph_id_count': len(seen_graph_ids),
-        }
+        return _summarize_graph_traces_payload(items)
 
     def _summarize_authority_treatment_signals(self, links: List[Dict[str, Any]]) -> Dict[str, Any]:
         authority_links = [
@@ -1097,124 +1092,13 @@ class ClaimSupportHook:
         link: Dict[str, Any],
         fact: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        fact = fact if isinstance(fact, dict) else {}
-        graph_trace = link.get('graph_trace', {}) if isinstance(link.get('graph_trace'), dict) else {}
-        graph_summary = link.get('graph_summary', {}) if isinstance(link.get('graph_summary'), dict) else {}
-        record_summary = link.get('record_summary', {}) if isinstance(link.get('record_summary'), dict) else {}
-        record_parse_summary = record_summary.get('parse_summary', {}) if isinstance(record_summary.get('parse_summary'), dict) else {}
-        fact_metadata = fact.get('metadata', {}) if isinstance(fact.get('metadata'), dict) else {}
-        parse_lineage = fact_metadata.get('parse_lineage', {}) if isinstance(fact_metadata.get('parse_lineage'), dict) else {}
-        snapshot = graph_trace.get('snapshot', {}) if isinstance(graph_trace.get('snapshot'), dict) else {}
-        source_ref = link.get('support_ref') or parse_lineage.get('source_ref') or ''
-        source_table = str(link.get('source_table') or '')
-        source_family = str(fact.get('source_family') or parse_lineage.get('record_scope') or '')
-        if not source_family:
-            source_family = 'legal_authority' if source_table == 'legal_authorities' else source_table or str(link.get('support_kind') or '')
-        source_record_id = fact.get('source_record_id')
-        if source_record_id is None:
-            if source_family == 'legal_authority':
-                source_record_id = link.get('authority_record_id')
-            elif source_family == 'claim_testimony':
-                source_record_id = link.get('testimony_record_id')
-            else:
-                source_record_id = link.get('evidence_record_id')
-        artifact_family = str(fact.get('artifact_family') or parse_lineage.get('artifact_family') or record_parse_summary.get('artifact_family') or '')
-        corpus_family = str(fact.get('corpus_family') or parse_lineage.get('corpus_family') or record_parse_summary.get('corpus_family') or '')
-        content_origin = str(fact.get('content_origin') or parse_lineage.get('content_origin') or record_parse_summary.get('content_origin') or '')
-        parse_quality = parse_lineage.get('parse_quality', {}) if isinstance(parse_lineage.get('parse_quality'), dict) else {}
-        source_span = parse_lineage.get('source_span', {}) if isinstance(parse_lineage.get('source_span'), dict) else {}
-
-        return {
-            'claim_type': link.get('claim_type'),
-            'claim_element_id': link.get('claim_element_id'),
-            'claim_element_text': link.get('claim_element_text'),
-            'support_kind': link.get('support_kind'),
-            'support_ref': link.get('support_ref'),
-            'support_label': link.get('support_label'),
-            'source_table': link.get('source_table'),
-            'source_family': source_family,
-            'source_record_id': source_record_id,
-            'source_ref': str(fact.get('source_ref') or parse_lineage.get('source_ref') or source_ref),
-            'record_scope': str(fact.get('record_scope') or parse_lineage.get('record_scope') or source_family),
-            'artifact_family': artifact_family,
-            'corpus_family': corpus_family,
-            'content_origin': content_origin,
-            'parse_source': str(fact.get('parse_source') or parse_lineage.get('source') or record_parse_summary.get('source') or ''),
-            'input_format': str(fact.get('input_format') or parse_lineage.get('input_format') or record_parse_summary.get('input_format') or ''),
-            'quality_tier': str(fact.get('quality_tier') or parse_lineage.get('quality_tier') or record_parse_summary.get('quality_tier') or ''),
-            'quality_score': float(fact.get('quality_score') or parse_lineage.get('quality_score') or record_parse_summary.get('quality_score') or parse_quality.get('quality_score') or 0.0),
-            'page_count': int(fact.get('page_count') or parse_lineage.get('page_count') or record_parse_summary.get('page_count') or source_span.get('page_count') or 0),
-            'support_strength': link.get('support_strength', 0.0),
-            'record_id': graph_trace.get('record_id') or link.get('evidence_record_id') or link.get('authority_record_id') or link.get('testimony_record_id'),
-            'fact_id': fact.get('fact_id', ''),
-            'fact_text': fact.get('text', ''),
-            'confidence': fact.get('confidence', 0.0),
-            'trace_kind': 'fact' if fact.get('fact_id') else 'link',
-            'parse_lineage': parse_lineage,
-            'source_lineage_ref': source_ref,
-            'record_summary': record_summary,
-            'graph_summary': graph_summary,
-            'graph_trace': graph_trace,
-            'graph_id': snapshot.get('graph_id', ''),
-            'evidence_record_id': link.get('evidence_record_id'),
-            'authority_record_id': link.get('authority_record_id'),
-            'testimony_record_id': link.get('testimony_record_id'),
-        }
+        return _build_support_trace_payload(link=link, fact=fact)
 
     def _extract_record_parse_summary(self, record: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        payload = record if isinstance(record, dict) else {}
-        parse_metadata = payload.get('parse_metadata', {}) if isinstance(payload.get('parse_metadata'), dict) else {}
-        transform_lineage = parse_metadata.get('transform_lineage', {}) if isinstance(parse_metadata.get('transform_lineage'), dict) else {}
-        provenance_payload = payload.get('provenance', {}) if isinstance(payload.get('provenance'), dict) else {}
-        if not provenance_payload and isinstance(payload.get('metadata'), dict):
-            metadata_provenance = payload['metadata'].get('provenance')
-            if isinstance(metadata_provenance, dict):
-                provenance_payload = metadata_provenance
-        provenance_metadata = provenance_payload.get('metadata', {}) if isinstance(provenance_payload.get('metadata'), dict) else {}
-        source_span = parse_metadata.get('source_span', {}) if isinstance(parse_metadata.get('source_span'), dict) else {}
-        parse_quality = parse_metadata.get('parse_quality', {}) if isinstance(parse_metadata.get('parse_quality'), dict) else {}
-
-        input_format = str(parse_metadata.get('input_format') or transform_lineage.get('input_format') or provenance_metadata.get('input_format') or '')
-        extraction_method = str(parse_metadata.get('extraction_method') or transform_lineage.get('normalization') or '')
-        quality_tier = str(parse_metadata.get('quality_tier') or parse_quality.get('quality_tier') or '')
-        quality_score = float(parse_metadata.get('quality_score') or parse_quality.get('quality_score') or 0.0)
-        page_count = int(parse_metadata.get('page_count', source_span.get('page_count', 0)) or 0)
-        content_origin = str(parse_metadata.get('content_origin') or transform_lineage.get('content_origin') or provenance_metadata.get('content_origin') or '')
-        artifact_family = str(parse_metadata.get('artifact_family') or transform_lineage.get('artifact_family') or provenance_metadata.get('artifact_family') or '')
-        corpus_family = str(parse_metadata.get('corpus_family') or transform_lineage.get('corpus_family') or provenance_metadata.get('corpus_family') or '')
-
-        artifact_identity = self._resolve_artifact_identity(
-            content_origin=content_origin,
-            artifact_family=artifact_family,
-            corpus_family=corpus_family,
+        return _extract_record_parse_summary_payload(
+            record,
+            artifact_identity_resolver=self._resolve_artifact_identity,
         )
-        artifact_family = artifact_identity['artifact_family']
-        corpus_family = artifact_identity['corpus_family']
-
-        return {
-            'parse_status': payload.get('parse_status'),
-            'chunk_count': int(payload.get('chunk_count', 0) or 0),
-            'corpus_family': corpus_family,
-            'artifact_family': artifact_family,
-            'input_format': input_format,
-            'extraction_method': extraction_method,
-            'quality_tier': quality_tier,
-            'quality_score': quality_score,
-            'page_count': page_count,
-            'source': str(parse_metadata.get('source') or transform_lineage.get('source') or ''),
-            'content_origin': content_origin,
-            'historical_capture': bool(parse_metadata.get('historical_capture', transform_lineage.get('historical_capture', provenance_metadata.get('historical_capture', False)))),
-            'capture_source': str(parse_metadata.get('capture_source') or transform_lineage.get('capture_source') or provenance_metadata.get('capture_source') or ''),
-            'archive_url': str(parse_metadata.get('archive_url') or transform_lineage.get('archive_url') or provenance_metadata.get('archive_url') or ''),
-            'original_url': str(parse_metadata.get('original_url') or transform_lineage.get('original_url') or provenance_metadata.get('original_url') or ''),
-            'version_of': str(parse_metadata.get('version_of') or transform_lineage.get('version_of') or provenance_metadata.get('version_of') or ''),
-            'captured_at': str(parse_metadata.get('captured_at') or transform_lineage.get('captured_at') or provenance_metadata.get('captured_at') or ''),
-            'observed_at': str(parse_metadata.get('observed_at') or transform_lineage.get('observed_at') or provenance_metadata.get('observed_at') or ''),
-            'content_source_field': str(parse_metadata.get('content_source_field') or transform_lineage.get('content_source_field') or provenance_metadata.get('content_source_field') or ''),
-            'fallback_mode': str(parse_metadata.get('fallback_mode') or transform_lineage.get('fallback_mode') or provenance_metadata.get('fallback_mode') or ''),
-            'parsed_text_preview': str(payload.get('parsed_text_preview') or ''),
-            'source_span': dict(source_span),
-        }
 
     def _normalize_support_fact(self, fact: Dict[str, Any], link: Dict[str, Any]) -> Dict[str, Any]:
         payload = fact if isinstance(fact, dict) else {}
@@ -1312,35 +1196,16 @@ class ClaimSupportHook:
         *,
         trace: Dict[str, Any],
     ) -> Dict[str, Any]:
+        summary = _build_support_packet_lineage_summary_payload(trace=trace)
         parse_lineage = trace.get('parse_lineage', {}) if isinstance(trace.get('parse_lineage'), dict) else {}
         record_summary = trace.get('record_summary', {}) if isinstance(trace.get('record_summary'), dict) else {}
         record_parse_summary = record_summary.get('parse_summary', {}) if isinstance(record_summary.get('parse_summary'), dict) else {}
-        source_span = parse_lineage.get('source_span') if isinstance(parse_lineage.get('source_span'), dict) else record_parse_summary.get('source_span', {}) if isinstance(record_parse_summary.get('source_span'), dict) else {}
-
-        return {
-            'corpus_family': str(parse_lineage.get('corpus_family') or record_parse_summary.get('corpus_family') or ''),
-            'artifact_family': str(parse_lineage.get('artifact_family') or record_parse_summary.get('artifact_family') or ''),
-            'source': str(parse_lineage.get('source') or record_parse_summary.get('source') or ''),
+        summary.update({
             'source_url': str(parse_lineage.get('source_url') or record_parse_summary.get('source_url') or record_summary.get('source_url') or ''),
-            'input_format': str(parse_lineage.get('input_format') or record_parse_summary.get('input_format') or ''),
-            'parser_version': str(parse_lineage.get('parser_version') or ''),
-            'content_origin': str(parse_lineage.get('content_origin') or record_parse_summary.get('content_origin') or ''),
-            'historical_capture': bool(parse_lineage.get('historical_capture', record_parse_summary.get('historical_capture', False))),
-            'capture_source': str(parse_lineage.get('capture_source') or record_parse_summary.get('capture_source') or ''),
-            'archive_url': str(parse_lineage.get('archive_url') or record_parse_summary.get('archive_url') or ''),
-            'original_url': str(parse_lineage.get('original_url') or record_parse_summary.get('original_url') or ''),
-            'version_of': str(parse_lineage.get('version_of') or record_parse_summary.get('version_of') or ''),
-            'captured_at': str(parse_lineage.get('captured_at') or record_parse_summary.get('captured_at') or ''),
-            'observed_at': str(parse_lineage.get('observed_at') or record_parse_summary.get('observed_at') or ''),
             'source_domain': str(parse_lineage.get('source_domain') or record_parse_summary.get('source_domain') or record_summary.get('source_domain') or ''),
             'content_hash': str(parse_lineage.get('content_hash') or record_parse_summary.get('content_hash') or record_summary.get('content_hash') or ''),
-            'content_source_field': str(parse_lineage.get('content_source_field') or record_parse_summary.get('content_source_field') or ''),
-            'fallback_mode': str(parse_lineage.get('fallback_mode') or record_parse_summary.get('fallback_mode') or ''),
-            'quality_tier': str(record_parse_summary.get('quality_tier') or parse_lineage.get('quality_tier') or ''),
-            'quality_score': float(record_parse_summary.get('quality_score') or parse_lineage.get('quality_score') or 0.0),
-            'page_count': int(record_parse_summary.get('page_count', 0) or 0),
-            'source_span': dict(source_span),
-        }
+        })
+        return summary
 
     def _build_support_packet(self, trace: Dict[str, Any]) -> Dict[str, Any]:
         record_summary = trace.get('record_summary', {}) if isinstance(trace.get('record_summary'), dict) else {}
@@ -1461,6 +1326,26 @@ class ClaimSupportHook:
             'fallback_mode_counts': fallback_mode_counts,
             'content_source_field_counts': content_source_field_counts,
         }
+
+    def _build_support_path_summary_dto(
+        self,
+        *,
+        support_traces: List[Dict[str, Any]],
+        support_packets: List[Dict[str, Any]],
+        graph_items: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Build the shared review DTO for an element or claim support path."""
+
+        graph_trace_summary = (
+            self._summarize_graph_traces(graph_items)
+            if graph_items is not None
+            else None
+        )
+        return ClaimSupportPathSummaryDTO(
+            support_trace_summary=self._summarize_support_traces(support_traces),
+            support_packet_summary=self._summarize_support_packets(support_packets),
+            graph_trace_summary=graph_trace_summary,
+        ).to_payload()
 
     def _collect_support_traces_from_links(self, links: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         traces: List[Dict[str, Any]] = []
@@ -1873,80 +1758,19 @@ class ClaimSupportHook:
         self,
         reasoning_diagnostics: Optional[Dict[str, Any]],
     ) -> int:
-        reasoning = reasoning_diagnostics if isinstance(reasoning_diagnostics, dict) else {}
-        logic_contradictions = reasoning.get('logic_contradictions', {})
-        if not isinstance(logic_contradictions, dict):
-            return 0
-        contradictions = logic_contradictions.get('contradictions', [])
-        if isinstance(contradictions, list):
-            return len(contradictions)
-        if contradictions:
-            return 1
-        summary = (reasoning.get('adapter_statuses') or {}).get('logic_contradictions', {})
-        if isinstance(summary, dict):
-            return int(summary.get('contradictions_count', 0) or 0)
-        return 0
+        return _extract_logic_contradiction_count_payload(reasoning_diagnostics)
 
     def _extract_logic_proof_counts(
         self,
         reasoning_diagnostics: Optional[Dict[str, Any]],
     ) -> Dict[str, int]:
-        reasoning = reasoning_diagnostics if isinstance(reasoning_diagnostics, dict) else {}
-        logic_proof = reasoning.get('logic_proof', {})
-        if not isinstance(logic_proof, dict):
-            return {
-                'provable_count': 0,
-                'unprovable_count': 0,
-            }
-        provable_elements = logic_proof.get('provable_elements', [])
-        unprovable_elements = logic_proof.get('unprovable_elements', [])
-        return {
-            'provable_count': len(provable_elements) if isinstance(provable_elements, list) else int(bool(provable_elements)),
-            'unprovable_count': len(unprovable_elements) if isinstance(unprovable_elements, list) else int(bool(unprovable_elements)),
-        }
+        return _extract_logic_proof_counts_payload(reasoning_diagnostics)
 
     def _extract_ontology_validation_signal(
         self,
         reasoning_diagnostics: Optional[Dict[str, Any]],
     ) -> str:
-        reasoning = reasoning_diagnostics if isinstance(reasoning_diagnostics, dict) else {}
-        ontology_validation = reasoning.get('ontology_validation', {})
-        if not isinstance(ontology_validation, dict):
-            return 'unknown'
-        result = ontology_validation.get('result')
-
-        def _normalize_validation_value(value: Any) -> Optional[str]:
-            if isinstance(value, bool):
-                return 'valid' if value else 'invalid'
-            if isinstance(value, str):
-                lowered = value.strip().lower()
-                if lowered in {'valid', 'validated', 'consistent', 'passed', 'pass', 'success', 'ok'}:
-                    return 'valid'
-                if lowered in {'invalid', 'inconsistent', 'failed', 'fail', 'error'}:
-                    return 'invalid'
-                return None
-            if isinstance(value, dict):
-                for key in ('valid', 'is_valid', 'consistent', 'passed', 'success'):
-                    if key in value:
-                        nested = _normalize_validation_value(value.get(key))
-                        if nested:
-                            return nested
-                for key in ('status', 'result', 'state', 'validation_status'):
-                    if key in value:
-                        nested = _normalize_validation_value(value.get(key))
-                        if nested:
-                            return nested
-            return None
-
-        normalized = _normalize_validation_value(result)
-        if normalized:
-            return normalized
-        status = str(ontology_validation.get('status') or '').strip().lower()
-        if status == 'success':
-            return 'valid'
-        if status in {'error', 'failed'}:
-            return 'invalid'
-        return 'unknown'
+        return _extract_ontology_validation_signal_payload(reasoning_diagnostics)
 
     def _extract_temporal_rule_profile(
         self,
@@ -3308,6 +3132,7 @@ class ClaimSupportHook:
                     'source_table': trace.get('source_table'),
                     'text': trace.get('fact_text') or trace.get('support_label') or '',
                     'confidence': trace.get('confidence', 0.0),
+                    'source_proof': self._support_trace_source_proof(trace),
                 }
             )
 
@@ -3464,6 +3289,144 @@ class ClaimSupportHook:
 
         return predicates
 
+    def _support_trace_source_proof(self, trace: Dict[str, Any]) -> Dict[str, Any]:
+        """Keep source identity from a support trace without treating it as entailment."""
+
+        record_summary = trace.get('record_summary') if isinstance(trace.get('record_summary'), dict) else {}
+        graph_trace = trace.get('graph_trace') if isinstance(trace.get('graph_trace'), dict) else {}
+        passage = trace.get('source_passage') if isinstance(trace.get('source_passage'), dict) else {}
+        if not passage and isinstance(record_summary.get('source_passage'), dict):
+            passage = record_summary.get('source_passage') or {}
+        provenance = trace.get('provenance') if isinstance(trace.get('provenance'), dict) else {}
+        character_span = None
+        byte_span = None
+        for source in (passage, provenance, trace):
+            if character_span is None and any(key in source for key in ('start_char', 'char_start', 'end_char', 'char_end')):
+                character_span = {
+                    'start': source.get('start_char', source.get('char_start')),
+                    'end': source.get('end_char', source.get('char_end')),
+                    'span_unit': 'character',
+                }
+            if byte_span is None and any(key in source for key in ('byte_start', 'start_byte', 'byte_end', 'end_byte')):
+                byte_span = {
+                    'start': source.get('byte_start', source.get('start_byte')),
+                    'end': source.get('byte_end', source.get('end_byte')),
+                    'span_unit': 'utf8_byte',
+                }
+        validation_status = str(trace.get('validation_status') or record_summary.get('validation_status') or '')
+        return {
+            'fact_id': str(trace.get('fact_id') or ''),
+            'support_ref': str(trace.get('support_ref') or ''),
+            'source_table': str(trace.get('source_table') or ''),
+            'source_family': str(trace.get('source_family') or ''),
+            'source_record_id': trace.get('source_record_id'),
+            'source_ref': str(trace.get('source_ref') or ''),
+            'proof_path_id': str(trace.get('proof_path_id') or graph_trace.get('proof_path_id') or ''),
+            'graph_id': str(trace.get('graph_id') or graph_trace.get('graph_id') or ''),
+            'content_hash': str(
+                trace.get('content_hash')
+                or provenance.get('content_hash')
+                or record_summary.get('content_hash')
+                or ''
+            ),
+            'citation': str(trace.get('citation') or record_summary.get('citation') or ''),
+            'authority_id': str(trace.get('authority_id') or record_summary.get('authority_id') or ''),
+            'authority_version': str(
+                trace.get('authority_version')
+                or record_summary.get('authority_version')
+                or ''
+            ),
+            'revision': str(trace.get('revision') or trace.get('fact_revision') or record_summary.get('revision') or ''),
+            'validation_status': validation_status,
+            'disputed': bool(trace.get('disputed')) or validation_status.lower() in {'disputed', 'contested'},
+            'character_span': character_span,
+            'utf8_byte_span': byte_span,
+            'dual_provenance': character_span is not None and byte_span is not None,
+            'epistemic_status': 'disputed' if bool(trace.get('disputed')) else 'allegation',
+            'axiom': False,
+            'is_entailment': False,
+        }
+
+    def _legal_ir_inputs_for_element(
+        self,
+        claim_type: str,
+        element: Dict[str, Any],
+        contradiction_candidates: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        asserted: List[Dict[str, Any]] = []
+        disputed: List[Dict[str, Any]] = []
+        selected_rules: List[Dict[str, Any]] = []
+        explicit_rules = element.get('selected_legal_rules') or element.get('selected_rules') or []
+        if isinstance(explicit_rules, list):
+            selected_rules.extend(rule for rule in explicit_rules if isinstance(rule, dict))
+        for trace in element.get('support_traces', []) or []:
+            if not isinstance(trace, dict):
+                continue
+            proof = self._support_trace_source_proof(trace)
+            fact = {
+                'fact_id': proof['fact_id'] or proof['support_ref'],
+                'text': str(trace.get('fact_text') or trace.get('support_label') or ''),
+                'revision': proof['revision'] or 'unversioned',
+                'support_ref': proof['support_ref'],
+                'source_table': proof['source_table'],
+                'content_hash': proof['content_hash'],
+                'citation': proof['citation'],
+                'authority_version': proof['authority_version'],
+                'disputed': proof['disputed'],
+                'validation_status': proof['validation_status'],
+            }
+            if proof['character_span']:
+                fact['span_unit'] = 'character'
+                fact['char_start'] = proof['character_span']['start']
+                fact['char_end'] = proof['character_span']['end']
+            if proof['utf8_byte_span']:
+                fact['span_unit'] = 'utf8_byte' if not proof['character_span'] else fact.get('span_unit', 'character')
+                fact['byte_start'] = proof['utf8_byte_span']['start']
+                fact['byte_end'] = proof['utf8_byte_span']['end']
+            if proof['disputed'] or str(trace.get('support_kind') or '') == 'contradiction':
+                disputed.append(fact)
+            elif str(trace.get('support_kind') or '') not in {'authority', 'legal_rule'}:
+                asserted.append(fact)
+            for candidate in trace.get('rule_candidates') or []:
+                if not isinstance(candidate, dict):
+                    continue
+                if candidate.get('applicable') is True or candidate.get('selected') is True:
+                    selected_rules.append(candidate)
+        for index, candidate in enumerate(contradiction_candidates):
+            if not isinstance(candidate, dict):
+                continue
+            texts = candidate.get('texts') or []
+            statement = texts[0] if isinstance(texts, list) and texts else candidate.get('summary') or candidate.get('text') or ''
+            disputed.append(
+                {
+                    'fact_id': str(candidate.get('contradiction_id') or candidate.get('candidate_id') or f'contradiction-{index}'),
+                    'text': str(statement or ''),
+                    'revision': str(candidate.get('revision') or 'unversioned'),
+                    'disputed': True,
+                }
+            )
+        assumptions = element.get('assumptions') if isinstance(element.get('assumptions'), list) else []
+        missing = [
+            {'fact_id': f'missing:{kind}', 'text': '', 'revision': 'missing'}
+            for kind in (element.get('missing_support_kinds') or [])
+        ]
+        modal = element.get('modal_ir') or element.get('legal_ir') or element.get('legal_ir_document')
+        return {
+            'sample_or_document': modal,
+            'canonical_receipt': element.get('canonical_formalization') if isinstance(element.get('canonical_formalization'), dict) else None,
+            'asserted_facts': asserted,
+            'disputed_facts': disputed,
+            'selected_legal_rules': selected_rules,
+            'assumptions': assumptions,
+            'missing_facts': missing,
+            'legal_context_version': str(element.get('legal_context_version') or element.get('authority_version') or ''),
+            'claim_id': str(element.get('claim_id') or claim_type),
+            'element_id': str(element.get('element_id') or ''),
+            'coverage_status': str(element.get('coverage_status') or element.get('status') or ''),
+            'max_obligations': element.get('max_obligations'),
+            'source_text': element.get('source_text') if isinstance(element.get('source_text'), str) else None,
+        }
+
     def _build_reasoning_ontology_fallback(
         self,
         claim_type: str,
@@ -3572,25 +3535,7 @@ class ClaimSupportHook:
         }
 
     def _summarize_adapter_result(self, adapter_result: Dict[str, Any], count_fields: Optional[List[str]] = None) -> Dict[str, Any]:
-        adapter_result = adapter_result if isinstance(adapter_result, dict) else {}
-        metadata = adapter_result.get('metadata', {}) if isinstance(adapter_result.get('metadata'), dict) else {}
-        summary = {
-            'status': str(adapter_result.get('status') or ''),
-            'operation': str(metadata.get('operation') or ''),
-            'implementation_status': str(metadata.get('implementation_status') or ''),
-            'backend_available': bool(metadata.get('backend_available', False)),
-            'degraded_reason': str(metadata.get('degraded_reason') or adapter_result.get('degraded_reason') or ''),
-        }
-        for field in count_fields or []:
-            if field in adapter_result:
-                value = adapter_result.get(field)
-                if isinstance(value, list):
-                    summary[f'{field}_count'] = len(value)
-                elif isinstance(value, dict):
-                    summary[f'{field}_key_count'] = len(value)
-                elif value is not None:
-                    summary[field] = value
-        return summary
+        return _summarize_adapter_result_payload(adapter_result, count_fields)
 
     def _run_element_reasoning_diagnostics(
         self,
@@ -3681,6 +3626,207 @@ class ClaimSupportHook:
         logic_proof = prove_claim_elements(reasoning_payload)
         logic_contradictions = check_contradictions(reasoning_payload)
         hybrid_reasoning = run_hybrid_reasoning(reasoning_payload)
+        obligation_inputs = self._legal_ir_inputs_for_element(claim_type, element, contradiction_candidates)
+        if obligation_inputs['sample_or_document'] is None and not obligation_inputs['canonical_receipt']:
+            inventory = build_legal_ir_premise_inventory(
+                asserted_facts=obligation_inputs['asserted_facts'],
+                disputed_facts=obligation_inputs['disputed_facts'],
+                selected_legal_rules=obligation_inputs['selected_legal_rules'],
+                assumptions=obligation_inputs['assumptions'],
+                missing_facts=obligation_inputs['missing_facts'],
+                source_text=obligation_inputs['source_text'] or '',
+                coverage_status=obligation_inputs['coverage_status'],
+            )
+            legal_ir_proof_obligations = {
+                'schema_version': 'legal-ir-bound-proof-obligations/v1',
+                'status': 'unavailable',
+                'support': 'unsupported',
+                'reason': 'Modal IR document was not supplied for this claim element.',
+                'backend': {
+                    'identity': 'ipfs_datasets_py.logic.integration.reasoning.legal_ir_obligations.generate_legal_ir_proof_obligations',
+                    'available': False,
+                },
+                'trust_level': 'unavailable',
+                'structural_only': True,
+                'substantive_entailment': False,
+                'entails_claim_element': False,
+                'coverage_status_promoted_to_proof': False,
+                'premise_inventory': inventory,
+                'assumptions': [
+                    {'premise_id': item.get('premise_id'), 'label': item.get('label')}
+                    for item in inventory.get('assumptions') or []
+                ],
+                'obligations': [],
+                'native_obligation_ids': [],
+                'operational_trace': [{'code': 'modal_ir_absent', 'status': 'unavailable'}],
+            }
+        else:
+            try:
+                legal_ir_proof_obligations = generate_bound_legal_ir_proof_obligations(
+                    obligation_inputs['sample_or_document'],
+                    canonical_receipt=obligation_inputs['canonical_receipt'],
+                    max_obligations=obligation_inputs['max_obligations'],
+                    claim_id=obligation_inputs['claim_id'],
+                    element_id=obligation_inputs['element_id'],
+                    asserted_facts=obligation_inputs['asserted_facts'],
+                    disputed_facts=obligation_inputs['disputed_facts'],
+                    selected_legal_rules=obligation_inputs['selected_legal_rules'],
+                    assumptions=obligation_inputs['assumptions'],
+                    missing_facts=obligation_inputs['missing_facts'],
+                    legal_context_version=obligation_inputs['legal_context_version'],
+                    coverage_status=obligation_inputs['coverage_status'],
+                    source_text=obligation_inputs['source_text'],
+                )
+            except Exception as exc:
+                legal_ir_proof_obligations = {
+                    'schema_version': 'legal-ir-bound-proof-obligations/v1',
+                    'status': 'unavailable',
+                    'support': 'unsupported',
+                    'reason': 'Legal IR proof obligation generator failed.',
+                    'trust_level': 'unavailable',
+                    'structural_only': True,
+                    'substantive_entailment': False,
+                    'entails_claim_element': False,
+                    'operational_trace': [{'code': type(exc).__name__, 'status': 'unavailable'}],
+                    'obligations': [],
+                }
+        obligation_rows = legal_ir_proof_obligations.get('obligations') if isinstance(legal_ir_proof_obligations, dict) else None
+        first_obligation = obligation_rows[0] if isinstance(obligation_rows, list) and obligation_rows else None
+        inventory = legal_ir_proof_obligations.get('premise_inventory') if isinstance(legal_ir_proof_obligations, dict) else None
+        identity = ''
+        versions = {}
+        if isinstance(legal_ir_proof_obligations, dict):
+            versions = legal_ir_proof_obligations.get('versions') if isinstance(legal_ir_proof_obligations.get('versions'), dict) else {}
+            identity = str(versions.get('execution_identity') or '')
+        issue_labels = []
+        if isinstance(temporal_context, dict):
+            for issue in temporal_context.get('temporal_issues') or []:
+                if isinstance(issue, dict):
+                    issue_labels.append(issue.get('issue_type') or issue.get('category') or '')
+        profile_warnings = list((temporal_rule_profile or {}).get('warnings') or []) if isinstance(temporal_rule_profile, dict) else []
+        relative_only = any('relative-only' in str(warning) or 'relative_only' in str(warning) for warning in profile_warnings)
+        selected_rules = []
+        for rule in obligation_inputs.get('selected_legal_rules') or []:
+            if not isinstance(rule, dict):
+                continue
+            selected_rules.append({
+                **deepcopy(rule),
+                'rule_id': rule.get('rule_id') or rule.get('premise_id') or '',
+                'version': rule.get('version') or rule.get('authority_version') or '',
+                'source_id': rule.get('source_id') or rule.get('citation') or '',
+                'source_version': rule.get('source_version') or rule.get('authority_version') or '',
+                'superseded': bool(rule.get('superseded') or str(rule.get('status') or '').lower() == 'superseded'),
+                'law_as_of': rule.get('law_as_of') or rule.get('effective_date') or '',
+            })
+        cache_identity = proof_cache_identity(
+            claim_id=obligation_inputs.get('claim_id') or claim_type,
+            element_id=obligation_inputs.get('element_id') or '',
+            factual_revisions=versions.get('fact_revisions') or [],
+            legal_source={
+                'source_id': str(element.get('legal_source_id') or ''),
+                'source_version': str(element.get('legal_source_version') or obligation_inputs.get('legal_context_version') or ''),
+                'legal_context_version': obligation_inputs.get('legal_context_version') or '',
+                'law_as_of': str(element.get('law_as_of') or element.get('applicable_law_date') or ''),
+                'rules': selected_rules,
+                'premise_inventory': deepcopy(inventory) if isinstance(inventory, dict) else {},
+                'sample_or_document': deepcopy(obligation_inputs.get('sample_or_document')),
+                'canonical_receipt': deepcopy(obligation_inputs.get('canonical_receipt')),
+            },
+            compiler={
+                'execution_identity': identity,
+                'formula_identity': versions.get('formula_identity') or '',
+                'source_map_identity': versions.get('source_map_identity') or '',
+                'obligation_version': str(first_obligation.get('schema_version') or '') if isinstance(first_obligation, dict) else str(getattr(first_obligation, 'schema_version', '') or ''),
+                'premise_version': str((inventory or {}).get('digest') or '') if isinstance(inventory, dict) else '',
+                'canonical': (obligation_inputs.get('canonical_receipt') or {}).get('identities') if isinstance(obligation_inputs.get('canonical_receipt'), dict) else {},
+            },
+            compiler_config={
+                'max_obligations': obligation_inputs.get('max_obligations'),
+                'checker_version': versions.get('checker_version') or '',
+            },
+            proof_policy={
+                'required_trust': 'kernel',
+                'total_timeout_seconds': 1.5,
+                'stage_timeout_seconds': {
+                    'deterministic': 0.25,
+                    'native_logic': 0.25,
+                    'smt_atp': 0.25,
+                    'lean_reconstruction': 0.25,
+                },
+            },
+            chronology={
+                'contradictory_dates': bool((temporal_rule_profile or {}).get('has_contradictory_dates')) if isinstance(temporal_rule_profile, dict) else False,
+                'relative_only': relative_only,
+                'issues': issue_labels,
+            },
+        )
+
+        def _route_provider():
+            return route_bound_legal_ir_proof(
+                first_obligation,
+                premise_inventory=inventory if isinstance(inventory, dict) else None,
+                sample_or_document=obligation_inputs['sample_or_document'],
+                goal_statement=str(element.get('element_text') or ''),
+                execution_identity=identity,
+                expected_execution_identity=identity,
+                obligation_version=cache_identity['components']['compiler']['identities']['obligation_version'],
+                expected_obligation_version=cache_identity['components']['compiler']['identities']['obligation_version'],
+                premise_version=cache_identity['components']['compiler']['identities']['premise_version'],
+                expected_premise_version=cache_identity['components']['compiler']['identities']['premise_version'],
+                total_timeout_seconds=1.5,
+                stage_timeout_seconds={
+                    'deterministic': 0.25,
+                    'native_logic': 0.25,
+                    'smt_atp': 0.25,
+                    'lean_reconstruction': 0.25,
+                },
+                required_trust='kernel',
+            )
+
+        try:
+            proof_evaluation = replay_satisfied_element_proof(cache_identity, provider=_route_provider)
+        except Exception as exc:
+            proof_evaluation = {
+                'cache_identity': cache_identity.get('cache_identity'),
+                'satisfied': False,
+                'status': 'unavailable',
+                'reason': type(exc).__name__,
+                'provider_called': False,
+                'reused': False,
+                'recommended_follow_ups': [],
+                'result': {
+                    'schema_version': 'legal-ir-bound-proof-routing/v1',
+                    'outcome': 'unavailable',
+                    'reason': type(exc).__name__,
+                    'substantive_trust_satisfied': False,
+                    'entails_claim_element': False,
+                },
+            }
+        routed_result = proof_evaluation.get('result') if isinstance(proof_evaluation.get('result'), dict) else None
+        if routed_result is None:
+            legal_ir_proof_routing = {
+                'schema_version': 'legal-ir-bound-proof-routing/v1',
+                'outcome': 'unknown' if proof_evaluation.get('status') == 'uncertain' else str(proof_evaluation.get('status') or 'unknown'),
+                'reason': str(proof_evaluation.get('reason') or 'chronology_uncertain'),
+                'substantive_trust_satisfied': False,
+                'entails_claim_element': False,
+                'provider_called': False,
+            }
+        else:
+            legal_ir_proof_routing = dict(routed_result)
+        legal_ir_proof_routing['proof_cache'] = {
+            'cache_identity': proof_evaluation.get('cache_identity') or cache_identity.get('cache_identity'),
+            'reused': bool(proof_evaluation.get('reused')),
+            'provider_called': bool(proof_evaluation.get('provider_called')),
+            'satisfied': bool(proof_evaluation.get('satisfied')),
+            'status': proof_evaluation.get('status'),
+            'reason': proof_evaluation.get('reason'),
+            'recommended_follow_ups': list(proof_evaluation.get('recommended_follow_ups') or []),
+        }
+        if proof_evaluation.get('status') == 'uncertain':
+            legal_ir_proof_routing['substantive_trust_satisfied'] = False
+            legal_ir_proof_routing['entails_claim_element'] = False
+            legal_ir_proof_routing['outcome'] = 'unknown'
         ontology_validation = validate_ontology(ontology_for_validation)
         ontology_workflow = build_validate_score_ontology(
             ontology_seed_text,
@@ -3778,144 +3924,27 @@ class ClaimSupportHook:
             'temporal_rule_profile': temporal_rule_profile,
             'temporal_proof_bundle': temporal_proof_bundle,
             'claim_support_temporal_handoff': claim_support_temporal_handoff,
+            'legal_ir_proof_obligations': legal_ir_proof_obligations,
+            'legal_ir_proof_routing': legal_ir_proof_routing,
+            'legacy_proof_heuristic': {
+                'proof_status': logic_proof.get('proof_status') if isinstance(logic_proof, dict) else '',
+                'labels_supported_coverage_provable': True,
+                'no_contradiction_scan_can_read_passed': True,
+                'is_substantive_entailment': False,
+            },
+            'substantive_entailment': False,
         }
 
     def _summarize_claim_reasoning_diagnostics(self, elements: List[Dict[str, Any]]) -> Dict[str, Any]:
-        adapter_status_counts: Dict[str, Dict[str, int]] = {
-            'ontology_build': {},
-            'logic_proof': {},
-            'logic_contradictions': {},
-            'hybrid_reasoning': {},
-            'ontology_validation': {},
-            'ontology_workflow': {},
-        }
-        backend_available_count = 0
-        predicate_count = 0
-        ontology_entity_count = 0
-        ontology_relationship_count = 0
-        fallback_ontology_count = 0
-        hybrid_bridge_available_count = 0
-        hybrid_tdfol_formula_count = 0
-        hybrid_dcec_formula_count = 0
-        temporal_fact_count = 0
-        temporal_relation_count = 0
-        temporal_issue_count = 0
-        temporal_partial_order_ready_count = 0
-        temporal_warning_count = 0
-        temporal_rule_profile_available_count = 0
-        temporal_rule_profile_satisfied_count = 0
-        temporal_rule_profile_partial_count = 0
-        temporal_rule_profile_failed_count = 0
-        temporal_proof_bundle_count = 0
-
-        for element in elements:
-            if not isinstance(element, dict):
-                continue
-            reasoning = element.get('reasoning_diagnostics', {})
-            if not isinstance(reasoning, dict):
-                continue
-            predicate_count += int(reasoning.get('predicate_count', 0) or 0)
-            ontology_entity_count += int(reasoning.get('ontology_entity_count', 0) or 0)
-            ontology_relationship_count += int(reasoning.get('ontology_relationship_count', 0) or 0)
-            backend_available_count += int(reasoning.get('backend_available_count', 0) or 0)
-            if reasoning.get('used_fallback_ontology'):
-                fallback_ontology_count += 1
-            hybrid_reasoning = reasoning.get('hybrid_reasoning', {})
-            if isinstance(hybrid_reasoning, dict):
-                hybrid_result = hybrid_reasoning.get('result', {}) if isinstance(hybrid_reasoning.get('result'), dict) else {}
-                if bool(hybrid_result.get('compiler_bridge_available', False)):
-                    hybrid_bridge_available_count += 1
-                hybrid_tdfol_formula_count += len(hybrid_result.get('tdfol_formulas', []) or [])
-                hybrid_dcec_formula_count += len(hybrid_result.get('dcec_formulas', []) or [])
-            temporal_summary = reasoning.get('temporal_summary', {})
-            if isinstance(temporal_summary, dict):
-                temporal_fact_count += int(temporal_summary.get('fact_count', 0) or 0)
-                temporal_relation_count += int(temporal_summary.get('relation_count', 0) or 0)
-                temporal_issue_count += int(temporal_summary.get('issue_count', 0) or 0)
-                temporal_warning_count += int(temporal_summary.get('warning_count', 0) or 0)
-                if bool(temporal_summary.get('partial_order_ready', False)):
-                    temporal_partial_order_ready_count += 1
-            temporal_rule_profile = reasoning.get('temporal_rule_profile', {})
-            if isinstance(temporal_rule_profile, dict) and bool(temporal_rule_profile.get('available', False)):
-                temporal_rule_profile_available_count += 1
-                temporal_rule_status = str(temporal_rule_profile.get('status') or '')
-                if temporal_rule_status == 'satisfied':
-                    temporal_rule_profile_satisfied_count += 1
-                elif temporal_rule_status == 'partial':
-                    temporal_rule_profile_partial_count += 1
-                elif temporal_rule_status == 'failed':
-                    temporal_rule_profile_failed_count += 1
-            temporal_proof_bundle = reasoning.get('temporal_proof_bundle', {})
-            if isinstance(temporal_proof_bundle, dict) and temporal_proof_bundle:
-                temporal_proof_bundle_count += 1
-            for adapter_name, summary in (reasoning.get('adapter_statuses') or {}).items():
-                if not isinstance(summary, dict):
-                    continue
-                status = str(summary.get('implementation_status') or summary.get('status') or 'unknown')
-                adapter_counts = adapter_status_counts.setdefault(adapter_name, {})
-                adapter_counts[status] = adapter_counts.get(status, 0) + 1
-
-        return {
-            'adapter_status_counts': adapter_status_counts,
-            'backend_available_count': backend_available_count,
-            'predicate_count': predicate_count,
-            'ontology_entity_count': ontology_entity_count,
-            'ontology_relationship_count': ontology_relationship_count,
-            'fallback_ontology_count': fallback_ontology_count,
-            'hybrid_bridge_available_count': hybrid_bridge_available_count,
-            'hybrid_tdfol_formula_count': hybrid_tdfol_formula_count,
-            'hybrid_dcec_formula_count': hybrid_dcec_formula_count,
-            'temporal_fact_count': temporal_fact_count,
-            'temporal_relation_count': temporal_relation_count,
-            'temporal_issue_count': temporal_issue_count,
-            'temporal_partial_order_ready_count': temporal_partial_order_ready_count,
-            'temporal_warning_count': temporal_warning_count,
-            'temporal_rule_profile_available_count': temporal_rule_profile_available_count,
-            'temporal_rule_profile_satisfied_count': temporal_rule_profile_satisfied_count,
-            'temporal_rule_profile_partial_count': temporal_rule_profile_partial_count,
-            'temporal_rule_profile_failed_count': temporal_rule_profile_failed_count,
-            'temporal_proof_bundle_count': temporal_proof_bundle_count,
-        }
+        summary = _summarize_claim_reasoning_diagnostics_payload(elements)
+        summary.setdefault('adapter_status_counts', {}).setdefault(
+            'ontology_workflow',
+            {},
+        )
+        return summary
 
     def _summarize_claim_validation_decisions(self, elements: List[Dict[str, Any]]) -> Dict[str, Any]:
-        decision_source_counts: Counter[str] = Counter()
-        adapter_contradicted_element_count = 0
-        fallback_ontology_element_count = 0
-        proof_supported_element_count = 0
-        logic_unprovable_element_count = 0
-        ontology_invalid_element_count = 0
-        temporal_rule_gap_element_count = 0
-
-        for element in elements:
-            if not isinstance(element, dict):
-                continue
-            trace = element.get('proof_decision_trace', {})
-            if not isinstance(trace, dict):
-                continue
-            source = str(trace.get('decision_source') or 'unknown')
-            decision_source_counts[source] += 1
-            if int(trace.get('logic_contradiction_count', 0) or 0) > 0:
-                adapter_contradicted_element_count += 1
-            if bool(trace.get('used_fallback_ontology')):
-                fallback_ontology_element_count += 1
-            if source in {'logic_proof_supported', 'ontology_validation_supported'}:
-                proof_supported_element_count += 1
-            if source == 'logic_unprovable':
-                logic_unprovable_element_count += 1
-            if str(trace.get('ontology_validation_signal') or '') == 'invalid':
-                ontology_invalid_element_count += 1
-            if str(trace.get('temporal_rule_status') or '') in {'failed', 'partial'}:
-                temporal_rule_gap_element_count += 1
-
-        return {
-            'decision_source_counts': dict(sorted(decision_source_counts.items())),
-            'adapter_contradicted_element_count': adapter_contradicted_element_count,
-            'fallback_ontology_element_count': fallback_ontology_element_count,
-            'proof_supported_element_count': proof_supported_element_count,
-            'logic_unprovable_element_count': logic_unprovable_element_count,
-            'ontology_invalid_element_count': ontology_invalid_element_count,
-            'temporal_rule_gap_element_count': temporal_rule_gap_element_count,
-        }
+        return _summarize_claim_validation_decisions_payload(elements)
 
     def _build_claim_validation(
         self,
@@ -5349,8 +5378,11 @@ class ClaimSupportHook:
                     links_by_kind.setdefault(link.get('support_kind', 'unknown'), []).append(link)
 
                 support_traces = self._collect_support_traces_from_links(element.get('links', []) or [])
-                support_trace_summary = self._summarize_support_traces(support_traces)
                 support_packets = [self._build_support_packet(trace) for trace in support_traces]
+                review_path_summary = self._build_support_path_summary_dto(
+                    support_traces=support_traces,
+                    support_packets=support_packets,
+                )
 
                 element_id = element.get('element_id') or ''
                 element_support_ledger = self.get_element_support_ledger(
@@ -5388,9 +5420,8 @@ class ClaimSupportHook:
                         ],
                         'links_by_kind': links_by_kind,
                         'support_traces': support_traces,
-                        'support_trace_summary': support_trace_summary,
                         'support_packets': support_packets,
-                        'support_packet_summary': self._summarize_support_packets(support_packets),
+                        **review_path_summary,
                         'element_support_ledger': element_support_ledger,
                         'graph_snapshot_refs': graph_snapshot_refs,
                         'support_path_summary': support_path_summary,
@@ -5401,6 +5432,10 @@ class ClaimSupportHook:
 
             claim_support_traces = self._collect_support_traces_from_links(claim_summary.get('links', []))
             claim_support_packets = [self._build_support_packet(trace) for trace in claim_support_traces]
+            claim_support_path_summary = self._build_support_path_summary_dto(
+                support_traces=claim_support_traces,
+                support_packets=claim_support_packets,
+            )
             claim_support_paths = [
                 path
                 for element in elements
@@ -5417,8 +5452,7 @@ class ClaimSupportHook:
                 'support_by_kind': claim_summary.get('support_by_kind', {}),
                 'authority_treatment_summary': claim_summary.get('authority_treatment_summary', {}),
                 'authority_rule_candidate_summary': claim_summary.get('authority_rule_candidate_summary', {}),
-                'support_trace_summary': self._summarize_support_traces(claim_support_traces),
-                'support_packet_summary': self._summarize_support_packets(claim_support_packets),
+                **claim_support_path_summary,
                 'support_quality_summary': self._summarize_support_path_quality(claim_support_paths),
                 'elements': elements,
                 'unassigned_links': claim_summary.get('unassigned_links', []),
@@ -5939,6 +5973,11 @@ class ClaimSupportHook:
                     claim_element_text=element.get('element_text'),
                 )
                 support_packets = [self._build_support_packet(trace) for trace in support_traces]
+                support_path_summary = self._build_support_path_summary_dto(
+                    support_traces=support_traces,
+                    support_packets=support_packets,
+                    graph_items=element.get('links', []),
+                )
                 unresolved_elements.append(
                     {
                         'element_id': element.get('element_id'),
@@ -5954,12 +5993,10 @@ class ClaimSupportHook:
                         'support_facts': support_facts,
                         'support_fact_registry_summary': self._summarize_fact_registry(support_facts),
                         'support_traces': support_traces,
-                        'support_trace_summary': self._summarize_support_traces(support_traces),
                         'support_packets': support_packets,
-                        'support_packet_summary': self._summarize_support_packets(support_packets),
+                        **support_path_summary,
                         'support_path_summary': element.get('support_path_summary', {}),
                         'support_quality_summary': element.get('support_quality_summary', {}),
-                        'graph_trace_summary': self._summarize_graph_traces(element.get('links', [])),
                         'recommended_action': (
                             element.get('support_quality_summary', {}).get('recommended_quality_action')
                             if isinstance(element.get('support_quality_summary'), dict)
@@ -7957,6 +7994,58 @@ class ClaimSupportHook:
                 'error': str(exc),
                 'graph_snapshot': adapter_graph_snapshot,
             }
+
+    def resume_factual_graph(self, graph_id: str) -> Dict[str, Any]:
+        """Reopen committed graph revisions without publishing plaintext."""
+        from integrations.ipfs_datasets.graphs import resume_graph_revisions
+
+        try:
+            resumed = resume_graph_revisions(graph_id)
+        except Exception as exc:
+            self.mediator.log('factual_graph_resume_error', error=str(exc), graph_id=graph_id)
+            return {
+                'available': False,
+                'graph_id': graph_id,
+                'revisions': [],
+                'provenance': [],
+                'superseded_facts': [],
+                'cross_graph_links': [],
+                'plaintext_publication': False,
+                'error': str(exc),
+            }
+        resumed['available'] = True
+        resumed['plaintext_publication'] = False
+        return resumed
+
+    def persist_private_factual_graph(
+        self,
+        graph_payload: Dict[str, Any],
+        private_context: Dict[str, Any],
+        *,
+        graph_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Seal graph payload, source text, embeddings, and indexes before replication.
+
+        Plaintext publication stays disabled. The knowledge-graph client catalog
+        is not used for these private bytes.
+        """
+        from integrations.ipfs_datasets.graphs import persist_graph_snapshot
+
+        sealed = dict(private_context or {})
+        sealed.pop('publish_plaintext', None)
+        result = persist_graph_snapshot(
+            graph_payload if isinstance(graph_payload, dict) else {},
+            graph_id=graph_id,
+            private_context=sealed,
+        )
+        result['plaintext_publication'] = False
+        self.mediator.log(
+            'private_factual_graph_sealed',
+            graph_id=str(graph_id or ''),
+            persisted=bool(result.get('persisted')),
+            plaintext_publication=False,
+        )
+        return result
 
     def get_support_paths_for_element(
         self,

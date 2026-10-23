@@ -18,6 +18,17 @@ from integrations.ipfs_datasets.draft_logic_pipeline import (
 from integrations.ipfs_datasets.legal import constrain_assertions_to_corpus
 
 
+@pytest.fixture(autouse=True)
+def hermetic_proof_storage(monkeypatch, tmp_path):
+    """Exercise local fallback without accessing a host daemon or cache."""
+    from integrations.ipfs_datasets import storage
+    monkeypatch.setenv("COMPLAINT_GENERATOR_IPFS_CACHE_DIR", str(tmp_path / "proof-cache"))
+    monkeypatch.delenv("COMPLAINT_GENERATOR_ENABLE_IPFS_KIT", raising=False)
+    monkeypatch.setattr(storage, "_load_optional_kit_backend", lambda: None)
+    for name in ("add_bytes", "cat", "pin"):
+        monkeypatch.setattr(storage, name, None)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -269,6 +280,39 @@ class TestPinProofReportToIPFS:
         ts = result["pinned_at"]
         assert "T" in ts, f"Expected ISO-8601 timestamp, got: {ts}"
 
+    def test_pin_failure_does_not_set_pinned_true(self):
+        def _store(data, **_kwargs):
+            del data
+            return {
+                "status": "available",
+                "cid": "bafyrealnetworkcid",
+                "pinned": False,
+                "verified": True,
+                "uploaded": True,
+                "stored_local": False,
+                "network_durable": False,
+                "cid_kind": "content_cid",
+                "backend_name": "kit",
+                "verification": {"matched": True, "method": "readback"},
+                "receipt": {"cid_kind": "content_cid"},
+            }
+
+        def _pin(cid, **_kwargs):
+            raise RuntimeError(f"pin failed for {cid}")
+
+        with patch("integrations.ipfs_datasets.storage.store_bytes", side_effect=_store):
+            with patch("integrations.ipfs_datasets.storage.pin_cid", side_effect=_pin):
+                result = pin_proof_report_to_ipfs(_minimal_report())
+        assert result["pinned"] is False
+        assert result["network_durable"] is False
+        assert result["report_cid"].startswith("sha256:")
+        assert result["backend"] == "local_content_hash"
+        assert result["stored_local"] is False
+        assert result["uploaded"] is True
+        assert result["verified"] is True
+        assert result["deferred"] is True
+        assert result["receipt"]["storage_cid"] == "bafyrealnetworkcid"
+
     def test_report_cid_fallback_starts_with_sha256(self):
         # When the IPFS backend raises, the local sha256 fallback is used.
         with patch(
@@ -278,15 +322,46 @@ class TestPinProofReportToIPFS:
             result = pin_proof_report_to_ipfs(_minimal_report())
         # The sha256: prefix fallback should still produce a non-empty CID.
         assert result["report_cid"].startswith("sha256:")
+        assert result["stored_local"] is False
+        assert result["uploaded"] is False
+        assert result["verified"] is False
+
+    @pytest.mark.parametrize("storage_result", [5, {"status": "unavailable", "cid": "", "error": "offline"}])
+    def test_hash_only_fallback_does_not_claim_a_persisted_artifact(self, storage_result):
+        with patch("integrations.ipfs_datasets.storage.store_bytes", return_value=storage_result):
+            result = pin_proof_report_to_ipfs(_minimal_report())
+        assert result["report_cid"].startswith("sha256:")
+        assert result["stored_local"] is False
+        assert result["uploaded"] is False
+        assert result["pinned"] is False
+        assert result["verified"] is False
+        assert result["deferred"] is True
+
+    def test_real_local_cache_is_distinct_from_an_unstored_hash(self):
+        result = pin_proof_report_to_ipfs(_minimal_report())
+        assert result["stored_local"] is True
+        assert result["verified"] is True
+        assert result["uploaded"] is False
+        assert result["pinned"] is False
+        assert result["network_durable"] is False
+        assert result["receipt"]["storage_cid"]
 
     def test_deterministic_cid_for_same_content(self):
-        # Each call produces its own timestamp so the CIDs will differ between
-        # calls. Verify instead that the sha256 fallback CID is well-formed.
+        # Each call produces its own timestamp so envelope bytes differ.
+        # Without a verified network pin, the identifier is a SHA256 fallback
+        # and must not be reported as network pinned or durable.
         report = _minimal_report()
         result = pin_proof_report_to_ipfs(report, claim_id="SAME")
         cid = result["report_cid"]
-        # sha256: prefix fallback → hex digest of 64 chars after the colon.
-        assert cid.startswith("sha256:") and len(cid) == len("sha256:") + 64
+        if result.get("network_durable") is True:
+            assert result["pinned"] is True
+            assert result["backend"] == "ipfs"
+            assert cid
+        else:
+            assert cid.startswith("sha256:") and len(cid) == len("sha256:") + 64
+            assert result["pinned"] is False
+            assert result["backend"] == "local_content_hash"
+            assert result.get("network_durable") is False
 
 
 # ---------------------------------------------------------------------------
@@ -310,20 +385,26 @@ class TestConstrainAssertionsVectorPass:
         )
         assert result["total_assertion_count"] == 1
 
-    def test_vector_pass_succeeds_with_mock_index(self, tmp_path):
-        """When a vector index exists, hits from it are used to ground assertions."""
-        numpy = pytest.importorskip("numpy")
+    @pytest.mark.parametrize("index_source", ["argument", "environment"])
+    def test_local_vector_index_does_not_authorize_embedding_or_grounding(
+        self, tmp_path, monkeypatch, index_source
+    ):
+        """A populated legacy index grants neither retrieval access nor proof."""
+        from pathlib import Path
+        from unittest.mock import Mock
+
         import numpy as np
+        from integrations.ipfs_datasets import legal, vector_store
 
         index_dir = tmp_path / "legal_index"
         index_dir.mkdir()
 
-        # Build a tiny fake vector index: 2 records, 4-dim vectors.
-        dim = 4
+        # Keep the real synthetic index: 2 records, 4-dimensional vectors.
         vectors = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]], dtype=np.float32)
         np.save(str(index_dir / "legal_corpus.vectors.npy"), vectors)
         records = [
             json.dumps({
+                "id": "rec-1",
                 "text": "Employer shall not retaliate against a whistleblower.",
                 "source": "state_law",
                 "citation": "ORS 659A.199",
@@ -331,6 +412,7 @@ class TestConstrainAssertionsVectorPass:
                 "type": "statute",
             }),
             json.dumps({
+                "id": "rec-2",
                 "text": "Employee may file a complaint with the Bureau of Labor.",
                 "source": "state_law",
                 "citation": "ORS 659A.820",
@@ -339,25 +421,87 @@ class TestConstrainAssertionsVectorPass:
             }),
         ]
         (index_dir / "legal_corpus.records.jsonl").write_text("\n".join(records), encoding="utf-8")
+        index_before = {path.name: path.read_bytes() for path in index_dir.iterdir()}
 
         assertions = [
             {"assertion_id": "s-1", "text": "Employer shall not retaliate against whistleblower."}
         ]
+        monkeypatch.delenv("COMPLAINT_LEGAL_VECTOR_INDEX_DIR", raising=False)
+        arguments = {"legal_vector_index_dir": str(index_dir)}
+        if index_source == "environment":
+            monkeypatch.setenv("COMPLAINT_LEGAL_VECTOR_INDEX_DIR", str(index_dir))
+            arguments = {}
 
-        # Mock embed_texts_batched so vector comparison works without real embeddings.
-        with patch(
-            "integrations.ipfs_datasets.vector_store.embed_texts_batched",
-            return_value=[[1.0, 0.0, 0.0, 0.0]],  # cosine-similar to first record
-        ):
+        # Refusal must happen before an embedding, backend, or index read.
+        # Explicit zero-call checks also catch swallowed boundary exceptions.
+        forbidden_calls = []
+        index_open_attempts = []
+        original_open = Path.open
+
+        def guard_index_open(path, *args, **kwargs):
+            if path.is_relative_to(index_dir):
+                index_open_attempts.append(path.name)
+                raise AssertionError("The legacy index did not authorize file access")
+            return original_open(path, *args, **kwargs)
+
+        with monkeypatch.context() as guarded:
+            for module, attribute in (
+                (legal, "_search_legal_vector_index"),
+                (legal, "embed_query_text"),
+                (legal, "get_embeddings_router"),
+                (legal, "_run_owned_deadline"),
+                (vector_store, "embed_texts_batched"),
+                (vector_store, "get_embeddings_router"),
+                (vector_store, "search_vector_index"),
+                (np, "load"),
+            ):
+                denied = Mock(side_effect=AssertionError("No embedding or retrieval was authorized"))
+                guarded.setattr(module, attribute, denied)
+                forbidden_calls.append(denied)
+            guarded.setattr(Path, "open", guard_index_open)
             result = constrain_assertions_to_corpus(
-                assertions,
-                legal_vector_index_dir=str(index_dir),
+                assertions, state="OR", retrieval_mode="offline", **arguments
             )
 
+        for denied in forbidden_calls:
+            denied.assert_not_called()
+        assert index_open_attempts == []
+        assert {path.name: path.read_bytes() for path in index_dir.iterdir()} == index_before
         assert result["total_assertion_count"] == 1
-        # At least one hit grounded the assertion.
-        assert result["grounded_count"] == 1
-        assert result["corpus_coverage_percent"] == 100
+        assert result["grounded_count"] == 0
+        assert result["ungrounded_count"] == 1
+        assert result["candidate_count"] == 0
+        assert result["source_verified_count"] == 0
+        assert result["applicable_count"] == 0
+        assert result["entailed_count"] == 0
+        assert result["corpus_coverage_percent"] == 0
+        assert result["corpus_coverage_semantics"] == "retrieval_only"
+        assert result["entailment_prover"] == "unsupported"
+        assert result["grounded"] == []
+        assert result["fact_graph_mutated"] is False
+        detail = result["details"][0]
+        assert detail["dispositions"] == {
+            "retrieval": "unavailable",
+            "source_verification": "unknown",
+            "applicability": "unknown",
+            "entailment": "unsupported",
+        }
+        assert {
+            "backend": "legal_vector_index",
+            "status": "unavailable",
+            "error_code": "owned_vector_lookup_unavailable",
+        } in detail["diagnostics"]
+        assert assertions[0]["text"] not in str(detail["diagnostics"])
+        assert detail["corpus_hits"] == []
+        assert detail["grounded"] is False
+        assert detail["source_verified"] is False
+        assert detail["applicable"] is False
+        assert detail["entails"] is False
+        assert detail["entailment_reason"] == "no_bound_entailment_prover"
+        assert detail["fact_verified"] is False
+        assert detail["fact_promotion"] == "refused"
+        assert detail["no_applicable_law"] is False
+        assert detail["allegation_false"] is False
 
     def test_vector_env_var_gates_pass(self, tmp_path, monkeypatch):
         """COMPLAINT_LEGAL_VECTOR_INDEX_DIR env var activates the vector pass."""

@@ -14,6 +14,79 @@ from pathlib import Path
 pytestmark = pytest.mark.no_auto_network
 
 
+def _install_legal_passage_graph_fixture(monkeypatch):
+    """Give only the requesting storage unit test an explicit legal graph.
+
+    Extraction capability is exercised separately by the FACT02 contract.
+    These rows describe supplied authority text, never complainant facts or
+    a rule's applicability. Document parsing and all durable storage stay real.
+    """
+    from dataclasses import replace
+    from mediator import legal_authority_hooks
+    from integrations.ipfs_datasets.provenance import build_provenance, stable_content_hash
+    from integrations.ipfs_datasets.types import (
+        GraphEntity, GraphRelationship, build_user_assertion_envelope,
+    )
+
+    calls = []
+
+    def legal_passage_graph(text, *, source_id='', metadata=None):
+        assert isinstance(text, str) and text.strip()
+        assert source_id.startswith('authority:') and source_id.removeprefix('authority:').isdigit()
+        assert isinstance(metadata, dict) and metadata['artifact_id'] == source_id
+        assert metadata['legal_passage'] is True
+        assert metadata['source_family'] == metadata['record_scope'] == 'legal_authority'
+        assert metadata['artifact_family'] == 'legal_authority_text'
+        passage = next(line.strip() for line in text.splitlines() if line.strip())
+        raw = text.encode('utf-8')
+        start = raw.index(passage.encode('utf-8'))
+        span = {'start': start, 'end': start + len(passage.encode('utf-8')), 'text': passage}
+        envelope = build_user_assertion_envelope(
+            source_text=text, source_kind='legal_text', source_id=source_id,
+            source_span=span, source_hash=stable_content_hash(raw),
+            record_type='legal_text', assertion_status='legal_text',
+            extractor_version='authority-storage-unit-fixture.v1',
+        )
+        assert envelope.record_type == 'legal_text' and not envelope.is_asserted_user_fact
+        assert raw[envelope.source_span_start:envelope.source_span_end].decode('utf-8') == passage
+        provenance = replace(build_provenance(
+            source_url=metadata.get('source_url', ''), acquisition_method='synthetic_storage_fixture',
+            source_type='legal_authority', content_hash=stable_content_hash(raw),
+            source_system='authority-storage-unit-fixture',
+            metadata={'record_scope': 'legal_authority', 'source_span': span},
+        ), assertion=envelope.as_dict()).as_dict()
+        attributes = {
+            **metadata, 'record_scope': 'legal_authority', 'source_family': 'legal_authority',
+            'record_type': 'legal_text', 'content_origin': 'legal_authority_text',
+            'source_span': span, 'assertion': envelope.as_dict(),
+        }
+        authority_node = GraphEntity(
+            entity_id=source_id + ':source', entity_type='legal_authority',
+            name=metadata.get('title', ''), attributes=dict(attributes), provenance=provenance,
+            assertion=envelope.as_dict(),
+        ).as_dict()
+        passage_node = GraphEntity(
+            entity_id=source_id + ':legal-passage:0', entity_type='fact', name=passage,
+            confidence=1.0, attributes={**attributes, 'text': passage, 'sentence_index': 0},
+            provenance=provenance, assertion=envelope.as_dict(),
+        ).as_dict()
+        relationship = GraphRelationship(
+            relationship_id=source_id + ':contains-legal-passage:0',
+            source_id=authority_node['id'], target_id=passage_node['id'],
+            relation_type='contains_legal_passage', confidence=1.0,
+            attributes=dict(attributes), provenance=provenance, assertion=envelope.as_dict(),
+        ).as_dict()
+        calls.append({'source_id': source_id, 'span': span, 'content_hash': stable_content_hash(raw)})
+        return {'status': 'available', 'entities': [authority_node, passage_node],
+                'relationships': [relationship], 'metadata': {
+                    **metadata, 'fixture_scope': 'authority-storage-unit',
+                    'record_scope': 'legal_authority', 'provenance': provenance,
+                }}
+
+    monkeypatch.setattr(legal_authority_hooks, 'extract_graph_from_text', legal_passage_graph)
+    return calls
+
+
 class TestLegalAuthoritySearchHook:
     """Test cases for LegalAuthoritySearchHook"""
     
@@ -134,132 +207,67 @@ class TestLegalAuthoritySearchHook:
             pytest.skip(f"Test requires dependencies: {e}")
 
     def test_search_all_sources_filters_by_authority_families(self):
-        """Authority-family filtering should skip unrelated source searches."""
-        try:
-            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
-
-            mock_mediator = Mock()
-            mock_mediator.log = Mock()
-            mock_mediator.query_backend = Mock(return_value="test query")
-
-            hook = LegalAuthoritySearchHook(mock_mediator)
-            hook.search_us_code = Mock(return_value=[{'citation': '42 U.S.C. § 1983'}])
-            hook.search_state_laws = Mock(return_value=[{'citation': 'ORS 90.385'}])
-            hook.search_federal_register = Mock(return_value=[{'title': 'EEOC rule'}])
-            hook.search_administrative_law = Mock(return_value=[{'citation': 'OAR 839-003-0001'}])
-            hook.search_case_law = Mock(return_value=[{'citation': 'Smith v. Example'}])
-            hook.search_web_archives = Mock(return_value=[{'url': 'https://law.cornell.edu/example'}])
-
-            results = hook.search_all_sources(
-                'test query',
-                authority_families=['statute', 'regulation'],
-            )
-
-            hook.search_us_code.assert_called_once_with('test query', max_results=5)
-            hook.search_state_laws.assert_called_once_with(
-                'test query',
-                state=None,
-                max_results=5,
-                allow_live_scrape_fallback=False,
-            )
-            hook.search_federal_register.assert_called_once_with('test query', max_results=5)
-            hook.search_administrative_law.assert_called_once_with(
-                'test query',
-                state=None,
-                max_results=5,
-                allow_live_scrape_fallback=False,
-            )
-            hook.search_case_law.assert_not_called()
-            hook.search_web_archives.assert_not_called()
-            assert results['statutes'] == [{'citation': '42 U.S.C. § 1983'}]
-            assert results['state_statutes'] == [{'citation': 'ORS 90.385'}]
-            assert results['regulations'] == [{'title': 'EEOC rule'}]
-            assert results['administrative_rules'] == [{'citation': 'OAR 839-003-0001'}]
-            assert results['case_law'] == []
-            assert results['web_archives'] == []
-            assert 'search_diagnostics' in results
-        except ImportError as e:
-            pytest.skip(f"Test requires dependencies: {e}")
+        """Explicit federal discovery admits only requested bounded families."""
+        from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+        mediator = Mock()
+        hook = LegalAuthoritySearchHook(mediator)
+        statute = {'source_family':'us_code','citation':'42 U.S.C. § 1983',
+            'uri':'https://uscode.house.gov/example','applicability':'unknown'}
+        regulation = {'source_family':'federal_register','citation':'89 FR 100',
+            'uri':'https://www.federalregister.gov/example','applicability':'unknown'}
+        def lookup(**options):
+            row = statute if options['source_family']=='us_code' else regulation
+            return {'status':'success','results':[row],'applicability':'unknown'}
+        hook.lookup_bounded_corpus = Mock(side_effect=lookup)
+        hook.search_case_law = Mock(side_effect=AssertionError('unrequested case search'))
+        hook.search_web_archives = Mock(side_effect=AssertionError('unrequested archive search'))
+        result = hook.search_all_sources('test query',jurisdiction='federal',
+            authority_families=['statute','regulation'])
+        assert [c.kwargs['source_family'] for c in hook.lookup_bounded_corpus.call_args_list] == ['us_code','federal_register']
+        assert all(c.kwargs['retrieval_mode']=='offline' and c.kwargs['jurisdiction']=='federal'
+            for c in hook.lookup_bounded_corpus.call_args_list)
+        assert result['statutes']==[statute] and result['regulations']==[regulation]
+        assert result['state_statutes']==result['administrative_rules']==result['case_law']==result['web_archives']==[]
+        hook.search_case_law.assert_not_called();hook.search_web_archives.assert_not_called()
+        assert result['search_diagnostics']['statutes']['status']=='success'
+        assert result['statutes'][0]['applicability']==result['regulations'][0]['applicability']=='unknown'
 
     def test_search_state_laws_logs_hf_coverage_warning_when_dataset_has_no_state_rows(self):
-        try:
-            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
-
-            mock_mediator = Mock()
-            mock_mediator.log = Mock()
-            mock_mediator.query_backend = Mock(return_value='test query')
-
-            hook = LegalAuthoritySearchHook(mock_mediator)
-            mock_mediator.log.reset_mock()
-
-            diagnostic = {
-                'warning_code': 'hf_state_rows_missing',
-                'warning_message': 'Hugging Face dataset justicedao/ipfs_state_laws does not currently expose rows for requested state OR.',
-                'state_code': 'OR',
-                'hf_dataset_id': 'justicedao/ipfs_state_laws',
-            }
-
-            with patch('mediator.legal_authority_hooks.search_state_laws', return_value=[]):
-                with patch('mediator.legal_authority_hooks.get_last_legal_search_diagnostic', return_value=diagnostic):
-                    results = hook.search_state_laws(
-                        'tenant retaliation',
-                        state='OR',
-                        max_results=5,
-                        allow_live_scrape_fallback=False,
-                    )
-
-            assert results == []
-            assert any(
-                call.args and call.args[0] == 'legal_authority_warning'
-                and call.kwargs.get('warning_code') == 'hf_state_rows_missing'
-                and call.kwargs.get('state') == 'OR'
-                for call in mock_mediator.log.call_args_list
-            )
-        except ImportError as e:
-            pytest.skip(f"Test requires dependencies: {e}")
+        """Historical warning case: use current bounded capability, never stale globals."""
+        from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+        mediator=Mock();hook=LegalAuthoritySearchHook(mediator);mediator.log.reset_mock()
+        envelope={'status':'unavailable','capability':'offline_asset_missing','error_code':'offline_asset_missing',
+            'retrieval_mode':'offline','results':[],'result_count':0,'source_family':'state_statute','applicability':'unknown'}
+        with patch('mediator.legal_authority_hooks.lookup_bounded_legal_corpus',return_value=envelope) as bounded:
+            with patch('mediator.legal_authority_hooks.get_last_legal_search_diagnostic',
+                    side_effect=AssertionError('stale global diagnostic consulted')) as stale:
+                result=hook.search_state_laws('tenant retaliation',state='OR',max_results=5,
+                    allow_live_scrape_fallback=False)
+                diagnostic=hook._collect_search_diagnostics(query='tenant retaliation',state='OR')
+        assert result==[];stale.assert_not_called()
+        bounded.assert_called_once_with(source_family='state_statute',query='tenant retaliation',
+            max_results=5,state='OR',retrieval_mode='offline')
+        assert diagnostic['state_statutes']['status']=='unavailable'
+        assert diagnostic['state_statutes']['error_code']=='offline_asset_missing'
+        assert diagnostic['state_statutes']['applicability']=='unknown'
+        assert diagnostic['state_statutes']['warning_code']=='offline_asset_missing'
+        assert any(c.args and c.args[0]=='legal_corpus_candidate_lookup'
+            and c.kwargs.get('error_code')=='offline_asset_missing' for c in mediator.log.call_args_list)
+        assert not any(c.kwargs.get('warning_code')=='hf_state_rows_missing' for c in mediator.log.call_args_list)
 
     def test_search_federal_register_uses_ecfr_fallback(self):
-        """Regulation search should fall back to eCFR when scraper results are unavailable."""
-        try:
-            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
-
-            mock_mediator = Mock()
-            mock_mediator.log = Mock()
-            mock_mediator.query_backend = Mock(return_value="test query")
-
-            hook = LegalAuthoritySearchHook(mock_mediator)
-            ecfr_payload = {
-                'results': [
-                    {
-                        'hierarchy': {
-                            'title': '24',
-                            'part': '982',
-                            'subpart': 'L',
-                            'section': '982.555',
-                        },
-                        'headings': {
-                            'part': 'Section 8 Tenant-Based Assistance: Housing Choice Voucher Program',
-                            'section': 'Informal hearing for participant.',
-                        },
-                        'full_text_excerpt': '<strong>24</strong> CFR 982.555 governs informal hearing procedures for participants.',
-                        'score': 0.98,
-                    }
-                ]
-            }
-            mock_response = Mock()
-            mock_response.raise_for_status = Mock()
-            mock_response.json = Mock(return_value=ecfr_payload)
-
-            with patch('mediator.legal_authority_hooks.search_federal_register', new=None):
-                with patch('mediator.legal_authority_hooks.requests.get', return_value=mock_response):
-                    results = hook.search_federal_register('24 CFR 982.555 housing voucher hearing', max_results=5)
-
-            assert results
-            assert results[0]['source'] == 'ecfr'
-            assert results[0]['citation'] == '24 C.F.R. § 982.555'
-            assert 'Informal hearing' in results[0]['title']
-        except ImportError as e:
-            pytest.skip(f"Test requires dependencies: {e}")
+        """Historical fallback case: missing bounded assets cannot initiate eCFR or HTTP."""
+        from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+        hook=LegalAuthoritySearchHook(Mock())
+        hook._search_ecfr_fallback=Mock(side_effect=AssertionError('implicit eCFR fallback'))
+        with patch('mediator.legal_authority_hooks.requests.get',side_effect=AssertionError('implicit HTTP')) as http:
+            result=hook.search_federal_register('24 CFR 982.555 housing voucher hearing',max_results=5,
+                jurisdiction='federal')
+        assert result==[];http.assert_not_called();hook._search_ecfr_fallback.assert_not_called()
+        diagnostic=hook._collect_search_diagnostics(query='24 CFR 982.555 housing voucher hearing',state=None)
+        assert diagnostic['regulations']['status']=='unavailable'
+        assert diagnostic['regulations']['error_code']=='offline_asset_missing'
+        assert diagnostic['regulations']['applicability']=='unknown'
 
     def test_search_case_law_uses_courtlistener_fallback(self):
         """Case-law search should fall back to CourtListener when RECAP is unavailable."""
@@ -299,54 +307,43 @@ class TestLegalAuthoritySearchHook:
             pytest.skip(f"Test requires dependencies: {e}")
 
     def test_search_all_sources_adds_oregon_statute_fallback(self):
-        """Broad source search should add Oregon state statutes when federal statutes are empty."""
-        try:
-            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
-
-            mock_mediator = Mock()
-            mock_mediator.log = Mock()
-            mock_mediator.query_backend = Mock(return_value="test query")
-
-            hook = LegalAuthoritySearchHook(mock_mediator)
-            hook.search_us_code = Mock(return_value=[])
-            hook.search_federal_register = Mock(return_value=[])
-            hook.search_case_law = Mock(return_value=[])
-            hook.search_web_archives = Mock(return_value=[])
-            hook._search_oregon_statutes_fallback = Mock(return_value=[{'citation': 'ORS 659A.145', 'source': 'oregon_public_law'}])
-
-            results = hook.search_all_sources('Oregon housing authority reasonable accommodation', jurisdiction='or')
-
-            assert results['statutes'] == [{'citation': 'ORS 659A.145', 'source': 'oregon_public_law'}]
-            hook._search_oregon_statutes_fallback.assert_called_once_with(
-                'Oregon housing authority reasonable accommodation',
-                max_results=5,
-            )
-        except ImportError as e:
-            pytest.skip(f"Test requires dependencies: {e}")
+        """Historical fallback case: explicit Oregon rows stay in the bounded state bucket."""
+        from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+        hook=LegalAuthoritySearchHook(Mock())
+        row={'source_family':'state_statute','citation':'ORS 659A.145',
+            'uri':'https://www.oregonlegislature.gov/example','jurisdiction':'OR','applicability':'unknown'}
+        hook.lookup_bounded_corpus=Mock(return_value={'status':'success','results':[row],'applicability':'unknown'})
+        hook._search_oregon_statutes_fallback=Mock(side_effect=AssertionError('implicit live fallback'))
+        result=hook.search_all_sources('Oregon housing authority reasonable accommodation',
+            jurisdiction='or',authority_families=['statute'])
+        assert result['statutes']==[] and result['state_statutes']==[row]
+        hook.lookup_bounded_corpus.assert_called_once_with(source_family='state_statute',
+            query='Oregon housing authority reasonable accommodation',max_results=5,retrieval_mode='offline',jurisdiction='OR',state='OR')
+        hook._search_oregon_statutes_fallback.assert_not_called()
+        assert result['state_statutes'][0]['applicability']=='unknown'
 
     def test_search_us_code_uses_federal_statute_fallback(self):
-        """Statute search should return official U.S. Code fallbacks for housing queries."""
-        try:
-            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
-
-            mock_mediator = Mock()
-            mock_mediator.log = Mock()
-            mock_mediator.query_backend = Mock(return_value="test query")
-
-            hook = LegalAuthoritySearchHook(mock_mediator)
-            mock_response = Mock()
-            mock_response.raise_for_status = Mock()
-            mock_response.text = '<html><head><title>42 U.S.C. § 3604 - Discrimination in the sale or rental of housing</title></head></html>'
-
-            with patch('mediator.legal_authority_hooks.search_us_code', new=None):
-                with patch('mediator.legal_authority_hooks.requests.get', return_value=mock_response):
-                    results = hook.search_us_code('fair housing reasonable accommodation voucher', max_results=5)
-
-            assert results
-            assert results[0]['source'] == 'uscode_house'
-            assert any(row['citation'] == '42 U.S.C. § 3604(f)(3)(B)' for row in results)
-        except ImportError as e:
-            pytest.skip(f"Test requires dependencies: {e}")
+        """Historical fallback case: explicit cached source provenance needs no HTTP."""
+        import hashlib
+        from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+        hook=LegalAuthoritySearchHook(Mock())
+        hook._search_federal_statutes_fallback=Mock(side_effect=AssertionError('implicit federal fallback'))
+        query='fair housing reasonable accommodation voucher'
+        passage='Synthetic public statutory passage concerning reasonable accommodation.'
+        row={'citation':'42 U.S.C. § 3604(f)(3)(B)','uri':'https://uscode.house.gov/example',
+            'text':passage,'jurisdiction':'federal','corpus_id':'synthetic-uscode'}
+        with patch('mediator.legal_authority_hooks.requests.get',side_effect=AssertionError('implicit HTTP')) as http:
+            result=hook.search_us_code(query,max_results=5,retrieval_mode='cache',jurisdiction='federal',
+                offline_cache={'us_code|'+query+'|federal|':[row]})
+        http.assert_not_called();hook._search_federal_statutes_fallback.assert_not_called()
+        assert len(result)==1 and result[0]['source_family']=='us_code'
+        assert result[0]['citation']=='42 U.S.C. § 3604(f)(3)(B)'
+        assert result[0]['uri']==row['uri'] and result[0]['source_passage']==passage
+        assert result[0]['content_hash_scope']=='source_passage'
+        assert result[0]['content_hash']=='sha256:'+hashlib.sha256(passage.encode('utf-8')).hexdigest()
+        assert result[0]['jurisdiction']=='federal' and result[0]['jurisdiction_status']=='source'
+        assert result[0]['effective_date']is None and result[0]['effective_date_status']=='unknown'
+        assert result[0]['corpus_id']=='synthetic-uscode' and result[0]['applicability']=='unknown'
 
     def test_search_web_archives_uses_agency_guidance_fallback(self):
         """Web-archive search should fall back to curated HUD guidance when archive search is unavailable."""
@@ -878,8 +875,9 @@ class TestLegalAuthorityStorageHook:
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
     
-    def test_get_authorities_by_claim(self):
+    def test_get_authorities_by_claim(self, monkeypatch):
         """Test retrieving authorities by claim type"""
+        fixture_calls = _install_legal_passage_graph_fixture(monkeypatch)
         try:
             from mediator.legal_authority_hooks import LegalAuthorityStorageHook
             import duckdb
@@ -903,6 +901,7 @@ class TestLegalAuthorityStorageHook:
                 }
                 
                 hook.add_authority(authority_data, 'testuser', claim_type='employment')
+                assert fixture_calls  # This storage test uses its explicit legal-passage input.
                 
                 # Retrieve by claim
                 results = hook.get_authorities_by_claim('testuser', 'employment')
@@ -918,8 +917,9 @@ class TestLegalAuthorityStorageHook:
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
 
-    def test_add_authority_persists_fact_rows(self):
+    def test_add_authority_persists_fact_rows(self, monkeypatch):
         """Test storing an authority also persists extracted fact rows."""
+        fixture_calls = _install_legal_passage_graph_fixture(monkeypatch)
         try:
             from mediator.legal_authority_hooks import LegalAuthorityStorageHook
             import duckdb
@@ -942,6 +942,7 @@ class TestLegalAuthorityStorageHook:
                 }
 
                 record_id = hook.add_authority(authority_data, 'testuser', claim_type='civil rights')
+                assert fixture_calls  # This storage test uses its explicit legal-passage input.
                 authorities = hook.get_authorities_by_claim('testuser', 'civil rights')
                 facts = hook.get_authority_facts(record_id)
 
@@ -955,8 +956,9 @@ class TestLegalAuthorityStorageHook:
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
 
-    def test_add_authority_persists_parse_summary_and_chunks(self):
+    def test_add_authority_persists_parse_summary_and_chunks(self, monkeypatch):
         """Test authority parsing stores parse summary fields and chunk rows."""
+        fixture_calls = _install_legal_passage_graph_fixture(monkeypatch)
         try:
             from mediator.legal_authority_hooks import LegalAuthorityStorageHook
             import duckdb
@@ -1003,6 +1005,7 @@ class TestLegalAuthorityStorageHook:
                 }
 
                 record_id = hook.add_authority(authority_data, 'testuser', claim_type='employment')
+                assert fixture_calls  # This storage test uses its explicit legal-passage input.
                 authority = hook.get_authority_by_id(record_id)
                 chunks = hook.get_authority_chunks(record_id)
 
@@ -1262,8 +1265,9 @@ class TestLegalAuthorityStorageHook:
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
 
-    def test_add_authority_preserves_html_parse_contract(self):
+    def test_add_authority_preserves_html_parse_contract(self, monkeypatch):
         """Test authority HTML content is normalized through the shared parse contract."""
+        fixture_calls = _install_legal_passage_graph_fixture(monkeypatch)
         try:
             from mediator.legal_authority_hooks import LegalAuthorityStorageHook
             import duckdb
@@ -1310,6 +1314,7 @@ class TestLegalAuthorityStorageHook:
                 }
 
                 record_id = hook.add_authority(authority_data, 'testuser', claim_type='employment')
+                assert fixture_calls  # This storage test uses its explicit legal-passage input.
                 authority = hook.get_authority_by_id(record_id)
                 chunks = hook.get_authority_chunks(record_id)
                 facts = hook.get_authority_facts(record_id)
@@ -1371,11 +1376,14 @@ class TestLegalAuthorityStorageHook:
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
 
-    def test_add_authority_persists_graph_metadata(self):
+    def test_add_authority_persists_graph_metadata(self, monkeypatch):
         """Test authority storage persists graph summary fields and graph rows."""
         try:
             from mediator.legal_authority_hooks import LegalAuthorityStorageHook
             import duckdb
+            from integrations.ipfs_datasets import graphs
+            private_extractor = Mock(side_effect=AssertionError('legal authority must not enter private extraction'))
+            monkeypatch.setattr(graphs, '_run_owned_private_extractor', private_extractor)
 
             mock_mediator = Mock()
             mock_mediator.log = Mock()
@@ -1422,6 +1430,12 @@ class TestLegalAuthorityStorageHook:
                 authority = hook.get_authority_by_id(record_id)
                 graph = hook.get_authority_graph(record_id)
 
+                private_extractor.assert_not_called()
+                assert authority['graph_metadata']['legal_passage'] is True
+                assert authority['graph_metadata']['source_family'] == 'legal_authority'
+                assert authority['graph_metadata']['record_scope'] == 'legal_authority'
+                assert authority['graph_metadata']['artifact_family'] == 'legal_authority_text'
+                assert authority['graph_metadata']['private_extraction']['diagnostic'] == 'legal_passage_not_private_extraction'
                 assert record_id > 0
                 assert authority is not None
                 assert authority['graph_status'] in {'unavailable', 'available-fallback'}
@@ -1503,7 +1517,12 @@ class TestLegalAuthorityStorageHook:
                     }
                     for rel in graph['relationships']
                 )
-                assert any(entity['type'] == 'fact' for entity in graph['entities'])
+                legal_nodes = [entity for entity in graph['entities'] if entity['type'] == 'authority_source']
+                assert legal_nodes
+                assert all(entity['id'].startswith('authority_source:') for entity in legal_nodes)
+                assert all(entity['attributes']['about_complainant'] is False for entity in legal_nodes)
+                assert not any(entity['type'] == 'fact' for entity in graph['entities'])
+                assert all(rel['relation_type'] == 'cites_authority' for rel in graph['relationships'])
                 assert len(graph['relationships']) >= 1
                 assert all('relation_type' in rel for rel in graph['relationships'])
             finally:
@@ -1813,8 +1832,9 @@ class TestLegalAuthorityStorageHook:
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
     
-    def test_get_statistics(self):
+    def test_get_statistics(self, monkeypatch):
         """Test getting authority statistics"""
+        fixture_calls = _install_legal_passage_graph_fixture(monkeypatch)
         try:
             from mediator.legal_authority_hooks import LegalAuthorityStorageHook
             import duckdb
@@ -1834,10 +1854,12 @@ class TestLegalAuthorityStorageHook:
                         'type': 'statute',
                         'source': 'us_code',
                         'citation': f'Test § {i}',
-                        'title': f'Test Title {i}'
+                        'title': f'Test Title {i}',
+                        'content': f'Synthetic legal authority passage {i}.'
                     }
                     hook.add_authority(authority_data, 'testuser')
                 
+                assert len(fixture_calls) == 3
                 stats = hook.get_statistics('testuser')
                 
                 assert stats['available'] is True
@@ -1931,8 +1953,9 @@ class TestMediatorLegalAuthorityIntegration:
             pytest.skip(f"Test requires dependencies: {e}")
     
     @pytest.mark.integration
-    def test_mediator_search_and_store_authorities(self):
+    def test_mediator_search_and_store_authorities(self, monkeypatch):
         """Test searching and storing legal authorities through mediator"""
+        fixture_calls = _install_legal_passage_graph_fixture(monkeypatch)
         try:
             from mediator import Mediator
             from complaint_phases import ComplaintPhase
@@ -2045,6 +2068,7 @@ class TestMediatorLegalAuthorityIntegration:
                 
                 # Store
                 stored = mediator.store_legal_authorities(results, claim_type='civil rights')
+                assert fixture_calls  # This storage test uses its explicit legal-passage input.
                 assert 'statutes' in stored
                 assert 'state_statutes' in stored
                 assert 'administrative_rules' in stored

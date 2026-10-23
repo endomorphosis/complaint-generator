@@ -1,28 +1,38 @@
 from __future__ import annotations
 
+import ast
+import contextvars
+import errno
+import fcntl
 import inspect
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
-import sys
 import threading
+import tempfile
 import tomllib
 import uuid
 import zipfile
 import hashlib
 import hmac
 from base64 import b64encode
+from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Set
+from types import MappingProxyType
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Protocol, Set
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
 from complaint_phases.legal_document import parse_legal_document
+from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
+from lib.runtime_ownership import require_module_ownership
 
 
 def _legal_source_availability_snapshot() -> Dict[str, Any]:
@@ -229,17 +239,23 @@ except ModuleNotFoundError:
     anyio = _AnyioFallback()
 
 
-def _ensure_local_ipfs_datasets_path() -> None:
-    repo_root = Path(__file__).resolve().parent.parent
-    candidate = repo_root / "ipfs_datasets_py"
-    candidate_text = str(candidate)
-    if candidate.is_dir() and candidate_text not in sys.path:
-        sys.path.insert(0, candidate_text)
+def _require_ipfs_attr(module_name: str, attr_name: str) -> Any:
+    value, error = import_attr_optional(module_name, attr_name)
+    if value is not None and error is None:
+        return value
+    message = import_failure_message(error) or f"missing attribute {attr_name}"
+    raise ImportError(f"Unable to import {module_name}.{attr_name}: {message}")
 
 
-_ensure_local_ipfs_datasets_path()
+def _prefer_checkout(repo_root: Path, name: str) -> Path:
+    external = repo_root / "external" / name
+    if external.exists():
+        return external
+    return repo_root / name
 
 
+MODULE_OWNERSHIP = require_module_ownership("applications.complaint_workspace")
+RUNTIME_ENTRYPOINT_ROLE = MODULE_OWNERSHIP.role
 DEFAULT_USER_ID = "did:key:anonymous"
 DEFAULT_UI_UX_OPTIMIZER_METHOD = "actor_critic"
 DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
@@ -273,6 +289,13 @@ MIKE_CITATION_KEY_FIELD_PRECEDENCE: tuple[str, ...] = ("citation_id", "id", "sou
 MIKE_STATUS_CONTRACT_VERSION = "complaint-mike-status-v4"
 MIKE_HANDOFF_CONTRACT_VERSION = "complaint-mike-handoff-v4"
 MIKE_SYNC_CONTRACT_VERSION = "complaint-mike-sync-v4"
+DEFAULT_COMPLAINT_MCP_CONNECTOR_URL = "http://localhost:8000/api/complaint-workspace/mcp/rpc"
+MIKE_MCP_CONNECTOR_TOOLS: tuple[str, ...] = (
+    "complaint.generate_grounded_text",
+    "complaint.search_corpus",
+    "complaint.get_handoff",
+    "complaint.sync_draft",
+)
 MAX_MIKE_HANDOFF_PARAGRAPHS = 80
 MAX_MIKE_WEAK_LINKS_DISPLAY = 3
 VALID_MIKE_STRUCTURED_DELTA_OPS: Set[str] = {"insert", "delete", "replace", "edit", "move"}
@@ -380,10 +403,6 @@ DEFAULT_MIKE_SKILL_ASSET_MANIFEST: List[Dict[str, Any]] = [
         "required_for_grounding_modes": ["legal_corpus_only", "strict_legal_containment"],
     },
 ]
-DEFAULT_UI_UX_SCREENSHOT_TARGET = (
-    "tests/test_website_cohesion_playwright.py::"
-    "test_homepage_navigation_can_drive_a_full_complaint_journey_with_real_handoffs"
-)
 DEFAULT_UI_UX_SCREENSHOT_TARGET = "playwright/tests/complaint-flow.spec.js"
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / ".complaint_workspace"
@@ -443,6 +462,174 @@ _CLAIM_ELEMENTS: List[Dict[str, str]] = [
 ]
 DEFAULT_INTAKE_QUESTIONS: List[Dict[str, str]] = deepcopy(_INTAKE_QUESTIONS)
 DEFAULT_CLAIM_ELEMENTS: List[Dict[str, str]] = deepcopy(_CLAIM_ELEMENTS)
+ORIGINAL_COMPLAINT_QUESTION_ID = "original_complaint"
+ORIGINAL_COMPLAINT_SCHEMA = "complaint-generator.original-complaint.v1"
+INTAKE_SESSION_SCHEMA = "complaint-generator.intake-session.v2"
+_NARRATIVE_INQUIRY: Dict[str, str] = {
+    "id": ORIGINAL_COMPLAINT_QUESTION_ID,
+    "label": "Complaint narrative",
+    "prompt": "What happened?",
+    "placeholder": "Describe the events in your own words",
+}
+
+
+def _empty_original_complaint() -> Dict[str, Any]:
+    return {
+        "schema_version": ORIGINAL_COMPLAINT_SCHEMA,
+        "text": "",
+        "revision": 0,
+        "revisions": [],
+    }
+
+
+def migrate_original_complaint(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Add the versioned narrative without rewriting a saved seven-field session.
+
+    Existing ``intake_answers`` keys and values stay as stored. A missing or
+    unversioned narrative becomes ``original_complaint`` and is not copied
+    from ``party_name``.
+    """
+
+    answers = state.get("intake_answers")
+    if not isinstance(answers, dict):
+        state["intake_answers"] = {}
+    current = state.get("original_complaint")
+    if isinstance(current, str):
+        text = current.strip()
+        state["original_complaint"] = {
+            "schema_version": ORIGINAL_COMPLAINT_SCHEMA,
+            "text": text,
+            "revision": 1 if text else 0,
+            "revisions": (
+                [
+                    {
+                        "revision": 1,
+                        "text": text,
+                        "captured_at": str(state.get("updated_at") or ""),
+                        "source": "legacy_string",
+                    }
+                ]
+                if text
+                else []
+            ),
+        }
+    elif isinstance(current, dict):
+        text = str(current.get("text") or "").strip()
+        revisions = current.get("revisions")
+        if not isinstance(revisions, list):
+            revisions = []
+        else:
+            revisions = [item for item in revisions if isinstance(item, dict)]
+        try:
+            revision = int(current.get("revision") or 0)
+        except (TypeError, ValueError):
+            revision = 0
+        if text and revision <= 0:
+            revision = len(revisions) or 1
+        if text and not revisions:
+            revisions = [
+                {
+                    "revision": revision or 1,
+                    "text": text,
+                    "captured_at": str(current.get("captured_at") or state.get("updated_at") or ""),
+                    "source": "legacy_object",
+                }
+            ]
+            revision = revision or 1
+        current["schema_version"] = ORIGINAL_COMPLAINT_SCHEMA
+        current["text"] = text
+        current["revision"] = revision
+        current["revisions"] = revisions
+        state["original_complaint"] = current
+    else:
+        state["original_complaint"] = _empty_original_complaint()
+    state["intake_session_schema"] = INTAKE_SESSION_SCHEMA
+    return state
+
+
+def _narrative_record(state: Dict[str, Any]) -> Dict[str, Any]:
+    migrate_original_complaint(state)
+    record = state.get("original_complaint")
+    if not isinstance(record, dict):
+        record = _empty_original_complaint()
+        state["original_complaint"] = record
+    return record
+
+
+def _structured_answers_present(state: Dict[str, Any]) -> bool:
+    answers = state.get("intake_answers") or {}
+    if not isinstance(answers, dict):
+        return False
+    return any(str(answers.get(question["id"]) or "").strip() for question in _INTAKE_QUESTIONS)
+
+
+def _narrative_is_open(state: Dict[str, Any]) -> bool:
+    """Ask for the story only at the start of a session that has no structured answers.
+
+    Saved seven-field sessions stay on their next structured question. The
+    narrative can still be revised by passing its own question id.
+    """
+
+    record = _narrative_record(state)
+    if int(record.get("revision") or 0) > 0 or str(record.get("text") or "").strip():
+        return False
+    if _structured_answers_present(state):
+        return False
+    return True
+
+
+_UNKNOWN_INTAKE_ANSWERS = {
+    "unknown", "i do not know", "i don't know", "i dont know", "idk", "not sure",
+    "unsure", "no idea", "do not know", "don't know", "n/a", "na", "none",
+}
+
+
+def _workspace_stopping_policy(
+    state: Dict[str, Any],
+    *,
+    active_question: Optional[Dict[str, Any]],
+    answers: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Workspace view of the same stopping outcomes the interview denoiser returns."""
+    from complaint_phases.denoiser import project_stopping_policy
+
+    wait = state.get("intentional_user_wait") if isinstance(state.get("intentional_user_wait"), dict) else {}
+    paused = bool(wait.get("paused")) and bool(wait.get("intentional", True))
+    stored = state.get("interview_stop") if isinstance(state.get("interview_stop"), dict) else None
+    shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+    if stored is None and isinstance(shared.get("interview_stop"), dict):
+        stored = shared.get("interview_stop")
+    if isinstance(stored, dict) and stored.get("state"):
+        return project_stopping_policy(stored, paused=paused)
+
+    values = [str(value or "").strip().lower() for value in (answers or {}).values() if str(value or "").strip()]
+    unknown_only = bool(values) and all(value in _UNKNOWN_INTAKE_ANSWERS for value in values)
+    if paused:
+        state_name = "paused"
+    elif active_question is not None:
+        state_name = "needs_answer"
+    elif unknown_only:
+        state_name = "deferred_unknown"
+    else:
+        state_name = "saturated"
+    stop = {
+        "state": state_name,
+        "intake_complete": False,
+        "filing_ready": False,
+        "legal_sufficiency": False,
+        "core_facts_complete": False,
+        "unresolved_issue_summary": {
+            "items": [{"reason": "unknown_only_session" if unknown_only else "structured_questions_are_not_legal_sufficiency"}],
+            "open_answerable_count": 1 if active_question is not None else 0,
+            "legal_sufficiency": False,
+            "core_facts_complete": False,
+            "proof_requirements_satisfied": False,
+            "rejected_shortcuts": ["empty_question_list"] if active_question is None else [],
+        },
+    }
+    return project_stopping_policy(stop, paused=paused)
+
+
 _CLAIM_TYPE_LABELS: Dict[str, str] = {
     "retaliation": "Retaliation",
     "employment_discrimination": "Employment Discrimination",
@@ -525,6 +712,9 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "mike-status",
     "sync-mike-draft",
     "draft-proof-report",
+    "get-draft-proof-report",
+    "render-draft-proof-report",
+    "pin-draft-proof-report",
     "score-draft-quality",
     "improve-draft",
     "proof-history",
@@ -574,6 +764,8 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "getMikeIntegrationStatus",
     "syncMikeFinalDraft",
     "getDraftProofReport",
+    "renderDraftProofReport",
+    "pinDraftProofReport",
     "scoreDraftQuality",
     "improveDraft",
     "getProofHistory",
@@ -769,7 +961,7 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
     },
     "draft_proof_report": {
         "package_export": "get_draft_proof_report",
-        "cli_command": "get-draft-proof-report",
+        "cli_command": "draft-proof-report",
         "mcp_tool": "complaint.get_draft_proof_report",
         "browser_sdk_method": "getDraftProofReport",
     },
@@ -824,6 +1016,40 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
 }
 
 
+def format_terminal_why(
+    inquiry: Optional[Dict[str, Any]] = None,
+    *,
+    state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Explain the current gap question for a terminal /why command."""
+    from complaint_phases.denoiser import format_terminal_why as render_terminal_why
+
+    chosen = inquiry if isinstance(inquiry, dict) else None
+    if chosen is None and isinstance(state, dict):
+        stored = state.get("explained_inquiry")
+        if isinstance(stored, dict):
+            chosen = stored
+        else:
+            projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+            pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else {}
+            phase_inquiry = None
+            phase_data = state.get("phase_data") if isinstance(state.get("phase_data"), dict) else {}
+            intake = phase_data.get("intake") if isinstance(phase_data.get("intake"), dict) else {}
+            if isinstance(intake.get("current_explained_inquiry"), dict):
+                phase_inquiry = intake.get("current_explained_inquiry")
+            chosen = phase_inquiry or (pending or None)
+    return render_terminal_why(chosen)
+
+
+def publish_explained_inquiry(state: Dict[str, Any], selection: Dict[str, Any]) -> Dict[str, Any]:
+    """Copy a phase-manager selection onto the workspace session without storing an answer."""
+    current = selection.get("current") if isinstance(selection, dict) else None
+    inquiries = selection.get("inquiries") if isinstance(selection, dict) else None
+    state["explained_inquiry"] = current if isinstance(current, dict) else None
+    state["explained_inquiries"] = list(inquiries or [])
+    return state
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -831,6 +1057,272 @@ def _utc_now() -> str:
 def _slugify_user_id(user_id: str) -> str:
     normalized = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(user_id or DEFAULT_USER_ID).strip())
     return normalized.strip("-") or DEFAULT_USER_ID
+
+
+class WorkspaceAuthorizationDenied(PermissionError):
+    """Private workspace operation refused for this principal or case.
+
+    The message is a stable code. It must not echo session contents, markers,
+    paths, or caller-supplied identifiers.
+    """
+
+    code = "authorization_denied"
+
+    def __init__(self) -> None:
+        super().__init__("authorization_denied")
+
+
+class WorkspacePersistenceError(RuntimeError):
+    """Existing session bytes could not be read or must not be replaced."""
+
+    def __init__(self, message: str, *, code: str, public_status: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.public_status = public_status
+
+
+class AuthorizationRequirement:
+    """Resource/ability admission record.
+
+    Mirrors the transport-neutral shape of
+    ``ipfs_kit_py`` ``AuthorizationRequirement.protected(resource, ability)``
+    without importing storage services. It does not authenticate a token or
+    infer case ownership.
+    """
+
+    def __init__(self, resource: str, ability: str, *, protected: bool = True) -> None:
+        self.resource = str(resource or "")
+        self.ability = str(ability or "")
+        self.protected = bool(protected)
+
+    @classmethod
+    def protected(cls, resource: str, ability: str) -> "AuthorizationRequirement":
+        return cls(resource, ability, protected=True)
+
+    @classmethod
+    def public(cls, resource: str, ability: str) -> "AuthorizationRequirement":
+        return cls(resource, ability, protected=False)
+
+
+@dataclass(frozen=True)
+class WorkspaceDispatchContext:
+    """Transport-neutral principal context shared by service, facade, HTTP, and MCP.
+
+    Compatible with ``ipfs_kit_py.core.service_router.DispatchContext``:
+    ``principal`` is a non-empty string or None, and ``attributes`` is a mapping.
+    """
+
+    principal: Optional[str] = None
+    attributes: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.principal is not None and (not isinstance(self.principal, str) or not self.principal):
+            raise ValueError("principal must be a non-empty string or None")
+        if not isinstance(self.attributes, Mapping):
+            raise ValueError("dispatch context attributes must be a mapping")
+        object.__setattr__(self, "attributes", MappingProxyType(dict(self.attributes)))
+
+
+@dataclass(frozen=True)
+class WorkspaceAccess:
+    """Authenticated principal binding. A supplied user id is not authorization."""
+
+    trust: str
+    principal_id: Optional[str] = None
+    case_id: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.trust not in {"trusted_local", "authenticated", "unauthenticated"}:
+            raise ValueError("unsupported workspace trust")
+        if self.trust == "authenticated" and not self.principal_id:
+            raise ValueError("authenticated workspace access requires a principal")
+
+    @staticmethod
+    def trusted_local(principal_id: Optional[str] = None, case_id: Optional[str] = None) -> "WorkspaceAccess":
+        """Explicit local operator ownership. ``principal_id`` None selects the requested local id."""
+
+        return WorkspaceAccess("trusted_local", principal_id or None, case_id or None)
+
+    @staticmethod
+    def authenticated(principal_id: str, case_id: Optional[str] = None) -> "WorkspaceAccess":
+        return WorkspaceAccess("authenticated", str(principal_id), case_id or None)
+
+    @staticmethod
+    def unauthenticated() -> "WorkspaceAccess":
+        return WorkspaceAccess("unauthenticated", None, None)
+
+    def dispatch_context(self, *, user_id: Optional[str], case_id: Optional[str], ability: str) -> WorkspaceDispatchContext:
+        principal = self.principal_id if self.trust == "authenticated" else None
+        if self.trust == "trusted_local" and self.principal_id:
+            principal = self.principal_id
+        return WorkspaceDispatchContext(
+            principal=principal,
+            attributes={
+                "trust": self.trust,
+                "user_id": user_id,
+                "bound_principal": self.principal_id,
+                "case_id": case_id,
+                "bound_case_id": self.case_id,
+                "ability": ability,
+                "resource": "workspace.case",
+            },
+        )
+
+
+class WorkspaceAuthorizer:
+    """Admit a protected workspace operation for the bound principal and case.
+
+    A client-supplied user id is an identifier. Trusted-local admission must be
+    an explicit ``trusted_local`` trust value. This object does not accept a
+    process-wide bearer token as case ownership.
+    """
+
+    def __call__(self, requirement: AuthorizationRequirement, context: WorkspaceDispatchContext) -> bool:
+        if not isinstance(requirement, AuthorizationRequirement):
+            return False
+        if not requirement.protected:
+            return True
+        attributes = context.attributes
+        trust = str(attributes.get("trust") or "")
+        requested_user = attributes.get("user_id")
+        requested_case = attributes.get("case_id")
+        bound_case = attributes.get("bound_case_id")
+        if requested_case is not None and bound_case is not None and str(requested_case) != str(bound_case):
+            return False
+        record_case = attributes.get("record_case_id")
+        if record_case is not None and bound_case is not None and str(record_case) != str(bound_case):
+            return False
+        if record_case is not None and requested_case is not None and str(record_case) != str(requested_case):
+            return False
+        if trust == "trusted_local":
+            bound = attributes.get("bound_principal")
+            if bound and requested_user is not None and str(requested_user) != str(bound):
+                return False
+            return True
+        if trust != "authenticated" or not context.principal:
+            return False
+        if requested_user is None or str(requested_user) != context.principal:
+            return False
+        return True
+
+
+class PrincipalRegistry:
+    """Injectable bearer-token to principal map. Tokens are not interchangeable."""
+
+    def __init__(self) -> None:
+        self._tokens: Dict[str, WorkspaceAccess] = {}
+
+    def register(self, token: str, principal_id: str, *, case_id: Optional[str] = None) -> None:
+        normalized = str(token or "").strip()
+        if not normalized:
+            raise ValueError("principal token is required")
+        self._tokens[normalized] = WorkspaceAccess.authenticated(principal_id, case_id=case_id)
+
+    def resolve(self, token: Optional[str]) -> Optional[WorkspaceAccess]:
+        normalized = str(token or "").strip()
+        if not normalized:
+            return None
+        return self._tokens.get(normalized)
+
+
+_REQUEST_ACCESS: contextvars.ContextVar[Optional[WorkspaceAccess]] = contextvars.ContextVar(
+    "complaint_workspace_access",
+    default=None,
+)
+_REQUEST_CASE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "complaint_workspace_case",
+    default=None,
+)
+_REQUEST_CID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "complaint_workspace_cid",
+    default=None,
+)
+_REQUEST_STORAGE_KEY: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "complaint_workspace_storage_key",
+    default=None,
+)
+
+_PUBLIC_MCP_TOOLS = frozenset(
+    {
+        "complaint.create_identity",
+        "complaint.list_intake_questions",
+        "complaint.list_claim_elements",
+        "complaint.search_corpus",
+    }
+)
+_LEGACY_MAP_NAME = "legacy-namespace-map.json"
+_MCP_HOST_PATH_ARGUMENTS = frozenset({
+    "input_path", "manifest_path", "statefile_path", "evidence_db_path",
+    "legal_authority_db_path", "claim_support_db_path", "index_path", "paths",
+    "artifact_path", "artifact_dir", "output_dir", "output_path", "evidence_root",
+    "duckdb_output_dir", "screenshot_dir", "screenshot_paths", "config_path", "gmail_oauth_client_secrets",
+    "gmail_oauth_token_cache",
+})
+
+
+def principal_namespace(principal_id: str) -> str:
+    """Stable collision-resistant namespace for an exact principal identity."""
+
+    material = str(principal_id if principal_id is not None else "").encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
+
+
+def namespace_filename(principal_id: str) -> str:
+    return f"p-{principal_namespace(principal_id)}.json"
+
+
+@contextmanager
+def workspace_access_scope(access: Optional[WorkspaceAccess]) -> Iterator[None]:
+    token = _REQUEST_ACCESS.set(access)
+    try:
+        yield
+    finally:
+        _REQUEST_ACCESS.reset(token)
+
+
+@contextmanager
+def _workspace_reference_scope(
+    *,
+    case_id: Optional[str] = None,
+    cid: Optional[str] = None,
+    storage_key: Optional[str] = None,
+) -> Iterator[None]:
+    case_token = _REQUEST_CASE.set(None if case_id is None or str(case_id).strip() == "" else str(case_id))
+    cid_token = _REQUEST_CID.set(None if cid is None or str(cid).strip() == "" else str(cid))
+    key_token = _REQUEST_STORAGE_KEY.set(
+        None if storage_key is None or str(storage_key).strip() == "" else str(storage_key)
+    )
+    try:
+        yield
+    finally:
+        _REQUEST_CASE.reset(case_token)
+        _REQUEST_CID.reset(cid_token)
+        _REQUEST_STORAGE_KEY.reset(key_token)
+
+
+def _bearer_token_from_headers(headers: Mapping[str, str]) -> str:
+    authorization = str(headers.get("authorization") or headers.get("Authorization") or "")
+    if authorization.startswith("Bearer "):
+        return authorization[7:].strip()
+    return ""
+
+
+def access_from_http_headers(
+    headers: Mapping[str, str],
+    *,
+    principal_registry: Optional[PrincipalRegistry] = None,
+    trusted_local: bool = False,
+) -> WorkspaceAccess:
+    """Resolve request trust. A generic bearer or supplied user id is not a principal."""
+
+    token = _bearer_token_from_headers(headers)
+    if principal_registry is not None and token:
+        resolved = principal_registry.resolve(token)
+        if resolved is not None:
+            return resolved
+    if trusted_local:
+        return WorkspaceAccess.trusted_local()
+    return WorkspaceAccess.unauthenticated()
 
 
 def _split_lines(value: Optional[str]) -> List[str]:
@@ -1201,12 +1693,13 @@ def _resolve_llm_draft_backend_candidates(
         if not provider_key or provider_key in seen:
             continue
         seen.add(provider_key)
-        candidates.append(
-            _resolve_llm_draft_backend(
-                fallback_provider,
-                requested_model or None,
-            )
+        candidate = _resolve_llm_draft_backend(
+            fallback_provider,
+            requested_model or None,
         )
+        # An internal default is a selected provider, not an explicit request.
+        candidate["requested_provider"] = None
+        candidates.append(candidate)
     return candidates or [_resolve_llm_draft_backend(provider, model)]
 
 
@@ -1944,7 +2437,10 @@ def _looks_like_formal_complaint_candidate(body: str) -> bool:
 
 def generate_decentralized_id() -> Dict[str, Any]:
     try:
-        from ipfs_datasets_py.processors.auth.ucan import UCANManager
+        UCANManager = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.auth.ucan",
+            "UCANManager",
+        )
 
         manager = UCANManager.get_instance()
         if manager.initialize():
@@ -1970,13 +2466,66 @@ def generate_decentralized_id() -> Dict[str, Any]:
     }
 
 
-def _default_state(user_id: str) -> Dict[str, Any]:
+_PRIVACY_MODE_NOTICE = (
+    "Processing choice is saved per case. Remote Grok processing requires explicit consent, "
+    "and Grok can read submitted prompt content when you authorize it. "
+    "Local encryption at rest is separate from remote processing. "
+    "Use /privacy local to disable future remote calls, or /privacy grok to authorize them."
+)
+
+
+def _privacy_helpers():
+    from integrations.ipfs_datasets.llm import (
+        build_complaint_privacy_context,
+        coerce_effective_privacy_policy,
+        complaint_data_class_inventory,
+        inspect_privacy_policy,
+        privacy_policy_for_mode,
+    )
+
     return {
+        "build_complaint_privacy_context": build_complaint_privacy_context,
+        "coerce_effective_privacy_policy": coerce_effective_privacy_policy,
+        "complaint_data_class_inventory": complaint_data_class_inventory,
+        "inspect_privacy_policy": inspect_privacy_policy,
+        "privacy_policy_for_mode": privacy_policy_for_mode,
+    }
+
+
+def _state_case_id(state: Mapping[str, Any], user_id: str) -> str:
+    case_id = str(state.get("case_id") or user_id or "").strip()
+    return case_id or str(user_id or "")
+
+
+def _apply_effective_privacy_policy(state: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    helpers = _privacy_helpers()
+    case_id = _state_case_id(state, user_id)
+    state["case_id"] = case_id
+    inspection = helpers["inspect_privacy_policy"](
+        state.get("privacy_policy"),
+        user_id=user_id,
+        case_id=case_id,
+    )
+    state["privacy_policy"] = inspection["policy"]
+    state["privacy_policy_load"] = {
+        "admitted": bool(inspection["admitted"]),
+        "reason": str(inspection["reason"] or ""),
+        "cloud_processing_enabled": bool(inspection["cloud_processing_enabled"]),
+    }
+    state.setdefault("privacy_notice_shown", False)
+    return state
+
+
+def _default_state(user_id: str) -> Dict[str, Any]:
+    state = {
         "user_id": user_id,
+        "case_id": user_id,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
         "claim_type": _normalize_claim_type("retaliation"),
         "case_synopsis": "",
+        "intake_session_schema": INTAKE_SESSION_SCHEMA,
+        "original_complaint": _empty_original_complaint(),
         "intake_answers": {},
         "intake_history": [],
         "evidence": {"testimony": [], "documents": []},
@@ -1988,6 +2537,7 @@ def _default_state(user_id: str) -> Dict[str, Any]:
         "latest_packet_export": None,
         "latest_export_critic": None,
         "ui_readiness": None,
+        "privacy_notice_shown": False,
         "mike_integration": {
             "last_handoff": None,
             "last_sync": None,
@@ -1996,33 +2546,1828 @@ def _default_state(user_id: str) -> Dict[str, Any]:
             "audit_trail": [],
         },
     }
+    return _apply_effective_privacy_policy(state, user_id)
+
+
+class _ComplaintWorkspaceHandlerBackend(Protocol):
+    """Narrow service contract required by the request-handler boundary."""
+
+    def _load_state(self, user_id: str) -> Dict[str, Any]: ...
+
+    def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]: ...
+
+    def _build_question_status(self, answers: Dict[str, Any]) -> List[Dict[str, Any]]: ...
+
+    def _next_question(self, answers: Dict[str, Any]) -> Optional[Dict[str, str]]: ...
+
+    def _question_by_id(self, question_id: Optional[str]) -> Optional[Dict[str, str]]: ...
+
+    def _build_review(self, state: Dict[str, Any]) -> Dict[str, Any]: ...
+
+    def _build_case_synopsis(self, state: Dict[str, Any]) -> str: ...
+
+    def _build_intake_chat_payload(
+        self,
+        state: Dict[str, Any],
+        *,
+        accepted_answer: Optional[Dict[str, Any]] = None,
+        requested_question_id: Optional[str] = None,
+    ) -> Dict[str, Any]: ...
+
+    def _build_draft(
+        self,
+        state: Dict[str, Any],
+        requested_relief: Optional[List[str]] = None,
+        *,
+        use_llm: bool = False,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        config_path: Optional[str] = None,
+        backend_id: Optional[str] = None,
+    ) -> Dict[str, Any]: ...
+
+    def import_local_evidence(
+        self,
+        user_id: Optional[str],
+        *,
+        paths: List[str],
+        claim_element_id: str = "causation",
+        kind: str = "document",
+        evidence_root: Optional[str] = None,
+    ) -> Dict[str, Any]: ...
+
+
+class ComplaintWorkspaceRequestHandlers:
+    """Request-facing mutations isolated from workspace state-shaping helpers.
+
+    ``ComplaintWorkspaceService`` retains its public methods as a compatibility
+    facade. This class owns the request lifecycle and depends only on the narrow
+    backend contract above, making the handler group independently testable while
+    keeping the route, CLI, package, and MCP response shapes stable.
+    """
+
+    def __init__(
+        self,
+        workspace: _ComplaintWorkspaceHandlerBackend,
+        *,
+        now: Optional[Callable[[], str]] = None,
+    ) -> None:
+        self.workspace = workspace
+        self._now = now
+
+    @staticmethod
+    def _normalize_user_id(user_id: Optional[str]) -> str:
+        return str(user_id or DEFAULT_USER_ID)
+
+    def _load_state(self, user_id: Optional[str]) -> Dict[str, Any]:
+        return self.workspace._load_state(self._normalize_user_id(user_id))
+
+    def _timestamp(self) -> str:
+        return self._now() if self._now is not None else _utc_now()
+
+    def _build_session_payload(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Compose the stable session response shared by request entrypoints."""
+
+        answers = state.get("intake_answers") or {}
+        return {
+            "session": deepcopy(state),
+            "questions": self.workspace._build_question_status(answers),
+            "next_question": self.workspace._next_question(answers),
+            "review": self.workspace._build_review(state),
+            "case_synopsis": self.workspace._build_case_synopsis(state),
+        }
+
+    def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        state = self.workspace._save_state(self._load_state(user_id))
+        return self._build_session_payload(state)
+
+    def submit_intake_answers(self, user_id: Optional[str], answers: Dict[str, Any]) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = self._load_state(user_id)
+        answer_map = state.setdefault("intake_answers", {})
+        history = state.setdefault("intake_history", [])
+        for question in _INTAKE_QUESTIONS:
+            value = str(answers.get(question["id"]) or "").strip()
+            if not value:
+                continue
+            answer_map[question["id"]] = value
+            history.append({"question_id": question["id"], "answer": value, "captured_at": self._timestamp()})
+        workspace._save_state(state)
+        return self.get_session(str(state.get("user_id")))
+
+    def run_intake_chat_turn(
+        self,
+        user_id: Optional[str],
+        *,
+        message: Optional[str] = None,
+        question_id: Optional[str] = None,
+        expected_question_revision: Optional[int] = None,
+        interview_action: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = self._load_state(user_id)
+        normalized_message = str(message or "").strip()
+        if normalized_message.lower() == "/why":
+            why = format_terminal_why(state=state)
+            payload = workspace._build_intake_chat_payload(state)
+            payload["why"] = why
+            payload["command"] = "/why"
+            payload["stored_as_answer"] = False
+            payload["awaiting_user"] = True
+            payload["message"] = why["display"]
+            return payload
+        normalized_action = str(interview_action or "").strip().lower()
+        if normalized_action == "resume":
+            interview = workspace.apply_shared_interview(
+                state,
+                message=None,
+                question_id=None,
+                expected_question_revision=None,
+                interview_action="resume",
+                narrative_turn=False,
+            )
+            workspace._save_state(state)
+            payload = workspace._build_intake_chat_payload(state)
+            payload["interview"] = interview
+            return payload
+        normalized_question_id = str(question_id or "").strip()
+        narrative_turn = normalized_question_id == ORIGINAL_COMPLAINT_QUESTION_ID or (
+            not normalized_question_id and _narrative_is_open(state)
+        )
+        if narrative_turn:
+            target_question = dict(_NARRATIVE_INQUIRY)
+        else:
+            target_question = (
+                workspace._question_by_id(normalized_question_id)
+                if normalized_question_id
+                else workspace._next_question(state.get("intake_answers") or {})
+            )
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        pending_graph = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else {}
+        if not normalized_question_id and not narrative_turn and message and pending_graph.get("inquiry_id"):
+            normalized_question_id = str(pending_graph["inquiry_id"])
+        graph_inquiry = normalized_question_id.startswith("inq-")
+        if normalized_question_id and target_question is None and not graph_inquiry:
+            raise ValueError(f"Unknown intake question_id: {question_id}")
+
+        accepted_answer: Optional[Dict[str, Any]] = None
+        normalized_message = str(message or "").strip()
+        privacy_command = normalized_message.lower()
+        if privacy_command in {"/privacy local", "/privacy grok"}:
+            helpers = _privacy_helpers()
+            mode = "grok" if privacy_command.endswith("grok") else "local"
+            case_id = _state_case_id(state, str(state.get("user_id") or self._normalize_user_id(user_id)))
+            state["case_id"] = case_id
+            state["privacy_policy"] = helpers["privacy_policy_for_mode"](
+                str(state.get("user_id") or case_id),
+                case_id,
+                mode,
+            )
+            state["privacy_notice_shown"] = True
+            workspace._save_state(state)
+            payload = workspace._build_intake_chat_payload(
+                state,
+                accepted_answer=None,
+                requested_question_id=question_id,
+            )
+            payload["privacy_command"] = {
+                "applied": True,
+                "stored_as_answer": False,
+                "processing_mode": state["privacy_policy"]["processing_mode"],
+            }
+            payload["privacy_notice"] = _PRIVACY_MODE_NOTICE
+            pending = payload.get("message") or ""
+            payload["message"] = f"Saved privacy mode for this case. The pending question is unchanged.\n{pending}".strip()
+            return payload
+
+        joined_effect = None
+        if normalized_message and normalized_action not in {"status", "resume"}:
+            identity_question = normalized_question_id or str((target_question or {}).get("id") or "")
+            joined_effect = workspace._joined_chat_identity(state, identity_question, normalized_message,
+                                                            expected_question_revision)
+            if any(item.get("effect_id") == joined_effect for item in state.get("intake_history", []) if isinstance(item, dict)):
+                payload = workspace._build_intake_chat_payload(state)
+                payload["duplicate_answer_effect"] = True
+                return payload
+        show_privacy_notice = not bool(state.get("privacy_notice_shown"))
+        if show_privacy_notice:
+            state["privacy_notice_shown"] = True
+        if normalized_message and not (graph_inquiry or normalized_action in {"answer", "status"}):
+            if target_question is None:
+                raise ValueError("The intake flow is already complete for this session.")
+            if narrative_turn:
+                record = _narrative_record(state)
+                revision = int(record.get("revision") or 0) + 1
+                captured_at = self._timestamp()
+                revisions = list(record.get("revisions") or [])
+                revisions.append(
+                    {
+                        "revision": revision,
+                        "text": normalized_message,
+                        "captured_at": captured_at,
+                        "source": "intake_chat",
+                    }
+                )
+                record["schema_version"] = ORIGINAL_COMPLAINT_SCHEMA
+                record["text"] = normalized_message
+                record["revision"] = revision
+                record["revisions"] = revisions
+                state["original_complaint"] = record
+                accepted_answer = {
+                    "question_id": ORIGINAL_COMPLAINT_QUESTION_ID,
+                    "answer": normalized_message,
+                    "captured_at": captured_at,
+                    "kind": "narrative",
+                    "revision": revision,
+                }
+            else:
+                answer_map = state.setdefault("intake_answers", {})
+                history = state.setdefault("intake_history", [])
+                answer_map[target_question["id"]] = normalized_message
+                accepted_answer = {
+                    "question_id": target_question["id"],
+                    "answer": normalized_message,
+                    "captured_at": self._timestamp(),
+                }
+                history.append(deepcopy(accepted_answer))
+
+        interview = workspace.apply_shared_interview(
+            state,
+            message=normalized_message or None,
+            question_id=normalized_question_id or None,
+            expected_question_revision=expected_question_revision,
+            interview_action=normalized_action or None,
+            narrative_turn=bool(normalized_message and narrative_turn),
+        )
+        if interview.get("status") == "refused":
+            payload = workspace._build_intake_chat_payload(state)
+            payload["interview"] = interview
+            return payload
+        if joined_effect is not None:
+            workspace._commit_joined_snapshot(state, effect_id=joined_effect,
+                question_id=identity_question, answer=normalized_message)
+        else:
+            workspace._save_state(state)
+        payload = workspace._build_intake_chat_payload(
+            state,
+            accepted_answer=accepted_answer,
+            requested_question_id=None if accepted_answer is not None or graph_inquiry else question_id,
+        )
+        payload["interview"] = interview
+        if show_privacy_notice:
+            payload["privacy_notice"] = _PRIVACY_MODE_NOTICE
+            if str(payload.get("message") or "").startswith("Let's start with the basics."):
+                payload["message"] = f"{_PRIVACY_MODE_NOTICE}\n\n{payload['message']}"
+        return payload
+
+    def save_evidence(
+        self,
+        user_id: Optional[str],
+        *,
+        kind: str,
+        claim_element_id: str,
+        title: str,
+        content: str,
+        source: Optional[str] = None,
+        attachment_names: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = self._load_state(user_id)
+        evidence_store = state.setdefault("evidence", {"testimony": [], "documents": []})
+        collection_key = "documents" if kind == "document" else "testimony"
+        record = {
+            "id": f"{collection_key}-{len(evidence_store.get(collection_key, [])) + 1}",
+            "kind": kind,
+            "claim_element_id": claim_element_id,
+            "title": title,
+            "content": content,
+            "source": source or "",
+            "attachment_names": [str(item).strip() for item in list(attachment_names or []) if str(item).strip()],
+            "saved_at": self._timestamp(),
+        }
+        evidence_store.setdefault(collection_key, []).append(record)
+        workspace._save_state(state)
+        return {
+            "saved": record,
+            "review": workspace._build_review(state),
+            "session": deepcopy(state),
+            "case_synopsis": workspace._build_case_synopsis(state),
+        }
+
+    async def upload_local_evidence_files(
+        self,
+        user_id: Optional[str],
+        *,
+        files: List[Any],
+        claim_element_id: str = "causation",
+        kind: str = "document",
+        evidence_root: Optional[str] = None,
+        note: Optional[str] = None,
+        note_title: Optional[str] = None,
+        source: Optional[str] = "dashboard-chat-upload",
+    ) -> Dict[str, Any]:
+        if not files:
+            raise ValueError("At least one file is required.")
+
+        workspace = self.workspace
+        upload_source = str(source or "dashboard-chat-upload").strip() or "dashboard-chat-upload"
+        uploaded_files: List[Dict[str, Any]] = []
+        memory_files: List[Dict[str, Any]] = []
+        for index, file in enumerate(files, start=1):
+            original_name = Path(str(getattr(file, "filename", None) or f"upload-{index}")).name or f"upload-{index}"
+            file_bytes = file.read()
+            if inspect.isawaitable(file_bytes):
+                file_bytes = await file_bytes
+            if isinstance(file_bytes, str):
+                file_bytes = file_bytes.encode("utf-8")
+            elif file_bytes is None:
+                file_bytes = b""
+            else:
+                file_bytes = bytes(file_bytes)
+            memory_files.append({"filename": original_name, "data": file_bytes})
+            uploaded_files.append(
+                {
+                    "filename": original_name,
+                    "content_type": str(getattr(file, "content_type", None) or "application/octet-stream"),
+                    "size": len(file_bytes),
+                    "storage": "ephemeral-memory",
+                }
+            )
+        payload = workspace.ingest_memory_evidence(
+            user_id,
+            files=memory_files,
+            claim_element_id=claim_element_id,
+            kind=kind,
+        )
+        if payload.get("status") == "unlock_needed":
+            payload["uploaded_files"] = uploaded_files
+            payload["upload_source"] = upload_source
+            return payload
+
+        normalized_note = str(note or "").strip()
+        if normalized_note:
+            uploaded_names = [item["filename"] for item in uploaded_files if item.get("filename")]
+            effective_claim_element_id = claim_element_id
+            if claim_element_id in {"auto", "suggested"}:
+                first_import = next(iter(payload.get("imported") or []), {})
+                effective_claim_element_id = str(
+                    first_import.get("effective_claim_element_id")
+                    or first_import.get("suggested_claim_element_id")
+                    or "causation"
+                ).strip() or "causation"
+            note_record = self.save_evidence(
+                user_id,
+                kind="testimony",
+                claim_element_id=effective_claim_element_id,
+                title=str(note_title or "Chat upload note").strip() or "Chat upload note",
+                content=normalized_note,
+                source=upload_source,
+                attachment_names=uploaded_names,
+            )
+            payload["note_record"] = note_record.get("saved")
+            payload["session"] = note_record.get("session")
+            payload["review"] = note_record.get("review")
+            payload["case_synopsis"] = note_record.get("case_synopsis")
+
+        payload["uploaded_files"] = uploaded_files
+        payload["upload_source"] = upload_source
+        return payload
+
+    def generate_complaint(
+        self,
+        user_id: Optional[str],
+        *,
+        requested_relief: Optional[List[str]] = None,
+        title_override: Optional[str] = None,
+        use_llm: bool = False,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        config_path: Optional[str] = None,
+        backend_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = self._load_state(user_id)
+        draft = workspace._build_draft(
+            state,
+            requested_relief=requested_relief,
+            use_llm=use_llm,
+            provider=provider,
+            model=model,
+            config_path=config_path,
+            backend_id=backend_id,
+        )
+        if title_override:
+            draft["title"] = title_override
+        state["draft"] = draft
+        workspace._save_state(state)
+        return {
+            "draft": deepcopy(draft),
+            "review": workspace._build_review(state),
+            "session": deepcopy(state),
+            "case_synopsis": workspace._build_case_synopsis(state),
+        }
+
+    def update_draft(
+        self,
+        user_id: Optional[str],
+        *,
+        title: Optional[str] = None,
+        body: Optional[str] = None,
+        requested_relief: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = self._load_state(user_id)
+        draft = deepcopy(state.get("draft") or workspace._build_draft(state))
+        if title is not None:
+            draft["title"] = title
+        if body is not None:
+            draft["body"] = body
+        if requested_relief is not None:
+            draft["requested_relief"] = requested_relief
+        draft["updated_at"] = self._timestamp()
+        state["draft"] = draft
+        workspace._save_state(state)
+        return {
+            "draft": deepcopy(draft),
+            "review": workspace._build_review(state),
+            "session": deepcopy(state),
+            "case_synopsis": workspace._build_case_synopsis(state),
+        }
+
+    def update_case_synopsis(self, user_id: Optional[str], synopsis: Optional[str]) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = self._load_state(user_id)
+        state["case_synopsis"] = str(synopsis or "").strip()
+        workspace._save_state(state)
+        session = self.get_session(str(state.get("user_id")))
+        return {
+            "session": session["session"],
+            "review": session["review"],
+            "questions": session["questions"],
+            "next_question": session["next_question"],
+            "case_synopsis": session["case_synopsis"],
+        }
+
+    def update_claim_type(self, user_id: Optional[str], claim_type: Optional[str]) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = self._load_state(user_id)
+        state["claim_type"] = _normalize_claim_type(claim_type)
+        workspace._save_state(state)
+        session = self.get_session(str(state.get("user_id")))
+        return {
+            "session": session["session"],
+            "review": session["review"],
+            "questions": session["questions"],
+            "next_question": session["next_question"],
+            "case_synopsis": session["case_synopsis"],
+            "claim_type": session["session"]["claim_type"],
+            "claim_type_label": _claim_type_display_name(session["session"]["claim_type"]),
+        }
+
+    def reset_session(self, user_id: Optional[str]) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = _default_state(self._normalize_user_id(user_id))
+        workspace._save_state(state)
+        result = self.get_session(str(state["user_id"]))
+        retention = workspace.normal_reset_retention_receipt()
+        result["private_retention"] = retention
+        result["encryption_key_destroyed"] = False
+        result["recovery_path_destroyed"] = False
+        return result
+
+    def delete_private_case(self, user_id: Optional[str], **options: Any) -> Dict[str, Any]:
+        return self.workspace.delete_private_case(user_id, **options)
+
+
+class _WorkspaceCaseKeyProvider:
+    """Resolve through current request admission and the current unlocked store.
+
+    The handle carries no key snapshot or request authority. Retaining it across
+    requests or an operator lock does not retain either capability.
+    """
+
+    def __init__(self, workspace: "ComplaintWorkspaceService") -> None:
+        self._workspace = workspace
+
+    def resolve(self, binding):
+        from integrations.private_storage import PrivateArtifactBinding, canonical_associated_data
+
+        if not isinstance(binding, PrivateArtifactBinding):
+            raise WorkspaceAuthorizationDenied()
+        self._workspace._require_private_case_key_access(
+            binding.tenant_id, binding.case_id, principal_id=binding.principal_id
+        )
+        canonical_associated_data(binding)
+        return self._workspace._private_key_session().provider().resolve(binding)
 
 
 class ComplaintWorkspaceService:
-    def __init__(self, root_dir: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        root_dir: Optional[Path] = None,
+        *,
+        access: Optional[WorkspaceAccess] = None,
+        authorizer: Optional[WorkspaceAuthorizer] = None,
+    ) -> None:
         base_dir = Path(root_dir) if root_dir is not None else _SESSION_DIR
-        self._session_dir = base_dir
-        self._session_dir.mkdir(parents=True, exist_ok=True)
+        self._session_dir = Path(os.path.abspath(base_dir))
+        if self._session_dir.resolve() != self._session_dir:
+            raise WorkspaceAuthorizationDenied()
+        self._session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        root_stat = self._session_dir.lstat()
+        if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != os.getuid():
+            raise WorkspaceAuthorizationDenied()
+        self._session_directory_identity = (root_stat.st_dev, root_stat.st_ino)
         self._last_draft_refinement_error: Optional[str] = None
+        self._default_access = access if access is not None else WorkspaceAccess.trusted_local()
+        self._authorizer = authorizer or WorkspaceAuthorizer()
+        self.request_handlers = ComplaintWorkspaceRequestHandlers(self)
+        self._interview_mediators: Dict[tuple[str, str], Any] = {}
+
+    def apply_shared_interview(
+        self,
+        state: Dict[str, Any],
+        *,
+        message: Optional[str],
+        question_id: Optional[str],
+        expected_question_revision: Optional[int],
+        interview_action: Optional[str],
+        narrative_turn: bool,
+    ) -> Dict[str, Any]:
+        """Delegate narrative start, graph answers, and resume to one mediator transition."""
+        user_id = str(state.get("user_id") or DEFAULT_USER_ID)
+        case_id = _state_case_id(state, user_id)
+        self._check_access(user_id, ability="write", case_id=case_id, record_case_id=case_id)
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else None
+        action = str(interview_action or "").strip().lower()
+        graph_question = str(question_id or "").startswith("inq-")
+        should_run = bool(narrative_turn or graph_question or action in {"resume", "status", "start", "answer"} or projection)
+        if not should_run:
+            return {
+                "contract_version": "interview-transition-v1",
+                "action": "deferred",
+                "status": "awaiting_user",
+                "awaiting_user": True,
+                "legal_sufficiency": False,
+                "error": None,
+            }
+        try:
+            mediator = self._mediator_for_shared_interview(user_id, case_id)
+            begin_router = getattr(mediator, "begin_intake_router_action", None)
+            if callable(begin_router):
+                previous_router = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
+                router_session = str(previous_router.get("session_id") or "")
+                if not re.fullmatch(r"[0-9a-f]{32}", router_session):
+                    router_session = uuid.uuid4().hex
+                begin_router(owner_id=user_id, case_id=case_id, session_id=router_session,
+                             revision=int((projection or {}).get("session_revision") or 0), previous=previous_router)
+            kwargs: Dict[str, Any] = {
+                "privacy_policy": state.get("privacy_policy"),
+                "user_id": user_id,
+                "case_id": case_id,
+            }
+            # Rehydrate first, then apply this same request. A cold answer is
+            # never silently consumed as a resume-only operation.
+            if projection and not mediator.workflow_actions.interview_started:
+                restored = mediator.transition_shared_interview(action="resume", session_projection=projection, **kwargs)
+                if restored.get("error"):
+                    return restored
+            if action == "resume":
+                receipt = mediator.transition_shared_interview(action="resume", **kwargs)
+            elif narrative_turn or action == "start":
+                receipt = mediator.transition_shared_interview(
+                    action="start",
+                    narrative=message or _narrative_record(state).get("text"),
+                    **kwargs,
+                )
+            elif graph_question or action == "answer":
+                receipt = mediator.transition_shared_interview(
+                    action="answer",
+                    answer=message,
+                    inquiry_id=question_id,
+                    expected_question_revision=expected_question_revision,
+                    **kwargs,
+                )
+            else:
+                receipt = mediator.transition_shared_interview(action="status", **kwargs)
+            # Refusals are authoritative and have no accepted transition to
+            # publish. In particular, an older provider-stage error must not
+            # replace a stale-question receipt or change its saved projection.
+            if receipt.get("status") == "refused":
+                return receipt
+            exported = mediator.workflow_actions.export_session_projection()
+            if exported:
+                state["shared_interview"] = exported
+            snapshot_router = getattr(mediator, "intake_router_snapshot", None)
+            if callable(snapshot_router):
+                snapshot = snapshot_router()
+                previous_router = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
+                prior_receipts = []
+                for item in previous_router.get("receipts") or []:
+                    if (isinstance(item, dict) and set(item) == {"operation", "request_id", "binding_id", "status", "intake_complete"}
+                            and item.get("operation") in {"extract_facts", "propose_questions"}
+                            and item.get("status") in {"available", "privacy_denied", "provider_unavailable", "malformed_output", "quota", "timeout", "cancelled", "stale_request"}
+                            and all(isinstance(item.get(key), str) and re.fullmatch(r"[0-9a-f]{32}", item[key]) for key in ("request_id", "binding_id"))):
+                        prior_receipts.append(dict(item))
+                seen = {item["request_id"] for item in prior_receipts}
+                prior_receipts.extend(item for item in snapshot["receipts"] if item["request_id"] not in seen)
+                state["intake_router"] = {**snapshot, "session_id": router_session,
+                                          "receipts": prior_receipts[-32:]}
+                if snapshot["errors"] and not receipt.get("error"):
+                    # Accepted user answers and their graph effects remain in
+                    # this same transaction. An unresolved provider stage is
+                    # explicit on resume and can never establish completion.
+                    receipt["status"] = "awaiting_user" if receipt.get("inquiry") else "unavailable"
+                    receipt["awaiting_user"] = bool(receipt.get("inquiry"))
+                    receipt["intake_complete"] = False
+                    receipt["readiness"] = {"ready_to_advance": False, "legal_sufficiency": False}
+                    receipt["error"] = {"code": "provider_unavailable", "resumable": True,
+                                        "router_failures": dict(snapshot["errors"]), "legal_sufficiency": False}
+                receipt["intake_router"] = deepcopy(state["intake_router"])
+            return receipt
+        except Exception as exc:
+            return {
+                "contract_version": "interview-transition-v1",
+                "action": action or "status",
+                "status": "unavailable",
+                "awaiting_user": False,
+                "legal_sufficiency": False,
+                "error": {
+                    "code": "capability_unavailable",
+                    "resumable": True,
+                    "error_type": type(exc).__name__,
+                    "legal_sufficiency": False,
+                },
+            }
+
+    def _mediator_for_shared_interview(self, user_id: str, case_id: str):
+        self._check_access(user_id, ability="read", case_id=case_id, record_case_id=case_id)
+        cache_key = (user_id, case_id)
+        cached = self._interview_mediators.get(cache_key)
+        if cached is not None:
+            return cached
+        from mediator.mediator import Mediator
+
+        # The cache and derived database namespace include both owner and
+        # case. Raw caller identifiers never become filesystem components.
+        identity = hashlib.sha256(json.dumps([user_id, case_id], separators=(",", ":")).encode()).hexdigest()
+        db_dir = self._session_dir / "interview-db" / identity
+        db_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+        def _interview_backend(prompt, complaint_privacy_context=None, **kwargs):
+            from integrations.ipfs_datasets.llm import generate_text_with_metadata
+            from mediator.exceptions import UserPresentableException
+
+            host_keys = {"intake_operation", "intake_source_text", "intake_target_refs", "intake_request_id"}
+            generated = generate_text_with_metadata(
+                prompt, provider="grok_cli", model_name="grok-4.7",
+                complaint_privacy_context=complaint_privacy_context,
+                **{key: value for key, value in kwargs.items() if key in host_keys},
+            )
+            if (not isinstance(generated, dict) or generated.get("status") not in {"available", "success"}
+                    or generated.get("error") or not isinstance(generated.get("text"), str)):
+                from backends.llm_router_backend import ProviderRouteError
+                kind = generated.get("failure_kind") if isinstance(generated, dict) else ""
+                code = {"malformed": "malformed_output", "quota": "quota", "timeout": "timeout", "cancelled": "cancelled"}.get(kind, "provider_unavailable")
+                raise ProviderRouteError({"error_code": code, "intake_complete": False})
+            return str(generated.get("text") or "")
+
+        mediator = Mediator(
+            [_interview_backend],
+            evidence_db_path=str(db_dir / "evidence.db"),
+            legal_authority_db_path=str(db_dir / "legal-authority.db"),
+            claim_support_db_path=str(db_dir / "claim-support.db"),
+        )
+        mediator.state.username = user_id
+        self._interview_mediators[cache_key] = mediator
+        return mediator
+
+    def _private_artifact_context(self, user_id: str, case_id: Optional[str] = None, *, revision: str = "session-v1") -> Dict[str, Any]:
+        """Resolve current request admission and the live user-owned key session."""
+        from integrations.private_storage import PrivateArtifactBinding, PrivateKeyMaterialError
+
+        selected_case = str(case_id or _REQUEST_CASE.get() or self._effective_access().case_id or user_id)
+        resolved = self._check_access(user_id, ability="read", case_id=selected_case, record_case_id=selected_case)
+        self._require_private_case_key_access(resolved, selected_case, principal_id=resolved)
+        binding = PrivateArtifactBinding(tenant_id=resolved, case_id=selected_case, artifact_kind="session", revision="session-v1", principal_id=resolved)
+        try:
+            provider = self.private_key_provider()
+            provider.resolve(binding)
+        except PrivateKeyMaterialError:
+            raise WorkspacePersistenceError("Private workspace keys require unlock.", code="unlock_needed", public_status="unlock_needed") from None
+        access = self._effective_access()
+        if access.trust == "trusted_local" and not access.principal_id and not access.case_id:
+            access = WorkspaceAccess.trusted_local(resolved, selected_case)
+        return {"access": access, "tenant_id": resolved, "case_id": selected_case,
+                "principal_id": resolved, "key_provider": provider, "revision": revision}
+
+    def _private_session_filename(self, user_id: str) -> str:
+        base = self._namespace_filename(user_id)
+        try:
+            self._read_bytes_nofollow(base + ".cgpe")
+        except FileNotFoundError:
+            return base
+        except WorkspaceAuthorizationDenied:
+            raise
+        except OSError:
+            raise WorkspacePersistenceError("Private session storage is unavailable.", code="read_error", public_status="unavailable") from None
+        return base + ".cgpe"
+
+    def _open_private_session_bytes(self, user_id: str, filename: str, raw: bytes) -> Dict[str, Any]:
+        from integrations.private_storage import PrivateArtifactBinding, PrivateArtifactIntegrityError, PrivateCryptoCapabilityError, PrivateStorageError, open_private_artifact
+
+        context = self._private_artifact_context(user_id)
+        binding = PrivateArtifactBinding(tenant_id=context["tenant_id"], case_id=context["case_id"], artifact_kind="session", revision="session-v1", principal_id=context["principal_id"])
+        try:
+            key_id, key = context["key_provider"].resolve(binding)
+            body = open_private_artifact(raw, binding=binding, key=key, expected_key_id=key_id)
+            payload = json.loads(body.decode("utf-8"))
+        except PrivateCryptoCapabilityError:
+            raise WorkspacePersistenceError("Private encryption is unavailable.", code="private_crypto_unavailable", public_status="unavailable") from None
+        except (PrivateStorageError, json.JSONDecodeError, UnicodeDecodeError):
+            raise WorkspacePersistenceError("Private session authentication failed; existing bytes were preserved.", code="authentication_failed", public_status="recoverable") from None
+        if not isinstance(payload, dict):
+            raise WorkspacePersistenceError("Private session is corrupt; existing bytes were preserved.", code="corrupt_session", public_status="recoverable")
+        self._prepare_loaded_state(payload, user_id)
+        payload.update(status="available", session_readable=True, missing_new_session=False, existing_unreadable=False, at_rest_protection="private_envelope")
+        return payload
+
+    def _save_private_state(self, state: Dict[str, Any], filename: str, existing_raw: Optional[bytes]) -> Dict[str, Any]:
+        from integrations.private_storage import PrivateArtifactBinding, PrivateCryptoCapabilityError, PrivateStorageError, seal_private_artifact, open_private_artifact
+
+        user_id = str(state["user_id"])
+        case_id = _state_case_id(state, user_id)
+        context = self._private_artifact_context(user_id, case_id)
+        if existing_raw is not None:
+            if not existing_raw.startswith(b"CGPE"):
+                try:
+                    legacy = json.loads(existing_raw.decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    raise WorkspacePersistenceError("Existing session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable") from None
+                if not isinstance(legacy, dict):
+                    raise WorkspacePersistenceError("Existing session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable")
+                self._prepare_loaded_state(legacy, user_id)
+                raise WorkspacePersistenceError("Legacy data requires explicit migration.", code="migration_required", public_status="recoverable")
+            self._open_private_session_bytes(user_id, filename, existing_raw)
+        binding = PrivateArtifactBinding(tenant_id=context["tenant_id"], case_id=case_id, artifact_kind="session", revision="session-v1", principal_id=context["principal_id"])
+        state["at_rest_protection"] = "private_envelope"
+        body = json.dumps(state, sort_keys=True).encode("utf-8")
+        root_fd = self._open_session_directory()
+        temporary = "." + uuid.uuid4().hex + ".tmp"
+        lock_fd = -1
+        try:
+            lock_flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
+            lock_fd = os.open(".session-write.lock", lock_flags, 0o600, dir_fd=root_fd)
+            os.fchmod(lock_fd, 0o600)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            key_id, key = context["key_provider"].resolve(binding)
+            envelope = seal_private_artifact(body, binding=binding, key=key, key_id=key_id)
+            self._write_bytes_nofollow(temporary, envelope, root_fd=root_fd, durable=True)
+            staged = self._read_bytes_nofollow(temporary)
+            if staged != envelope or open_private_artifact(staged, binding=binding, key=key, expected_key_id=key_id) != body:
+                raise WorkspacePersistenceError("Private session readback failed.", code="readback_mismatch", public_status="recoverable")
+            try:
+                current = self._read_bytes_nofollow(filename)
+            except FileNotFoundError:
+                current = None
+            if current != existing_raw:
+                raise WorkspacePersistenceError("The private session changed; retry from its current revision.", code="revision_conflict", public_status="recoverable")
+            if context["key_provider"].resolve(binding) != (key_id, key):
+                raise WorkspacePersistenceError("Private workspace keys require unlock.", code="unlock_needed", public_status="unlock_needed")
+            os.replace(temporary, filename, src_dir_fd=root_fd, dst_dir_fd=root_fd)
+            os.fsync(root_fd)
+        except PrivateCryptoCapabilityError:
+            raise WorkspacePersistenceError("Private encryption is unavailable.", code="private_crypto_unavailable", public_status="unavailable") from None
+        except PrivateStorageError:
+            raise WorkspacePersistenceError("Private session authentication failed.", code="authentication_failed", public_status="recoverable") from None
+        except WorkspaceAuthorizationDenied:
+            raise
+        except OSError:
+            raise WorkspacePersistenceError("Private session storage is unavailable; existing bytes were preserved.", code="write_error", public_status="unavailable") from None
+        finally:
+            try:
+                os.unlink(temporary, dir_fd=root_fd)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+            if lock_fd >= 0:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(lock_fd)
+            os.close(root_fd)
+        return state
+
+    def joined_revision_repository(self, user_id: Optional[str] = None, case_id: Optional[str] = None) -> Path:
+        root = self._session_dir / "joined-revisions"
+        if user_id is None:
+            return root
+        # An existing singleton repository is never hidden or treated as a
+        # fresh namespace. Authentication/recovery must admit it explicitly.
+        if any((root / name).exists() for name in ("head.cgpe", "wal", "owner.cgpe", "o")):
+            return root
+        # Reuse the workspace's opaque namespace convention; no identifying
+        # caller label is a repository pathname.
+        identity = json.dumps([str(user_id), str(case_id or user_id)], separators=(",", ":"))
+        return root / ("p-" + principal_namespace(identity))
+
+    def _joined_key(self, user_id: str, case_id: Optional[str] = None):
+        from integrations.private_storage import PrivateArtifactBinding
+        context = self._private_artifact_context(user_id, case_id)
+        binding = PrivateArtifactBinding(tenant_id=context["tenant_id"], case_id=context["case_id"],
+            principal_id=context["principal_id"], artifact_kind="session", revision="session-v1")
+        key_id, key = context["key_provider"].resolve(binding)
+        return context, key_id, key
+
+    def _joined_chat_identity(self, state: Mapping[str, Any], question_id: str, answer: str,
+                              question_revision: Optional[int] = None) -> str:
+        import hmac
+        user = str(state["user_id"])
+        context, _, key = self._joined_key(user, _state_case_id(state, user))
+        body = json.dumps([context["tenant_id"], context["case_id"], question_id,
+                           question_revision, answer], separators=(",", ":")).encode("utf-8")
+        return hmac.new(key, b"joined-intake-effect@1\x00" + body, hashlib.sha256).hexdigest()
+
+    def _commit_joined_snapshot(self, state: Dict[str, Any], *, effect_id: Optional[str] = None,
+                                question_id: Optional[str] = None, answer: Optional[str] = None) -> Dict[str, Any]:
+        from integrations.private_storage import commit_private_revision
+        user = str(state["user_id"])
+        context, key_id, key = self._joined_key(user, _state_case_id(state, user))
+        expected = str(state.get("private_revision") or "0")
+        revision = str(int(expected) + 1)
+        transaction = uuid.uuid4().hex
+        effect = effect_id or uuid.uuid4().hex
+        if effect_id:
+            history = state.setdefault("intake_history", [])
+            if any(item.get("effect_id") == effect_id for item in history if isinstance(item, dict)):
+                return state
+            found = next((item for item in reversed(history) if isinstance(item, dict)
+                          and item.get("question_id") == question_id and item.get("answer") == answer
+                          and not item.get("effect_id")), None)
+            if found is None:
+                found = {"question_id": question_id, "answer": answer}
+                history.append(found)
+            found.update(effect_id=effect, transaction_id=transaction)
+            graph = state.setdefault("annotation_knowledge_graph", {"entities": [], "relationships": []})
+            graph.setdefault("relationships", []).append({"id": effect, "kind": "intake-answer",
+                "question_id": question_id, "revision": revision})
+            state.setdefault("proof_history", []).append({"effect_id": effect, "transaction_id": transaction,
+                "kind": "intake-revision", "revision": revision})
+        state.update(private_revision=revision, missing_new_session=False, session_readable=True,
+                     at_rest_protection="private_envelope")
+        publication = commit_private_revision(self.joined_revision_repository(user, context["case_id"]),
+            tenant_id=context["tenant_id"], case_id=context["case_id"], principal_id=context["principal_id"],
+            key=key, key_id=key_id, expected_revision=expected,
+            session=json.dumps(state, sort_keys=True).encode("utf-8"),
+            fact_graph=json.dumps({"relationships": state.get("annotation_knowledge_graph", {}).get("relationships", []),
+                                   "revision": revision}, sort_keys=True).encode("utf-8"),
+            proof=json.dumps({"entries": state.get("proof_history", []), "revision": revision}, sort_keys=True).encode("utf-8"),
+            transaction_id=transaction, effect_id=effect)
+        if not publication.committed:
+            raise WorkspacePersistenceError("joined revision did not commit", code="durability_unproven", public_status="recoverable")
+        return state
+
+    def commit_joined_intake_revision(
+        self,
+        user_id: str,
+        *,
+        question_id: str,
+        answer: str,
+        transaction_id: str,
+        effect_id: str,
+        case_id: Optional[str] = None,
+        expected_revision: Optional[str] = None,
+        crash_injector: Any = None,
+        writer: Any = None,
+        fsync_file: Any = None,
+        fsync_directory: Any = None,
+    ) -> Dict[str, Any]:
+        """Commit one intake answer with its fact-graph edge and proof entry.
+
+        The three payloads are sealed before the Kit WAL intent is written.
+        The intent carries opaque ciphertext refs and the stable ids only.
+        """
+
+        from integrations.private_storage import commit_private_revision
+
+        resolved = self._check_access(user_id, ability="write", case_id=case_id)
+        context = self._private_artifact_context(resolved, case_id)
+        binding_case = context["case_id"]
+        state = self._load_state(resolved, case_id=binding_case)
+        if str(state.get("user_id") or "") != resolved:
+            raise WorkspaceAuthorizationDenied()
+        if _state_case_id(state, resolved) != binding_case and state.get("missing_new_session") is not True:
+            if case_id is not None and _state_case_id(state, resolved) != binding_case:
+                raise WorkspaceAuthorizationDenied()
+        current = str(state.get("private_revision") or "0")
+        expected = "0" if expected_revision in {None, ""} else str(expected_revision)
+        if current != expected:
+            raise WorkspacePersistenceError(
+                "stale revision",
+                code="revision_conflict",
+                public_status="recoverable",
+            )
+        next_revision = str(int(expected) + 1)
+        answers = dict(state.get("intake_answers") or {})
+        history = [item for item in list(state.get("intake_history") or []) if isinstance(item, dict)]
+        if any(str(item.get("effect_id") or "") == effect_id for item in history):
+            raise WorkspacePersistenceError(
+                "effect already recorded",
+                code="duplicate_effect",
+                public_status="recoverable",
+            )
+        answers[str(question_id)] = str(answer)
+        history.append({
+            "question_id": str(question_id),
+            "answer": str(answer),
+            "effect_id": effect_id,
+            "transaction_id": transaction_id,
+        })
+        state["intake_answers"] = answers
+        state["intake_history"] = history
+        state["private_revision"] = next_revision
+        graph = state.get("annotation_knowledge_graph")
+        if not isinstance(graph, dict):
+            graph = {"entities": [], "relationships": []}
+        relationships = [item for item in list(graph.get("relationships") or []) if isinstance(item, dict)]
+        relationships.append({
+            "id": effect_id,
+            "kind": "intake-answer",
+            "question_id": str(question_id),
+            "revision": next_revision,
+        })
+        graph["relationships"] = relationships
+        state["annotation_knowledge_graph"] = graph
+        proofs = [item for item in list(state.get("proof_history") or []) if isinstance(item, dict)]
+        proofs.append({
+            "effect_id": effect_id,
+            "transaction_id": transaction_id,
+            "kind": "intake-revision",
+            "revision": next_revision,
+        })
+        state["proof_history"] = proofs
+        fact_document = {"relationships": relationships, "effect_id": effect_id, "revision": next_revision}
+        proof_document = {"entries": proofs, "effect_id": effect_id, "revision": next_revision}
+        from integrations.private_storage import PrivateArtifactBinding as _Binding
+        binding = _Binding(
+            tenant_id=resolved,
+            case_id=binding_case,
+            artifact_kind="session",
+            revision="session-v1",
+            principal_id=resolved,
+        )
+        key_id, key = context["key_provider"].resolve(binding)
+        publication = commit_private_revision(
+            self.joined_revision_repository(resolved, binding_case),
+            tenant_id=resolved,
+            case_id=binding_case,
+            principal_id=resolved,
+            key=key,
+            key_id=key_id,
+            expected_revision=expected,
+            session=json.dumps(state, sort_keys=True).encode("utf-8"),
+            fact_graph=json.dumps(fact_document, sort_keys=True).encode("utf-8"),
+            proof=json.dumps(proof_document, sort_keys=True).encode("utf-8"),
+            transaction_id=transaction_id,
+            effect_id=effect_id,
+            crash_injector=crash_injector,
+            writer=writer,
+            fsync_file=fsync_file,
+            fsync_directory=fsync_directory,
+        )
+        receipt = publication.as_dict()
+        receipt["network_pinned"] = False
+        receipt["question_id"] = str(question_id)
+        return receipt
+
+    def recover_joined_intake_revision(self, user_id: str, *, case_id: Optional[str] = None) -> Dict[str, Any]:
+        from integrations.private_storage import PrivateArtifactBinding, recover_private_revision
+
+        resolved = self._check_access(user_id, ability="write", case_id=case_id)
+        context = self._private_artifact_context(resolved, case_id)
+        binding = PrivateArtifactBinding(
+            tenant_id=resolved,
+            case_id=context["case_id"],
+            artifact_kind="session",
+            revision="session-v1",
+            principal_id=resolved,
+        )
+        key_id, key = context["key_provider"].resolve(binding)
+        publication = recover_private_revision(
+            self.joined_revision_repository(resolved, context["case_id"]),
+            tenant_id=resolved,
+            case_id=context["case_id"],
+            principal_id=resolved,
+            key=key,
+            key_id=key_id,
+        )
+        return publication.as_dict()
+
+    def _private_local_backend(self):
+        from integrations.ipfs_datasets.storage import LocalCacheIPFSBackend
+        workspace = self
+        class OwnedCiphertextBackend(LocalCacheIPFSBackend):
+            measurement_label = "measured-local"
+            def __init__(self):
+                # All operations below use the admitted workspace descriptor.
+                # Do not initialize the global/home fallback cache.
+                pass
+            def add_bytes(self, data, pin=True):
+                blob = bytes(data)
+                cid = "bafy" + hashlib.sha256(blob).hexdigest()[:55]
+                workspace._write_bytes_nofollow("private-artifacts/" + cid, blob, create_parents=True)
+                return {"success": True, "cid": cid, "pinned": False}
+            def cat(self, cid):
+                if not re.fullmatch(r"bafy[0-9a-f]{55}", str(cid)):
+                    raise WorkspaceAuthorizationDenied()
+                return workspace._read_bytes_nofollow("private-artifacts/" + str(cid))
+            def pin(self, cid):
+                return {"success": True, "cid": cid, "pinned": False}
+        return OwnedCiphertextBackend()
+
+    def ingest_memory_evidence(self, user_id: Optional[str], *, files: List[Dict[str, Any]], claim_element_id: str = "causation", kind: str = "document", backend: Any = None) -> Dict[str, Any]:
+        """Keep attachment processing in memory and store only authenticated envelopes."""
+        from integrations.ipfs_datasets.storage import store_automatic_private_artifact
+        from integrations.private_storage import PrivateStorageError
+        state = self._load_state(self._resolve_user_id(user_id))
+        owner = str(state["user_id"])
+        context = self._private_artifact_context(owner, _state_case_id(state, owner))
+        transport = backend if backend is not None else self._private_local_backend()
+        imported = []
+        for index, item in enumerate(files, start=1):
+            data = bytes(item.get("data") or b"")
+            filename = str(item.get("filename") or f"upload-{index}")
+            try:
+                text = data.decode("utf-8")
+                extraction = {"status": "available", "method": "ephemeral-memory"}
+            except UnicodeDecodeError:
+                text = None
+                extraction = {"status": "limited", "code": "in_memory_extraction_unavailable", "method": "ephemeral-memory", "preserved_original": True}
+            base = {**context, "backend": transport, "backend_name": "local_cache" if backend is None else "kit", "pin_content": backend is not None}
+            try:
+                attachment = store_automatic_private_artifact(data, artifact_kind="attachment", **{**base, "revision": f"attachment-{index}"})
+                extracted = store_automatic_private_artifact(text.encode("utf-8"), artifact_kind="extracted-text", **{**base, "revision": f"extracted-text-{index}"}) if text is not None else None
+            except PrivateStorageError:
+                raise WorkspacePersistenceError("Private evidence storage is unavailable.", code="artifact_unavailable", public_status="unavailable") from None
+            imported.append({"filename": filename, "extraction": extraction, "attachment_cid": attachment.get("cid"), "extracted_cid": (extracted or {}).get("cid"), "effective_claim_element_id": claim_element_id, "plaintext_disk": False})
+            documents = state.setdefault("evidence", {"testimony": [], "documents": []}).setdefault("documents", [])
+            documents.append({"id": f"documents-{len(documents)+1}", "kind": kind, "claim_element_id": claim_element_id, "title": filename, "content_cid": (extracted or {}).get("cid"), "attachment_cid": attachment.get("cid"), "extraction": extraction, "saved_at": _utc_now()})
+        self._save_state(state)
+        return {"status": "available", "imported": imported, "extraction_boundary": "ephemeral-memory", "plaintext_disk": False, "session": state}
+
+    def persist_private_case_materials(self, user_id: str, materials: Dict[str, bytes], *, case_id: Optional[str] = None, backend: Any = None) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import store_automatic_private_artifact
+        from integrations.private_storage import PrivateStorageError
+        context = self._private_artifact_context(user_id, case_id)
+        transport = backend if backend is not None else self._private_local_backend()
+        artifacts = {}
+        try:
+            for kind, payload in materials.items():
+                artifacts[kind] = store_automatic_private_artifact(bytes(payload), artifact_kind=str(kind), **{**context, "revision": f"{kind}-1", "backend": transport, "backend_name": "local_cache" if backend is None else "kit", "pin_content": backend is not None})
+        except (PrivateStorageError, ValueError):
+            raise WorkspacePersistenceError("Private artifact storage is unavailable.", code="artifact_unavailable", public_status="unavailable") from None
+        return {"status": "available", "written": True, "artifacts": artifacts, "plaintext_disk": False}
+
+    def interview_snapshot_directory(self, user_id: str, case_id: Optional[str] = None) -> Path:
+        resolved = self._check_access(user_id, ability="write")
+        directory = self._session_dir / "interview-snapshots" / self._namespace_filename(resolved)
+        # Preserve the existing default-case location; other cases have their
+        # own head and revision clock beneath the private user namespace.
+        case = str(case_id or resolved)
+        if case != resolved:
+            directory = directory / ("case-" + self._namespace_filename(case))
+        return directory
+
+    def _interview_snapshot_key(self, user_id: str, case_id: Optional[str] = None) -> Dict[str, Any]:
+        from integrations.private_storage import PrivateArtifactBinding, PrivateKeyLockedError, PrivateKeyMaterialError
+        try:
+            context = self._private_artifact_context(user_id, case_id)
+            binding_key = context["key_provider"].resolve(PrivateArtifactBinding(
+                tenant_id=context["tenant_id"],
+                case_id=context["case_id"],
+                artifact_kind="interview-snapshot",
+                revision="snapshot-rev-0",
+                principal_id=context["principal_id"],
+            ))
+        except (PrivateKeyLockedError, PrivateKeyMaterialError):
+            raise WorkspacePersistenceError(
+                "Private interview keys require unlock.",
+                code="unlock_needed",
+                public_status="unlock_needed",
+            ) from None
+        context["key_id"], context["key"] = binding_key
+        return context
+
+    def persist_complete_interview_snapshot(
+        self,
+        user_id: str,
+        snapshot: Mapping[str, Any],
+        *,
+        protection: str = "user_chosen_encrypted",
+        case_id: Optional[str] = None,
+        expected_revision: Optional[str] = None,
+        migrate_plaintext: bool = False,
+        fail_before_head: bool = False,
+    ) -> Dict[str, Any]:
+        """Persist one complete interview snapshot inside the private session tree."""
+        from integrations.ipfs_datasets.storage import InterviewSnapshotError, persist_interview_snapshot
+
+        if protection == "user_chosen_encrypted":
+            context = self._interview_snapshot_key(user_id, case_id)
+        else:
+            context = {"tenant_id": user_id, "case_id": str(case_id or user_id), "principal_id": user_id, "key": None, "key_id": None}
+        directory = self.interview_snapshot_directory(str(context["tenant_id"]), str(context["case_id"]))
+        try:
+            result = persist_interview_snapshot(
+                directory,
+                snapshot,
+                protection=protection,
+                tenant_id=str(context["tenant_id"]),
+                case_id=str(context["case_id"]),
+                principal_id=str(context["principal_id"]),
+                key=context.get("key"),
+                key_id=context.get("key_id"),
+                expected_revision=expected_revision,
+                migrate_plaintext=migrate_plaintext,
+                fail_before_head=fail_before_head,
+            )
+        except InterviewSnapshotError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.public_status) from None
+        receipt = dict(result["receipt"])
+        receipt["plaintext_disk"] = protection != "user_chosen_encrypted"
+        return {"snapshot": result["snapshot"], "receipt": receipt}
+
+    def load_complete_interview_snapshot(
+        self,
+        user_id: str,
+        *,
+        protection: str = "user_chosen_encrypted",
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import InterviewSnapshotError, load_interview_snapshot
+
+        if protection == "user_chosen_encrypted":
+            context = self._interview_snapshot_key(user_id, case_id)
+        else:
+            context = {"tenant_id": user_id, "case_id": str(case_id or user_id), "principal_id": user_id, "key": None, "key_id": None}
+        directory = self.interview_snapshot_directory(str(context["tenant_id"]), str(context["case_id"]))
+        try:
+            return load_interview_snapshot(
+                directory,
+                protection=protection,
+                tenant_id=str(context["tenant_id"]),
+                case_id=str(context["case_id"]),
+                principal_id=str(context["principal_id"]),
+                key=context.get("key"),
+                key_id=context.get("key_id"),
+            )
+        except InterviewSnapshotError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.public_status) from None
+
+    def migrate_plaintext_interview_snapshot(self, user_id: str, *, case_id: Optional[str] = None) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import InterviewSnapshotError, migrate_unencrypted_interview_snapshot
+
+        context = self._interview_snapshot_key(user_id, case_id)
+        directory = self.interview_snapshot_directory(str(context["tenant_id"]), str(context["case_id"]))
+        try:
+            return migrate_unencrypted_interview_snapshot(
+                directory,
+                tenant_id=str(context["tenant_id"]),
+                case_id=str(context["case_id"]),
+                principal_id=str(context["principal_id"]),
+                key=context["key"],
+                key_id=context["key_id"],
+            )
+        except InterviewSnapshotError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.public_status) from None
+
+    def export_readable_filing(
+        self,
+        user_id: str,
+        *,
+        destination: Path,
+        protection: str,
+        content: bytes,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Write an explicit operator-chosen filing export."""
+        self._require_local_filesystem_access()
+        self._check_access(user_id, ability="write", case_id=case_id)
+        if protection not in {"user_chosen_plaintext", "user_chosen_encrypted"}:
+            raise WorkspacePersistenceError(
+                "protection state required",
+                code="protection_required",
+                public_status="unavailable",
+            )
+        dest = Path(destination)
+        if not dest.is_absolute():
+            raise WorkspacePersistenceError(
+                "user-chosen location required",
+                code="destination_required",
+                public_status="unavailable",
+            )
+        resolved_user = self._check_access(user_id, ability="read")
+        session_root = self._session_dir.resolve()
+        try:
+            dest.resolve().relative_to(session_root)
+            inside_session = True
+        except ValueError:
+            inside_session = False
+        if inside_session:
+            raise WorkspacePersistenceError(
+                "filing export must not use the session cache",
+                code="hidden_cache_rejected",
+                public_status="unavailable",
+            )
+        from integrations.private_storage import PrivateArtifactBinding, PrivateStorageError, seal_private_artifact, open_private_artifact
+        payload = bytes(content)
+        if protection == "user_chosen_encrypted":
+            context = self._private_artifact_context(resolved_user, case_id)
+            binding = PrivateArtifactBinding(tenant_id=resolved_user, case_id=context["case_id"], artifact_kind="filing-export", revision="filing-export-v1", principal_id=resolved_user)
+            try:
+                key_id, key = context["key_provider"].resolve(binding)
+                payload = seal_private_artifact(payload, binding=binding, key=key, key_id=key_id)
+                if open_private_artifact(payload, binding=binding, key=key, expected_key_id=key_id) != bytes(content):
+                    raise WorkspacePersistenceError("Filing encryption readback failed.", code="readback_mismatch", public_status="recoverable")
+            except PrivateStorageError:
+                raise WorkspacePersistenceError("Private filing encryption is unavailable.", code="private_export_unavailable", public_status="unavailable") from None
+        temporary = None
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            parent = dest.parent.resolve(strict=True)
+            if parent != dest.parent.absolute() or parent.stat().st_uid != os.getuid():
+                raise WorkspaceAuthorizationDenied()
+            temporary = parent / (".filing-" + uuid.uuid4().hex + ".tmp")
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+            if temporary.read_bytes() != payload:
+                raise WorkspacePersistenceError("Filing readback failed.", code="readback_mismatch", public_status="recoverable")
+            os.replace(temporary, dest)
+        except WorkspaceAuthorizationDenied:
+            raise
+        except OSError:
+            raise WorkspacePersistenceError("Filing output is unavailable.", code="write_error", public_status="unavailable") from None
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return {"user_id": resolved_user, "path": str(dest), "protection": protection, "automatic": False, "hidden_cache": False, "bytes": len(payload)}
+
+    def migrate_legacy_private_artifacts(self, **kwargs: Any) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
+        from complaint_generator.legacy_session_migration import migrate_private_workspace
+        return migrate_private_workspace(**kwargs)
+
+    def migrate_legacy_private_session(self, user_id: str) -> Dict[str, Any]:
+        """Explicitly migrate an owned JSON session, retaining its original bytes."""
+        from complaint_generator.legacy_session_migration import migrate_private_workspace
+        context = self._private_artifact_context(user_id)
+        private_name = self._namespace_filename(user_id) + ".cgpe"
+        try:
+            canonical = self._read_bytes_nofollow(private_name)
+        except FileNotFoundError:
+            canonical = None
+        if canonical is not None:
+            # An authenticated current successor outranks the retained legacy
+            # snapshot. Rerunning migration must never roll back newer answers.
+            self._open_private_session_bytes(user_id, private_name, canonical)
+            return {"status": "complete", "complete": True, "private_session_verified": True,
+                    "existing_private_preserved": True, "legacy_plaintext_retained": True,
+                    "source_bytes_preserved": True, "cleanup_performed": False}
+        source_name = self._namespace_filename(user_id)
+        try:
+            raw = self._read_bytes_nofollow(source_name)
+        except FileNotFoundError:
+            source_name = self._legacy_filename(user_id)
+            if self._legacy_owner_conflict(source_name, user_id):
+                raise WorkspaceAuthorizationDenied()
+            try:
+                raw = self._read_bytes_nofollow(source_name)
+            except FileNotFoundError:
+                raise WorkspacePersistenceError("No owned legacy session was found.", code="legacy_missing", public_status="recoverable") from None
+        if raw.startswith(b"CGPE"):
+            self._open_private_session_bytes(user_id, source_name, raw)
+            return {"status": "complete", "complete": True, "legacy_plaintext_retained": False}
+        try:
+            state = json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise WorkspacePersistenceError("Legacy session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable") from None
+        if not isinstance(state, dict):
+            raise WorkspacePersistenceError("Legacy session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable")
+        self._prepare_loaded_state(state, user_id)
+        artifact = {**context, "artifact_kind": "session", "revision": "session-v1", "source_path": self._session_dir / source_name, "owner_record": {"owner": user_id, "case_id": context["case_id"]}}
+        result = migrate_private_workspace(source_root=self._session_dir, destination_root=self._session_dir / "private-migrations", artifacts=[artifact])
+        if result.get("complete") is not True:
+            return result
+        private_name = self._namespace_filename(user_id) + ".cgpe"
+        try:
+            previous = self._read_bytes_nofollow(private_name)
+        except FileNotFoundError:
+            previous = None
+        self._save_private_state(state, private_name, previous)
+        return {**result, "legacy_plaintext_retained": True, "source_bytes_preserved": self._read_bytes_nofollow(source_name) == raw, "private_session_verified": True}
+
+    def _effective_access(self) -> WorkspaceAccess:
+        current = _REQUEST_ACCESS.get()
+        if current is not None:
+            return current
+        return self._default_access
+
+    def _resolve_user_id(self, user_id: Optional[str]) -> str:
+        access = self._effective_access()
+        supplied = str(user_id).strip() if user_id is not None and str(user_id).strip() else ""
+        if access.trust == "authenticated":
+            if not supplied:
+                return str(access.principal_id or "")
+            return supplied
+        if access.trust == "trusted_local":
+            if not supplied:
+                return str(access.principal_id or DEFAULT_USER_ID)
+            return supplied
+        return supplied or DEFAULT_USER_ID
+
+    def _check_access(
+        self,
+        user_id: Optional[str],
+        *,
+        ability: str,
+        case_id: Optional[str] = None,
+        record_case_id: Optional[str] = None,
+    ) -> str:
+        access = self._effective_access()
+        resolved_user = self._resolve_user_id(user_id)
+        explicit_case = _REQUEST_CASE.get()
+        selected_case = case_id if case_id is not None else explicit_case
+        if selected_case is None:
+            selected_case = access.case_id
+        context = access.dispatch_context(user_id=resolved_user, case_id=selected_case, ability=ability)
+        if record_case_id is not None:
+            attributes = dict(context.attributes)
+            attributes["record_case_id"] = record_case_id
+            context = WorkspaceDispatchContext(principal=context.principal, attributes=attributes)
+        requirement = AuthorizationRequirement.protected("workspace.case", ability)
+        admitted = False
+        try:
+            admitted = bool(self._authorizer(requirement, context))
+        except Exception:
+            admitted = False
+        if not admitted:
+            raise WorkspaceAuthorizationDenied()
+        return resolved_user
+
+    def _namespace_filename(self, user_id: str) -> str:
+        return namespace_filename(user_id)
+
+    def _legacy_filename(self, user_id: str) -> str:
+        return f"{_slugify_user_id(user_id)}.json"
 
     def _session_path(self, user_id: str) -> Path:
-        return self._session_dir / f"{_slugify_user_id(user_id)}.json"
+        return self._session_dir / self._namespace_filename(user_id)
 
-    def _load_state(self, user_id: str) -> Dict[str, Any]:
-        path = self._session_path(user_id)
-        if not path.exists():
-            return _default_state(user_id)
+    def _legacy_session_path(self, user_id: str) -> Path:
+        return self._session_dir / self._legacy_filename(user_id)
+
+    def _open_session_directory(self) -> int:
         try:
-            payload = json.loads(path.read_text())
-        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-            return _default_state(user_id)
+            if self._session_dir.resolve() != self._session_dir:
+                raise WorkspaceAuthorizationDenied()
+            descriptor = os.open(self._session_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            metadata = os.fstat(descriptor)
+            if ((metadata.st_dev, metadata.st_ino) != self._session_directory_identity
+                    or metadata.st_uid != os.getuid()):
+                os.close(descriptor)
+                raise WorkspaceAuthorizationDenied()
+            return descriptor
+        except OSError:
+            raise WorkspaceAuthorizationDenied() from None
+
+    def _require_local_filesystem_access(self) -> None:
+        """Host paths are operator capabilities, not remote resource identifiers.
+
+        Dataset/manifests and legacy import/export adapters can traverse more
+        than their first file. Until they expose an owner-bound storage handle,
+        only an explicitly unbound local operator may give them host paths.
+        """
+        access = self._effective_access()
+        if access.trust != "trusted_local" or access.principal_id or access.case_id:
+            raise WorkspaceAuthorizationDenied()
+        self._check_access(None, ability="filesystem")
+
+    def _open_relative(self, relative: str, flags: int, mode: int = 0o600, *,
+                       root_fd: Optional[int] = None, create_parents: bool = False) -> int:
+        if not isinstance(relative, str) or not relative or relative.startswith("/") or "\\" in relative or "\x00" in relative:
+            raise WorkspaceAuthorizationDenied()
+        parts = [part for part in relative.split("/") if part != ""]
+        if not parts or any(part in {".", ".."} for part in parts):
+            raise WorkspaceAuthorizationDenied()
+        root_fd = self._open_session_directory() if root_fd is None else os.dup(root_fd)
+        current = -1
+        close_current = False
+        try:
+            for index, part in enumerate(parts):
+                last = index == len(parts) - 1
+                parent_fd = root_fd if not close_current else current
+                if not last and create_parents:
+                    try:
+                        os.mkdir(part, mode=0o700, dir_fd=parent_fd)
+                    except FileExistsError:
+                        pass
+                open_flags = os.O_NOFOLLOW | os.O_NONBLOCK | (flags if last else (os.O_RDONLY | os.O_DIRECTORY))
+                try:
+                    opened = os.open(part, open_flags, mode if last else 0, dir_fd=parent_fd)
+                except OSError as exc:
+                    if exc.errno in {errno.ELOOP, errno.ENOTDIR, errno.EPERM}:
+                        raise WorkspaceAuthorizationDenied() from None
+                    raise
+                if close_current:
+                    os.close(current)
+                current = opened
+                close_current = True
+            metadata = os.fstat(current)
+            if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1
+                    or metadata.st_uid != os.getuid()):
+                raise WorkspaceAuthorizationDenied()
+            owned = current
+            current = -1
+            close_current = False
+            return owned
+        finally:
+            if close_current and current >= 0:
+                os.close(current)
+            os.close(root_fd)
+
+    def _read_bytes_nofollow(self, relative: str) -> bytes:
+        fd = self._open_relative(relative, os.O_RDONLY)
+        try:
+            chunks: List[bytes] = []
+            while True:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks)
+        finally:
+            os.close(fd)
+
+    def _write_bytes_nofollow(self, relative: str, payload: bytes, *,
+                              root_fd: Optional[int] = None, create_parents: bool = False,
+                              durable: bool = False) -> None:
+        # Validate the opened inode before truncation, including hard-link and
+        # special-file refusal. Opening with O_TRUNC would already damage it.
+        fd = self._open_relative(relative, os.O_WRONLY | os.O_CREAT,
+                                 root_fd=root_fd, create_parents=create_parents)
+        try:
+            os.ftruncate(fd, 0)
+            view = memoryview(payload)
+            while view:
+                written = os.write(fd, view)
+                view = view[written:]
+            if durable:
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def _read_json_file(self, filename: str, *, strict: bool = False) -> Optional[Dict[str, Any]]:
+        try:
+            raw = self._read_bytes_nofollow(filename)
+        except FileNotFoundError:
+            return None
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            if strict:
+                raise WorkspaceAuthorizationDenied() from None
+            return None
         if not isinstance(payload, dict):
-            return _default_state(user_id)
-        payload.setdefault("user_id", user_id)
+            if strict:
+                raise WorkspaceAuthorizationDenied()
+            return None
+        return payload
+
+    def _read_legacy_map(self) -> Dict[str, Any]:
+        payload = self._read_json_file(_LEGACY_MAP_NAME)
+        if not isinstance(payload, dict):
+            return {"version": 1, "entries": {}}
+        entries = payload.get("entries")
+        if not isinstance(entries, dict):
+            payload["entries"] = {}
+        payload.setdefault("version", 1)
+        return payload
+
+    def _write_legacy_map(self, payload: Dict[str, Any]) -> None:
+        body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+        self._write_bytes_nofollow(_LEGACY_MAP_NAME, body)
+
+    def _record_legacy_owner(self, slug: str, owner: str) -> None:
+        mapping = self._read_legacy_map()
+        entries = dict(mapping.get("entries") or {})
+        current = entries.get(slug)
+        if isinstance(current, dict) and str(current.get("owner") or "") not in {"", owner}:
+            return
+        if isinstance(current, dict) and str(current.get("owner") or "") == owner:
+            return
+        entries[slug] = {"owner": owner, "namespace": principal_namespace(owner)}
+        mapping["entries"] = entries
+        self._write_legacy_map(mapping)
+
+    def _legacy_owner_conflict(self, slug: str, owner: str) -> bool:
+        entries = dict(self._read_legacy_map().get("entries") or {})
+        current = entries.get(slug)
+        if not isinstance(current, dict):
+            return False
+        recorded = str(current.get("owner") or "")
+        return bool(recorded) and recorded != owner
+
+    def _prepare_loaded_state(self, payload: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+        owner = payload.get("user_id")
+        if not isinstance(owner, str) or owner != user_id:
+            raise WorkspaceAuthorizationDenied()
+        record_case = _state_case_id(payload, user_id)
+        self._check_access(user_id, ability="read", record_case_id=record_case)
+        expected_case = _REQUEST_CASE.get() or self._effective_access().case_id
+        if expected_case is not None and str(record_case) != str(expected_case):
+            raise WorkspaceAuthorizationDenied()
+        self._assert_bound_references(payload, record_case)
+        payload["claim_type"] = _normalize_claim_type(payload.get("claim_type"))
+        return payload
+
+    def _assert_bound_references(self, payload: Mapping[str, Any], record_case: str) -> None:
+        cid = _REQUEST_CID.get()
+        storage_key = _REQUEST_STORAGE_KEY.get()
+        if cid is None and storage_key is None:
+            return
+        references = [item for item in list(payload.get("private_references") or []) if isinstance(item, Mapping)]
+
+        def _matches(item: Mapping[str, Any]) -> bool:
+            if str(item.get("case_id") or record_case) != str(record_case):
+                return False
+            if cid is not None and str(item.get("cid") or "") != cid:
+                return False
+            if storage_key is not None and str(item.get("storage_key") or "") != storage_key:
+                return False
+            return True
+
+        if not any(_matches(item) for item in references):
+            raise WorkspaceAuthorizationDenied()
+
+    def _load_owned_payload(self, user_id: str) -> Optional[Dict[str, Any]]:
+        namespaced = self._read_json_file(self._namespace_filename(user_id), strict=True)
+        if namespaced is not None:
+            return self._prepare_loaded_state(namespaced, user_id)
+        slug = self._legacy_filename(user_id)
+        if self._legacy_owner_conflict(slug, user_id):
+            return None
+        legacy = self._read_json_file(slug)
+        if legacy is None:
+            return None
+        legacy_owner = legacy.get("user_id")
+        if legacy_owner is None or str(legacy_owner) != user_id:
+            return None
+        self._record_legacy_owner(slug, user_id)
+        return self._prepare_loaded_state(legacy, user_id)
+
+    def _private_file_relative(self, user_id: Optional[str], relative_name: str, *, ability: str) -> str:
+        resolved = self._check_access(user_id, ability=ability)
+        state = self._load_state(resolved)
+        case_id = _state_case_id(state, resolved)
+        if (not isinstance(relative_name, str) or not relative_name or relative_name.startswith("/")
+                or "\\" in relative_name or "\x00" in relative_name
+                or any(part in {"", ".", "..", _LEGACY_MAP_NAME}
+                       or re.fullmatch(r"p-[0-9a-f]{64}\.json", part)
+                       for part in relative_name.split("/"))):
+            raise WorkspaceAuthorizationDenied()
+        return f"private-files/p-{principal_namespace(resolved)}/c-{principal_namespace(case_id)}/{relative_name}"
+
+    def _contained_file_binding(self, resolved: str, relative: str):
+        from integrations.private_storage import PrivateArtifactBinding
+        context = self._private_artifact_context(resolved)
+        binding = PrivateArtifactBinding(tenant_id=resolved, case_id=context["case_id"],
+            artifact_kind="contained-file", revision="file-" + hashlib.sha256(relative.encode("utf-8")).hexdigest(), principal_id=resolved)
+        return context, binding
+
+    def _open_private_file_parent(self, relative: str) -> tuple[int, str]:
+        # relative was admitted by _private_file_relative; keep every parent
+        # directory opened with no-follow through the final atomic publication.
+        parts = relative.split("/")
+        current = self._open_session_directory()
+        try:
+            for part in parts[:-1]:
+                try:
+                    os.mkdir(part, mode=0o700, dir_fd=current)
+                except FileExistsError:
+                    pass
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current)
+                info = os.fstat(child)
+                if info.st_uid != os.getuid():
+                    os.close(child)
+                    raise WorkspaceAuthorizationDenied()
+                os.close(current)
+                current = child
+            return current, parts[-1]
+        except (OSError, WorkspaceAuthorizationDenied):
+            os.close(current)
+            raise WorkspaceAuthorizationDenied() from None
+
+    def read_contained_workspace_file(self, user_id: Optional[str], relative_name: str) -> bytes:
+        from integrations.private_storage import PrivateStorageError, open_private_artifact
+        resolved = self._check_access(user_id, ability="read")
+        relative = self._private_file_relative(resolved, relative_name, ability="read")
+        context, binding = self._contained_file_binding(resolved, relative)
+        try:
+            blob = self._read_bytes_nofollow(relative)
+            key_id, key = context["key_provider"].resolve(binding)
+            return open_private_artifact(blob, binding=binding, key=key, expected_key_id=key_id)
+        except OSError:
+            raise WorkspaceAuthorizationDenied() from None
+        except PrivateStorageError:
+            raise WorkspacePersistenceError("Private file authentication failed; existing bytes were preserved.", code="authentication_failed", public_status="recoverable") from None
+
+    def write_contained_workspace_file(self, user_id: Optional[str], relative_name: str, content: bytes) -> Dict[str, Any]:
+        from integrations.private_storage import PrivateStorageError, open_private_artifact, seal_private_artifact
+        resolved = self._check_access(user_id, ability="write")
+        relative = self._private_file_relative(resolved, relative_name, ability="write")
+        context, binding = self._contained_file_binding(resolved, relative)
+        parent_fd, filename = self._open_private_file_parent(relative)
+        temporary = ".private-file-" + uuid.uuid4().hex + ".tmp"
+        try:
+            key_id, key = context["key_provider"].resolve(binding)
+            try:
+                previous = self._read_bytes_nofollow(relative)
+            except FileNotFoundError:
+                previous = None
+            if previous is not None:
+                open_private_artifact(previous, binding=binding, key=key, expected_key_id=key_id)
+            body = bytes(content or b"")
+            envelope = seal_private_artifact(body, binding=binding, key=key, key_id=key_id)
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent_fd)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(envelope)
+                handle.flush()
+            stage = self._read_bytes_nofollow("/".join(relative.split("/")[:-1] + [temporary]))
+            if stage != envelope or open_private_artifact(stage, binding=binding, key=key, expected_key_id=key_id) != body:
+                raise WorkspacePersistenceError("Private file readback failed.", code="readback_mismatch", public_status="recoverable")
+            try:
+                current = self._read_bytes_nofollow(relative)
+            except FileNotFoundError:
+                current = None
+            if current != previous:
+                raise WorkspacePersistenceError("Private file changed; current bytes were preserved.", code="revision_conflict", public_status="recoverable")
+            if context["key_provider"].resolve(binding) != (key_id, key):
+                raise WorkspacePersistenceError("Private workspace keys require unlock.", code="unlock_needed", public_status="unlock_needed")
+            os.replace(temporary, filename, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        except OSError:
+            raise WorkspaceAuthorizationDenied() from None
+        except PrivateStorageError:
+            raise WorkspacePersistenceError("Private file authentication failed; existing bytes were preserved.", code="authentication_failed", public_status="recoverable") from None
+        finally:
+            try:
+                os.unlink(temporary, dir_fd=parent_fd)
+            except FileNotFoundError:
+                pass
+            os.close(parent_fd)
+        return {"user_id": resolved, "relative_name": str(relative_name or ""), "written": True, "at_rest_protection": "private_envelope"}
+
+    def remember_private_reference(
+        self,
+        user_id: Optional[str],
+        *,
+        cid: Optional[str] = None,
+        storage_key: Optional[str] = None,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        resolved = self._resolve_user_id(user_id)
+        with _workspace_reference_scope(case_id=case_id):
+            state = self._load_state(resolved)
+        record_case = _state_case_id(state, resolved)
+        if case_id is not None and str(case_id) != record_case:
+            raise WorkspaceAuthorizationDenied()
+        if not cid and not storage_key:
+            raise WorkspaceAuthorizationDenied()
+        references = [item for item in list(state.get("private_references") or []) if isinstance(item, dict)]
+        references.append(
+            {
+                "cid": None if cid is None else str(cid),
+                "storage_key": None if storage_key is None else str(storage_key),
+                "case_id": record_case,
+            }
+        )
+        state["private_references"] = references
+        self._save_state(state)
+        return {
+            "user_id": resolved,
+            "case_id": record_case,
+            "stored": True,
+            "at_rest_protection": "private_envelope",
+        }
+
+    def resolve_private_reference(
+        self,
+        user_id: Optional[str],
+        *,
+        case_id: Optional[str] = None,
+        cid: Optional[str] = None,
+        storage_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        resolved = self._resolve_user_id(user_id)
+        with _workspace_reference_scope(case_id=case_id, cid=cid, storage_key=storage_key):
+            state = self._load_state(resolved)
+        return {
+            "user_id": str(state.get("user_id") or resolved),
+            "case_id": _state_case_id(state, resolved),
+            "cid": None if cid is None else str(cid),
+            "storage_key": None if storage_key is None else str(storage_key),
+            "admitted": True,
+            "at_rest_protection": "private_envelope",
+        }
+
+    def _load_state(self, user_id: str, *, case_id: Optional[str] = None) -> Dict[str, Any]:
+        resolved_user = self._check_access(user_id, ability="read", case_id=case_id)
+        context = self._private_artifact_context(resolved_user, case_id)
+        repository = self.joined_revision_repository(resolved_user, context["case_id"])
+        from integrations.private_storage import private_revision_readiness, PrivateStorageError
+        _, readiness_key_id, readiness_key = self._joined_key(resolved_user, context["case_id"])
+        try:
+            readiness = private_revision_readiness(repository, tenant_id=resolved_user,
+                case_id=context["case_id"], principal_id=context["principal_id"],
+                key=readiness_key, key_id=readiness_key_id)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Joined state requires authenticated recovery; original bytes were preserved.",
+                code=exc.code, public_status="recoverable") from None
+        if readiness == "committed":
+            from integrations.private_storage import read_private_revision, PrivateStorageError
+            _, key_id, key = self._joined_key(resolved_user, context["case_id"])
+            try:
+                opened = read_private_revision(repository, tenant_id=resolved_user, case_id=context["case_id"],
+                    principal_id=context["principal_id"], key=key, key_id=key_id)
+                loaded = json.loads(opened["session"])
+                graph = json.loads(opened["fact_graph"])
+                proof = json.loads(opened["proof"])
+                if (str(loaded.get("private_revision")) != opened["revision"]
+                    or loaded.get("annotation_knowledge_graph", {}).get("relationships", []) != graph.get("relationships", [])
+                    or loaded.get("proof_history", []) != proof.get("entries", [])):
+                    raise ValueError("joined revision differs")
+                self._prepare_loaded_state(loaded, resolved_user)
+            except (PrivateStorageError, ValueError, TypeError, KeyError):
+                raise WorkspacePersistenceError("Joined private state did not authenticate; original bytes were preserved.",
+                    code="authentication_failed", public_status="recoverable") from None
+            loaded.update(status="available", session_readable=True, missing_new_session=False,
+                          existing_unreadable=False, at_rest_protection="private_envelope")
+            return loaded
+        filename = self._private_session_filename(resolved_user)
+        try:
+            raw = self._read_bytes_nofollow(filename)
+        except FileNotFoundError:
+            raw = None
+        except WorkspaceAuthorizationDenied:
+            raise
+        except OSError:
+            raise WorkspacePersistenceError("Private session storage is unavailable.", code="read_error", public_status="unavailable") from None
+        if raw is not None:
+            if raw.startswith(b"CGPE"):
+                loaded = self._open_private_session_bytes(resolved_user, filename, raw)
+            else:
+                try:
+                    legacy = json.loads(raw.decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    raise WorkspacePersistenceError("Existing session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable") from None
+                if not isinstance(legacy, dict):
+                    raise WorkspacePersistenceError("Existing session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable")
+                self._prepare_loaded_state(legacy, resolved_user)
+                raise WorkspacePersistenceError("Legacy data requires explicit migration.", code="migration_required", public_status="recoverable")
+        else:
+            legacy = None
+            slug = self._legacy_filename(resolved_user)
+            if not self._legacy_owner_conflict(slug, resolved_user):
+                try:
+                    legacy_raw = self._read_bytes_nofollow(slug)
+                except FileNotFoundError:
+                    legacy_raw = None
+                except WorkspaceAuthorizationDenied:
+                    raise
+                except OSError:
+                    raise WorkspacePersistenceError("Private session storage is unavailable.", code="read_error", public_status="unavailable") from None
+                if legacy_raw is not None:
+                    try:
+                        legacy = json.loads(legacy_raw.decode("utf-8"))
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        raise WorkspacePersistenceError("Existing legacy session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable") from None
+                    if not isinstance(legacy, dict):
+                        raise WorkspacePersistenceError("Existing legacy session is corrupt and was preserved.", code="corrupt_session", public_status="recoverable")
+            if isinstance(legacy, dict) and legacy.get("user_id") == resolved_user:
+                self._prepare_loaded_state(legacy, resolved_user)
+                raise WorkspacePersistenceError("Legacy data requires explicit migration.", code="migration_required", public_status="recoverable")
+            loaded = _default_state(resolved_user)
+            loaded["case_id"] = context["case_id"]
+            loaded.update(missing_new_session=True, session_readable=True, status="available")
+            self._prepare_loaded_state(loaded, resolved_user)
+        payload = loaded
         payload["claim_type"] = _normalize_claim_type(payload.get("claim_type"))
         payload.setdefault("case_synopsis", "")
         payload.setdefault("intake_answers", {})
         payload.setdefault("intake_history", [])
+        migrate_original_complaint(payload)
         payload.setdefault("evidence", {"testimony": [], "documents": []})
         payload.setdefault("document_annotations", [])
         payload.setdefault("annotation_knowledge_graph", {"entities": [], "relationships": []})
@@ -2032,6 +4377,12 @@ class ComplaintWorkspaceService:
         payload.setdefault("latest_packet_export", None)
         payload.setdefault("latest_export_critic", None)
         payload.setdefault("ui_readiness", None)
+        payload.setdefault("case_id", user_id)
+        payload.setdefault("privacy_notice_shown", False)
+        # Serialized identity fields cannot transfer another workspace's cloud
+        # consent to the record selected by the caller. This binds policy only;
+        # tenant authorization remains a separate requirement.
+        _apply_effective_privacy_policy(payload, user_id)
         payload.setdefault(
             "mike_integration",
             {
@@ -2047,16 +4398,49 @@ class ComplaintWorkspaceService:
         return payload
 
     def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        if state.get("session_readable") is False or state.get("existing_unreadable"):
+            raise WorkspacePersistenceError(
+                "refusing to replace an unreadable session",
+                code="overwrite_blocked",
+                public_status=str(state.get("status") or "recoverable"),
+            )
         state["updated_at"] = _utc_now()
-        path = self._session_path(str(state.get("user_id") or DEFAULT_USER_ID))
-        temp_path = path.with_name(f"{path.name}.tmp")
+        user_id = str(state.get("user_id") or DEFAULT_USER_ID)
+        state["user_id"] = user_id
+        record_case = _state_case_id(state, user_id)
+        self._check_access(user_id, ability="write", record_case_id=record_case)
+        _apply_effective_privacy_policy(state, user_id)
+        repository = self.joined_revision_repository(user_id, record_case)
+        from integrations.private_storage import private_revision_readiness, PrivateStorageError
+        context, readiness_key_id, readiness_key = self._joined_key(user_id, record_case)
         try:
-            temp_path.write_text(json.dumps(state, indent=2, sort_keys=True))
-            os.replace(temp_path, path)
-        finally:
-            if temp_path.exists():
-                temp_path.unlink()
-        return state
+            readiness = private_revision_readiness(repository, tenant_id=user_id,
+                case_id=record_case, principal_id=context["principal_id"],
+                key=readiness_key, key_id=readiness_key_id)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Joined state requires authenticated recovery; original bytes were preserved.",
+                code=exc.code, public_status="recoverable") from None
+        if readiness == "committed":
+            return self._commit_joined_snapshot(state)
+        filename = self._private_session_filename(user_id)
+        try:
+            existing_raw = self._read_bytes_nofollow(filename)
+        except FileNotFoundError:
+            existing_raw = None
+        except WorkspaceAuthorizationDenied:
+            raise
+        except OSError as exc:
+            raise WorkspacePersistenceError("session unreadable", code="read_error", public_status="unavailable") from exc
+        if existing_raw is not None and not existing_raw.startswith(b"CGPE"):
+            try:
+                json.loads(existing_raw.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise WorkspacePersistenceError(
+                    "corrupt session preserved",
+                    code="corrupt_session",
+                    public_status="recoverable",
+                ) from exc
+        return self._save_private_state(state, filename, existing_raw)
 
     def _build_question_status(self, answers: Dict[str, Any]) -> List[Dict[str, Any]]:
         status = []
@@ -2096,6 +4480,10 @@ class ComplaintWorkspaceService:
             else "Core claim elements already have at least some recorded support."
         )
         guidance = {
+            "original_complaint": {
+                "why_this_matters": "The original complaint is the complainant's story. It stays separate from the structured name, party, and element answers.",
+                "how_to_answer": "Describe what happened in plain language. You can use more than one line, paste a file, or revise this narrative later without changing your name.",
+            },
             "party_name": {
                 "why_this_matters": "This anchors who the complaint belongs to across the CLI, web workspace, and later evidence collection.",
                 "how_to_answer": "Use the name that should appear in the complaint caption or intake record.",
@@ -2142,25 +4530,39 @@ class ComplaintWorkspaceService:
         answers = state.get("intake_answers") or {}
         review = self._build_review(state)
         questions = self._build_question_status(answers)
-        active_question = self._question_by_id(requested_question_id) if requested_question_id else self._next_question(answers)
+        requested_id = str(requested_question_id or "").strip()
+        if requested_id == ORIGINAL_COMPLAINT_QUESTION_ID or (not requested_id and _narrative_is_open(state)):
+            active_question = dict(_NARRATIVE_INQUIRY)
+        elif requested_id:
+            active_question = self._question_by_id(requested_id)
+        else:
+            active_question = self._next_question(answers)
         answered_count = len([item for item in questions if item.get("is_answered")])
         total_questions = len(questions)
+        narrative_record = _narrative_record(state)
         if active_question:
-            lead_in = "Let's start with the basics." if answered_count == 0 else "I have that. Next:" if accepted_answer else "Next question:"
+            if active_question["id"] == ORIGINAL_COMPLAINT_QUESTION_ID:
+                lead_in = "Let's start with the basics. Describe your complaint in plain language."
+            elif answered_count == 0 and not str(narrative_record.get("text") or "").strip():
+                lead_in = "Let's start with the basics."
+            elif accepted_answer:
+                lead_in = "I have that. Next:"
+            else:
+                lead_in = "Next question:"
             message = f"{lead_in} {active_question['prompt']}"
             explanation = self._build_intake_chat_explanation(active_question, state)
         else:
             message = (
-                "Intake complete. I have the core complaint facts. Next, review the synopsis, add corroborating evidence, "
-                "and use the mediator follow-up flow to tighten proof gaps."
+                "No further answerable intake questions are waiting. That is interview saturation, "
+                "not a finding that every fact, proof requirement, or legal element is satisfied."
             )
             explanation = {
                 "question_id": None,
-                "why_this_matters": "The intake record is complete enough to hand off into evidence collection and complaint drafting.",
-                "how_to_answer": "No further intake answer is required right now.",
-                "review_focus": "Shift attention to corroborating documents, witness testimony, and legal support.",
+                "why_this_matters": "An empty question list does not establish legal sufficiency or complete core facts.",
+                "how_to_answer": "Review the remaining issues, then add evidence or resume when there is something new to say.",
+                "review_focus": "Unresolved proof and evidence gaps stay open until they are actually resolved.",
             }
-        return {
+        payload = {
             "user_id": str(state.get("user_id") or DEFAULT_USER_ID),
             "message": message,
             "inquiry": {
@@ -2168,13 +4570,24 @@ class ComplaintWorkspaceService:
                 "label": active_question["label"],
                 "prompt": active_question["prompt"],
                 "placeholder": active_question.get("placeholder") or "",
+                "kind": "narrative" if active_question["id"] == ORIGINAL_COMPLAINT_QUESTION_ID else "structured",
             }
             if active_question
             else None,
+            "original_complaint": deepcopy(narrative_record),
             "explanation": explanation,
             "accepted_answer": deepcopy(accepted_answer) if accepted_answer else None,
             "questions": questions,
-            "next_question": self._next_question(answers),
+            "next_question": (
+                {
+                    "id": active_question["id"],
+                    "label": active_question["label"],
+                    "prompt": active_question["prompt"],
+                    "placeholder": active_question.get("placeholder") or "",
+                }
+                if active_question
+                else self._next_question(answers)
+            ),
             "review": review,
             "case_synopsis": self._build_case_synopsis(state),
             "session": deepcopy(state),
@@ -2182,9 +4595,40 @@ class ComplaintWorkspaceService:
                 "answered_question_count": answered_count,
                 "total_question_count": total_questions,
                 "is_complete": active_question is None,
+                "narrative_captured": bool(str(narrative_record.get("text") or "").strip()),
+                "narrative_revision": int(narrative_record.get("revision") or 0),
                 "remaining_question_ids": [item["id"] for item in _INTAKE_QUESTIONS if not str(answers.get(item["id"]) or "").strip()],
             },
         }
+
+        projection = state.get("shared_interview")
+        if isinstance(projection, dict) and projection.get("schema_version") == "shared-interview-session-v1":
+            pending = projection.get("pending_inquiry")
+            payload["legacy_inquiry"] = deepcopy(payload["inquiry"])
+            payload["legacy_conversation_state"] = deepcopy(payload["conversation_state"])
+            if isinstance(pending, dict):
+                inquiry = {
+                    "question_id": pending.get("inquiry_id"), "inquiry_id": pending.get("inquiry_id"),
+                    "label": "Complaint follow-up", "prompt": str(pending.get("question") or ""),
+                    "placeholder": "", "kind": "graph", "revision": pending.get("revision"),
+                }
+                payload["inquiry"] = inquiry
+                payload["next_question"] = {"id": inquiry["question_id"], **inquiry}
+                payload["message"] = inquiry["prompt"]
+                payload["expected_question_revision"] = pending.get("revision")
+            else:
+                payload["inquiry"] = None
+                payload["next_question"] = None
+                payload["expected_question_revision"] = None
+                payload["message"] = "The shared interview has no pending question. Review its unknown, unavailable and capped reasons before proceeding."
+            payload["conversation_state"]["is_complete"] = pending is None
+            payload["conversation_state"]["active_engine"] = "shared_interview"
+            payload["legal_sufficiency"] = False
+        payload["stopping_policy"] = _workspace_stopping_policy(state, active_question=active_question, answers=answers)
+        payload["legal_sufficiency"] = False
+        payload["core_facts_complete"] = False
+        payload["filing_ready"] = False
+        return payload
 
     def _support_matrix(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
         answers = state.get("intake_answers") or {}
@@ -2861,6 +5305,24 @@ class ComplaintWorkspaceService:
         config_path: Optional[str] = None,
         backend_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
+        helpers = _privacy_helpers()
+        case_id = _state_case_id(state, str(state.get("user_id") or DEFAULT_USER_ID))
+        privacy_context = helpers["build_complaint_privacy_context"](
+            state.get("privacy_policy"),
+            user_id=str(state.get("user_id") or DEFAULT_USER_ID),
+            case_id=case_id,
+            data_class="drafts_proofs",
+        )
+        from integrations.ipfs_datasets.llm import _privacy_context_block_reason
+
+        privacy_block = _privacy_context_block_reason(
+            privacy_context,
+            provider=provider,
+            model_name=model,
+        )
+        if privacy_block:
+            self._last_draft_refinement_error = privacy_block
+            return None
         try:
             from backends import LLMRouterBackend
             from .ui_review import _load_backend_kwargs
@@ -2871,11 +5333,12 @@ class ComplaintWorkspaceService:
                 backend_kwargs["provider"] = provider
             if model:
                 backend_kwargs["model"] = model
+            backend_kwargs["complaint_privacy_context"] = privacy_context
             backend = LLMRouterBackend(**backend_kwargs)
             prompt = self._build_formal_complaint_generation_prompt(state, base_draft)
             raw_response = self._invoke_llm_draft_backend_with_timeout(backend, prompt)
-        except Exception as exc:
-            self._last_draft_refinement_error = str(exc) or "llm_router refinement failed"
+        except Exception:
+            self._last_draft_refinement_error = "private_generation_failed"
             return None
 
         parsed = _parse_json_object(raw_response)
@@ -3144,17 +5607,17 @@ class ComplaintWorkspaceService:
             },
         }
 
-    def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
-        normalized_user_id = str(user_id or DEFAULT_USER_ID)
-        state = self._save_state(self._load_state(normalized_user_id))
-        answers = state.get("intake_answers") or {}
-        return {
-            "session": deepcopy(state),
-            "questions": self._build_question_status(answers),
-            "next_question": self._next_question(answers),
-            "review": self._build_review(state),
-            "case_synopsis": self._build_case_synopsis(state),
-        }
+    def get_session(self, user_id: Optional[str] = None, case_id: Optional[str] = None) -> Dict[str, Any]:
+        resolved = self._resolve_user_id(user_id)
+
+        def _run() -> Dict[str, Any]:
+            self._check_access(resolved, ability="read", case_id=case_id)
+            return self.request_handlers.get_session(resolved)
+
+        if case_id is None:
+            return _run()
+        with _workspace_reference_scope(case_id=case_id):
+            return _run()
 
     def build_mediator_prompt(self, user_id: Optional[str]) -> Dict[str, Any]:
         session = self.get_session(user_id)
@@ -3536,11 +5999,110 @@ class ComplaintWorkspaceService:
             "mike_logic": deepcopy(((current_draft.get("sync_metadata") or {}).get("logic_review") or {})),
         }
 
+    @classmethod
+    def _tooling_contract_source_members(cls) -> Dict[str, Set[str]]:
+        """Inspect shipped interfaces without importing CLI or executing SDK code."""
+
+        root = cls._repo_root()
+        unavailable_sources: Set[str] = set()
+
+        def source(relative_path: str) -> str:
+            try:
+                return (root / relative_path).read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                unavailable_sources.add(relative_path)
+                return ""
+
+        trees: Dict[str, ast.Module] = {}
+
+        def python_tree(relative_path: str) -> ast.Module:
+            if relative_path in trees:
+                return trees[relative_path]
+            try:
+                tree = ast.parse(source(relative_path))
+            except SyntaxError:
+                unavailable_sources.add(relative_path)
+                tree = ast.Module(body=[], type_ignores=[])
+            trees[relative_path] = tree
+            return tree
+
+        def declared_members(relative_path: str) -> Set[str]:
+            members: Set[str] = set()
+            for node in python_tree(relative_path).body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    members.add(node.name)
+                elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                    members.update(alias.asname or alias.name for alias in node.names)
+            return members
+
+        package_exports: Set[str] = set()
+        package_bindings: Set[str] = set()
+        for node in python_tree("complaint_generator/__init__.py").body:
+            if isinstance(node, ast.ImportFrom) and node.module:
+                module_path = (
+                    ("complaint_generator/" if node.level == 1 else "")
+                    + node.module.replace(".", "/") + ".py"
+                )
+                members = declared_members(module_path)
+                package_bindings.update(
+                    alias.asname or alias.name for alias in node.names if alias.name in members
+                )
+            if not isinstance(node, ast.Assign):
+                continue
+            targets = {target.id for target in node.targets if isinstance(target, ast.Name)}
+            if "__all__" in targets:
+                try:
+                    package_exports.update(
+                        value for value in ast.literal_eval(node.value) if isinstance(value, str)
+                    )
+                except (TypeError, ValueError):
+                    pass
+            elif "_LAZY_EXPORTS" in targets:
+                try:
+                    lazy_exports = ast.literal_eval(node.value)
+                    for name, (module_name, member_name) in lazy_exports.items():
+                        module_path = (
+                            "complaint_generator/" + module_name[1:].replace(".", "/") + ".py"
+                            if module_name.startswith(".")
+                            else module_name.replace(".", "/") + ".py"
+                        )
+                        if member_name in declared_members(module_path):
+                            package_bindings.add(name)
+                except (AttributeError, TypeError, ValueError):
+                    pass
+        cli_commands: Set[str] = set()
+        for node in python_tree("applications/complaint_cli.py").body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for decorator in node.decorator_list:
+                if (
+                    isinstance(decorator, ast.Call)
+                    and isinstance(decorator.func, ast.Attribute)
+                    and isinstance(decorator.func.value, ast.Name)
+                    and decorator.func.value.id == "app"
+                    and decorator.func.attr == "command"
+                    and decorator.args
+                    and isinstance(decorator.args[0], ast.Constant)
+                    and isinstance(decorator.args[0].value, str)
+                ):
+                    cli_commands.add(decorator.args[0].value)
+        sdk_methods = [
+            set(re.findall(r"(?m)^    (?:async )?([A-Za-z_$][\w$]*)\s*\(", source(path)))
+            for path in ("static/complaint_mcp_sdk.js", "static/complaint_mcp_sdk.mjs")
+        ]
+        return {
+            "package_exports": package_exports & package_bindings,
+            "cli_commands": cli_commands,
+            "browser_sdk_methods": sdk_methods[0] & sdk_methods[1],
+            "unavailable_sources": unavailable_sources,
+        }
+
     def get_tooling_contract(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         mcp_tools = [tool.get("name") for tool in list(self.list_mcp_tools().get("tools") or []) if tool.get("name")]
-        package_exports = list(_PACKAGE_EXPORT_CONTRACT)
-        cli_commands = list(_CLI_COMMAND_CONTRACT)
-        browser_sdk_methods = list(_BROWSER_SDK_METHOD_CONTRACT)
+        available = self._tooling_contract_source_members()
+        package_exports = [name for name in _PACKAGE_EXPORT_CONTRACT if name in available["package_exports"]]
+        cli_commands = [name for name in _CLI_COMMAND_CONTRACT if name in available["cli_commands"]]
+        browser_sdk_methods = [name for name in _BROWSER_SDK_METHOD_CONTRACT if name in available["browser_sdk_methods"]]
         core_flow_steps: List[Dict[str, Any]] = []
         missing_exposures: List[str] = []
         for step_id, mapping in _CORE_FLOW_CONTRACT.items():
@@ -3569,6 +6131,10 @@ class ComplaintWorkspaceService:
             "core_flow_steps": core_flow_steps,
             "missing_exposures": missing_exposures,
             "all_core_flow_steps_exposed": not missing_exposures,
+            "surface_inventory": {
+                "status": "unknown" if available["unavailable_sources"] else "verified",
+                "unavailable_sources": sorted(available["unavailable_sources"]),
+            },
         }
         if user_id:
             try:
@@ -3593,6 +6159,8 @@ class ComplaintWorkspaceService:
         legal_authority_db_path: Optional[str | Path] = None,
         claim_support_db_path: Optional[str | Path] = None,
     ) -> Dict[str, Any]:
+        if any(value is not None for value in (manifest_path, statefile_path, evidence_db_path, legal_authority_db_path, claim_support_db_path)):
+            self._require_local_filesystem_access()
         from complaint_generator.data_migration import inspect_workspace_data_schema
 
         resolved_user_id = str(user_id or DEFAULT_USER_ID)
@@ -3624,6 +6192,7 @@ class ComplaintWorkspaceService:
         package_name: Optional[str] = None,
         include_car: bool = True,
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         from complaint_generator.data_migration import migrate_legacy_workspace_data
 
         resolved_user_id = str(user_id or DEFAULT_USER_ID)
@@ -4331,7 +6900,10 @@ class ComplaintWorkspaceService:
             if str(os.getenv("COMPLAINT_PROVIDER_DIAGNOSTICS_CHECK_SECRETS", "") or "").strip() != "1":
                 return ""
             try:
-                from ipfs_datasets_py.mcp_server.secrets_vault import get_secrets_vault
+                get_secrets_vault = _require_ipfs_attr(
+                    "ipfs_datasets_py.mcp_server.secrets_vault",
+                    "get_secrets_vault",
+                )
 
                 vault = get_secrets_vault()
                 for name in names:
@@ -4605,6 +7177,8 @@ class ComplaintWorkspaceService:
         backend_id: Optional[str] = None,
         notes: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if artifact_path or artifact_dir:
+            self._require_local_filesystem_access()
         from .ui_review import review_complaint_export_artifacts
 
         artifact_metadata: List[Dict[str, Any]] = []
@@ -4647,19 +7221,7 @@ class ComplaintWorkspaceService:
         }
 
     def update_claim_type(self, user_id: Optional[str], claim_type: Optional[str]) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        state["claim_type"] = _normalize_claim_type(claim_type)
-        self._save_state(state)
-        session = self.get_session(str(state.get("user_id")))
-        return {
-            "session": session["session"],
-            "review": session["review"],
-            "questions": session["questions"],
-            "next_question": session["next_question"],
-            "case_synopsis": session["case_synopsis"],
-            "claim_type": session["session"]["claim_type"],
-            "claim_type_label": _claim_type_display_name(session["session"]["claim_type"]),
-        }
+        return self.request_handlers.update_claim_type(user_id, claim_type)
 
     def _build_complaint_output_review_artifacts(self, user_id: Optional[str]) -> List[Dict[str, Any]]:
         if not user_id:
@@ -4882,17 +7444,7 @@ class ComplaintWorkspaceService:
         raise ValueError(f"Unsupported complaint export format: {output_format}")
 
     def submit_intake_answers(self, user_id: Optional[str], answers: Dict[str, Any]) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        answer_map = state.setdefault("intake_answers", {})
-        history = state.setdefault("intake_history", [])
-        for question in _INTAKE_QUESTIONS:
-            value = str(answers.get(question["id"]) or "").strip()
-            if not value:
-                continue
-            answer_map[question["id"]] = value
-            history.append({"question_id": question["id"], "answer": value, "captured_at": _utc_now()})
-        self._save_state(state)
-        return self.get_session(str(state.get("user_id")))
+        return self.request_handlers.submit_intake_answers(user_id, answers)
 
     def run_intake_chat_turn(
         self,
@@ -4900,32 +7452,15 @@ class ComplaintWorkspaceService:
         *,
         message: Optional[str] = None,
         question_id: Optional[str] = None,
+        expected_question_revision: Optional[int] = None,
+        interview_action: Optional[str] = None,
     ) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        target_question = self._question_by_id(question_id) if question_id else self._next_question(state.get("intake_answers") or {})
-        if question_id and target_question is None:
-            raise ValueError(f"Unknown intake question_id: {question_id}")
-
-        accepted_answer: Optional[Dict[str, Any]] = None
-        normalized_message = str(message or "").strip()
-        if normalized_message:
-            if target_question is None:
-                raise ValueError("The intake flow is already complete for this session.")
-            answer_map = state.setdefault("intake_answers", {})
-            history = state.setdefault("intake_history", [])
-            answer_map[target_question["id"]] = normalized_message
-            accepted_answer = {
-                "question_id": target_question["id"],
-                "answer": normalized_message,
-                "captured_at": _utc_now(),
-            }
-            history.append(deepcopy(accepted_answer))
-
-        self._save_state(state)
-        return self._build_intake_chat_payload(
-            state,
-            accepted_answer=accepted_answer,
-            requested_question_id=question_id if accepted_answer is None else None,
+        return self.request_handlers.run_intake_chat_turn(
+            user_id,
+            message=message,
+            question_id=question_id,
+            expected_question_revision=expected_question_revision,
+            interview_action=interview_action,
         )
 
     def save_evidence(
@@ -4939,27 +7474,39 @@ class ComplaintWorkspaceService:
         source: Optional[str] = None,
         attachment_names: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        evidence_store = state.setdefault("evidence", {"testimony": [], "documents": []})
-        collection_key = "documents" if kind == "document" else "testimony"
-        record = {
-            "id": f"{collection_key}-{len(evidence_store.get(collection_key, [])) + 1}",
-            "kind": kind,
-            "claim_element_id": claim_element_id,
-            "title": title,
-            "content": content,
-            "source": source or "",
-            "attachment_names": [str(item).strip() for item in list(attachment_names or []) if str(item).strip()],
-            "saved_at": _utc_now(),
-        }
-        evidence_store.setdefault(collection_key, []).append(record)
-        self._save_state(state)
-        return {
-            "saved": record,
-            "review": self._build_review(state),
-            "session": deepcopy(state),
-            "case_synopsis": self._build_case_synopsis(state),
-        }
+        return self.request_handlers.save_evidence(
+            user_id,
+            kind=kind,
+            claim_element_id=claim_element_id,
+            title=title,
+            content=content,
+            source=source,
+            attachment_names=attachment_names,
+        )
+
+    async def upload_local_evidence_files(
+        self,
+        user_id: Optional[str],
+        *,
+        files: List[Any],
+        claim_element_id: str = "causation",
+        kind: str = "document",
+        evidence_root: Optional[str] = None,
+        note: Optional[str] = None,
+        note_title: Optional[str] = None,
+        source: Optional[str] = "dashboard-chat-upload",
+    ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
+        return await self.request_handlers.upload_local_evidence_files(
+            user_id,
+            files=files,
+            claim_element_id=claim_element_id,
+            kind=kind,
+            evidence_root=evidence_root,
+            note=note,
+            note_title=note_title,
+            source=source,
+        )
 
     @classmethod
     def _build_document_annotation_knowledge_graph(cls, annotations: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -5337,10 +7884,13 @@ class ComplaintWorkspaceService:
         checkpoint_name: Optional[str] = None,
         uid_window_size: Optional[int] = None,
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         async def _run_import() -> Dict[str, Any]:
-            from ipfs_datasets_py.processors.legal_data.email_import import import_gmail_evidence
+            from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
-            return await import_gmail_evidence(
+            import_gmail_evidence_upstream = load_legal_symbol("import_gmail_evidence", module="email_import")
+
+            return await import_gmail_evidence_upstream(
                 addresses=addresses,
                 collect_all_messages=collect_all_messages,
                 user_id=str(user_id or DEFAULT_USER_ID),
@@ -5401,10 +7951,13 @@ class ComplaintWorkspaceService:
         bm25_search_query: Optional[str] = None,
         bm25_search_limit: int = 20,
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         async def _run_pipeline() -> Dict[str, Any]:
-            from ipfs_datasets_py.processors.legal_data.email_pipeline import run_gmail_duckdb_pipeline
+            from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
-            return await run_gmail_duckdb_pipeline(
+            run_gmail_duckdb_pipeline_upstream = load_legal_symbol("run_gmail_duckdb_pipeline", module="email_pipeline")
+
+            return await run_gmail_duckdb_pipeline_upstream(
                 user_id=str(user_id or DEFAULT_USER_ID),
                 addresses=addresses,
                 collect_all_messages=collect_all_messages,
@@ -5447,9 +8000,12 @@ class ComplaintWorkspaceService:
         bm25_k1: float = 1.2,
         bm25_b: float = 0.75,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data.email_pipeline import search_email_duckdb_corpus
+        self._require_local_filesystem_access()
+        from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
-        return search_email_duckdb_corpus(
+        search_email_duckdb_corpus_upstream = load_legal_symbol("search_email_duckdb_corpus", module="email_pipeline")
+
+        return search_email_duckdb_corpus_upstream(
             index_path=index_path,
             query=query,
             limit=limit,
@@ -5467,6 +8023,7 @@ class ComplaintWorkspaceService:
         kind: str = "document",
         evidence_root: Optional[str] = None,
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         from complaint_generator.local_evidence_import import import_local_evidence
 
         return import_local_evidence(
@@ -5491,26 +8048,16 @@ class ComplaintWorkspaceService:
         config_path: Optional[str] = None,
         backend_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        draft = self._build_draft(
-            state,
+        return self.request_handlers.generate_complaint(
+            user_id,
             requested_relief=requested_relief,
+            title_override=title_override,
             use_llm=use_llm,
             provider=provider,
             model=model,
             config_path=config_path,
             backend_id=backend_id,
         )
-        if title_override:
-            draft["title"] = title_override
-        state["draft"] = draft
-        self._save_state(state)
-        return {
-            "draft": deepcopy(draft),
-            "review": self._build_review(state),
-            "session": deepcopy(state),
-            "case_synopsis": self._build_case_synopsis(state),
-        }
 
     def update_draft(
         self,
@@ -5520,36 +8067,15 @@ class ComplaintWorkspaceService:
         body: Optional[str] = None,
         requested_relief: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        draft = deepcopy(state.get("draft") or self._build_draft(state))
-        if title is not None:
-            draft["title"] = title
-        if body is not None:
-            draft["body"] = body
-        if requested_relief is not None:
-            draft["requested_relief"] = requested_relief
-        draft["updated_at"] = _utc_now()
-        state["draft"] = draft
-        self._save_state(state)
-        return {
-            "draft": deepcopy(draft),
-            "review": self._build_review(state),
-            "session": deepcopy(state),
-            "case_synopsis": self._build_case_synopsis(state),
-        }
+        return self.request_handlers.update_draft(
+            user_id,
+            title=title,
+            body=body,
+            requested_relief=requested_relief,
+        )
 
     def update_case_synopsis(self, user_id: Optional[str], synopsis: Optional[str]) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        state["case_synopsis"] = str(synopsis or "").strip()
-        self._save_state(state)
-        session = self.get_session(str(state.get("user_id")))
-        return {
-            "session": session["session"],
-            "review": session["review"],
-            "questions": session["questions"],
-            "next_question": session["next_question"],
-            "case_synopsis": session["case_synopsis"],
-        }
+        return self.request_handlers.update_case_synopsis(user_id, synopsis)
 
     @staticmethod
     def _repo_root() -> Path:
@@ -5616,6 +8142,41 @@ class ComplaintWorkspaceService:
     def _resolve_mike_grounding_mode(cls, override: Optional[str] = None) -> str:
         candidate = str(override or os.getenv("COMPLAINT_MIKE_GROUNDING_MODE") or DEFAULT_MIKE_GROUNDING_MODE).strip().lower()
         return candidate or DEFAULT_MIKE_GROUNDING_MODE
+
+    @staticmethod
+    def _mike_connector_url() -> str:
+        configured = str(os.getenv("COMPLAINT_MCP_CONNECTOR_URL") or "").strip()
+        return configured or DEFAULT_COMPLAINT_MCP_CONNECTOR_URL
+
+    @staticmethod
+    def _mike_connector_setup_text(router_available: bool) -> str:
+        connector_url = ComplaintWorkspaceService._mike_connector_url()
+        registration = (
+            "Mike registers this connector with Streamable HTTP on a public https URL. "
+            "http://localhost and private addresses are rejected by Mike. "
+            "Path: /api/complaint-workspace/mcp/rpc. "
+            "Tools: complaint.generate_grounded_text, complaint.search_corpus, "
+            "complaint.get_handoff, complaint.sync_draft. "
+            "Set COMPLAINT_MCP_AUTH_TOKEN and put the same bearer token in the Mike connector auth config. "
+            "The mike-llm-router-patch-v1 stamp is compatibility-only and does not intercept Mike LLM calls. "
+            f"Connector URL: {connector_url}."
+        )
+        if router_available:
+            availability = (
+                "Register this complaint-generator MCP connector in Mike. "
+                "Grounded drafting calls complaint.generate_grounded_text. "
+                "The accelerate routers are available. "
+            )
+        else:
+            availability = (
+                "The MCP connector and accelerate routers are unavailable. "
+                "Register the connector URL when the accelerate checkout can be imported. "
+            )
+        return f"{availability}{registration}"
+
+    @staticmethod
+    def _document_version_content_sha256(title: str, body: str) -> str:
+        return hashlib.sha256((str(title or "") + str(body or "")).encode("utf-8")).hexdigest()
 
     @classmethod
     def _build_mike_router_policy_snapshot(cls) -> Dict[str, Any]:
@@ -5707,8 +8268,10 @@ class ComplaintWorkspaceService:
     @classmethod
     def _build_mike_submodule_inventory(cls) -> Dict[str, Any]:
         repo_root = cls._repo_root()
-        mike_root = repo_root / "mike"
-        ipfs_root = repo_root / "ipfs_datasets_py"
+        mike_root = _prefer_checkout(repo_root, "mike")
+        ipfs_root = _prefer_checkout(repo_root, "ipfs_datasets_py")
+        accelerate_root = _prefer_checkout(repo_root, "ipfs_accelerate_py")
+        kit_root = _prefer_checkout(repo_root, "ipfs_kit_py")
         mike_frontend_package = cls._safe_read_json_file(mike_root / "frontend" / "package.json")
         mike_backend_package = cls._safe_read_json_file(mike_root / "backend" / "package.json")
         ipfs_pyproject = cls._safe_read_toml_file(cls._ipfs_project_file(ipfs_root))
@@ -5726,11 +8289,17 @@ class ComplaintWorkspaceService:
             "backend/src/routes/caseLaw.ts",
             "backend/src/lib/mcp/client.ts",
         ]
-        existing_editor_modules = [path for path in editor_modules if (mike_root / path).exists()]
+        existing_editor_modules = [path for path in editor_modules if (mike_root / path).is_file()]
+        editor_module_inventory = [
+            {"path": path, "path_found": (mike_root / path).is_file()}
+            for path in editor_modules
+        ]
         return {
             "strategy": {
-                "mike": "pinned_submodule",
-                "ipfs_datasets_py": "pinned_submodule",
+                "mike": "external/mike@origin/main",
+                "ipfs_datasets_py": "external/ipfs_datasets_py@origin/main",
+                "ipfs_accelerate_py": "external/ipfs_accelerate_py@origin/main",
+                "ipfs_kit_py": "external/ipfs_kit_py@origin/main",
                 "workspace_adapters": "promote_stable_contracts_inside_complaint_generator",
                 "editor_assets_decoupled_from_legal_processors": True,
             },
@@ -5744,6 +8313,7 @@ class ComplaintWorkspaceService:
                 "frontend_dependencies": sorted(dict(mike_frontend_package.get("dependencies") or {}).keys())[:20],
                 "backend_dependencies": sorted(dict(mike_backend_package.get("dependencies") or {}).keys())[:20],
                 "editor_modules": existing_editor_modules,
+                "editor_module_inventory": editor_module_inventory,
                 "editor_module_count": len(existing_editor_modules),
                 "skill_assets": deepcopy(skill_asset_manifest.get("assets") or []),
                 "skill_asset_count": int(skill_asset_manifest.get("asset_count") or 0),
@@ -5772,10 +8342,26 @@ class ComplaintWorkspaceService:
                     "re-run_strict_grounding_tests",
                 ],
             },
+            "ipfs_accelerate_py": {
+                "available": accelerate_root.is_dir() and (accelerate_root / "README.md").exists(),
+                "root": str(accelerate_root),
+                "commit": cls._safe_read_git_ref(accelerate_root, "HEAD"),
+                "origin_main_commit": cls._safe_read_git_ref(accelerate_root, "origin/main"),
+            },
+            "ipfs_kit_py": {
+                "available": kit_root.is_dir() and (kit_root / "README.md").exists(),
+                "root": str(kit_root),
+                "commit": cls._safe_read_git_ref(kit_root, "HEAD"),
+                "origin_main_commit": cls._safe_read_git_ref(kit_root, "origin/main"),
+            },
             "workspace_adapter_boundary": {
                 "router_adapter": "integrations/ipfs_datasets/llm.py",
                 "legal_adapter": "integrations/ipfs_datasets/legal.py",
                 "logic_adapter": "integrations/ipfs_datasets/logic.py",
+                "storage_adapter": "integrations/ipfs_datasets/storage.py",
+                "graph_adapter": "integrations/ipfs_datasets/graphs.py",
+                "multimedia_adapter": "integrations/ipfs_datasets/multimedia.py",
+                "accelerate_router_facade": "integrations/ipfs_accelerate/routers.py",
                 "workspace_contract_owner": "applications/complaint_workspace.py",
             },
         }
@@ -5783,10 +8369,14 @@ class ComplaintWorkspaceService:
     @classmethod
     def _build_mike_compatibility_target_matrix(cls) -> Dict[str, Any]:
         repo_root = cls._repo_root()
+        mike_root = _prefer_checkout(repo_root, "mike")
+        ipfs_root = _prefer_checkout(repo_root, "ipfs_datasets_py")
+        accelerate_root = _prefer_checkout(repo_root, "ipfs_accelerate_py")
+        kit_root = _prefer_checkout(repo_root, "ipfs_kit_py")
         complaint_pyproject = cls._safe_read_toml_file(repo_root / "pyproject.toml")
-        mike_frontend_package = cls._safe_read_json_file(repo_root / "mike" / "frontend" / "package.json")
-        mike_backend_package = cls._safe_read_json_file(repo_root / "mike" / "backend" / "package.json")
-        ipfs_pyproject = cls._safe_read_toml_file(cls._ipfs_project_file(repo_root / "ipfs_datasets_py"))
+        mike_frontend_package = cls._safe_read_json_file(mike_root / "frontend" / "package.json")
+        mike_backend_package = cls._safe_read_json_file(mike_root / "backend" / "package.json")
+        ipfs_pyproject = cls._safe_read_toml_file(cls._ipfs_project_file(ipfs_root))
         complaint_project = dict(complaint_pyproject.get("project") or {})
         ipfs_project = dict(ipfs_pyproject.get("project") or {})
         return {
@@ -5808,16 +8398,19 @@ class ComplaintWorkspaceService:
                 "workspace_source_of_truth": "complaint_generator_session_state",
             },
             "submodule_shas": {
-                "mike_commit": cls._safe_read_git_ref(repo_root / "mike", "HEAD"),
-                "mike_origin_main_commit": cls._safe_read_git_ref(repo_root / "mike", "origin/main"),
-                "ipfs_datasets_py_commit": cls._safe_read_git_ref(repo_root / "ipfs_datasets_py", "HEAD"),
-                "ipfs_datasets_py_origin_main_commit": cls._safe_read_git_ref(
-                    repo_root / "ipfs_datasets_py", "origin/main"
-                ),
+                "mike_commit": cls._safe_read_git_ref(mike_root, "HEAD"),
+                "mike_origin_main_commit": cls._safe_read_git_ref(mike_root, "origin/main"),
+                "ipfs_datasets_py_commit": cls._safe_read_git_ref(ipfs_root, "HEAD"),
+                "ipfs_datasets_py_origin_main_commit": cls._safe_read_git_ref(ipfs_root, "origin/main"),
+                "ipfs_accelerate_py_commit": cls._safe_read_git_ref(accelerate_root, "HEAD"),
+                "ipfs_accelerate_py_origin_main_commit": cls._safe_read_git_ref(accelerate_root, "origin/main"),
+                "ipfs_kit_py_commit": cls._safe_read_git_ref(kit_root, "HEAD"),
+                "ipfs_kit_py_origin_main_commit": cls._safe_read_git_ref(kit_root, "origin/main"),
             },
             "config_expectations": {
                 "complaint_mike_base_url_env": "COMPLAINT_MIKE_BASE_URL",
                 "complaint_mike_grounding_mode_env": "COMPLAINT_MIKE_GROUNDING_MODE",
+                "complaint_mcp_connector_url_env": "COMPLAINT_MCP_CONNECTOR_URL",
                 "workspace_router_provider_env": "COMPLAINT_LLM_PROVIDER",
                 "workspace_router_model_env": "COMPLAINT_LLM_MODEL",
             },
@@ -6827,8 +9420,25 @@ class ComplaintWorkspaceService:
                 "must_route_generation_through_workspace_llm_router": True,
             },
         }
-        # Apply the Mike LLM router patch so every handoff carries the patched
-        # router reference and enforcement metadata.
+        from integrations.ipfs_datasets import llm as complaint_llm
+
+        router_available = bool(getattr(complaint_llm, "LLM_ROUTER_AVAILABLE", False))
+        draft_title = str(draft_payload.get("title") or "")
+        draft_body = str(draft_payload.get("body") or "")
+        handoff_payload["mike_document"] = {
+            "title": draft_title,
+            "body": draft_body,
+            "citations": list(draft_payload.get("citation_links") or []),
+            "content_sha256": self._document_version_content_sha256(draft_title, draft_body),
+        }
+        handoff_payload["mike_integration"] = {
+            "transport": "mcp_connector",
+            "connector_url": self._mike_connector_url(),
+            "tools": list(MIKE_MCP_CONNECTOR_TOOLS),
+            "setup_instructions": self._mike_connector_setup_text(router_available),
+            "llm_router_available": router_available,
+        }
+        # The payload stamp stays for one release. Mike calls the MCP connector.
         try:
             from integrations.mike.llm_patch import apply_mike_llm_router_patch
             apply_mike_llm_router_patch(handoff_payload)
@@ -7075,7 +9685,12 @@ class ComplaintWorkspaceService:
             "redline_delta_count": int(((normalized_sync_provenance.get("redline_metadata") or {}).get("structured_delta_count")) or 0),
             "sync_integrity_hash": sync_integrity_hash,
             "sync_integrity_hash_mode": sync_integrity_hash_mode,
+            "document_version_content_sha256": self._document_version_content_sha256(
+                str(draft.get("title") or ""),
+                str(draft.get("body") or ""),
+            ),
         }
+        draft["sync_metadata"]["document_version_content_sha256"] = sync_record["document_version_content_sha256"]
         sync_history.insert(0, sync_record)
         mike_integration["last_sync"] = sync_record
         mike_integration["sync_history"] = sync_history[:25]
@@ -7116,6 +9731,7 @@ class ComplaintWorkspaceService:
             "questions": session["questions"],
             "next_question": session["next_question"],
             "case_synopsis": session["case_synopsis"],
+            "document_version_content_sha256": sync_record["document_version_content_sha256"],
         }
 
     def get_mike_integration_status(self, user_id: Optional[str]) -> Dict[str, Any]:
@@ -7375,12 +9991,13 @@ class ComplaintWorkspaceService:
         }
         try:
             from integrations.ipfs_datasets.draft_logic_pipeline import pin_proof_report_to_ipfs
-            pin_result = pin_proof_report_to_ipfs(
-                proof_report,
-                claim_id=claim_id or resolved_user_id,
-            )
-        except Exception as exc:
-            pin_result["error"] = str(exc)
+            context = self._private_artifact_context(resolved_user_id, revision="proof-1")
+            context.update(backend=self._private_local_backend(), backend_name="local_cache", pin_content=False)
+            pin_result = pin_proof_report_to_ipfs(proof_report, claim_id=claim_id or resolved_user_id, private_context=context)
+        except WorkspacePersistenceError:
+            raise
+        except Exception:
+            pin_result.update(status="unavailable", deferred=True, verified=False, error="private_proof_unavailable")
         return {
             "status": "ok",
             "user_id": resolved_user_id,
@@ -7577,19 +10194,31 @@ class ComplaintWorkspaceService:
                 f"DRAFT:\n{improved_body}"
             )
             try:
+                helpers = _privacy_helpers()
+                case_id = _state_case_id(state, resolved_user_id)
+                privacy_context = helpers["build_complaint_privacy_context"](
+                    state.get("privacy_policy"),
+                    user_id=resolved_user_id,
+                    case_id=case_id,
+                    data_class="drafts_proofs",
+                )
                 llm_result = generate_text_with_metadata(
                     prompt,
                     provider=provider,
-                    model=model,
+                    model_name=model,
                     config_path=config_path,
                     backend_id=backend_id,
+                    complaint_privacy_context=privacy_context,
                 )
+                if str((llm_result or {}).get("privacy_decision") or "") == "denied":
+                    llm_errors.append(str((llm_result or {}).get("error") or "privacy_denied"))
+                    continue
                 revised = str((llm_result or {}).get("text") or "").strip()
                 if revised and len(revised) > _MIN_REVISED_DRAFT_LENGTH:
                     improved_body = revised
                     applied_suggestions.append(suggestion)
-            except Exception as exc:
-                llm_errors.append(f"{dimension}: {exc}")
+            except Exception:
+                llm_errors.append("private_generation_failed")
 
         improved = bool(applied_suggestions)
         if improved:
@@ -7706,16 +10335,54 @@ class ComplaintWorkspaceService:
         }
 
     def reset_session(self, user_id: Optional[str]) -> Dict[str, Any]:
-        state = _default_state(str(user_id or DEFAULT_USER_ID))
-        self._save_state(state)
-        return self.get_session(str(state["user_id"]))
+        return self.request_handlers.reset_session(user_id)
 
-    @staticmethod
-    def _resolve_docket_path(path_value: str | Path) -> str:
+    def normal_reset_retention_receipt(self) -> Dict[str, Any]:
+        from integrations.private_storage import normal_reset_retention_receipt
+
+        return normal_reset_retention_receipt()
+
+    def delete_private_case(
+        self,
+        user_id: Optional[str],
+        *,
+        tenant_id: str,
+        case_id: str,
+        repository: str | Path,
+        policy: str,
+        legal_hold: bool = False,
+        workspace_required: bool = False,
+        providers: Optional[Mapping[str, Any]] = None,
+        timeout_seconds: Optional[float] = None,
+        crash_at: Optional[str] = None,
+        principal_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """User-visible scoped deletion. Normal reset does not call this."""
+
+        del principal_id
+        self._require_local_filesystem_access()
+        self._check_access(user_id or tenant_id, ability="write", case_id=case_id)
+        from integrations.private_storage import delete_private_case as _delete
+
+        return _delete(
+            repository,
+            self._private_key_session(),
+            tenant_id=tenant_id,
+            case_id=case_id,
+            policy=policy,
+            legal_hold=legal_hold,
+            workspace_required=workspace_required,
+            providers=providers,
+            timeout_seconds=timeout_seconds,
+            crash_at=crash_at,
+        )
+
+    def _resolve_docket_path(self, path_value: str | Path) -> str:
+        self._require_local_filesystem_access()
         return str(Path(str(path_value)).expanduser().resolve())
 
-    @staticmethod
-    def _resolve_workspace_dataset_path(path_value: str | Path) -> str:
+    def _resolve_workspace_dataset_path(self, path_value: str | Path) -> str:
+        self._require_local_filesystem_access()
         return str(Path(str(path_value)).expanduser().resolve())
 
     def _load_workspace_dataset_payload(
@@ -7729,10 +10396,10 @@ class ComplaintWorkspaceService:
         if normalized_type in {"single", "single_parquet", "parquet"}:
             return self._load_workspace_single_parquet_payload(resolved_path)
 
-        from ipfs_datasets_py.processors.legal_data import (
-            WorkspaceDatasetBuilder,
-            load_packaged_workspace_dataset,
-        )
+        from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+        WorkspaceDatasetBuilder = load_legal_symbol("WorkspaceDatasetBuilder")
+        load_packaged_workspace_dataset = load_legal_symbol("load_packaged_workspace_dataset")
 
         if normalized_type == "packaged":
             dataset = load_packaged_workspace_dataset(resolved_path)
@@ -8314,8 +10981,9 @@ class ComplaintWorkspaceService:
         if normalized_type in {"single", "single_parquet", "parquet"}:
             summary = self._summarize_workspace_dataset_payload(filtered_payload)
         else:
-            from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
+            from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
+            summarize_workspace_dataset = load_legal_symbol("summarize_workspace_dataset")
             summary = dict(summarize_workspace_dataset(filtered_payload))
         return {
             "input_path": resolved_path,
@@ -8818,8 +11486,9 @@ class ComplaintWorkspaceService:
         if normalized_type in {"single", "single_parquet", "parquet"}:
             summary = self._summarize_workspace_dataset_payload(dataset_payload)
         else:
-            from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
+            from integrations.ipfs_datasets.legal_data import load_legal_symbol
 
+            summarize_workspace_dataset = load_legal_symbol("summarize_workspace_dataset")
             summary = dict(summarize_workspace_dataset(dataset_payload))
         knowledge_graph = dict(dataset_payload.get("knowledge_graph") or {})
         entities = [dict(item) for item in list(knowledge_graph.get("entities") or []) if isinstance(item, dict)]
@@ -8955,11 +11624,11 @@ class ComplaintWorkspaceService:
             )
             summary = self._summarize_workspace_dataset_payload(filtered_payload)
         else:
-            from ipfs_datasets_py.processors.legal_data import (
-                search_workspace_dataset_bm25,
-                search_workspace_dataset_vector,
-                summarize_workspace_dataset,
-            )
+            from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+            search_workspace_dataset_bm25 = load_legal_symbol("search_workspace_dataset_bm25")
+            search_workspace_dataset_vector = load_legal_symbol("search_workspace_dataset_vector")
+            summarize_workspace_dataset = load_legal_symbol("summarize_workspace_dataset")
 
             if normalized_backend == "bm25":
                 results = search_workspace_dataset_bm25(filtered_payload, query, top_k=int(top_k or 10))
@@ -9005,10 +11674,10 @@ class ComplaintWorkspaceService:
                 top_k=int(top_k or 10),
             )
         else:
-            from ipfs_datasets_py.processors.legal_data import (
-                search_docket_dataset_bm25,
-                search_docket_dataset_vector,
-            )
+            from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+            search_docket_dataset_bm25 = load_legal_symbol("search_docket_dataset_bm25")
+            search_docket_dataset_vector = load_legal_symbol("search_docket_dataset_vector")
 
             if normalized_backend == "bm25":
                 results = search_docket_dataset_bm25(dataset_payload, query, top_k=int(top_k or 10))
@@ -9079,6 +11748,7 @@ class ComplaintWorkspaceService:
         }
 
     def get_packaged_docket_operator_dashboard(self, manifest_path: str | Path) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         from integrations.ipfs_datasets.legal_data import get_packaged_docket_operator_dashboard
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
@@ -9095,6 +11765,7 @@ class ComplaintWorkspaceService:
         *,
         report_format: str = "parsed",
     ) -> Dict[str, Any]:
+        self._require_local_filesystem_access()
         from integrations.ipfs_datasets.legal_data import load_packaged_docket_operator_dashboard_report
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
@@ -9121,7 +11792,12 @@ class ComplaintWorkspaceService:
         chain_until_satisfied: bool = True,
         attach_refreshed_packets: bool = False,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import execute_packaged_docket_proof_revalidation_queue
+        self._require_local_filesystem_access()
+        from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+        execute_packaged_docket_proof_revalidation_queue = load_legal_symbol(
+            "execute_packaged_docket_proof_revalidation_queue"
+        )
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
         execution = execute_packaged_docket_proof_revalidation_queue(
@@ -9152,7 +11828,12 @@ class ComplaintWorkspaceService:
         execution_top_k: int = 10,
         chain_until_satisfied: bool = True,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import persist_packaged_docket_proof_revalidation_queue
+        self._require_local_filesystem_access()
+        from integrations.ipfs_datasets.legal_data import load_legal_symbol
+
+        persist_packaged_docket_proof_revalidation_queue = load_legal_symbol(
+            "persist_packaged_docket_proof_revalidation_queue"
+        )
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
         resolved_output_dir = str(Path(str(output_dir)).expanduser().resolve())
@@ -9173,6 +11854,613 @@ class ComplaintWorkspaceService:
             "output_dir": resolved_output_dir,
             "source": "complaint_workspace_packaged_proof_revalidation_queue_persist",
         }
+
+    def get_privacy_policy(self, user_id: Optional[str] = None, case_id: Optional[str] = None) -> Dict[str, Any]:
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        bound_case = _state_case_id(state, resolved_user_id)
+        requested_case = str(case_id or bound_case)
+        helpers = _privacy_helpers()
+        if requested_case != bound_case:
+            inspection = helpers["inspect_privacy_policy"](
+                state.get("privacy_policy"),
+                user_id=resolved_user_id,
+                case_id=requested_case,
+            )
+            policy = inspection["policy"]
+            load = {
+                "admitted": False,
+                "reason": "privacy_denied:case_binding",
+                "cloud_processing_enabled": False,
+            }
+        else:
+            policy = dict(state.get("privacy_policy") or {})
+            load = dict(state.get("privacy_policy_load") or {})
+        return {
+            "user_id": resolved_user_id,
+            "case_id": bound_case,
+            "requested_case_id": requested_case,
+            "policy": policy,
+            "load": load,
+            "at_rest_protection": "private_envelope",
+            "encryption_at_rest_blocks_remote_llm": False,
+            "authenticates_tenant": False,
+            "authorization_note": "user_id selects a workspace record. Tenant authorization is PRIV002, not this policy.",
+        }
+
+    def set_privacy_policy(
+        self,
+        user_id: Optional[str],
+        mode: str,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        bound_case = _state_case_id(state, resolved_user_id)
+        requested_case = str(case_id or bound_case)
+        if requested_case != bound_case:
+            payload = self.get_privacy_policy(resolved_user_id, case_id=requested_case)
+            payload["updated"] = False
+            return payload
+        helpers = _privacy_helpers()
+        state["privacy_policy"] = helpers["privacy_policy_for_mode"](resolved_user_id, bound_case, mode)
+        self._save_state(state)
+        payload = self.get_privacy_policy(resolved_user_id)
+        payload["updated"] = True
+        return payload
+
+    def dispatch_private_llm_turn(
+        self,
+        user_id: Optional[str],
+        *,
+        relevant_facts: list,
+        rule_gaps: list,
+        unrelated_evidence: Optional[list] = None,
+        sensitive_literals: Optional[list] = None,
+        key: bytes,
+        key_id: str,
+        provider: Optional[str] = None,
+        model_name: Optional[str] = None,
+        timeout: Any = None,
+        campaign_settings: Optional[Mapping[str, Any]] = None,
+        stored_user_complaint: bool = False,
+        turn_id: str = "",
+        **options: Any,
+    ) -> Dict[str, Any]:
+        """Apply the persisted cloud choice, then the minimal-prompt router gate."""
+
+        from integrations.ipfs_datasets.llm import dispatch_private_turn
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        helpers = _privacy_helpers()
+        case_id = _state_case_id(state, resolved_user_id)
+        privacy_context = helpers["build_complaint_privacy_context"](
+            state.get("privacy_policy"),
+            user_id=resolved_user_id,
+            case_id=case_id,
+            data_class="raw_intake",
+        )
+        result = dispatch_private_turn(
+            privacy_context=privacy_context,
+            relevant_facts=relevant_facts,
+            rule_gaps=rule_gaps,
+            unrelated_evidence=unrelated_evidence,
+            sensitive_literals=sensitive_literals,
+            key=key,
+            key_id=key_id,
+            provider=provider,
+            model_name=model_name,
+            timeout=timeout,
+            campaign_settings=campaign_settings,
+            stored_user_complaint=stored_user_complaint,
+            principal_id=resolved_user_id,
+            turn_id=turn_id,
+            **options,
+        )
+        result["user_id"] = resolved_user_id
+        result["case_id"] = case_id
+        return result
+
+    def inventory_private_data_classes(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Describe private case classes without reading other sessions, evidence, exports, or secrets."""
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        helpers = _privacy_helpers()
+        canonical = helpers["complaint_data_class_inventory"]()
+        logical_locations = {
+            "raw_intake": ["session.intake_answers", "session.intake_history"],
+            "attachments": ["session.evidence.documents.attachment_names", "workspace.attachments"],
+            "fact_kg": ["session.annotation_knowledge_graph"],
+            "claim_dependency_evaluations": ["session.review.support_matrix", "session.proof_history"],
+            "annotations": ["session.document_annotations", "session.workspace_annotation_index"],
+            "drafts_proofs": ["session.draft", "session.proof_history", "session.latest_packet_export"],
+            "embeddings": ["workspace.cache.embeddings"],
+            "exports": ["workspace.exports"],
+            "logs": ["workspace.logs"],
+            "caches": ["workspace.cache"],
+            "temporary_files": ["workspace.tmp"],
+            "backups": ["workspace.backups"],
+        }
+        private_rows = []
+        for item in list(canonical.get("private_claim_fact_graph") or []):
+            class_id = str(item.get("id") or "")
+            private_rows.append(
+                {
+                    **item,
+                    "logical_locations": list(logical_locations.get(class_id) or []),
+                    "graph": "private_claim_fact_graph",
+                }
+            )
+        return {
+            "user_id": resolved_user_id,
+            "case_id": _state_case_id(state, resolved_user_id),
+            "reads_existing_private_paths": False,
+            "at_rest_protection": "private_envelope",
+            "encryption_at_rest_blocks_remote_llm": False,
+            "authenticates_tenant": False,
+            "private_claim_fact_graph": private_rows,
+            "public_legal_source_graph": dict(canonical.get("public_legal_source_graph") or {}),
+            "agent_context": dict(canonical.get("agent_context") or {}),
+            "present_state_keys": {
+                "raw_intake": bool(state.get("intake_answers") or state.get("intake_history")),
+                "attachments": any(
+                    list(item.get("attachment_names") or [])
+                    for item in list((state.get("evidence") or {}).get("documents") or [])
+                    if isinstance(item, dict)
+                ),
+                "fact_kg": bool((state.get("annotation_knowledge_graph") or {}).get("entities")),
+                "annotations": bool(state.get("document_annotations")),
+                "drafts_proofs": bool(state.get("draft") or state.get("proof_history")),
+            },
+        }
+
+    def metadata_residual_exposure(self) -> Dict[str, Any]:
+        """Plain statement of size, timing, and access-pattern residuals."""
+
+        from integrations.ipfs_datasets.storage import PADDING_POLICY, RESIDUAL_METADATA_EXPOSURE
+
+        return {
+            "residual_exposure": RESIDUAL_METADATA_EXPOSURE,
+            "padding_policy": dict(PADDING_POLICY),
+            "embeddings_classification": "private_derived",
+        }
+
+    def publish_case_public_reference(
+        self,
+        record: Mapping[str, Any],
+        *,
+        sensitive_literals: Optional[list] = None,
+        document_filename: str = "",
+    ) -> Dict[str, Any]:
+        """Publish an opaque index row and filename. Private literals stay off both."""
+
+        from integrations.ipfs_datasets.storage import (
+            opaque_storage_filename,
+            publish_public_index_entry,
+        )
+
+        literals = [str(item) for item in (sensitive_literals or []) if str(item or "")]
+        if document_filename:
+            literals.append(str(document_filename))
+        filename = opaque_storage_filename(
+            str(record.get("kind") or "object"),
+            document_filename or str(record.get("cid") or "object"),
+        )
+        projected = publish_public_index_entry(
+            {
+                "cid": record.get("cid"),
+                "cid_kind": record.get("cid_kind") or "opaque",
+                "artifact_class": record.get("artifact_class") or "opaque_private_ref",
+                "classification": record.get("classification") or "opaque",
+                "status": record.get("status") or "stored",
+                "opaque_name": filename,
+                "user_name": record.get("user_name"),
+                "case_name": record.get("case_name"),
+                "complaint_text": record.get("complaint_text"),
+                "filename": document_filename,
+                "node_label": record.get("node_label"),
+                "query": record.get("query"),
+            },
+            sensitive_literals=literals,
+        )
+        return {"filename": filename, "public_metadata": projected}
+
+    def remember_case_alias(self, user_id: str, case_id: str, alias: str, canonical: str, *, key: bytes, key_id: str) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.llm import remember_case_alias
+
+        self._check_access(str(user_id), ability="read", case_id=str(case_id))
+        return remember_case_alias(
+            user_id=str(user_id),
+            case_id=str(case_id),
+            alias=alias,
+            canonical=canonical,
+            key=key,
+            key_id=key_id,
+            principal_id=str(user_id),
+        )
+
+    def resolve_case_alias(self, user_id: str, case_id: str, alias: str, *, key: bytes, key_id: str) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.llm import resolve_case_alias
+
+        self._check_access(str(user_id), ability="read", case_id=str(case_id))
+        return resolve_case_alias(
+            user_id=str(user_id),
+            case_id=str(case_id),
+            alias=alias,
+            key=key,
+            key_id=key_id,
+            principal_id=str(user_id),
+        )
+
+    def store_case_embedding(
+        self,
+        user_id: str,
+        case_id: str,
+        vector: list,
+        source_text: str,
+        *,
+        key: bytes,
+        key_id: str,
+        sensitive_literals: Optional[list] = None,
+    ) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.llm import store_private_embedding
+
+        self._check_access(str(user_id), ability="read", case_id=str(case_id))
+        return store_private_embedding(
+            user_id=str(user_id),
+            case_id=str(case_id),
+            vector=vector,
+            source_text=source_text,
+            key=key,
+            key_id=key_id,
+            principal_id=str(user_id),
+            sensitive_literals=sensitive_literals,
+        )
+
+    def default_workspace_log(self, record: Mapping[str, Any]) -> Dict[str, Any]:
+        """Default workspace log line. Payloads and case text are not included."""
+
+        from integrations.ipfs_datasets.storage import emit_default_storage_log
+
+        return emit_default_storage_log(record)
+
+    def _private_key_directory(self) -> Path:
+        return self._session_dir / "private-keys"
+
+    def _private_key_session(self):
+        from integrations.private_storage import UserOwnedKeySession
+
+        session = getattr(self, "_user_owned_keys", None)
+        directory = self._private_key_directory()
+        if session is None or Path(session.directory) != directory:
+            session = UserOwnedKeySession(directory)
+            self._user_owned_keys = session
+        return session
+
+    def _require_private_case_key_access(
+        self, tenant_id: str, case_id: str, *, principal_id: Optional[str] = None
+    ) -> None:
+        """Admit one exact owner/case before any key-store lookup.
+
+        The shared master store has an operator-only lifecycle. Once unlocked,
+        authenticated users may use their bound case through this narrower seam.
+        """
+
+        if (not isinstance(tenant_id, str) or not tenant_id
+                or not isinstance(case_id, str) or not case_id
+                or (principal_id is not None and principal_id != tenant_id)):
+            raise WorkspaceAuthorizationDenied()
+        access = self._effective_access()
+        operator = access.trust == "trusted_local" and not access.principal_id and not access.case_id
+        if not operator:
+            if (access.trust not in {"authenticated", "trusted_local"}
+                    or access.principal_id != tenant_id or access.case_id != case_id):
+                raise WorkspaceAuthorizationDenied()
+        explicit_case = _REQUEST_CASE.get()
+        if explicit_case is not None and explicit_case != case_id:
+            raise WorkspaceAuthorizationDenied()
+        self._check_access(tenant_id, ability="private_key", case_id=case_id)
+
+    def private_key_status(self) -> Dict[str, Any]:
+        """Local operator view of the shared store, without case plaintext."""
+
+        self._require_local_filesystem_access()
+
+        from integrations.private_storage import task_key_receipt
+
+        return task_key_receipt(self._private_key_session().public_state())
+
+    def initialize_private_keys(
+        self,
+        *,
+        protection: str,
+        passphrase: Optional[str] = None,
+        keyring: Any = None,
+    ) -> Dict[str, Any]:
+        """Local operator creates the shared store; cloud consent is unchanged."""
+
+        self._require_local_filesystem_access()
+
+        from integrations.private_storage import PrivateKeyLockedError, task_key_receipt
+
+        session = self._private_key_session()
+        try:
+            state = session.create(protection=protection, passphrase=passphrase, keyring=keyring)
+        except PrivateKeyLockedError as exc:
+            return task_key_receipt(exc.public_state())
+        self._user_owned_keys = session
+        return task_key_receipt(state)
+
+    def unlock_private_keys(
+        self,
+        *,
+        passphrase: Optional[str] = None,
+        keyring: Any = None,
+    ) -> Dict[str, Any]:
+        """Local operator unlocks the shared store; remote consent is unchanged."""
+
+        self._require_local_filesystem_access()
+
+        from integrations.private_storage import (
+            PrivateArtifactIntegrityError,
+            PrivateKeyLockedError,
+            task_key_receipt,
+        )
+
+        session = self._private_key_session()
+        try:
+            if passphrase is not None:
+                state = session.unlock_passphrase(passphrase)
+            else:
+                state = session.unlock_keyring(keyring)
+        except PrivateKeyLockedError as exc:
+            return task_key_receipt(exc.public_state())
+        except PrivateArtifactIntegrityError:
+            state = session.public_state()
+            state["code"] = "authentication_failed"
+            state["message"] = "The wrapped key did not authenticate. Encrypted state was not overwritten."
+            state["awaiting_user"] = True
+            state["status"] = "unlock_needed"
+            return task_key_receipt(state)
+        self._user_owned_keys = session
+        return task_key_receipt(state)
+
+    def lock_private_keys(self) -> Dict[str, Any]:
+        """Local operator locks the shared store for all case handles."""
+
+        self._require_local_filesystem_access()
+        from integrations.private_storage import task_key_receipt
+
+        return task_key_receipt(self._private_key_session().lock())
+
+    def export_private_key_recovery(
+        self,
+        *,
+        tenant_id: str,
+        case_id: str,
+        recovery_passphrase: str,
+        destination: str,
+    ) -> Dict[str, Any]:
+        """Local operator performs an explicit recovery export to a host path."""
+
+        self._require_local_filesystem_access()
+
+        from integrations.private_storage import PrivateKeyLockedError, task_key_receipt
+
+        session = self._private_key_session()
+        try:
+            exported = session.export_recovery(tenant_id, case_id, recovery_passphrase, destination)
+        except PrivateKeyLockedError as exc:
+            return task_key_receipt(exc.public_state())
+        state = session.public_state()
+        state["deliberate_export"] = True
+        state["automatic_backup"] = False
+        state["message"] = "Deliberate recovery export written. This is not an automatic case backup."
+        state["case_count"] = session.public_state()["case_count"]
+        if not exported.get("deliberate_export"):
+            raise PrivateKeyLockedError(
+                "Recovery export was not marked deliberate.",
+                actions=("recovery_export",),
+            )
+        return task_key_receipt(state)
+
+    def import_private_key_recovery(
+        self,
+        *,
+        tenant_id: str,
+        case_id: str,
+        recovery_passphrase: str,
+        payload: bytes,
+        store_passphrase: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Local operator imports recovery material into the shared store."""
+
+        self._require_local_filesystem_access()
+        from integrations.private_storage import (
+            PrivateArtifactBindingError,
+            PrivateArtifactIntegrityError,
+            PrivateKeyLockedError,
+            task_key_receipt,
+        )
+
+        session = self._private_key_session()
+        try:
+            state = session.import_recovery(
+                payload,
+                tenant_id=tenant_id,
+                case_id=case_id,
+                recovery_passphrase=recovery_passphrase,
+                store_passphrase=store_passphrase,
+            )
+        except PrivateKeyLockedError as exc:
+            return task_key_receipt(exc.public_state())
+        except PrivateArtifactBindingError:
+            state = session.public_state()
+            state["code"] = "foreign_case"
+            state["message"] = "Recovery material belongs to another case and was not imported."
+            state["status"] = "unlock_needed"
+            state["awaiting_user"] = True
+            return task_key_receipt(state)
+        except PrivateArtifactIntegrityError:
+            state = session.public_state()
+            state["code"] = "authentication_failed"
+            state["message"] = "Recovery material did not authenticate and was not imported."
+            state["status"] = "unlock_needed"
+            state["awaiting_user"] = True
+            return task_key_receipt(state)
+        self._user_owned_keys = session
+        return task_key_receipt(state)
+
+    def prepare_private_terminal_case(self, user_id: str) -> Dict[str, Any]:
+        """Use an unlocked case key; initialize only a demonstrably new profile."""
+        self._require_local_filesystem_access()
+        user = self._resolve_user_id(user_id)
+        self._require_private_case_key_access(user, user, principal_id=user)
+        from integrations.private_storage import PrivateArtifactBinding, PrivateKeyMaterialError
+
+        keys = self._private_key_session()
+        if not keys.unlocked:
+            raise WorkspacePersistenceError("Private workspace keys require unlock.", code="unlock_needed", public_status="unlock_needed")
+        binding = PrivateArtifactBinding(tenant_id=user, case_id=user, principal_id=user,
+                                         artifact_kind="session", revision="session-v1")
+        try:
+            self.private_key_provider().resolve(binding)
+        except PrivateKeyMaterialError:
+            # Missing keys for an existing profile mean recovery, never a new
+            # identity. Unindexed ciphertext is also insufficient proof that
+            # creating a fresh case key is safe.
+            base = self._namespace_filename(user)
+            existing = [self._session_dir / base, self._session_dir / (base + ".cgpe"),
+                        self._legacy_session_path(user), self.joined_revision_repository(user, user),
+                        self.interview_snapshot_directory(user, user),
+                        self._session_dir / "private-artifacts", self._session_dir / "private-migrations"]
+            if any(os.path.lexists(path) for path in existing):
+                raise WorkspacePersistenceError("Recover the selected private case key before continuing.",
+                                                code="key_unavailable", public_status="unlock_needed") from None
+            ready = self.ensure_private_case_key(user, user)
+            if ready.get("unlocked") is not True:
+                raise WorkspacePersistenceError("Private workspace keys require unlock.", code="unlock_needed", public_status="unlock_needed")
+        return {"status": "ready", "unlock_is_remote_consent": False, "data_reset": False}
+
+    def ensure_private_case_key(self, tenant_id: str, case_id: str) -> Dict[str, Any]:
+        """Mint or reload one case data key. The key id is opaque; bytes stay in memory."""
+
+        self._require_private_case_key_access(tenant_id, case_id)
+
+        from integrations.private_storage import PrivateKeyLockedError, task_key_receipt
+
+        session = self._private_key_session()
+        try:
+            key_id = session.ensure_data_key(tenant_id, case_id)
+        except PrivateKeyLockedError as exc:
+            receipt = task_key_receipt(exc.public_state())
+            receipt.pop("case_count", None)
+            return receipt
+        state = session.public_state()
+        state["message"] = "Case data key is available in this unlocked session."
+        receipt = task_key_receipt(state)
+        receipt.pop("case_count", None)
+        receipt["data_key_id"] = key_id
+        return receipt
+
+    def private_key_provider(self):
+        """Request-checked lazy case provider; a handle retains no raw key map."""
+
+        access = self._effective_access()
+        if access.trust == "trusted_local" and not access.principal_id and not access.case_id:
+            self._require_local_filesystem_access()
+        else:
+            self._require_private_case_key_access(access.principal_id, access.case_id)
+        session = self._private_key_session()
+        if not session.unlocked:
+            # Preserve the native typed construction failure without copying any
+            # unlocked case keys into the returned, long-lived handle.
+            session.provider()
+        return _WorkspaceCaseKeyProvider(self)
+
+    def continue_without_private_keys(self) -> Dict[str, Any]:
+        """Let a coding supervisor proceed without user keys or a privacy bypass."""
+
+        self._require_local_filesystem_access()
+
+        from integrations.private_storage import task_key_receipt
+
+        state = self._private_key_session().public_state()
+        if not state.get("unlocked"):
+            state["status"] = "awaiting_user"
+            state["awaiting_user"] = True
+        state["worker_state"] = "ready_for_independent_tasks"
+        state["invented_key"] = False
+        state["privacy_bypassed"] = False
+        state["message"] = "Private keys stay locked until the user unlocks them. Other coding work can continue."
+        return task_key_receipt(state)
+
+    def generate_grounded_text(
+        self,
+        user_id: Optional[str],
+        *,
+        prompt: str,
+        provider: Optional[str] = None,
+        model_name: Optional[str] = None,
+        grounding_mode: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.llm import generate_text_with_metadata
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        helpers = _privacy_helpers()
+        privacy_context = helpers["build_complaint_privacy_context"](
+            state.get("privacy_policy"),
+            user_id=resolved_user_id,
+            case_id=_state_case_id(state, resolved_user_id),
+            data_class="raw_intake",
+        )
+        resolved_grounding_mode = self._resolve_mike_grounding_mode(grounding_mode or "legal_corpus_only")
+        generated = generate_text_with_metadata(
+            f"[grounding_mode={resolved_grounding_mode}]\n{prompt}",
+            provider=provider,
+            model_name=model_name,
+            complaint_privacy_context=privacy_context,
+        )
+        if not isinstance(generated, dict):
+            generated = {"status": "error", "text": "", "error": "privacy_denied:malformed_consent"}
+        public_generation = dict(generated)
+        if str(public_generation.get("privacy_decision") or "") == "denied":
+            public_generation.pop("prompt", None)
+        return {
+            "user_id": resolved_user_id,
+            "case_id": _state_case_id(state, resolved_user_id),
+            "grounding_mode": resolved_grounding_mode,
+            "text": str(public_generation.get("text") or ""),
+            "generation": public_generation,
+            "at_rest_protection": "private_envelope",
+        }
+
+    def search_corpus(self, *, query: str, max_results: int = 5) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.search import search_multi_engine_web
+
+        try:
+            results = search_multi_engine_web(str(query or ""), max_results=int(max_results or 5))
+        except Exception as exc:
+            return {
+                "status": "degraded",
+                "query": str(query or ""),
+                "results": [],
+                "error": str(exc),
+            }
+        return {
+            "status": "available",
+            "query": str(query or ""),
+            "results": list(results or []),
+        }
+
+    def get_handoff(self, user_id: Optional[str], **kwargs: Any) -> Dict[str, Any]:
+        return self.build_mike_handoff(user_id, **kwargs)
+
+    def sync_draft(self, user_id: Optional[str], **kwargs: Any) -> Dict[str, Any]:
+        return self.sync_mike_final_draft(user_id, **kwargs)
 
     def list_mcp_tools(self) -> Dict[str, Any]:
         return {
@@ -9207,6 +12495,10 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.build_mike_handoff", "description": "Build a Mike editor handoff payload with prefilled complaint draft, review state, and evidence context."},
                 {"name": "complaint.get_mike_integration_status", "description": "Return Mike handoff/sync status, correlation IDs, and recommended next integration action."},
                 {"name": "complaint.sync_mike_final_draft", "description": "Sync an edited draft from Mike back into the complaint workspace and persist the merged draft state."},
+                {"name": "complaint.generate_grounded_text", "description": "Generate grounded complaint text through the accelerate llm_router under the legal corpus grounding mode."},
+                {"name": "complaint.search_corpus", "description": "Search the complaint corpus through the datasets search adapter."},
+                {"name": "complaint.get_handoff", "description": "Build the Mike handoff payload, including the MCP connector contract."},
+                {"name": "complaint.sync_draft", "description": "Sync a Mike document version back into the complaint workspace and return document_version_content_sha256."},
                 {"name": "complaint.get_draft_proof_report", "description": "Run the draft-logic pipeline on the current complaint draft and return the full DraftProofReport with proof status, contradictions, corpus coverage, and deontic norms."},
                 {"name": "complaint.render_draft_proof_report", "description": "Run the draft-logic pipeline on the current draft and render a human-readable Markdown proof report."},
                 {"name": "complaint.pin_draft_proof_report", "description": "Run the draft-logic pipeline, then pin the DraftProofReport and its Lean 4 / Coq theorem exports to IPFS for immutable provenance."},
@@ -9242,7 +12534,54 @@ class ComplaintWorkspaceService:
         }
 
     def call_mcp_tool(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        args = arguments or {}
+        args = dict(arguments or {})
+        if any(args.get(key) not in (None, "", []) for key in _MCP_HOST_PATH_ARGUMENTS):
+            self._require_local_filesystem_access()
+        if tool_name not in _PUBLIC_MCP_TOOLS:
+            resolved = self._resolve_user_id(args.get("user_id"))
+            case_id = args.get("case_id")
+            selected_case = None if case_id is None or str(case_id).strip() == "" else str(case_id)
+            cid_value = args.get("cid") if args.get("cid") is not None else args.get("content_id")
+            key_value = args.get("storage_key") if args.get("storage_key") is not None else args.get("key")
+            track_reference = tool_name == "complaint.resolve_private_reference" or cid_value is not None or key_value is not None
+            self._check_access(resolved, ability="read", case_id=selected_case)
+            args["user_id"] = resolved
+            with _workspace_reference_scope(
+                case_id=selected_case,
+                cid=None if not track_reference or cid_value is None else str(cid_value),
+                storage_key=None if not track_reference or key_value is None else str(key_value),
+            ):
+                return self._dispatch_mcp_tool(tool_name, args)
+        return self._dispatch_mcp_tool(tool_name, args)
+
+    def _dispatch_mcp_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        if tool_name == "complaint.read_contained_file":
+            data = self.read_contained_workspace_file(args.get("user_id"), str(args.get("relative_name") or ""))
+            return {
+                "content_b64": b64encode(data).decode("ascii"),
+                "at_rest_protection": "private_envelope",
+            }
+        if tool_name == "complaint.write_contained_file":
+            raw_content = args.get("content")
+            if isinstance(raw_content, str):
+                payload = raw_content.encode("utf-8")
+            else:
+                payload = bytes(raw_content or b"")
+            return self.write_contained_workspace_file(args.get("user_id"), str(args.get("relative_name") or ""), payload)
+        if tool_name == "complaint.remember_private_reference":
+            return self.remember_private_reference(
+                args.get("user_id"),
+                cid=args.get("cid") or args.get("content_id"),
+                storage_key=args.get("storage_key") or args.get("key"),
+                case_id=args.get("case_id"),
+            )
+        if tool_name == "complaint.resolve_private_reference":
+            return self.resolve_private_reference(
+                args.get("user_id"),
+                case_id=args.get("case_id"),
+                cid=args.get("cid") or args.get("content_id"),
+                storage_key=args.get("storage_key") or args.get("key"),
+            )
         if tool_name == "complaint.create_identity":
             return generate_decentralized_id()
         if tool_name == "complaint.list_intake_questions":
@@ -9250,7 +12589,7 @@ class ComplaintWorkspaceService:
         if tool_name == "complaint.list_claim_elements":
             return self.list_claim_elements()
         if tool_name == "complaint.start_session":
-            return self.get_session(args.get("user_id"))
+            return self.get_session(args.get("user_id"), case_id=args.get("case_id"))
         if tool_name == "complaint.submit_intake":
             return self.submit_intake_answers(args.get("user_id"), args.get("answers") or {})
         if tool_name == "complaint.run_intake_chat_turn":
@@ -9258,6 +12597,8 @@ class ComplaintWorkspaceService:
                 args.get("user_id"),
                 message=args.get("message"),
                 question_id=args.get("question_id"),
+                expected_question_revision=args.get("expected_question_revision"),
+                interview_action=args.get("interview_action"),
             )
         if tool_name == "complaint.save_evidence":
             return self.save_evidence(
@@ -9478,6 +12819,51 @@ class ComplaintWorkspaceService:
             if isinstance(requested_relief, str):
                 requested_relief = _split_lines(requested_relief)
             return self.sync_mike_final_draft(
+                args.get("user_id"),
+                body=args.get("body"),
+                title=args.get("title"),
+                requested_relief=requested_relief,
+                handoff_id=args.get("handoff_id"),
+                project_id=args.get("project_id"),
+                workspace_id=args.get("workspace_id"),
+                mike_document_id=args.get("mike_document_id"),
+                citation_links=args.get("citation_links"),
+                redline_summary=args.get("redline_summary"),
+                source_updated_at=args.get("source_updated_at"),
+                structured_deltas=args.get("structured_deltas"),
+                editor_metadata=args.get("editor_metadata"),
+                grounding_mode=args.get("grounding_mode"),
+                assertion_annotations=args.get("assertion_annotations"),
+                authority_links=args.get("authority_links"),
+                sync_provenance=args.get("sync_provenance"),
+            )
+        if tool_name == "complaint.generate_grounded_text":
+            return self.generate_grounded_text(
+                args.get("user_id"),
+                prompt=str(args.get("prompt") or ""),
+                provider=args.get("provider"),
+                model_name=args.get("model_name") or args.get("model"),
+                grounding_mode=args.get("grounding_mode"),
+            )
+        if tool_name == "complaint.search_corpus":
+            return self.search_corpus(
+                query=str(args.get("query") or ""),
+                max_results=int(args.get("max_results") or 5),
+            )
+        if tool_name == "complaint.get_handoff":
+            return self.get_handoff(
+                args.get("user_id"),
+                mike_base_url=args.get("mike_base_url"),
+                project_id=args.get("project_id"),
+                workspace_id=args.get("workspace_id"),
+                generate_draft_if_missing=bool(args.get("generate_draft_if_missing", True)),
+                grounding_mode=args.get("grounding_mode"),
+            )
+        if tool_name == "complaint.sync_draft":
+            requested_relief = args.get("requested_relief")
+            if isinstance(requested_relief, str):
+                requested_relief = _split_lines(requested_relief)
+            return self.sync_draft(
                 args.get("user_id"),
                 body=args.get("body"),
                 title=args.get("title"),

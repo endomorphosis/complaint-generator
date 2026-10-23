@@ -230,9 +230,20 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
         "complaint.migrate_legacy_workspace_data",
         "complaint.view_workspace_dataset",
         "complaint.search_workspace_dataset",
+        "complaint.get_workspace_dataset_graph",
         "complaint.build_mike_handoff",
         "complaint.get_mike_integration_status",
         "complaint.sync_mike_final_draft",
+        "complaint.generate_grounded_text",
+        "complaint.search_corpus",
+        "complaint.get_handoff",
+        "complaint.sync_draft",
+        "complaint.get_draft_proof_report",
+        "complaint.render_draft_proof_report",
+        "complaint.pin_draft_proof_report",
+        "complaint.score_draft_quality",
+        "complaint.improve_draft",
+        "complaint.get_proof_history",
         "complaint.generate_complaint",
         "complaint.update_draft",
         "complaint.export_complaint_packet",
@@ -435,13 +446,39 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert any(item["id"] == "workspace_schema_refresh" for item in package_payload["schema_guided_recommendations"])
 
 
+def test_mcp_and_cli_interview_transitions_match_package_graph_revision(monkeypatch, tmp_path):
+    """MCP and terminal chat turns keep the package inquiry id and graph revision."""
+
+    from tests.test_tui_interview_acceptance import (
+        COHERENT,
+        _graph_revision_fingerprint,
+        _mcp_turn,
+        _service,
+        _terminal_turn,
+    )
+    from complaint_generator.workspace import run_intake_chat_turn
+
+    package = _service(tmp_path / "package", "tools-package-user")
+    mcp = _service(tmp_path / "mcp", "tools-mcp-user")
+    terminal = _service(tmp_path / "terminal", "tools-terminal-user")
+    package_payload = run_intake_chat_turn("tools-package-user", message=COHERENT, service=package)
+    mcp_payload = _mcp_turn(mcp, "tools-mcp-user", COHERENT)
+    terminal_payload = _terminal_turn(terminal, "tools-terminal-user", COHERENT, monkeypatch)
+    assert _graph_revision_fingerprint(package_payload) == _graph_revision_fingerprint(mcp_payload)
+    assert _graph_revision_fingerprint(package_payload) == _graph_revision_fingerprint(terminal_payload)
+    assert package_payload["stopping_policy"]["outcome"] == "awaiting_user"
+    assert package_payload["interview"]["legal_sufficiency"] is False
+
+
 def test_intake_chat_turn_is_exposed_across_cli_mcp_and_api(monkeypatch, tmp_path):
     runner = CliRunner()
     service = ComplaintWorkspaceService(root_dir=tmp_path / "intake-chat-sessions")
+    service.initialize_private_keys(protection="passphrase", passphrase="synthetic-wrapper-fixture-passphrase")
+    service.ensure_private_case_key("chat-user", "chat-user")
     monkeypatch.setattr(complaint_cli_impl, "service", service)
 
     first_turn = _invoke_cli(runner, "chat-turn", "--user-id", "chat-user")
-    assert first_turn["inquiry"]["question_id"] == "party_name"
+    assert first_turn["inquiry"]["question_id"] == "original_complaint"
     assert first_turn["accepted_answer"] is None
 
     cli_turn = _invoke_cli(
@@ -450,8 +487,13 @@ def test_intake_chat_turn_is_exposed_across_cli_mcp_and_api(monkeypatch, tmp_pat
         "--user-id",
         "chat-user",
         "--message",
-        "Jordan Example",
+        "My employer retaliated after I reported discrimination.",
     )
+    assert cli_turn["accepted_answer"]["question_id"] == "original_complaint"
+    assert cli_turn["next_question"]["id"] == "party_name"
+    assert cli_turn["session"]["intake_answers"].get("party_name") in {None, ""}
+    cli_turn = _invoke_cli(runner, "chat-turn", "--user-id", "chat-user",
+        "--message", "Jordan Example", "--question-id", "party_name")
     assert cli_turn["accepted_answer"]["question_id"] == "party_name"
     assert cli_turn["next_question"]["id"] == "opposing_party"
 
@@ -468,13 +510,18 @@ def test_intake_chat_turn_is_exposed_across_cli_mcp_and_api(monkeypatch, tmp_pat
     assert mcp_turn["accepted_answer"]["question_id"] == "opposing_party"
     assert mcp_turn["next_question"]["id"] == "protected_activity"
 
+    from applications.complaint_workspace import PrincipalRegistry
+
+    registry = PrincipalRegistry()
+    registry.register("synthetic-chat-token", "chat-user", case_id="chat-user")
     app = FastAPI()
-    attach_complaint_workspace_routes(app, service)
+    attach_complaint_workspace_routes(app, service, principal_registry=registry)
     from fastapi.testclient import TestClient
 
     client = TestClient(app)
     response = client.post(
         "/api/complaint-workspace/intake-chat",
+        headers={"Authorization": "Bearer synthetic-chat-token"},
         json={
             "user_id": "chat-user",
             "message": "Reported discrimination to HR",

@@ -539,6 +539,43 @@ class ComplaintMcpClient {
         return this.callTool('complaint.sync_mike_final_draft', payload || {});
     }
 
+    getDraftProofReport(userId, options = {}) {
+        return this.callTool('complaint.get_draft_proof_report', Object.assign({
+            user_id: userId,
+            allow_live_scrape_fallback: false,
+        }, options || {}));
+    }
+
+    renderDraftProofReport(userId, options = {}) {
+        return this.callTool('complaint.render_draft_proof_report', Object.assign({
+            user_id: userId,
+        }, options || {}));
+    }
+
+    pinDraftProofReport(userId, options = {}) {
+        return this.callTool('complaint.pin_draft_proof_report', Object.assign({
+            user_id: userId,
+        }, options || {}));
+    }
+
+    scoreDraftQuality(userId, options = {}) {
+        return this.callTool('complaint.score_draft_quality', Object.assign({
+            user_id: userId,
+        }, options || {}));
+    }
+
+    improveDraft(userId, options = {}) {
+        return this.callTool('complaint.improve_draft', Object.assign({
+            user_id: userId,
+        }, options || {}));
+    }
+
+    getProofHistory(userId) {
+        return this.callTool('complaint.get_proof_history', {
+            user_id: userId,
+        });
+    }
+
     exportComplaintPacket(userId) {
         return this.callTool('complaint.export_complaint_packet', {
             user_id: userId,

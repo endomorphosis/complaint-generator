@@ -34,6 +34,8 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, set):
         return [_json_safe(item) for item in sorted(value, key=lambda item: str(item))]
     return value
+
+
 def _sanitize_for_json(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _sanitize_for_json(item) for key, item in value.items()}
@@ -46,13 +48,26 @@ def _sanitize_for_json(value: Any) -> Any:
     if hasattr(value, "isoformat") and callable(getattr(value, "isoformat")):
         try:
             return value.isoformat()
-        except Exception:
-            pass
+        except (TypeError, ValueError, OverflowError):
+            logger.warning(
+                "Could not serialize %s with isoformat(); using fallback JSON representation",
+                type(value).__name__,
+                exc_info=True,
+            )
     if hasattr(value, "__dict__"):
         try:
-            return _sanitize_for_json(vars(value))
-        except Exception:
-            pass
+            attributes = vars(value)
+        except TypeError:
+            logger.warning(
+                "Could not inspect %s attributes for JSON serialization; using string fallback",
+                type(value).__name__,
+                exc_info=True,
+            )
+        else:
+            # Keep recursive conversion outside the access-error handler. A
+            # failure in an attribute serializer is not evidence that the
+            # object's attributes are unavailable and must remain observable.
+            return _sanitize_for_json(attributes)
     return str(value)
 
 
@@ -121,34 +136,48 @@ class AdversarialHarness:
 
     @staticmethod
     def _attach_result_spec_metadata(result: SessionResult, spec: Dict[str, Any]) -> SessionResult:
+        if not isinstance(result.seed_complaint, dict):
+            return result
+
         try:
-            if isinstance(result.seed_complaint, dict):
-                search_summary = _seed_search_summary(
-                    result.seed_complaint,
-                    str(spec.get('hacc_search_mode') or 'package'),
-                )
-                result.seed_complaint = {
-                    **result.seed_complaint,
-                    '_meta': {
-                        'personality': spec.get('personality'),
-                        'max_turns': spec.get('max_turns'),
-                        'include_hacc_evidence': spec.get('include_hacc_evidence', False),
-                        'hacc_preset': spec.get('hacc_preset'),
-                        'use_hacc_vector_search': spec.get('use_hacc_vector_search', False),
-                        'hacc_search_mode': search_summary['requested_search_mode'],
-                        'hacc_effective_search_mode': search_summary['effective_search_mode'],
-                        'hacc_search_fallback_note': search_summary['fallback_note'],
-                        'search_summary': search_summary,
-                        'seed_source': result.seed_complaint.get('source'),
-                        'anchor_sections': list(
-                            (
-                                result.seed_complaint.get('key_facts', {}) or {}
-                            ).get('anchor_sections', [])
-                        ),
-                    }
-                }
-        except Exception:
-            pass
+            search_summary = _seed_search_summary(
+                result.seed_complaint,
+                str(spec.get('hacc_search_mode') or 'package'),
+            )
+            key_facts = dict(result.seed_complaint.get('key_facts') or {})
+            anchor_sections = list(key_facts.get('anchor_sections') or [])
+        except (TypeError, ValueError):
+            # Seed complaints can originate in external evidence packages. A
+            # malformed optional metadata field must not turn an otherwise
+            # completed session into a failed one, but it must be observable.
+            # Keep unexpected implementation failures outside this recovery
+            # path so they are not silently reported as successful enrichment.
+            logger.warning(
+                "Could not attach optional specification metadata to session %s; "
+                "leaving its seed complaint unchanged",
+                result.session_id,
+                exc_info=True,
+            )
+            return result
+
+        # Perform the mutation outside the external-data recovery boundary so
+        # defects in result assignment or metadata assembly remain visible.
+        result.seed_complaint = {
+            **result.seed_complaint,
+            '_meta': {
+                'personality': spec.get('personality'),
+                'max_turns': spec.get('max_turns'),
+                'include_hacc_evidence': spec.get('include_hacc_evidence', False),
+                'hacc_preset': spec.get('hacc_preset'),
+                'use_hacc_vector_search': spec.get('use_hacc_vector_search', False),
+                'hacc_search_mode': search_summary['requested_search_mode'],
+                'hacc_effective_search_mode': search_summary['effective_search_mode'],
+                'hacc_search_fallback_note': search_summary['fallback_note'],
+                'search_summary': search_summary,
+                'seed_source': result.seed_complaint.get('source'),
+                'anchor_sections': anchor_sections,
+            }
+        }
         return result
 
     @staticmethod
@@ -448,6 +477,19 @@ class AdversarialHarness:
         safe = self._safe_session_id(session_id)
         return os.path.join(self.session_state_dir, safe)
 
+    @staticmethod
+    def _initialize_session_databases(*database_paths: str | None) -> None:
+        """Create each configured session database and surface initialization failures."""
+        configured_paths = [path for path in database_paths if path]
+        if not configured_paths:
+            return
+
+        import duckdb  # type: ignore
+
+        for database_path in configured_paths:
+            connection = duckdb.connect(database_path)
+            connection.close()
+
     def _create_mediator_for_session(
         self,
         *,
@@ -460,24 +502,50 @@ class AdversarialHarness:
         """Call mediator_factory with optional per-session DB paths if supported."""
         try:
             sig = inspect.signature(self.mediator_factory)
-            params = sig.parameters
-            accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
-            kwargs: Dict[str, Any] = {}
-            if accepts_kwargs or "evidence_db_path" in params:
-                kwargs["evidence_db_path"] = evidence_db_path
-            if accepts_kwargs or "legal_authority_db_path" in params:
-                kwargs["legal_authority_db_path"] = legal_authority_db_path
-            if accepts_kwargs or "claim_support_db_path" in params:
-                kwargs["claim_support_db_path"] = claim_support_db_path
-            if session_id is not None and (accepts_kwargs or "session_id" in params):
-                kwargs["session_id"] = session_id
-            if session_dir is not None and (accepts_kwargs or "session_dir" in params):
-                kwargs["session_dir"] = session_dir
-            if kwargs:
-                return self.mediator_factory(**kwargs)
-        except Exception:
-            pass
-        return self.mediator_factory()
+        except (TypeError, ValueError):
+            # Some extension and dynamically generated callables do not expose
+            # an inspectable signature. Retain no-argument factory compatibility
+            # for those callables, while making the loss of session-scoped paths
+            # observable. Factory execution deliberately remains outside this
+            # recovery boundary so constructor failures are never retried or
+            # replaced by a second, argument-less invocation.
+            logger.warning(
+                "Could not inspect mediator factory %s; calling it without "
+                "session-specific arguments",
+                type(self.mediator_factory).__name__,
+                exc_info=True,
+            )
+            return self.mediator_factory()
+
+        params = sig.parameters
+        accepts_kwargs = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in params.values()
+        )
+
+        def accepts_keyword(name: str) -> bool:
+            parameter = params.get(name)
+            return accepts_kwargs or (
+                parameter is not None
+                and parameter.kind in {
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
+                }
+            )
+
+        kwargs: Dict[str, Any] = {}
+        if accepts_keyword("evidence_db_path"):
+            kwargs["evidence_db_path"] = evidence_db_path
+        if accepts_keyword("legal_authority_db_path"):
+            kwargs["legal_authority_db_path"] = legal_authority_db_path
+        if accepts_keyword("claim_support_db_path"):
+            kwargs["claim_support_db_path"] = claim_support_db_path
+        if session_id is not None and accepts_keyword("session_id"):
+            kwargs["session_id"] = session_id
+        if session_dir is not None and accepts_keyword("session_dir"):
+            kwargs["session_dir"] = session_dir
+
+        return self.mediator_factory(**kwargs)
 
     def _ensure_session_db_paths(
         self,
@@ -863,21 +931,14 @@ class AdversarialHarness:
             legal_authority_db_path = os.path.join(session_dir, "legal_authorities.duckdb") if session_dir else None
             claim_support_db_path = os.path.join(session_dir, "claim_support.duckdb") if session_dir else None
 
-            # Proactively create valid DuckDB container files so they are always present
-            # in the session folder (hooks will still initialize schemas when DuckDB is available).
-            try:
-                import duckdb  # type: ignore
-                if evidence_db_path:
-                    conn = duckdb.connect(evidence_db_path)
-                    conn.close()
-                if legal_authority_db_path:
-                    conn = duckdb.connect(legal_authority_db_path)
-                    conn.close()
-                if claim_support_db_path:
-                    conn = duckdb.connect(claim_support_db_path)
-                    conn.close()
-            except Exception:
-                pass
+            # Proactively create valid DuckDB containers before constructing
+            # hooks. A missing or unusable session database is a session
+            # initialization failure, not an optional-artifact condition.
+            self._initialize_session_databases(
+                evidence_db_path,
+                legal_authority_db_path,
+                claim_support_db_path,
+            )
 
             # Create new mediator instance (thread-safe). If supported, use per-session DuckDB paths.
             mediator = self._create_mediator_for_session(

@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+import functools
 import json
+import os
 import re
-import tempfile
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from .complaint_mcp_protocol import handle_jsonrpc_message, tool_list_payload
-from .complaint_workspace import ComplaintWorkspaceService, generate_decentralized_id
+from .complaint_workspace import (
+    ComplaintWorkspaceService,
+    PrincipalRegistry,
+    WorkspaceAuthorizationDenied,
+    access_from_http_headers,
+    generate_decentralized_id,
+    workspace_access_scope,
+)
 from .fastapi_compat import attach_router_routes
 
 try:
@@ -142,6 +149,8 @@ class IntakeChatTurnRequest(BaseModel):
     user_id: Optional[str] = None
     message: Optional[str] = None
     question_id: Optional[str] = None
+    expected_question_revision: Optional[int] = Field(default=None, ge=0)
+    interview_action: Optional[str] = None
 
 
 class EvidenceRequest(BaseModel):
@@ -346,13 +355,65 @@ class PackagedDocketRevalidationPersistRequest(BaseModel):
     chain_until_satisfied: bool = True
 
 
-def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceService] = None) -> APIRouter:
+def create_complaint_workspace_router(
+    service: Optional[ComplaintWorkspaceService] = None,
+    *,
+    principal_registry: Optional[PrincipalRegistry] = None,
+    trusted_local: bool = False,
+) -> APIRouter:
+    """HTTP and MCP routes share one principal/case authorizer.
+
+    ``trusted_local`` must be passed explicitly for a local operator binding.
+    A process-wide bearer token or a caller-supplied ``user_id`` does not
+    authorize a private read, write, or export.
+    """
+
     router = APIRouter()
     workspace = service or ComplaintWorkspaceService()
+    registry = principal_registry
+
+    async def _bind_request_access(http_request: Request):
+        access = access_from_http_headers(
+            http_request.headers,
+            principal_registry=registry,
+            trusted_local=trusted_local,
+        )
+        with workspace_access_scope(access):
+            yield
+
+    def _register(method_registrar):
+        def wrapper(path: str, *args: Any, **kwargs: Any):
+            def decorator(fn):
+                if path.endswith("/mcp/call") or path.endswith("/mcp/rpc") or path.endswith("/mcp/tools") or path.endswith("/identity"):
+                    return method_registrar(path, *args, **kwargs)(fn)
+
+                @functools.wraps(fn)
+                async def guarded(*guard_args: Any, **guard_kwargs: Any):
+                    try:
+                        return await fn(*guard_args, **guard_kwargs)
+                    except WorkspaceAuthorizationDenied:
+                        raise HTTPException(status_code=403, detail="authorization_denied") from None
+                    except HTTPException:
+                        raise
+                    except Exception:
+                        raise HTTPException(status_code=500, detail="workspace_operation_failed") from None
+
+                return method_registrar(path, *args, **kwargs)(guarded)
+
+            return decorator
+
+        return wrapper
+
+    router.get = _register(router.get)  # type: ignore[method-assign]
+    router.post = _register(router.post)  # type: ignore[method-assign]
+    router.dependencies.append(Depends(_bind_request_access))
 
     @router.get("/api/complaint-workspace/session")
-    async def get_session(user_id: Optional[str] = None) -> Dict[str, Any]:
-        return workspace.get_session(user_id)
+    async def get_session(
+        user_id: Optional[str] = None,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return workspace.get_session(user_id, case_id=case_id)
 
     @router.post("/api/complaint-workspace/identity")
     async def create_identity() -> Dict[str, Any]:
@@ -368,6 +429,8 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             request.user_id,
             message=request.message,
             question_id=request.question_id,
+            expected_question_revision=request.expected_question_revision,
+            interview_action=request.interview_action,
         )
 
     @router.post("/api/complaint-workspace/evidence")
@@ -480,63 +543,16 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
         ) -> Dict[str, Any]:
             if not files:
                 raise HTTPException(status_code=400, detail="At least one file is required.")
-
-            with tempfile.TemporaryDirectory(prefix="complaint-workspace-upload-") as temp_dir:
-                temp_root = Path(temp_dir)
-                temp_paths: List[str] = []
-                uploaded_files: List[Dict[str, Any]] = []
-                for index, file in enumerate(files, start=1):
-                    original_name = Path(str(file.filename or f"upload-{index}")).name or f"upload-{index}"
-                    destination = temp_root / f"{index:04d}_{original_name}"
-                    file_bytes = await file.read()
-                    destination.write_bytes(file_bytes)
-                    temp_paths.append(str(destination))
-                    uploaded_files.append(
-                        {
-                            "filename": original_name,
-                            "content_type": str(file.content_type or "application/octet-stream"),
-                            "size": len(file_bytes),
-                            "temporary_path": str(destination),
-                        }
-                    )
-
-                payload = workspace.import_local_evidence(
-                    user_id,
-                    paths=temp_paths,
-                    claim_element_id=claim_element_id,
-                    kind=kind,
-                    evidence_root=evidence_root,
-                )
-
-                note_record = None
-                normalized_note = str(note or "").strip()
-                if normalized_note:
-                    uploaded_names = [item["filename"] for item in uploaded_files if item.get("filename")]
-                    effective_claim_element_id = claim_element_id
-                    if claim_element_id in {"auto", "suggested"}:
-                        first_import = next(iter(payload.get("imported") or []), {})
-                        effective_claim_element_id = str(
-                            first_import.get("effective_claim_element_id")
-                            or first_import.get("suggested_claim_element_id")
-                            or "causation"
-                        ).strip() or "causation"
-                    note_record = workspace.save_evidence(
-                        user_id,
-                        kind="testimony",
-                        claim_element_id=effective_claim_element_id,
-                        title=str(note_title or "Chat upload note").strip() or "Chat upload note",
-                        content=normalized_note,
-                        source=str(source or "dashboard-chat-upload").strip() or "dashboard-chat-upload",
-                        attachment_names=uploaded_names,
-                    )
-                    payload["note_record"] = note_record.get("saved")
-                    payload["session"] = note_record.get("session")
-                    payload["review"] = note_record.get("review")
-                    payload["case_synopsis"] = note_record.get("case_synopsis")
-
-                payload["uploaded_files"] = uploaded_files
-                payload["upload_source"] = str(source or "dashboard-chat-upload").strip() or "dashboard-chat-upload"
-                return payload
+            return await workspace.upload_local_evidence_files(
+                user_id,
+                files=files,
+                claim_element_id=claim_element_id,
+                kind=kind,
+                evidence_root=evidence_root,
+                note=note,
+                note_title=note_title,
+                source=source,
+            )
     else:
 
         @router.post("/api/complaint-workspace/upload-local-evidence")
@@ -666,13 +682,47 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
     @router.get("/api/complaint-workspace/export/download")
     async def download_complaint_packet(
         user_id: Optional[str] = Query(default=None),
+        case_id: Optional[str] = Query(default=None),
         output_format: str = Query(default="json"),
+        cid: Optional[str] = Query(default=None),
+        storage_key: Optional[str] = Query(default=None),
     ) -> Response:
+        if case_id or cid or storage_key:
+            workspace.resolve_private_reference(
+                user_id,
+                case_id=case_id,
+                cid=cid,
+                storage_key=storage_key,
+            )
         artifact = workspace.build_export_artifact(user_id, output_format=output_format)
         return Response(
             content=artifact["body"],
             media_type=str(artifact["media_type"]),
             headers={"Content-Disposition": f'attachment; filename="{artifact["filename"]}"'},
+        )
+
+    @router.get("/api/complaint-workspace/contained-file")
+    async def read_contained_file(
+        relative_name: str,
+        user_id: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        payload = workspace.read_contained_workspace_file(user_id, relative_name)
+        return {
+            "content_b64": __import__("base64").b64encode(payload).decode("ascii"),
+            "at_rest_protection": "plaintext_pending",
+        }
+
+    @router.post("/api/complaint-workspace/contained-file")
+    async def write_contained_file(request: Dict[str, Any]) -> Dict[str, Any]:
+        content = request.get("content")
+        if isinstance(content, str):
+            raw = content.encode("utf-8")
+        else:
+            raw = bytes(content or b"")
+        return workspace.write_contained_workspace_file(
+            request.get("user_id"),
+            str(request.get("relative_name") or ""),
+            raw,
         )
 
     @router.get("/api/complaint-workspace/mcp/tools")
@@ -860,12 +910,26 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
 
     @router.post("/api/complaint-workspace/mcp/call")
     async def call_mcp_tool(request: McpCallRequest) -> Dict[str, Any]:
-        return workspace.call_mcp_tool(request.tool_name, request.arguments)
+        try:
+            return workspace.call_mcp_tool(request.tool_name, request.arguments)
+        except WorkspaceAuthorizationDenied:
+            return {"ok": False, "error": "authorization_denied", "isError": True}
+        except Exception:
+            return {"ok": False, "error": "workspace_operation_failed", "isError": True}
 
     @router.post("/api/complaint-workspace/mcp/rpc")
-    async def call_jsonrpc(request: JsonRpcRequest) -> Dict[str, Any]:
+    async def call_jsonrpc(request: JsonRpcRequest, http_request: Request) -> Response:
+        token = os.environ.get("COMPLAINT_MCP_AUTH_TOKEN", "").strip()
+        if token:
+            authorization = http_request.headers.get("authorization", "")
+            if authorization != f"Bearer {token}":
+                raise HTTPException(status_code=401, detail="MCP bearer token required")
         response = handle_jsonrpc_message(workspace, request.model_dump())
-        return response or {"jsonrpc": "2.0", "id": request.id, "result": None}
+        body = response or {"jsonrpc": "2.0", "id": request.id, "result": None}
+        return Response(
+            content=json.dumps(body),
+            media_type="application/json",
+        )
 
     return router
 
@@ -873,5 +937,15 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
 def attach_complaint_workspace_routes(
     app: FastAPI,
     service: Optional[ComplaintWorkspaceService] = None,
+    *,
+    principal_registry: Optional[PrincipalRegistry] = None,
+    trusted_local: bool = False,
 ) -> FastAPI:
-    return attach_router_routes(app, create_complaint_workspace_router(service))
+    return attach_router_routes(
+        app,
+        create_complaint_workspace_router(
+            service,
+            principal_registry=principal_registry,
+            trusted_local=trusted_local,
+        ),
+    )

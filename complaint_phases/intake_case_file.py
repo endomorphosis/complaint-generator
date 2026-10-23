@@ -5,10 +5,13 @@ Helpers for building and summarizing the structured intake case file.
 from __future__ import annotations
 
 import calendar
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from itertools import combinations
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping, Optional
+
+from integrations.ipfs_datasets.types import user_assertion_from_mapping
 
 from .intake_claim_registry import normalize_claim_type, refresh_required_elements, registry_for_claim_type
 
@@ -27,6 +30,235 @@ def _coerce_list(value: Any) -> List[Any]:
 
 def _coerce_dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+QUESTION_DISPOSITIONS = (
+    "answered",
+    "unknown",
+    "refused",
+    "skipped",
+    "deferred",
+    "invalidated",
+)
+_NON_FACT_QUESTION_DISPOSITIONS = {
+    "unknown",
+    "refused",
+    "skipped",
+    "deferred",
+    "invalidated",
+}
+_QUESTION_DISPOSITION_ALIASES = {
+    "answered": "answered",
+    "answer": "answered",
+    "unknown": "unknown",
+    "do_not_know": "unknown",
+    "dont_know": "unknown",
+    "don't_know": "unknown",
+    "do-not-know": "unknown",
+    "declined": "refused",
+    "decline": "refused",
+    "refused": "refused",
+    "refuse": "refused",
+    "refusal": "refused",
+    "skipped": "skipped",
+    "skip": "skipped",
+    "deferred": "deferred",
+    "defer": "deferred",
+    "invalidated": "invalidated",
+    "invalidate": "invalidated",
+    "contradictory": "contradictory",
+}
+_CLOSED_QUESTION_DISPOSITIONS = _NON_FACT_QUESTION_DISPOSITIONS | {
+    "answered",
+    "declined",
+    "contradictory",
+}
+
+
+def canonical_question_disposition(value: Any) -> str:
+    """Map an answer label onto the persisted disposition vocabulary."""
+    token = _normalize_text(value).lower().replace(" ", "_")
+    if token in _QUESTION_DISPOSITION_ALIASES:
+        return _QUESTION_DISPOSITION_ALIASES[token]
+    return ""
+
+
+def question_disposition_creates_fact(disposition: str) -> bool:
+    """Unknown and refusal dispositions are not facts or requirement satisfaction."""
+    return canonical_question_disposition(disposition) == "answered"
+
+
+def _question_disposition_key(record: Mapping[str, Any]) -> tuple:
+    return (
+        _normalize_text(record.get("target_id")),
+        _normalize_text(record.get("target_revision")),
+        _normalize_text(record.get("disposition")).lower(),
+        bool(record.get("reopened")),
+        _normalize_text(record.get("reopen_reason")),
+    )
+
+
+def _normalize_question_disposition_record(record: Mapping[str, Any]) -> Dict[str, Any]:
+    disposition = canonical_question_disposition(record.get("disposition")) or _normalize_text(
+        record.get("disposition")
+    ).lower()
+    non_fact = disposition in _NON_FACT_QUESTION_DISPOSITIONS or disposition in {"declined", "contradictory"}
+    creates_fact = False if non_fact else bool(record.get("creates_fact"))
+    satisfies_requirement = False if non_fact else bool(record.get("satisfies_requirement"))
+    contradictory_conclusion = False if non_fact else bool(record.get("contradictory_conclusion"))
+    if disposition != "answered":
+        creates_fact = False if non_fact else creates_fact
+    return {
+        "target_id": _normalize_text(record.get("target_id")),
+        "target_revision": _normalize_text(record.get("target_revision")) or "unresolved",
+        "target_kind": _normalize_text(record.get("target_kind")) or None,
+        "disposition": disposition,
+        "question": _normalize_text(record.get("question")) or None,
+        "answer": None if non_fact and not _normalize_text(record.get("answer")) else record.get("answer"),
+        "reason": _normalize_text(record.get("reason")) or None,
+        "creates_fact": creates_fact,
+        "satisfies_requirement": satisfies_requirement,
+        "contradictory_conclusion": contradictory_conclusion,
+        "reopened": bool(record.get("reopened")),
+        "reopen_reason": _normalize_text(record.get("reopen_reason")) or None,
+        "evidence_change": _normalize_text(record.get("evidence_change")) or None,
+        "scope_change": _normalize_text(record.get("scope_change")) or None,
+        "status": "reopened" if record.get("reopened") else "disposed",
+    }
+
+
+def question_disposition_records(intake_case_file: Any) -> List[Dict[str, Any]]:
+    case_file = _coerce_dict(intake_case_file)
+    records: List[Dict[str, Any]] = []
+    seen = set()
+    for item in _coerce_list(case_file.get("question_dispositions")):
+        if not isinstance(item, dict):
+            continue
+        normalized = _normalize_question_disposition_record(item)
+        if not normalized["target_id"] or not normalized["disposition"]:
+            continue
+        key = _question_disposition_key(normalized)
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append(normalized)
+    return records
+
+
+def question_target_is_closed(
+    intake_case_file: Any,
+    target_id: Any,
+    target_revision: Any = None,
+) -> bool:
+    """A disposed target stays closed across revisions until an explicit reopen."""
+    wanted = _normalize_text(target_id)
+    if not wanted:
+        return False
+    revision = _normalize_text(target_revision)
+    closed = False
+    for record in question_disposition_records(intake_case_file):
+        if record["target_id"] != wanted:
+            continue
+        if record["reopened"]:
+            reopen_revision = record.get("target_revision") or ""
+            if not revision or not reopen_revision or reopen_revision in {revision, "unresolved"}:
+                closed = False
+            continue
+        if record["disposition"] in _CLOSED_QUESTION_DISPOSITIONS:
+            closed = True
+    return closed
+
+
+def record_question_disposition(
+    intake_case_file: Dict[str, Any],
+    *,
+    target_id: Any,
+    target_revision: Any,
+    disposition: Any,
+    target_kind: Any = None,
+    question: Any = None,
+    answer: Any = None,
+    reason: Any = None,
+    creates_fact: bool = False,
+    satisfies_requirement: bool = False,
+    contradictory_conclusion: bool = False,
+) -> Dict[str, Any]:
+    """Persist one stable target revision and its disposition on the case file."""
+    case_file = _coerce_dict(intake_case_file)
+    canonical = canonical_question_disposition(disposition)
+    if not canonical:
+        raise ValueError("question disposition must be answered, unknown, refused, skipped, deferred, or invalidated")
+    record = _normalize_question_disposition_record({
+        "target_id": target_id,
+        "target_revision": target_revision,
+        "target_kind": target_kind,
+        "disposition": canonical,
+        "question": question,
+        "answer": answer,
+        "reason": reason,
+        "creates_fact": creates_fact,
+        "satisfies_requirement": satisfies_requirement,
+        "contradictory_conclusion": contradictory_conclusion,
+        "reopened": False,
+    })
+    if not record["target_id"]:
+        raise ValueError("question disposition requires a stable target_id")
+    records = question_disposition_records(case_file)
+    records = [
+        item for item in records
+        if not (
+            item["target_id"] == record["target_id"]
+            and item["target_revision"] == record["target_revision"]
+            and not item["reopened"]
+        )
+    ]
+    records.append(record)
+    case_file["question_dispositions"] = records
+    return record
+
+
+def reopen_question_disposition(
+    intake_case_file: Dict[str, Any],
+    target_id: Any,
+    *,
+    reason: Any,
+    target_revision: Any = None,
+    evidence_change: Any = None,
+    scope_change: Any = None,
+) -> Dict[str, Any]:
+    """Reopen a disposed question only when new evidence or scope is named."""
+    why = _normalize_text(reason)
+    evidence = _normalize_text(evidence_change) or None
+    scope = _normalize_text(scope_change) or None
+    if not why:
+        raise ValueError("reopening a disposed question requires a reason")
+    if not evidence and not scope:
+        raise ValueError("reopening a disposed question requires new evidence or changed scope")
+    case_file = _coerce_dict(intake_case_file)
+    wanted = _normalize_text(target_id)
+    records = question_disposition_records(case_file)
+    disposed = [
+        item for item in records
+        if item["target_id"] == wanted and not item["reopened"] and item["disposition"] in _CLOSED_QUESTION_DISPOSITIONS
+    ]
+    if not wanted or not disposed:
+        raise ValueError("no disposed question matches that target")
+    revision = _normalize_text(target_revision) or disposed[-1]["target_revision"]
+    reopened = _normalize_question_disposition_record({
+        **disposed[-1],
+        "target_revision": revision,
+        "reopened": True,
+        "reopen_reason": why,
+        "evidence_change": evidence,
+        "scope_change": scope,
+        "creates_fact": False,
+        "satisfies_requirement": False,
+        "contradictory_conclusion": False,
+        "answer": None,
+    })
+    records.append(reopened)
+    case_file["question_dispositions"] = records
+    return reopened
 
 
 def _coerce_provenance_refs(value: Any) -> List[Any]:
@@ -2580,9 +2812,92 @@ def build_candidate_claims(knowledge_graph) -> List[Dict[str, Any]]:
                 "confidence": float(entity.confidence),
                 "source": entity.source,
                 "required_elements": [],
+                "epistemic_class": _normalize_text(entity.attributes.get("epistemic_class") or "") or None,
+                "narrative_kind": _normalize_text(entity.attributes.get("narrative_kind") or "") or None,
             }
         )
     return candidates
+
+
+def _user_assertion_payload(provenance: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(provenance, Mapping):
+        return None
+    payload = provenance.get("user_assertion")
+    if not isinstance(payload, Mapping) or not _normalize_text(payload.get("contract_version") or ""):
+        return None
+    return user_assertion_from_mapping(payload).as_dict()
+
+
+def _project_user_assertion(provenance: Any, *, legacy_ref: str, expected_text: Optional[str] = None) -> Dict[str, Any]:
+    """Project an assertion envelope. Records without one keep the legacy case-file shape."""
+    envelope_payload = _user_assertion_payload(provenance)
+    if envelope_payload is None:
+        return {
+            "source_kind": "knowledge_graph_entity",
+            "source_ref": legacy_ref,
+            "status": "accepted",
+            "assertion_status": "unverified",
+            "source_span_refs": [],
+        }
+    envelope = user_assertion_from_mapping(envelope_payload)
+    if (expected_text is not None and envelope.is_asserted_user_fact
+            and " ".join(expected_text.split()) != " ".join(envelope.source_span_text.split())):
+        envelope = replace(envelope, record_type="unverified_candidate", source_kind="unverified",
+            assertion_status="unverified", deficiencies=("unsupported_extracted_content",))
+    identity = envelope.source_identity
+    source_kind = envelope.source_kind if envelope.is_asserted_user_fact else (envelope.record_type or envelope.source_kind or "unverified")
+    if envelope.is_asserted_user_fact:
+        status = envelope.assertion_status
+    elif envelope.record_type == "legal_text":
+        status = "legal_text"
+    elif envelope.record_type in {"model_suggestion", "inferred_claim_label"}:
+        status = "suggestion"
+    else:
+        status = "unverified"
+    span_refs: List[Dict[str, Any]] = []
+    if envelope.source_span_start is not None and envelope.source_span_end is not None:
+        span_refs.append(
+            {
+                "kind": "user_source_span",
+                "source_kind": source_kind,
+                "source_id": identity,
+                "start": envelope.source_span_start,
+                "end": envelope.source_span_end,
+                "source_hash": envelope.source_hash,
+                "text": envelope.source_span_text,
+                "assertion_status": status,
+                "stable_id": envelope.stable_id,
+            }
+        )
+    return {
+        "source_kind": source_kind,
+        "source_ref": identity if envelope.is_asserted_user_fact and identity else legacy_ref,
+        "status": status,
+        "assertion_status": status,
+        "extractor_version": envelope.extractor_version,
+        "stable_id": envelope.stable_id,
+        "source_hash": envelope.source_hash,
+        "source_id": envelope.source_id,
+        "message_id": envelope.message_id,
+        "document_id": envelope.document_id,
+        "source_span": {
+            "start": envelope.source_span_start,
+            "end": envelope.source_span_end,
+            "text": envelope.source_span_text,
+            "unit": "byte",
+        },
+        "source_span_refs": span_refs,
+        "user_assertion": envelope.as_dict(),
+        "source_assertions": [user_assertion_from_mapping(item).as_dict()
+            for item in (provenance.get("user_assertions") or [])
+            if isinstance(item, Mapping) and user_assertion_from_mapping(item).is_asserted_user_fact],
+        "record_type": envelope.record_type,
+        "contract_version": envelope.contract_version,
+        "jurisdiction": envelope.jurisdiction,
+        "actor": envelope.actor,
+        "asserted_name": envelope.name,
+        "asserted_event_date": envelope.event_date,
+    }
 
 
 def build_canonical_facts(knowledge_graph) -> List[Dict[str, Any]]:
@@ -2595,6 +2910,12 @@ def build_canonical_facts(knowledge_graph) -> List[Dict[str, Any]]:
         fact_text = _normalize_text(entity.attributes.get("description") or entity.name)
         if not fact_text:
             continue
+        provenance_projection = _project_user_assertion(getattr(entity, "provenance", {}), legacy_ref=entity.id,
+                                                       expected_text=fact_text)
+        existing_span_refs = _coerce_provenance_refs(entity.attributes.get("source_span_refs"))
+        provenance_projection["source_span_refs"] = _coerce_provenance_refs(
+            existing_span_refs + list(provenance_projection.get("source_span_refs") or [])
+        )
         canonical_facts.append(
             _normalize_canonical_fact_record(
                 {
@@ -2619,10 +2940,9 @@ def build_canonical_facts(knowledge_graph) -> List[Dict[str, Any]]:
                     "actor_ids": list(entity.attributes.get("actor_ids") or []),
                     "target_ids": list(entity.attributes.get("target_ids") or []),
                     "location": _normalize_text(entity.attributes.get("location") or "") or None,
-                    "source_kind": "knowledge_graph_entity",
-                    "source_ref": entity.id,
                     "confidence": float(entity.confidence),
-                    "status": "accepted",
+                    "epistemic_class": _normalize_text(entity.attributes.get("epistemic_class") or "") or None,
+                    "value_status": _normalize_text(entity.attributes.get("value_status") or "") or None,
                     "needs_corroboration": entity.confidence < 0.85,
                     "corroboration_priority": "high" if entity.confidence < 0.7 else "medium",
                     "materiality": "medium",
@@ -2630,12 +2950,81 @@ def build_canonical_facts(knowledge_graph) -> List[Dict[str, Any]]:
                     "event_support_refs": _unique_normalized_strings(entity.attributes.get("event_support_refs") or []),
                     "source_artifact_ids": _unique_normalized_strings(entity.attributes.get("source_artifact_ids") or []),
                     "testimony_record_ids": _unique_normalized_strings(entity.attributes.get("testimony_record_ids") or []),
-                    "source_span_refs": _coerce_provenance_refs(entity.attributes.get("source_span_refs")),
                     "contradiction_group_id": None,
+                    **provenance_projection,
                 }
             )
         )
     return canonical_facts
+
+
+def build_canonical_fact_edges(knowledge_graph) -> List[Dict[str, Any]]:
+    """Project graph edges with their assertion envelopes.
+
+    source_id and target_id stay node endpoints. User message and document
+    identity stays inside the assertion envelope.
+    """
+    if knowledge_graph is None:
+        return []
+    edges: List[Dict[str, Any]] = []
+    relationships = getattr(knowledge_graph, "relationships", {})
+    relationship_values = relationships.values() if isinstance(relationships, Mapping) else relationships
+    for relationship in relationship_values:
+        # Revalidate mutable graph records before projecting their assertion.
+        serializer = getattr(relationship, "to_dict", None)
+        serialized = serializer() if callable(serializer) else {}
+        provenance = serialized.get("provenance", getattr(relationship, "provenance", {}))
+        projection = _project_user_assertion(
+            provenance,
+            legacy_ref=str(getattr(relationship, "id", "") or ""),
+        )
+        edges.append(
+            {
+                **projection,
+                "relationship_id": getattr(relationship, "id", ""),
+                "source_id": getattr(relationship, "source_id", ""),
+                "target_id": getattr(relationship, "target_id", ""),
+                "relation_type": getattr(relationship, "relation_type", ""),
+                "confidence": getattr(relationship, "confidence", None),
+            }
+        )
+    return edges
+
+
+def restore_entity_from_canonical_fact(fact: Mapping[str, Any]):
+    """Rebuild a fact entity from a canonical projection without inventing fields."""
+    from complaint_phases.knowledge_graph import Entity
+
+    record = dict(fact or {})
+    assertion = record.get("user_assertion") if isinstance(record.get("user_assertion"), Mapping) else {}
+    attributes = {
+        "description": record.get("text") or "",
+        "fact_type": record.get("fact_type") or "general",
+        "predicate_family": record.get("predicate_family") or "",
+        "event_label": record.get("event_label") or "",
+        "event_id": record.get("event_id") or "",
+        "event_date_or_range": record.get("event_date_or_range") or "",
+        "source_span_refs": list(record.get("source_span_refs") or []),
+    }
+    if isinstance(record.get("sequence_index"), int):
+        attributes["sequence_index"] = record.get("sequence_index")
+    provenance: Dict[str, Any] = {}
+    if assertion:
+        provenance["user_assertion"] = dict(assertion)
+    history = record.get("source_assertions")
+    if isinstance(history, list):
+        provenance["user_assertions"] = [user_assertion_from_mapping(item).as_dict()
+            for item in history if isinstance(item, Mapping) and user_assertion_from_mapping(item).is_asserted_user_fact]
+    confidence = record.get("confidence")
+    return Entity(
+        id=str(record.get("fact_id") or record.get("stable_id") or ""),
+        type="fact",
+        name=str(record.get("name") or record.get("text") or ""),
+        attributes=attributes,
+        confidence=float(0.0 if confidence is None else confidence),
+        source="complaint",
+        provenance=provenance,
+    )
 
 
 def build_proof_leads(knowledge_graph) -> List[Dict[str, Any]]:
@@ -2830,6 +3219,29 @@ def build_open_items(intake_case_file: Dict[str, Any]) -> List[Dict[str, Any]]:
             has_named_staff = True
         if staff_title_pattern.search(_normalize_text(fact_dict.get("text") or fact_dict.get("event_label") or "")):
             has_staff_title = True
+
+    legal_context = case_file.get("legal_context")
+    if not isinstance(legal_context, dict):
+        legal_context = refresh_explicit_legal_context(case_file)
+        case_file["legal_context"] = legal_context
+    for question in _coerce_list(legal_context.get("questions")):
+        question_dict = _coerce_dict(question)
+        question_id = _normalize_text(question_dict.get("question_id") or "")
+        if not question_id:
+            continue
+        _add_item(
+            {
+                "open_item_id": f"legal_context:{question_id}",
+                "kind": "legal_context_gap",
+                "blocking_level": "blocking" if question_dict.get("field") == "jurisdiction" else "important",
+                "section": "legal_context",
+                "reason": _normalize_text(question_dict.get("prompt") or "Legal context is unresolved."),
+                "next_question_strategy": f"ask_{_normalize_text(question_dict.get('field') or 'legal_context')}",
+                "recommended_support_kind": "intake_clarification",
+                "proof_path_status": "missing",
+                "question": question_dict,
+            }
+        )
 
     for claim in candidate_claims:
         claim_dict = _coerce_dict(claim)
@@ -3695,6 +4107,254 @@ def build_intake_sections(
     }
 
 
+def _legal_context_helpers():
+    from integrations.ipfs_datasets.legal import (
+        apply_legal_context_update,
+        classify_legal_date,
+        empty_legal_context,
+        questions_for_legal_context,
+        resolve_explicit_jurisdiction,
+    )
+    return {
+        "apply_legal_context_update": apply_legal_context_update,
+        "classify_legal_date": classify_legal_date,
+        "empty_legal_context": empty_legal_context,
+        "questions_for_legal_context": questions_for_legal_context,
+        "resolve_explicit_jurisdiction": resolve_explicit_jurisdiction,
+    }
+
+
+def extract_explicit_jurisdiction_from_text(text: Any) -> str:
+    """Require an unambiguous affirmative statement, rather than the first hit."""
+    helpers = _legal_context_helpers()
+    raw = _normalize_text(text)
+    if not raw:
+        return "unknown"
+    selected = set()
+    uncertain = re.compile(
+        r"\b(?:not|never|no|unsure|uncertain|whether|maybe|perhaps|might|could|"
+        r"possibly|dispute|disputed|cited|claimed|claims|don't|doesn't|isn't)\b",
+        re.IGNORECASE,
+    )
+    for clause in re.findall(r"[^.;!?\n]+[.;!?\n]?", raw):
+        if clause.rstrip().endswith("?") or re.match(
+            r"\s*(?:do|does|is|are|should|can|would|will|which|what|how|where|when)\b",
+            clause, re.IGNORECASE,
+        ) or uncertain.search(clause) or re.search(r"\bmay\s+(?:be|apply|govern)\b", clause, re.IGNORECASE):
+            continue
+        candidates = []
+        if re.search(
+            r"\bfederal\s+law\s+(?:applies|governs)\b|"
+            r"\b(?:filed|pending)\s+in\s+(?:(?:a|the)\s+)?federal\s+court\b",
+            clause, re.IGNORECASE,
+        ):
+            candidates.append("federal")
+        labeled = re.search(r"\bjurisdiction\s*:\s*([A-Za-z][A-Za-z ]{1,40})", clause, re.IGNORECASE)
+        if labeled:
+            candidates.append(labeled.group(1).strip(" ."))
+        candidates.extend(match.group(1).strip() for match in re.finditer(
+            r"\b(?:under|pursuant to|state of|or|and)\s+(?:(?:under|pursuant to)\s+)?([A-Za-z][A-Za-z ]{1,30}?)\s+(?:law|statute|court)\b",
+            clause, re.IGNORECASE,
+        ))
+        for candidate in candidates:
+            resolved = helpers["resolve_explicit_jurisdiction"](candidate)
+            if resolved != "unknown":
+                selected.add(resolved)
+    return next(iter(selected)) if len(selected) == 1 else "unknown"
+
+
+def _extract_labeled_legal_date(text: str, labels: tuple[str, ...], role: str) -> Dict[str, Any] | None:
+    helpers = _legal_context_helpers()
+    for label in labels:
+        match = re.search(rf"\b{label}\s*[: ]\s*([^.;\n]+)", text, flags=re.IGNORECASE)
+        if match:
+            return helpers["classify_legal_date"](match.group(1).strip(), role=role)
+    return None
+
+
+def derive_explicit_legal_context(intake_case_file: Dict[str, Any]) -> Dict[str, Any]:
+    """Build legal context from explicit user text and dated facts."""
+    helpers = _legal_context_helpers()
+    case_file = _coerce_dict(intake_case_file)
+    source_text = _normalize_text(case_file.get("source_complaint_text") or "")
+    context = helpers["empty_legal_context"]()
+    jurisdiction = extract_explicit_jurisdiction_from_text(source_text)
+    context["jurisdiction"] = jurisdiction
+    context["jurisdiction_explicit"] = jurisdiction != "unknown"
+    context["status"] = "unknown" if jurisdiction == "unknown" else "explicit"
+
+    applicable = _extract_labeled_legal_date(
+        source_text,
+        ("applicable law date", "law in effect on", "law applicable on"),
+        "applicable_law_date",
+    )
+    if applicable:
+        context["applicable_law_date"] = applicable
+    filing = _extract_labeled_legal_date(
+        source_text,
+        ("filing date", "filed on", "reference date"),
+        "filing_reference_date",
+    )
+    if filing:
+        context["filing_reference_date"] = filing
+    retrieval_raw = _normalize_text(
+        case_file.get("corpus_retrieved_at") or case_file.get("corpus_retrieval_date") or ""
+    )
+    if retrieval_raw:
+        context["corpus_retrieval_date"] = helpers["classify_legal_date"](
+            retrieval_raw,
+            role="corpus_retrieval_date",
+        )
+
+    event_dates: List[Dict[str, Any]] = []
+    for fact in _coerce_list(case_file.get("canonical_facts")):
+        if not isinstance(fact, dict):
+            continue
+        raw_event = _normalize_text(fact.get("event_date_or_range") or "")
+        if not raw_event:
+            continue
+        event_dates.append(helpers["classify_legal_date"](raw_event, role="event_date"))
+    context["event_dates"] = event_dates
+    if len(event_dates) == 1:
+        context["event_date"] = event_dates[0]
+    context["questions"] = helpers["questions_for_legal_context"](
+        context,
+        selecting_rules=bool(_coerce_list(case_file.get("candidate_claims"))),
+    )
+    return context
+
+
+def refresh_explicit_legal_context(intake_case_file: Dict[str, Any]) -> Dict[str, Any]:
+    """Recompute context and invalidate selected rules when the user changes it."""
+    helpers = _legal_context_helpers()
+    case_file = _coerce_dict(intake_case_file)
+    previous = case_file.get("legal_context")
+    if not isinstance(previous, dict):
+        previous = helpers["empty_legal_context"]()
+    derived = derive_explicit_legal_context(case_file)
+    overrides = _coerce_dict(case_file.get("legal_context_overrides"))
+    # Presence, including an explicit blank, matters. Missing source context
+    # cannot silently retain a previously selected jurisdiction or date.
+    updates: Dict[str, Any] = {
+        "jurisdiction": overrides.get("jurisdiction") if "jurisdiction" in overrides else derived.get("jurisdiction"),
+    }
+    for role in ("applicable_law_date", "event_date", "filing_reference_date", "corpus_retrieval_date"):
+        if role in overrides:
+            updates[role] = overrides.get(role)
+        else:
+            updates[role] = derived.get(role)
+    if "event_dates" in overrides:
+        updates["event_dates"] = overrides.get("event_dates")
+    elif "event_date" in overrides:
+        updates["event_dates"] = [overrides["event_date"]] if overrides["event_date"] else []
+    else:
+        updates["event_dates"] = derived.get("event_dates") or []
+    proof = [
+        item for item in _coerce_list(case_file.get("proof_leads"))
+        if isinstance(item, dict)
+    ]
+    updated = helpers["apply_legal_context_update"](previous, updates, dependent_proof=proof)
+    updated["questions"] = helpers["questions_for_legal_context"](
+        updated,
+        selecting_rules=bool(_coerce_list(case_file.get("candidate_claims"))),
+    )
+    # Ordinary intake refresh and mediator question refresh use this path too;
+    # invalidation must reach the actual proof records, not only a nested copy.
+    if updated.get("changed_fields"):
+        invalidated = _coerce_list(updated.get("dependent_proof"))
+        if len(invalidated) != len(proof) or not all(isinstance(item, dict) for item in invalidated):
+            raise ValueError("Legal context changed the dependent proof projection shape")
+        # The update preserves order/cardinality. Identity indexing would merge
+        # distinct legacy records with absent or duplicate proof identifiers.
+        case_file["proof_leads"] = [dict(item) for item in invalidated]
+    case_file["legal_context"] = updated
+    return updated
+
+
+def apply_explicit_legal_context(intake_case_file: Dict[str, Any], **updates: Any) -> Dict[str, Any]:
+    """Record user answers and drop rule applicability that depended on the old context."""
+    case_file = _coerce_dict(intake_case_file)
+    overrides = _coerce_dict(case_file.get("legal_context_overrides"))
+    for key, value in updates.items():
+        overrides[key] = value
+    case_file["legal_context_overrides"] = overrides
+    case_file["legal_context"] = refresh_explicit_legal_context(case_file)
+    return case_file
+
+
+def project_graph_revision_view(case_file: Dict[str, Any], knowledge_graph) -> Dict[str, Any]:
+    """Expose narrative nodes, revisions, unknowns, and contradictions without dropping history."""
+    if not isinstance(case_file, dict) or knowledge_graph is None:
+        return case_file
+    from complaint_phases.knowledge_graph import inspect_graph_revisions
+
+    narrative_nodes = []
+    unknowns = []
+    contradictions = []
+    support_edges = []
+    for entity in getattr(knowledge_graph, "entities", {}).values():
+        attributes = entity.attributes if isinstance(getattr(entity, "attributes", None), dict) else {}
+        epistemic_class = _normalize_text(attributes.get("epistemic_class") or "") or None
+        if attributes.get("narrative_source_linked") or attributes.get("narrative_kind"):
+            envelope = _user_assertion_payload(getattr(entity, "provenance", {})) or {}
+            narrative_nodes.append({
+                "entity_id": entity.id,
+                "entity_type": entity.type,
+                "narrative_kind": attributes.get("narrative_kind"),
+                "name": entity.name,
+                "epistemic_class": epistemic_class or "user_allegation",
+                "stable_id": envelope.get("stable_id"),
+                "source_span": envelope.get("source_span"),
+                "source_hash": envelope.get("source_hash"),
+                "statement": envelope.get("source_span_text") or attributes.get("description") or entity.name,
+            })
+        value_status = _normalize_text(attributes.get("value_status") or "")
+        if value_status == "unknown":
+            unknowns.append({"entity_id": entity.id, "statement": attributes.get("description") or entity.name, "value_status": "unknown"})
+        if value_status == "contradiction":
+            contradictions.append({"entity_id": entity.id, "statement": attributes.get("description") or entity.name, "value_status": "contradiction"})
+    ledger = knowledge_graph.factual_ledger() if hasattr(knowledge_graph, "factual_ledger") else {}
+    for conflict in ledger.get("conflicts") or []:
+        if isinstance(conflict, dict):
+            contradictions.append(dict(conflict))
+    for revision in ledger.get("revisions") or []:
+        if not isinstance(revision, dict):
+            continue
+        revision_status = _normalize_text(revision.get("value_status") or "")
+        statement = revision.get("statement") or (revision.get("provenance") or {}).get("statement")
+        if revision_status == "unknown" and statement:
+            unknowns.append({
+                "entity_id": revision.get("entity_id") or "",
+                "statement": statement,
+                "value_status": "unknown",
+                "event_id": revision.get("event_id") or "",
+            })
+        if revision_status == "contradiction" and statement:
+            contradictions.append({
+                "entity_id": revision.get("entity_id") or "",
+                "statement": statement,
+                "value_status": "contradiction",
+                "event_id": revision.get("event_id") or "",
+            })
+    for relationship in getattr(knowledge_graph, "relationships", {}).values():
+        attributes = relationship.attributes if isinstance(getattr(relationship, "attributes", None), dict) else {}
+        if attributes.get("epistemic_class"):
+            support_edges.append({
+                "relationship_id": relationship.id,
+                "relation_type": relationship.relation_type,
+                "epistemic_class": attributes.get("epistemic_class"),
+                "source_id": relationship.source_id,
+                "target_id": relationship.target_id,
+                "statement": attributes.get("statement"),
+            })
+    case_file["graph_revisions"] = inspect_graph_revisions(knowledge_graph)
+    case_file["narrative_source_nodes"] = narrative_nodes
+    case_file["visible_unknowns"] = unknowns
+    case_file["visible_contradictions"] = contradictions
+    case_file["epistemic_support_edges"] = support_edges
+    return case_file
+
+
 def build_intake_case_file(knowledge_graph, complaint_text: str = "") -> Dict[str, Any]:
     """Build the initial structured intake case file from current graph state."""
     candidate_claims = [
@@ -3776,11 +4436,14 @@ def build_intake_case_file(knowledge_graph, complaint_text: str = "") -> Dict[st
         "proof_leads": proof_leads,
         "blocker_follow_up_summary": blocker_follow_up_summary,
         "contradiction_queue": [],
+        "question_dispositions": [],
         "open_items": [],
         "summary_snapshots": [],
         "complainant_summary_confirmation": {},
         "source_complaint_text": normalized_complaint_text,
     }
+    intake_case_file["legal_context"] = refresh_explicit_legal_context(intake_case_file)
+    intake_case_file = project_graph_revision_view(intake_case_file, knowledge_graph)
 
     open_items = build_open_items(intake_case_file)
     intake_case_file["open_items"] = open_items
@@ -3894,12 +4557,14 @@ def refresh_intake_case_file(intake_case_file: Dict[str, Any], knowledge_graph, 
     )
     case_file["harm_profile"] = build_harm_profile(_coerce_list(case_file.get("canonical_facts")))
     case_file["remedy_profile"] = build_remedy_profile(_coerce_list(case_file.get("canonical_facts")))
+    case_file["legal_context"] = refresh_explicit_legal_context(case_file)
     case_file["blocker_follow_up_summary"] = build_blocker_follow_up_summary(
         candidate_claims=_coerce_list(case_file.get("candidate_claims")),
         canonical_facts=_coerce_list(case_file.get("canonical_facts")),
         proof_leads=_coerce_list(case_file.get("proof_leads")),
         source_text=str(case_file.get("source_complaint_text") or ""),
     )
+    case_file["question_dispositions"] = question_disposition_records(case_file)
     case_file["open_items"] = build_open_items(case_file)
 
     summary_snapshots = _coerce_list(case_file.get("summary_snapshots"))

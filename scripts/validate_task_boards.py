@@ -38,6 +38,14 @@ VALID_STATUSES = {
     "blocked",
 }
 VALID_PRIORITIES = {"P0", "P1", "P2"}
+DAEMON_STATUS_BY_CANONICAL = {
+    "complete": "completed",
+    "validation_required": "todo",
+    "in_progress": "in-progress",
+    "planned": "todo",
+    "deferred": "blocked",
+    "blocked": "blocked",
+}
 STALE_ABSOLUTE_PREFIX = "/home/barberb/complaint-generator"
 TASK_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$")
 FENCED_CODE_RE = re.compile(
@@ -391,6 +399,11 @@ def _validate_markdown_projection(
         task_id = str(task_id).strip()
         return task_id if task_id.startswith("SUP-") else f"SUP-{task_id}"
 
+    expected_ids = {daemon_task_id(task["task_id"]) for task in tasks
+                    if isinstance(task, dict) and isinstance(task.get("task_id"), str)}
+    for extra in sorted(set(re.findall(r"^## (SUP-\S+)(?:[ \t]|$)", text, re.M)) - expected_ids):
+        errors.append(f"{_display_path(markdown_path, repo_root)}: unexpected markdown task {extra}")
+
     for task in tasks:
         if not isinstance(task, dict):
             continue
@@ -398,25 +411,35 @@ def _validate_markdown_projection(
         if not isinstance(task_id, str):
             continue
         rendered_task_id = daemon_task_id(task_id)
-        heading = f"## {rendered_task_id} "
-        if text.count(heading) != 1:
+        sections = list(re.finditer(
+            rf"^## {re.escape(rendered_task_id)} [^\n]*\n(?P<body>.*?)(?=^## |\Z)",
+            text, re.M | re.S,
+        ))
+        if len(sections) != 1:
             errors.append(
                 f"{_display_path(markdown_path, repo_root)}: expected exactly one "
                 f"markdown section for {rendered_task_id}"
             )
+        section_text = sections[0].group("body") if len(sections) == 1 else ""
+        dependencies = task.get("depends_on", [])
+        if not isinstance(dependencies, list):
+            dependencies = []
         expected_dependencies = ", ".join(
             daemon_task_id(dependency)
-            for dependency in task.get("depends_on", [])
+            for dependency in dependencies
             if isinstance(dependency, str) and dependency.strip()
         )
         for field_name, expected in (
+            ("Status", DAEMON_STATUS_BY_CANONICAL.get(str(task.get("status", "")), "todo")),
             ("Canonical task id", task_id),
             ("Canonical status", str(task.get("status", ""))),
             ("Source doc", str(task.get("source_doc", ""))),
             ("Depends on", expected_dependencies),
         ):
             line = f"- {field_name}: {expected}"
-            if line not in text:
+            field_pattern = re.compile(rf"^\s*-\s*{re.escape(field_name)}\s*:", re.I)
+            actual = [value for value in section_text.splitlines() if field_pattern.match(value)]
+            if actual != [line]:
                 errors.append(
                     f"{_display_path(markdown_path, repo_root)}: missing line {line!r} "
                     f"for {rendered_task_id}"

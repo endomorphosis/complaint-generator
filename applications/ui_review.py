@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from queue import Queue
@@ -12,6 +15,9 @@ from time import perf_counter
 from typing import Any, Dict, Iterable, List, Optional
 
 from backends import LLMRouterBackend, MultimodalRouterBackend
+
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_COMPLAINT_OUTPUT_REVIEW_TIMEOUT_S = 8
@@ -49,6 +55,62 @@ _UI_REVIEW_PROVIDER_IMAGE_LIMITS = {
 }
 _UI_REVIEW_ROUTE_PROVIDER_ALIASES = {"llm_router", "multimodal_router"}
 _UI_REVIEW_ROUTE_MODEL_ALIASES = {"llm_router", "multimodal_router"}
+
+
+_UI_REVIEW_LIST_FIELDS = (
+    "actor_path_breaks",
+    "broken_controls",
+    "button_audit",
+    "critic_test_obligations",
+    "issues",
+    "page_reviews",
+    "playwright_followups",
+    "recommended_changes",
+    "route_handoffs",
+    "workflow_gaps",
+)
+_UI_REVIEW_MAPPING_FIELDS = (
+    "actor_plan",
+    "complaint_journey",
+    "critic_review",
+    "stage_findings",
+)
+
+
+@dataclass(frozen=True)
+class UIReviewPayloadDTO:
+    """DTO for model-produced review data before it reaches UI consumers.
+
+    Unknown extension fields pass through unchanged.  Known collection fields are
+    guarded at this boundary so templates and report readers do not each need
+    their own defensive normalization.
+    """
+
+    values: Dict[str, Any]
+
+    @classmethod
+    def from_value(cls, value: Any) -> "UIReviewPayloadDTO":
+        normalized = dict(value) if isinstance(value, Mapping) else {}
+        for field in _UI_REVIEW_LIST_FIELDS:
+            if field in normalized and not isinstance(normalized[field], list):
+                normalized[field] = []
+        for field in _UI_REVIEW_MAPPING_FIELDS:
+            if field in normalized:
+                normalized[field] = (
+                    dict(normalized[field])
+                    if isinstance(normalized[field], Mapping)
+                    else {}
+                )
+        return cls(normalized)
+
+    def to_payload(self) -> Dict[str, Any]:
+        return dict(self.values)
+
+
+def normalize_ui_review_payload_dto(value: Any) -> Dict[str, Any]:
+    """Normalize one UI review payload through its explicit response DTO."""
+
+    return UIReviewPayloadDTO.from_value(value).to_payload()
 
 
 def _format_router_backend_path(backend: Dict[str, Any]) -> str:
@@ -102,8 +164,15 @@ def _parse_json_response(text: str) -> Dict[str, Any]:
         parsed = json.loads(stripped)
         if isinstance(parsed, dict):
             return parsed
+    except (json.JSONDecodeError, TypeError) as exc:
+        logger.debug("UI review response was not valid JSON; using the structured fallback: %s", exc)
     except Exception:
-        pass
+        logger.warning("Unexpected failure while decoding the UI review response; using the structured fallback", exc_info=True)
+    else:
+        logger.debug(
+            "UI review response decoded as %s instead of an object; using the structured fallback",
+            type(parsed).__name__,
+        )
     return {
         "summary": "The UI review response was not valid JSON.",
         "issues": [],
@@ -166,7 +235,11 @@ def _list_artifact_metadata(screenshot_dir: str) -> List[Dict[str, Any]]:
     for candidate in sorted(root.glob("*.json")):
         try:
             payload = json.loads(candidate.read_text())
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            logger.debug("Ignoring unreadable UI review artifact metadata at %s", candidate, exc_info=True)
+            continue
         except Exception:
+            logger.warning("Unexpected failure while reading UI review artifact metadata at %s", candidate, exc_info=True)
             continue
         if isinstance(payload, dict):
             payloads.append(payload)
@@ -179,7 +252,11 @@ def _normalize_artifact_path(value: Any) -> str:
         return ""
     try:
         return str(Path(text).expanduser().resolve())
+    except (OSError, RuntimeError):
+        logger.debug("Could not normalize artifact path %r; preserving the original value", text, exc_info=True)
+        return text
     except Exception:
+        logger.warning("Unexpected failure while normalizing artifact path %r; preserving it", text, exc_info=True)
         return text
 
 
@@ -289,8 +366,11 @@ def _max_page_reviews_for_provider(provider: Optional[str]) -> int:
     if override:
         try:
             return max(1, int(override))
-        except Exception:
-            pass
+        except ValueError:
+            logger.debug(
+                "Invalid COMPLAINT_UI_REVIEW_MAX_PAGES=%r; using the provider default",
+                override,
+            )
     normalized = str(provider or "").strip().lower()
     if normalized in {"codex_cli", "codex"}:
         return 4
@@ -379,7 +459,11 @@ def _build_tall_image_review_board(
 ):
     try:
         from PIL import Image
+    except ImportError:
+        logger.debug("Pillow is unavailable; skipping tall-image review-board preparation")
+        return image
     except Exception:
+        logger.warning("Pillow could not be initialized; skipping tall-image review-board preparation", exc_info=True)
         return image
 
     width, height = image.size
@@ -457,7 +541,11 @@ def _prepare_review_image_copy(
         return image_path
     try:
         from PIL import Image
+    except ImportError:
+        logger.debug("Pillow is unavailable; reviewing the original image at %s", image_path)
+        return image_path
     except Exception:
+        logger.warning("Pillow could not be initialized; reviewing the original image at %s", image_path, exc_info=True)
         return image_path
 
     max_bytes = int(limits.get("max_bytes") or 0)
@@ -494,6 +582,11 @@ def _prepare_review_image_copy(
             if prepared_path.exists() and prepared_path.stat().st_size < stat.st_size:
                 return prepared_path
     except Exception:
+        logger.warning(
+            "Could not prepare optimized UI review image %s; using the original image",
+            image_path,
+            exc_info=True,
+        )
         return image_path
     return image_path
 
@@ -1131,6 +1224,11 @@ def review_complaint_export_artifacts(
                 notes=notes,
             )
         except Exception as error:
+            logger.warning(
+                "Complaint-output review failed for export %r; using deterministic review feedback",
+                export.get("name") or export.get("filename") or export.get("claim_type") or "unknown",
+                exc_info=True,
+            )
             review_payload = _fallback_complaint_output_review(export, error)
         review = dict(review_payload.get("review") or {})
         filing_shape_scores.append(int(review.get("filing_shape_score") or 0))
@@ -1525,7 +1623,11 @@ def _load_backend_kwargs(config_path: Optional[str], backend_id: Optional[str]) 
         return {"id": backend_id or "ui-review"}
     try:
         payload = json.loads(path.read_text())
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        logger.warning("Could not load UI review backend configuration from %s; using defaults", path, exc_info=True)
+        return {"id": backend_id or "ui-review"}
     except Exception:
+        logger.exception("Unexpected failure loading UI review backend configuration from %s; using defaults", path)
         return {"id": backend_id or "ui-review"}
     backends = payload.get("BACKENDS") or payload.get("backends") or []
     if not isinstance(backends, list):
@@ -1676,7 +1778,8 @@ def _ui_review_heartbeat_seconds() -> float:
         return 0.0
     try:
         return max(0.0, float(raw_value))
-    except Exception:
+    except ValueError:
+        logger.debug("Invalid UI review heartbeat interval %r; disabling heartbeat output", raw_value)
         return 0.0
 
 
@@ -1732,16 +1835,23 @@ def _complaint_output_review_timeout_for_provider(provider: Optional[str]) -> fl
     if explicit:
         try:
             return max(5.0, float(explicit))
-        except Exception:
-            pass
+        except ValueError:
+            logger.debug(
+                "Invalid COMPLAINT_OUTPUT_REVIEW_TIMEOUT_SECONDS=%r; using the provider default",
+                explicit,
+            )
     normalized = str(provider or "").strip().lower()
     if normalized:
         provider_override = str(os.getenv(f"COMPLAINT_OUTPUT_REVIEW_TIMEOUT_SECONDS_{normalized.upper()}", "") or "").strip()
         if provider_override:
             try:
                 return max(5.0, float(provider_override))
-            except Exception:
-                pass
+            except ValueError:
+                logger.debug(
+                    "Invalid complaint-output timeout override for provider %s: %r; using the provider default",
+                    normalized,
+                    provider_override,
+                )
         return max(float(DEFAULT_COMPLAINT_OUTPUT_REVIEW_TIMEOUT_S), _ui_review_timeout_for_provider(provider))
     return float(DEFAULT_COMPLAINT_OUTPUT_REVIEW_TIMEOUT_S)
 
@@ -1756,7 +1866,8 @@ def _ui_review_timeout_for_provider(provider: Optional[str]) -> float:
             continue
         try:
             return max(1.0, float(candidate))
-        except Exception:
+        except ValueError:
+            logger.debug("Invalid UI review timeout override %r; trying the next configured value", candidate)
             continue
     return float(_TEXT_UI_REVIEW_TIMEOUTS.get(normalized, DEFAULT_UI_REVIEW_TIMEOUT_S))
 
@@ -2001,7 +2112,9 @@ def create_ui_review_report(
                 page_reports.append(_run_page_review_task(payload))
 
         page_reports.sort(key=lambda item: str(item.get("page_label") or "").strip())
-        review_payload = _aggregate_page_review_reports(page_reports)
+        review_payload = normalize_ui_review_payload_dto(
+            _aggregate_page_review_reports(page_reports)
+        )
         backend_metadata = {
             "id": backend_kwargs.get("id", "ui-review"),
             "provider": backend_kwargs.get("provider"),
@@ -2051,6 +2164,10 @@ def create_ui_review_report(
         )
     except Exception as exc:
         multimodal_exc = exc
+        if skip_multimodal:
+            logger.debug("Using text UI review for text-only provider %s", provider_name or "unspecified")
+        else:
+            logger.warning("Multimodal UI review failed; attempting configured fallbacks", exc_info=True)
         if _is_rate_limit_router_error(exc):
             for fallback_provider in _multimodal_rate_limit_fallback_chain(provider_name):
                 candidate_kwargs = _fallback_backend_kwargs(backend_kwargs, provider=fallback_provider)
@@ -2075,6 +2192,11 @@ def create_ui_review_report(
                         backend_metadata["fallback_attempts"] = list(fallback_attempts)
                     break
                 except Exception as fallback_exc:
+                    logger.warning(
+                        "Multimodal UI review fallback provider %s failed",
+                        fallback_provider,
+                        exc_info=True,
+                    )
                     fallback_attempts.append(
                         {
                             "provider": fallback_provider,
@@ -2101,6 +2223,10 @@ def create_ui_review_report(
                 if skip_multimodal:
                     backend_metadata["multimodal_skipped"] = True
             except Exception as exc:
+                logger.warning(
+                    "Text UI review fallback failed; using deterministic UI review output",
+                    exc_info=True,
+                )
                 review_payload = _deterministic_ui_review_fallback(
                     screenshots=screenshots,
                     artifact_metadata=list(artifact_metadata or []),
@@ -2121,6 +2247,7 @@ def create_ui_review_report(
                     backend_metadata["fallback_attempts"] = list(fallback_attempts)
     backend_metadata.setdefault("prompt_mode", "compact" if use_compact_prompt else "full")
 
+    review_payload = normalize_ui_review_payload_dto(review_payload)
     report = {
         "generated_at": _utc_now(),
         "backend": backend_metadata,

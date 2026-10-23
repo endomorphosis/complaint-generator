@@ -390,10 +390,43 @@ class TestEvidenceStateHook:
                 assert result['cid'] == 'QmTest789'
                 assert result['type'] == 'video'
                 assert 'provenance' in result
+                assert hook.get_evidence_by_cid('QmMissing') is None
             finally:
                 if os.path.exists(db_path):
                     os.unlink(db_path)
                     
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+
+    def test_get_evidence_by_cid_surfaces_query_failure(self):
+        """A failed lookup must not masquerade as a missing evidence record."""
+        try:
+            import duckdb
+            from mediator.evidence_hooks import EvidenceQueryError, EvidenceStateHook
+
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            mock_connection = Mock()
+            query_error = duckdb.Error('evidence database unavailable')
+            mock_connection.execute.side_effect = query_error
+
+            hook = object.__new__(EvidenceStateHook)
+            hook.mediator = mock_mediator
+            hook.db_path = 'unavailable-evidence.duckdb'
+
+            with patch('mediator.evidence_hooks.duckdb.connect', return_value=mock_connection):
+                with pytest.raises(EvidenceQueryError, match='Failed to query evidence by CID QmUnavailable') as exc_info:
+                    hook.get_evidence_by_cid('QmUnavailable')
+
+            assert exc_info.value.__cause__ is query_error
+            mock_connection.close.assert_called_once_with()
+            mock_mediator.log.assert_called_once_with(
+                'evidence_query_error',
+                operation='get_evidence_by_cid',
+                error='evidence database unavailable',
+                error_type='Error',
+                cid='QmUnavailable',
+            )
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
 

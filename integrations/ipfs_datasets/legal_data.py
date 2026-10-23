@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
-from .loader import import_attr_optional
+from .loader import import_attr_optional, import_failure_message, import_module_optional
 
 
 def _upstream_legal_data_exports() -> tuple[Any | None, Any | None]:
@@ -126,6 +126,30 @@ def load_packaged_docket_operator_dashboard_report(
             f"Latest routing reason: {dashboard['inspection'].get('latest_routing_reason') or 'Unavailable'}"
         )
     return dashboard
+
+
+def legal_module(name: str = "") -> Any:
+    """Import a legal_data submodule on demand.
+
+    The package init hashes state-law producer sources, so callers should
+    invoke this inside the function that needs the symbol.
+    """
+
+    suffix = str(name or "").strip().strip(".")
+    module_name = "ipfs_datasets_py.processors.legal_data" if not suffix else (
+        suffix if suffix.startswith("ipfs_datasets_py.") else f"ipfs_datasets_py.processors.legal_data.{suffix}"
+    )
+    module, error = import_module_optional(module_name)
+    if module is None:
+        raise ImportError(import_failure_message(error) or f"{module_name} unavailable")
+    return module
+
+
+def load_legal_symbol(name: str, *, module: str = "") -> Any:
+    legal = legal_module(module)
+    if not hasattr(legal, name):
+        raise ImportError(f"{legal.__name__} has no attribute {name}")
+    return getattr(legal, name)
 
 
 def summarize_docket_dataset(payload: Mapping[str, Any]) -> Dict[str, Any]:

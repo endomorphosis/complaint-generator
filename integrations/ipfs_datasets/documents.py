@@ -13,7 +13,7 @@ from email.parser import BytesParser
 from html import unescape
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from .loader import import_attr_optional, import_module_optional
 from .types import (
@@ -102,10 +102,10 @@ def _build_parse_summary(
     parser_version: str,
     input_format: str,
     paragraph_count: int,
-    extraction_method: str,
-    quality_tier: str,
-    quality_score: float,
-    page_count: int,
+    extraction_method: str = "",
+    quality_tier: str = "",
+    quality_score: float = 0.0,
+    page_count: int = 0,
 ) -> DocumentParseSummary:
     return DocumentParseSummary(
         status=status,
@@ -600,6 +600,7 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 100) -> List[Di
 
 
 def _chunk_page_index(text: str, offset: int, page_count: int) -> int:
+    """Return the one-based page containing an extracted-text offset."""
     if page_count <= 0 or not text:
         return 0
     return min(max(1, text[: max(offset, 0)].count("\f") + 1), page_count)
@@ -616,6 +617,7 @@ def _annotate_chunk_metadata(
     extraction_method: str,
     quality_tier: str,
 ) -> List[Dict[str, Any]]:
+    """Give every chunk enough lineage to travel between ingestion paths."""
     annotated: List[Dict[str, Any]] = []
     text_length = len(text or "")
     for chunk in chunks:
@@ -863,6 +865,192 @@ def parse_document_file(
     )
 
 
+def _merge_parse_context(
+    document_parse: Dict[str, Any],
+    *,
+    source: str,
+    metadata: Optional[Mapping[str, Any]] = None,
+    lineage: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Attach caller context while keeping parser-owned fields authoritative.
+
+    Evidence, authority, and web ingestion attach different source identity to
+    the same parse result.  MIME detection, quality, chunking, and parser
+    version must continue to describe what the parser actually did, so caller
+    context only fills missing fields.  ``source`` is the sole exception: an
+    explicit source names the ingestion lane and is propagated consistently.
+    """
+    payload = dict(document_parse)
+    parse_metadata = dict(payload.get("metadata") or {})
+    transform_lineage = payload.get("lineage")
+    if not isinstance(transform_lineage, dict):
+        transform_lineage = parse_metadata.get("transform_lineage")
+    transform_lineage = dict(transform_lineage) if isinstance(transform_lineage, dict) else {}
+
+    for key, value in dict(metadata or {}).items():
+        if value not in (None, "", [], (), {}):
+            parse_metadata.setdefault(str(key), value)
+    for key, value in dict(lineage or {}).items():
+        if value not in (None, "", [], (), {}):
+            transform_lineage.setdefault(str(key), value)
+
+    resolved_source = str(
+        source
+        or parse_metadata.get("source")
+        or transform_lineage.get("source")
+        or ""
+    )
+    if resolved_source:
+        parse_metadata["source"] = resolved_source
+        transform_lineage["source"] = resolved_source
+
+    normalized_chunks: List[Dict[str, Any]] = []
+    for chunk in payload.get("chunks", []) or []:
+        if not isinstance(chunk, dict):
+            continue
+        chunk_payload = dict(chunk)
+        chunk_metadata = dict(chunk_payload.get("metadata") or {})
+        if resolved_source:
+            chunk_metadata["source"] = resolved_source
+        chunk_payload["metadata"] = chunk_metadata
+        normalized_chunks.append(chunk_payload)
+
+    parse_metadata["transform_lineage"] = transform_lineage
+    payload["chunks"] = normalized_chunks
+    payload["metadata"] = parse_metadata
+    payload["lineage"] = transform_lineage
+    return payload
+
+
+def parse_document(
+    content: Any = None,
+    *,
+    data: Optional[bytes] = None,
+    text: Optional[str] = None,
+    file_path: Optional[str | Path] = None,
+    filename: Optional[str] = None,
+    mime_type: Optional[str] = None,
+    source: Optional[str] = None,
+    metadata: Optional[Mapping[str, Any]] = None,
+    lineage: Optional[Mapping[str, Any]] = None,
+    chunk_size: int = 1000,
+    overlap: int = 100,
+) -> Dict[str, Any]:
+    """Parse one document input through the shared ingestion contract.
+
+    Exactly one of ``content``, ``data``, ``text``, or ``file_path`` must be
+    supplied.  Positional ``content`` dispatches bytes, :class:`~pathlib.Path`,
+    strings, and readable streams.  A string is always document text; local
+    string paths must use ``file_path`` so fetched web content cannot be
+    mistaken for a filesystem path.
+
+    The result retains the normalized dictionary returned by the legacy
+    ``parse_document_*`` helpers.  Those helpers remain public compatibility
+    entry points, while ingestion code can use this source-agnostic function.
+    """
+    supplied = (content is not None, data is not None, text is not None, file_path is not None)
+    if sum(supplied) != 1:
+        raise ValueError("exactly one of content, data, text, or file_path must be provided")
+
+    parsed: Dict[str, Any]
+    resolved_source = str(source or "")
+
+    if file_path is not None:
+        path = Path(file_path)
+        parsed = parse_document_file(
+            str(path),
+            mime_type=mime_type,
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+        resolved_source = resolved_source or "file"
+    elif data is not None:
+        if not isinstance(data, (bytes, bytearray, memoryview)):
+            raise TypeError("data must be bytes-like")
+        parsed = parse_document_bytes(
+            bytes(data),
+            filename=filename,
+            mime_type=mime_type,
+            source=resolved_source or "bytes",
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+        resolved_source = resolved_source or "bytes"
+    elif text is not None:
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        parsed = parse_document_text(
+            text,
+            filename=filename,
+            mime_type=mime_type,
+            source=resolved_source or "text",
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+        resolved_source = resolved_source or "text"
+    elif isinstance(content, Path):
+        parsed = parse_document_file(
+            str(content),
+            mime_type=mime_type,
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+        resolved_source = resolved_source or "file"
+    elif isinstance(content, (bytes, bytearray, memoryview)):
+        parsed = parse_document_bytes(
+            bytes(content),
+            filename=filename,
+            mime_type=mime_type,
+            source=resolved_source or "bytes",
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+        resolved_source = resolved_source or "bytes"
+    elif isinstance(content, str):
+        parsed = parse_document_text(
+            content,
+            filename=filename,
+            mime_type=mime_type,
+            source=resolved_source or "text",
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+        resolved_source = resolved_source or "text"
+    elif hasattr(content, "read"):
+        stream_value = content.read()
+        stream_name = filename or Path(str(getattr(content, "name", ""))).name
+        if isinstance(stream_value, str):
+            parsed = parse_document_text(
+                stream_value,
+                filename=stream_name,
+                mime_type=mime_type,
+                source=resolved_source or "stream",
+                chunk_size=chunk_size,
+                overlap=overlap,
+            )
+        elif isinstance(stream_value, (bytes, bytearray, memoryview)):
+            parsed = parse_document_bytes(
+                bytes(stream_value),
+                filename=stream_name,
+                mime_type=mime_type,
+                source=resolved_source or "stream",
+                chunk_size=chunk_size,
+                overlap=overlap,
+            )
+        else:
+            raise TypeError("document stream read() must return str or bytes")
+        resolved_source = resolved_source or "stream"
+    else:
+        raise TypeError("content must be text, bytes, a Path, or a readable stream")
+
+    return _merge_parse_context(
+        parsed,
+        source=resolved_source,
+        metadata=metadata,
+        lineage=lineage,
+    )
+
+
 def _stable_record_id(source_path: str, metadata: Optional[Dict[str, Any]] = None) -> str:
     seed_parts = [str(source_path or "").strip()]
     if isinstance(metadata, dict):
@@ -890,9 +1078,11 @@ def _materialize_parse_record(
     record_id: Optional[str] = None,
     ocr_attempted: bool = False,
     ocr_used: bool = False,
+    ocr_error: Optional[Mapping[str, Any]] = None,
     error: Optional[str] = None,
 ) -> Dict[str, Any]:
     metadata = dict(metadata or {})
+    ocr_error_details = dict(ocr_error or {})
     target_dir = _ensure_output_dir(output_dir)
     resolved_id = record_id or _stable_record_id(source_path, metadata)
     text = str(parsed.get("text") or "")
@@ -910,7 +1100,10 @@ def _materialize_parse_record(
     )
     extraction_method = str(parse_metadata.get("extraction_method") or "")
     parse_quality = dict(parse_metadata.get("parse_quality") or {})
-    needs_ocr = bool("requires_ocr_or_binary_pdf" in list(parse_quality.get("quality_flags") or []))
+    needs_ocr = bool(
+        "requires_ocr_or_binary_pdf" in list(parse_quality.get("quality_flags") or [])
+        or (ocr_error_details and not ocr_used)
+    )
     checksum = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest() if text else ""
 
     record = {
@@ -926,6 +1119,7 @@ def _materialize_parse_record(
         "extraction_method": extraction_method,
         "ocr_attempted": bool(ocr_attempted),
         "ocr_used": bool(ocr_used),
+        "ocr_error": ocr_error_details,
         "needs_ocr": needs_ocr,
         "error": error or "",
         "metadata": {
@@ -939,6 +1133,7 @@ def _materialize_parse_record(
             "content_type": content_type,
             "ocr_attempted": bool(ocr_attempted),
             "ocr_used": bool(ocr_used),
+            "ocr_error": ocr_error_details,
             "needs_ocr": needs_ocr,
         },
         "parse": parsed,
@@ -1017,6 +1212,12 @@ def parse_pdf_to_record(
     chunk_size: int = 1000,
     overlap: int = 100,
 ) -> Dict[str, Any]:
+    """Parse a PDF and optionally improve a low-text result with OCR.
+
+    OCR is a best-effort enhancement: expected process and filesystem failures
+    retain the initial parse and are reported in ``ocr_error`` instead of
+    making an otherwise usable record fail.
+    """
     path = Path(pdf_path)
     if not path.exists():
         return _materialize_parse_record(
@@ -1036,6 +1237,7 @@ def parse_pdf_to_record(
     text = str(parsed.get("text") or "")
     ocr_attempted = False
     ocr_used = False
+    ocr_error: Dict[str, Any] = {}
 
     if enable_ocr and len(text.strip()) < 100 and shutil.which("ocrmypdf") is not None:
         ocr_attempted = True
@@ -1048,7 +1250,19 @@ def parse_pdf_to_record(
                 text=True,
                 timeout=300,
             )
-            if result.returncode == 0 and ocr_path.exists():
+            if result.returncode != 0:
+                process_message = str(result.stderr or result.stdout or "").strip()
+                ocr_error = {
+                    "error_type": "OCRProcessError",
+                    "message": process_message or f"ocrmypdf exited with status {result.returncode}",
+                    "returncode": int(result.returncode),
+                }
+            elif not ocr_path.exists():
+                ocr_error = {
+                    "error_type": "OCROutputMissing",
+                    "message": "ocrmypdf completed without creating an output PDF",
+                }
+            else:
                 ocr_parsed = parse_document_file(
                     str(ocr_path),
                     mime_type="application/pdf",
@@ -1064,8 +1278,11 @@ def parse_pdf_to_record(
                     parse_quality["ocr_used"] = True
                     parsed_metadata["parse_quality"] = parse_quality
                     parsed["metadata"] = parsed_metadata
-        except Exception:
-            pass
+        except (OSError, UnicodeError, subprocess.SubprocessError) as exc:
+            ocr_error = {
+                "error_type": type(exc).__name__,
+                "message": str(exc) or type(exc).__name__,
+            }
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1076,6 +1293,7 @@ def parse_pdf_to_record(
         output_dir=output_dir,
         ocr_attempted=ocr_attempted,
         ocr_used=ocr_used,
+        ocr_error=ocr_error,
     )
 
 
@@ -1298,6 +1516,7 @@ __all__ = [
     "extract_text_content",
     "ingest_download_manifest",
     "ingest_local_document",
+    "parse_document",
     "parse_document_text",
     "parse_document_bytes",
     "parse_document_file",

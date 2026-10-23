@@ -164,13 +164,33 @@ def test_workspace_cli_is_exposed_through_package_entrypoint(monkeypatch, tmp_pa
     assert payload["session"]["intake_answers"]["protected_activity"] == "Reported retaliation to HR"
 
 
+def test_package_interview_turn_exposes_graph_inquiry_and_provenance(tmp_path):
+    """Package entry uses the same interview transition the acceptance suite drives."""
+
+    from tests.test_tui_interview_acceptance import COHERENT, _assert_graph_case, _service
+
+    service = _service(tmp_path, "pkg-accept-user")
+    payload = run_intake_chat_turn("pkg-accept-user", message=COHERENT, service=service)
+    assert run_intake_chat_turn is complaint_workspace_module.run_intake_chat_turn
+    _assert_graph_case(payload, COHERENT)
+    assert payload["interview"]["inquiry"]["inquiry_id"].startswith("inq-")
+    assert payload["stopping_policy"]["legal_sufficiency"] is False
+    assert payload["interview"]["graph"]["provenance"]["keys"]
+
+
 def test_package_exposes_shared_intake_chat_turn_wrapper(tmp_path):
     service = ComplaintWorkspaceService(root_dir=tmp_path / "workspace-chat-sessions")
+    service.initialize_private_keys(protection="passphrase", passphrase="synthetic-package-fixture-passphrase")
+    service.ensure_private_case_key("pkg-chat-user", "pkg-chat-user")
 
     opening = run_intake_chat_turn("pkg-chat-user", service=service)
-    assert opening["inquiry"]["question_id"] == "party_name"
+    assert opening["inquiry"]["question_id"] == "original_complaint"
     assert opening["accepted_answer"] is None
 
+    narrative = run_intake_chat_turn("pkg-chat-user", message="My employer retaliated after a report.", service=service)
+    assert narrative["accepted_answer"]["question_id"] == "original_complaint"
+    assert narrative["next_question"]["id"] == "party_name"
+    assert narrative["session"]["intake_answers"].get("party_name") in {None, ""}
     follow_up = run_intake_chat_turn("pkg-chat-user", message="Jordan Example", service=service)
     assert follow_up["accepted_answer"]["question_id"] == "party_name"
     assert follow_up["next_question"]["id"] == "opposing_party"
@@ -203,5 +223,5 @@ def test_stdio_mcp_server_responds_with_initialize_and_tool_payload(monkeypatch,
 
     lines = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
     assert lines[0]["result"]["serverInfo"]["name"] == "complaint-workspace-mcp"
-    assert lines[0]["result"]["protocolVersion"] == "2026-03-22"
+    assert lines[0]["result"]["protocolVersion"] == "2025-06-18"
     assert any(tool["name"] == "complaint.generate_complaint" for tool in lines[1]["result"]["tools"])

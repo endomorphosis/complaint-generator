@@ -101,8 +101,12 @@ class LegalGraph:
         
         # Find elements tagged with this claim type
         # Include both regular requirements and procedural requirements
+        from integrations.ipfs_datasets.logic import is_applicable_legal_requirement
+
         for element in self.elements.values():
-            if element.element_type in ('requirement', 'procedural_requirement'):
+            if element.element_type in ('requirement', 'procedural_requirement', 'legal_requirement'):
+                if not is_applicable_legal_requirement(element.attributes):
+                    continue
                 applicable_claims = element.attributes.get('applicable_claim_types', [])
                 if claim_type in applicable_claims:
                     requirements.append(element)
@@ -264,7 +268,7 @@ class LegalGraph:
             Dict with 'total_requirements', 'claim_types_covered', 'avg_requirements_per_claim'.
         """
         requirements = [e for e in self.elements.values() 
-                       if e.element_type in ('requirement', 'procedural_requirement')]
+                       if e.element_type in ('requirement', 'procedural_requirement', 'legal_requirement')]
         
         claim_types_with_reqs: set = set()
         for req in requirements:
@@ -414,7 +418,7 @@ class LegalGraph:
         """
         counts: dict = {}
         for element in self.elements.values():
-            if element.element_type not in ('requirement', 'procedural_requirement'):
+            if element.element_type not in ('requirement', 'procedural_requirement', 'legal_requirement'):
                 continue
             claim_types = element.attributes.get('applicable_claim_types', [])
             for claim_type in claim_types:
@@ -452,14 +456,28 @@ class LegalGraphBuilder:
         # Add statutes as elements
         statute_elements = []
         for statute in statutes:
+            statute_attributes = {
+                'text': statute.get('text', ''),
+                'source_text': statute.get('source_text', '') or statute.get('text', ''),
+            }
+            for key in (
+                'authority_id', 'authority_version', 'version', 'source_hash', 'content_hash',
+                'content_hash_scope', 'effective_date', 'as_of_date', 'applicable_date', 'expiration_date',
+                'sunset_date', 'repeal_date', 'superseded_date', 'law_versions', 'changes',
+                'query_context', 'temporal_query_context', 'authority_treatment_edges',
+                'treatment_records', 'treatment_summary',
+            ):
+                if key in statute:
+                    statute_attributes[key] = statute.get(key)
             element = LegalElement(
                 id=self._get_element_id(),
                 element_type='statute',
                 name=statute.get('name', 'Unnamed Statute'),
                 description=statute.get('description', ''),
                 citation=statute.get('citation', ''),
-                jurisdiction=statute.get('jurisdiction', 'US'),
-                attributes={'text': statute.get('text', '')}
+                jurisdiction=(statute.get('jurisdiction')
+                              if isinstance(statute.get('jurisdiction'), str) else ''),
+                attributes=statute_attributes,
             )
             graph.add_element(element)
             statute_elements.append(element)
@@ -469,17 +487,39 @@ class LegalGraphBuilder:
             requirements = self._extract_requirements_from_statute(statute_elem, claim_types)
             
             for req_data in requirements:
+                element_type = str(req_data.get('element_type') or 'legal_requirement')
+                record_kind = 'rule_candidate' if element_type == 'rule_candidate' else 'legal_requirement'
+                attributes = {
+                    'applicable_claim_types': claim_types,
+                    'source_statute': statute_elem.id,
+                    'record_kind': record_kind,
+                    'about_complainant': False,
+                }
+                extra = req_data.get('attributes') if isinstance(req_data.get('attributes'), dict) else {}
+                attributes.update(extra)
+                for key in (
+                    'verification_status', 'promotion_status', 'applicable', 'legacy_template',
+                    'template_kind', 'review_reason', 'review_reasons', 'source_bound',
+                    'source_span', 'source_hash', 'authority_id', 'authority_identity',
+                    'authority_version', 'jurisdiction', 'applicable_date', 'structure',
+                    'rule_character', 'promoted', 'span_sha256', 'authority_text_sha256',
+                    'temporal_applicability', 'support_eligible', 'treatment_blocks_support',
+                    'treatment_edges', 'blocking_treatments',
+                ):
+                    if key in req_data:
+                        attributes[key] = req_data[key]
                 req_element = LegalElement(
-                    id=self._get_element_id(),
-                    element_type='requirement',
+                    id=self._get_element_id(element_type if element_type == 'rule_candidate' else 'legal_requirement', {
+                        'statute': {key: value for key, value in statute_elem.to_dict().items() if key != 'id'}, 'requirement': req_data,
+                        'claim_types': sorted(claim_types),
+                    }),
+                    element_type=element_type,
                     name=req_data['name'],
                     description=req_data.get('description', ''),
-                    citation=statute_elem.citation,
+                    citation=req_data.get('citation') or statute_elem.citation,
+                    jurisdiction=str(req_data.get('jurisdiction') or statute_elem.jurisdiction or ''),
                     required=req_data.get('required', True),
-                    attributes={
-                        'applicable_claim_types': claim_types,
-                        'source_statute': statute_elem.id
-                    }
+                    attributes=attributes,
                 )
                 graph.add_element(req_element)
                 
@@ -533,59 +573,152 @@ class LegalGraphBuilder:
         
         for req_data in procedural_reqs:
             element = LegalElement(
-                id=self._get_element_id(),
+                id=self._get_element_id('legal_requirement', {'jurisdiction': jurisdiction, 'requirement': req_data}),
                 element_type='procedural_requirement',
                 name=req_data['name'],
                 description=req_data['description'],
                 citation=req_data['rule'],
                 jurisdiction=jurisdiction,
                 required=True,
-                attributes={'category': 'civil_procedure'}
+                attributes=self._unverified_procedural_attributes()
             )
             graph.add_element(element)
         
         logger.info(f"Built procedural rules graph: {graph.summary()}")
         return graph
     
+    def _unverified_procedural_attributes(self) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.logic import legacy_procedural_template_attributes
+        return legacy_procedural_template_attributes()
+
     def _extract_requirements_from_statute(self, statute: LegalElement,
                                           claim_types: List[str]) -> List[Dict[str, Any]]:
+        """Extract source-bound candidates and keep keyword templates unverified.
+
+        Statute text yields candidates linked to exact UTF-8 spans. A candidate
+        becomes a legal requirement only when promotion retains jurisdiction,
+        authority identity/version, source hash, span, and applicable date.
+        Claim-keyword templates stay explicit unverified templates.
         """
-        Extract legal requirements from a statute.
-        
-        This is a simplified implementation. In production, this would use
-        LLM to parse statute text and extract elements.
-        """
-        requirements = []
-        
-        # Basic element extraction (placeholder)
-        # In production, use LLM to analyze statute text
-        
-        # Example: discrimination statutes typically require these elements
-        if 'discrimination' in str(claim_types).lower():
-            requirements.extend([
-                {
-                    'name': 'Protected Class Membership',
-                    'description': 'Plaintiff must be member of protected class',
-                    'required': True
-                },
-                {
-                    'name': 'Adverse Action',
-                    'description': 'Plaintiff suffered adverse employment/housing action',
-                    'required': True
-                },
-                {
-                    'name': 'Causal Connection',
-                    'description': 'Protected class status was motivating factor',
-                    'required': True
-                }
-            ])
-        
+        from integrations.ipfs_datasets.logic import (
+            extract_source_bound_rule_candidates,
+            legacy_unverified_requirement_templates,
+        )
+
+        requirements: List[Dict[str, Any]] = []
+        source_text = statute.attributes.get('source_text')
+        if not isinstance(source_text, str) or source_text == '':
+            source_text = statute.attributes.get('text') if isinstance(statute.attributes.get('text'), str) else ''
+        if source_text:
+            authority = {
+                'source_text': source_text,
+                'jurisdiction': statute.jurisdiction,
+                'citation': statute.citation,
+                'authority_id': statute.attributes.get('authority_id') or statute.citation,
+                'authority_version': statute.attributes.get('authority_version') or statute.attributes.get('version') or '',
+                'source_hash': statute.attributes.get('source_hash') or statute.attributes.get('content_hash') or '',
+                'content_hash_scope': statute.attributes.get('content_hash_scope') or '',
+                'effective_date': statute.attributes.get('effective_date') or '',
+                'as_of_date': statute.attributes.get('as_of_date') or statute.attributes.get('applicable_date') or '',
+                'expiration_date': statute.attributes.get('expiration_date') or '',
+                'sunset_date': statute.attributes.get('sunset_date') or '',
+                'repeal_date': statute.attributes.get('repeal_date') or '',
+                'superseded_date': statute.attributes.get('superseded_date') or '',
+                'law_versions': statute.attributes.get('law_versions') or [],
+                'changes': statute.attributes.get('changes') or [],
+                'query_context': statute.attributes.get('query_context') or statute.attributes.get('temporal_query_context') or {},
+                'authority_treatment_edges': statute.attributes.get('authority_treatment_edges') or [],
+                'treatment_records': statute.attributes.get('treatment_records') or [],
+                'treatment_summary': statute.attributes.get('treatment_summary') or {},
+            }
+            extracted = extract_source_bound_rule_candidates(authority)
+            for candidate in extracted['candidates']:
+                promoted = bool(candidate.get('promoted'))
+                requirements.append({
+                    'name': (candidate.get('rule_text') or 'unparsed authority text')[:self._MAX_RULE_NAME_LENGTH],
+                    'description': candidate.get('rule_text') or '',
+                    'required': True,
+                    'element_type': 'legal_requirement' if promoted else 'rule_candidate',
+                    'citation': candidate.get('citation') or statute.citation,
+                    'jurisdiction': candidate.get('jurisdiction') or statute.jurisdiction,
+                    'verification_status': candidate.get('verification_status'),
+                    'promotion_status': candidate.get('promotion_status'),
+                    'applicable': candidate.get('applicable'),
+                    'legacy_template': False,
+                    'review_reason': candidate.get('review_reason') or '',
+                    'review_reasons': list(candidate.get('review_reasons') or []),
+                    'source_bound': True,
+                    'source_span': candidate.get('source_span'),
+                    'source_hash': candidate.get('source_hash'),
+                    'authority_id': candidate.get('authority_id'),
+                    'authority_identity': candidate.get('authority_identity'),
+                    'authority_version': candidate.get('authority_version'),
+                    'applicable_date': candidate.get('applicable_date'),
+                    'structure': candidate.get('structure'),
+                    'rule_character': candidate.get('rule_character'),
+                    'promoted': promoted,
+                    'span_sha256': candidate.get('span_sha256'),
+                    'authority_text_sha256': candidate.get('authority_text_sha256'),
+                    'temporal_applicability': candidate.get('temporal_applicability'),
+                    'support_eligible': candidate.get('support_eligible'),
+                    'treatment_blocks_support': candidate.get('treatment_blocks_support'),
+                    'treatment_edges': candidate.get('treatment_edges'),
+                    'blocking_treatments': candidate.get('blocking_treatments'),
+                    'attributes': {
+                        'source_bound_candidate': candidate,
+                    },
+                })
+        requirements.extend(legacy_unverified_requirement_templates(claim_types))
         return requirements
     
-    def _get_element_id(self) -> str:
-        """Generate unique element ID."""
+    def _get_element_id(self, element_type: str = "", identity: Optional[Dict[str, Any]] = None) -> str:
+        """Generate a unique element ID in that record's namespace."""
         self.element_counter += 1
+        prefix = {
+            "authority_source": "authority_source",
+            "rule_candidate": "rule_candidate",
+            "requirement": "legal_requirement",
+            "procedural_requirement": "legal_requirement",
+            "legal_requirement": "legal_requirement",
+        }.get(element_type)
+        if prefix:
+            if identity is not None:
+                from integrations.ipfs_datasets.graphs import mint_graph_record_id
+                return mint_graph_record_id(prefix, json.dumps(identity, sort_keys=True, ensure_ascii=False, separators=(",", ":")))
+            return f"{prefix}:{self.element_counter}"
         return f"legal_elem_{self.element_counter}"
+
+    def project_legal_passage(self, passage: Dict[str, Any]) -> LegalElement:
+        """Project a legal passage into a legal namespace, never a complainant fact.
+
+        The returned element is not added to a graph so callers can attach the
+        passage provenance before insertion.
+        """
+        from integrations.ipfs_datasets.graphs import legal_namespace_kind
+
+        payload = dict(passage or {})
+        payload["legal_passage"] = True
+        kind = legal_namespace_kind(payload)
+        text = str(payload.get("text") or payload.get("name") or payload.get("description") or "").strip()
+        provenance = payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
+        return LegalElement(
+            id=self._get_element_id(kind, {
+                "text": text, "source_passage_id": payload.get("passage_id") or payload.get("source_id") or "",
+                "citation": payload.get("citation") or "", "jurisdiction": payload.get("jurisdiction") or "",
+                "provenance": provenance,
+            }),
+            element_type=kind,
+            name=(text or kind)[: self._MAX_RULE_NAME_LENGTH],
+            description=text,
+            citation=str(payload.get("citation") or ""),
+            jurisdiction=str(payload.get("jurisdiction") or ""),
+            attributes={
+                "record_kind": kind,
+                "about_complainant": False,
+                "source_passage_id": str(payload.get("passage_id") or payload.get("source_id") or ""),
+                "provenance": dict(provenance),
+            },
+        )
     
     def _get_relation_id(self) -> str:
         """Generate unique relation ID."""
@@ -673,7 +806,11 @@ class LegalGraphBuilder:
             ).strip()
 
             node = LegalElement(
-                id=self._get_element_id(),
+                id=self._get_element_id('authority_source', {
+                    'source_authority_id': raw_id, 'name': name, 'citation': citation,
+                    'jurisdiction': jurisdiction, 'authority_family': authority_family,
+                    'provenance': authority.get('provenance') if isinstance(authority.get('provenance'), dict) else {},
+                }),
                 element_type='authority_source',
                 name=name,
                 citation=citation,
@@ -681,6 +818,9 @@ class LegalGraphBuilder:
                 attributes={
                     'source_authority_id': raw_id,
                     'authority_family': authority_family,
+                    'record_kind': 'authority_source',
+                    'about_complainant': False,
+                    'provenance': dict(authority.get('provenance') or {}) if isinstance(authority.get('provenance'), dict) else {},
                 },
             )
             graph.add_element(node)
@@ -711,12 +851,56 @@ class LegalGraphBuilder:
                 graph, source_node_id, authority, element_id_to_graph_id
             )
 
+        self._apply_visible_treatment_support(graph)
+
         logger.debug(
             "built authority legal graph: %d elements, %d relations",
             len(graph.elements),
             len(graph.relations),
         )
         return graph
+
+    def _apply_visible_treatment_support(self, graph: 'LegalGraph') -> None:
+        """Keep treatment edges and stop them from supporting a requirement."""
+        blocking_types = {
+            'adverse', 'good_law_unconfirmed', 'questioned', 'limits', 'distinguishes', 'superseded',
+        }
+        visible_types = blocking_types | {'supports'}
+        treatments_by_authority: Dict[str, List[LegalRelation]] = {}
+        for relation in graph.relations.values():
+            if relation.relation_type in visible_types:
+                treatments_by_authority.setdefault(relation.target_id, []).append(relation)
+        rule_to_authority = {
+            relation.source_id: relation.target_id
+            for relation in graph.relations.values()
+            if relation.relation_type == 'extracted_from'
+        }
+        requirement_to_rule = {
+            relation.source_id: relation.target_id
+            for relation in graph.relations.values()
+            if relation.relation_type == 'promoted_from'
+        }
+        for element in graph.elements.values():
+            authority_node = rule_to_authority.get(element.id)
+            if authority_node is None and element.id in requirement_to_rule:
+                authority_node = rule_to_authority.get(requirement_to_rule[element.id])
+            if not authority_node:
+                continue
+            relations = treatments_by_authority.get(authority_node, [])
+            treatment_types = [relation.relation_type for relation in relations]
+            blocking = [name for name in treatment_types if name in blocking_types]
+            element.attributes['treatment_edges_visible'] = True
+            element.attributes['visible_treatment_types'] = treatment_types
+            element.attributes['blocking_treatments'] = list(dict.fromkeys(blocking))
+            if blocking:
+                element.attributes['treatment_blocks_support'] = True
+                element.attributes['support_eligible'] = False
+                element.attributes['applicable'] = False
+            elif element.attributes.get('promotion_status') == 'promoted':
+                temporal = element.attributes.get('temporal_applicability')
+                temporal_ok = not isinstance(temporal, dict) or temporal.get('applicable') is True
+                element.attributes['support_eligible'] = bool(temporal_ok and element.attributes.get('applicable') is not False)
+                element.attributes['treatment_blocks_support'] = False
 
     def _add_treatment_edges(
         self,
@@ -859,24 +1043,128 @@ class LegalGraphBuilder:
             if not isinstance(grounded_rule, dict):
                 metadata = candidate.get('metadata', {}) if isinstance(candidate.get('metadata'), dict) else {}
                 grounded_rule = metadata.get('grounded_rule', {}) if isinstance(metadata.get('grounded_rule'), dict) else {}
+            from integrations.ipfs_datasets.logic import extract_source_bound_rule_candidates
+
+            promotion_input = dict(candidate)
+            # Normalize the supported text alias before source admission. The
+            # exact candidate text, rather than a different authority sentence,
+            # must own every promoted requirement's source span.
+            promotion_input['rule_text'] = rule_text
+            for key in (
+                'source_text', 'text', 'source_hash', 'content_hash', 'content_hash_scope',
+                'authority_version', 'version', 'jurisdiction', 'citation', 'authority_id',
+                'effective_date', 'as_of_date', 'applicable_date', 'expiration_date',
+                'sunset_date', 'repeal_date', 'superseded_date', 'law_versions', 'changes',
+                'query_context', 'temporal_query_context', 'authority_treatment_edges',
+                'treatment_records', 'treatment_summary', 'law_version_id',
+            ):
+                if key not in promotion_input and key in authority:
+                    promotion_input[key] = authority.get(key)
+            if not promotion_input.get('authority_id'):
+                promotion_input['authority_id'] = str(authority.get('authority_id') or authority.get('id') or '')
+            extraction = extract_source_bound_rule_candidates(promotion_input)
+            promoted_candidate = next(
+                (item for item in extraction['candidates'] if item.get('rule_text') == rule_text),
+                {},
+            )
             rule_node = LegalElement(
-                id=self._get_element_id(),
+                id=self._get_element_id('rule_candidate', {
+                    'source_authority_node': authority_node_id, 'rule_text': rule_text, 'rule_type': rule_type,
+                    'provenance': candidate.get('provenance') if isinstance(candidate.get('provenance'), dict) else {},
+                }),
                 element_type='rule_candidate',
                 name=rule_text[:self._MAX_RULE_NAME_LENGTH],
                 description=rule_text,
                 attributes={
                     'rule_type': rule_type,
+                    'record_kind': 'rule_candidate',
+                    'about_complainant': False,
                     'extraction_confidence': confidence,
                     'source_authority_node': authority_node_id,
+                    'provenance': dict(candidate.get('provenance') or {}) if isinstance(candidate.get('provenance'), dict) else {},
                     'grounded_rule': grounded_rule,
-                    'deontic_operator': grounded_rule.get('deontic_operator', ''),
+                    'deontic_operator': grounded_rule.get('deontic_operator', '') or promoted_candidate.get('deontic_operator', ''),
                     'operator_family': grounded_rule.get('operator_family', ''),
                     'grounding_status': grounded_rule.get('grounding_status', ''),
                     'treatment_influence': grounded_rule.get('treatment_influence', ''),
                     'premise_failure_category': grounded_rule.get('premise_failure_category', ''),
+                    'promotion_status': 'candidate',
+                    'verification_status': 'candidate',
+                    'applicable': False,
+                    'promoted_to_requirement': bool(promoted_candidate.get('promoted')),
+                    'review_reason': '' if promoted_candidate.get('promoted') else promoted_candidate.get('review_reason', ''),
+                    'review_reasons': list(promoted_candidate.get('review_reasons') or []),
+                    'source_span': promoted_candidate.get('source_span'),
+                    'structure': promoted_candidate.get('structure'),
+                    'rule_character': promoted_candidate.get('rule_character'),
+                    'jurisdiction': promoted_candidate.get('jurisdiction') or authority.get('jurisdiction') or '',
+                    'authority_id': promoted_candidate.get('authority_id') or '',
+                    'authority_version': promoted_candidate.get('authority_version') or '',
+                    'source_hash': promoted_candidate.get('source_hash') or '',
+                    'applicable_date': promoted_candidate.get('applicable_date') or {},
+                    'temporal_applicability': promoted_candidate.get('temporal_applicability') or {},
+                    'support_eligible': promoted_candidate.get('support_eligible'),
+                    'treatment_blocks_support': promoted_candidate.get('treatment_blocks_support'),
+                    'treatment_edges': list(promoted_candidate.get('treatment_edges') or []),
+                    'blocking_treatments': list(promoted_candidate.get('blocking_treatments') or []),
                 },
             )
             graph.add_element(rule_node)
+            if promoted_candidate.get('promoted'):
+                requirement = LegalElement(
+                    id=self._get_element_id('legal_requirement', {
+                        'source_authority_node': authority_node_id,
+                        'promoted_from_rule': rule_text,
+                        'source_span': promoted_candidate.get('source_span'),
+                        'source_hash': promoted_candidate.get('source_hash'),
+                        'authority_version': promoted_candidate.get('authority_version'),
+                    }),
+                    element_type='legal_requirement',
+                    name=rule_text[:self._MAX_RULE_NAME_LENGTH],
+                    description=rule_text,
+                    citation=str(promoted_candidate.get('citation') or authority.get('citation') or ''),
+                    jurisdiction=str(promoted_candidate.get('jurisdiction') or ''),
+                    attributes={
+                        'record_kind': 'legal_requirement',
+                        'about_complainant': False,
+                        'applicable': bool(promoted_candidate.get('applicable')),
+                        'support_eligible': bool(promoted_candidate.get('support_eligible')),
+                        'treatment_blocks_support': bool(promoted_candidate.get('treatment_blocks_support')),
+                        'treatment_edges': list(promoted_candidate.get('treatment_edges') or []),
+                        'blocking_treatments': list(promoted_candidate.get('blocking_treatments') or []),
+                        'temporal_applicability': promoted_candidate.get('temporal_applicability') or {},
+                        'promoted': True,
+                        'promotion_status': 'promoted',
+                        'verification_status': 'promoted',
+                        'legacy_template': False,
+                        'review_reason': '',
+                        'source_span': promoted_candidate.get('source_span'),
+                        'source_hash': promoted_candidate.get('source_hash'),
+                        'span_sha256': promoted_candidate.get('span_sha256'),
+                        'authority_text_sha256': promoted_candidate.get('authority_text_sha256'),
+                        'authority_id': promoted_candidate.get('authority_id'),
+                        'authority_identity': promoted_candidate.get('authority_identity'),
+                        'authority_version': promoted_candidate.get('authority_version'),
+                        'applicable_date': promoted_candidate.get('applicable_date'),
+                        'structure': promoted_candidate.get('structure'),
+                        'rule_character': promoted_candidate.get('rule_character'),
+                        'jurisdiction': promoted_candidate.get('jurisdiction'),
+                        'applicable_claim_types': [
+                            item for item in [
+                                str(candidate.get('claim_type') or authority.get('claim_type') or '')
+                            ] if item
+                        ],
+                    },
+                )
+                graph.add_element(requirement)
+                graph.add_relation(
+                    LegalRelation(
+                        id=self._get_relation_id(),
+                        source_id=requirement.id,
+                        target_id=rule_node.id,
+                        relation_type='promoted_from',
+                    )
+                )
             # rule candidate extracted_from authority (rule → authority direction)
             graph.add_relation(
                 LegalRelation(

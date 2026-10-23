@@ -3,7 +3,11 @@
 import importlib
 from io import BytesIO
 import json
+import os
 import tempfile
+import integrations.ipfs_datasets.capabilities as capabilities_module
+import integrations.ipfs_datasets.legal as legal_module
+import integrations.ipfs_datasets.loader as loader_module
 import integrations.ipfs_datasets.vector_store as vector_store_module
 import integrations.ipfs_datasets as adapter
 from pathlib import Path
@@ -12,6 +16,8 @@ from unittest.mock import Mock, patch
 import zipfile
 
 from integrations.ipfs_datasets.capabilities import (
+    CAPABILITY_NAMES,
+    CAPABILITY_SCHEMA_VERSION,
     get_ipfs_datasets_capabilities,
     summarize_ipfs_datasets_capability_report,
     summarize_ipfs_datasets_capabilities,
@@ -26,12 +32,20 @@ from integrations.ipfs_datasets.documents import (
     should_parse_document_input,
     summarize_document_parse,
 )
-from integrations.ipfs_datasets.graphs import extract_graph_from_text, persist_graph_snapshot, query_graph_snapshot, query_graph_support
+from integrations.ipfs_datasets.graphs import (
+    GraphPersistence,
+    GraphQuery,
+    extract_graph_from_text,
+    persist_graph_snapshot,
+    query_graph_snapshot,
+    query_graph_support,
+)
 from integrations.ipfs_datasets.graphrag import (
     analyze_pdf_relationships,
     batch_process_pdfs,
     build_validate_score_ontology,
     build_ontology,
+    create_ontology_generator,
     cross_analyze_pdf_documents,
     extract_pdf_entities,
     ingest_pdf_to_graphrag,
@@ -54,6 +68,7 @@ from integrations.ipfs_datasets.logic import check_contradictions, prove_claim_e
 from integrations.ipfs_datasets.mcp_gateway import execute_gateway_tool, list_gateway_tools
 from integrations.ipfs_datasets.scraper_daemon import ScraperDaemon, ScraperDaemonConfig
 from integrations.ipfs_datasets.search import (
+    DegradedSearchResults,
     archive_url_snapshot,
     download_url,
     download_with_recovery,
@@ -76,7 +91,27 @@ from integrations.ipfs_datasets.storage import LocalCacheIPFSBackend, ensure_ipf
 from mediator.integrations import adapter as mediator_adapter_module
 
 
-pytestmark = pytest.mark.no_auto_network
+pytestmark = [
+    pytest.mark.no_auto_network,
+    pytest.mark.no_auto_heavy,
+]
+
+
+def test_loader_discovers_nested_provider_layout(tmp_path: Path):
+    compatibility_package = "ipfs_" + "acceler" + "ate_py"
+    package_dir = (
+        tmp_path
+        / compatibility_package
+        / "ipfs_datasets_py"
+        / "ipfs_datasets_py"
+    )
+    package_dir.mkdir(parents=True)
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+
+    with patch.object(loader_module, "_candidate_ipfs_source_roots", return_value=[tmp_path]):
+        resolved = loader_module._package_dir_for_root("ipfs_datasets_py")
+
+    assert resolved == package_dir
 
 
 def test_mediator_adapter_capability_detection_uses_module_paths_without_importing():
@@ -152,12 +187,105 @@ def test_capability_registry_exposes_common_contract_fields():
 
     for name, status in capabilities.items():
         payload = status.as_dict()
-        assert payload["provider"] == "ipfs_datasets_py"
-        assert payload["module_path"].startswith("ipfs_datasets_py")
+        assert payload["provider"] in {"ipfs_datasets_py", "ipfs_accelerate_py", "ipfs_kit_py"}
+        assert payload["module_path"].split(".", 1)[0] in {"ipfs_datasets_py", "ipfs_accelerate_py", "ipfs_kit_py"}
+        assert payload["details"]["owner"] == payload["provider"]
         assert payload["details"]["capability"] == name
         assert "error_type" in payload["details"]
-        assert payload["details"]["adapter_module"].startswith("integrations.ipfs_datasets")
+        assert payload["details"]["adapter_module"].startswith(("integrations.ipfs_datasets", "integrations.ipfs_accelerate"))
         assert payload["details"]["contract_family"]
+
+
+def test_capability_registry_keys_are_stable_across_runtime_modes():
+    status_keys = {
+        "status",
+        "available",
+        "module_path",
+        "degraded_reason",
+        "provider",
+        "details",
+    }
+    detail_keys = {
+        "owner",
+        "bridge",
+        "public_adapter",
+        "canonical_modules",
+        "deprecated_upstream",
+        "capability",
+        "adapter_module",
+        "contract_family",
+        "install_extra",
+        "reason_code",
+        "degraded_reason",
+        "error_type",
+        "error_message",
+        "missing_module",
+        "remediation",
+    }
+    missing_extra = ModuleNotFoundError("No module named 'optional_parser'")
+    missing_extra.name = "optional_parser"
+
+    try:
+        get_ipfs_datasets_capabilities.cache_clear()
+        with patch.object(
+            capabilities_module,
+            "import_module_optional",
+            return_value=(object(), None),
+        ):
+            available = get_ipfs_datasets_capabilities()
+
+        get_ipfs_datasets_capabilities.cache_clear()
+        with patch.object(
+            capabilities_module,
+            "import_module_optional",
+            return_value=(None, missing_extra),
+        ):
+            degraded = get_ipfs_datasets_capabilities()
+    finally:
+        get_ipfs_datasets_capabilities.cache_clear()
+
+    assert tuple(available) == CAPABILITY_NAMES
+    assert tuple(degraded) == CAPABILITY_NAMES
+    for name in CAPABILITY_NAMES:
+        available_payload = available[name].as_dict()
+        degraded_payload = degraded[name].as_dict()
+        assert set(available_payload) == status_keys
+        assert set(degraded_payload) == status_keys
+        assert set(available_payload["details"]) == detail_keys
+        assert set(degraded_payload["details"]) == detail_keys
+
+
+def test_capability_degraded_reason_identifies_extra_and_recovery_action():
+    missing_extra = ModuleNotFoundError("No module named 'symbolicai'")
+    missing_extra.name = "symbolicai"
+
+    try:
+        get_ipfs_datasets_capabilities.cache_clear()
+        with patch.object(
+            capabilities_module,
+            "import_module_optional",
+            side_effect=lambda module_name: (
+                (None, missing_extra)
+                if module_name == "ipfs_datasets_py.logic"
+                else (object(), None)
+            ),
+        ):
+            report = summarize_ipfs_datasets_capability_report()
+    finally:
+        get_ipfs_datasets_capabilities.cache_clear()
+
+    logic_status = report["capabilities"]["logic_tools"]
+    reason = logic_status["degraded_reason"]
+    assert report["schema_version"] == CAPABILITY_SCHEMA_VERSION
+    assert report["capability_keys"] == list(CAPABILITY_NAMES)
+    assert report["degraded_capabilities"] == {"logic_tools": reason}
+    assert logic_status["status"] == "degraded"
+    assert logic_status["available"] is False
+    assert logic_status["details"]["reason_code"] == "missing_optional_dependency"
+    assert logic_status["details"]["missing_module"] == "symbolicai"
+    assert "logic_tools" in reason
+    assert "symbolicai" in reason
+    assert 'python -m pip install "ipfs_datasets_py[logic]"' in reason
 
 
 def test_capability_report_returns_counts_and_nested_statuses():
@@ -177,7 +305,11 @@ def test_startup_payload_reuses_canonical_capability_summary_contract():
 
     assert startup_payload["capability_report"]["capabilities"] == startup_payload["capabilities"]
     assert startup_payload["capability_report"]["status"] in {"available", "degraded"}
-    assert all(payload["provider"] == "ipfs_datasets_py" for payload in startup_payload["capabilities"].values())
+    assert all(
+        payload["provider"] in {"ipfs_datasets_py", "ipfs_accelerate_py", "ipfs_kit_py"}
+        and payload["details"]["owner"] == payload["provider"]
+        for payload in startup_payload["capabilities"].values()
+    )
 
 
 def test_search_us_code_normalizes_results():
@@ -358,6 +490,42 @@ def test_search_state_administrative_rules_normalizes_vector_results():
     assert results[0]['metadata']['details']['operation'] == 'search_state_administrative_rules'
     assert results[0]['metadata']['details']['hf_dataset_id'] == 'justicedao/ipfs_state_admin_rules'
     assert results[0]['metadata']['details']['retrieval_backend'] == 'huggingface_corpus'
+
+
+def test_search_state_laws_reports_router_embedding_failure(caplog):
+    router = Mock()
+    router.embed_text.side_effect = RuntimeError('embedding provider unavailable')
+
+    with patch.object(legal_module, 'EMBEDDINGS_AVAILABLE', True), patch.object(
+        legal_module,
+        'embed_query_text',
+        new=None,
+    ), patch.object(legal_module, 'get_embeddings_router', return_value=router), patch.object(
+        legal_module,
+        '_search_state_law_corpus_async',
+        new=Mock(return_value=object()),
+    ), patch.object(legal_module, '_search_hf_parquet_text', return_value=[]):
+        with caplog.at_level('WARNING', logger=legal_module.__name__):
+            results = search_state_laws(
+                'tenant retaliation',
+                state='OR',
+                embedding_model='test-model',
+                embedding_provider='test-provider',
+                allow_live_scrape_fallback=False,
+            )
+
+    assert results == []
+    diagnostics = get_last_legal_search_diagnostic('search_state_laws')
+    assert diagnostics['embedding'] == {
+        'status': 'error',
+        'stage': 'router_embed_text',
+        'provider': 'test-provider',
+        'model_name': 'test-model',
+        'error_type': 'RuntimeError',
+        'error': 'embedding provider unavailable',
+    }
+    assert 'continuing with text-search fallbacks' in caplog.text
+    assert 'embedding provider unavailable' in caplog.text
 
 
 def test_search_state_laws_can_skip_live_scrape_fallback():
@@ -545,6 +713,38 @@ def test_search_multi_engine_web_normalizes_orchestrated_results():
     assert results[0]['provider'] == 'ipfs_datasets_py'
     assert results[0]['metadata']['details']['operation'] == 'search_multi_engine_search'
     assert results[0]['metadata']['details']['query'] == 'agency guidance'
+
+
+def test_search_multi_engine_web_returns_typed_degradation_on_orchestrator_failure():
+    fallback_records = [{'url': 'https://example.com/fallback', 'source_type': 'brave_search'}]
+
+    with patch('integrations.ipfs_datasets.search.MULTI_ENGINE_SEARCH_AVAILABLE', True):
+        with patch('integrations.ipfs_datasets.search.OrchestratorConfig', return_value=object()):
+            with patch(
+                'integrations.ipfs_datasets.search.MultiEngineOrchestrator',
+                side_effect=RuntimeError('orchestrator offline'),
+            ):
+                with patch(
+                    'integrations.ipfs_datasets.search.search_brave_web',
+                    return_value=fallback_records,
+                ):
+                    results = search_multi_engine_web('agency guidance', max_results=5)
+
+    assert isinstance(results, DegradedSearchResults)
+    assert results == fallback_records
+    assert results.status == 'degraded'
+    assert results.operation == 'search_multi_engine_web'
+    assert results.error_type == 'RuntimeError'
+    assert results.fallback_provider == 'brave'
+    assert results.as_dict() == {
+        'status': 'degraded',
+        'operation': 'search_multi_engine_web',
+        'degraded_reason': 'orchestrator offline',
+        'error_type': 'RuntimeError',
+        'fallback_provider': 'brave',
+        'result_count': 1,
+        'results': fallback_records,
+    }
 
 
 def test_rank_search_results_explains_claim_element_and_archive_priority():
@@ -893,6 +1093,15 @@ def test_scraper_daemon_optimizes_tactics_across_iterations():
                         result = daemon.run(keywords=['employment discrimination'], domains=['example.com'])
 
     assert len(result['iterations']) >= 1
+    assert result['status'] == 'completed'
+    assert result['pid'] == os.getpid()
+    assert result['updated_at']
+    assert result['artifacts']['final_result_count'] == len(result['final_results'])
+    assert result['last_error'] is None
+    assert daemon.status_payload() == {
+        key: result[key]
+        for key in ('status', 'pid', 'updated_at', 'artifacts', 'last_error')
+    }
     assert result['final_results']
     assert 'https://example.com/policy' in result['coverage_ledger']
     assert result['tactic_history']['multi_engine_search']
@@ -1225,8 +1434,11 @@ def test_extract_graph_from_text_returns_normalized_shape():
 
     assert result['source_id'] == 'artifact-1'
     assert result['entities'][0]['id'] == 'artifact-1'
-    assert any(entity['type'] == 'fact' for entity in result['entities'])
-    assert any(relationship['relation_type'] == 'has_fact' for relationship in result['relationships'])
+    assert result['status'] in {'available', 'degraded', 'unavailable'}
+    assert result['metadata']['private_extraction']['status'] in {'available', 'degraded', 'unavailable'}
+    assert all(entity['type'] in {'artifact', 'model_suggestion'} for entity in result['entities'])
+    assert all(entity.get('assertion', {}).get('assertion_status') != 'asserted' for entity in result['entities'])
+    assert not any(relationship['relation_type'] in {'has_fact', 'supports', 'supported_by'} for relationship in result['relationships'])
     assert result['metadata']['operation'] == 'extract_graph_from_text'
 
 
@@ -1325,7 +1537,14 @@ def test_analyze_pdf_relationships_and_cross_document_delegate_to_upstream_tools
 
 
 def test_persist_graph_snapshot_returns_stable_contract():
-    graph_payload = extract_graph_from_text('Example complaint text', source_id='artifact-1')
+    # Persistence preserves a real unavailable/suggestion payload; it must not
+    # depend on optional extraction inventing a fact or an edge for this test.
+    graph_payload = {
+        'status': 'unavailable', 'source_id': 'artifact-1',
+        'entities': [{'id': 'artifact-1', 'type': 'artifact', 'name': 'Example complaint text'}],
+        'relationships': [],
+        'metadata': {'private_extraction': {'status': 'unavailable', 'diagnostic': 'extractor_unavailable'}},
+    }
 
     result = persist_graph_snapshot(
         graph_payload,
@@ -1340,13 +1559,86 @@ def test_persist_graph_snapshot_returns_stable_contract():
     assert result['persisted'] is True
     assert result['created'] is True
     assert result['reused'] is False
-    assert result['node_count'] >= 1
-    assert result['edge_count'] >= 1
+    assert result['node_count'] == 1
+    assert result['edge_count'] == 0
     assert result['metadata']['source_id'] == 'artifact-1'
     assert result['metadata']['projection_target'] == 'complaint_phase_knowledge_graph'
     assert result['metadata']['lineage']['status'] == graph_payload['status']
     assert result['metadata']['persistence_scope'] == 'adapter_memory'
     assert result['metadata']['operation'] == 'persist_graph_snapshot'
+
+
+def test_graph_persistence_interface_receives_versioned_provenance_contract():
+    class RecordingPersistence:
+        def __init__(self):
+            self.request = None
+
+        def persist_snapshot(self, request):
+            self.request = request
+            return {'status': 'persisted', 'persisted': True, 'created': True}
+
+        def get_snapshot(self, graph_id, *, graph_version=None):
+            return self.request
+
+    backend = RecordingPersistence()
+    assert isinstance(backend, GraphPersistence)
+    graph_payload = extract_graph_from_text(
+        'A dated notice supports the claim.',
+        source_id='artifact-9',
+        metadata={
+            'provenance': {
+                'source_type': 'evidence',
+                'source_record_id': 9,
+                'content_hash': 'source-hash',
+            }
+        },
+    )
+
+    result = persist_graph_snapshot(graph_payload, persistence=backend)
+
+    assert result['status'] == 'persisted'
+    assert result['persisted'] is True
+    assert result['graph_version'].startswith('sha256:')
+    assert result['snapshot_id'].startswith('graph-snapshot:')
+    assert result['content_hash'] == backend.request['content_hash']
+    assert backend.request['graph_id'] == result['graph_id']
+    assert backend.request['provenance']['source_id'] == 'artifact-9'
+    assert backend.request['provenance']['source_type'] == 'evidence'
+    assert backend.request['provenance']['source_record_id'] == 9
+
+
+def test_graph_query_interface_receives_query_and_provenance_fields():
+    class RecordingQuery:
+        def __init__(self):
+            self.query = None
+
+        def query_support(self, query):
+            self.query = query
+            return {
+                'results': [{'fact_id': 'fact:backend', 'text': 'Backend result'}],
+                'summary': {'result_count': 1},
+            }
+
+    backend = RecordingQuery()
+    assert isinstance(backend, GraphQuery)
+
+    result = query_graph_support(
+        'employment:1',
+        graph_id='case:1',
+        graph_version='7',
+        claim_type='employment',
+        claim_element_text='Protected activity',
+        filters={'source_type': 'evidence'},
+        provenance={'source_system': 'complaint-generator'},
+        query_backend=backend,
+    )
+
+    assert result['results'][0]['fact_id'] == 'fact:backend'
+    assert result['metadata']['implementation_status'] == 'backend'
+    assert backend.query['graph_id'] == 'case:1'
+    assert backend.query['graph_version'] == '7'
+    assert backend.query['filters'] == {'source_type': 'evidence'}
+    assert backend.query['provenance']['source_system'] == 'complaint-generator'
 
 
 def test_query_graph_snapshot_returns_persisted_adapter_record():
@@ -1542,6 +1834,43 @@ def test_stubbed_adapters_expose_canonical_operation_metadata():
     assert refinement_result['metadata']['details']['rounds'] == 2
 
 
+def test_create_ontology_generator_does_not_swallow_initialization_failure():
+    class FailingOntologyGenerator:
+        def __init__(self):
+            raise RuntimeError('ontology model initialization failed')
+
+    with patch(
+        'integrations.ipfs_datasets.graphrag.OntologyGenerator',
+        FailingOntologyGenerator,
+    ), pytest.raises(RuntimeError, match='ontology model initialization failed'):
+        create_ontology_generator()
+
+
+def test_build_ontology_reports_generator_initialization_failure():
+    class FailingOntologyGenerator:
+        def __init__(self):
+            raise RuntimeError('ontology model initialization failed')
+
+    with patch(
+        'integrations.ipfs_datasets.graphrag.OntologyGenerator',
+        FailingOntologyGenerator,
+    ):
+        result = build_ontology('Employment retaliation policy.')
+
+    assert result['status'] == 'error'
+    assert result['ontology'] is None
+    assert result['metadata']['text_length'] == 30
+    assert result['metadata']['error'] == 'ontology model initialization failed'
+    assert result['metadata']['operation'] == 'build_ontology'
+    assert result['metadata']['backend_available'] is True
+    assert result['metadata']['implementation_status'] == 'error'
+    assert result['metadata']['details'] == {
+        'operation': 'build_ontology',
+        'backend_available': True,
+        'implementation_status': 'error',
+    }
+
+
 def test_logic_stubbed_adapters_summarize_temporal_predicate_shapes():
     predicates = [
         {'predicate_type': 'claim_element', 'claim_type': 'retaliation', 'predicate_id': 'retaliation:1'},
@@ -1704,10 +2033,11 @@ def test_storage_wrappers_expose_canonical_operation_metadata():
 def test_storage_backend_reports_unavailable_when_kubo_cli_missing():
     fake_backend = type('KuboCLIBackend', (), {'_cmd': 'ipfs'})()
 
-    with patch('integrations.ipfs_datasets.storage.get_ipfs_backend', return_value=fake_backend):
-        with patch('integrations.ipfs_datasets.storage.shutil.which', return_value=None):
-            stored = store_bytes(b'complaint text', pin_content=False)
-            backend_status = storage_backend_status()
+    with patch.dict('os.environ', {'IPFS_DATASETS_PY_KUBO_CMD': '', 'KUBO_CMD': ''}):
+        with patch('integrations.ipfs_datasets.storage.get_ipfs_backend', return_value=fake_backend):
+            with patch('integrations.ipfs_datasets.storage.shutil.which', return_value=None):
+                stored = store_bytes(b'complaint text', pin_content=False)
+                backend_status = storage_backend_status()
 
     assert stored['status'] == 'unavailable'
     assert 'missing ipfs CLI binary' in stored['metadata']['degraded_reason']
@@ -1726,7 +2056,7 @@ def test_storage_backend_auto_discovers_repo_local_kubo_install(tmp_path: Path):
     (bin_dir / 'ipfs').write_text('#!/bin/sh\nexit 0\n')
     (repo_dir / 'config').write_text('{}')
 
-    with patch.dict('os.environ', {}, clear=False):
+    with patch.dict('os.environ', {'IPFS_DATASETS_PY_KUBO_CMD': '', 'KUBO_CMD': ''}, clear=False):
         with patch('integrations.ipfs_datasets.storage._repo_local_ipfs_kit_root', return_value=local_root):
             with patch('integrations.ipfs_datasets.storage.get_ipfs_backend', return_value=fake_backend):
                 with patch('integrations.ipfs_datasets.storage.shutil.which', return_value=None):
