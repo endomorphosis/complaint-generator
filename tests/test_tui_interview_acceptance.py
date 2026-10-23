@@ -102,7 +102,17 @@ def _block_network_and_provider_subprocesses(monkeypatch):
 
         return wrapped
 
-    monkeypatch.setattr(subprocess, "Popen", guarded(subprocess.Popen))
+    # Popen is also a generic class in dependency annotations. Keep that
+    # interface while refusing provider executables before process creation.
+    original_popen = subprocess.Popen
+
+    class GuardedPopen(original_popen):
+        def __init__(self, *args, **kwargs):
+            if _command_basename(args, kwargs) in _PROVIDER_BASENAMES and not _canary_selected():
+                raise RuntimeError("provider subprocess blocked")
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
     monkeypatch.setattr(subprocess, "run", guarded(subprocess.run))
     monkeypatch.setattr(subprocess, "call", guarded(subprocess.call))
     monkeypatch.setattr(subprocess, "check_call", guarded(subprocess.check_call))
@@ -279,6 +289,8 @@ def _assert_graph_case(payload: dict, narrative: str) -> None:
 
 def test_network_and_provider_subprocesses_stay_blocked_without_live_canary():
     assert _canary_selected() is False
+    assert isinstance(subprocess.Popen, type)
+    assert subprocess.Popen[bytes].__origin__ is subprocess.Popen
     with pytest.raises(RuntimeError, match="network socket blocked"):
         socket.create_connection(("192.0.2.1", 9), timeout=0.1)
     with pytest.raises(RuntimeError, match="provider subprocess blocked"):
