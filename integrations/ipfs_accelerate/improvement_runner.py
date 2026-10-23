@@ -247,6 +247,8 @@ def _shutdown_verified(record: Mapping[str, Any], shutdown: Mapping[str, Any], r
 
 
 def _admission_docker_runtime():
+    from integrations.ipfs_datasets.loader import ensure_import_paths
+    ensure_import_paths("ipfs_accelerate_py.agent_supervisor.runtime.grok_cli_runner")
     from ipfs_accelerate_py.agent_supervisor.runtime import grok_cli_runner
     return grok_cli_runner
 

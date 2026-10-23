@@ -1,5 +1,5 @@
 import json
-import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -14,10 +14,9 @@ from .review_ui import attach_claim_support_review_ui_routes, attach_static_asse
 
 
 def _read_template(filename: str) -> str:
-    path = os.path.join(os.getcwd(), "templates", filename)
-    if os.path.isfile(path):
-        with open(path, "r", encoding="utf-8") as handle:
-            return handle.read()
+    path = Path(__file__).resolve().parent.parent / "templates" / filename
+    if path.is_file():
+        return path.read_text(encoding="utf-8")
     return ""
 
 
