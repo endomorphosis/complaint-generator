@@ -1721,7 +1721,7 @@ def interview_snapshot_receipt(
     def revision(value: Any) -> str:
         text = str(value or "")
         return text if text.isascii() and text.isdigit() and 0 < len(text) <= 20 else "unknown"
-    reasons = {"unknown", "user_pause", "eof", "cancelled", "interrupted", "paused",
+    reasons = {"unknown", "awaiting_user", "user_pause", "eof", "cancelled", "interrupted", "paused",
                "needs_answer", "saturated", "deferred_unknown", "provider_unavailable", "limit_reached"}
     receipt = {
         "operation_id": operation_id if operation_id in {"interview_snapshot_commit", "interview_snapshot_load"} else "interview_snapshot_unknown",
