@@ -375,3 +375,56 @@ def test_invalid_terminal_processing_choice_has_no_store_side_effects(tmp_path: 
     assert result.returncode == 2
     assert "invalid_privacy_mode" in result.stdout
     assert not sessions.exists()
+
+
+def test_documented_recovery_commands_round_trip_real_case_key(tmp_path: Path) -> None:
+    from tests.test_private_workspace_portability import _stage, PASSPHRASE, RECOVERY, TENANT, CASE, PRINCIPAL, COMPLAINT, GRAPH, PROOF
+    from integrations.private_storage import UserOwnedKeySession, read_private_workspace_generation
+    _session, store, repository, _staged = _stage(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _operator_env(home)
+    catalog = {item["id"]: item["command"] for item in _catalog()["examples"]}
+    recovery = tmp_path / "deliberate-recovery.cgpe"
+    values = {"STORE_DIR": str(store), "TENANT_ID": TENANT, "CASE_ID": CASE, "RECOVERY_FILE": str(recovery)}
+    code, output = _pty_run(_python_argv(catalog["keys-recover-export"], values), cwd=REPO_ROOT, env=env,
+        steps=[("Private key passphrase", PASSPHRASE + "\n"), ("Recovery export passphrase", RECOVERY + "\n")])
+    assert code == 0 and recovery.is_file(), output[-2000:]
+    assert PASSPHRASE not in output and RECOVERY not in output
+    assert stat.S_IMODE(recovery.stat().st_mode) == 0o600
+    new_store = tmp_path / "recovered-keys"
+    values["STORE_DIR"] = str(new_store)
+    code, output = _pty_run(_python_argv(catalog["keys-recover-import"], values), cwd=REPO_ROOT, env=env,
+        steps=[("Recovery import passphrase", RECOVERY + "\n"), ("New store passphrase", "synthetic-new-store-passphrase\n")])
+    assert code == 0, output[-2000:]
+    assert RECOVERY not in output and "synthetic-new-store-passphrase" not in output
+    restored = UserOwnedKeySession(new_store)
+    restored.unlock_passphrase("synthetic-new-store-passphrase")
+    opened = read_private_workspace_generation(repository, restored, tenant_id=TENANT, case_id=CASE, principal_id=PRINCIPAL)
+    assert (opened["complaint"], opened["fact_graph"], opened["proof"]) == (COMPLAINT, GRAPH, PROOF)
+
+
+def test_documented_workspace_export_authenticates_in_a_fresh_store(tmp_path: Path) -> None:
+    from tests.test_private_workspace_portability import _stage, PASSPHRASE, RECOVERY, TENANT, CASE, PRINCIPAL, COMPLAINT, GRAPH, PROOF
+    from integrations.private_storage import UserOwnedKeySession, import_encrypted_workspace, read_private_workspace_generation
+    _session, store, repository, _staged = _stage(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    export_dir, recovery = tmp_path / "ciphertext-export", tmp_path / "separate-recovery.cgpe"
+    values = {"STORE_DIR": str(store), "TENANT_ID": TENANT, "CASE_ID": CASE, "PRINCIPAL_ID": PRINCIPAL,
+        "REPOSITORY_DIR": str(repository), "EXPORT_DIR": str(export_dir), "RECOVERY_FILE": str(recovery)}
+    command = next(item["command"] for item in _catalog()["examples"] if item["id"] == "workspace-export")
+    code, output = _pty_run(_python_argv(command, values), cwd=REPO_ROOT, env=_operator_env(home),
+        steps=[("Private key passphrase", PASSPHRASE + "\n"), ("Recovery export passphrase", RECOVERY + "\n")])
+    assert code == 0 and recovery.is_file() and export_dir.is_dir(), output[-2000:]
+    assert PASSPHRASE not in output and RECOVERY not in output
+    assert recovery.parent != export_dir and stat.S_IMODE(recovery.stat().st_mode) == 0o600
+    assert all(COMPLAINT not in path.read_bytes() for path in export_dir.rglob("*") if path.is_file())
+    new_store, restored_repository = tmp_path / "fresh-keys", tmp_path / "fresh-repository"
+    import_encrypted_workspace(repository, export_dir, recovery, new_store,
+        tenant_id=TENANT, case_id=CASE, principal_id=PRINCIPAL,
+        recovery_passphrase=RECOVERY, store_passphrase="synthetic-export-restore-passphrase", destination=restored_repository)
+    restored = UserOwnedKeySession(new_store)
+    restored.unlock_passphrase("synthetic-export-restore-passphrase")
+    opened = read_private_workspace_generation(restored_repository, restored, tenant_id=TENANT, case_id=CASE, principal_id=PRINCIPAL)
+    assert (opened["complaint"], opened["fact_graph"], opened["proof"]) == (COMPLAINT, GRAPH, PROOF)
