@@ -350,3 +350,102 @@ def _assert_architecture_refusal(llm, spies: _Spy) -> None:
     assert refused["error"] == llm.ARCH_CLASSIFICATION_BLOCKED
     assert refused["dispatch"] == "none"
     assert refused.get("effective_model_name") in {"", None}
+def _metadata_hardening_context(llm, user_id="metadata-user", case_id="metadata-case"):
+    policy = llm.privacy_policy_for_mode(user_id, case_id, "grok")
+    return llm.build_complaint_privacy_context(
+        policy, user_id=user_id, case_id=case_id, data_class="raw_intake",
+    )
+
+
+def test_case_aliases_are_keyed_stable_and_scoped():
+    import hashlib
+    import integrations.ipfs_datasets.llm as llm
+
+    llm.clear_case_private_caches()
+    facts = [{"fact_id": "fact-1", "text": "Mia saw Eli receive the notice.", "supports_rules": ["rule-1"]}]
+    gaps = [{"rule_id": "rule-1", "missing": "method of service"}]
+
+    def build(key, literals, case="metadata-case"):
+        return llm.build_minimal_turn_prompt(
+            user_id="metadata-user", case_id=case, relevant_facts=facts,
+            rule_gaps=gaps, sensitive_literals=literals, key=key,
+            key_id="key-" + key[:1].hex(), principal_id="metadata-user",
+        )
+
+    def alias_for(built, literal, key, case="metadata-case"):
+        for row in built["aliases"]:
+            opened = llm.resolve_case_alias(
+                user_id="metadata-user", case_id=case, alias=row["alias"],
+                key=key, key_id="key-" + key[:1].hex(),
+            )
+            if opened.get("canonical") == literal:
+                return row["alias"]
+        raise AssertionError("encrypted reversible alias was not found")
+
+    key = b"a" * 32
+    first = build(key, ["Mia", "Eli"])
+    reordered = build(key, ["Eli", "Mia"])
+    alias = alias_for(first, "Mia", key)
+    assert alias == alias_for(reordered, "Mia", key)
+    other_key = b"b" * 32
+    assert alias != alias_for(build(other_key, ["Mia", "Eli"]), "Mia", other_key)
+    assert alias != alias_for(build(key, ["Mia", "Eli"], "another-case"), "Mia", key, "another-case")
+    guesses = {
+        "alias_" + hashlib.sha256(f"metadata-user\0metadata-case\0{index}\0Mia".encode()).hexdigest()[:12]
+        for index in range(2)
+    }
+    assert alias not in guesses
+    assert "Mia" not in first["prompt"] and "Eli" not in first["prompt"]
+
+
+def test_request_inspection_keeps_only_bounded_metadata(spies: _Spy):
+    import integrations.ipfs_datasets.llm as llm
+
+    context = _metadata_hardening_context(llm)
+    for number in range(20):
+        result = llm.dispatch_private_turn(
+            privacy_context=context, relevant_facts=_facts(), rule_gaps=_gaps(),
+            sensitive_literals=[SECRET, TOKEN], unrelated_evidence=[UNRELATED],
+            key=b"c" * 32, key_id="metadata-key", turn_id=f"turn-{number}",
+        )
+        assert result["status"] == "available"
+    assert spies.provider == 20
+    assert all(NECESSARY in prompt for prompt in spies.prompts)
+    assert all(SECRET not in prompt and TOKEN not in prompt for prompt in spies.prompts)
+    cache, traces = llm.private_llm_request_cache(), llm.private_llm_request_traces()
+    assert len(cache) == len(traces) == 8
+    serialized = json.dumps([cache, traces])
+    for literal in (SECRET, TOKEN, UNRELATED, NECESSARY):
+        assert literal not in serialized
+    assert all(row.get("prompt", "") == "" for row in cache)
+    cache[0]["privacy_choice"]["provider"] = "caller-injected-value"
+    assert llm.private_llm_request_cache()[0]["privacy_choice"]["provider"] == "grok_cli"
+
+
+def test_declared_development_campaign_cannot_send_opted_in_stored_case(spies: _Spy):
+    import integrations.ipfs_datasets.llm as llm
+
+    denied = llm.dispatch_private_turn(
+        privacy_context=_metadata_hardening_context(llm),
+        relevant_facts=_facts(), rule_gaps=_gaps(), sensitive_literals=[SECRET],
+        key=b"d" * 32, key_id="campaign-key",
+        campaign_settings={"provider": "grok_cli", "model": "grok-4.7"},
+        stored_user_complaint=True,
+    )
+    assert denied["error"] == "privacy_denied:supervisor_fixtures_only"
+    assert denied["dispatch"] == "none"
+    _quiet(spies, denied)
+    assert llm.private_llm_request_cache() == []
+    assert llm.private_llm_request_traces() == []
+
+
+@pytest.mark.parametrize("key", [None, b"", b"short"])
+def test_minimal_prompt_requires_case_key_even_without_alias_literals(key):
+    import integrations.ipfs_datasets.llm as llm
+
+    with pytest.raises(ValueError, match="privacy_denied:malformed_key"):
+        llm.build_minimal_turn_prompt(
+            user_id="metadata-user", case_id="metadata-case",
+            relevant_facts=_facts(), rule_gaps=_gaps(), sensitive_literals=[],
+            key=key, key_id="missing-key",
+        )

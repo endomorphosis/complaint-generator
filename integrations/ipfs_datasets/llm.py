@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 import hashlib
+import hmac
 import importlib
 import json
 import logging
@@ -2268,6 +2269,8 @@ def build_minimal_turn_prompt(
 	and case only.
 	"""
 
+	if not isinstance(key, (bytes, bytearray)) or len(key) != 32:
+		raise ValueError("privacy_denied:malformed_key")
 	if not isinstance(relevant_facts, list) or not relevant_facts:
 		raise ValueError("privacy_denied:malformed_turn")
 	if not isinstance(rule_gaps, list) or not rule_gaps:
@@ -2300,8 +2303,9 @@ def build_minimal_turn_prompt(
 	literals.sort(key=len, reverse=True)
 	replacements: list[tuple[str, str]] = []
 	alias_rows: list[Dict[str, Any]] = []
-	for index, literal in enumerate(literals):
-		digest = hashlib.sha256(f"{user_id}\0{case_id}\0{index}\0{literal}".encode("utf-8")).hexdigest()[:12]
+	for literal in literals:
+		material = json.dumps([str(user_id), str(case_id), literal], ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+		digest = hmac.new(bytes(key), b"complaint-private-turn-alias-v1\0" + material, hashlib.sha256).hexdigest()[:32]
 		alias = f"alias_{digest}"
 		if literal in alias:
 			raise ValueError("privacy_denied:malformed_alias")
@@ -2352,17 +2356,17 @@ def build_minimal_turn_prompt(
 
 
 def private_llm_request_cache() -> list[Dict[str, Any]]:
-	"""Final private-turn payloads. Callers assert model, timeout, and aliases."""
+	"""Bounded request metadata; private prompt bodies are never retained here."""
 
 	with _PRIVATE_REQUEST_LOCK:
-		return [dict(item) for item in _PRIVATE_REQUEST_CACHE]
+		return deepcopy(_PRIVATE_REQUEST_CACHE)
 
 
 def private_llm_request_traces() -> list[Dict[str, Any]]:
 	"""Redacted traces. Prompt bodies are omitted."""
 
 	with _PRIVATE_REQUEST_LOCK:
-		return [dict(item) for item in _PRIVATE_REQUEST_TRACES]
+		return deepcopy(_PRIVATE_REQUEST_TRACES)
 
 
 def clear_private_llm_request_cache() -> None:
@@ -2450,6 +2454,8 @@ def dispatch_private_turn(
 		return _private_turn_denial(PRIVACY_DENIAL_SCOPE)
 	if model_name is not None and str(model_name).strip() not in {"", PRIVACY_GROK_MODEL}:
 		return _private_turn_denial(PRIVACY_DENIAL_SCOPE)
+	if stored_user_complaint and campaign_settings is not None:
+		return _private_turn_denial("privacy_denied:supervisor_fixtures_only")
 	try:
 		bounded_timeout = _bounded_private_timeout(timeout if timeout is not None else options.get("timeout"))
 		minimal = build_minimal_turn_prompt(
@@ -2474,8 +2480,9 @@ def dispatch_private_turn(
 		"provider": PRIVACY_GROK_PROVIDER,
 		"model": PRIVACY_GROK_MODEL,
 		"timeout_seconds": bounded_timeout,
-		"prompt": prompt,
-		"privacy_choice": choice,
+		"prompt": "",
+		"request_reference": os.urandom(16).hex(),
+		"privacy_choice": dict(choice),
 		"allow_local_fallback": False,
 		"allow_cross_provider_fallback": False,
 	}
@@ -2492,6 +2499,8 @@ def dispatch_private_turn(
 	with _PRIVATE_REQUEST_LOCK:
 		_PRIVATE_REQUEST_CACHE.append(dict(payload))
 		_PRIVATE_REQUEST_TRACES.append(dict(trace))
+		del _PRIVATE_REQUEST_CACHE[:-8]
+		del _PRIVATE_REQUEST_TRACES[:-8]
 	forward = {
 		key: value
 		for key, value in options.items()
