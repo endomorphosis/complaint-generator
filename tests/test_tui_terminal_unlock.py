@@ -126,7 +126,7 @@ def _real_cli(tmp_path,session_dir,phrase,*,narrative=None):
     return code,output,sent_narrative
 
 def test_fresh_package_chat_unlocks_without_an_injected_service(terminal,tmp_path):
-    _,service=terminal;service.ensure_private_case_key(USER,USER);service.lock_private_keys()
+    _,service=terminal;service.lock_private_keys()
     code,output,sent=_real_cli(tmp_path,service._session_dir,PHRASE,narrative=NARRATIVE)
     assert code==0 and sent
     assert b'Traceback'not in output and b'Chat paused' in output
@@ -140,4 +140,15 @@ def test_fresh_package_wrong_passphrase_is_private_and_preserves_store(terminal,
     _,service=terminal;service.ensure_private_case_key(USER,USER);service.lock_private_keys();before=_files(service._session_dir)
     code,output,sent=_real_cli(tmp_path,service._session_dir,'synthetic-wrong-password')
     assert code==2 and not sent and b'Traceback'not in output and b'authentication_failed'in output
+    assert _files(service._session_dir)==before
+
+
+def test_unlock_cancellation_has_a_bounded_private_exit(terminal,monkeypatch,capsys):
+    cli,service=terminal;service.lock_private_keys();before=_files(service._session_dir);_prompt(monkeypatch)
+    from integrations import private_storage
+    def interrupted(*_args):raise KeyboardInterrupt()
+    monkeypatch.setattr(private_storage,'read_unlock_passphrase',interrupted)
+    with pytest.raises(SystemExit)as error:cli.chat(user_id=USER,max_turns=1)
+    output=capsys.readouterr();assert error.value.code==130
+    assert 'Traceback'not in output.out+output.err and PHRASE not in output.out+output.err
     assert _files(service._session_dir)==before

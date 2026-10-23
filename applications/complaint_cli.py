@@ -764,7 +764,11 @@ def _unlock_private_chat_case(user_id: str) -> None:
 @app.command("chat")
 @_workspace_command_boundary
 def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
-    _unlock_private_chat_case(user_id)
+    try:
+        _unlock_private_chat_case(user_id)
+    except KeyboardInterrupt:
+        terminal_echo("Private workspace unlock cancelled.")
+        raise SystemExit(EXIT_INTERRUPTED) from None
     try:
         max_turns = int(max_turns)
     except (TypeError, ValueError):
