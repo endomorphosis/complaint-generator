@@ -1318,7 +1318,7 @@ Implementation instructions:
 
 ## CIMP-REL-03 Qualify release evidence and prove the taskboard has no unresolved required work
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.release
