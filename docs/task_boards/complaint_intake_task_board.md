@@ -904,7 +904,7 @@ Implementation instructions:
 
 ## CIMP-DUR-005 Implement configurable encrypted replica verification and repair
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Goal: goal.durability
