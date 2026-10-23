@@ -340,7 +340,8 @@ def test_session_directory_alias_is_rejected_before_any_profile_effect(tmp_path,
 
 
 @pytest.mark.parametrize("mode", ["grok", "local"])
-def test_fresh_terminal_processing_choice_is_explicit_and_case_bound(tmp_path: Path, mode: str) -> None:
+@pytest.mark.parametrize("choice", ["flag", "slash"])
+def test_fresh_terminal_processing_choice_is_explicit_and_case_bound(tmp_path: Path, mode: str, choice: str) -> None:
     from applications.complaint_workspace import ComplaintWorkspaceService
     home = tmp_path / "home"
     home.mkdir()
@@ -352,9 +353,12 @@ def test_fresh_terminal_processing_choice_is_explicit_and_case_bound(tmp_path: P
         service.set_privacy_policy("synthetic-policy", "grok")
     service.lock_private_keys()
     env = _operator_env(home, {"COMPLAINT_WORKSPACE_SESSION_DIR": str(sessions)})
-    argv = _python_argv(PRIMARY, {"USER_ID": "synthetic-policy"}) + ["--privacy-mode", mode]
+    argv = _python_argv(PRIMARY, {"USER_ID": "synthetic-policy"})
+    if choice == "flag":
+        argv += ["--privacy-mode", mode]
+    terminal_input = "/quit\n" if choice == "flag" else "/privacy " + mode + "\n/quit\n"
     code, output = _pty_run(argv, cwd=REPO_ROOT, env=env,
-        steps=[("passphrase", "synthetic-policy-passphrase\n"), (">", "/quit\n")])
+        steps=[("passphrase", "synthetic-policy-passphrase\n"), (">", terminal_input)])
     assert code == 0, output[-2000:]
     assert "synthetic-policy-passphrase" not in output
     restarted = ComplaintWorkspaceService(root_dir=sessions)

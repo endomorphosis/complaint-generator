@@ -101,7 +101,7 @@ DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
 EXIT_OK = 0
 EXIT_EOF_PAUSE = 1
 EXIT_INTERRUPTED = 130
-TERMINAL_COMMANDS = ("/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit")
+TERMINAL_COMMANDS = ("/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy")
 _UNKNOWN_ANSWERS = {
     "unknown", "i don't know", "i do not know", "idk", "not sure", "unsure", "n/a", "na",
 }
@@ -109,6 +109,7 @@ _PAUSE_MESSAGE = "Chat paused. Resume with the same user ID to continue the save
 _HELP_TEXT = """
 Terminal controls (a command is never stored as an answer):
   /help     show this help, exit codes, and input modes
+  /privacy  select /privacy local or /privacy grok for this case; remote Grok receives submitted prompts
   /status   show the pending question, objective, graph revision, stop reason, and unknown/skipped answers
   /why      explain why the pending question matters; the question stays pending
   /skip     record the pending question as skipped; it does not satisfy the legal requirement
@@ -228,7 +229,7 @@ INTAKE_OPERATOR_EXAMPLES = (
         "model": "grok-4.7",
         "backend_id": "llm-router-grok-4.7",
         "config_path": "config.llm_router.json",
-        "controls": ["/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit"],
+        "controls": ["/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy local", "/privacy grok"],
         "notes": "Save is /pause or a recoverable exit. Resume is the same command with the same USER_ID, then /resume.",
     },
     {
@@ -964,6 +965,14 @@ def chat(user_id: str = "demo-user", max_turns: int = 0, privacy_mode: str = "")
         command = _command_name(line)
         if command == "":
             terminal_echo("Unknown command. It was not stored. Use /help.")
+            continue
+        if command == "/privacy":
+            parts = line.strip().lower().split()
+            if len(parts) != 2 or parts[1] not in {"local", "grok"}:
+                terminal_echo("Use /privacy local or /privacy grok. Remote Grok processing sends submitted prompts to the provider.")
+                continue
+            payload = service.run_intake_chat_turn(user_id, message="/privacy " + parts[1],
+                question_id=str(inquiry.get("question_id") or "") or None)
             continue
         if command == "/help":
             terminal_echo(_HELP_TEXT)

@@ -54,6 +54,7 @@ These lines are commands to the interview. They are not saved as answers.
 | Input | Effect |
 | --- | --- |
 | `/help` | Show controls and exit codes. |
+| `/privacy grok` or `/privacy local` | Authorize remote processing or revoke it for future calls; keep the current question pending. |
 | `/status` | Show the pending question, objective, graph revision, stop reason, and unknown or skipped answers. |
 | `/why` | Explain why the pending question was asked. The question stays pending. |
 | `/skip` | Record a skip. A skip does not satisfy a legal requirement. |
