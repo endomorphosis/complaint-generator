@@ -88,23 +88,31 @@ def _install_native(monkeypatch, calls):
 
 
 def _assert_sealed(captured, provider_kwargs):
-    assert set(captured) <= ALLOWED
+    diagnostic_fields = {
+        "schema", "provider", "model", "prompt", "timeout_seconds",
+        "allow_local_fallback", "allow_cross_provider_fallback", "request_id",
+        "request_reference", "capture_kind",
+    }
+    assert set(captured) <= diagnostic_fields
     assert captured["schema"] == llm.PROVIDER_EGRESS_SCHEMA
     assert captured["provider"] == PINNED_GROK_PROVIDER
     assert captured["model"] == PINNED_GROK_MODEL
     assert captured["allow_local_fallback"] is False
     assert captured["allow_cross_provider_fallback"] is False
-    encoded = json.dumps(captured)
-    assert SECRET not in encoded
-    assert TOKEN not in encoded
-    assert "embedding" not in captured
-    assert "trace" not in captured
-    assert "enrichment" not in captured
-    assert provider_kwargs["prompt"] == captured["prompt"]
+    assert captured["prompt"] == captured["request_id"] == ""
+    assert captured["capture_kind"] == "metadata_only"
+    assert len(captured["request_reference"]) == 32
+    assert 0 < captured["timeout_seconds"] <= 60
+    assert SECRET not in json.dumps(captured) and TOKEN not in json.dumps(captured)
+    # Payload assertions inspect the actual provider spy, not a global copy.
     assert provider_kwargs["provider"] == PINNED_GROK_PROVIDER
     assert provider_kwargs["model_name"] == PINNED_GROK_MODEL
-    assert SECRET not in json.dumps(provider_kwargs["prompt"])
-    assert TOKEN not in json.dumps(provider_kwargs["prompt"])
+    assert provider_kwargs["prompt"]
+    assert SECRET not in provider_kwargs["prompt"]
+    assert TOKEN not in provider_kwargs["prompt"]
+    assert provider_kwargs["timeout"] == captured["timeout_seconds"]
+    assert provider_kwargs["allow_local_fallback"] is False
+    assert provider_kwargs["allow_cross_provider_fallback"] is False
 
 
 def test_final_serialized_request_keeps_only_sanitized_fields(monkeypatch):
@@ -306,3 +314,42 @@ def test_bypass_routes_do_not_reach_the_provider(monkeypatch):
         })
     assert llm.provider_egress_captures() == []
     assert calls == []
+def test_last_dispatch_boundary_drops_unknown_options_and_caps_timeout(monkeypatch):
+    import time
+
+    calls = []
+    _install_native(monkeypatch, calls)
+    backend = LLMRouterBackend(
+        "last-boundary", provider=PINNED_GROK_PROVIDER, model=PINNED_GROK_MODEL,
+        timeout_seconds=600, retry_max_attempts=1,
+    )
+    generate, result_type, observation_type = backend_module.load_observed_llm_symbols()
+    result = backend._dispatch_observed(
+        _json_prompt(),
+        {"unapproved_option": SECRET, "temperature": 0.25, "stop": ["END"]},
+        time.monotonic() + 600, "c" * 32,
+        generate, result_type, observation_type, lambda value: None,
+    )
+    assert result["text"] == "ok"
+    assert len(calls) == 1
+    assert "unapproved_option" not in calls[0]
+    assert calls[0]["temperature"] == 0.25 and calls[0]["stop"] == ["END"]
+    assert 0 < calls[0]["timeout"] <= 60
+    assert calls[0]["allow_local_fallback"] is False
+    assert calls[0]["allow_cross_provider_fallback"] is False
+
+
+def test_existing_backend_rechecks_recorded_consent_after_revocation(monkeypatch):
+    calls = []
+    _install_native(monkeypatch, calls)
+    llm.record_case_cloud_consent(user_id="revoke-user", case_id="revoke-case", mode="grok")
+    backend = LLMRouterBackend(
+        "revocation", provider=PINNED_GROK_PROVIDER, model=PINNED_GROK_MODEL,
+        timeout_seconds=5, retry_max_attempts=1,
+    )
+    backend.apply_recorded_case_consent("revoke-user", "revoke-case")
+    llm.record_case_cloud_consent(user_id="revoke-user", case_id="revoke-case", mode="local")
+    with pytest.raises(ProviderRouteError):
+        backend(_json_prompt())
+    assert calls == []
+    assert backend.processing_setting()["value"] == "local_private"

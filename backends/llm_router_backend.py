@@ -28,6 +28,7 @@ from integrations.ipfs_datasets.llm import (
     grok47_route_capability,
     intake_request_response_format,
     intercept_final_provider_request,
+    provider_egress_options,
     recorded_case_privacy_context,
     tui_processing_setting,
     _generate_intake_with_metadata,
@@ -175,6 +176,7 @@ class LLMRouterBackend:
         self.session_id = uuid.uuid4().hex
         self.session_retained = True
         self._recorded_privacy_context = None
+        self._recorded_case_binding = None
         self._processing_setting = tui_processing_setting(None)
         self.progress_events = []
         self.task_receipts = []
@@ -203,6 +205,7 @@ class LLMRouterBackend:
         """Bind this backend to the saved per-case choice. Local private stays local."""
 
         context = recorded_case_privacy_context(user_id=user_id, case_id=case_id, data_class=data_class)
+        self._recorded_case_binding = (user_id, case_id, data_class)
         self._recorded_privacy_context = context
         self._processing_setting = tui_processing_setting(context.get("policy"))
         return dict(self._processing_setting)
@@ -210,6 +213,12 @@ class LLMRouterBackend:
     def processing_setting(self) -> dict:
         """Clear TUI copy of the processing choice currently bound to this backend."""
 
+        if self._recorded_case_binding is not None:
+            user_id, case_id, data_class = self._recorded_case_binding
+            self._recorded_privacy_context = recorded_case_privacy_context(
+                user_id=user_id, case_id=case_id, data_class=data_class,
+            )
+            self._processing_setting = tui_processing_setting(self._recorded_privacy_context.get("policy"))
         return dict(self._processing_setting)
 
     def remote_inference_disclosure(self) -> dict:
@@ -313,7 +322,8 @@ class LLMRouterBackend:
         source_text = kwargs.get("intake_source_text")
         self._intake_source_text = source_text if type(source_text) is str else ""
         privacy_context = kwargs.get("complaint_privacy_context")
-        if privacy_context is None and self._recorded_privacy_context is not None:
+        if privacy_context is None and self._recorded_case_binding is not None:
+            self.processing_setting()
             privacy_context = self._recorded_privacy_context
         route_block = unpinned_grok_route_reason(self.provider, self.model)
         if route_block or (self._strict_route() and not self.pinned_grok47):
@@ -527,13 +537,15 @@ class LLMRouterBackend:
                 "allow_local_fallback": False,
                 "allow_cross_provider_fallback": False,
                 "request_id": request_id,
+                **provider_egress_options(options),
             })
         except RuntimeError:
             self._fail("privacy_denied", route_observation="refused")
         text = sealed["prompt"]
         result = generate(prompt=text, provider=PINNED_GROK_PROVIDER,
                           model_name=PINNED_GROK_MODEL, observation_request_id=request_id,
-                          **{**options, "timeout": max(0.01, deadline - time.monotonic()) if deadline is not None else 60.0,
+                          **{**provider_egress_options(sealed), "timeout": sealed["timeout_seconds"],
+                             "allow_local_fallback": False, "allow_cross_provider_fallback": False,
                              "grok_stream_progress": True,
                              "grok_progress_callback": progress, "usage_cancel_event": self._cancel_event,
                              "grok_cli_cmd": ["grok"], "grok_tools": "read_file",

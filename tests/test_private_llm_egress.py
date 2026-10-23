@@ -449,3 +449,38 @@ def test_minimal_prompt_requires_case_key_even_without_alias_literals(key):
             relevant_facts=_facts(), rule_gaps=_gaps(), sensitive_literals=[],
             key=key, key_id="missing-key",
         )
+def test_public_request_inspection_apis_do_not_expose_private_content(spies: _Spy):
+    import inspect
+    import integrations.ipfs_datasets.llm as llm
+
+    if hasattr(llm, "clear_provider_egress_captures"):
+        llm.clear_provider_egress_captures()
+    result = llm.dispatch_private_turn(
+        privacy_context=_metadata_hardening_context(llm), relevant_facts=_facts(),
+        rule_gaps=_gaps(), sensitive_literals=[SECRET, TOKEN], unrelated_evidence=[UNRELATED],
+        key=b"e" * 32, key_id="inspection-key",
+    )
+    assert result["status"] == "available" and spies.provider == 1
+    assert NECESSARY in spies.prompts[0]
+    inspected = set()
+    for name, function in vars(llm).items():
+        if name.startswith("_") or name.startswith("clear_"):
+            continue
+        if not any(word in name.lower() for word in ("cache", "trace", "capture", "snapshot")):
+            continue
+        if not inspect.isfunction(function) or function.__module__ != llm.__name__:
+            continue
+        required = [
+            parameter for parameter in inspect.signature(function).parameters.values()
+            if parameter.default is inspect.Parameter.empty
+            and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+        ]
+        if required:
+            continue
+        serialized = json.dumps(function(), default=str)
+        for literal in (SECRET, TOKEN, UNRELATED, NECESSARY):
+            assert literal not in serialized, name
+        inspected.add(name)
+    assert {"private_llm_request_cache", "private_llm_request_traces"} <= inspected
+    if hasattr(llm, "provider_egress_captures"):
+        assert "provider_egress_captures" in inspected

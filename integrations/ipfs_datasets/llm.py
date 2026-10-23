@@ -2130,7 +2130,7 @@ def tui_processing_setting(policy: Any = None) -> Dict[str, Any]:
 		value_label = "Grok 4.7 for this case"
 		summary = (
 			"Grok 4.7 for this case: only sanitized fields go to grok_cli / grok-4.7. "
-			"This choice is saved for this case and reused on later turns."
+			"This choice is reused for later turns in this session."
 		)
 	return {
 		"setting_id": "case_processing_mode",
@@ -2151,14 +2151,14 @@ def tui_processing_setting(policy: Any = None) -> Dict[str, Any]:
 			{
 				"value": PRIVACY_PROCESSING_GROK,
 				"label": "Grok 4.7 for this case",
-				"detail": "Send only sanitized fields to grok_cli / grok-4.7. Saved per case and reused.",
+				"detail": "Send only sanitized fields to grok_cli / grok-4.7 for later turns in this session.",
 			},
 		],
 	}
 
 
 def record_case_cloud_consent(*, user_id: str, case_id: str, mode: str) -> Dict[str, Any]:
-	"""Persist one explicit processing choice for this user and case only."""
+	"""Cache this session projection; the private workspace owns persistence."""
 
 	policy = privacy_policy_for_mode(user_id, case_id, mode)
 	user, case = _case_cache_key(user_id, case_id)
@@ -2184,7 +2184,7 @@ def clear_case_processing_consent() -> None:
 
 
 def provider_egress_captures() -> list[Dict[str, Any]]:
-	"""Final serialized requests that passed the last-hop allowlist."""
+	"""Bounded metadata only; request bodies and caller IDs are never retained."""
 
 	with _EGRESS_LOCK:
 		return deepcopy(_PROVIDER_EGRESS_LOG)
@@ -2249,6 +2249,12 @@ def _optional_egress_fields(source: Mapping[str, Any]) -> Dict[str, Any]:
 	return fields
 
 
+def provider_egress_options(source: Mapping[str, Any]) -> Dict[str, Any]:
+	"""Copy only vetted generation settings for the actual provider invocation."""
+
+	return _optional_egress_fields(source) if isinstance(source, Mapping) else {}
+
+
 def intercept_final_provider_request(request: Mapping[str, Any]) -> Dict[str, Any]:
 	"""Fail closed. The returned object is the only serialized provider request.
 
@@ -2284,7 +2290,7 @@ def intercept_final_provider_request(request: Mapping[str, Any]) -> Dict[str, An
 		"provider": PRIVACY_GROK_PROVIDER,
 		"model": PRIVACY_GROK_MODEL,
 		"prompt": _sanitize_provider_prompt(prompt),
-		"timeout_seconds": float(timeout),
+		"timeout_seconds": min(float(timeout), 60.0),
 		"allow_local_fallback": False,
 		"allow_cross_provider_fallback": False,
 		"request_id": request_id,
@@ -2293,7 +2299,18 @@ def intercept_final_provider_request(request: Mapping[str, Any]) -> Dict[str, An
 	if set(sealed) - _PROVIDER_EGRESS_FIELDS:
 		raise RuntimeError(PRIVACY_DENIAL_SCOPE)
 	with _EGRESS_LOCK:
-		_PROVIDER_EGRESS_LOG.append(deepcopy(sealed))
+		_PROVIDER_EGRESS_LOG.append({
+			"schema": PROVIDER_EGRESS_SCHEMA,
+			"provider": PRIVACY_GROK_PROVIDER,
+			"model": PRIVACY_GROK_MODEL,
+			"timeout_seconds": sealed["timeout_seconds"],
+			"allow_local_fallback": False,
+			"allow_cross_provider_fallback": False,
+			"prompt": "",
+			"request_id": "",
+			"request_reference": os.urandom(16).hex(),
+			"capture_kind": "metadata_only",
+		})
 		del _PROVIDER_EGRESS_LOG[:-8]
 	return sealed
 
