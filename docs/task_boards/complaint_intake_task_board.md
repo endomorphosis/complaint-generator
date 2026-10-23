@@ -1272,7 +1272,7 @@ Implementation instructions:
 
 ## CIMP-REL-01 Run end-to-end graph-driven private interview acceptance scenarios
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.release
