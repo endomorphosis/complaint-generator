@@ -630,3 +630,18 @@ def test_package_api_mcp_and_terminal_share_inquiry_and_graph_revision(tmp_path:
         assert payload["stopping_policy"]["outcome"] == "awaiting_user"
         assert payload["interview"]["error"]["code"] == "provider_unavailable"
     assert {item[0] for item in fingerprints} == {package_payload["interview"]["inquiry"]["inquiry_id"]}
+
+
+def test_pty_interview_matches_the_shared_graph_revision(tmp_path: Path):
+    """The terminal PTY path is the same interview the package turn records."""
+
+    from tests.test_complaint_intake_acceptance import drive_pty_interview
+
+    user_id = "pty-shared-user"
+    service = _service(tmp_path, user_id)
+    transcript = drive_pty_interview(service, user_id, [COHERENT, "/quit"], max_turns=2)
+    assert "plain language" in transcript or "Describe your complaint" in transcript
+    status = service.run_intake_chat_turn(user_id, interview_action="status")
+    _assert_graph_case(status, COHERENT)
+    assert status["stopping_policy"]["outcome"] == "awaiting_user"
+    assert "Alex Rivera" in json.dumps(status["session"]["shared_interview"]["knowledge_graph"])
