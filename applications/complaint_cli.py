@@ -179,7 +179,126 @@ class TerminalComplaintWorkspaceService(ComplaintWorkspaceService):
         return receipt
 
 
-service = TerminalComplaintWorkspaceService()
+def session_dir_from_environment() -> Optional[Path]:
+    """Use an explicit session directory when the operator sets one.
+
+    The default remains the checkout's ``.complaint_workspace/sessions``.
+    A relative override is resolved from the current working directory.
+    Nothing here reads a user home, a Codex profile, or a fixed interpreter path.
+    """
+
+    raw = os.environ.get("COMPLAINT_WORKSPACE_SESSION_DIR", "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return Path(os.path.abspath(path))
+
+
+class _LazyTerminalService:
+    """Build the workspace on first use so importing the CLI does not create a store."""
+
+    def __init__(self) -> None:
+        self._service: TerminalComplaintWorkspaceService | None = None
+
+    def _load(self) -> TerminalComplaintWorkspaceService:
+        if self._service is None:
+            override = session_dir_from_environment()
+            self._service = (
+                TerminalComplaintWorkspaceService(override)
+                if override is not None
+                else TerminalComplaintWorkspaceService()
+            )
+        return self._service
+
+    def __getattr__(self, name: str):
+        return getattr(self._load(), name)
+
+
+service = _LazyTerminalService()
+
+# One primary terminal interview command. Slash controls are typed inside it.
+# Placeholders are literal tokens the operator replaces. They are not home paths.
+PRIMARY_TUI_COMMAND = "python -m complaint_generator.cli chat --user-id USER_ID"
+INTAKE_OPERATOR_EXAMPLES = (
+    {
+        "id": "primary-tui-grok-4.7",
+        "command": PRIMARY_TUI_COMMAND,
+        "model": "grok-4.7",
+        "backend_id": "llm-router-grok-4.7",
+        "config_path": "config.llm_router.json",
+        "controls": ["/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit"],
+        "notes": "Save is /pause or a recoverable exit. Resume is the same command with the same USER_ID, then /resume.",
+    },
+    {
+        "id": "router-live-canary-not-requested",
+        "command": "python -m complaint_generator.cli router-live-canary --config-path config.llm_router.json --backend-id llm-router-grok-4.7",
+        "model": "grok-4.7",
+        "sends_complaint_data": False,
+        "confirm_live": False,
+    },
+    {
+        "id": "keys-status",
+        "command": "python -m complaint_generator.cli keys-status --store-dir STORE_DIR",
+    },
+    {
+        "id": "keys-init",
+        "command": "python -m complaint_generator.cli keys-init --store-dir STORE_DIR --protection passphrase",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "keys-unlock",
+        "command": "python -m complaint_generator.cli keys-unlock --store-dir STORE_DIR",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "keys-recover-export",
+        "command": "python -m complaint_generator.cli keys-recover-export --store-dir STORE_DIR --tenant-id TENANT_ID --case-id CASE_ID --destination RECOVERY_FILE",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "keys-recover-import",
+        "command": "python -m complaint_generator.cli keys-recover-import --store-dir STORE_DIR --tenant-id TENANT_ID --case-id CASE_ID --source RECOVERY_FILE",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "workspace-export",
+        "command": "python -m complaint_generator.cli workspace-export --store-dir STORE_DIR --tenant-id TENANT_ID --case-id CASE_ID --principal-id PRINCIPAL_ID --repository REPOSITORY_DIR --export-dir EXPORT_DIR --recovery-destination RECOVERY_FILE",
+        "passphrase_on_argv": False,
+    },
+    {
+        "id": "supervisor-start",
+        "command": "python scripts/run_complaint_improvement_supervisor.py start --repo-root REPO_ROOT --spec SPEC_PATH --state-dir STATE_DIR --watch --monitor-seconds 21600",
+        "model": "grok-4.7",
+        "resume": "same start command and same STATE_DIR after stop",
+    },
+    {
+        "id": "supervisor-status",
+        "command": "python scripts/run_complaint_improvement_supervisor.py status --repo-root REPO_ROOT --spec SPEC_PATH --state-dir STATE_DIR",
+    },
+    {
+        "id": "supervisor-stop",
+        "command": "python scripts/run_complaint_improvement_supervisor.py stop --repo-root REPO_ROOT --spec SPEC_PATH --state-dir STATE_DIR",
+    },
+)
+
+
+def intake_operator_catalog() -> dict[str, Any]:
+    return {
+        "primary_tui_command": PRIMARY_TUI_COMMAND,
+        "interpreter": "python",
+        "python_requires": ">=3.12",
+        "session_dir_env": "COMPLAINT_WORKSPACE_SESSION_DIR",
+        "default_session_dir": ".complaint_workspace/sessions",
+        "pinned_submodules": [
+            "external/ipfs_accelerate_py",
+            "external/ipfs_datasets_py",
+            "external/ipfs_kit_py",
+        ],
+        "optional_dependencies": ["cryptography>=41.0.0", "typer>=0.12.0"],
+        "examples": list(INTAKE_OPERATOR_EXAMPLES),
+    }
 
 
 def _emit_workspace_failure(error: Exception) -> None:
@@ -730,6 +849,13 @@ def _sync_controls_from_payload(user_id: str, payload: dict, inquiry: Optional[d
     return state
 
 
+
+
+@app.command("intake-operator-examples")
+def intake_operator_examples() -> None:
+    """Print the documented intake, key, and supervisor command catalog."""
+
+    _print(intake_operator_catalog())
 
 
 def _unlock_private_chat_case(user_id: str) -> None:
