@@ -950,7 +950,7 @@ Implementation instructions:
 
 ## CIMP-PRIV-006 Apply user cloud-processing choice and redaction before llm_router
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Goal: goal.privacy
