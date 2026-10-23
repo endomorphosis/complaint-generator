@@ -818,6 +818,45 @@ def revoke_retained_keys(session: Any, tenant_id: str, case_id: str, repository:
     return session.revoke_retained_keys(tenant_id, case_id, repository, **options)
 
 
+def delete_private_case(
+    repository: str | Path,
+    session: Any,
+    *,
+    tenant_id: str,
+    case_id: str,
+    policy: str,
+    legal_hold: bool = False,
+    workspace_required: bool = False,
+    providers: Any = None,
+    timeout_seconds: float | None = None,
+    crash_at: str | None = None,
+) -> dict[str, Any]:
+    """Delete one case and return the scoped unpin, remote, and key receipts."""
+
+    from integrations.private_storage import delete_private_case as _delete
+
+    return _delete(
+        repository,
+        session,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        policy=policy,
+        legal_hold=legal_hold,
+        workspace_required=workspace_required,
+        providers=providers,
+        timeout_seconds=timeout_seconds,
+        crash_at=crash_at,
+    )
+
+
+def normal_reset_retention_receipt() -> dict[str, Any]:
+    """Show that a normal reset leaves encryption keys and recovery in place."""
+
+    from integrations.private_storage import normal_reset_retention_receipt as _receipt
+
+    return _receipt()
+
+
 def export_complaint_packet(
     user_id: Optional[str],
     *,

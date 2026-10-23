@@ -3028,7 +3028,15 @@ class ComplaintWorkspaceRequestHandlers:
         workspace = self.workspace
         state = _default_state(self._normalize_user_id(user_id))
         workspace._save_state(state)
-        return self.get_session(str(state["user_id"]))
+        result = self.get_session(str(state["user_id"]))
+        retention = workspace.normal_reset_retention_receipt()
+        result["private_retention"] = retention
+        result["encryption_key_destroyed"] = False
+        result["recovery_path_destroyed"] = False
+        return result
+
+    def delete_private_case(self, user_id: Optional[str], **options: Any) -> Dict[str, Any]:
+        return self.workspace.delete_private_case(user_id, **options)
 
 
 class _WorkspaceCaseKeyProvider:
@@ -10322,6 +10330,46 @@ class ComplaintWorkspaceService:
 
     def reset_session(self, user_id: Optional[str]) -> Dict[str, Any]:
         return self.request_handlers.reset_session(user_id)
+
+    def normal_reset_retention_receipt(self) -> Dict[str, Any]:
+        from integrations.private_storage import normal_reset_retention_receipt
+
+        return normal_reset_retention_receipt()
+
+    def delete_private_case(
+        self,
+        user_id: Optional[str],
+        *,
+        tenant_id: str,
+        case_id: str,
+        repository: str | Path,
+        policy: str,
+        legal_hold: bool = False,
+        workspace_required: bool = False,
+        providers: Optional[Mapping[str, Any]] = None,
+        timeout_seconds: Optional[float] = None,
+        crash_at: Optional[str] = None,
+        principal_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """User-visible scoped deletion. Normal reset does not call this."""
+
+        del principal_id
+        self._require_local_filesystem_access()
+        self._check_access(user_id or tenant_id, ability="write", case_id=case_id)
+        from integrations.private_storage import delete_private_case as _delete
+
+        return _delete(
+            repository,
+            self._private_key_session(),
+            tenant_id=tenant_id,
+            case_id=case_id,
+            policy=policy,
+            legal_hold=legal_hold,
+            workspace_required=workspace_required,
+            providers=providers,
+            timeout_seconds=timeout_seconds,
+            crash_at=crash_at,
+        )
 
     def _resolve_docket_path(self, path_value: str | Path) -> str:
         self._require_local_filesystem_access()
