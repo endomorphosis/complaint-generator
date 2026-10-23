@@ -14,7 +14,7 @@ python -m pip install -e .
 python -m pip install 'cryptography>=41.0.0' 'typer>=0.12.0'
 ```
 
-`cryptography` and `typer` are explicit optional installs for this workflow. `cryptography` wraps local keys. `typer` is the preferred CLI parser; if it is absent, `applications/complaint_cli.py` uses a small built-in parser for the same flags. The pinned commits for those submodules are recorded in `docs/task_boards/complaint_intake_improvement_spec.json` under `upstream_pins`. Do not point the commands at a different checkout of those projects.
+`cryptography` and `typer` are explicit optional installs for this workflow. `cryptography` wraps local keys. `typer` is the preferred CLI parser; if it is absent, `applications/complaint_cli.py` uses a small built-in parser for the same flags. The checkout’s Git submodule entries select the exact revisions installed by that command. The taskboard specification records its original baseline under `upstream_pins`; reviewed integrations can advance a submodule entry later. Do not substitute a different checkout of those projects.
 
 Print the machine-readable catalog:
 
