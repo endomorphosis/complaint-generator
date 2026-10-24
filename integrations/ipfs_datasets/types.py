@@ -136,6 +136,44 @@ def locate_unique_byte_span(source_text: str, needle: str) -> SourceSpanLookup:
     return SourceSpanLookup(start=start, end=start + len(needle_bytes), text=needle)
 
 
+_CHAR_SPAN_UNITS = frozenset({"char", "chars", "character", "characters"})
+
+
+def resolve_source_span(source_text: str, source_span: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Bind a span to one UTF-8 generation. Offsets from another generation are not applied.
+
+    Character offsets convert only when the span names this source generation.
+    A mismatched generation or an unbound character span stays deficient and
+    does not borrow bytes from the current text.
+    """
+    if not isinstance(source_span, Mapping) or not source_span:
+        return {"start": None, "end": None, "text": "", "deficiencies": ["missing_source_span"]}
+    actual = source_byte_hash(source_text) if isinstance(source_text, str) and source_text != "" else ""
+    claimed = _clean_supplied_text(source_span.get("source_generation"))
+    if claimed and claimed != actual:
+        return {"start": None, "end": None, "text": "", "deficiencies": ["source_generation_mismatch"]}
+    unit = _clean_supplied_text(source_span.get("unit")).lower() or "byte"
+    start = source_span.get("start")
+    end = source_span.get("end")
+    if unit in _CHAR_SPAN_UNITS:
+        if not claimed or claimed != actual or not isinstance(source_text, str):
+            return {"start": None, "end": None, "text": "", "deficiencies": ["source_span_unit_not_byte"]}
+        if isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, int) or not isinstance(end, int):
+            return {"start": None, "end": None, "text": "", "deficiencies": ["source_span_not_integers"]}
+        if start < 0 or end <= start or end > len(source_text):
+            return {"start": None, "end": None, "text": "", "deficiencies": ["source_span_out_of_bounds"]}
+        start = len(source_text[:start].encode("utf-8"))
+        end = len(source_text[:end].encode("utf-8"))
+    sliced, span_deficiency = _slice_source_bytes(source_text, start, end)
+    if span_deficiency:
+        return {"start": None, "end": None, "text": "", "deficiencies": [span_deficiency]}
+    deficiencies: List[str] = []
+    supplied = source_span.get("text")
+    if supplied is not None and str(supplied) != sliced:
+        deficiencies.append("source_span_mismatch")
+    return {"start": start, "end": end, "text": sliced, "deficiencies": deficiencies}
+
+
 def _slice_source_bytes(source_text: str, start: Any, end: Any) -> tuple[str, str]:
     if isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, int) or not isinstance(end, int):
         return "", "source_span_not_integers"
@@ -186,6 +224,9 @@ class UserAssertionEnvelope:
     actor: str = ""
     name: str = ""
     event_date: str = ""
+    answer_id: str = ""
+    source_generation: str = ""
+    factual_record_class: str = ""
     confidence: Optional[float] = None
     legal_hit: bool = False
     role: str = ""
@@ -217,6 +258,9 @@ class UserAssertionEnvelope:
             role=self.role, subject_key=self.subject_key, jurisdiction=self.jurisdiction,
             actor=self.actor, name=self.name, event_date=self.event_date,
             **endpoint_binding,
+            **({"answer_id": self.answer_id} if self.answer_id else {}),
+            **({"source_generation": self.source_generation} if self.source_generation else {}),
+            **({"factual_record_class": self.factual_record_class} if self.factual_record_class else {}),
         )
 
     @property
@@ -247,8 +291,16 @@ class UserAssertionEnvelope:
             and bool(self.stable_id)
             and coordinates_valid
             and self.stable_id == self.computed_stable_id()
+            and (not self.source_generation or self.source_generation == self.source_hash)
+            and self.factual_record_class not in {"extraction_hypothesis", "legal_text"}
             and not self.deficiencies
         )
+
+    @property
+    def source_byte_length(self) -> int:
+        if not isinstance(self.source_text, str) or self.source_text == "":
+            return 0
+        return len(self.source_text.encode("utf-8"))
 
     def as_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -261,6 +313,7 @@ class UserAssertionEnvelope:
             "unit": "byte",
         }
         payload["is_asserted_user_fact"] = self.is_asserted_user_fact
+        payload["source_byte_length"] = self.source_byte_length
         return payload
 
 
@@ -304,6 +357,9 @@ def user_assertion_from_mapping(payload: Optional[Mapping[str, Any]]) -> UserAss
         actor=_clean_supplied_text(data.get("actor")),
         name=_clean_supplied_text(data.get("name")),
         event_date=_clean_supplied_text(data.get("event_date")),
+        answer_id=_clean_supplied_text(data.get("answer_id")),
+        source_generation=_clean_supplied_text(data.get("source_generation")),
+        factual_record_class=_clean_supplied_text(data.get("factual_record_class")),
         confidence=parsed_confidence,
         legal_hit=bool(data.get("legal_hit", False)),
         role=_clean_supplied_text(data.get("role")),
@@ -342,6 +398,8 @@ def build_user_assertion_envelope(
     actor: str = "",
     name: str = "",
     event_date: str = "",
+    answer_id: str = "",
+    factual_record_class: str = "",
     extra_deficiencies: Sequence[str] = (),
 ) -> UserAssertionEnvelope:
     """Validate one record against the user-assertion contract.
@@ -355,6 +413,11 @@ def build_user_assertion_envelope(
     origin_norm = _clean_supplied_text(origin).lower()
     explicit_record_type = _clean_supplied_text(record_type)
     forced_record_type = ""
+    class_norm = _clean_supplied_text(factual_record_class)
+    if class_norm == "legal_text" and not forced_record_type:
+        forced_record_type = "legal_text"
+    elif class_norm == "extraction_hypothesis" and not forced_record_type:
+        forced_record_type = "model_suggestion"
     if explicit_record_type in NON_USER_RECORD_TYPES:
         forced_record_type = explicit_record_type
     elif origin_norm in {"model", "llm"}:
@@ -362,25 +425,12 @@ def build_user_assertion_envelope(
     if forced_record_type:
         deficiencies.add(forced_record_type)
 
-    span_payload = dict(source_span) if isinstance(source_span, Mapping) else {}
-    span_start = span_payload.get("start")
-    span_end = span_payload.get("end")
-    sliced_text = ""
-    if span_payload:
-        sliced_text, span_deficiency = _slice_source_bytes(source_text, span_start, span_end)
-        if span_deficiency:
-            deficiencies.add(span_deficiency)
-            sliced_text = ""
-            span_start = None
-            span_end = None
-        else:
-            supplied_span_text = span_payload.get("text")
-            if supplied_span_text is not None and str(supplied_span_text) != sliced_text:
-                deficiencies.add("source_span_mismatch")
-    else:
-        deficiencies.add("missing_source_span")
-        span_start = None
-        span_end = None
+    resolved = resolve_source_span(source_text if isinstance(source_text, str) else "", source_span)
+    for item in resolved["deficiencies"]:
+        deficiencies.add(item)
+    span_start = resolved["start"]
+    span_end = resolved["end"]
+    sliced_text = resolved["text"]
 
     computed_hash = source_byte_hash(source_text) if isinstance(source_text, str) and source_text != "" else ""
     supplied_hash = _clean_supplied_text(source_hash)
@@ -476,6 +526,9 @@ def build_user_assertion_envelope(
         actor=supplied_actor,
         name=supplied_name,
         event_date=supplied_event_date,
+        answer_id=_clean_supplied_text(answer_id),
+        source_generation=effective_hash,
+        factual_record_class=class_norm,
         confidence=stored_confidence,
         legal_hit=bool(legal_hit),
         role=_clean_supplied_text(role),
@@ -1205,6 +1258,7 @@ __all__ = [
     "UserAssertionEnvelope",
     "source_byte_hash",
     "locate_unique_byte_span",
+    "resolve_source_span",
     "build_user_assertion_envelope",
     "user_assertion_from_mapping",
     "graph_entity_from_payload",
