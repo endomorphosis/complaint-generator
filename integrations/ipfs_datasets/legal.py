@@ -3988,6 +3988,441 @@ def _finish_live_call(
     )
 
 
+CANONICAL_CORPUS_PARAMETER_APIS = {
+    CORPUS_FAMILY_US_CODE: "search_us_code_corpus_from_parameters",
+    CORPUS_FAMILY_STATE_STATUTE: "search_state_law_corpus_from_parameters",
+    CORPUS_FAMILY_STATE_ADMIN: "search_state_law_corpus_from_parameters",
+    CORPUS_FAMILY_FEDERAL_REGISTER: "search_federal_register_corpus_from_parameters",
+    CORPUS_FAMILY_COURT_RULE: "search_court_rules_corpus_from_parameters",
+}
+_ACQUISITION_BYTE_CAP = 1048576
+_OWNED_SOURCE_FIELDS = ("source_text", "locator", "version", "retrieval")
+
+
+def _acquisition_binding(payload: Any) -> Dict[str, Any]:
+    """Accept either a bound acquisition result or its inner request."""
+    if not isinstance(payload, Mapping):
+        return {"ready": False, "request": None, "execution": {"storage_available": None, "status": "blocked"}}
+    if "ready" in payload and "request" in payload:
+        execution = payload.get("execution") if isinstance(payload.get("execution"), Mapping) else {}
+        return {
+            "ready": payload.get("ready") is True and isinstance(payload.get("request"), Mapping),
+            "request": payload.get("request") if isinstance(payload.get("request"), Mapping) else None,
+            "execution": dict(execution),
+            "questions": list(payload.get("questions") or []),
+        }
+    program = payload.get("program") if isinstance(payload.get("program"), Mapping) else {}
+    ready = bool(payload.get("jurisdiction") and payload.get("law_query_date") and program.get("query_text"))
+    return {"ready": ready, "request": dict(payload) if ready else None, "execution": {}, "questions": []}
+
+
+def _selected_corpus_families(request: Mapping[str, Any]) -> List[tuple]:
+    plan = request.get("corpus_plan") if isinstance(request.get("corpus_plan"), Mapping) else {}
+    families = {
+        str(family or "").strip()
+        for family in (plan.get("authority_families") or [])
+        if str(family or "").strip()
+    }
+    selected = [
+        (CORPUS_FAMILY_US_CODE, bool(plan.get("search_us_code"))),
+        (CORPUS_FAMILY_STATE_STATUTE, bool(plan.get("search_state_laws"))),
+        (CORPUS_FAMILY_FEDERAL_REGISTER, bool(plan.get("search_federal_register"))),
+        (CORPUS_FAMILY_STATE_ADMIN, bool(plan.get("search_state_administrative_rules"))),
+        (CORPUS_FAMILY_COURT_RULE, _plan_searches_court_rules(dict(plan), families)),
+    ]
+    return [(family, CANONICAL_CORPUS_PARAMETER_APIS[family]) for family, enabled in selected if enabled]
+
+
+def _parameter_record(request: Mapping[str, Any], family: str, api_name: str, *, max_results: int, timeout_seconds: float, max_bytes: int) -> Dict[str, Any]:
+    plan = request.get("corpus_plan") if isinstance(request.get("corpus_plan"), Mapping) else {}
+    program = request.get("program") if isinstance(request.get("program"), Mapping) else {}
+    state_code = str(plan.get("state_code") or "")
+    jurisdiction = str(request.get("jurisdiction") or plan.get("jurisdiction") or "")
+    parameters: Dict[str, Any] = {
+        "collection_name": "local-private-legal-fixture" if program.get("retrieval_mode") != RETRIEVAL_MODE_LIVE else str(program.get("collection_name") or ""),
+        "query_text": str(program.get("query_text") or ""),
+        "top_k": max_results,
+        "auto_setup_venv": False,
+        "chunk_lookup_enabled": False,
+        "download_corpus": False,
+        "initialize_common_crawl": False,
+        "law_query_date": request.get("law_query_date"),
+        "timeout_seconds": timeout_seconds,
+        "max_bytes": max_bytes,
+        "source_family": family,
+    }
+    if family in {CORPUS_FAMILY_STATE_STATUTE, CORPUS_FAMILY_STATE_ADMIN} or (family == CORPUS_FAMILY_COURT_RULE and state_code):
+        parameters["state"] = state_code
+    if family == CORPUS_FAMILY_COURT_RULE:
+        parameters["jurisdiction"] = "federal" if jurisdiction == "federal" else "state"
+    elif jurisdiction:
+        parameters["jurisdiction"] = jurisdiction
+    return {
+        "parameter_api": api_name,
+        "parameters": parameters,
+        "allowed_backend": api_name,
+    }
+
+
+def _local_cache_from_rows(request: Mapping[str, Any], local_rows: Optional[Mapping[str, Any]], offline_cache: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    cache: Dict[str, Any] = dict(offline_cache or {})
+    if not isinstance(local_rows, Mapping):
+        return cache
+    program = request.get("program") if isinstance(request.get("program"), Mapping) else {}
+    plan = request.get("corpus_plan") if isinstance(request.get("corpus_plan"), Mapping) else {}
+    query = str(program.get("query_text") or "")
+    jurisdiction = str(request.get("jurisdiction") or "")
+    state_code = str(plan.get("state_code") or "")
+    resolved = resolve_explicit_jurisdiction(jurisdiction)
+    jurisdiction_key = "" if resolved == UNKNOWN_LEGAL_CONTEXT else resolved
+    for family, rows in local_rows.items():
+        family_name = str(family or "")
+        if family_name not in CANONICAL_CORPUS_PARAMETER_APIS or not isinstance(rows, list):
+            continue
+        cache[_cache_key(family_name, query, jurisdiction_key, state_code)] = list(rows)
+    return cache
+
+
+def _owned_source_candidate(row: Mapping[str, Any], *, law_query_date: Any, max_bytes: int) -> tuple:
+    """Keep a row only when owned text, locator, version, and retrieval are present.
+
+    A snippet, score, or caller applicability flag is not a candidate and is not proof.
+    """
+    passage = row.get("source_passage") if isinstance(row.get("source_passage"), str) else ""
+    passage_status = str(row.get("passage_status") or "")
+    locator = ""
+    locator_kind = ""
+    if row.get("uri_status") == "source" and isinstance(row.get("uri"), str) and row.get("uri"):
+        locator = row["uri"]
+        locator_kind = "uri"
+    elif row.get("citation_status") == "source" and isinstance(row.get("citation"), str) and row.get("citation"):
+        locator = row["citation"]
+        locator_kind = "citation"
+    version = row.get("corpus_version") if isinstance(row.get("corpus_version"), str) else ""
+    if passage_status != "full_text" or not passage:
+        reason = "snippet_not_owned" if row.get("snippet") or passage_status == "snippet_only" else "source_text_missing"
+        return None, reason
+    if not locator:
+        return None, "locator_missing"
+    if not version.strip():
+        return None, "missing_edition"
+    encoded = passage.encode("utf-8")
+    if len(encoded) > max_bytes:
+        return None, "byte_bound_exceeded"
+    retrieval = {
+        "retrieved_at": row.get("retrieved_at"),
+        "retrieval_mode": row.get("retrieval_mode"),
+        "source_family": row.get("source_family"),
+        "content_hash": row.get("content_hash"),
+        "content_hash_scope": row.get("content_hash_scope"),
+        "provenance_status": row.get("provenance_status"),
+        "corpus_id": row.get("corpus_id"),
+        "jurisdiction_status": row.get("jurisdiction_status"),
+        "effective_date": row.get("effective_date"),
+        "effective_date_status": row.get("effective_date_status"),
+    }
+    candidate = {
+        "source_text": passage,
+        "source_byte_length": len(encoded),
+        "locator": locator,
+        "locator_kind": locator_kind,
+        "version": version.strip(),
+        "retrieval": retrieval,
+        "applicability": UNKNOWN_LEGAL_CONTEXT,
+        "applicable": False,
+        "verified": False,
+        "support_eligible": False,
+        "proof": False,
+        "relevance_is_not_proof": True,
+        "law_query_date": law_query_date,
+        "edition_selected": False,
+    }
+    return candidate, "candidate"
+
+
+def _operation_status(envelope_status: str, reasons: List[str], owned: List[Dict[str, Any]]) -> str:
+    if owned:
+        return "candidates"
+    if "missing_edition" in reasons and envelope_status in {"success", "partial_success", "empty", "candidates"}:
+        return "missing_edition"
+    if "byte_bound_exceeded" in reasons:
+        return "unavailable"
+    if envelope_status == "timeout":
+        return "timeout"
+    if envelope_status in {"unavailable", "error"}:
+        return envelope_status
+    if envelope_status in {"success", "partial_success"} and not owned:
+        if reasons and all(reason in {"snippet_not_owned", "source_text_missing", "locator_missing"} for reason in reasons):
+            return "incomplete"
+        return "empty"
+    return envelope_status or "empty"
+
+
+def _resume_for(operations: List[Dict[str, Any]], *, blocked: str = "") -> Dict[str, Any]:
+    reasons = [str(item.get("status") or "") for item in operations]
+    if blocked == "cancelled":
+        return {"resumable": False, "next_action": "awaiting_user", "worker_stalled": False, "completed_operations": [], "pending_statuses": ["cancelled"]}
+    if blocked == "blocked":
+        return {"resumable": True, "next_action": "resolve_legal_context", "worker_stalled": False, "completed_operations": [], "pending_statuses": ["blocked"]}
+    pending = [item for item in operations if item.get("status") in {"unavailable", "timeout", "missing_edition", "error", "incomplete", "refused"}]
+    completed = [str(item.get("source_family") or "") for item in operations if item.get("status") in {"candidates", "empty"}]
+    if any(item.get("status") == "timeout" for item in operations):
+        action = "retry_timeout"
+    elif any(item.get("status") == "missing_edition" for item in operations):
+        action = "supply_edition"
+    elif any(item.get("status") in {"unavailable", "error"} for item in operations):
+        action = "retry_unavailable"
+    elif any(item.get("status") == "incomplete" for item in operations):
+        action = "supply_owned_source_text"
+    elif any(item.get("status") == "refused" for item in operations):
+        action = "resolve_purpose_gate"
+    else:
+        action = "none"
+    return {
+        "resumable": bool(pending) or action != "none",
+        "next_action": action,
+        "worker_stalled": False,
+        "completed_operations": completed,
+        "pending_statuses": [str(item.get("status") or "") for item in pending] or reasons,
+    }
+
+
+def _roll_up_status(operations: List[Dict[str, Any]]) -> str:
+    statuses = [str(item.get("status") or "") for item in operations]
+    if any(status == "candidates" for status in statuses):
+        return "candidates"
+    for status in ("timeout", "unavailable", "error", "missing_edition", "incomplete", "refused", "empty"):
+        if status in statuses:
+            return status
+    return "empty"
+
+
+def acquire_bounded_canonical_legal_sources(
+    binding: Any,
+    *,
+    owner_id: str,
+    case_id: str,
+    purpose: str = "public_law_citation",
+    data_class: str = "public_legal_source_graph",
+    provider_kind: str = "legal_corpus",
+    policy_reader: Optional[Any] = None,
+    provider_loader: Optional[Any] = None,
+    allowed_backends: Optional[Iterable[str]] = None,
+    deadline_seconds: Optional[float] = None,
+    max_results: Optional[int] = None,
+    max_bytes: int = 65536,
+    retrieval_mode: Optional[str] = None,
+    offline_cache: Optional[Dict[str, Any]] = None,
+    local_rows: Optional[Mapping[str, Any]] = None,
+    index_path: Optional[str] = None,
+    query_vector: Optional[List[float]] = None,
+    collection_name: Optional[str] = None,
+    privacy_policy_accepted: bool = False,
+    contains_private_facts: bool = False,
+    cancelled: bool = False,
+) -> Dict[str, Any]:
+    """Acquire owned legal-source candidates for one explicit acquisition request.
+
+    Local cache and index reads do not infer embeddings and do not download a
+    corpus. A live parameter-API call is dispatched only after the purpose and
+    data-class gate allows it. Search hits are not applicability or proof.
+    """
+    unpacked = _acquisition_binding(binding)
+    request = unpacked.get("request") if isinstance(unpacked.get("request"), Mapping) else None
+    execution = unpacked.get("execution") if isinstance(unpacked.get("execution"), Mapping) else {}
+    base = {
+        "owner_id": str(owner_id or ""),
+        "case_id": str(case_id or ""),
+        "purpose": purpose if type(purpose) is str else "",
+        "data_class": data_class if type(data_class) is str else "",
+        "candidates": [],
+        "operations": [],
+        "model_inference_used": False,
+        "commoncrawl_initialized": False,
+        "corpus_download_started": False,
+        "backend_invoked": False,
+        "remote_dispatched": False,
+        "applicability": UNKNOWN_LEGAL_CONTEXT,
+        "proof": False,
+        "contains_private_narrative": False,
+        "live_model_identity_verified": False,
+    }
+    if cancelled:
+        base.update(status="cancelled", error_code="cancelled", gate={"status": "not_required", "code": "cancelled"}, resume=_resume_for([], blocked="cancelled"))
+        return base
+    if execution.get("storage_available") is False or execution.get("status") == "unavailable":
+        base.update(status="unavailable", error_code="storage_unavailable", gate={"status": "not_required", "code": "storage_unavailable"},
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}], blocked=""))
+        return base
+    if not unpacked.get("ready") or request is None:
+        base.update(status="blocked", error_code="legal_context_not_ready", gate={"status": "not_required", "code": "legal_context_not_ready"},
+            questions=list(unpacked.get("questions") or []), resume=_resume_for([], blocked="blocked"))
+        return base
+
+    try:
+        bounded_results = int(request.get("bounds", {}).get("max_results", 5) if max_results is None else max_results)
+    except (TypeError, ValueError):
+        bounded_results = 0
+    if type(bounded_results) is not int or isinstance(bounded_results, bool) or not 1 <= bounded_results <= _BOUNDED_RESULT_CAP:
+        base.update(status="unavailable", error_code="invalid_result_limit", gate={"status": "not_required", "code": "invalid_result_limit"},
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}]))
+        return base
+    try:
+        timeout_value = float(request.get("bounds", {}).get("timeout_seconds", 5.0) if deadline_seconds is None else deadline_seconds)
+    except (TypeError, ValueError):
+        timeout_value = 0.0
+    if not math.isfinite(timeout_value) or timeout_value <= 0 or timeout_value > _BOUNDED_TIMEOUT_CAP_SECONDS:
+        base.update(status="unavailable", error_code="invalid_timeout", gate={"status": "not_required", "code": "invalid_timeout"},
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}]))
+        return base
+    if type(max_bytes) is not int or isinstance(max_bytes, bool) or not 1 <= max_bytes <= _ACQUISITION_BYTE_CAP:
+        base.update(status="unavailable", error_code="invalid_byte_bound", gate={"status": "not_required", "code": "invalid_byte_bound"},
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}]))
+        return base
+
+    mode = str(retrieval_mode or (request.get("program") or {}).get("retrieval_mode") or RETRIEVAL_MODE_OFFLINE).strip().lower()
+    if mode not in BOUNDED_RETRIEVAL_MODES:
+        base.update(status="unavailable", error_code="retrieval_mode_required", gate={"status": "not_required", "code": "retrieval_mode_required"},
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}]))
+        return base
+    allowed = {str(item) for item in allowed_backends} if allowed_backends is not None else set(CANONICAL_CORPUS_PARAMETER_APIS.values())
+    families = _selected_corpus_families(request)
+    gate: Dict[str, Any] = {"status": "not_required", "code": "local_first", "policy_read": False, "provider_loader_called": False}
+    if mode == RETRIEVAL_MODE_LIVE:
+        from mediator.hook_runtime import prepare_remote_hook_query
+
+        if policy_reader is None:
+            gate = {"status": "refused", "code": "consent_missing", "policy_read": False, "provider_loader_called": False}
+        else:
+            gate = prepare_remote_hook_query(
+                policy_reader=policy_reader,
+                provider_loader=provider_loader,
+                owner_id=str(owner_id or ""),
+                case_id=str(case_id or ""),
+                purpose=purpose,
+                provider_kind=provider_kind,
+                data_class=data_class,
+                tools=False,
+                citation=str((request.get("program") or {}).get("query_text") or ""),
+                complaint_text=None,
+            )
+        if gate.get("status") != "available" or gate.get("effectful") is not True:
+            refused = "unavailable" if gate.get("status") == "unavailable" else "refused"
+            base.update(status=refused, error_code=str(gate.get("code") or "consent_missing"), gate={
+                "status": gate.get("status"), "code": gate.get("code"), "policy_read": gate.get("policy_read"),
+                "provider_loader_called": gate.get("provider_loader_called"),
+            }, remote_dispatched=False, resume=_resume_for([{"status": refused, "source_family": ""}]))
+            return base
+    elif query_vector:
+        base.update(status="unavailable", error_code="local_inference_refused", gate=gate,
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}]))
+        return base
+
+    explicit_local = local_rows is not None or isinstance(offline_cache, dict) or bool(index_path)
+    if mode != RETRIEVAL_MODE_LIVE and not explicit_local:
+        base.update(status="unavailable", error_code="offline_asset_missing", gate=gate, remote_dispatched=False,
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}]))
+        return base
+    cache = _local_cache_from_rows(request, local_rows, offline_cache if isinstance(offline_cache, dict) else None)
+    law_query_date = request.get("law_query_date")
+    plan = request.get("corpus_plan") if isinstance(request.get("corpus_plan"), Mapping) else {}
+    query = str((request.get("program") or {}).get("query_text") or "")
+    operations: List[Dict[str, Any]] = []
+    candidates: List[Dict[str, Any]] = []
+    for family, api_name in families:
+        record = _parameter_record(request, family, api_name, max_results=bounded_results, timeout_seconds=timeout_value, max_bytes=max_bytes)
+        operation: Dict[str, Any] = {
+            "source_family": family,
+            "parameter_api": api_name,
+            "parameters": record["parameters"],
+            "backend_allowed": api_name in allowed,
+            "backend_invoked": False,
+            "model_inference_used": False,
+            "commoncrawl_initialized": False,
+            "corpus_download_started": False,
+            "deadline_seconds": timeout_value,
+            "max_results": bounded_results,
+            "max_bytes": max_bytes,
+            "withheld": [],
+            "candidate_count": 0,
+        }
+        if api_name not in allowed:
+            operation.update(status="unavailable", error_code="backend_not_allowed")
+            operations.append(operation)
+            continue
+        lookup_mode = RETRIEVAL_MODE_CACHE if mode != RETRIEVAL_MODE_LIVE else RETRIEVAL_MODE_LIVE
+        if mode == RETRIEVAL_MODE_OFFLINE and index_path and family == CORPUS_FAMILY_US_CODE and not local_rows:
+            lookup_mode = RETRIEVAL_MODE_OFFLINE
+        try:
+            envelope = lookup_bounded_legal_corpus(
+                source_family=family,
+                query=query,
+                retrieval_mode=lookup_mode,
+                jurisdiction=str(request.get("jurisdiction") or ""),
+                state=str(plan.get("state_code") or "") or None,
+                court_jurisdiction=record["parameters"].get("jurisdiction") if family == CORPUS_FAMILY_COURT_RULE else None,
+                max_results=bounded_results,
+                timeout_seconds=timeout_value,
+                offline_cache=cache if lookup_mode != RETRIEVAL_MODE_LIVE else None,
+                index_path=index_path if lookup_mode == RETRIEVAL_MODE_OFFLINE else None,
+                collection_name=collection_name,
+                query_vector=query_vector if lookup_mode == RETRIEVAL_MODE_LIVE else None,
+                contains_private_facts=contains_private_facts if lookup_mode == RETRIEVAL_MODE_LIVE else False,
+                privacy_policy_accepted=privacy_policy_accepted if lookup_mode == RETRIEVAL_MODE_LIVE else False,
+                live_backend="corpus",
+            )
+        except Exception:
+            envelope = {"status": "unavailable", "error_code": "backend_unavailable", "results": []}
+        operation["backend_invoked"] = True
+        base["backend_invoked"] = True
+        if lookup_mode == RETRIEVAL_MODE_LIVE:
+            base["remote_dispatched"] = True
+            operation["model_inference_used"] = False
+        reasons: List[str] = []
+        owned: List[Dict[str, Any]] = []
+        for row in envelope.get("results") or []:
+            if not isinstance(row, Mapping):
+                reasons.append("source_text_missing")
+                operation["withheld"].append({"reason": "source_text_missing"})
+                continue
+            candidate, reason = _owned_source_candidate(row, law_query_date=law_query_date, max_bytes=max_bytes)
+            if candidate is None:
+                reasons.append(reason)
+                operation["withheld"].append({"reason": reason, "passage_status": row.get("passage_status"), "provenance_status": row.get("provenance_status")})
+                continue
+            candidate["parameter_api"] = api_name
+            candidate["source_family"] = family
+            owned.append(candidate)
+        status = _operation_status(str(envelope.get("status") or ""), reasons, owned)
+        if status == "unavailable" and "byte_bound_exceeded" in reasons and not owned:
+            error_code = "byte_bound_exceeded"
+        else:
+            error_code = str(envelope.get("error_code") or "")
+        if status == "missing_edition":
+            error_code = "missing_edition"
+        operation.update(status=status, error_code=error_code, envelope_status=str(envelope.get("status") or ""), candidate_count=len(owned))
+        candidates.extend(owned[:bounded_results])
+        operations.append(operation)
+        if len(candidates) >= bounded_results:
+            candidates = candidates[:bounded_results]
+            break
+    if not families:
+        base.update(status="empty", error_code="", operations=[], candidates=[], gate=gate, resume=_resume_for([{"status": "empty", "source_family": ""}]))
+        return base
+    base["model_inference_used"] = any(bool(item.get("model_inference_used")) for item in operations)
+    base.update(
+        status=_roll_up_status(operations),
+        error_code=next((str(item.get("error_code") or "") for item in operations if item.get("status") == _roll_up_status(operations) and item.get("error_code")), ""),
+        candidates=candidates,
+        operations=operations,
+        gate={"status": gate.get("status"), "code": gate.get("code"), "policy_read": bool(gate.get("policy_read")), "provider_loader_called": bool(gate.get("provider_loader_called"))},
+        resume=_resume_for(operations),
+        result_count=len(candidates),
+        bounds={"max_results": bounded_results, "timeout_seconds": timeout_value, "max_bytes": max_bytes},
+    )
+    return base
+
+
 def search_legal_authority_program(
     program: Dict[str, Any],
     *,
@@ -4109,6 +4544,8 @@ __all__ = [
     "adapt_sourced_legal_requirements",
     "intake_legal_selection",
     "build_bounded_legal_acquisition_request",
+    "acquire_bounded_canonical_legal_sources",
+    "CANONICAL_CORPUS_PARAMETER_APIS",
     "unresolved_legal_requirement",
     "legal_requirement_search_plan",
     "lookup_bounded_legal_corpus",
