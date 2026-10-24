@@ -144,6 +144,7 @@ class Mediator:
 		self.denoiser = ComplaintDenoiser(mediator=self)
 		self.legal_graph_builder = LegalGraphBuilder(mediator=self)
 		self.neurosymbolic_matcher = NeurosymbolicMatcher(mediator=self)
+		self._legal_evidence_hook_contexts = {}
 		self.workflow_actions = WorkflowActionService(
 			self,
 			recovery_action_builder=lambda *args, **kwargs: _build_document_grounding_recovery_action(
@@ -14473,6 +14474,47 @@ class Mediator:
 		"""Retained compatibility refusal; use the source-bound canonical role hook."""
 		return {'applied':False, 'graph_changed':False, 'intake_complete':False,
 			'error_code':'binding_missing', 'successful_empty':False}
+
+	def bind_legal_evidence_hook_context(self, **fields):
+		"""Opt-in host context for a legal or evidence operation.
+
+		Legacy intake and hook callers do not pass through this method.
+		The returned receipt has opaque ids and hashes only.
+		"""
+		from .hook_runtime import HookContextError, bind_hook_execution_context
+		payload = dict(fields)
+		payload.setdefault('privacy_context', getattr(self, '_interview_privacy_context', None))
+		if 'session_revision' not in payload:
+			meta = getattr(self.workflow_actions, '_interview_meta', None) or {}
+			payload['session_revision'] = int(meta.get('session_revision') or 0) if isinstance(meta, dict) else 0
+		try:
+			context = bind_hook_execution_context(host=self, **payload)
+		except HookContextError as exc:
+			return {'bound': False, 'code': exc.code, 'receipt': None, 'provider_invoked': False}
+		self._legal_evidence_hook_contexts[context.operation_id] = context
+		return {'bound': True, 'code': 'context_bound', 'receipt': context.public_receipt(), 'provider_invoked': False}
+
+	def dispatch_legal_evidence_hook(self, operation_id, *, now, effect=None, **observed):
+		"""Validate the bound context. This seam does not dispatch an effect."""
+		from .hook_runtime import authorize_hook_execution
+		context = getattr(self, '_legal_evidence_hook_contexts', {}).get(operation_id)
+		privacy = observed.pop('privacy_context', getattr(self, '_interview_privacy_context', None))
+		decision = authorize_hook_execution(
+			context,
+			privacy_context=privacy,
+			now=now,
+			host=self,
+			effect=None,
+			**observed,
+		)
+		# A caller-supplied effect is ignored. Activation belongs to a later task.
+		decision['effect_dispatched'] = False
+		decision['provider_invoked'] = False
+		decision['ignored_effect'] = effect is not None
+		if decision.get('receipt') is not None:
+			self.log('legal_evidence_hook_context', operation_id=operation_id, code=decision['code'],
+				prompt_logged=False, response_logged=False)
+		return decision
 
 	def log(self, event_type, **data):
 		self.state.log.append({
