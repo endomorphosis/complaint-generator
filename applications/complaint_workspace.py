@@ -8840,6 +8840,7 @@ class ComplaintWorkspaceService:
         local_rows: Optional[Dict[str, Any]] = None,
         cancelled: bool = False,
         retrieval_mode: str = "cache",
+        storage_available: Optional[bool] = None,
         context_updates: Optional[Dict[str, Any]] = None,
         dependency_change: Optional[Dict[str, Any]] = None,
         effect_receipt: Optional[Dict[str, Any]] = None,
@@ -8867,7 +8868,7 @@ class ComplaintWorkspaceService:
             "source_complaint_text": narrative_text,
             "candidate_claims": list(claims),
         }
-        storage_available = self._legal_research_storage_available()
+        storage_available = self._legal_research_storage_available() if storage_available is None else bool(storage_available)
         fingerprint = self._legal_research_fingerprint(
             case_id=case_id,
             narrative_text=narrative_text,
@@ -13698,8 +13699,16 @@ class ComplaintWorkspaceService:
         invocation_id: str,
         case_id: str,
         result_acceptor: Optional[Any] = None,
+        bound_graph_revision: Optional[str] = None,
+        current_graph_revision: Optional[str] = None,
+        bound_session_revision: Optional[int] = None,
+        current_session_revision: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Load the current persisted policy again before accepting a late result."""
+        """Load the current persisted policy again before accepting a late result.
+
+        A supplied bound revision is compared with the saved graph and session.
+        A mismatch is stale and does not call the result acceptor.
+        """
 
         from mediator.hook_runtime import accept_late_hook_result
 
@@ -13708,13 +13717,414 @@ class ComplaintWorkspaceService:
         def reader() -> Dict[str, Any]:
             return self.read_persisted_owner_case_policy(resolved_user_id, case_id=case_id)
 
+        if bound_graph_revision is not None or bound_session_revision is not None:
+            anchor = self._adverse_public_anchor(resolved_user_id)
+            if current_graph_revision is None:
+                current_graph_revision = str(anchor.get("graph_revision") or "")
+            if current_session_revision is None:
+                current_session_revision = int(anchor.get("session_revision") or 0)
         return accept_late_hook_result(
             policy_reader=reader,
             invocation_id=invocation_id,
             owner_id=resolved_user_id,
             case_id=case_id,
             result_acceptor=result_acceptor,
+            bound_graph_revision=bound_graph_revision,
+            current_graph_revision=current_graph_revision,
+            bound_session_revision=bound_session_revision,
+            current_session_revision=current_session_revision,
         )
+
+    def _adverse_public_anchor(self, user_id: str) -> Dict[str, Any]:
+        """Graph token, pending inquiry, and snapshot head. Reads do not dispatch."""
+
+        state = self._load_state(user_id)
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else {}
+        graph = projection.get("knowledge_graph") if isinstance(projection.get("knowledge_graph"), dict) else {}
+        token = ""
+        if graph:
+            try:
+                from complaint_phases.knowledge_graph import KnowledgeGraph
+                from mediator.hook_runtime import graph_revision_token
+
+                token = graph_revision_token(KnowledgeGraph.from_dict(graph))
+            except Exception:
+                token = ""
+        head_revision = None
+        head_code = "no_committed_head"
+        try:
+            loaded = self.load_complete_interview_snapshot(user_id)
+            snapshot = loaded.get("snapshot") if isinstance(loaded.get("snapshot"), dict) else {}
+            head_revision = snapshot.get("revision")
+            head_code = "available" if head_revision else "no_committed_head"
+        except WorkspacePersistenceError as exc:
+            head_code = str(exc.code or "unavailable")
+        return {
+            "graph_revision": token,
+            "session_revision": int(projection.get("session_revision") or 0),
+            "pending_inquiry": {
+                "inquiry_id": pending.get("inquiry_id"),
+                "revision": pending.get("revision"),
+                "question": pending.get("question"),
+                "objective_id": pending.get("objective_id"),
+                "target_id": pending.get("target_id"),
+            },
+            "head_revision": head_revision,
+            "head_code": head_code,
+        }
+
+    def authenticate_interview_snapshot_key(
+        self,
+        user_id: str,
+        *,
+        key: bytes,
+        key_id: str,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Try one caller key against the committed snapshot. A miss does not replace the head."""
+
+        from integrations.ipfs_datasets.storage import InterviewSnapshotError, load_interview_snapshot
+
+        context = self._interview_snapshot_key(user_id, case_id)
+        directory = self.interview_snapshot_directory(str(context["tenant_id"]), str(context["case_id"]))
+        try:
+            load_interview_snapshot(
+                directory,
+                protection="user_chosen_encrypted",
+                tenant_id=str(context["tenant_id"]),
+                case_id=str(context["case_id"]),
+                principal_id=str(context["principal_id"]),
+                key=key,
+                key_id=key_id,
+            )
+        except InterviewSnapshotError as exc:
+            return {
+                "authenticated": False,
+                "code": str(exc.code or "authentication_failed"),
+                "public_status": str(exc.public_status or "recoverable"),
+                "head_replaced": False,
+                "legal_completion": False,
+            }
+        return {"authenticated": True, "code": "authenticated", "head_replaced": False, "legal_completion": False}
+
+    def run_public_adverse_outcome(
+        self,
+        user_id: Optional[str],
+        kind: str,
+        *,
+        deadline_seconds: float = 30.0,
+        repository: Optional[Path] = None,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Exercise one adverse hook or storage outcome through public operations.
+
+        The last committed graph token, pending inquiry, and snapshot head stay
+        in place. Legal completion is never synthesized. Owned children are
+        reaped; provider processes and the network are not started.
+        """
+
+        from mediator.hook_runtime import (
+            PUBLIC_ADVERSE_OUTCOMES,
+            OwnedProcessGuard,
+            reject_public_model_proposal,
+        )
+
+        resolved = str(user_id or DEFAULT_USER_ID)
+        guard = OwnedProcessGuard(deadline_seconds)
+        before = self._adverse_public_anchor(resolved)
+        outcome: Dict[str, Any] = {
+            "kind": kind,
+            "code": "unsupported_adverse_case",
+            "status": "unavailable",
+            "legal_completion": False,
+            "proof": False,
+            "legal_sufficiency": False,
+            "requirements_satisfied": False,
+            "backend_completed": False,
+            "provider_invoked": False,
+            "provider_process_started": False,
+            "network_touched": False,
+            "resume_possible": False,
+            "nonrecoverable_boundary": "unsupported_adverse_case",
+            "next_action": "report_unsupported_outcome",
+        }
+        try:
+            guard.spawn_owned_idle_child()
+            if guard.expired():
+                outcome.update(code="deadline_elapsed", status="timeout", resume_possible=True,
+                               nonrecoverable_boundary=None, next_action="retry_within_deadline")
+            elif kind not in PUBLIC_ADVERSE_OUTCOMES:
+                outcome["capability"] = "unavailable"
+            elif kind == "malformed_model_proposal":
+                rejected = reject_public_model_proposal({"requirements_satisfied": True, "tools": ["shell"]})
+                outcome.update(rejected)
+                outcome["status"] = "refused"
+            elif kind in {"late_model_proposal", "consent_revocation"}:
+                outcome.update(self._adverse_model_timing(resolved, kind, case_id=case_id))
+            elif kind == "wrong_key":
+                probed = self.authenticate_interview_snapshot_key(
+                    resolved, key=os.urandom(32), key_id="wrong-key", case_id=case_id,
+                )
+                boundary = None if probed.get("code") == "authentication_failed" and before.get("head_revision") else "no_committed_head"
+                outcome.update({
+                    "code": probed.get("code") or "authentication_failed",
+                    "status": "refused",
+                    "resume_possible": before.get("head_revision") is not None,
+                    "nonrecoverable_boundary": "wrong_key_cannot_open_head" if probed.get("code") == "authentication_failed" else boundary,
+                    "next_action": "retry_with_case_key" if before.get("head_revision") else "commit_snapshot",
+                    "head_replaced": False,
+                })
+            elif kind == "legal_source_outage":
+                receipt = self.run_legal_research(
+                    resolved,
+                    storage_available=False,
+                    retrieval_mode="cache",
+                    dependency_change={"source_outage": True},
+                )
+                outcome.update({
+                    "code": str(receipt.get("error_code") or "storage_unavailable"),
+                    "status": str(receipt.get("status") or "unavailable"),
+                    "proof": False,
+                    "legal_sufficiency": False,
+                    "requirements_satisfied": False,
+                    "backend_completed": False,
+                    "legal_completion": False,
+                    "provider_invoked": False,
+                    "resume_possible": True,
+                    "nonrecoverable_boundary": None,
+                    "next_action": str(receipt.get("next_action") or "retry_unavailable"),
+                    "stored_as_answer": False,
+                })
+            elif kind == "interrupted_snapshot":
+                try:
+                    self.commit_complete_grounded_snapshot(
+                    resolved,
+                    case_id=case_id,
+                    fail_before_head=True,
+                    expected_revision=None if before.get("head_revision") is None else str(before.get("head_revision")),
+                )
+                    outcome.update(code="durability_unproven", status="unavailable")
+                except WorkspacePersistenceError as exc:
+                    outcome.update(code=str(exc.code or "durability_unproven"), status=str(exc.public_status or "recoverable"))
+                outcome.update({
+                    "resume_possible": True,
+                    "nonrecoverable_boundary": None,
+                    "next_action": "retry_snapshot_commit",
+                    "head_replaced": False,
+                    "legal_completion": False,
+                })
+            elif kind == "corrupt_replica":
+                outcome.update(self._adverse_corrupt_replica(resolved, repository, case_id=case_id))
+        except WorkspacePersistenceError as exc:
+            outcome.update({
+                "code": str(exc.code or "unavailable"),
+                "status": str(exc.public_status or "unavailable"),
+                "resume_possible": exc.public_status != "nonrecoverable",
+                "nonrecoverable_boundary": None if exc.public_status != "nonrecoverable" else str(exc.code),
+                "next_action": "retry_unavailable",
+            })
+        finally:
+            children = guard.cleanup()
+        after = self._adverse_public_anchor(resolved)
+        preserved = {
+            "graph_revision": before.get("graph_revision") == after.get("graph_revision"),
+            "pending_inquiry": before.get("pending_inquiry") == after.get("pending_inquiry"),
+            "head_revision": before.get("head_revision") == after.get("head_revision"),
+            "session_revision": before.get("session_revision") == after.get("session_revision"),
+        }
+        outcome["before"] = before
+        outcome["after"] = after
+        outcome["preserved"] = preserved
+        outcome["owned_children"] = children
+        outcome["legal_completion"] = False
+        outcome["proof"] = False
+        outcome["legal_sufficiency"] = False
+        outcome["requirements_satisfied"] = False
+        outcome["backend_completed"] = False
+        outcome["provider_process_started"] = False
+        outcome["network_touched"] = False
+        if children.get("status") == "unavailable" and not children.get("pids"):
+            outcome["owned_child_capability"] = "unavailable"
+        else:
+            outcome["owned_child_capability"] = "reaped"
+        return outcome
+
+    def _adverse_model_timing(self, user_id: str, kind: str, *, case_id: Optional[str]) -> Dict[str, Any]:
+        """Authorize a synthetic in-process loader, then refuse the late or revoked result."""
+
+        policy = self.get_privacy_policy(user_id)
+        bound_case = str(case_id or policy.get("case_id") or user_id)
+        self.set_privacy_policy(user_id, "grok", case_id=bound_case)
+        submitted: list[Any] = []
+
+        def loader() -> Dict[str, Any]:
+            return {"status": "available", "synthetic": True, "live_model_identity_verified": False}
+
+        def submit(query: Mapping[str, Any]) -> None:
+            submitted.append(dict(query))
+
+        prepared = self.dispatch_consented_hook_query(
+            user_id,
+            purpose="extract_facts",
+            provider_kind="grok_inference",
+            data_class="raw_intake",
+            provider_loader=loader,
+            query_submitter=submit,
+            case_id=bound_case,
+            private_fields={"source_text": "synthetic gap", "target_ref": "target.adverse"},
+        )
+        invocation_id = str(prepared.get("invocation_id") or "")
+        accepted: list[str] = []
+        if kind == "consent_revocation":
+            self.set_privacy_policy(user_id, "local", case_id=bound_case)
+            late = self.accept_late_consented_hook_result(
+                user_id,
+                invocation_id=invocation_id,
+                case_id=bound_case,
+                result_acceptor=lambda: accepted.append("accepted"),
+            )
+            code = str(late.get("code") or "consent_revoked")
+        else:
+            late = self.accept_late_consented_hook_result(
+                user_id,
+                invocation_id=invocation_id,
+                case_id=bound_case,
+                result_acceptor=lambda: accepted.append("accepted"),
+                bound_graph_revision="bound-revision-not-current",
+                bound_session_revision=0,
+            )
+            code = str(late.get("code") or "stale_revision")
+        return {
+            "code": code,
+            "status": "refused",
+            "accepted": False,
+            "acceptor_called": bool(accepted),
+            "policy_read": bool(late.get("policy_read")),
+            "live_model_identity_verified": False,
+            "synthetic_transport": True,
+            "query_count": len(submitted),
+            "resume_possible": True,
+            "nonrecoverable_boundary": None,
+            "next_action": "continue_pending_inquiry",
+            "legal_completion": False,
+            "proof": False,
+            "provider_invoked": False,
+            "provider_process_started": False,
+        }
+
+    def _adverse_corrupt_replica(self, user_id: str, repository: Optional[Path], *, case_id: Optional[str]) -> Dict[str, Any]:
+        """Publish one fixture replica that returns corrupt bytes and refuse to restore it."""
+
+        from integrations.ipfs_datasets.storage import replica_policy
+        from integrations.private_storage import PrivateStorageError
+
+        if repository is None:
+            return {
+                "code": "replica_repository_required",
+                "status": "unavailable",
+                "capability": "unavailable",
+                "resume_possible": True,
+                "nonrecoverable_boundary": None,
+                "next_action": "supply_private_repository",
+                "legal_completion": False,
+            }
+
+        class _CorruptFixture:
+            provider_class = "fixture"
+            fixture_provider = True
+
+            def __init__(self) -> None:
+                self.frame = b""
+                self.version = ""
+
+            def place(self, *, digest: str, version: str, frame: bytes, timeout_seconds: float | None = None) -> Dict[str, Any]:
+                del digest, timeout_seconds
+                self.frame = b"\xff" + bytes(frame)
+                self.version = version
+                return {"status": "stored", "cid": "bafyfixturecorrupt"}
+
+            def readback(self, *, digest: str, version: str, timeout_seconds: float | None = None) -> Dict[str, Any]:
+                del digest, version, timeout_seconds
+                return {"status": "available", "frame": self.frame, "version": self.version, "cid": "bafyfixturecorrupt"}
+
+        corrupt = _CorruptFixture()
+        policy = replica_policy(desired_replicas=1, minimum_replicas=1, mode="private_remote")
+        state = self._load_state(user_id)
+        narrative = _narrative_record(state)
+        text = str(narrative.get("text") or "synthetic").encode("utf-8")
+        try:
+            published = self.publish_encrypted_replicas(
+                user_id,
+                repository,
+                case_id=case_id,
+                policy=policy,
+                revision="adverse-r1",
+                complaint=text,
+                fact_graph=b"graph:last-valid",
+                proof=b"proof:not-legal-completion",
+                providers={"fixture-corrupt": corrupt},
+                timeout_seconds=1,
+            )
+        except (PrivateStorageError, ValueError, WorkspacePersistenceError) as exc:
+            code = getattr(exc, "code", None) or "replica_unavailable"
+            return {
+                "code": str(code),
+                "status": "unavailable",
+                "resume_possible": True,
+                "nonrecoverable_boundary": None,
+                "next_action": "retry_unavailable",
+                "legal_completion": False,
+                "published": False,
+            }
+        ledger = Path(repository) / "replica-ledger" / "primary.frame"
+        primary_existed = ledger.is_file()
+        primary_bytes = ledger.read_bytes() if primary_existed else b""
+        if primary_existed:
+            ledger.unlink()
+        restored = None
+        error_code = "replica_unavailable"
+        try:
+            restored = self.restore_encrypted_workspace(
+                user_id,
+                repository,
+                case_id=case_id,
+                providers={"fixture-corrupt": corrupt},
+                timeout_seconds=1,
+            )
+            error_code = "replica_restored"
+        except PrivateStorageError as exc:
+            error_code = str(exc.code or "replica_unavailable")
+        primary_after = ledger.read_bytes() if ledger.is_file() else b""
+        corrupt_used = restored is not None and restored.get("source") == "replica"
+        if corrupt_used or (primary_after and primary_after != primary_bytes):
+            return {
+                "code": "corrupt_replica_applied",
+                "status": "unavailable",
+                "published": bool(published),
+                "corrupt_replica_used": True,
+                "resume_possible": False,
+                "nonrecoverable_boundary": "corrupt_replica_applied",
+                "next_action": "do_not_treat_replica_as_legal_completion",
+                "legal_completion": False,
+                "proof": False,
+                "network_durable": False,
+            }
+        if primary_existed and not ledger.is_file():
+            ledger.write_bytes(primary_bytes)
+        return {
+            "code": error_code,
+            "status": "unavailable",
+            "published": bool(published),
+            "corrupt_replica_used": False,
+            "primary_preserved": (not primary_existed) or ledger.read_bytes() == primary_bytes,
+            "resume_possible": True,
+            "nonrecoverable_boundary": "corrupt_replica_not_a_restore_source",
+            "next_action": "resume_from_local_snapshot_head",
+            "legal_completion": False,
+            "proof": False,
+            "network_durable": False,
+        }
 
     def inventory_private_data_classes(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Describe private case classes without reading other sessions, evidence, exports, or secrets."""
