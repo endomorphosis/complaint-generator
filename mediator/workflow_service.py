@@ -417,6 +417,10 @@ class WorkflowActionService:
 		meta = dict(self._interview_meta)
 		denoiser = getattr(mediator, "denoiser", None)
 		history = list(getattr(denoiser, "questions_asked", []) or [])
+		pending = meta.get("pending_inquiry")
+		if isinstance(pending, dict):
+			pending = self._explicit_grounding(pending)
+			meta["pending_inquiry"] = pending
 		projection = {
 			"schema_version": self.SESSION_PROJECTION_VERSION,
 			"contract_version": self.INTERVIEW_CONTRACT_VERSION,
@@ -425,7 +429,7 @@ class WorkflowActionService:
 			"phase": phase_manager.current_phase.value,
 			"narrative_extraction_count": meta.get("narrative_extraction_count", 0),
 			"question_revision": meta.get("question_revision", 0),
-			"pending_inquiry": meta.get("pending_inquiry"),
+			"pending_inquiry": pending,
 			"answered_inquiries": list(meta.get("answered_inquiries") or []),
 			"unknown_reasons": list(meta.get("unknown_reasons") or []),
 			"unavailable_reasons": list(meta.get("unavailable_reasons") or []),
@@ -485,7 +489,7 @@ class WorkflowActionService:
 			"session_revision": int(projection.get("session_revision") or 0),
 			"narrative_extraction_count": int(projection.get("narrative_extraction_count") or 0),
 			"question_revision": int(projection.get("question_revision") or 0),
-			"pending_inquiry": projection.get("pending_inquiry"),
+			"pending_inquiry": self._explicit_grounding(projection.get("pending_inquiry")),
 			"answered_inquiries": list(projection.get("answered_inquiries") or []),
 			"unknown_reasons": list(projection.get("unknown_reasons") or []),
 			"unavailable_reasons": list(projection.get("unavailable_reasons") or []),
@@ -564,21 +568,226 @@ class WorkflowActionService:
 		return None
 
 	def _inquiry_from_question(self, question: Dict[str, Any], *, revision: int) -> Dict[str, Any]:
-		qtype = str(question.get("type") or "clarification")
+		question = question if isinstance(question, dict) else {}
+		qtype = str(question.get("type") or question.get("question_type") or "clarification")
 		text = str(question.get("question") or "").strip()
 		digest = hashlib.sha256(f"{qtype}|{text}".encode("utf-8")).hexdigest()[:16]
 		reasons = []
 		if not text:
 			reasons.append("question_text_unavailable")
-		return {
-			"inquiry_id": f"inq-{digest}",
+		selected = self._host_selection_for_question(question)
+		host_inquiry_id = str(question.get("inquiry_id") or "").strip()
+		if not host_inquiry_id.startswith("inq-") or self._reference_is_model_authored(host_inquiry_id, question):
+			selected_id = str((selected or {}).get("inquiry_id") or "").strip()
+			if selected_id.startswith("inq-") and not self._reference_is_model_authored(selected_id, question):
+				host_inquiry_id = selected_id
+			else:
+				host_inquiry_id = f"inq-{digest}"
+		inquiry = {
+			"inquiry_id": host_inquiry_id,
 			"revision": int(revision),
 			"question": text,
 			"question_type": qtype,
 			"kind": "graph",
 			"unknown_reasons": reasons,
 			"legal_sufficiency": False,
+			"objective_id": self._host_binding(question, selected, "objective_id"),
+			"target_id": self._host_binding(question, selected, "target_id"),
+			"target_revision": self._host_binding(question, selected, "target_revision"),
+			"why_it_matters": self._host_why(question, selected),
+			"expected_answer_contract": self._host_contract(question, selected, "expected_answer_contract"),
+			"expected_update_contract": self._host_contract(question, selected, "expected_update_contract"),
+			"source_references": self._host_source_references(question, selected),
 		}
+		return self._explicit_grounding(inquiry)
+
+	def _host_selection_for_question(self, question: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+		"""Read the denoiser selection contract for this question.
+
+		A stored explained inquiry is used only when it names the same host
+		target. The contract may supply an objective id the question itself did
+		not carry. It must not replace a target the question did not select,
+		and a model proposal is never a selection.
+		"""
+		if self._question_is_model_authored(question):
+			return None
+		target_id = str(question.get("target_id") or "").strip()
+		if target_id and self._reference_is_model_authored(target_id, question):
+			target_id = ""
+		candidates: List[Dict[str, Any]] = []
+		phase_manager = getattr(self._mediator, "phase_manager", None)
+		getter = getattr(phase_manager, "get_phase_data", None)
+		if callable(getter):
+			try:
+				current = getter(ComplaintPhase.INTAKE, "current_explained_inquiry")
+				pool = getter(ComplaintPhase.INTAKE, "explained_inquiries") or []
+			except Exception:
+				current = None
+				pool = []
+			if isinstance(current, dict):
+				candidates.append(current)
+			if isinstance(pool, list):
+				candidates.extend(item for item in pool if isinstance(item, dict))
+		question_text = str(question.get("question") or "").strip()
+		inquiry_id = str(question.get("inquiry_id") or "").strip()
+		for item in candidates:
+			if self._question_is_model_authored(item):
+				continue
+			same_target = bool(target_id) and target_id == str(item.get("target_id") or "").strip()
+			same_inquiry = bool(inquiry_id) and inquiry_id == str(item.get("inquiry_id") or "").strip()
+			same_text = bool(question_text) and question_text == str(item.get("question") or "").strip()
+			if same_target or same_inquiry or (same_text and str(item.get("objective_id") or "").strip()):
+				return item
+		if str(question.get("objective_id") or "").strip() and target_id:
+			return None
+		denoiser = getattr(self._mediator, "denoiser", None)
+		builder = getattr(denoiser, "_explained_inquiry_from_candidate", None)
+		if not callable(builder) or not target_id:
+			return None
+		try:
+			explained = builder(question)
+		except Exception:
+			return None
+		if not isinstance(explained, dict):
+			return None
+		if str(explained.get("target_id") or "").strip() != target_id:
+			return None
+		if self._reference_is_model_authored(str(explained.get("objective_id") or ""), question):
+			return None
+		return explained
+
+	def _question_is_model_authored(self, question: Dict[str, Any]) -> bool:
+		if not isinstance(question, dict):
+			return False
+		origin = str(question.get("origin") or question.get("record_type") or "").strip().lower()
+		return origin in {"model", "model_suggestion"}
+
+	def _reference_is_model_authored(self, value: str, question: Dict[str, Any]) -> bool:
+		text = str(value or "").strip()
+		if not text or not isinstance(question, dict):
+			return False
+		proposal = question.get("model_proposal") if isinstance(question.get("model_proposal"), dict) else {}
+		authored = {
+			str(proposal.get("wording") or "").strip(),
+			str(proposal.get("target_ref") or "").strip(),
+			str(proposal.get("graph_id") or "").strip(),
+			str(proposal.get("entity_id") or "").strip(),
+			str(proposal.get("objective_id") or "").strip(),
+			str(proposal.get("target_id") or "").strip(),
+		}
+		authored.discard("")
+		return text in authored
+
+	def _host_binding(self, question: Dict[str, Any], selected: Optional[Dict[str, Any]], key: str) -> Optional[str]:
+		if self._question_is_model_authored(question):
+			return None
+		for source in (question, selected if isinstance(selected, dict) else None):
+			if not isinstance(source, dict):
+				continue
+			value = str(source.get(key) or "").strip()
+			if value and not self._reference_is_model_authored(value, question):
+				return value
+		return None
+
+	def _host_why(self, question: Dict[str, Any], selected: Optional[Dict[str, Any]]) -> Optional[str]:
+		if self._question_is_model_authored(question):
+			return None
+		for source in (question, selected if isinstance(selected, dict) else None):
+			if not isinstance(source, dict):
+				continue
+			for key in ("why_it_matters", "why_answer_helps", "question_reason"):
+				value = str(source.get(key) or "").strip()
+				if value and not self._reference_is_model_authored(value, question):
+					return value
+		return None
+
+	def _host_contract(self, question: Dict[str, Any], selected: Optional[Dict[str, Any]], key: str) -> Optional[Dict[str, Any]]:
+		if self._question_is_model_authored(question):
+			return None
+		for source in (question, selected if isinstance(selected, dict) else None):
+			if not isinstance(source, dict):
+				continue
+			value = source.get(key)
+			if isinstance(value, dict):
+				return dict(value)
+		return None
+
+	def _host_source_references(self, question: Dict[str, Any], selected: Optional[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+		if self._question_is_model_authored(question):
+			return None
+		records: List[Any] = [question]
+		if isinstance(selected, dict):
+			records.append(selected)
+			candidate = selected.get("candidate")
+			if isinstance(candidate, dict):
+				records.append(candidate)
+		target = question.get("unresolved_target") if isinstance(question.get("unresolved_target"), dict) else None
+		if isinstance(target, dict):
+			records.append(target)
+		for record in records:
+			if not isinstance(record, dict):
+				continue
+			raw = record.get("source_references")
+			if not isinstance(raw, list):
+				raw = record.get("source_refs")
+			if not isinstance(raw, list):
+				continue
+			refs: List[Dict[str, Any]] = []
+			for item in raw:
+				if not isinstance(item, dict):
+					continue
+				origin = str(item.get("origin") or item.get("record_type") or "").strip().lower()
+				if origin in {"model", "model_suggestion"}:
+					continue
+				refs.append({
+					str(ref_key): ref_value
+					for ref_key, ref_value in item.items()
+					if ref_key not in {"text", "prompt", "wording", "narrative"}
+				})
+			return refs
+		return None
+
+	def _explicit_grounding(self, inquiry: Any) -> Any:
+		"""Keep host bindings. A thin legacy inquiry stays explicitly unknown."""
+		if not isinstance(inquiry, dict):
+			return inquiry
+		copied = dict(inquiry)
+		objective = str(copied.get("objective_id") or "").strip()
+		target = str(copied.get("target_id") or "").strip()
+		if objective and target and copied.get("grounding_status") != "unknown":
+			copied["grounding_status"] = "host_selected"
+			if not str(copied.get("target_revision") or "").strip():
+				copied["target_revision"] = "unknown"
+			if isinstance(copied.get("source_references"), list):
+				copied["source_references_status"] = copied.get("source_references_status") or "host_selected"
+			else:
+				copied["source_references"] = None
+				copied["source_references_status"] = "unknown"
+			return copied
+		if not objective:
+			copied["objective_id"] = "unknown"
+		if not target:
+			copied["target_id"] = "unknown"
+		if not str(copied.get("target_revision") or "").strip():
+			copied["target_revision"] = "unknown"
+		copied["grounding_status"] = "unknown"
+		if not str(copied.get("why_it_matters") or "").strip():
+			copied["why_it_matters"] = None
+		if not isinstance(copied.get("expected_answer_contract"), dict):
+			copied["expected_answer_contract"] = None
+		if not isinstance(copied.get("expected_update_contract"), dict):
+			copied["expected_update_contract"] = None
+		if isinstance(copied.get("source_references"), list):
+			copied["source_references_status"] = "host_selected"
+		else:
+			copied["source_references"] = None
+			copied["source_references_status"] = "unknown"
+		reasons = [str(item) for item in (copied.get("unknown_reasons") or []) if str(item or "").strip()]
+		if "grounding_unknown" not in reasons:
+			reasons.append("grounding_unknown")
+		copied["unknown_reasons"] = reasons
+		copied["legal_sufficiency"] = False
+		return copied
 
 	def _narrative_prompt_inquiry(self) -> Dict[str, Any]:
 		return {
