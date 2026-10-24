@@ -2651,6 +2651,253 @@ class _ComplaintWorkspaceHandlerBackend(Protocol):
     ) -> Dict[str, Any]: ...
 
 
+def _pending_inquiry_copy(state: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    pending = projection.get("pending_inquiry") if isinstance(projection, Mapping) else None
+    if isinstance(pending, Mapping):
+        return dict(pending)
+    controls = state.get("terminal_controls") if isinstance(state.get("terminal_controls"), Mapping) else {}
+    stored = controls.get("pending_inquiry") if isinstance(controls, Mapping) else None
+    return dict(stored) if isinstance(stored, Mapping) else None
+
+
+def _terminal_edit_receipt(
+    *,
+    status: str,
+    message: str,
+    error_code: Optional[str] = None,
+    pending_inquiry: Optional[Mapping[str, Any]] = None,
+    pending_reselected: bool = False,
+    correction: Optional[Mapping[str, Any]] = None,
+    graph_revision: str = "",
+    session_revision: int = 0,
+) -> Dict[str, Any]:
+    error = None
+    if error_code:
+        error = {"code": error_code, "resumable": error_code != "event_conflict", "legal_sufficiency": False}
+    return {
+        "contract_version": "terminal-graph-edit-v1",
+        "status": status,
+        "message": message,
+        "display_only": False,
+        "legal_sufficiency": False,
+        "awaiting_user": False,
+        "worker_stalled": False,
+        "pending_reselected": bool(pending_reselected),
+        "pending_inquiry": dict(pending_inquiry) if isinstance(pending_inquiry, Mapping) else None,
+        "graph_revision": graph_revision,
+        "session_revision": session_revision,
+        "correction": dict(correction) if isinstance(correction, Mapping) else None,
+        "error": error,
+    }
+
+
+def _edit_source_context(envelope: Mapping[str, Any], replacement: str, event_id: str) -> Dict[str, Any]:
+    from integrations.ipfs_datasets.types import source_byte_hash
+
+    message_id = f"edit-{event_id}"
+    return {
+        "source_text": replacement,
+        "source_kind": str(envelope.get("source_kind") or "user_statement"),
+        "source_id": message_id,
+        "message_id": message_id,
+        "assertion_status": "asserted",
+        "extractor_version": str(envelope.get("extractor_version") or "complaint-mediator"),
+        "source_hash": source_byte_hash(replacement),
+        "source_span": {
+            "start": 0,
+            "end": len(replacement.encode("utf-8")),
+            "text": replacement,
+            "unit": "byte",
+        },
+        "subject_key": str(envelope.get("subject_key") or "fact"),
+    }
+
+
+def _active_assertion_matches(knowledge: Any, answer: str) -> list[tuple[int, str, Dict[str, Any]]]:
+    ledger = knowledge.factual_ledger()
+    states = ledger.get("assertion_states") if isinstance(ledger.get("assertion_states"), Mapping) else {}
+    revisions = ledger.get("revisions") if isinstance(ledger.get("revisions"), list) else []
+    indexes: Dict[str, int] = {}
+    for record in revisions:
+        if not isinstance(record, Mapping):
+            continue
+        stable = str(record.get("stable_id") or record.get("new_stable_id") or "")
+        if stable:
+            indexes[stable] = max(indexes.get(stable, 0), int(record.get("revision_index") or 0))
+    matches: list[tuple[int, str, Dict[str, Any]]] = []
+    for stable_id, record in states.items():
+        if not isinstance(record, Mapping) or str(record.get("status") or "") != "active":
+            continue
+        envelope = record.get("envelope") if isinstance(record.get("envelope"), Mapping) else {}
+        span = envelope.get("source_span") if isinstance(envelope.get("source_span"), Mapping) else {}
+        text = str(span.get("text") or envelope.get("source_text") or "")
+        if text != answer:
+            continue
+        matches.append((indexes.get(str(stable_id), 0), str(stable_id), dict(envelope)))
+    return matches
+
+
+def _last_eligible_accepted_answer(state: Mapping[str, Any], knowledge: Any) -> Optional[Dict[str, Any]]:
+    """Last accepted answer that still has one active assertion."""
+
+    history = state.get("intake_history") if isinstance(state.get("intake_history"), list) else []
+    ineligible = {"skipped", "unknown", "refused", "deferred"}
+    for item in reversed(history):
+        if not isinstance(item, Mapping):
+            continue
+        disposition = str(item.get("disposition") or "accepted").strip().lower()
+        if disposition in ineligible:
+            continue
+        answer = str(item.get("answer") or "").strip()
+        if not answer or answer.lower() in _UNKNOWN_INTAKE_ANSWERS:
+            continue
+        stable_id = str(item.get("target_stable_id") or item.get("stable_id") or "").strip()
+        ledger = knowledge.factual_ledger()
+        states = ledger.get("assertion_states") if isinstance(ledger.get("assertion_states"), Mapping) else {}
+        if stable_id:
+            record = states.get(stable_id) if isinstance(states.get(stable_id), Mapping) else {}
+            if str(record.get("status") or "") == "active":
+                envelope = record.get("envelope") if isinstance(record.get("envelope"), Mapping) else {}
+                return {
+                    "question_id": str(item.get("question_id") or ""),
+                    "answer": answer,
+                    "stable_id": stable_id,
+                    "entity_id": str(record.get("entity_id") or ""),
+                    "envelope": dict(envelope),
+                    "history_audit": str(item.get("audit_id") or ""),
+                }
+        matches = _active_assertion_matches(knowledge, answer)
+        if not matches:
+            continue
+        _index, matched_id, envelope = sorted(matches)[-1]
+        record = states.get(matched_id) if isinstance(states.get(matched_id), Mapping) else {}
+        return {
+            "question_id": str(item.get("question_id") or ""),
+            "answer": answer,
+            "stable_id": matched_id,
+            "entity_id": str(record.get("entity_id") or ""),
+            "envelope": envelope,
+            "history_audit": str(item.get("audit_id") or ""),
+        }
+    return None
+
+
+def _append_correction_history(
+    state: Dict[str, Any],
+    target: Mapping[str, Any],
+    replacement: str,
+    receipt: Mapping[str, Any],
+) -> None:
+    question_id = str(target.get("question_id") or "")
+    answers = state.setdefault("intake_answers", {})
+    if not isinstance(answers, dict):
+        answers = {}
+        state["intake_answers"] = answers
+    if question_id:
+        answers[question_id] = replacement
+    history = state.setdefault("intake_history", [])
+    if not isinstance(history, list):
+        history = []
+        state["intake_history"] = history
+    history.append({
+        "question_id": question_id,
+        "answer": replacement,
+        "previous_answer": str(target.get("answer") or ""),
+        "disposition": "corrected",
+        "target_stable_id": str(receipt.get("replacement_stable_id") or ""),
+        "supersedes_stable_id": str(target.get("stable_id") or ""),
+        "captured_at": state.get("updated_at"),
+        "display_only": False,
+    })
+
+
+def _reselect_affected_pending(
+    actions: Any,
+    knowledge: Any,
+    target: Mapping[str, Any],
+    pending_before: Optional[Mapping[str, Any]],
+) -> tuple[Dict[str, Any], bool]:
+    meta = getattr(actions, "_interview_meta", None)
+    if not isinstance(meta, dict):
+        return dict(pending_before or {}), False
+    pending = dict(meta.get("pending_inquiry") or pending_before or {})
+    entity_id = str(target.get("entity_id") or "")
+    stable_id = str(target.get("stable_id") or "")
+    bound = str(pending.get("target_id") or "")
+    affected = bound not in {"", "unknown"} and bound in {entity_id, stable_id}
+    ledger = knowledge.factual_ledger()
+    for inquiry in ledger.get("inquiry_targets") or []:
+        if not isinstance(inquiry, Mapping):
+            continue
+        same_inquiry = str(inquiry.get("inquiry_id") or "") == str(pending.get("inquiry_id") or "")
+        same_target = str(inquiry.get("entity_id") or "") == entity_id or str(inquiry.get("stable_id") or "") == stable_id
+        if same_inquiry and same_target and str(inquiry.get("status") or "") == "reopened":
+            affected = True
+    if not affected:
+        meta["pending_inquiry"] = pending
+        return pending, False
+    question_text = str(pending.get("question") or "")
+    for question in ledger.get("reopened_questions") or []:
+        if not isinstance(question, Mapping):
+            continue
+        context = question.get("context") if isinstance(question.get("context"), Mapping) else {}
+        if str(context.get("inquiry_id") or "") == str(pending.get("inquiry_id") or ""):
+            question_text = str(question.get("question") or question_text)
+            break
+    revision = int(meta.get("question_revision") or pending.get("revision") or 0) + 1
+    meta["question_revision"] = revision
+    pending["question"] = question_text
+    pending["revision"] = revision
+    pending["reopened"] = True
+    pending["target_id"] = bound or entity_id
+    meta["pending_inquiry"] = pending
+    return pending, True
+
+
+def _note_terminal_edit_controls(
+    state: Dict[str, Any],
+    *,
+    pending: Mapping[str, Any],
+    question_id: str,
+    previous: str,
+    replacement: str,
+    target_stable_id: str,
+    replacement_stable_id: str,
+    graph_token: str,
+    session_revision: int,
+) -> None:
+    controls = state.get("terminal_controls")
+    if not isinstance(controls, dict):
+        controls = {}
+        state["terminal_controls"] = controls
+    controls.setdefault("schema", "terminal-controls-v1")
+    controls["paused"] = False
+    controls["pending_inquiry"] = dict(pending)
+    controls["objective_id"] = pending.get("objective_id")
+    controls["graph_revision"] = int(pending.get("revision") or 0)
+    narrative = state.get("original_complaint") if isinstance(state.get("original_complaint"), Mapping) else {}
+    controls["fingerprint"] = {
+        "inquiry_id": str(pending.get("inquiry_id") or ""),
+        "question_revision": int(pending.get("revision") or 0),
+        "session_revision": int(session_revision),
+        "history_len": len(state.get("intake_history") or []),
+        "narrative_revision": int(narrative.get("revision") or 0),
+        "objective_id": str(pending.get("objective_id") or ""),
+        "graph_revision_token": graph_token,
+    }
+    edits = list(controls.get("edits") or [])
+    edits.append({
+        "question_id": question_id,
+        "previous": previous,
+        "replacement": replacement,
+        "target_stable_id": target_stable_id,
+        "replacement_stable_id": replacement_stable_id,
+        "display_only": False,
+    })
+    controls["edits"] = edits
+
+
 class ComplaintWorkspaceRequestHandlers:
     """Request-facing mutations isolated from workspace state-shaping helpers.
 
@@ -2888,6 +3135,183 @@ class ComplaintWorkspaceRequestHandlers:
             if str(payload.get("message") or "").startswith("Let's start with the basics."):
                 payload["message"] = f"{_PRIVACY_MODE_NOTICE}\n\n{payload['message']}"
         return payload
+
+    def apply_terminal_graph_edit(
+        self,
+        user_id: Optional[str],
+        replacement: str,
+        *,
+        expected_graph_revision: Optional[str] = None,
+        expected_session_revision: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Correct the last eligible accepted answer on the shared factual graph.
+
+        Display history is not a second source of truth. The public correction
+        keeps the previous assertion and appends a revision. An unrelated
+        pending question stays pending. A pending question bound to the corrected
+        target is reopened. A stale graph or session revision is refused.
+        """
+
+        text = str(replacement or "").strip()
+        if not text:
+            return _terminal_edit_receipt(
+                status="refused",
+                message="Edit needs replacement text. The pending question is unchanged.",
+                error_code="correction_required",
+            )
+        try:
+            state = self._load_state(user_id)
+        except WorkspacePersistenceError as exc:
+            return _terminal_edit_receipt(
+                status="unavailable",
+                message=f"Edit is unavailable ({exc.code or 'unavailable'}). The pending question is unchanged.",
+                error_code=str(exc.code or "unavailable"),
+            )
+        user = str(state.get("user_id") or user_id or DEFAULT_USER_ID)
+        case_id = _state_case_id(state, user)
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else None
+        if not isinstance(projection, dict) or projection.get("schema_version") != "shared-interview-session-v1":
+            return _terminal_edit_receipt(
+                status="unavailable",
+                message="Edit is unavailable (session_missing). The pending question is unchanged.",
+                error_code="session_missing",
+                pending_inquiry=_pending_inquiry_copy(state),
+            )
+        try:
+            mediator = self.workspace._mediator_for_shared_interview(user, case_id)
+            actions = mediator.workflow_actions
+            if not actions.interview_started:
+                restored = actions.restore_session_projection(projection)
+                if restored.get("error"):
+                    code = str((restored.get("error") or {}).get("code") or "session_missing")
+                    return _terminal_edit_receipt(
+                        status="unavailable",
+                        message=f"Edit is unavailable ({code}). The pending question is unchanged.",
+                        error_code=code,
+                        pending_inquiry=_pending_inquiry_copy(state),
+                    )
+            actions.bind_interview_privacy(state.get("privacy_policy"), user_id=user, case_id=case_id)
+        except WorkspacePersistenceError as exc:
+            return _terminal_edit_receipt(
+                status="unavailable",
+                message=f"Edit is unavailable ({exc.code or 'unavailable'}). The pending question is unchanged.",
+                error_code=str(exc.code or "unavailable"),
+                pending_inquiry=_pending_inquiry_copy(state),
+            )
+        except Exception as exc:
+            return _terminal_edit_receipt(
+                status="unavailable",
+                message=f"Edit is unavailable ({type(exc).__name__}). The pending question is unchanged.",
+                error_code="capability_unavailable",
+                pending_inquiry=_pending_inquiry_copy(state),
+            )
+        from complaint_phases.phase_manager import ComplaintPhase
+
+        knowledge = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "knowledge_graph")
+        if knowledge is None or not hasattr(knowledge, "factual_ledger"):
+            return _terminal_edit_receipt(
+                status="unavailable",
+                message="Edit is unavailable (capability_unavailable). The pending question is unchanged.",
+                error_code="capability_unavailable",
+                pending_inquiry=_pending_inquiry_copy(state),
+            )
+        metadata = getattr(knowledge, "metadata", None)
+        if isinstance(metadata, dict) and not str(metadata.get("case_id") or "").strip():
+            metadata["case_id"] = case_id
+        target = _last_eligible_accepted_answer(state, knowledge)
+        pending_before = _pending_inquiry_copy(state)
+        if target is None:
+            return _terminal_edit_receipt(
+                status="refused",
+                message="Nothing to edit yet. The pending question is unchanged.",
+                error_code="missing_target",
+                pending_inquiry=pending_before,
+            )
+        from mediator.hook_runtime import graph_revision_token
+
+        current_token = graph_revision_token(knowledge)
+        current_session = int((actions._interview_meta or {}).get("session_revision") or 0)
+        graph_token = current_token if expected_graph_revision is None else str(expected_graph_revision)
+        session_revision = current_session if expected_session_revision is None else int(expected_session_revision)
+        event_id = "edit-" + hashlib.sha256(
+            f"{target['stable_id']}|{text}".encode("utf-8")
+        ).hexdigest()[:24]
+        receipt = mediator.apply_factual_correction(
+            action="correct",
+            target_stable_id=target["stable_id"],
+            replacement=text,
+            source_context=_edit_source_context(target.get("envelope") or {}, text, event_id),
+            event_id=event_id,
+            case_id=case_id,
+            expected_graph_revision=graph_token,
+            expected_session_revision=session_revision,
+        )
+        status = str(receipt.get("status") or "")
+        error = receipt.get("error") if isinstance(receipt.get("error"), dict) else {}
+        error_code = str(error.get("code") or "")
+        if status != "applied":
+            if error_code == "stale_target":
+                message = "Stale concurrent edit rejected. The pending inquiry was kept."
+            elif error_code == "missing_target":
+                message = "Nothing to edit yet. The pending question is unchanged."
+            elif status == "unavailable":
+                message = f"Edit is unavailable ({error_code or 'unavailable'}). The pending question is unchanged."
+            else:
+                message = f"Edit was refused ({error_code or status or 'refused'}). The pending question is unchanged."
+            return _terminal_edit_receipt(
+                status=status or "refused",
+                message=message,
+                error_code=error_code or None,
+                pending_inquiry=pending_before,
+                correction=receipt,
+            )
+        pending, reselected = _reselect_affected_pending(actions, knowledge, target, pending_before)
+        exported = actions.export_session_projection()
+        if not isinstance(exported, dict):
+            return _terminal_edit_receipt(
+                status="unavailable",
+                message="Edit is unavailable (projection_invalid). The pending question is unchanged.",
+                error_code="projection_invalid",
+                pending_inquiry=pending_before,
+                correction=receipt,
+            )
+        state["shared_interview"] = exported
+        if receipt.get("idempotent_replay") is not True:
+            _append_correction_history(state, target, text, receipt)
+        _note_terminal_edit_controls(
+            state,
+            pending=pending,
+            question_id=str(target.get("question_id") or ""),
+            previous=str(target.get("answer") or ""),
+            replacement=text,
+            target_stable_id=str(target.get("stable_id") or ""),
+            replacement_stable_id=str(receipt.get("replacement_stable_id") or ""),
+            graph_token=str(receipt.get("graph_revision") or ""),
+            session_revision=int(exported.get("session_revision") or 0),
+        )
+        try:
+            self.workspace._save_state(state)
+        except WorkspacePersistenceError as exc:
+            return _terminal_edit_receipt(
+                status="unavailable",
+                message=f"Edit is unavailable ({exc.code or 'durability_unproven'}). The pending question is unchanged.",
+                error_code=str(exc.code or "durability_unproven"),
+                pending_inquiry=pending_before,
+                correction=receipt,
+            )
+        if reselected:
+            message = "Edited the last recorded answer. The pending question was reopened because its target changed."
+        else:
+            message = "Edited the last recorded answer. The pending question is unchanged."
+        return _terminal_edit_receipt(
+            status="applied",
+            message=message,
+            pending_inquiry=pending,
+            pending_reselected=reselected,
+            correction=receipt,
+            graph_revision=str(receipt.get("graph_revision") or ""),
+            session_revision=int(exported.get("session_revision") or 0),
+        )
 
     def save_evidence(
         self,
@@ -7945,6 +8369,21 @@ class ComplaintWorkspaceService:
             question_id=question_id,
             expected_question_revision=expected_question_revision,
             interview_action=interview_action,
+        )
+
+    def apply_terminal_graph_edit(
+        self,
+        user_id: Optional[str],
+        replacement: str,
+        *,
+        expected_graph_revision: Optional[str] = None,
+        expected_session_revision: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        return self.request_handlers.apply_terminal_graph_edit(
+            user_id,
+            replacement,
+            expected_graph_revision=expected_graph_revision,
+            expected_session_revision=expected_session_revision,
         )
 
     def run_legal_research(
