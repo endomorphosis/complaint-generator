@@ -478,7 +478,7 @@ Implementation instructions:
 
 ## CIMP-MGND-19 Expose a public legal-research action in the terminal workflow
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
