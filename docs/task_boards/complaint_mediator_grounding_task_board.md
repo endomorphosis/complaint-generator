@@ -348,7 +348,7 @@ Implementation instructions:
 
 ## CIMP-MGND-14 Persist factual revisions through canonical private graph artifacts
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
