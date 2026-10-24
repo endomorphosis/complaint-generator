@@ -34,7 +34,7 @@ Implementation instructions:
 
 ## CIMP-MGND-02 Probe declared current SDK owner capabilities
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
