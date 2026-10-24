@@ -130,7 +130,7 @@ Implementation instructions:
 
 ## CIMP-GUI-05 Bind authenticated browser sessions and logout
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
