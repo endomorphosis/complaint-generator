@@ -1118,6 +1118,370 @@ def _clean_source_refs(value: Any) -> tuple[Optional[str], tuple[dict[str, str],
     return None, tuple(rows)
 
 
+HOOK_DISPATCH_TRACE_SCHEMA = "hook_dispatch_trace_v1"
+HOOK_STAGE_RECEIPT_SCHEMA = "hook_stage_receipt_v1"
+_TRACE_KINDS = ("operation", "request", "revision", "outcome")
+_TRACE_TERMINALS = frozenset({
+    "successful",
+    "empty",
+    "denied",
+    "malformed",
+    "timeout",
+    "cancelled",
+    "unavailable",
+})
+_SOURCE_SEARCH_STATES = frozenset({"empty", "failed", "found", "not_run"})
+_ADMISSION_STATES = frozenset({"rejected", "admitted", "not_run"})
+_STAGE_STATUSES = frozenset({
+    "recorded",
+    "not_reached",
+    "malformed",
+    "denied",
+    "cancelled",
+    "timeout",
+    "unavailable",
+})
+_PUBLIC_CODES = frozenset({
+    "successful",
+    "empty",
+    "denied",
+    "malformed",
+    "timeout",
+    "cancelled",
+    "unavailable",
+    "prerequisite_unavailable",
+    "key_unavailable",
+    "private_store_unavailable",
+    "derived_index_unready",
+    "storage_unavailable",
+    "binding_missing",
+    "consent_missing",
+    "wrong_case",
+    "purpose_mismatch",
+    "missing_purpose",
+    "stale_request",
+    "stale_revision",
+    "source_binding_changed",
+    "context_binding_changed",
+    "target_not_host_owned",
+    "secret_material",
+    "undeclared_role",
+    "unknown_field",
+    "unsupported_operation",
+    "model_cannot_invoke_tools",
+    "model_cannot_supply_destination",
+    "model_cannot_supply_path",
+    "model_cannot_supply_provider_command",
+    "model_cannot_satisfy_requirements",
+    "model_cannot_select_target",
+    "unbounded_chain",
+    "deadline_elapsed",
+    "invalid_deadline",
+    "empty_source_search",
+    "source_failure",
+    "rejected_admission",
+    "stage_not_observed",
+    "privacy_denied",
+    "operation_unregistered",
+    "unclassified",
+})
+_COUNT_LIMIT = 64
+_EARLY_MALFORMED = frozenset({"malformed", "unsupported_operation"})
+_EARLY_DENIED = frozenset({
+    "unknown_field",
+    "undeclared_role",
+    "secret_material",
+    "target_not_host_owned",
+    "unbounded_chain",
+})
+_UNAVAILABLE_CODES = frozenset({
+    "prerequisite_unavailable",
+    "key_unavailable",
+    "private_store_unavailable",
+    "derived_index_unready",
+    "storage_unavailable",
+    "binding_missing",
+})
+
+
+def _safe_code(value: Any, default: str) -> str:
+    if type(value) is not str:
+        return default
+    if value.startswith("privacy_denied"):
+        return "privacy_denied"
+    if value in _PUBLIC_CODES:
+        return value
+    return default
+
+
+def _safe_error_type(value: Any) -> str:
+    if type(value) is not str:
+        return ""
+    if len(value) > 64 or not value.isidentifier():
+        return ""
+    return value
+
+
+def _bounded_count(value: Any) -> int:
+    if type(value) is not int or isinstance(value, bool) or value < 0:
+        return 0
+    if value > _COUNT_LIMIT:
+        return _COUNT_LIMIT
+    return value
+
+
+def _safe_revision_token(value: Any) -> str:
+    if type(value) is not str or not value or len(value) > 80:
+        return ""
+    for character in value:
+        if character not in "abcdefghijklmnopqrstuvwxyz0123456789_.:-":
+            return ""
+    return value
+
+
+def _safe_request_id(value: Any) -> str:
+    if type(value) is str and len(value) == 32 and all(character in "0123456789abcdef" for character in value):
+        return value
+    return uuid.uuid4().hex
+
+
+def _bounded_session_revision(value: Any) -> int:
+    if type(value) is not int or isinstance(value, bool) or value < 0 or value > 1_000_000:
+        return 0
+    return value
+
+
+def _dispatch_terminal(status: str, code: str) -> str:
+    if code == "cancelled" or status == "cancelled":
+        return "cancelled"
+    if code in {"timeout", "deadline_elapsed"} or status == "timeout":
+        return "timeout"
+    if status == "unavailable" or code in _UNAVAILABLE_CODES:
+        return "unavailable"
+    if code in _EARLY_MALFORMED or status == "malformed":
+        return "malformed"
+    return "denied"
+
+
+def _dispatch_stage_statuses(code: str, operation: str) -> tuple[str, str, str]:
+    if code in _EARLY_MALFORMED or operation not in LEGAL_EVIDENCE_OPERATIONS:
+        return "malformed", "malformed", "not_reached"
+    if code in _EARLY_DENIED or code.startswith("model_cannot"):
+        return "recorded", "denied", "not_reached"
+    if code in {"stale_revision", "stale_request"}:
+        return "recorded", "recorded", "denied"
+    if code == "binding_missing":
+        return "not_reached", "not_reached", "not_reached"
+    return "recorded", "recorded", "recorded"
+
+
+def _stage_status(value: Any, default: str) -> str:
+    if type(value) is str and value in _STAGE_STATUSES and value != "successful":
+        return value
+    return default
+
+
+def _reconcile_terminal(
+    terminal: str,
+    source_search: str,
+    admission: str,
+    code: str,
+) -> tuple[str, str, str, str]:
+    """Keep empty search, source failure, and rejected admission distinct.
+
+    A caller-supplied success never overwrites a failed or unobserved stage.
+    """
+
+    search = source_search if source_search in _SOURCE_SEARCH_STATES else "not_run"
+    admit = admission if admission in _ADMISSION_STATES else "not_run"
+    term = terminal if terminal in _TRACE_TERMINALS else "unavailable"
+    if term == "malformed":
+        return "malformed", search, admit, _safe_code(code, "malformed")
+    if term == "cancelled":
+        return "cancelled", search, admit, "cancelled"
+    if term == "timeout":
+        kept = _safe_code(code, "timeout")
+        return "timeout", search, admit, kept if kept != "unclassified" else "timeout"
+    if search == "failed":
+        return "unavailable", "failed", admit, "source_failure"
+    if admit == "rejected":
+        return "denied", search, "rejected", "rejected_admission"
+    if term == "denied":
+        return "denied", search, admit, _safe_code(code, "denied")
+    if term == "unavailable":
+        return "unavailable", search, admit, _safe_code(code, "unavailable")
+    if term == "empty" or search == "empty":
+        if search == "found" or admit == "admitted":
+            return "unavailable", search, admit, "stage_not_observed"
+        return "empty", "empty", "not_run", "empty_source_search"
+    if term == "successful" and search == "found" and admit == "admitted":
+        return "successful", "found", "admitted", "successful"
+    return "unavailable", search, admit, "stage_not_observed"
+
+
+def record_bounded_hook_outcome(observation: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Record ordered operation, request, revision, and outcome receipts.
+
+    Diagnostics do not call a provider, retry, or copy error text, tool
+    payloads, prompts, or source bytes. Stage failure stays visible.
+    """
+
+    raw = observation if isinstance(observation, Mapping) and not isinstance(observation, (str, bytes)) else {}
+    operation = raw.get("operation") if raw.get("operation") in LEGAL_EVIDENCE_OPERATIONS else ""
+    counts = raw.get("counts") if isinstance(raw.get("counts"), Mapping) else {}
+    seen = _bounded_count(counts.get("seen", raw.get("seen")))
+    admitted = _bounded_count(counts.get("admitted", raw.get("admitted")))
+    if admitted > seen:
+        admitted = seen
+    errors = _bounded_count(counts.get("errors", raw.get("errors")))
+    terminal, search, admission, code = _reconcile_terminal(
+        str(raw.get("terminal") or ""),
+        str(raw.get("source_search") or ""),
+        str(raw.get("admission") or ""),
+        str(raw.get("code") or ""),
+    )
+    if terminal != "successful" and errors == 0 and terminal not in {"empty"}:
+        errors = 1
+    if terminal == "successful":
+        errors = 0
+    operation_status = _stage_status(raw.get("operation_status"), "recorded" if operation else "malformed")
+    request_status = _stage_status(raw.get("request_status"), "recorded" if operation else "malformed")
+    revision_status = _stage_status(raw.get("revision_status"), "recorded" if operation else "not_reached")
+    if terminal == "malformed" and operation_status == "recorded" and not operation:
+        operation_status = "malformed"
+        request_status = "malformed"
+        revision_status = "not_reached"
+    if terminal in {"cancelled", "timeout"} and revision_status == "recorded":
+        pass
+    outcome_status = terminal
+    # No earlier receipt may claim success when the outcome is not success.
+    if outcome_status != "successful":
+        for label, status in (
+            ("operation", operation_status),
+            ("request", request_status),
+            ("revision", revision_status),
+        ):
+            if status == "successful":
+                if label == "operation":
+                    operation_status = "recorded"
+                elif label == "request":
+                    request_status = "recorded"
+                else:
+                    revision_status = "recorded"
+    request_id = _safe_request_id(raw.get("request_id"))
+    session_revision = _bounded_session_revision(raw.get("session_revision"))
+    graph_revision = _safe_revision_token(raw.get("graph_revision"))
+    error_type = _safe_error_type(raw.get("error_type"))
+    receipts = [
+        {
+            "schema": HOOK_STAGE_RECEIPT_SCHEMA,
+            "ordinal": 1,
+            "kind": "operation",
+            "operation": operation,
+            "status": operation_status,
+            "code": code if operation_status in {"malformed", "denied", "cancelled", "timeout", "unavailable"} else "recorded",
+        },
+        {
+            "schema": HOOK_STAGE_RECEIPT_SCHEMA,
+            "ordinal": 2,
+            "kind": "request",
+            "request_id": request_id,
+            "status": request_status,
+            "code": code if request_status in {"malformed", "denied", "cancelled", "timeout", "unavailable"} else "recorded",
+        },
+        {
+            "schema": HOOK_STAGE_RECEIPT_SCHEMA,
+            "ordinal": 3,
+            "kind": "revision",
+            "session_revision": session_revision,
+            "graph_revision": graph_revision,
+            "status": revision_status,
+            "code": code if revision_status in {"malformed", "denied", "cancelled", "timeout", "unavailable"} else "recorded",
+        },
+        {
+            "schema": HOOK_STAGE_RECEIPT_SCHEMA,
+            "ordinal": 4,
+            "kind": "outcome",
+            "status": outcome_status,
+            "code": code,
+            "source_search": search,
+            "admission": admission,
+            "error_type": error_type,
+            "counts": {"seen": seen, "admitted": admitted, "errors": errors},
+            "provider_invoked": False,
+            "fallback_used": False,
+            "retry_count": 0,
+            "effect_dispatched": False,
+            "backend_completed": False,
+            "requirements_satisfied": False,
+            "tool_payload_logged": False,
+        },
+    ]
+    return {
+        "schema": HOOK_DISPATCH_TRACE_SCHEMA,
+        "ordered": True,
+        "request_id": request_id,
+        "terminal": terminal,
+        "code": code,
+        "source_search": search,
+        "admission": admission,
+        "receipts": receipts,
+        "provider_invoked": False,
+        "fallback_used": False,
+        "retry_count": 0,
+        "hides_failure": False,
+    }
+
+
+def public_hook_outcome_log(trace: Mapping[str, Any]) -> dict[str, Any]:
+    """Sanitized mediator/router log fields. No payloads or error text."""
+
+    operation = ""
+    request_id = ""
+    session_revision = 0
+    graph_revision = ""
+    outcome: Mapping[str, Any] = {}
+    receipts = trace.get("receipts") if isinstance(trace, Mapping) else None
+    if isinstance(receipts, list):
+        for item in receipts:
+            if not isinstance(item, Mapping):
+                continue
+            kind = item.get("kind")
+            if kind == "operation" and type(item.get("operation")) is str:
+                operation = item["operation"]
+            elif kind == "request" and type(item.get("request_id")) is str:
+                request_id = item["request_id"]
+            elif kind == "revision":
+                if type(item.get("session_revision")) is int and not isinstance(item.get("session_revision"), bool):
+                    session_revision = item["session_revision"]
+                if type(item.get("graph_revision")) is str:
+                    graph_revision = item["graph_revision"]
+            elif kind == "outcome":
+                outcome = item
+    counts = outcome.get("counts") if isinstance(outcome.get("counts"), Mapping) else {}
+    terminal = trace.get("terminal") if isinstance(trace, Mapping) else ""
+    return {
+        "operation": operation,
+        "request_id": request_id,
+        "session_revision": session_revision,
+        "graph_revision": graph_revision,
+        "terminal": terminal if terminal in _TRACE_TERMINALS else "unavailable",
+        "code": _safe_code(trace.get("code") if isinstance(trace, Mapping) else "", "unclassified"),
+        "error_type": _safe_error_type(outcome.get("error_type")),
+        "source_search": outcome.get("source_search") if outcome.get("source_search") in _SOURCE_SEARCH_STATES else "not_run",
+        "admission": outcome.get("admission") if outcome.get("admission") in _ADMISSION_STATES else "not_run",
+        "seen": _bounded_count(counts.get("seen")),
+        "admitted": _bounded_count(counts.get("admitted")),
+        "errors": _bounded_count(counts.get("errors")),
+        "prompt_logged": False,
+        "response_logged": False,
+        "tool_payload_logged": False,
+        "provider_invoked": False,
+        "fallback_used": False,
+        "retry_count": 0,
+    }
+
+
 def _operation_result(
     *,
     operation: str,
@@ -1127,8 +1491,29 @@ def _operation_result(
     owner: str = "",
     prerequisites: Sequence[Mapping[str, Any]] = (),
     role: Optional[str] = None,
+    session_revision: int = 0,
+    graph_revision: str = "",
+    request_id: str = "",
+    error_type: str = "",
 ) -> dict[str, Any]:
-    refused = status == "refused"
+    refused = status in {"refused", "timeout", "cancelled", "malformed"}
+    public_code = _safe_code(code, "unclassified")
+    operation_status, request_status, revision_status = _dispatch_stage_statuses(public_code, operation if operation in LEGAL_EVIDENCE_OPERATIONS else "")
+    trace = record_bounded_hook_outcome({
+        "operation": operation if operation in LEGAL_EVIDENCE_OPERATIONS else "",
+        "terminal": _dispatch_terminal(status, public_code),
+        "code": public_code,
+        "source_search": "not_run",
+        "admission": "not_run",
+        "operation_status": operation_status,
+        "request_status": request_status,
+        "revision_status": revision_status,
+        "session_revision": session_revision,
+        "graph_revision": graph_revision,
+        "request_id": request_id,
+        "error_type": error_type,
+        "counts": {"seen": len(source_refs), "admitted": 0, "errors": 0 if status == "successful" else 1},
+    })
     return {
         "schema": HOOK_OPERATION_RESULT_SCHEMA,
         "operation": operation,
@@ -1152,6 +1537,7 @@ def _operation_result(
         "storage_invoked": False,
         "writes": 0,
         "dispatch_enabled": False,
+        "trace": trace,
     }
 
 
@@ -1238,7 +1624,14 @@ def dispatch_registered_hook_operation(
         if _bounded_text(revision, limit=80) is None:
             return _operation_result(operation=operation, status="refused", code="malformed", owner=_OPERATION_OWNERS[operation])
         if revision != graph_revision:
-            return _operation_result(operation=operation, status="refused", code="stale_revision", owner=_OPERATION_OWNERS[operation])
+            return _operation_result(
+                operation=operation,
+                status="refused",
+                code="stale_revision",
+                owner=_OPERATION_OWNERS[operation],
+                session_revision=session_revision if type(session_revision) is int else 0,
+                graph_revision=graph_revision if type(graph_revision) is str else "",
+            )
     decision = authorize_hook_execution(
         context,
         owner_id=owner_id,
@@ -1262,15 +1655,34 @@ def dispatch_registered_hook_operation(
         private_store_available=private_store_available is True,
         derived_index_ready=derived_index_ready is True,
     )
+    trace_revision = session_revision if type(session_revision) is int else 0
+    trace_graph = graph_revision if type(graph_revision) is str else ""
     if not decision["authorized"]:
+        auth_code = str(decision["code"])
+        auth_status = "cancelled" if auth_code == "cancelled" else "refused"
         return _operation_result(
             operation=operation,
-            status="refused",
-            code=str(decision["code"]),
+            status=auth_status,
+            code=auth_code,
             source_refs=source_refs,
             owner=_OPERATION_OWNERS[operation],
             prerequisites=prerequisites,
             role=role if type(role) is str else None,
+            session_revision=trace_revision,
+            graph_revision=trace_graph,
+        )
+    if request_state == "timeout":
+        return _operation_result(
+            operation=operation,
+            status="timeout",
+            code="timeout",
+            source_refs=source_refs,
+            owner=_OPERATION_OWNERS[operation],
+            prerequisites=prerequisites,
+            role=role if type(role) is str else None,
+            session_revision=trace_revision,
+            graph_revision=trace_graph,
+            error_type="TimeoutError",
         )
     if key_available is not True:
         code = "key_unavailable"
@@ -1288,6 +1700,8 @@ def dispatch_registered_hook_operation(
         owner=_OPERATION_OWNERS[operation],
         prerequisites=prerequisites,
         role=role if type(role) is str else None,
+        session_revision=trace_revision,
+        graph_revision=trace_graph,
     )
 
 
