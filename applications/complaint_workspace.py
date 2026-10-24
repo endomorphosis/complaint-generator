@@ -4650,6 +4650,127 @@ class ComplaintWorkspaceService:
         except InterviewSnapshotError as exc:
             raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.public_status) from None
 
+    def preflight_legacy_hook_artifact(
+        self,
+        user_id: str,
+        *,
+        source_path: Path,
+        source_preimage: str,
+        destination: Path,
+        revision: str,
+        case_id: Optional[str] = None,
+        retention_policy: str = "retain",
+    ) -> Dict[str, Any]:
+        """Preflight one explicit legacy hook artifact. Does not scan or rewrite."""
+
+        return self._legacy_hook_migration(
+            user_id,
+            source_path=source_path,
+            source_preimage=source_preimage,
+            destination=destination,
+            revision=revision,
+            case_id=case_id,
+            retention_policy=retention_policy,
+            commit=False,
+            interrupt_at=None,
+        )
+
+    def commit_legacy_hook_artifact(
+        self,
+        user_id: str,
+        *,
+        source_path: Path,
+        source_preimage: str,
+        destination: Path,
+        revision: str,
+        case_id: Optional[str] = None,
+        retention_policy: str = "retain",
+        interrupt_at: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Commit one explicit legacy hook artifact. Plaintext retirement follows the receipt."""
+
+        return self._legacy_hook_migration(
+            user_id,
+            source_path=source_path,
+            source_preimage=source_preimage,
+            destination=destination,
+            revision=revision,
+            case_id=case_id,
+            retention_policy=retention_policy,
+            commit=True,
+            interrupt_at=interrupt_at,
+        )
+
+    def _legacy_hook_migration(
+        self,
+        user_id: str,
+        *,
+        source_path: Path,
+        source_preimage: str,
+        destination: Path,
+        revision: str,
+        case_id: Optional[str],
+        retention_policy: str,
+        commit: bool,
+        interrupt_at: Optional[str],
+    ) -> Dict[str, Any]:
+        from integrations.private_storage import (
+            PrivateArtifactBindingError,
+            PrivateArtifactIntegrityError,
+            PrivateKeyMaterialError,
+            commit_legacy_hook_migration,
+            preflight_legacy_hook_migration,
+        )
+
+        if source_path is None or destination is None or not revision:
+            raise WorkspacePersistenceError(
+                "An explicit legacy hook source, destination, and revision are required.",
+                code="selection_required",
+                public_status="unavailable",
+            )
+        try:
+            context = self._private_artifact_context(user_id, case_id, revision=revision)
+        except WorkspacePersistenceError as exc:
+            return {
+                "schema": "legacy-hook-migration-receipt",
+                "status": "unavailable",
+                "code": exc.code,
+                "encrypted": False,
+                "pending": True,
+                "pending_items": [{"pending": "encryption"}],
+                "encrypted_items": [],
+                "encryption_established": False,
+                "verified_commit": False,
+                "automatic_scan": False,
+                "durable": False,
+                "network_durable": False,
+                "mode_bits_establish_encryption": False,
+                "local_copy_establishes_encryption": False,
+                "local_copy_establishes_durability": False,
+                "plaintext_retired": False,
+                "source_bytes_preserved": True,
+                "last_valid_head_preserved": True,
+            }
+        operation = commit_legacy_hook_migration if commit else preflight_legacy_hook_migration
+        kwargs = dict(
+            source_preimage=source_preimage,
+            destination=destination,
+            access=context["access"],
+            tenant_id=str(context["tenant_id"]),
+            case_id=str(context["case_id"]),
+            principal_id=str(context["principal_id"]),
+            revision=revision,
+            retention_policy=retention_policy,
+            key_provider=context["key_provider"],
+        )
+        if commit:
+            kwargs["interrupt_at"] = interrupt_at
+        try:
+            return operation(source_path, **kwargs)
+        except (PrivateArtifactBindingError, PrivateArtifactIntegrityError, PrivateKeyMaterialError) as exc:
+            code = getattr(exc, "reason", None) or getattr(exc, "code", "legacy_hook_rejected")
+            raise WorkspacePersistenceError(str(exc), code=str(code), public_status="recoverable") from None
+
     def export_readable_filing(
         self,
         user_id: str,
