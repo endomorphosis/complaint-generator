@@ -1344,6 +1344,196 @@ def _owner_liveness(birth: Any) -> str:
     return "alive"
 
 
+_NATIVE_CLOSE_KINDS = ("validation_accepted", "merge_accepted", "completion_callback_accepted")
+
+
+def _artifact_digest(path: Path) -> dict[str, Any]:
+    try:
+        if path.is_symlink() or not path.is_file():
+            return {"present": False, "sha256": None, "reason": "unavailable"}
+        raw = path.read_bytes()
+    except OSError as exc:
+        return {"present": False, "sha256": None, "reason": type(exc).__name__}
+    return {"present": True, "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+
+
+def _accepted_native_closures(events_path: Path, *, plan_id: str, source_generation: str,
+                              task_cids: Mapping[str, str]) -> dict[str, Any]:
+    """Close a task only from accepted validation, merge, and callback events.
+
+    Characterization frames and manual metadata never count, and a frame for a
+    different plan, CID, or source generation cannot close this campaign.
+    """
+
+    satisfied = {task_id: set() for task_id in task_cids}
+    report: dict[str, Any] = {"status": "absent", "closed_task_ids": [],
+                              "ignored_characterization": 0, "ignored_manual": 0}
+    try:
+        if not events_path.is_file() or events_path.is_symlink():
+            return report
+        if events_path.stat().st_size > MAX_EVENT_HISTORY_BYTES:
+            report["status"] = "size_limit"
+            return report
+        raw = events_path.read_bytes()
+    except OSError as exc:
+        report["status"] = type(exc).__name__
+        return report
+    report["status"] = "read"
+    for line in raw.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("counts_as_characterization_pass") is True or event.get("type") == "characterization":
+            report["ignored_characterization"] += 1
+            continue
+        if event.get("manual") is True or event.get("type") in {"manual_completion", "manual_metadata"}:
+            report["ignored_manual"] += 1
+            continue
+        kind = event.get("type")
+        if kind not in _NATIVE_CLOSE_KINDS or event.get("accepted") is not True:
+            continue
+        if event.get("skipped") is True or event.get("outcome") in {"skipped", "failed", "error", "xfailed"}:
+            continue
+        task_id = event.get("task_id")
+        if not isinstance(task_id, str) or task_cids.get(task_id) != event.get("canonical_task_cid"):
+            continue
+        if event.get("plan_id") != plan_id or event.get("source_generation") != source_generation:
+            continue
+        satisfied[task_id].add(kind)
+    report["closed_task_ids"] = sorted(
+        task_id for task_id, kinds in satisfied.items() if set(kinds) == set(_NATIVE_CLOSE_KINDS)
+    )
+    return report
+
+
+def observe_separate_campaign(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
+    """Read one separate campaign through the public Native status seam.
+
+    The completed intake spec, plan, and board are hashed before and after and
+    are never rewritten. This observation does not start a provider or grant
+    completion authority.
+    """
+
+    from .improvement_plan import BOARD_RELATIVE, PLAN_RELATIVE, campaign_observation_binding
+
+    repo_root = Path(repo_root).resolve()
+    spec_path = Path(spec_path)
+    state_dir = Path(state_dir)
+    spec, artifacts = _campaign_spec(repo_root, spec_path)
+    if artifacts == DEFAULT_ARTIFACTS:
+        raise ValueError("separate campaign observation requires a distinct artifact namespace")
+    historical_names = (SPEC_RELATIVE, PLAN_RELATIVE, BOARD_RELATIVE)
+    before = {relative: _artifact_digest(repo_root / relative) for relative in historical_names}
+    binding = campaign_observation_binding(spec)
+    observed = status(repo_root, spec_path, state_dir)
+    after = {relative: _artifact_digest(repo_root / relative) for relative in historical_names}
+    identity_error = None
+    identities: list[Any] = []
+    try:
+        _, daemon = _native_modules(repo_root)
+        identities = list(daemon.parse_task_file(repo_root / artifacts.board_relative, task_header_prefix=TASK_PREFIX))
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        identity_error = type(exc).__name__
+    task_cids = {task.task_id: task.canonical_task_cid for task in identities}
+    markdown_completed = sorted(task.task_id for task in identities if task.status == "completed")
+    characterization = sorted(
+        task.task_id for task in identities
+        if str(task.metadata.get("counts as characterization pass", "")).lower() in {"1", "true", "yes"}
+        or str(task.metadata.get("characterization", "")).lower() in {"pass", "passed", "complete", "completed"}
+    )
+    manual = sorted(
+        task.task_id for task in identities
+        if str(task.metadata.get("manual completion", "")).lower() in {"1", "true", "yes", "allowed"}
+        or str(task.metadata.get("completion", "")).lower() == "manual"
+    )
+    record = _read_json(state_dir / "launcher.json")
+    recorded_plan = record.get("plan_id")
+    recorded_generation = record.get("source_generation")
+    if record.get("read_error"):
+        plan_bound = generation_bound = False
+    elif record.get("schema_version"):
+        plan_bound = recorded_plan == binding["plan_id"]
+        generation_bound = recorded_generation == binding["source_generation"]
+    else:
+        plan_bound = recorded_plan in (None, binding["plan_id"])
+        generation_bound = recorded_generation in (None, "", binding["source_generation"])
+    closures = _accepted_native_closures(
+        state_dir / f"{STATE_PREFIX}_events.jsonl",
+        plan_id=binding["plan_id"], source_generation=binding["source_generation"], task_cids=task_cids,
+    )
+    if not plan_bound or not generation_bound:
+        closures = {**closures, "closed_task_ids": [], "rejected_reason": "plan_or_source_generation_mismatch"}
+    env = campaign_environment(repo_root, state_dir=state_dir)
+    merge_target = record.get("merge_target") if isinstance(record.get("merge_target"), str) else "campaign-test"
+    argv = native_argv(
+        repo_root / artifacts.board_relative, state_dir, merge_target,
+        board_namespace=artifacts.board_namespace, protected_paths=artifacts.protected_paths,
+    )
+    workers = argv[argv.index("--validation-max-workers") + 1] if "--validation-max-workers" in argv else None
+    timeout = argv[argv.index("--implementation-timeout") + 1] if "--implementation-timeout" in argv else None
+    historical_tasks = None
+    historical_error = None
+    if before[BOARD_RELATIVE]["present"]:
+        try:
+            _, daemon = _native_modules(repo_root)
+            historical = list(daemon.parse_task_file(repo_root / BOARD_RELATIVE, task_header_prefix=TASK_PREFIX))
+            historical_tasks = {
+                "count": len(historical),
+                "markdown_completed": sum(task.status == "completed" for task in historical),
+                "remapped": False, "completion_authority": False,
+            }
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            historical_error = type(exc).__name__
+    else:
+        historical_error = "unavailable"
+    active_cid = (observed.get("native_state") or {}).get("active_task_cid")
+    return {
+        "schema": "complaint-campaign-health-observation@1",
+        "status": observed.get("status"),
+        "healthy": bool(observed.get("healthy") and plan_bound and generation_bound),
+        "native_state_source": observed.get("native_state_source"),
+        "native_read_errors": observed.get("native_read_errors"),
+        "binding": binding,
+        "plan_bound": bool(plan_bound),
+        "source_generation_bound": bool(generation_bound),
+        "task_cids": task_cids,
+        "active_task_cid": active_cid,
+        "active_task_cid_bound": active_cid in (None, "") or active_cid in set(task_cids.values()),
+        "identity_error": identity_error,
+        "markdown_completed_task_ids": markdown_completed,
+        "characterization_task_ids": characterization,
+        "manual_metadata_task_ids": manual,
+        "native_closed_task_ids": list(closures["closed_task_ids"]),
+        "native_closure": closures,
+        "markdown_or_characterization_grants_completion": False,
+        "provider_started": False,
+        "paid_calls": 0,
+        "completion_authority": False,
+        "route": {
+            "provider": "grok_cli", "model": MODEL, "allow_fallback": False,
+            "router": env.get("TODO_DAEMON_LLM_BACKEND"),
+            "pool_max_entries": env.get("IPFS_ACCELERATE_AGENT_WORKTREE_POOL_MAX_ENTRIES"),
+            "implementation_timeout_seconds": TIMEOUT_SECONDS,
+            "argv_implementation_timeout": timeout,
+            "max_agent_turns": env.get("IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS"),
+            "validation_max_workers": workers,
+            "implement": "--implement" in argv,
+            "fallback_disabled": env.get("TODO_DAEMON_LLM_ALLOW_LOCAL_FALLBACK") == "0"
+            and env.get("TODO_DAEMON_LLM_ALLOW_CROSS_PROVIDER_FALLBACK") == "0",
+            "resource_min_free_bytes": RESOURCE_MIN_FREE_BYTES,
+            "resource_min_free_inodes": RESOURCE_MIN_FREE_INODES,
+        },
+        "historical_baseline": {
+            **binding["historical_baseline"],
+            "before": before, "after": after, "unchanged": before == after,
+            "tasks": historical_tasks, "read_error": historical_error,
+        },
+    }
+
+
 def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     record = _read_json(state_dir / "launcher.json")
     owned = owns_process(record)

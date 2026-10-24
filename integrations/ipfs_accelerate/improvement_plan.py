@@ -14,7 +14,7 @@ import re
 import tempfile
 from typing import Any, Mapping, Sequence
 
-from .campaign import campaign_artifacts
+from .campaign import DEFAULT_ARTIFACTS, campaign_artifacts
 
 
 SPEC_RELATIVE = "docs/task_boards/complaint_intake_improvement_spec.json"
@@ -450,6 +450,46 @@ def canonical_model_policy() -> dict[str, Any]:
 
     return {"router": _PROVIDER["router"], "provider": _PROVIDER["provider"],
             "model": _PROVIDER["model"], "allow_fallback": False}
+
+
+def source_generation(spec: Mapping[str, Any]) -> str:
+    """Identity of the exact specification bytes a campaign observation may bind."""
+
+    spec = validate_spec(dict(spec))
+    return hashlib.sha256(json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def campaign_observation_binding(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Bind a separate campaign to its plan, source generation, and historical intake paths.
+
+    Compilation does not execute validation, start a provider, or rewrite the
+    completed intake artifacts. Those paths stay a historical baseline.
+    """
+
+    spec = validate_spec(dict(spec))
+    artifacts = campaign_artifacts(spec)
+    plan = build_improvement_work_plan(spec)
+    generation = plan.metadata["spec_sha256"]
+    if generation != source_generation(spec):
+        raise ValueError("campaign source generation differs from its specification")
+    return {
+        "plan_id": plan.plan_id,
+        "source_generation": generation,
+        "board_namespace": artifacts.board_namespace,
+        "spec_relative": artifacts.spec_relative,
+        "plan_relative": artifacts.plan_relative,
+        "board_relative": artifacts.board_relative,
+        "distinct_from_historical_intake": artifacts != DEFAULT_ARTIFACTS,
+        "historical_baseline": {
+            "spec_relative": SPEC_RELATIVE,
+            "plan_relative": PLAN_RELATIVE,
+            "board_relative": BOARD_RELATIVE,
+            "immutable": True,
+            "completion_authority": False,
+        },
+        "provider": canonical_model_policy(),
+        "completion_authority": False,
+    }
 
 
 _PRIVATE_BINDING_ROOTS = frozenset({"data", "output", "statefiles", "exports", ".complaint_workspace", "secrets", "evidence", "uploads", "attachments", "private", "sessions"})
