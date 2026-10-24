@@ -135,6 +135,10 @@ class WorkflowActionService:
 		)
 		self._mediator._interview_privacy_context = context
 		self._interview_privacy_policy = context.get("policy")
+		self._bound_case_id = str(context.get("case_id") or case_id or "")
+		meta = getattr(self, "_interview_meta", None)
+		if isinstance(meta, dict):
+			meta["case_id"] = self._bound_case_id
 		return context
 
 	@property
@@ -235,6 +239,171 @@ class WorkflowActionService:
 			error=self._interview_error("unknown_action", resumable=True),
 		)
 
+	FACTUAL_CORRECTION_CONTRACT_VERSION = "factual-correction-v1"
+
+	def apply_factual_correction(
+		self,
+		*,
+		action: str,
+		target_stable_id: str,
+		replacement: str,
+		source_context: Optional[Dict[str, Any]],
+		event_id: str,
+		case_id: str,
+		expected_graph_revision: Optional[str],
+		expected_session_revision: Optional[int],
+	) -> Dict[str, Any]:
+		"""Correct or retract one assertion through process_denoising_answer.
+
+		The same event id and payload replay the stored graph result. A missing,
+		cross-case, or stale target is refused before any factual record changes.
+		"""
+		normalized = str(action or "").strip().lower()
+		if normalized not in {"correct", "retract"}:
+			return self._correction_receipt(
+				status="refused",
+				action=normalized or "correct",
+				case_id=str(case_id or ""),
+				event_id=str(event_id or ""),
+				target_stable_id=str(target_stable_id or ""),
+				error_code="unknown_action",
+			)
+		if not self.interview_started:
+			return self._correction_receipt(
+				status="unavailable",
+				action=normalized,
+				case_id=str(case_id or ""),
+				event_id=str(event_id or ""),
+				target_stable_id=str(target_stable_id or ""),
+				error_code="session_missing",
+			)
+		mediator = self._mediator
+		kg = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "knowledge_graph")
+		if kg is None or not hasattr(kg, "begin_answer_event"):
+			return self._correction_receipt(
+				status="unavailable",
+				action=normalized,
+				case_id=str(case_id or ""),
+				event_id=str(event_id or ""),
+				target_stable_id=str(target_stable_id or ""),
+				error_code="capability_unavailable",
+			)
+		case_refusal = self._correction_case_refusal(
+			kg,
+			action=normalized,
+			case_id=str(case_id or ""),
+			event_id=str(event_id or ""),
+			target_stable_id=str(target_stable_id or ""),
+		)
+		if case_refusal is not None:
+			return case_refusal
+		stable_event = str(event_id or "").strip()
+		if not stable_event:
+			return self._correction_receipt(
+				status="refused",
+				action=normalized,
+				case_id=str(case_id or ""),
+				event_id="",
+				target_stable_id=str(target_stable_id or ""),
+				error_code="missing_event",
+			)
+		statement = str(replacement or "")
+		context = dict(source_context) if isinstance(source_context, dict) else None
+		question = self._correction_question(stable_event, normalized)
+		supersedes = str(target_stable_id or "").strip() if normalized == "correct" else None
+		retracts = str(target_stable_id or "").strip() if normalized == "retract" else None
+		from complaint_phases.knowledge_graph import AnswerEventConflict, answer_event_payload
+
+		payload = answer_event_payload(
+			question=question,
+			answer=statement,
+			source_context=context,
+			factual_action=normalized,
+			supersedes_stable_id=supersedes,
+			retracts_stable_id=retracts,
+		)
+		try:
+			prior = kg.begin_answer_event(stable_event, payload)
+		except AnswerEventConflict:
+			return self._correction_receipt(
+				status="refused",
+				action=normalized,
+				case_id=str(case_id or ""),
+				event_id=stable_event,
+				target_stable_id=str(target_stable_id or ""),
+				error_code="event_conflict",
+			)
+		if prior is None:
+			refusal = self._correction_target_refusal(
+				kg,
+				action=normalized,
+				case_id=str(case_id or ""),
+				event_id=stable_event,
+				target_stable_id=str(target_stable_id or ""),
+				statement=statement,
+				source_context=context,
+				expected_graph_revision=expected_graph_revision,
+				expected_session_revision=expected_session_revision,
+			)
+			if refusal is not None:
+				return refusal
+		phase_manager = mediator.phase_manager
+		saved_questions = list(phase_manager.get_phase_data(ComplaintPhase.INTAKE, "current_questions") or [])
+		saved_candidates = list(phase_manager.get_phase_data(ComplaintPhase.INTAKE, "question_candidates") or [])
+		try:
+			engine = mediator.process_denoising_answer(
+				question,
+				statement,
+				answer_event_id=stable_event,
+				source_context=context,
+				factual_action=normalized,
+				supersedes_stable_id=supersedes,
+				retracts_stable_id=retracts,
+			)
+		except AnswerEventConflict:
+			return self._correction_receipt(
+				status="refused",
+				action=normalized,
+				case_id=str(case_id or ""),
+				event_id=stable_event,
+				target_stable_id=str(target_stable_id or ""),
+				error_code="event_conflict",
+			)
+		except Exception as exc:
+			return self._correction_receipt(
+				status="unavailable",
+				action=normalized,
+				case_id=str(case_id or ""),
+				event_id=stable_event,
+				target_stable_id=str(target_stable_id or ""),
+				error_code="capability_unavailable",
+				error_type=type(exc).__name__,
+			)
+		finally:
+			phase_manager.update_phase_data(ComplaintPhase.INTAKE, "current_questions", saved_questions)
+			phase_manager.update_phase_data(ComplaintPhase.INTAKE, "question_candidates", saved_candidates)
+		if prior is None:
+			meta = self._interview_meta
+			meta["session_revision"] = int(meta.get("session_revision") or 0) + 1
+			meta["case_id"] = str(case_id or "")
+			metadata = getattr(kg, "metadata", None)
+			if isinstance(metadata, dict) and not metadata.get("case_id"):
+				metadata["case_id"] = str(case_id or "")
+		updates = engine.get("updates") if isinstance(engine, dict) else {}
+		if not isinstance(updates, dict):
+			updates = {}
+		return self._correction_receipt(
+			status="applied",
+			action=normalized,
+			case_id=str(case_id or ""),
+			event_id=stable_event,
+			target_stable_id=str(target_stable_id or ""),
+			idempotent_replay=prior is not None,
+			graph_mutated=prior is None,
+			updates=updates,
+			knowledge_graph=kg,
+		)
+
 	def export_session_projection(self) -> Optional[Dict[str, Any]]:
 		"""Versioned snapshot that can rebuild KG/DG without a new extraction."""
 		if not self.interview_started:
@@ -331,6 +500,7 @@ class WorkflowActionService:
 			"started": True,
 			"session_id": f"interview-{uuid4().hex[:12]}",
 			"session_revision": 1,
+			"case_id": str(getattr(self, "_bound_case_id", "") or ""),
 			"narrative_extraction_count": 1,
 			"question_revision": 1 if questions else 0,
 			"pending_inquiry": self._inquiry_from_question(questions[0], revision=1) if questions else None,
@@ -972,6 +1142,230 @@ class WorkflowActionService:
 		result["receipt_is_durable"] = False
 		result["receipt_is_proof"] = False
 		return result
+
+
+	def _bound_case_ids(self, knowledge_graph) -> Dict[str, str]:
+		meta = getattr(self, "_interview_meta", None) or {}
+		privacy = getattr(self._mediator, "_interview_privacy_context", None)
+		graph_case = ""
+		metadata = getattr(knowledge_graph, "metadata", None)
+		if isinstance(metadata, dict):
+			graph_case = str(metadata.get("case_id") or "")
+		privacy_case = str(privacy.get("case_id") or "") if isinstance(privacy, dict) else ""
+		return {
+			"session": str(meta.get("case_id") or getattr(self, "_bound_case_id", "") or ""),
+			"privacy": privacy_case,
+			"graph": graph_case,
+		}
+
+	def _correction_case_refusal(self, knowledge_graph, *, action, case_id, event_id, target_stable_id):
+		bound = self._bound_case_ids(knowledge_graph)
+		requested = str(case_id or "")
+		present = [value for value in bound.values() if value]
+		if not requested or not present or any(value != requested for value in present):
+			return self._correction_receipt(
+				status="refused",
+				action=action,
+				case_id=requested,
+				event_id=event_id,
+				target_stable_id=target_stable_id,
+				error_code="cross_case",
+				knowledge_graph=knowledge_graph,
+			)
+		return None
+
+	def _correction_target_refusal(
+		self,
+		knowledge_graph,
+		*,
+		action,
+		case_id,
+		event_id,
+		target_stable_id,
+		statement,
+		source_context,
+		expected_graph_revision,
+		expected_session_revision,
+	):
+		from mediator.hook_runtime import graph_revision_token
+
+		current_session = int((self._interview_meta or {}).get("session_revision") or 0)
+		current_graph = graph_revision_token(knowledge_graph)
+		stale = (
+			expected_session_revision is None
+			or int(expected_session_revision) != current_session
+			or str(expected_graph_revision or "") != current_graph
+		)
+		if stale:
+			return self._correction_receipt(
+				status="refused",
+				action=action,
+				case_id=case_id,
+				event_id=event_id,
+				target_stable_id=target_stable_id,
+				error_code="stale_target",
+				knowledge_graph=knowledge_graph,
+			)
+		denoiser = getattr(self._mediator, "denoiser", None)
+		if denoiser is not None and hasattr(denoiser, "classify_answer_disposition"):
+			disposition = denoiser.classify_answer_disposition(statement)
+			if disposition in getattr(denoiser, "_NON_FACT_DISPOSITIONS", ()):
+				return self._correction_receipt(
+					status="refused",
+					action=action,
+					case_id=case_id,
+					event_id=event_id,
+					target_stable_id=target_stable_id,
+					error_code="correction_required",
+					knowledge_graph=knowledge_graph,
+				)
+		if not isinstance(source_context, dict) or not str(source_context.get("source_text") or ""):
+			return self._correction_receipt(
+				status="refused",
+				action=action,
+				case_id=case_id,
+				event_id=event_id,
+				target_stable_id=target_stable_id,
+				error_code="correction_required",
+				knowledge_graph=knowledge_graph,
+			)
+		target = str(target_stable_id or "").strip()
+		entity = knowledge_graph.entity_for_stable_id(target) if target else None
+		if entity is None:
+			return self._correction_receipt(
+				status="refused",
+				action=action,
+				case_id=case_id,
+				event_id=event_id,
+				target_stable_id=target,
+				error_code="missing_target",
+				knowledge_graph=knowledge_graph,
+			)
+		if knowledge_graph.entity_activity(entity.id) in {"superseded", "retracted", "conflict"}:
+			return self._correction_receipt(
+				status="refused",
+				action=action,
+				case_id=case_id,
+				event_id=event_id,
+				target_stable_id=target,
+				error_code="stale_target",
+				knowledge_graph=knowledge_graph,
+			)
+		return None
+
+	def _correction_question(self, event_id: str, action: str) -> Dict[str, Any]:
+		return {
+			"type": "clarification",
+			"question": "What is the corrected fact?",
+			"context": {
+				"fact_type": "clarification",
+				"factual_action": action,
+				"correction_event_id": event_id,
+			},
+			"candidate_source": "factual_correction",
+		}
+
+	def _affected_support_targets(self, knowledge_graph, updates: Dict[str, Any], target_stable_id: str) -> List[Dict[str, Any]]:
+		previous = None
+		if knowledge_graph is not None and target_stable_id and hasattr(knowledge_graph, "entity_for_stable_id"):
+			previous = knowledge_graph.entity_for_stable_id(target_stable_id)
+		previous_id = getattr(previous, "id", "")
+		found: List[Dict[str, Any]] = []
+		seen = set()
+		relationships = getattr(knowledge_graph, "relationships", {}) or {}
+		for relationship in relationships.values():
+			attributes = getattr(relationship, "attributes", {}) or {}
+			if attributes.get("activity_status") != "invalidated":
+				continue
+			if previous_id and str(attributes.get("invalidated_entity_id") or "") not in {"", previous_id}:
+				continue
+			if previous_id and previous_id not in {getattr(relationship, "source_id", ""), getattr(relationship, "target_id", "")}:
+				continue
+			source_id = str(getattr(relationship, "source_id", "") or "")
+			target_id = str(getattr(relationship, "target_id", "") or "")
+			other = target_id if source_id == previous_id else source_id
+			item = {
+				"relationship_id": str(getattr(relationship, "id", "") or ""),
+				"target_id": other,
+				"relation_type": str(getattr(relationship, "relation_type", "") or ""),
+			}
+			key = (item["relationship_id"], item["target_id"])
+			if key in seen:
+				continue
+			seen.add(key)
+			found.append(item)
+		for node_id in updates.get("dependency_nodes_invalidated") or []:
+			item = {"relationship_id": "", "target_id": str(node_id), "relation_type": "dependency"}
+			key = ("", item["target_id"])
+			if key in seen:
+				continue
+			seen.add(key)
+			found.append(item)
+		return found
+
+	def _correction_receipt(
+		self,
+		*,
+		status: str,
+		action: str,
+		case_id: str,
+		event_id: str,
+		target_stable_id: str,
+		error_code: Optional[str] = None,
+		error_type: Optional[str] = None,
+		idempotent_replay: bool = False,
+		graph_mutated: bool = False,
+		updates: Optional[Dict[str, Any]] = None,
+		knowledge_graph=None,
+	) -> Dict[str, Any]:
+		from mediator.hook_runtime import graph_revision_token
+
+		meta = getattr(self, "_interview_meta", None) or {}
+		updates = updates or {}
+		graph_revision = ""
+		revision_index = 0
+		lineage = {
+			"action": "supersede" if action == "correct" else "retract",
+			"previous_stable_id": target_stable_id,
+			"new_stable_id": str(updates.get("stable_id") or ""),
+			"previous_envelope_retained": False,
+			"replacement_envelope_retained": False,
+		}
+		if knowledge_graph is not None and hasattr(knowledge_graph, "factual_ledger"):
+			graph_revision = graph_revision_token(knowledge_graph)
+			revision_index = len(knowledge_graph.factual_ledger().get("revisions") or [])
+			previous_state = knowledge_graph.assertion_state(target_stable_id) if target_stable_id else {}
+			replacement_state = knowledge_graph.assertion_state(lineage["new_stable_id"]) if lineage["new_stable_id"] else {}
+			lineage["previous_envelope_retained"] = isinstance(previous_state.get("envelope"), dict)
+			lineage["replacement_envelope_retained"] = isinstance(replacement_state.get("envelope"), dict)
+			lineage["previous_status"] = str(previous_state.get("status") or "")
+			lineage["replacement_status"] = str(replacement_state.get("status") or "")
+		error = None
+		if error_code:
+			error = {"code": error_code, "resumable": error_code != "event_conflict", "legal_sufficiency": False}
+			if error_type:
+				error["error_type"] = error_type
+		return {
+			"contract_version": self.FACTUAL_CORRECTION_CONTRACT_VERSION,
+			"status": status,
+			"action": action,
+			"case_id": case_id,
+			"event_id": event_id,
+			"target_stable_id": target_stable_id,
+			"replacement_stable_id": lineage["new_stable_id"],
+			"idempotent_replay": bool(idempotent_replay),
+			"graph_mutated": bool(graph_mutated),
+			"display_only": False,
+			"graph_revision": graph_revision,
+			"graph_revision_index": revision_index,
+			"session_revision": int(meta.get("session_revision") or 0),
+			"affected_support_targets": self._affected_support_targets(knowledge_graph, updates, target_stable_id) if status == "applied" else [],
+			"lineage": lineage,
+			"awaiting_user": False,
+			"worker_stalled": False,
+			"legal_sufficiency": False,
+			"error": error,
+		}
 
 
 def _json_ready(value: Any) -> Any:

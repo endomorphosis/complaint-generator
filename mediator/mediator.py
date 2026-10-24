@@ -1745,6 +1745,10 @@ class Mediator:
 			'error': None,
 		}
 
+	def apply_factual_correction(self, **kwargs):
+		"""Public factual correction. Graph updates stay on process_denoising_answer."""
+		return self.workflow_actions.apply_factual_correction(**kwargs)
+
 	def analyze_complaint_legal_issues(self):
 		"""
 		Analyze complaint and classify legal issues.
