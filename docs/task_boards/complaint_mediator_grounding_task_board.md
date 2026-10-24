@@ -1102,7 +1102,7 @@ Implementation instructions:
 
 ## CIMP-MGND-43 Prove the new grounded public journey with synthetic source evidence
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
