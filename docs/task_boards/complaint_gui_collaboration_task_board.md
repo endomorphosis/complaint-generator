@@ -252,7 +252,7 @@ Implementation instructions:
 
 ## CIMP-GUI-09 Centralize server-side case action authorization
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
