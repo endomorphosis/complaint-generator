@@ -192,7 +192,7 @@ Implementation instructions:
 
 ## CIMP-MGND-08 Make hook effects replay-safe and graph-bound
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
