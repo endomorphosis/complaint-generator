@@ -112,7 +112,7 @@ Implementation instructions:
 
 ## CIMP-MGND-05 Bind new hook execution contexts to current case revisions
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
