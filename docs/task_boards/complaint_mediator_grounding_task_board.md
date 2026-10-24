@@ -972,7 +972,7 @@ Implementation instructions:
 
 ## CIMP-MGND-38 Offer finite source/evidence next actions without false completion
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
