@@ -10480,3 +10480,39 @@ class ClaimSupportHook(PrivateDerivedIndexMixin):
         handoff['prior_proof_satisfied'] = proof_satisfied
         handoff['proof_satisfied'] = False
         return handoff
+
+    def forward_independent_norm_decisions(
+        self,
+        requirement: Dict[str, Any],
+        definition_envelope: Optional[Dict[str, Any]] = None,
+        scope_envelope: Optional[Dict[str, Any]] = None,
+        review_envelope: Optional[Dict[str, Any]] = None,
+        bound_variable_envelope: Optional[Dict[str, Any]] = None,
+        declared_prover_result: Any = None,
+    ) -> Dict[str, Any]:
+        """Forward review and bound-variable decisions without signing or proving them.
+
+        Source, edition, meaning, and context permissions stay on separate records.
+        An unprovided review is left absent. Generated Lean stays unbuilt unless the
+        owner report and a hash-matching declared prover result both say otherwise.
+        """
+        from integrations.ipfs_datasets.definition_evidence import forward_independent_norm_decisions
+
+        admitted = requirement.get('admitted_legal_text')
+        proof = requirement.get('proof')
+        proof_satisfied = requirement.get('proof_satisfied')
+        handoff = forward_independent_norm_decisions(
+            requirement,
+            definition_envelope,
+            scope_envelope,
+            review_envelope,
+            bound_variable_envelope,
+            declared_prover_result,
+        )
+        if requirement.get('admitted_legal_text') != admitted or requirement.get('proof') != proof:
+            handoff['admitted_legal_text_changed'] = True
+            handoff['proof_changed'] = requirement.get('proof') != proof
+        handoff['prior_proof_satisfied'] = proof_satisfied
+        handoff['proof_satisfied'] = False
+        handoff['reviews_synthesized'] = False
+        return handoff
