@@ -928,3 +928,364 @@ def dispatch_declared_hook_purpose(
     result = _purpose_result(purpose_id=purpose_id, status="available", code="proposal_accepted", model_dispatched=True, output=clean_output, identity=identity, route=route, synthetic_transport_invoked=True)
     result["dispatch"] = "model"
     return result
+
+
+# Operation contracts. Registration records owners and disabled handlers.
+# It does not search, ingest, refresh, persist, or call a provider.
+HOOK_OPERATION_REGISTRY_SCHEMA = "hook_operation_registry_v1"
+HOOK_OPERATION_REQUEST_SCHEMA = "hook_operation_request_v1"
+HOOK_OPERATION_RESULT_SCHEMA = "hook_operation_result_v1"
+
+_EXTRACTION_QUESTION_ROLES = ("extract_facts", "propose_questions", "explain_candidate")
+_SOURCE_REF_LIMIT = 8
+_HANDLER_CALLS = {"count": 0}
+
+_EFFECT_FIELD_CODES = {
+    "tools": "model_cannot_invoke_tools",
+    "tool": "model_cannot_invoke_tools",
+    "tool_calls": "model_cannot_invoke_tools",
+    "grok_tools": "model_cannot_invoke_tools",
+    "invoke_tool": "model_cannot_invoke_tools",
+    "destination": "model_cannot_supply_destination",
+    "destinations": "model_cannot_supply_destination",
+    "endpoint": "model_cannot_supply_destination",
+    "url": "model_cannot_supply_destination",
+    "file_path": "model_cannot_supply_path",
+    "path": "model_cannot_supply_path",
+    "paths": "model_cannot_supply_path",
+    "output_path": "model_cannot_supply_path",
+    "provider_command": "model_cannot_supply_provider_command",
+    "command": "model_cannot_supply_provider_command",
+    "shell": "model_cannot_supply_provider_command",
+    "argv": "model_cannot_supply_provider_command",
+    "requirements_satisfied": "model_cannot_satisfy_requirements",
+    "requirement_satisfied": "model_cannot_satisfy_requirements",
+    "satisfied_requirements": "model_cannot_satisfy_requirements",
+    "satisfied_nodes": "model_cannot_satisfy_requirements",
+    "node_edits": "model_cannot_satisfy_requirements",
+    "satisfied_node_edits": "model_cannot_satisfy_requirements",
+    "chain": "unbounded_chain",
+    "next_operation": "unbounded_chain",
+    "next_operations": "unbounded_chain",
+}
+
+_OPERATION_FIELDS = {
+    "acquire_legal_sources": frozenset({"operation", "role", "target_ref", "source_refs", "citation_ref"}),
+    "ingest_private_evidence": frozenset({"operation", "role", "target_ref", "source_refs", "evidence_ref"}),
+    "refresh_grounding": frozenset({"operation", "role", "target_ref", "source_refs", "graph_revision"}),
+}
+
+_OPERATION_OWNERS = {
+    "acquire_legal_sources": "mediator.legal_authority_hooks.LegalAuthoritySearchHook",
+    "ingest_private_evidence": "mediator.evidence_hooks.EvidenceStorageHook",
+    "refresh_grounding": "mediator.mediator.Mediator.refresh_verified_legal_dependencies",
+}
+
+_INDEX_OWNERS = {
+    "acquire_legal_sources": "mediator.legal_authority_hooks.LegalAuthoritySearchHook",
+    "ingest_private_evidence": "mediator.evidence_hooks.EvidenceStorageHook",
+    "refresh_grounding": "mediator.legal_authority_hooks.LegalAuthorityStorageHook",
+}
+
+
+def _disabled_handler(operation: str) -> Callable[[Mapping[str, Any]], Any]:
+    def handler(_request: Mapping[str, Any]) -> Any:
+        _HANDLER_CALLS["count"] += 1
+        raise HookContextError("handler_disabled")
+
+    handler.operation = operation  # type: ignore[attr-defined]
+    handler.enabled = False  # type: ignore[attr-defined]
+    return handler
+
+
+_DISABLED_HANDLERS = {name: _disabled_handler(name) for name in LEGAL_EVIDENCE_OPERATIONS}
+
+
+def operation_handler_call_count() -> int:
+    return int(_HANDLER_CALLS["count"])
+
+
+def _prerequisite_rows(operation: str) -> tuple[dict[str, Any], ...]:
+    return (
+        {
+            "id": "persisted_operation_consent",
+            "owner": "integrations.ipfs_datasets.llm",
+            "implemented": False,
+            "verified": False,
+        },
+        {
+            "id": "encrypted_private_artifact_store",
+            "owner": "integrations.ipfs_datasets.storage",
+            "implemented": False,
+            "verified": False,
+        },
+        {
+            "id": "derived_index_boundary",
+            "owner": _INDEX_OWNERS[operation],
+            "implemented": False,
+            "verified": False,
+        },
+    )
+
+
+def legal_evidence_operation_registry() -> tuple[dict[str, Any], ...]:
+    """Canonical owners and prerequisites. No operation names a successor."""
+
+    rows = []
+    for operation in LEGAL_EVIDENCE_OPERATIONS:
+        rows.append({
+            "operation": operation,
+            "owner": _OPERATION_OWNERS[operation],
+            "handler_bound": True,
+            "handler_enabled": False,
+            "effect_enabled": False,
+            "writes_enabled": False,
+            "prerequisites": [dict(item) for item in _prerequisite_rows(operation)],
+            "next_operations": [],
+            "adjacent_roles": list(_EXTRACTION_QUESTION_ROLES),
+            "request_schema": HOOK_OPERATION_REQUEST_SCHEMA,
+            "result_schema": HOOK_OPERATION_RESULT_SCHEMA,
+            "request_fields": sorted(_OPERATION_FIELDS[operation]),
+        })
+    return tuple(rows)
+
+
+def register_legal_evidence_operations(*, probes: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Bind disabled handlers. Probes and owners are not called."""
+
+    if probes is not None and not isinstance(probes, Mapping):
+        raise HookContextError("malformed")
+    return {
+        "schema": HOOK_OPERATION_REGISTRY_SCHEMA,
+        "registered": True,
+        "dispatch_enabled": False,
+        "writes_enabled": False,
+        "handler_enabled": False,
+        "provider_invoked": False,
+        "backend_invoked": False,
+        "storage_invoked": False,
+        "handler_call_count": operation_handler_call_count(),
+        "operations": [dict(row) for row in legal_evidence_operation_registry()],
+    }
+
+
+def _effect_code(value: Any, *, depth: int = 0) -> Optional[str]:
+    if depth > 6:
+        return "malformed"
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            name = str(key)
+            if name in _EFFECT_FIELD_CODES:
+                return _EFFECT_FIELD_CODES[name]
+            if name in _SECRET_FIELD_NAMES:
+                return "secret_material"
+            found = _effect_code(item, depth=depth + 1)
+            if found:
+                return found
+    elif isinstance(value, (list, tuple)):
+        if len(value) > 32:
+            return "malformed"
+        for item in value:
+            found = _effect_code(item, depth=depth + 1)
+            if found:
+                return found
+    elif isinstance(value, str) and ("/" in value or "\\" in value or ".." in value):
+        return "model_cannot_supply_path"
+    return None
+
+
+def _clean_source_refs(value: Any) -> tuple[Optional[str], tuple[dict[str, str], ...]]:
+    if type(value) is not list or len(value) > _SOURCE_REF_LIMIT:
+        return "malformed", ()
+    rows = []
+    seen: set[tuple[str, str]] = set()
+    for item in value:
+        if type(item) is not dict or set(item) != {"source_id", "content_hash"}:
+            return "malformed", ()
+        source_id = _as_ref(item.get("source_id"))
+        content_hash = item.get("content_hash")
+        if source_id is None or type(content_hash) is not str or len(content_hash) != 64:
+            return "malformed", ()
+        try:
+            int(content_hash, 16)
+        except ValueError:
+            return "malformed", ()
+        identity = (source_id, content_hash)
+        if identity in seen:
+            return "malformed", ()
+        seen.add(identity)
+        rows.append({"source_id": source_id, "content_hash": content_hash})
+    return None, tuple(rows)
+
+
+def _operation_result(
+    *,
+    operation: str,
+    status: str,
+    code: str,
+    source_refs: Sequence[Mapping[str, str]] = (),
+    owner: str = "",
+    prerequisites: Sequence[Mapping[str, Any]] = (),
+    role: Optional[str] = None,
+) -> dict[str, Any]:
+    refused = status == "refused"
+    return {
+        "schema": HOOK_OPERATION_RESULT_SCHEMA,
+        "operation": operation,
+        "status": status,
+        "code": code,
+        "role": role,
+        "role_dispatched": False,
+        "candidate_status": "refused" if refused else "not_candidate",
+        "source_status": "refused" if refused else "not_admitted",
+        "support_status": "refused" if refused else "unsupported",
+        "proof_status": "not_proof",
+        "source_refs": [dict(item) for item in source_refs],
+        "source_refs_admitted": False,
+        "owner": owner,
+        "prerequisites": [dict(item) for item in prerequisites],
+        "handler_enabled": False,
+        "handler_invoked": False,
+        "effect_dispatched": False,
+        "provider_invoked": False,
+        "backend_invoked": False,
+        "storage_invoked": False,
+        "writes": 0,
+        "dispatch_enabled": False,
+    }
+
+
+def _marked_prerequisites(operation: str, *, key_available: bool, private_store_available: bool, derived_index_ready: bool) -> list[dict[str, Any]]:
+    rows = []
+    for item in _prerequisite_rows(operation):
+        row = dict(item)
+        row["verified"] = False
+        if item["id"] == "encrypted_private_artifact_store" and (not key_available or not private_store_available):
+            row["status"] = "key_unavailable" if not key_available else "private_store_unavailable"
+        elif item["id"] == "derived_index_boundary" and not derived_index_ready:
+            row["status"] = "derived_index_unready"
+        else:
+            row["status"] = "unavailable"
+        rows.append(row)
+    return rows
+
+
+def dispatch_registered_hook_operation(
+    request: Mapping[str, Any] | None,
+    *,
+    context: HookExecutionContext | None,
+    host_targets: Sequence[str],
+    owner_id: str,
+    case_id: str,
+    session_id: str,
+    session_revision: int,
+    graph_revision: str,
+    legal_context: Mapping[str, Any] | None,
+    purpose: Any,
+    source_bindings: Sequence[Mapping[str, Any]] | None,
+    privacy_context: Mapping[str, Any] | None,
+    now: datetime,
+    host: Any = None,
+    storage_available: bool = True,
+    request_state: str = "active",
+    key_available: bool = True,
+    private_store_available: bool = True,
+    derived_index_ready: bool = True,
+    persisted_consent_verified: bool = False,
+    probes: Mapping[str, Any] | None = None,
+    effect: Optional[Callable[[Mapping[str, Any]], Any]] = None,
+    handler: Optional[Callable[[Mapping[str, Any]], Any]] = None,
+) -> dict[str, Any]:
+    """Validate one registered operation and refuse its effect.
+
+    Disabled handlers, probes, and caller effects are not invoked. A true
+    persisted-consent flag cannot enable dispatch: that store is not implemented.
+    """
+
+    del persisted_consent_verified, effect, handler, probes
+    if not isinstance(request, Mapping) or isinstance(request, (str, bytes)):
+        return _operation_result(operation="", status="refused", code="malformed")
+    proposal = request.get("model_proposal") if "model_proposal" in request else None
+    if proposal is not None:
+        proposal_code = _effect_code(proposal) or "model_cannot_select_target"
+        if proposal_code == "malformed":
+            proposal_code = "model_cannot_select_target"
+        return _operation_result(operation=str(request.get("operation") or ""), status="refused", code=proposal_code)
+    effect_code = _effect_code(request)
+    if effect_code:
+        return _operation_result(operation=str(request.get("operation") or ""), status="refused", code=effect_code)
+    operation = request.get("operation")
+    if type(operation) is not str or operation not in _OPERATION_FIELDS:
+        return _operation_result(operation=str(operation or ""), status="refused", code="unsupported_operation")
+    if set(request) - _OPERATION_FIELDS[operation]:
+        return _operation_result(operation=operation, status="refused", code="unknown_field", owner=_OPERATION_OWNERS[operation])
+    role = request.get("role")
+    if role is not None and role not in _EXTRACTION_QUESTION_ROLES:
+        return _operation_result(operation=operation, status="refused", code="undeclared_role", owner=_OPERATION_OWNERS[operation])
+    ref_code, source_refs = _clean_source_refs(request.get("source_refs"))
+    if ref_code:
+        return _operation_result(operation=operation, status="refused", code=ref_code, owner=_OPERATION_OWNERS[operation])
+    target = _as_ref(request.get("target_ref"))
+    owned = tuple(item for item in host_targets if type(item) is str)
+    if target is None or target not in owned:
+        return _operation_result(operation=operation, status="refused", code="target_not_host_owned", owner=_OPERATION_OWNERS[operation])
+    if operation == "acquire_legal_sources" and request.get("citation_ref") is not None and _as_ref(request.get("citation_ref")) is None:
+        return _operation_result(operation=operation, status="refused", code="malformed", owner=_OPERATION_OWNERS[operation])
+    if operation == "ingest_private_evidence" and request.get("evidence_ref") is not None and _as_ref(request.get("evidence_ref")) is None:
+        return _operation_result(operation=operation, status="refused", code="malformed", owner=_OPERATION_OWNERS[operation])
+    if operation == "refresh_grounding":
+        revision = request.get("graph_revision")
+        if _bounded_text(revision, limit=80) is None:
+            return _operation_result(operation=operation, status="refused", code="malformed", owner=_OPERATION_OWNERS[operation])
+        if revision != graph_revision:
+            return _operation_result(operation=operation, status="refused", code="stale_revision", owner=_OPERATION_OWNERS[operation])
+    decision = authorize_hook_execution(
+        context,
+        owner_id=owner_id,
+        case_id=case_id,
+        session_id=session_id,
+        session_revision=session_revision,
+        graph_revision=graph_revision,
+        legal_context=legal_context,
+        purpose=purpose,
+        source_bindings=source_bindings,
+        privacy_context=privacy_context,
+        now=now,
+        host=host,
+        storage_available=storage_available,
+        request_state=request_state,
+        effect=None,
+    )
+    prerequisites = _marked_prerequisites(
+        operation,
+        key_available=key_available is True,
+        private_store_available=private_store_available is True,
+        derived_index_ready=derived_index_ready is True,
+    )
+    if not decision["authorized"]:
+        return _operation_result(
+            operation=operation,
+            status="refused",
+            code=str(decision["code"]),
+            source_refs=source_refs,
+            owner=_OPERATION_OWNERS[operation],
+            prerequisites=prerequisites,
+            role=role if type(role) is str else None,
+        )
+    if key_available is not True:
+        code = "key_unavailable"
+    elif private_store_available is not True:
+        code = "private_store_unavailable"
+    elif derived_index_ready is not True:
+        code = "derived_index_unready"
+    else:
+        code = "prerequisite_unavailable"
+    return _operation_result(
+        operation=operation,
+        status="unavailable",
+        code=code,
+        source_refs=source_refs,
+        owner=_OPERATION_OWNERS[operation],
+        prerequisites=prerequisites,
+        role=role if type(role) is str else None,
+    )

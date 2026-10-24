@@ -896,6 +896,47 @@ class WorkflowActionService:
 			'workflow_action_focus_areas': matched_focus_areas,
 		}
 
+	def declare_legal_evidence_hook_operations(self) -> Dict[str, Any]:
+		"""Record the disabled legal/evidence registry. Does not write case state."""
+		from mediator.hook_runtime import register_legal_evidence_operations
+
+		receipt = register_legal_evidence_operations()
+		self._legal_evidence_operation_registry = receipt
+		self._legal_evidence_handlers_enabled = False
+		return receipt
+
+	def dispatch_legal_evidence_hook_operation(self, request: Any, **kwargs: Any) -> Dict[str, Any]:
+		"""Refuse acquire, ingest, and refresh until later consent and storage tasks."""
+		from mediator.hook_runtime import dispatch_registered_hook_operation
+
+		if self.__dict__.get("_legal_evidence_operation_registry") is None:
+			from mediator.hook_runtime import HOOK_OPERATION_RESULT_SCHEMA
+
+			return {
+				"schema": HOOK_OPERATION_RESULT_SCHEMA,
+				"operation": str(request.get("operation") or "") if isinstance(request, dict) else "",
+				"status": "refused",
+				"code": "operation_unregistered",
+				"candidate_status": "refused",
+				"source_status": "refused",
+				"support_status": "refused",
+				"proof_status": "not_proof",
+				"source_refs": [],
+				"source_refs_admitted": False,
+				"handler_enabled": False,
+				"handler_invoked": False,
+				"effect_dispatched": False,
+				"provider_invoked": False,
+				"backend_invoked": False,
+				"storage_invoked": False,
+				"writes": 0,
+				"dispatch_enabled": False,
+			}
+		kwargs.pop("probes", None)
+		kwargs.pop("effect", None)
+		kwargs.pop("handler", None)
+		return dispatch_registered_hook_operation(request, **kwargs)
+
 
 def _json_ready(value: Any) -> Any:
 	"""Drop values that cannot be stored in the versioned session projection."""
