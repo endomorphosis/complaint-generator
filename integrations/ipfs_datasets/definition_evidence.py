@@ -12,10 +12,18 @@ way. Occurrence, span, entity, and edition identities stay on the owner
 records. A governing definition is never filled in when the owner leaves it
 unset or when two asserted uses remain separate. Missing or conflicting
 evidence stays an explicit unresolved dependency.
+
+Norm interpretation review and bound-variable definition reports are forwarded
+through their current owners. Source, edition, meaning, and context permissions
+stay separate. This adapter does not sign reviews or turn generated Lean into
+a build or a proof unless that owner report already records execution and a
+declared prover result matches the source-pinned hashes.
 """
 
 from __future__ import annotations
 
+import hashlib
+from copy import deepcopy
 from typing import Any
 
 from .loader import import_module_optional
@@ -28,12 +36,16 @@ _BINDING_MODULE_NAME = "ipfs_datasets_py.logic.autoformal.legal_source_sampling_
 _REVIEW_MODULE_NAME = "ipfs_datasets_py.logic.autoformal.legal_source_sampling_context_definition_review_v2"
 _DEFINITION_MODULE_NAME = "ipfs_datasets_py.logic.autoformal.legal_norm_definition_evidence_v1"
 _SCOPE_MODULE_NAME = "ipfs_datasets_py.logic.autoformal.legal_norm_scope_correspondence_v1"
+_NORM_REVIEW_MODULE_NAME = "ipfs_datasets_py.logic.autoformal.legal_norm_interpretation_review_v1"
+_BOUND_VARIABLE_MODULE_NAME = "ipfs_datasets_py.logic.autoformal.legal_bound_variable_definition_v1"
 
 _context_module, _context_error = import_module_optional(_CONTEXT_MODULE_NAME)
 _binding_module, _binding_error = import_module_optional(_BINDING_MODULE_NAME)
 _review_module, _review_error = import_module_optional(_REVIEW_MODULE_NAME)
 _definition_module, _definition_error = import_module_optional(_DEFINITION_MODULE_NAME)
 _scope_module, _scope_error = import_module_optional(_SCOPE_MODULE_NAME)
+_norm_review_module, _norm_review_error = import_module_optional(_NORM_REVIEW_MODULE_NAME)
+_bound_variable_module, _bound_variable_error = import_module_optional(_BOUND_VARIABLE_MODULE_NAME)
 
 _CONTEXT_SCHEMA = "legal-source-sampling-review-context/v1"
 _RESPONSE_SCHEMA = "legal-source-sampling-context-declaration/v1"
@@ -42,7 +54,18 @@ _BINDING_SCHEMA = "legal-source-sampling-context-definition-binding/v2"
 _REVIEW_SCHEMA = "legal-source-sampling-context-definition-review-correspondence/v1"
 _DEFINITION_EVIDENCE_SCHEMA = "legal-norm-definition-evidence/v1"
 _SCOPE_CORRESPONDENCE_SCHEMA = "legal-norm-scope-correspondence-report/v1"
+_NORM_REVIEW_PREPARATION_SCHEMA = "legal-norm-interpretation-review-evidence/v1"
+_NORM_REVIEW_SUBJECT_SCHEMA = "legal-norm-interpretation-review-subject/v1"
+_NORM_REVIEW_ASSESSMENT_SCHEMA = "legal-norm-interpretation-review-assessment/v1"
+_BOUND_VARIABLE_SCHEMA = "legal-bound-variable-definition-report/v1"
 _HANDOFF_SCHEMA = "complaint-mediator-norm-definition-scope-handoff/v1"
+_DECISION_HANDOFF_SCHEMA = "complaint-mediator-independent-norm-decision-handoff/v1"
+_DECISION_SCHEMAS = {
+    _NORM_REVIEW_PREPARATION_SCHEMA,
+    _NORM_REVIEW_SUBJECT_SCHEMA,
+    _NORM_REVIEW_ASSESSMENT_SCHEMA,
+    _BOUND_VARIABLE_SCHEMA,
+}
 _ACCEPTED_SCHEMAS = {
     _CONTEXT_SCHEMA,
     _RESPONSE_SCHEMA,
@@ -51,6 +74,7 @@ _ACCEPTED_SCHEMAS = {
     _REVIEW_SCHEMA,
     _DEFINITION_EVIDENCE_SCHEMA,
     _SCOPE_CORRESPONDENCE_SCHEMA,
+    *_DECISION_SCHEMAS,
 }
 
 _DENIED_AUTHORITY = {
@@ -207,6 +231,46 @@ def _states(owner_result: dict[str, Any]) -> dict[str, Any]:
             "asserted_use_count": counts.get("distinct_typed_uses", counts.get("typed_targets")),
             "selected_interpretation": owner_result.get("selected_interpretation"),
         }
+    if schema == _NORM_REVIEW_PREPARATION_SCHEMA:
+        return {
+            "candidate": "unsigned_interpretation_review_evidence",
+            "source_review": owner_result.get("status"),
+            "meaning_review": "unreviewed",
+            "context_review": "unreviewed",
+            "governing_definition_use": owner_result.get("governing_definition_use"),
+            "context_slot_count": len(owner_result.get("context_slot_ids") or []),
+        }
+    if schema == _NORM_REVIEW_SUBJECT_SCHEMA:
+        return {
+            "candidate": "unsigned_review_subject",
+            "source_review": "unreviewed",
+            "meaning_review": "unreviewed",
+            "context_review": "unreviewed",
+            "context_slot_count": len(owner_result.get("context_slot_ids") or []),
+        }
+    if schema == _NORM_REVIEW_ASSESSMENT_SCHEMA:
+        ready = owner_result.get("norm_interpretation_ready") is True
+        return {
+            "candidate": "unsigned_review_assessment",
+            "source_review": owner_result.get("evidence_assessment_status"),
+            "meaning_review": "owner_marked_ready" if ready else "unreviewed",
+            "context_review": "unreviewed",
+            "review_count": owner_result.get("review_count"),
+            "norm_interpretation_ready": owner_result.get("norm_interpretation_ready"),
+            "governing_definition_use": owner_result.get("governing_definition_use"),
+            "context_slot_count": len(owner_result.get("original_context_slots") or []),
+        }
+    if schema == _BOUND_VARIABLE_SCHEMA:
+        return {
+            "candidate": owner_result.get("status"),
+            "source_review": "unreviewed",
+            "meaning_review": "unreviewed",
+            "context_review": "unreviewed",
+            "governing_definition_use": owner_result.get("governing_definition_use"),
+            "selected_interpretation": owner_result.get("selected_interpretation"),
+            "backend_executed": owner_result.get("backend_executed"),
+            "lean_compilation_verified": owner_result.get("lean_compilation_verified"),
+        }
     return {
         "candidate": None,
         "source_review": None,
@@ -332,6 +396,188 @@ def _definition_uses(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _independent_permissions(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Keep source, edition, meaning, and context grants as separate records."""
+
+    identities = _source_identities(result) if result else {
+        "occurrences": [],
+        "spans": [],
+        "entities": [],
+        "editions": [],
+    }
+    correspondence = result.get("correspondence") if isinstance(result.get("correspondence"), dict) else {}
+    source_bound = correspondence.get("source_bound") is True or result.get("source_bound") is True
+    meaning_ready = result.get("norm_interpretation_ready") is True
+    selected = result.get("selected_interpretation")
+    slots = result.get("context_slot_ids")
+    if not isinstance(slots, list):
+        slots = result.get("original_context_slots")
+    if not isinstance(slots, list):
+        slots = []
+    context_evidence = result.get("context_evidence")
+    context_supplied = bool(slots) or context_evidence not in (None, {}, [])
+    return {
+        "source": {"permission": "source", "granted": False, "source_bound": source_bound},
+        "edition": {
+            "permission": "edition",
+            "granted": False,
+            "editions": list(identities["editions"]),
+        },
+        "meaning": {
+            "permission": "meaning",
+            "granted": bool(meaning_ready and selected is not None),
+            "norm_interpretation_ready": meaning_ready,
+            "selected_interpretation": selected,
+        },
+        "context": {
+            "permission": "context",
+            "granted": False,
+            "context_supplied": context_supplied,
+            "closes_meaning": False,
+            "slot_count": len(slots),
+        },
+    }
+
+
+def _binding_pins(result: dict[str, Any]) -> dict[str, Any]:
+    binding = result.get("native_binding") if isinstance(result.get("native_binding"), dict) else {}
+    original = result.get("original_norm") if isinstance(result.get("original_norm"), dict) else {}
+    return {
+        "correspondence_sha256": result.get("correspondence_sha256") or binding.get("correspondence_sha256"),
+        "graph_sha256": result.get("graph_sha256") or binding.get("correspondence_sha256"),
+        "preparation_sha256": binding.get("preparation_sha256"),
+        "companion_sha256": result.get("companion_sha256"),
+        "request_sha256": result.get("request_sha256"),
+        "original_norm": original or None,
+    }
+
+
+def _retained_decision(result: dict[str, Any]) -> dict[str, Any]:
+    """Copy alternatives, assumptions, and carrier correspondence without choosing one."""
+
+    request = result.get("request") if isinstance(result.get("request"), dict) else {}
+    correspondence = result.get("correspondence") if isinstance(result.get("correspondence"), dict) else {}
+    alternatives = result.get("definition_alternatives")
+    if not isinstance(alternatives, list):
+        alternatives = result.get("definitions") if isinstance(result.get("definitions"), list) else None
+    unresolved = result.get("original_unresolved")
+    if unresolved is None:
+        unresolved = correspondence.get("retained_unresolved")
+    assumptions = result.get("assumptions") if isinstance(result.get("assumptions"), list) else []
+    return {
+        "alternatives": alternatives,
+        "alternative_ids": [
+            row.get("alternative_id") for row in alternatives if isinstance(row, dict)
+        ] if isinstance(alternatives, list) else [],
+        "assumptions": list(assumptions),
+        "definition_assumption": request.get("definition_assumption"),
+        "membership_assumption": request.get("membership_assumption"),
+        "carrier_map": request.get("carrier_map"),
+        "evaluation_context": request.get("evaluation_context"),
+        "occurrence_binding": result.get("occurrence_binding"),
+        "original_unresolved": unresolved,
+        "governing_definition_use": result.get("governing_definition_use"),
+        "source_pins": _binding_pins(result),
+    }
+
+
+def _matching_prover_result(declared: Any, result: dict[str, Any]) -> bool:
+    if not isinstance(declared, dict):
+        return False
+    required = ("status", "lean_source_sha256", "companion_sha256", "request_sha256", "theorems", "kernel_checked")
+    if any(key not in declared for key in required):
+        return False
+    if declared.get("status") not in {"verified", "proved"} or declared.get("kernel_checked") is not True:
+        return False
+    source = result.get("lean_source")
+    if not isinstance(source, str) or not source:
+        return False
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    return (
+        declared.get("lean_source_sha256") == digest
+        and declared.get("companion_sha256") == result.get("companion_sha256")
+        and declared.get("request_sha256") == result.get("request_sha256")
+        and declared.get("theorems") == result.get("conditional_theorems")
+    )
+
+
+def _conditional_lean(result: dict[str, Any] | None, declared_prover_result: Any) -> dict[str, Any]:
+    """Leave generated Lean unbuilt and unproved unless the owner and a matching declaration agree."""
+
+    if not isinstance(result, dict) or result.get("schema") != _BOUND_VARIABLE_SCHEMA:
+        return {
+            "generated": False,
+            "built": False,
+            "proved": False,
+            "kernel_checked": False,
+            "declared_prover_result_matches": False,
+            "reason": "no_declared_prover_result",
+        }
+    source = result.get("lean_source")
+    generated = isinstance(source, str) and "theorem" in source
+    authority = result.get("authority") if isinstance(result.get("authority"), dict) else {}
+    statements = result.get("conditional_theorem_statements")
+    kernel = (
+        isinstance(statements, list)
+        and bool(statements)
+        and all(isinstance(row, dict) and row.get("kernel_checked") is True for row in statements)
+    )
+    built = result.get("backend_executed") is True and result.get("lean_compilation_verified") is True
+    owner_checked = (
+        authority.get("conditional_theorems_checked") is True
+        and authority.get("lean_compilation_verified") is True
+    )
+    declared_matches = _matching_prover_result(declared_prover_result, result)
+    proved = bool(built and kernel and owner_checked and declared_matches)
+    if proved:
+        reason = "declared_prover_result"
+    elif declared_prover_result is None:
+        reason = "no_declared_prover_result"
+    elif not declared_matches:
+        reason = "declared_prover_result_does_not_match_source_pins"
+    else:
+        reason = "owner_execution_absent"
+    return {
+        "generated": generated,
+        "built": built,
+        "proved": proved,
+        "kernel_checked": kernel,
+        "declared_prover_result_matches": declared_matches,
+        "reason": reason,
+    }
+
+
+def _decision_invoke(
+    module: Any,
+    error: Any,
+    module_name: str,
+    function_name: str,
+    operation: str,
+    /,
+    *args: Any,
+    hashes: dict[str, Any] | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    envelope = _invoke(
+        module,
+        error,
+        module_name,
+        function_name,
+        operation,
+        *args,
+        hashes=hashes,
+        **kwargs,
+    )
+    envelope["reviews_synthesized"] = False
+    if "permissions" not in envelope:
+        result = envelope.get("result") if isinstance(envelope.get("result"), dict) else {}
+        envelope["permissions"] = _independent_permissions(result)
+    if "conditional_lean" not in envelope:
+        result = envelope.get("result") if isinstance(envelope.get("result"), dict) else None
+        envelope["conditional_lean"] = _conditional_lean(result, None)
+    return envelope
+
+
 def _pin_hashes(kwargs: dict[str, Any]) -> dict[str, Any]:
     pins = {
         key: value
@@ -428,9 +674,15 @@ def _envelope(
     if isinstance(result, dict) and result.get("schema") in {
         _DEFINITION_EVIDENCE_SCHEMA,
         _SCOPE_CORRESPONDENCE_SCHEMA,
+        *_DECISION_SCHEMAS,
     }:
         envelope["identities"] = _source_identities(result)
         envelope["definition_uses"] = _definition_uses(result)
+    if isinstance(result, dict) and result.get("schema") in _DECISION_SCHEMAS:
+        envelope["permissions"] = _independent_permissions(result)
+        envelope["reviews_synthesized"] = False
+        envelope["retained"] = _retained_decision(result)
+        envelope["conditional_lean"] = _conditional_lean(result, None)
     return envelope
 
 
@@ -948,8 +1200,118 @@ def validate_norm_scope_correspondence_v1(
     )
 
 
+def prepare_norm_review_evidence_v1(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Replay unsigned interpretation-review evidence. Reviews are not created here."""
+
+    return _decision_invoke(
+        _norm_review_module,
+        _norm_review_error,
+        _NORM_REVIEW_MODULE_NAME,
+        "prepare_norm_review_evidence_v1",
+        "prepare_norm_review_evidence",
+        *args,
+        hashes=_pin_hashes(kwargs),
+        **kwargs,
+    )
+
+
+def build_norm_review_subject_v1(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Replay the review subject bound to the caller's dependency manifest."""
+
+    return _decision_invoke(
+        _norm_review_module,
+        _norm_review_error,
+        _NORM_REVIEW_MODULE_NAME,
+        "build_norm_review_subject_v1",
+        "build_norm_review_subject",
+        *args,
+        hashes=_pin_hashes(kwargs),
+        **kwargs,
+    )
+
+
+def assess_norm_reviews_v1(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Authenticate only reviews the caller supplied. Unsigned reviews stay unsigned."""
+
+    return _decision_invoke(
+        _norm_review_module,
+        _norm_review_error,
+        _NORM_REVIEW_MODULE_NAME,
+        "assess_norm_reviews_v1",
+        "assess_norm_reviews",
+        *args,
+        hashes=_pin_hashes(kwargs),
+        **kwargs,
+    )
+
+
+def validate_norm_review_assessment_v1(report: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Regenerate a norm-review assessment without adding a signature."""
+
+    return _decision_invoke(
+        _norm_review_module,
+        _norm_review_error,
+        _NORM_REVIEW_MODULE_NAME,
+        "validate_norm_review_assessment_v1",
+        "validate_norm_review_assessment",
+        report,
+        *args,
+        hashes=_pin_hashes(kwargs),
+        **kwargs,
+    )
+
+
+def prepare_bound_variable_definition_v1(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Replay a conditional bound-variable definition without executing Lean."""
+
+    return _decision_invoke(
+        _bound_variable_module,
+        _bound_variable_error,
+        _BOUND_VARIABLE_MODULE_NAME,
+        "prepare_bound_variable_definition_v1",
+        "prepare_bound_variable_definition",
+        *args,
+        hashes=_pin_hashes(kwargs),
+        **kwargs,
+    )
+
+
+def validate_bound_variable_definition_v1(
+    record: Any,
+    *args: Any,
+    expected_report_sha256: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Regenerate a bound-variable report under its independent report pin."""
+
+    return _decision_invoke(
+        _bound_variable_module,
+        _bound_variable_error,
+        _BOUND_VARIABLE_MODULE_NAME,
+        "validate_bound_variable_definition_v1",
+        "validate_bound_variable_definition",
+        record,
+        *args,
+        expected_report_sha256=expected_report_sha256,
+        hashes=_pin_hashes({"expected_report_sha256": expected_report_sha256, **kwargs}),
+        **kwargs,
+    )
+
+
+def conditional_lean_disposition(
+    envelope: dict[str, Any] | None,
+    declared_prover_result: Any = None,
+) -> dict[str, Any]:
+    """Read Lean execution only from the owner report and a hash-matching declaration."""
+
+    result = None
+    if isinstance(envelope, dict) and isinstance(envelope.get("result"), dict):
+        result = envelope["result"]
+    return _conditional_lean(result, declared_prover_result)
+
+
 def absent_norm_evidence(kind: str) -> dict[str, Any]:
-    """Record that definition or scope evidence was not supplied."""
+    """Record that definition, scope, review, or bound-variable evidence was not supplied."""
 
     if kind == "definition":
         owner, function, operation = (
@@ -957,13 +1319,25 @@ def absent_norm_evidence(kind: str) -> dict[str, Any]:
             "prepare_norm_definition_evidence_v1",
             "prepare_norm_definition_evidence",
         )
+    elif kind == "review":
+        owner, function, operation = (
+            _NORM_REVIEW_MODULE_NAME,
+            "assess_norm_reviews_v1",
+            "assess_norm_reviews",
+        )
+    elif kind == "bound_variable":
+        owner, function, operation = (
+            _BOUND_VARIABLE_MODULE_NAME,
+            "prepare_bound_variable_definition_v1",
+            "prepare_bound_variable_definition",
+        )
     else:
         owner, function, operation = (
             _SCOPE_MODULE_NAME,
             "prepare_norm_scope_correspondence_v1",
             "prepare_norm_scope_correspondence",
         )
-    return _envelope(
+    envelope = _envelope(
         status="unavailable",
         operation=operation,
         owner=owner,
@@ -975,6 +1349,20 @@ def absent_norm_evidence(kind: str) -> dict[str, Any]:
         attachments=None,
         dependency={"error_type": "EvidenceNotSupplied", "message": kind},
     )
+    if kind in {"review", "bound_variable"}:
+        envelope["reviews_synthesized"] = False
+        envelope["permissions"] = _independent_permissions({})
+        envelope["conditional_lean"] = _conditional_lean(None, None)
+        envelope["retained"] = {
+            "alternatives": None,
+            "alternative_ids": [],
+            "assumptions": [],
+            "carrier_map": None,
+            "evaluation_context": None,
+            "occurrence_binding": None,
+            "source_pins": {},
+        }
+    return envelope
 
 
 def _editions(envelope: dict[str, Any]) -> set[Any]:
@@ -1077,4 +1465,76 @@ def forward_conditional_norm_evidence(
             "definition": definition_envelope.get("identities"),
             "scope": scope_envelope.get("identities"),
         },
+    }
+
+
+def _permission_record(envelope: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    if isinstance(envelope, dict) and isinstance(envelope.get("permissions"), dict):
+        permissions = envelope["permissions"]
+        if all(isinstance(permissions.get(name), dict) for name in ("source", "edition", "meaning", "context")):
+            return {
+                "source": deepcopy(permissions["source"]),
+                "edition": deepcopy(permissions["edition"]),
+                "meaning": deepcopy(permissions["meaning"]),
+                "context": deepcopy(permissions["context"]),
+            }
+    result = envelope.get("result") if isinstance(envelope, dict) and isinstance(envelope.get("result"), dict) else {}
+    return _independent_permissions(result)
+
+
+def forward_independent_norm_decisions(
+    requirement: dict[str, Any],
+    definition_envelope: dict[str, Any] | None = None,
+    scope_envelope: dict[str, Any] | None = None,
+    review_envelope: dict[str, Any] | None = None,
+    bound_variable_envelope: dict[str, Any] | None = None,
+    declared_prover_result: Any = None,
+) -> dict[str, Any]:
+    """Attach review and bound-variable decisions without merging their permissions or proofs."""
+
+    base = forward_conditional_norm_evidence(requirement, definition_envelope, scope_envelope)
+    review_envelope = review_envelope or absent_norm_evidence("review")
+    bound_variable_envelope = bound_variable_envelope or absent_norm_evidence("bound_variable")
+    review_permissions = _permission_record(review_envelope)
+    bound_permissions = _permission_record(bound_variable_envelope)
+    retained = bound_variable_envelope.get("retained") if isinstance(bound_variable_envelope.get("retained"), dict) else {}
+    review_retained = review_envelope.get("retained") if isinstance(review_envelope.get("retained"), dict) else {}
+    lean = conditional_lean_disposition(bound_variable_envelope, declared_prover_result)
+    return {
+        "schema": _DECISION_HANDOFF_SCHEMA,
+        "requirement_id": requirement.get("requirement_id"),
+        "admitted_legal_text": requirement.get("admitted_legal_text"),
+        "admitted_legal_text_changed": False,
+        "proof": requirement.get("proof"),
+        "proof_satisfied": False,
+        "proof_changed": False,
+        "definition_scope": base,
+        "review": review_envelope,
+        "bound_variable": bound_variable_envelope,
+        "permissions": {
+            "source": review_permissions["source"],
+            "edition": review_permissions["edition"],
+            "meaning": review_permissions["meaning"],
+            "context": review_permissions["context"],
+            "bound_variable": bound_permissions,
+        },
+        "retained": {
+            "alternatives": retained.get("alternatives", review_retained.get("alternatives")),
+            "alternative_ids": list(retained.get("alternative_ids") or review_retained.get("alternative_ids") or []),
+            "assumptions": list(retained.get("assumptions") or []),
+            "definition_assumption": retained.get("definition_assumption"),
+            "membership_assumption": retained.get("membership_assumption"),
+            "carrier_map": retained.get("carrier_map"),
+            "evaluation_context": retained.get("evaluation_context"),
+            "occurrence_binding": retained.get("occurrence_binding"),
+            "original_unresolved": review_retained.get("original_unresolved"),
+            "source_pins": {
+                "review": dict(review_retained.get("source_pins") or {}),
+                "bound_variable": dict(retained.get("source_pins") or {}),
+            },
+        },
+        "conditional_lean": lean,
+        "reviews_synthesized": False,
+        "governing_definition": None,
+        "unresolved_dependency": base.get("unresolved_dependency"),
     }
