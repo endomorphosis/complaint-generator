@@ -3748,6 +3748,92 @@ class ComplaintWorkspaceService:
         self._authorizer = authorizer or WorkspaceAuthorizer()
         self.request_handlers = ComplaintWorkspaceRequestHandlers(self)
         self._interview_mediators: Dict[tuple[str, str], Any] = {}
+        self._case_directory: Any = None
+
+    def open_case_directory(self, *, key: bytes, key_id: str) -> Any:
+        """Open the sealed case namespace index for the authenticated principal.
+
+        The directory lives beside this workspace. Callers select cases by the
+        authenticated principal and an explicit case id. A request ``user_id``
+        is not a selector. The injected key is not written.
+        """
+
+        from applications.case_directory import CaseDirectory
+
+        self._authenticated_case_actor()
+        directory = CaseDirectory(self._session_dir / "case-namespaces", key=key, key_id=key_id)
+        self._case_directory = directory
+        return directory
+
+    def create_independent_case(self, *, supplied_user_id: Optional[str] = None, unreadable_legacy_envelope: Optional[bytes] = None) -> Dict[str, Any]:
+        """Mint one owner-only case under the authenticated principal."""
+
+        actor = self._require_case_directory_actor()
+        record = self._case_directory.create_case(
+            actor_principal_id=actor,
+            supplied_user_id=supplied_user_id,
+            unreadable_legacy_envelope=unreadable_legacy_envelope,
+        )
+        return record.identity()
+
+    def adopt_owner_only_case(self, envelope: bytes, *, supplied_user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Read a legacy owner-only envelope and record its namespace.
+
+        Missing keys raise ``CaseDirectoryError`` and do not create a case.
+        Session plaintext is not stored in the directory.
+        """
+
+        actor = self._require_case_directory_actor()
+        record, payload = self._case_directory.adopt_owner_only_case(
+            actor_principal_id=actor,
+            envelope=envelope,
+            supplied_user_id=supplied_user_id,
+        )
+        return {
+            "case": record.identity(),
+            "legacy_session": payload,
+            "persisted_session_plaintext": False,
+        }
+
+    def read_owner_only_case(self, envelope: bytes, *, supplied_user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Open a legacy owner-only envelope without creating a case."""
+
+        actor = self._require_case_directory_actor()
+        return self._case_directory.read_owner_only_case(
+            actor_principal_id=actor,
+            envelope=envelope,
+            supplied_user_id=supplied_user_id,
+        )
+
+    def list_independent_cases(self, *, supplied_user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        actor = self._require_case_directory_actor()
+        records = self._case_directory.list_cases(actor_principal_id=actor, supplied_user_id=supplied_user_id)
+        return [record.identity() for record in records]
+
+    def select_independent_case(self, case_id: str, *, supplied_user_id: Optional[str] = None) -> Dict[str, Any]:
+        actor = self._require_case_directory_actor()
+        record = self._case_directory.select_case(
+            actor_principal_id=actor,
+            case_id=case_id,
+            supplied_user_id=supplied_user_id,
+        )
+        return record.identity()
+
+    def _authenticated_case_actor(self) -> str:
+        access = self._effective_access()
+        if access.trust != "authenticated" or not isinstance(access.principal_id, str) or not access.principal_id:
+            raise WorkspaceAuthorizationDenied()
+        return str(access.principal_id)
+
+    def _require_case_directory_actor(self) -> str:
+        actor = self._authenticated_case_actor()
+        if self._case_directory is None:
+            raise WorkspacePersistenceError(
+                "Case directory is not open.",
+                code="case_directory_closed",
+                public_status="unavailable",
+            )
+        return actor
 
     def remember_invocation_associations(self, user_id: Optional[str], entries: Any) -> Dict[str, Any]:
         """Store invocation associations in the encrypted session without a provider call."""
