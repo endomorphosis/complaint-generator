@@ -937,6 +937,42 @@ class WorkflowActionService:
 		kwargs.pop("handler", None)
 		return dispatch_registered_hook_operation(request, **kwargs)
 
+	def accept_bound_hook_effect(self, **kwargs: Any) -> Dict[str, Any]:
+		"""Admit one hook effect through the case graph's revision ledger.
+
+		Candidate acquisitions stay on this service. They are not written into
+		the graph, the pending inquiry, or the saved case, and a receipt is not
+		treated as durability or proof. No second session database is opened.
+		"""
+		from mediator.hook_runtime import accept_bound_hook_effect
+
+		graph = kwargs.pop("graph", None)
+		if graph is None:
+			phase_manager = getattr(self._mediator, "phase_manager", None)
+			getter = getattr(phase_manager, "get_phase_data", None)
+			graph = getter(ComplaintPhase.INTAKE, "knowledge_graph") if getter is not None else None
+		meta = self.__dict__.get("_interview_meta")
+		if "pending_inquiry" not in kwargs:
+			kwargs["pending_inquiry"] = meta.get("pending_inquiry") if isinstance(meta, dict) else None
+		if "saved_case" not in kwargs:
+			phase_manager = getattr(self._mediator, "phase_manager", None)
+			getter = getattr(phase_manager, "get_phase_data", None)
+			loaded = getter(ComplaintPhase.INTAKE, "intake_case_file") if getter is not None else None
+			kwargs["saved_case"] = loaded if isinstance(loaded, dict) else {}
+		log = self.__dict__.setdefault("_hook_candidate_acquisitions", [])
+		kwargs.setdefault("acquisition_log", log)
+		pending_before = kwargs.get("pending_inquiry")
+		saved_before = kwargs.get("saved_case")
+		result = accept_bound_hook_effect(graph=graph, **kwargs)
+		if isinstance(meta, dict) and meta.get("pending_inquiry") is not pending_before and "pending_inquiry" not in kwargs:
+			result["mutated_pending_inquiry"] = True
+		if saved_before is not kwargs.get("saved_case"):
+			result["mutated_saved_case"] = True
+		result["candidate_log_count"] = len(log)
+		result["receipt_is_durable"] = False
+		result["receipt_is_proof"] = False
+		return result
+
 
 def _json_ready(value: Any) -> Any:
 	"""Drop values that cannot be stored in the versioned session projection."""
