@@ -49,6 +49,58 @@ _SUPPORT_RELATION_TYPES = frozenset({
     "has_impact",
     "seeks_remedy",
 })
+_PROOF_ID_KEYS = ("fact_id", "entity_id", "support_entity_id", "invalidated_entity_id", "proof_cache_entity_id")
+_PROOF_LIST_KEYS = ("fact_ids", "entity_ids", "support_refs", "support_entity_ids", "proof_cache_fact_ids")
+
+
+def _listed_reference_ids(value: Any) -> Set[str]:
+    found: Set[str] = set()
+    if isinstance(value, str):
+        if value:
+            found.add(value)
+        return found
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, str) and item:
+                found.add(item)
+        return found
+    if isinstance(value, Mapping):
+        for key in _PROOF_ID_KEYS:
+            item = value.get(key)
+            if isinstance(item, str) and item:
+                found.add(item)
+        for key in _PROOF_LIST_KEYS:
+            found.update(_listed_reference_ids(value.get(key)))
+    return found
+
+
+def _proof_cache_cites(attributes: Mapping[str, Any], entity_id: str) -> bool:
+    if not isinstance(attributes, Mapping) or not entity_id:
+        return False
+    if entity_id in _listed_reference_ids(attributes.get("proof_cache")):
+        return True
+    if entity_id in _listed_reference_ids(attributes.get("proof_cache_fact_ids")):
+        return True
+    if attributes.get("proof_cache_support_ref") == entity_id or attributes.get("proof_cache_entity_id") == entity_id:
+        return True
+    return False
+
+
+def _invalidate_proof_cache(attributes: Dict[str, Any], entity_id: str, reason: str) -> Dict[str, Any]:
+    updated = dict(attributes)
+    identity = updated.get("proof_cache_identity")
+    if identity:
+        updated["rejected_proof_cache_identity"] = identity
+    updated["proof_cache_reusable"] = False
+    cache = updated.get("proof_cache")
+    if isinstance(cache, Mapping):
+        cache_copy = dict(cache)
+        cache_copy["reusable"] = False
+        cache_copy["satisfied"] = False
+        cache_copy["invalidation_reason"] = reason
+        cache_copy["invalidated_entity_id"] = entity_id
+        updated["proof_cache"] = cache_copy
+    return updated
 
 
 class AnswerEventConflict(ValueError):
@@ -1259,7 +1311,33 @@ class KnowledgeGraph:
         ledger.setdefault("assertion_states", {})
         ledger.setdefault("conflicts", [])
         ledger.setdefault("reopened_questions", [])
+        ledger.setdefault("inquiry_targets", [])
         return ledger
+
+    def register_inquiry_target(
+        self,
+        *,
+        inquiry_id: str,
+        entity_id: str,
+        question: str,
+        stable_id: str = "",
+    ) -> Dict[str, Any]:
+        """Record an inquiry bound to one factual target. Unrelated inquiries stay put."""
+        if not inquiry_id or not entity_id:
+            raise ValueError("inquiry target requires an id and a factual entity")
+        targets = self.factual_ledger()["inquiry_targets"]
+        for existing in targets:
+            if isinstance(existing, Mapping) and existing.get("inquiry_id") == inquiry_id:
+                return copy.deepcopy(dict(existing))
+        record = {
+            "inquiry_id": inquiry_id,
+            "entity_id": entity_id,
+            "stable_id": stable_id,
+            "question": question,
+            "status": "open",
+        }
+        targets.append(record)
+        return copy.deepcopy(record)
 
     def begin_answer_event(self, event_id: str, payload: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
         """Return the stored event when the payload matches. A changed payload fails."""
@@ -1498,23 +1576,37 @@ class KnowledgeGraph:
         return revision
 
     def invalidate_dependents(self, entity_id: str, *, reason: str, event_id: str = "") -> List[str]:
-        """Mark support that depended on an assertion stale and reopen a question."""
+        """Mark support that depended on an assertion stale and reopen its inquiries.
+
+        Only support edges and proof-cache references that cite this entity are
+        invalidated. Contradiction edges, unrelated identities, and inquiries
+        bound to other targets stay as they are.
+        """
         if not entity_id:
             return []
         invalidated: List[str] = []
         for relationship in self.relationships.values():
-            if entity_id not in {relationship.source_id, relationship.target_id}:
-                continue
-            if relationship.relation_type not in _SUPPORT_RELATION_TYPES:
-                continue
             attributes = dict(relationship.attributes or {})
+            cites_support = entity_id in {relationship.source_id, relationship.target_id}
+            cache_cites = _proof_cache_cites(attributes, entity_id)
+            if relationship.relation_type == "contradicts":
+                if cache_cites:
+                    relationship.attributes = _invalidate_proof_cache(attributes, entity_id, reason)
+                continue
+            if relationship.relation_type not in _SUPPORT_RELATION_TYPES or not cites_support:
+                if cache_cites:
+                    relationship.attributes = _invalidate_proof_cache(attributes, entity_id, reason)
+                    invalidated.append(relationship.id)
+                continue
             attributes["activity_status"] = "invalidated"
             attributes["effective"] = False
             attributes["invalidation_reason"] = reason
             attributes["invalidated_entity_id"] = entity_id
-            relationship.attributes = attributes
+            relationship.attributes = _invalidate_proof_cache(attributes, entity_id, reason) if cache_cites or attributes.get("proof_cache") else attributes
             invalidated.append(relationship.id)
         for entity in self.entities.values():
+            if entity.id == entity_id:
+                continue
             attributes = dict(entity.attributes or {})
             changed = False
             for key in ("satisfied_requirements", "resolved_gaps", "satisfied_fact_bundle", "event_support_refs"):
@@ -1523,9 +1615,62 @@ class KnowledgeGraph:
                     continue
                 attributes[key] = [item for item in values if item != entity_id]
                 changed = True
+            if _proof_cache_cites(attributes, entity_id):
+                attributes = _invalidate_proof_cache(attributes, entity_id, reason)
+                changed = True
             if changed:
                 attributes["support_invalidated"] = True
                 entity.attributes = attributes
+                if entity.id not in invalidated:
+                    invalidated.append(entity.id)
+        self._reopen_affected_inquiries(entity_id, reason=reason, event_id=event_id)
+        linked = getattr(self, "_dependency_graph", None)
+        if linked is not None:
+            from complaint_phases.dependency_graph import DependencyGraphBuilder
+            DependencyGraphBuilder().invalidate_factual_dependents(
+                linked, entity_id, reason=reason, event_id=event_id,
+            )
+        return invalidated
+
+    def _reopen_affected_inquiries(self, entity_id: str, *, reason: str, event_id: str) -> None:
+        questions = self.factual_ledger()["reopened_questions"]
+        stable_ids = {
+            str(state.get("stable_id") or "")
+            for state in self.factual_ledger().get("assertion_states", {}).values()
+            if isinstance(state, Mapping) and state.get("entity_id") == entity_id
+        }
+        reopened_any = False
+        for inquiry in self.factual_ledger().get("inquiry_targets") or []:
+            if not isinstance(inquiry, dict):
+                continue
+            target_entity = str(inquiry.get("entity_id") or "")
+            target_stable = str(inquiry.get("stable_id") or "")
+            affected = target_entity == entity_id or (target_stable and target_stable in stable_ids)
+            if not affected:
+                continue
+            inquiry["status"] = "reopened"
+            inquiry["invalidation_reason"] = reason
+            inquiry["event_id"] = event_id
+            reopened_any = True
+            question = {
+                "type": "clarification",
+                "question": inquiry.get("question") or (
+                    "The earlier statement is no longer active support. "
+                    "What is the current fact, and which source should be used?"
+                ),
+                "context": {
+                    "regenerated": True,
+                    "invalidated_entity_id": entity_id,
+                    "invalidation_reason": reason,
+                    "event_id": event_id,
+                    "inquiry_id": inquiry.get("inquiry_id"),
+                },
+                "candidate_source": "factual_revision",
+            }
+            if question not in questions:
+                questions.append(question)
+        if reopened_any:
+            return
         question = {
             "type": "clarification",
             "question": (
@@ -1540,10 +1685,8 @@ class KnowledgeGraph:
             },
             "candidate_source": "factual_revision",
         }
-        questions = self.factual_ledger()["reopened_questions"]
         if question not in questions:
             questions.append(question)
-        return invalidated
 
     def effective_fact_entities(self) -> List[Entity]:
         """Facts still eligible as current support. Superseded and retracted facts stay stored."""
