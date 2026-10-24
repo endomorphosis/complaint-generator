@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Protocol, Set
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Protocol, Sequence, Set
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
@@ -4712,7 +4712,12 @@ class ComplaintWorkspaceService:
             raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.public_status) from None
         receipt = dict(result["receipt"])
         receipt["plaintext_disk"] = protection != "user_chosen_encrypted"
-        return {"snapshot": result["snapshot"], "receipt": receipt, "cold_read": {"narrative_reextracted": False, "hooks_replayed": False, "model_calls": 0, "bindings_from": "committed_snapshot"}}
+        return {
+            "snapshot": result["snapshot"],
+            "receipt": receipt,
+            "cold_read": {"narrative_reextracted": False, "hooks_replayed": False, "model_calls": 0, "bindings_from": "committed_snapshot"},
+            "kit_durability": result.get("kit_durability") or {"status": "unavailable", "durable": False, "counts_as_replica": False, "network_durable": False},
+        }
 
     def commit_complete_grounded_snapshot(
         self,
@@ -4780,7 +4785,81 @@ class ComplaintWorkspaceService:
         )
         saved["provider_replayed"] = False
         saved["hooks_replayed"] = False
+        kit = saved.get("kit_durability") if isinstance(saved.get("kit_durability"), dict) else {}
+        saved["kit_durability_counts_as_replica"] = False
+        saved["network_durable"] = False
+        if kit.get("counts_as_replica") is True or kit.get("network_durable") is True:
+            raise WorkspacePersistenceError(
+                "A local durability receipt cannot claim replica durability.",
+                code="durability_unproven",
+                public_status="recoverable",
+            )
         return saved
+
+    def _replica_identity(self, user_id: str, case_id: Optional[str]) -> Dict[str, Any]:
+        context = self._interview_snapshot_key(user_id, case_id)
+        return {
+            "tenant_id": str(context["tenant_id"]),
+            "case_id": str(context["case_id"]),
+            "principal_id": str(context["principal_id"]),
+            "key": context["key"],
+            "key_id": context["key_id"],
+        }
+
+    def publish_encrypted_replicas(
+        self,
+        user_id: str,
+        repository: Path,
+        *,
+        case_id: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Publish sealed workspace replicas with the unlocked case key.
+
+        Callers cannot substitute another key. Fixture providers stay explicit
+        arguments and are not contacted unless the policy asks for them.
+        """
+
+        from integrations.ipfs_datasets.storage import publish_encrypted_replicas
+
+        identity = self._replica_identity(user_id, case_id)
+        kwargs.pop("key", None)
+        kwargs.pop("key_id", None)
+        kwargs.pop("tenant_id", None)
+        kwargs.pop("principal_id", None)
+        return publish_encrypted_replicas(repository, **identity, **kwargs)
+
+    def reconcile_encrypted_replicas(self, repository: Path, receipt: Optional[Mapping[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import reconcile_encrypted_replicas
+
+        return reconcile_encrypted_replicas(repository, receipt, **kwargs)
+
+    def restore_encrypted_replicas(self, user_id: str, repository: Path, receipt: Mapping[str, Any], *, case_id: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import restore_encrypted_replicas
+
+        identity = self._replica_identity(user_id, case_id)
+        kwargs.pop("key", None)
+        kwargs.pop("key_id", None)
+        kwargs.pop("tenant_id", None)
+        kwargs.pop("principal_id", None)
+        return restore_encrypted_replicas(repository, receipt, **identity, **kwargs)
+
+    def restore_encrypted_workspace(self, user_id: str, repository: Path, *, case_id: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import restore_encrypted_workspace
+
+        identity = self._replica_identity(user_id, case_id)
+        kwargs.pop("key", None)
+        kwargs.pop("key_id", None)
+        kwargs.pop("tenant_id", None)
+        kwargs.pop("principal_id", None)
+        return restore_encrypted_workspace(repository, **identity, **kwargs)
+
+    def count_verified_ciphertext_replicas(self, observations: Sequence[Mapping[str, Any]], **kwargs: Any) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import count_verified_ciphertext_replicas, label_ciphertext_replica_observations
+
+        if kwargs:
+            return label_ciphertext_replica_observations(observations, **kwargs)
+        return count_verified_ciphertext_replicas(observations)
 
     def load_complete_interview_snapshot(
         self,

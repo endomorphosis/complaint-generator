@@ -1535,6 +1535,170 @@ def count_verified_ciphertext_replicas(observations: Sequence[Mapping[str, Any]]
     return _count(observations)
 
 
+def _unavailable_kit_durability(reason: str) -> dict[str, Any]:
+    return {
+        "status": "unavailable",
+        "reason": reason,
+        "schema": "",
+        "durable": False,
+        "success": False,
+        "acknowledged_data": False,
+        "counts_as_replica": False,
+        "network_durable": False,
+        "local_fsync_is_network_durability": False,
+        "live_qualification": False,
+    }
+
+
+def _kit_snapshot_durability_record(*, revision: str) -> dict[str, Any]:
+    """Attach one existing Kit durability receipt for the local snapshot fsync.
+
+    The receipt records the file and directory fsync this process just
+    finished. It does not claim a WAL segment, a network replica, or a live
+    provider qualification.
+    """
+
+    try:
+        from integrations.private_storage import _prefer_vendored_kit
+
+        _prefer_vendored_kit()
+        from ipfs_kit_py.core.vfs.host_contracts import DurabilityMode, HostErrno
+        from ipfs_kit_py.kernel_vfs.durability import (
+            DurabilityCallbackKind,
+            DurabilityDisposition,
+            DurabilityReceipt,
+        )
+    except Exception:
+        return _unavailable_kit_durability("kit_durability_unavailable")
+    try:
+        receipt = DurabilityReceipt(
+            receipt_id="interview-snapshot-fsync-" + revision,
+            callback=DurabilityCallbackKind.FSYNC,
+            disposition=DurabilityDisposition.SUCCESS,
+            success=True,
+            durable=True,
+            durability_mode=DurabilityMode.WAL_AND_BACKEND,
+            acknowledged_data=True,
+            observed_effect=True,
+            backend_file_fsync=True,
+            backend_parent_directory_fsync=True,
+            wal_file_fsync=False,
+            wal_parent_directory_fsync=False,
+            fsync_receipt_id="interview-snapshot-directory-fsync-" + revision,
+            path="",
+            path_ref="interview-snapshot/" + revision,
+            errno=HostErrno.OK,
+            detail={
+                "wal_segment": False,
+                "network_replica": False,
+                "counts_as_replica": False,
+                "boundaries": ["snapshot_file", "snapshot_directory"],
+            },
+        )
+    except Exception:
+        return _unavailable_kit_durability("kit_durability_rejected")
+    record = receipt.to_record()
+    record["path"] = ""
+    record["status"] = "available"
+    record["counts_as_replica"] = False
+    record["network_durable"] = False
+    record["local_fsync_is_network_durability"] = False
+    record["live_qualification"] = False
+    return record
+
+
+def _read_kit_durability(dir_fd: int) -> dict[str, Any]:
+    try:
+        raw = _interview_read(dir_fd, "kit-durability.json")
+    except FileNotFoundError:
+        return _unavailable_kit_durability("missing")
+    except (OSError, InterviewSnapshotError):
+        return _unavailable_kit_durability("unreadable")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return _unavailable_kit_durability("corrupt")
+    if not isinstance(payload, dict):
+        return _unavailable_kit_durability("corrupt")
+    payload["counts_as_replica"] = False
+    payload["network_durable"] = False
+    payload["local_fsync_is_network_durability"] = False
+    payload["live_qualification"] = False
+    payload.pop("path", None)
+    return payload
+
+
+def _write_kit_durability(dir_fd: int, revision: str, complaint_text: str) -> dict[str, Any]:
+    record = _kit_snapshot_durability_record(revision=revision)
+    encoded = json.dumps(record, sort_keys=True).encode("utf-8")
+    if complaint_text and complaint_text.encode("utf-8") in encoded:
+        record = _unavailable_kit_durability("redacted")
+        encoded = json.dumps(record, sort_keys=True).encode("utf-8")
+    try:
+        _interview_write_exclusive(dir_fd, "kit-durability.json", encoded)
+        os.fsync(dir_fd)
+    except (OSError, InterviewSnapshotError):
+        return _unavailable_kit_durability("sidecar_unwritable")
+    return record
+
+
+def label_ciphertext_replica_observations(
+    observations: Sequence[Mapping[str, Any]],
+    *,
+    case_id: str,
+    key_id: str,
+    version: str,
+) -> dict[str, Any]:
+    """Count only authenticated readback bound to the current object, key, case, and version.
+
+    Acknowledgements, local CIDs, and unbound rows stay visible and uncounted.
+    Fixture providers stay labeled and can count only after that same readback.
+    """
+
+    prepared: list[dict[str, Any]] = []
+    labels: list[dict[str, Any]] = []
+    for row in observations:
+        if not isinstance(row, Mapping):
+            continue
+        provider_id = str(row.get("provider_id") or row.get("provider") or "")
+        object_name = str(row.get("name") or row.get("object") or "")
+        row_version = str(row.get("version") or "")
+        row_case = str(row.get("case_id") or case_id)
+        row_key = str(row.get("key_id") or key_id)
+        acknowledgement = bool(row.get("acknowledgement") or row.get("acknowledgement_only"))
+        local_cid = bool(row.get("local_cid") or row.get("cid"))
+        fixture = bool(row.get("fixture_provider") or row.get("provider_class") == "fixture")
+        bound = bool(object_name) and row_case == case_id and row_key == key_id and row_version == version
+        readback = (
+            row.get("readback") is True
+            or (row.get("counted") is True and row.get("digest_match") is True and row.get("version_match") is True)
+        )
+        authenticated = bound and readback and not acknowledgement and not local_cid
+        prepared.append({
+            "provider_id": provider_id,
+            "state": "verified" if authenticated else str(row.get("state") or "unbound"),
+            "digest_match": authenticated and row.get("digest_match") is True,
+            "version_match": authenticated and row.get("version_match") is True,
+        })
+        labels.append({
+            "provider_id": provider_id,
+            "object": object_name,
+            "case_id": row_case,
+            "key_id": row_key,
+            "version": row_version,
+            "acknowledgement": acknowledgement,
+            "local_cid": local_cid,
+            "fixture_provider": fixture,
+            "authenticated_readback": authenticated,
+            "counted": authenticated and row.get("digest_match") is True and row.get("version_match") is True,
+        })
+    summary = count_verified_ciphertext_replicas(prepared)
+    summary["labels"] = labels
+    summary["live_durability"] = False
+    summary["fixture_providers_labeled"] = all("fixture_provider" in item for item in labels)
+    return summary
+
+
 UPSTREAM_REPLICA_FIXTURES = (
     "tests/unit/test_wallet_storage_factory.py",
     "tests/unit/test_wallet_storage_replicas_optional.py",
@@ -2435,7 +2599,8 @@ def persist_interview_snapshot(
             document, status="available", operation_id="interview_snapshot_commit", protection=protection,
             case_scope=(tenant_id, case_id, principal_id),
         )
-        return {"snapshot": document, "receipt": receipt, "head": new_head}
+        kit_durability = _write_kit_durability(root_fd, next_revision, document.get("complaint_text") or "")
+        return {"snapshot": document, "receipt": receipt, "head": new_head, "kit_durability": kit_durability}
     finally:
         if lock_fd >= 0:
             try:
@@ -2509,7 +2674,13 @@ def load_interview_snapshot(
                 payload, status="available", operation_id="interview_snapshot_load", protection=protection,
                 case_scope=(tenant_id, case_id, principal_id),
             )
-            return {"snapshot": payload, "receipt": receipt, "recovered": False, "cold_read": dict(_COLD_READ)}
+            return {
+                "snapshot": payload,
+                "receipt": receipt,
+                "recovered": False,
+                "cold_read": dict(_COLD_READ),
+                "kit_durability": _read_kit_durability(root_fd),
+            }
         if head.get("protection") == "user_chosen_encrypted" and protection != "user_chosen_encrypted":
             raise InterviewSnapshotError(
                 "Encrypted interview snapshots do not fall back to plaintext.",
@@ -2563,7 +2734,13 @@ def load_interview_snapshot(
                 recovered_from=str(head.get("revision") or "") if recovered else None,
                 case_scope=(tenant_id, case_id, principal_id),
             )
-            return {"snapshot": payload, "receipt": receipt, "recovered": recovered, "cold_read": dict(_COLD_READ)}
+            return {
+                "snapshot": payload,
+                "receipt": receipt,
+                "recovered": recovered,
+                "cold_read": dict(_COLD_READ),
+                "kit_durability": _read_kit_durability(root_fd),
+            }
         if auth_failed:
             raise InterviewSnapshotError("private snapshot authentication failed", code="authentication_failed")
         raise InterviewSnapshotError("no valid interview revision remains", code="corrupt_snapshot")
@@ -2952,6 +3129,7 @@ __all__ = [
     "restore_encrypted_replicas",
     "restore_encrypted_workspace",
     "count_verified_ciphertext_replicas",
+    "label_ciphertext_replica_observations",
     "upstream_replica_fixture_qualification",
     "upstream_replication_fixture_qualification",
     "UPSTREAM_REPLICA_FIXTURES",
