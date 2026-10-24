@@ -547,6 +547,58 @@ def migrate_original_complaint(state: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 
+def _grounded_owners_from_state(state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Read graph, receipt, inquiry, and stop owners already on the session."""
+
+    interview = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+    factual = dict(state.get("factual_graph_binding") or {}) if isinstance(state.get("factual_graph_binding"), dict) else {}
+    legal = dict(state.get("legal_graph_binding") or {}) if isinstance(state.get("legal_graph_binding"), dict) else {}
+    knowledge = interview.get("knowledge_graph") if isinstance(interview.get("knowledge_graph"), dict) else {}
+    dependency = interview.get("dependency_graph") if isinstance(interview.get("dependency_graph"), dict) else {}
+    if not factual and knowledge:
+        factual = {
+            "revision": str(knowledge.get("graph_revision") or knowledge.get("graph_version") or ""),
+            "graph_id": str(knowledge.get("graph_id") or ""),
+            "content_hash": str(knowledge.get("content_hash") or ""),
+        }
+    if not legal and dependency:
+        legal = {
+            "revision": str(dependency.get("graph_revision") or dependency.get("revision") or dependency.get("graph_version") or ""),
+            "graph_id": str(dependency.get("graph_id") or ""),
+            "content_hash": str(dependency.get("content_hash") or ""),
+        }
+    pending = interview.get("pending_inquiry") if isinstance(interview.get("pending_inquiry"), dict) else None
+    if pending is None and isinstance(state.get("explained_inquiry"), dict):
+        pending = state.get("explained_inquiry")
+    receipts: List[Dict[str, Any]] = []
+    for container_name in ("intake_router", "router_trace"):
+        container = state.get(container_name) if isinstance(state.get(container_name), dict) else {}
+        pool = container.get("receipts")
+        if isinstance(pool, list):
+            receipts.extend(item for item in pool if isinstance(item, dict))
+    sources: List[Any] = []
+    if isinstance(pending, dict) and isinstance(pending.get("source_references"), list):
+        sources = list(pending.get("source_references") or [])
+    elif isinstance(state.get("source_references"), list):
+        sources = list(state.get("source_references") or [])
+    conditional = state.get("conditional_ir") if isinstance(state.get("conditional_ir"), dict) else interview.get("conditional_ir")
+    external = state.get("external_dependencies") if isinstance(state.get("external_dependencies"), dict) else {
+        "public_law": {"status": "external_unverified"},
+        "ephemeral_index": {"status": "ephemeral"},
+    }
+    return {
+        "factual_graph": factual,
+        "legal_graph": legal,
+        "source_references": sources,
+        "conditional_ir": conditional if isinstance(conditional, dict) else {"status": "unknown"},
+        "proof_statuses": [item for item in list(state.get("proof_history") or []) if isinstance(item, dict)] if isinstance(state.get("proof_history"), list) else [],
+        "hook_receipts": receipts,
+        "pending_inquiry": pending or {"status": "unknown"},
+        "stop_policy": state.get("stop_policy") if isinstance(state.get("stop_policy"), dict) else None,
+        "external_dependencies": external,
+    }
+
+
 def _narrative_record(state: Dict[str, Any]) -> Dict[str, Any]:
     migrate_original_complaint(state)
     record = state.get("original_complaint")
@@ -4631,6 +4683,7 @@ class ComplaintWorkspaceService:
         expected_revision: Optional[str] = None,
         migrate_plaintext: bool = False,
         fail_before_head: bool = False,
+        before_head: Any = None,
     ) -> Dict[str, Any]:
         """Persist one complete interview snapshot inside the private session tree."""
         from integrations.ipfs_datasets.storage import InterviewSnapshotError, persist_interview_snapshot
@@ -4653,12 +4706,81 @@ class ComplaintWorkspaceService:
                 expected_revision=expected_revision,
                 migrate_plaintext=migrate_plaintext,
                 fail_before_head=fail_before_head,
+                before_head=before_head,
             )
         except InterviewSnapshotError as exc:
             raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.public_status) from None
         receipt = dict(result["receipt"])
         receipt["plaintext_disk"] = protection != "user_chosen_encrypted"
-        return {"snapshot": result["snapshot"], "receipt": receipt}
+        return {"snapshot": result["snapshot"], "receipt": receipt, "cold_read": {"narrative_reextracted": False, "hooks_replayed": False, "model_calls": 0, "bindings_from": "committed_snapshot"}}
+
+    def commit_complete_grounded_snapshot(
+        self,
+        user_id: str,
+        *,
+        case_id: Optional[str] = None,
+        expected_revision: Optional[str] = None,
+        fail_before_head: bool = False,
+        before_head: Any = None,
+        owners: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Seal the current grounded owners in one snapshot transaction.
+
+        The commit reads state that is already stored. It does not extract a
+        narrative, replay hook receipts, or call a model.
+        """
+
+        from integrations.ipfs_datasets.storage import assemble_interview_snapshot
+
+        state = self._load_state(user_id, case_id=case_id)
+        collected = _grounded_owners_from_state(state)
+        if isinstance(owners, Mapping):
+            for key, value in owners.items():
+                if value is not None:
+                    collected[key] = value
+        interview = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        pending = collected.get("pending_inquiry") if isinstance(collected.get("pending_inquiry"), dict) else {"status": "unknown"}
+        stop = collected.get("stop_policy") if isinstance(collected.get("stop_policy"), dict) else {}
+        if isinstance(stop.get("reason"), str) and stop.get("reason"):
+            outcome = str(stop["reason"])
+        elif pending.get("inquiry_id"):
+            outcome = "awaiting_user"
+        else:
+            outcome = "unknown"
+        factual = collected.get("factual_graph") if isinstance(collected.get("factual_graph"), dict) else {}
+        narrative = _narrative_record(state)
+        snapshot = assemble_interview_snapshot(
+            session_id=str(interview.get("session_id") or state.get("user_id") or user_id),
+            revision="0",
+            outcome_reason=outcome,
+            pending_inquiry=pending,
+            knowledge_graph=interview.get("knowledge_graph") if isinstance(interview.get("knowledge_graph"), dict) else {"status": "unknown"},
+            dependency_graph=interview.get("dependency_graph") if isinstance(interview.get("dependency_graph"), dict) else {"status": "unknown"},
+            provenance={"source": "committed-state", "narrative_reextracted": False, "hooks_replayed": False, "model_calls": 0},
+            unknown_items=list(interview.get("unknown_reasons") or []),
+            deferred_items=list(interview.get("capped_reasons") or []),
+            complaint_text=str(narrative.get("text") or ""),
+            transcript=[],
+            exports={"status": "not_filed"},
+            durability_payload={"writer": "grounded-snapshot", "remote_replicas_claimed": False},
+            revisions={
+                "session_revision": interview.get("session_revision", "unknown"),
+                "question_revision": pending.get("revision", "unknown"),
+                "graph_revision": factual.get("revision", "unknown"),
+            },
+            grounding=collected,
+        )
+        saved = self.persist_complete_interview_snapshot(
+            user_id,
+            snapshot,
+            case_id=case_id,
+            expected_revision=expected_revision,
+            fail_before_head=fail_before_head,
+            before_head=before_head,
+        )
+        saved["provider_replayed"] = False
+        saved["hooks_replayed"] = False
+        return saved
 
     def load_complete_interview_snapshot(
         self,

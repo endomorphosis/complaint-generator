@@ -1622,6 +1622,21 @@ def upstream_replica_fixture_qualification() -> dict[str, Any]:
 
 INTERVIEW_SNAPSHOT_SCHEMA = "interview-snapshot-v1"
 INTERVIEW_HEAD_SCHEMA = "interview-snapshot-head-v1"
+GROUNDED_SNAPSHOT_SCHEMA = "grounded-snapshot-bindings-v1"
+_GROUNDING_GRAPH_STATUSES = frozenset({"bound", "unknown", "unavailable"})
+_GROUNDING_IR_STATUSES = frozenset({"unavailable", "not_compiled", "conditional", "failed", "unknown"})
+_GROUNDING_PROOF_STATUSES = frozenset({
+    "unavailable", "not_run", "failed", "proved", "unknown", "unresolved", "not_proof", "not_authoritative",
+})
+_GROUNDING_STOP_ACTIONS = frozenset({"await_user", "review", "stop", "unavailable", "resume", "unknown"})
+_GROUNDING_PUBLIC_LAW = frozenset({"external_unverified", "external_missing", "external_present", "unavailable"})
+_GROUNDING_EPHEMERAL = frozenset({"ephemeral", "unavailable", "rebuildable"})
+_COLD_READ = {
+    "narrative_reextracted": False,
+    "hooks_replayed": False,
+    "model_calls": 0,
+    "bindings_from": "committed_snapshot",
+}
 UNENCRYPTED_INTERVIEW_NAME = "unencrypted-interview-snapshot.json"
 _INTERVIEW_PROTECTIONS = frozenset({"user_chosen_encrypted", "user_chosen_plaintext"})
 _INTERVIEW_PART_KINDS = (
@@ -1661,6 +1676,266 @@ class InterviewSnapshotError(RuntimeError):
         self.public_status = public_status
 
 
+def _grounding_token(value: Any, limit: int) -> str:
+    text = value if isinstance(value, str) else ""
+    if not text or len(text) > limit or re.fullmatch(r"[A-Za-z0-9_.:@/-]+", text) is None:
+        return ""
+    return text
+
+
+def _grounding_hash(value: Any) -> str:
+    if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value):
+        return value
+    return ""
+
+
+def _graph_binding(record: Any, role: str) -> dict[str, Any]:
+    source = record if isinstance(record, Mapping) else {}
+    revision = _grounding_token(
+        source.get("revision") or source.get("graph_revision") or source.get("artifact_revision"),
+        120,
+    )
+    status = source.get("status") if source.get("status") in _GROUNDING_GRAPH_STATUSES else ""
+    if not revision:
+        revision = "unknown"
+        status = "unavailable" if status == "unavailable" else "unknown"
+    elif status not in {"bound", "unavailable"}:
+        status = "bound"
+    if status == "unknown":
+        revision = "unknown"
+    return {
+        "role": role,
+        "status": status,
+        "revision": revision,
+        "artifact_kind": _grounding_token(source.get("artifact_kind"), 80),
+        "artifact_revision": _grounding_token(source.get("artifact_revision"), 120),
+        "ciphertext_storage_id": _grounding_token(source.get("ciphertext_storage_id"), 128),
+        "graph_id": _grounding_token(source.get("graph_id"), 120),
+        "content_hash": _grounding_hash(source.get("content_hash")),
+    }
+
+
+def _source_reference_rows(records: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        return rows
+    for item in list(records)[:64]:
+        if not isinstance(item, Mapping):
+            continue
+        source_id = _grounding_token(item.get("source_id") or item.get("authority_id"), 120)
+        content_hash = _grounding_hash(item.get("content_hash") or item.get("sha256"))
+        if not source_id and not content_hash:
+            continue
+        span_start = item.get("span_start") if type(item.get("span_start")) is int else None
+        span_end = item.get("span_end") if type(item.get("span_end")) is int else None
+        rows.append({
+            "status": "bound" if source_id and content_hash else "reference_only",
+            "source_id": source_id,
+            "source_version": _grounding_token(item.get("source_version") or item.get("version"), 80),
+            "content_hash": content_hash,
+            "span_start": span_start,
+            "span_end": span_end,
+            "role": _grounding_token(item.get("role"), 64) or "unknown",
+        })
+    rows.sort(key=lambda row: (row["source_id"], row["content_hash"], row["role"]))
+    return rows
+
+
+def _proof_rows(records: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        return rows
+    for item in list(records)[:64]:
+        if not isinstance(item, Mapping):
+            continue
+        status = item.get("status") or item.get("proof_status") or "unknown"
+        if status not in _GROUNDING_PROOF_STATUSES:
+            status = "unknown"
+        rows.append({
+            "target_id": _grounding_token(item.get("target_id") or item.get("effect_id"), 120),
+            "status": status,
+            "receipt_ref": _grounding_token(item.get("receipt_ref") or item.get("transaction_id"), 80),
+        })
+    return rows
+
+
+def _hook_receipt_rows(records: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        return rows
+    for item in list(records)[:32]:
+        if not isinstance(item, Mapping):
+            continue
+        operation = _grounding_token(item.get("operation") or item.get("purpose"), 64)
+        request_id = _grounding_token(item.get("request_id"), 64)
+        if not operation and not request_id:
+            continue
+        label = item.get("invocation_label") if item.get("invocation_label") in {"real", "fake"} else "fake"
+        rows.append({
+            "operation": operation,
+            "purpose": _grounding_token(item.get("purpose"), 64),
+            "request_id": request_id,
+            "status": _grounding_token(item.get("status"), 64) or "unknown",
+            "accepted_graph_revision": _grounding_token(item.get("accepted_graph_revision"), 120),
+            "invocation_label": label,
+            "live_model_identity_verified": item.get("live_model_identity_verified") is True and label == "real",
+            "prompt_logged": False,
+            "provider_replayed": False,
+        })
+    return rows
+
+
+def _pending_binding(record: Any) -> dict[str, Any]:
+    source = record if isinstance(record, Mapping) else {}
+    inquiry_id = _grounding_token(source.get("inquiry_id"), 80)
+    status = _grounding_token(
+        source.get("inquiry_status") or source.get("status") or source.get("grounding_status"),
+        64,
+    ) or "unknown"
+    if status == "bound":
+        status = _grounding_token(source.get("grounding_status"), 64) or "unknown"
+    revision = source.get("revision")
+    if type(revision) is not int or revision < 0 or revision > 10_000_000:
+        revision_text = _grounding_token(revision, 40) or "unknown"
+    else:
+        revision_text = str(revision)
+    if not inquiry_id and status == "unknown":
+        binding_status = "unknown"
+    elif inquiry_id:
+        binding_status = "bound"
+    else:
+        binding_status = "unknown"
+    return {
+        "status": binding_status,
+        "inquiry_status": status,
+        "inquiry_id": inquiry_id,
+        "revision": revision_text,
+        "objective_id": _grounding_token(source.get("objective_id"), 120),
+        "target_id": _grounding_token(source.get("target_id"), 120),
+        "target_revision": _grounding_token(source.get("target_revision"), 120),
+        "source_references_status": _grounding_token(source.get("source_references_status"), 64) or "unknown",
+        "grounding_status": _grounding_token(source.get("grounding_status"), 64) or "unknown",
+    }
+
+
+def _stop_policy_binding(record: Any, outcome_reason: str) -> dict[str, Any]:
+    source = record if isinstance(record, Mapping) else {}
+    reasons = {
+        "unknown", "awaiting_user", "user_pause", "eof", "cancelled", "interrupted", "paused",
+        "needs_answer", "saturated", "deferred_unknown", "provider_unavailable", "limit_reached",
+    }
+    reason = source.get("reason") if source.get("reason") in reasons else outcome_reason
+    if reason not in reasons:
+        reason = "unknown"
+    action = source.get("action") if source.get("action") in _GROUNDING_STOP_ACTIONS else "unknown"
+    awaiting = reason == "awaiting_user" or action == "await_user"
+    if action == "unknown" and awaiting:
+        action = "await_user"
+    stalled = source.get("worker_stalled") is True and not awaiting
+    return {
+        "schema": "interview-stop-policy-v1",
+        "reason": reason,
+        "action": action,
+        "awaiting_user": awaiting,
+        "worker_stalled": stalled,
+        "legal_sufficiency": source.get("legal_sufficiency") is True,
+    }
+
+
+def _external_dependency_binding(record: Any) -> dict[str, Any]:
+    source = record if isinstance(record, Mapping) else {}
+    public = source.get("public_law") if isinstance(source.get("public_law"), Mapping) else {}
+    ephemeral = source.get("ephemeral_index") if isinstance(source.get("ephemeral_index"), Mapping) else {}
+    public_status = public.get("status") if public.get("status") in _GROUNDING_PUBLIC_LAW else "external_unverified"
+    ephemeral_status = ephemeral.get("status") if ephemeral.get("status") in _GROUNDING_EPHEMERAL else "ephemeral"
+    return {
+        "schema": "grounded-external-dependencies-v1",
+        "public_law": {
+            "dependency": "external",
+            "copied_into_snapshot": False,
+            "status": public_status,
+        },
+        "ephemeral_index": {
+            "dependency": "ephemeral",
+            "durable": False,
+            "status": ephemeral_status,
+        },
+        "remote_replicas": {
+            "existence_claimed": False,
+            "status": "not_asserted",
+            "snapshot_is_replica_proof": False,
+        },
+    }
+
+
+def canonical_grounded_bindings(
+    *,
+    factual_graph: Any = None,
+    legal_graph: Any = None,
+    source_references: Any = None,
+    conditional_ir: Any = None,
+    proof_statuses: Any = None,
+    hook_receipts: Any = None,
+    pending_inquiry: Any = None,
+    stop_policy: Any = None,
+    external_dependencies: Any = None,
+    outcome_reason: str = "unknown",
+    recorded: bool = True,
+) -> dict[str, Any]:
+    """Bind current owners. This does not extract narrative or replay hooks."""
+
+    ir_source = conditional_ir if isinstance(conditional_ir, Mapping) else {}
+    ir_status = ir_source.get("status") if ir_source.get("status") in _GROUNDING_IR_STATUSES else "unknown"
+    return {
+        "schema": GROUNDED_SNAPSHOT_SCHEMA,
+        "recorded": bool(recorded),
+        "factual_graph": _graph_binding(factual_graph, "factual"),
+        "legal_graph": _graph_binding(legal_graph, "legal"),
+        "source_references": _source_reference_rows(source_references),
+        "conditional_ir": {
+            "status": ir_status,
+            "receipt_ref": _grounding_token(ir_source.get("receipt_ref"), 80),
+        },
+        "proof_statuses": _proof_rows(proof_statuses),
+        "hook_receipts": _hook_receipt_rows(hook_receipts),
+        "pending_inquiry": _pending_binding(pending_inquiry),
+        "stop_policy": _stop_policy_binding(stop_policy, outcome_reason),
+        "external_dependencies": _external_dependency_binding(external_dependencies),
+        "replay": dict(_COLD_READ),
+    }
+
+
+def _apply_grounding(document: dict[str, Any]) -> dict[str, Any]:
+    existing = document.get("grounding") if isinstance(document.get("grounding"), Mapping) else None
+    if existing is None:
+        grounding = canonical_grounded_bindings(
+            pending_inquiry=document.get("pending_inquiry"),
+            stop_policy={"reason": document.get("outcome_reason")},
+            outcome_reason=str(document.get("outcome_reason") or "unknown"),
+            recorded=False,
+        )
+    else:
+        grounding = canonical_grounded_bindings(
+            factual_graph=existing.get("factual_graph"),
+            legal_graph=existing.get("legal_graph"),
+            source_references=existing.get("source_references"),
+            conditional_ir=existing.get("conditional_ir"),
+            proof_statuses=existing.get("proof_statuses"),
+            hook_receipts=existing.get("hook_receipts"),
+            pending_inquiry=existing.get("pending_inquiry") or document.get("pending_inquiry"),
+            stop_policy=existing.get("stop_policy"),
+            external_dependencies=existing.get("external_dependencies"),
+            outcome_reason=str(document.get("outcome_reason") or "unknown"),
+            recorded=existing.get("recorded") is not False,
+        )
+    document["grounding"] = grounding
+    revisions = dict(document.get("revisions") or {})
+    revisions["factual_graph_revision"] = grounding["factual_graph"]["revision"]
+    revisions["legal_graph_revision"] = grounding["legal_graph"]["revision"]
+    document["revisions"] = revisions
+    return document
+
+
 def assemble_interview_snapshot(
     *,
     session_id: str,
@@ -1678,6 +1953,7 @@ def assemble_interview_snapshot(
     durability_payload: Mapping[str, Any],
     revisions: Mapping[str, Any],
     snapshot_id: str | None = None,
+    grounding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one complete snapshot. Missing sections stay explicit, not omitted."""
 
@@ -1706,6 +1982,19 @@ def assemble_interview_snapshot(
         "durability_payload": dict(durability_payload) if isinstance(durability_payload, Mapping) else {"status": "unknown"},
         "explicit_dispositions": {"unknown": "recorded", "deferred": "recorded"},
     }
+    if isinstance(grounding, Mapping):
+        document["grounding"] = {
+            "factual_graph": grounding.get("factual_graph"),
+            "legal_graph": grounding.get("legal_graph"),
+            "source_references": grounding.get("source_references"),
+            "conditional_ir": grounding.get("conditional_ir"),
+            "proof_statuses": grounding.get("proof_statuses"),
+            "hook_receipts": grounding.get("hook_receipts"),
+            "pending_inquiry": grounding.get("pending_inquiry") or document["pending_inquiry"],
+            "stop_policy": grounding.get("stop_policy") or {"reason": document["outcome_reason"]},
+            "external_dependencies": grounding.get("external_dependencies"),
+            "recorded": True,
+        }
     return validate_interview_snapshot(document)
 
 
@@ -1738,7 +2027,19 @@ def validate_interview_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
         raise InterviewSnapshotError("complaint text must be a string", code="snapshot_invalid")
     if not isinstance(document.get("transcript"), list):
         raise InterviewSnapshotError("transcript must be a list", code="snapshot_invalid")
-    copied = json.loads(json.dumps(document, sort_keys=True))
+    copied = json.loads(json.dumps(dict(document), sort_keys=True))
+    copied = _apply_grounding(copied)
+    grounding = copied.get("grounding")
+    if not isinstance(grounding, dict) or grounding.get("schema") != GROUNDED_SNAPSHOT_SCHEMA:
+        raise InterviewSnapshotError("grounded bindings are required", code="snapshot_invalid")
+    dependencies = grounding.get("external_dependencies") or {}
+    replicas = dependencies.get("remote_replicas") if isinstance(dependencies, Mapping) else {}
+    if not isinstance(replicas, Mapping) or replicas.get("existence_claimed") is not False:
+        raise InterviewSnapshotError("snapshot must not claim remote replicas", code="snapshot_invalid")
+    if dependencies.get("public_law", {}).get("copied_into_snapshot") is not False:
+        raise InterviewSnapshotError("public law stays an external dependency", code="snapshot_invalid")
+    if dependencies.get("ephemeral_index", {}).get("durable") is not False:
+        raise InterviewSnapshotError("ephemeral indexes are not durable snapshot contents", code="snapshot_invalid")
     return copied
 
 
@@ -1980,6 +2281,7 @@ def persist_interview_snapshot(
     migrate_plaintext: bool = False,
     fail_before_head: bool = False,
     writer: Callable[[bytes], None] | None = None,
+    before_head: Callable[[int, str], None] | None = None,
 ) -> dict[str, Any]:
     """Commit one interview snapshot with private atomic files.
 
@@ -2080,6 +2382,22 @@ def persist_interview_snapshot(
             relative = "revisions/plain-" + revision_label + "-" + uuid.uuid4().hex + ".json"
             _interview_write_exclusive(root_fd, relative, blob_body)
             part_names = {kind: relative for kind in _INTERVIEW_PART_KINDS}
+        expected_digest = hashlib.sha256(blob_body).hexdigest()
+        if before_head is not None:
+            before_head(root_fd, part_names["interview-snapshot"])
+            try:
+                checked = _interview_read(root_fd, part_names["interview-snapshot"])
+            except (OSError, InterviewSnapshotError) as exc:
+                raise InterviewSnapshotError(
+                    "candidate snapshot is corrupt; the previous head stands",
+                    code="corrupt_candidate",
+                ) from exc
+            if hashlib.sha256(checked).hexdigest() != expected_digest:
+                raise InterviewSnapshotError(
+                    "candidate snapshot is corrupt; the previous head stands",
+                    code="corrupt_candidate",
+                )
+            blob_body = checked
         if fail_before_head:
             raise InterviewSnapshotError(
                 "durability head was not committed; the previous revision stands",
@@ -2102,6 +2420,9 @@ def persist_interview_snapshot(
             "history": history,
             "status": "committed",
             "migrated_plaintext": bool(legacy is not None and migrate_plaintext),
+            "remote_replicas_claimed": False,
+            "snapshot_is_replica_proof": False,
+            "grounding_schema": GROUNDED_SNAPSHOT_SCHEMA,
         }
         encoded_head = json.dumps(new_head, sort_keys=True).encode("utf-8")
         if document["complaint_text"] and document["complaint_text"] in encoded_head.decode("utf-8"):
@@ -2188,7 +2509,7 @@ def load_interview_snapshot(
                 payload, status="available", operation_id="interview_snapshot_load", protection=protection,
                 case_scope=(tenant_id, case_id, principal_id),
             )
-            return {"snapshot": payload, "receipt": receipt, "recovered": False}
+            return {"snapshot": payload, "receipt": receipt, "recovered": False, "cold_read": dict(_COLD_READ)}
         if head.get("protection") == "user_chosen_encrypted" and protection != "user_chosen_encrypted":
             raise InterviewSnapshotError(
                 "Encrypted interview snapshots do not fall back to plaintext.",
@@ -2242,7 +2563,7 @@ def load_interview_snapshot(
                 recovered_from=str(head.get("revision") or "") if recovered else None,
                 case_scope=(tenant_id, case_id, principal_id),
             )
-            return {"snapshot": payload, "receipt": receipt, "recovered": recovered}
+            return {"snapshot": payload, "receipt": receipt, "recovered": recovered, "cold_read": dict(_COLD_READ)}
         if auth_failed:
             raise InterviewSnapshotError("private snapshot authentication failed", code="authentication_failed")
         raise InterviewSnapshotError("no valid interview revision remains", code="corrupt_snapshot")
@@ -2650,6 +2971,8 @@ __all__ = [
     "optional_size_padding",
     "INTERVIEW_SNAPSHOT_SCHEMA",
     "InterviewSnapshotError",
+    "GROUNDED_SNAPSHOT_SCHEMA",
+    "canonical_grounded_bindings",
     "assemble_interview_snapshot",
     "validate_interview_snapshot",
     "interview_snapshot_receipt",
