@@ -7861,6 +7861,9 @@ class ComplaintWorkspaceService:
         local_rows: Optional[Dict[str, Any]] = None,
         cancelled: bool = False,
         retrieval_mode: str = "cache",
+        context_updates: Optional[Dict[str, Any]] = None,
+        dependency_change: Optional[Dict[str, Any]] = None,
+        effect_receipt: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Run one deliberate legal-research action for the saved case.
 
@@ -7892,6 +7895,9 @@ class ComplaintWorkspaceService:
             storage_available=storage_available,
             cancelled=cancelled,
             retrieval_mode=retrieval_mode,
+            context_updates=context_updates,
+            dependency_change=dependency_change,
+            effect_receipt=effect_receipt,
         )
         stored = state.get("legal_research") if isinstance(state.get("legal_research"), dict) else {}
         receipts = stored.get("receipts") if isinstance(stored.get("receipts"), dict) else {}
@@ -7908,8 +7914,21 @@ class ComplaintWorkspaceService:
             return replay
         answers_before = deepcopy(state.get("intake_answers") or {})
         history_before = deepcopy(state.get("intake_history") or [])
+        mediator = None
         try:
+            from complaint_phases.intake_case_file import apply_explicit_legal_context
+            from complaint_phases.phase_manager import ComplaintPhase
+
             mediator = self._mediator_for_shared_interview(resolved, case_id)
+            if isinstance(context_updates, dict) and context_updates:
+                phase_case = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file")
+                if isinstance(phase_case, dict) and phase_case:
+                    mediator.apply_explicit_legal_context(phase_case, **context_updates)
+                case_file = apply_explicit_legal_context(case_file, **context_updates)
+            if isinstance(effect_receipt, dict):
+                mediator._pending_legal_effect_receipt = dict(effect_receipt)
+            if isinstance(dependency_change, dict):
+                mediator._pending_legal_dependency_change = dict(dependency_change)
             receipt = mediator.workflow_actions.research_legal_source_gap(
                 user_id=resolved,
                 case_id=case_id,
@@ -7933,6 +7952,28 @@ class ComplaintWorkspaceService:
         receipt["proof"] = False
         receipt["fingerprint"] = fingerprint
         receipt["display"] = format_legal_research_result(receipt)
+        refresh = None
+        if mediator is not None:
+            from complaint_phases.phase_manager import ComplaintPhase
+
+            refresh = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "verified_dependency_refresh")
+            pending_change = getattr(mediator, "_pending_legal_dependency_change", None)
+            if isinstance(pending_change, dict) and pending_change:
+                mediator._pending_legal_dependency_change = None
+                if pending_change.get("source_outage") or pending_change.get("version_changed") or pending_change.get("treatment_changed") or pending_change.get("jurisdiction_changed") or pending_change.get("date_changed"):
+                    refresh = mediator.refresh_verified_legal_dependencies(pending_change)
+        if isinstance(refresh, dict):
+            receipt["dependency_refresh"] = {
+                "affected_node_ids": list(refresh.get("affected_node_ids") or []),
+                "preserved_node_ids": list(refresh.get("preserved_node_ids") or []),
+                "case_revision": refresh.get("case_revision"),
+                "atomic_case_revision": refresh.get("atomic_case_revision"),
+                "source_outage": bool(refresh.get("source_outage")),
+                "graph_replaced": False,
+                "empty_success": False,
+                "effect_request_id": refresh.get("effect_request_id") or "",
+                "source_admission_reread": bool(refresh.get("source_admission_reread")),
+            }
         state["intake_answers"] = answers_before
         state["intake_history"] = history_before
         legal_research = state.setdefault("legal_research", {})
@@ -7975,6 +8016,9 @@ class ComplaintWorkspaceService:
         storage_available: bool,
         cancelled: bool,
         retrieval_mode: str,
+        context_updates: Optional[Dict[str, Any]] = None,
+        dependency_change: Optional[Dict[str, Any]] = None,
+        effect_receipt: Optional[Dict[str, Any]] = None,
     ) -> str:
         corpus = json.dumps(local_rows, sort_keys=True, default=str) if local_rows is not None else ""
         body = json.dumps(
@@ -7982,12 +8026,16 @@ class ComplaintWorkspaceService:
                 "cancelled": bool(cancelled),
                 "case_id": case_id,
                 "claim_type": claim_type,
+                "context_updates": context_updates or {},
                 "corpus": corpus,
+                "dependency_change": dependency_change or {},
+                "effect_request_id": str((effect_receipt or {}).get("request_id") or ""),
                 "narrative": narrative_text,
                 "retrieval_mode": retrieval_mode,
                 "storage_available": bool(storage_available),
             },
             sort_keys=True,
+            default=str,
         )
         return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
