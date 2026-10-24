@@ -868,7 +868,7 @@ Implementation instructions:
 
 ## CIMP-MGND-34 Commit complete grounded snapshots atomically
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
