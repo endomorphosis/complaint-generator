@@ -1050,7 +1050,7 @@ Implementation instructions:
 
 ## CIMP-MGND-41 Observe the separate campaign without mutating the old 58-task state
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
