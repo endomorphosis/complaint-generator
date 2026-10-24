@@ -33,11 +33,17 @@ from integrations.ipfs_datasets.documents import parse_document, should_parse_do
 from integrations.ipfs_datasets.graphs import extract_graph_from_text, persist_graph_snapshot
 from integrations.ipfs_datasets.types import CaseArtifact, CaseFact
 from integrations.ipfs_datasets.storage import (
+    AUTOMATIC_PRIVATE_ARTIFACT_KINDS,
     IPFS_AVAILABLE,
+    PUBLIC_LEGAL_CONTENT_ORIGINS,
+    PUBLIC_LEGAL_CORPUS_FAMILIES,
     add_bytes,
     cat,
     get_ipfs_backend,
     pin,
+    retrieve_private_artifact,
+    store_automatic_private_artifact,
+    store_public_legal_corpus,
 )
 from claim_support_review import _merge_intake_summary_handoff_metadata
 
@@ -114,9 +120,19 @@ class EvidenceHookError(RuntimeError):
 class EvidenceStorageError(EvidenceHookError):
     """Evidence could not be normalized or stored."""
 
+    def __init__(self, message: str = "", *, code: str = "storage_error", public_status: str = "unavailable") -> None:
+        super().__init__(message)
+        self.code = code
+        self.public_status = public_status
+
 
 class EvidenceRetrievalError(EvidenceHookError):
     """Evidence could not be retrieved from the configured backend."""
+
+    def __init__(self, message: str = "", *, code: str = "retrieval_error", public_status: str = "unavailable") -> None:
+        super().__init__(message)
+        self.code = code
+        self.public_status = public_status
 
 
 class EvidencePersistenceError(EvidenceHookError):
@@ -381,7 +397,298 @@ class EvidenceStorageHook:
     
     def __init__(self, mediator):
         self.mediator = mediator
+        self._private_context: Optional[Dict[str, Any]] = None
+        self._private_route_bound = False
+        self._private_unavailable_code = ""
+        self._private_records: Dict[str, Dict[str, Any]] = {}
+        self._public_legal_cids: Dict[str, Dict[str, Any]] = {}
+        self._private_revision_counter = 0
         self._check_ipfs_availability()
+
+    def bind_private_artifact_context(self, context: Optional[Dict[str, Any]], *, unavailable_code: str = "") -> None:
+        """Attach the workspace private-artifact context. Does not mint keys."""
+
+        self._private_route_bound = True
+        self._private_unavailable_code = str(unavailable_code or "")
+        if context is None:
+            self._private_context = None
+            return
+        self._private_context = {
+            "access": context.get("access"),
+            "tenant_id": context.get("tenant_id"),
+            "case_id": context.get("case_id"),
+            "principal_id": context.get("principal_id"),
+            "key_provider": context.get("key_provider"),
+            "backend": context.get("backend"),
+            "backend_name": context.get("backend_name") or "local_cache",
+            "pin_content": bool(context.get("pin_content", False)),
+        }
+
+    def enable_public_user_evidence_ingestion(self) -> None:
+        """User evidence stays on the private owner. This gate does not open a plaintext path."""
+
+        if not self._private_route_bound or not self._private_context or self._private_unavailable_code:
+            raise EvidenceStorageError(
+                "Public user evidence ingestion requires the encrypted private artifact route.",
+                code="private_route_required",
+                public_status="unavailable",
+            )
+        raise EvidenceStorageError(
+            "Public user evidence ingestion is disabled. Private bytes stay on the encrypted artifact owner.",
+            code="public_user_evidence_disabled",
+            public_status="unavailable",
+        )
+
+    def _is_public_legal_corpus(self, metadata: Optional[Dict[str, Any]]) -> bool:
+        meta = metadata or {}
+        if meta.get("storage_class") == "public_legal_corpus" or meta.get("classification") == "public_legal_corpus":
+            return True
+        origin = str(meta.get("content_origin") or "")
+        corpus = str(meta.get("corpus_family") or "")
+        if origin not in PUBLIC_LEGAL_CONTENT_ORIGINS:
+            return False
+        return not corpus or corpus in PUBLIC_LEGAL_CORPUS_FAMILIES
+
+    def _private_artifact_kind(self, evidence_type: str) -> str:
+        if evidence_type in AUTOMATIC_PRIVATE_ARTIFACT_KINDS:
+            return evidence_type
+        return "attachment"
+
+    def _build_provenance(self, data: bytes, evidence_type: str, metadata: Optional[Dict[str, Any]]):
+        content_hash = stable_content_hash(data)
+        provenance = build_provenance(
+            source_url=str((metadata or {}).get('source_url', '')),
+            acquisition_method=str((metadata or {}).get('acquisition_method', 'submitted')),
+            source_type=str((metadata or {}).get('source_type', evidence_type)),
+            acquired_at=datetime.now().isoformat(),
+            content_hash=content_hash,
+            source_system=str((metadata or {}).get('source_system', 'complaint_generator')),
+            jurisdiction=str((metadata or {}).get('jurisdiction', '')),
+        )
+        provenance = build_provenance(
+            source_url=str(provenance.source_url or ''),
+            acquisition_method=str(provenance.acquisition_method or ''),
+            source_type=str(provenance.source_type or ''),
+            acquired_at=str(provenance.acquired_at or ''),
+            content_hash=str(provenance.content_hash or ''),
+            source_system=str(provenance.source_system or ''),
+            jurisdiction=str(provenance.jurisdiction or ''),
+            metadata=_merge_intake_summary_handoff_metadata(
+                dict(getattr(provenance, 'metadata', {}) or {}),
+                self.mediator,
+            ),
+        )
+        normalized_metadata = _merge_intake_summary_handoff_metadata(
+            merge_metadata_with_provenance(metadata, provenance),
+            self.mediator,
+        )
+        return provenance, normalized_metadata, content_hash
+
+    def _attach_document_parse(self, result: Dict[str, Any], data: bytes, evidence_type: str, metadata: Optional[Dict[str, Any]], provenance) -> None:
+        if not self._should_parse_evidence(evidence_type, metadata):
+            return
+        document_parse = parse_document(
+            data=data,
+            filename=str((metadata or {}).get('filename', '')),
+            mime_type=str((metadata or {}).get('mime_type', '')),
+            source=str((metadata or {}).get('parse_source', 'bytes')),
+        )
+        parse_contract = build_document_parse_contract(
+            document_parse,
+            default_source=str((metadata or {}).get('parse_source', 'bytes')),
+        )
+        result['document_parse'] = document_parse
+        result['metadata']['document_parse_summary'] = parse_contract['summary']
+        result['metadata']['document_parse_contract'] = parse_contract
+        graph_payload = extract_graph_from_text(
+            parse_contract.get('text', ''),
+            source_id=result.get('artifact_id') or result.get('cid'),
+            metadata={
+                'artifact_id': result.get('artifact_id', ''),
+                'filename': str((metadata or {}).get('filename', '')),
+                'mime_type': str((metadata or {}).get('mime_type', '')),
+                'source_url': provenance.source_url,
+                'claim_type': str((metadata or {}).get('claim_type', '')),
+                'claim_element_id': str((metadata or {}).get('claim_element_id', '')),
+                'claim_element_text': str((metadata or {}).get('claim_element', '')),
+                'title': str((metadata or {}).get('title', '')),
+            },
+        )
+        result['document_graph'] = graph_payload
+        result['metadata']['document_graph_summary'] = {
+            'status': graph_payload.get('status'),
+            'entity_count': len(graph_payload.get('entities', []) or []),
+            'relationship_count': len(graph_payload.get('relationships', []) or []),
+        }
+
+    def _result_from_artifact(self, data: bytes, evidence_type: str, metadata, provenance, normalized_metadata, content_hash, cid: str) -> Dict[str, Any]:
+        artifact = CaseArtifact(
+            cid=cid,
+            artifact_type=evidence_type,
+            size=len(data),
+            timestamp=datetime.now().isoformat(),
+            mime_type=str((metadata or {}).get('mime_type', '')),
+            source_type=provenance.source_type,
+            content_hash=content_hash,
+            acquisition_method=provenance.acquisition_method,
+            source_url=provenance.source_url,
+            metadata=normalized_metadata,
+            provenance=provenance,
+        )
+        return artifact.as_dict()
+
+    def _store_private_evidence(self, data: bytes, evidence_type: str, metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Seal private bytes with the existing artifact owner before any public store."""
+
+        from integrations.private_storage import (
+            PrivateCryptoCapabilityError,
+            PrivateKeyMaterialError,
+            PrivateStorageError,
+        )
+
+        if self._private_unavailable_code or not self._private_context or not self._private_context.get("key_provider"):
+            raise EvidenceStorageError(
+                "Private evidence storage is unavailable.",
+                code=self._private_unavailable_code or "key_unavailable",
+                public_status="unavailable",
+            )
+        context = self._private_context
+        kind = self._private_artifact_kind(str(evidence_type or "attachment"))
+        self._private_revision_counter += 1
+        revision = str((metadata or {}).get("revision") or f"{kind}-{self._private_revision_counter}")
+        backend = (metadata or {}).get("backend", context.get("backend"))
+        backend_name = str((metadata or {}).get("backend_name") or context.get("backend_name") or "local_cache")
+        pin_content = bool((metadata or {}).get("pin_content", context.get("pin_content", False)))
+        try:
+            receipt = store_automatic_private_artifact(
+                data,
+                artifact_kind=kind,
+                access=context.get("access"),
+                tenant_id=str(context.get("tenant_id") or ""),
+                case_id=str(context.get("case_id") or ""),
+                principal_id=str(context.get("principal_id") or context.get("tenant_id") or ""),
+                key_provider=context.get("key_provider"),
+                revision=revision,
+                backend=backend,
+                backend_name=backend_name,
+                pin_content=pin_content,
+            )
+        except PrivateKeyMaterialError as exc:
+            raise EvidenceStorageError(
+                "Private evidence storage is unavailable.",
+                code="key_unavailable",
+                public_status="unavailable",
+            ) from exc
+        except PrivateCryptoCapabilityError as exc:
+            raise EvidenceStorageError(
+                "Private evidence storage is unavailable.",
+                code="private_crypto_unavailable",
+                public_status="unavailable",
+            ) from exc
+        except (PrivateStorageError, ValueError) as exc:
+            raise EvidenceStorageError(
+                "Private evidence storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            ) from exc
+        view = dict(receipt.get("receipt") or {})
+        cid = str(receipt.get("cid") or "")
+        cid_kind = str(view.get("cid_kind") or "")
+        local_only = bool(receipt.get("stored_local")) or cid_kind in {"pseudo_cid", "sha256_fallback", "missing", ""}
+        remote_durable = bool(view.get("network_durable")) and not local_only and bool(cid)
+        if not cid or str(receipt.get("status") or "") not in {"available", "degraded"}:
+            raise EvidenceStorageError(
+                "Private evidence storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            )
+        provenance, normalized_metadata, content_hash = self._build_provenance(data, evidence_type, metadata)
+        result = self._result_from_artifact(data, evidence_type, metadata, provenance, normalized_metadata, content_hash, cid)
+        self._attach_document_parse(result, data, evidence_type, metadata, provenance)
+        result["private_artifact"] = True
+        result["classification"] = "private_evidence"
+        result["artifact_kind"] = kind
+        result["revision"] = revision
+        result["tenant_id"] = context.get("tenant_id")
+        result["case_id"] = context.get("case_id")
+        result["key_id"] = receipt.get("key_id")
+        result["cid_kind"] = cid_kind
+        result["network_durable"] = remote_durable
+        result["remote_durable"] = remote_durable
+        result["stored_local"] = bool(receipt.get("stored_local")) or local_only
+        result["ipfs_available"] = remote_durable
+        result["ipfs_persisted"] = remote_durable
+        result["storage_status"] = "stored" if remote_durable else "local_only"
+        if not remote_durable:
+            result["degraded_reason"] = "local deterministic identifier is not remote durability"
+            result["error_type"] = "LocalIdentifier"
+        self._private_records[cid] = {
+            "artifact_kind": kind,
+            "revision": revision,
+            "tenant_id": context.get("tenant_id"),
+            "case_id": context.get("case_id"),
+            "principal_id": context.get("principal_id"),
+            "backend": backend,
+            "backend_name": backend_name,
+            "content_hash": content_hash,
+            "provenance": result.get("provenance"),
+        }
+        self.mediator.log("evidence_stored_private", cid=cid, size=len(data), type=evidence_type, remote_durable=remote_durable)
+        return result
+
+    def _store_public_legal_evidence(self, data: bytes, evidence_type: str, metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        meta = dict(metadata or {})
+        origin = str(meta.get("content_origin") or "authority_full_text")
+        corpus = str(meta.get("corpus_family") or "legal_authority")
+        if origin not in PUBLIC_LEGAL_CONTENT_ORIGINS:
+            origin = "authority_full_text"
+        if corpus not in PUBLIC_LEGAL_CORPUS_FAMILIES:
+            corpus = "legal_authority"
+        backend = meta.get("backend")
+        backend_name = meta.get("backend_name")
+        try:
+            stored = store_public_legal_corpus(
+                data,
+                content_origin=origin,
+                corpus_family=corpus,
+                backend=backend,
+                backend_name=str(backend_name) if backend_name else None,
+                pin_content=bool(meta.get("pin_content", True)),
+            )
+        except (TypeError, ValueError) as exc:
+            raise EvidenceStorageError(
+                "Public legal corpus storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            ) from exc
+        cid = str(stored.get("cid") or "")
+        if stored.get("status") not in {"available", "degraded"} or not cid:
+            raise EvidenceStorageError(
+                "Public legal corpus storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            )
+        provenance, normalized_metadata, content_hash = self._build_provenance(data, evidence_type, meta)
+        result = self._result_from_artifact(data, evidence_type, meta, provenance, normalized_metadata, content_hash, cid)
+        self._attach_document_parse(result, data, evidence_type, meta, provenance)
+        remote_durable = bool(stored.get("network_durable"))
+        result["private_artifact"] = False
+        result["classification"] = "public_legal_corpus"
+        result["content_origin"] = origin
+        result["corpus_family"] = corpus
+        result["cid_kind"] = stored.get("cid_kind") or ""
+        result["network_durable"] = remote_durable
+        result["remote_durable"] = remote_durable
+        result["stored_local"] = bool(stored.get("stored_local"))
+        result["ipfs_available"] = stored.get("status") == "available"
+        result["ipfs_persisted"] = remote_durable
+        result["storage_status"] = "stored" if remote_durable else "local_only"
+        if not remote_durable:
+            result["degraded_reason"] = "local deterministic identifier is not remote durability"
+            result["error_type"] = "LocalIdentifier"
+        self._public_legal_cids[cid] = {"backend": backend, "backend_name": backend_name, "content_origin": origin}
+        self.mediator.log("public_legal_corpus_stored", cid=cid, size=len(data), remote_durable=remote_durable)
+        return result
     
     def _check_ipfs_availability(self):
         """Check if IPFS backend is available."""
@@ -418,6 +725,10 @@ class EvidenceStorageHook:
             - metadata: Any additional metadata
         """
         try:
+            if self._is_public_legal_corpus(metadata):
+                return self._store_public_legal_evidence(data, evidence_type, metadata)
+            if self._private_route_bound:
+                return self._store_private_evidence(data, evidence_type, metadata)
             storage_status = 'stored'
             storage_degraded_reason = ''
             storage_error_type = ''
@@ -533,6 +844,8 @@ class EvidenceStorageHook:
                 result['error_type'] = storage_error_type
             return result
             
+        except EvidenceStorageError:
+            raise
         except Exception as e:
             self.mediator.log(
                 'evidence_storage_error',
@@ -590,7 +903,7 @@ class EvidenceStorageHook:
             )
             raise EvidenceStorageError(f'Failed to store evidence file: {str(e)}') from e
     
-    def retrieve_evidence(self, cid: str) -> bytes:
+    def retrieve_evidence(self, cid: str, **binding: Any) -> bytes:
         """
         Retrieve evidence data from IPFS by CID.
         
@@ -601,6 +914,10 @@ class EvidenceStorageHook:
             Evidence data as bytes
         """
         try:
+            if cid in self._private_records or (self._private_route_bound and cid not in self._public_legal_cids and self._private_records):
+                return self._retrieve_private_evidence(cid, binding)
+            if cid in self._public_legal_cids:
+                return self._retrieve_public_legal_evidence(cid)
             if IPFS_AVAILABLE:
                 data = cat(cid)
                 self.mediator.log('evidence_retrieved', cid=cid, size=len(data))
@@ -624,6 +941,76 @@ class EvidenceStorageHook:
                 cid=cid,
             )
             raise EvidenceRetrievalError(f'Failed to retrieve evidence: {str(e)}') from e
+
+    def _retrieve_private_evidence(self, cid: str, binding: Dict[str, Any]) -> bytes:
+        from integrations.private_storage import PrivateKeyMaterialError, PrivateStorageError
+
+        record = self._private_records.get(cid)
+        context = self._private_context or {}
+        if record is None or not context:
+            raise EvidenceRetrievalError(
+                "Private evidence storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            )
+        case_id = str(binding.get("case_id") or record["case_id"])
+        tenant_id = str(binding.get("tenant_id") or record["tenant_id"])
+        principal_id = str(binding.get("principal_id") or record["principal_id"] or tenant_id)
+        access = binding.get("access", context.get("access"))
+        key_provider = binding.get("key_provider", context.get("key_provider"))
+        key = binding.get("key")
+        key_id = binding.get("key_id")
+        if key is not None or key_id is not None:
+            key_provider = None
+        try:
+            opened = retrieve_private_artifact(
+                cid,
+                access=access,
+                tenant_id=tenant_id,
+                case_id=case_id,
+                artifact_kind=str(binding.get("artifact_kind") or record["artifact_kind"]),
+                revision=str(binding.get("revision") or record["revision"]),
+                principal_id=principal_id,
+                key=key,
+                key_id=key_id,
+                key_provider=key_provider,
+                backend=binding.get("backend", record.get("backend")),
+                backend_name=binding.get("backend_name", record.get("backend_name")),
+            )
+        except PrivateKeyMaterialError as exc:
+            raise EvidenceRetrievalError(
+                "Private evidence storage is unavailable.",
+                code="key_unavailable",
+                public_status="unavailable",
+            ) from exc
+        except PrivateStorageError as exc:
+            raise EvidenceRetrievalError(
+                "Private evidence could not be opened for the expected binding.",
+                code=str(getattr(exc, "code", "") or "authentication_failed"),
+                public_status="recoverable",
+            ) from exc
+        data = opened.get("data")
+        if not isinstance(data, (bytes, bytearray)):
+            raise EvidenceRetrievalError(
+                "Private evidence storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            )
+        return bytes(data)
+
+    def _retrieve_public_legal_evidence(self, cid: str) -> bytes:
+        from integrations.ipfs_datasets.storage import retrieve_bytes
+
+        located = self._public_legal_cids.get(cid) or {}
+        loaded = retrieve_bytes(cid, backend=located.get("backend"), backend_name=located.get("backend_name"))
+        data = loaded.get("data")
+        if loaded.get("status") not in {"available", "degraded"} or not isinstance(data, (bytes, bytearray)):
+            raise EvidenceRetrievalError(
+                "Public legal corpus storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            )
+        return bytes(data)
 
 
 class EvidenceStateHook:

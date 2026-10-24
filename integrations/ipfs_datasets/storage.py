@@ -1072,6 +1072,13 @@ def pin_cid(cid: str, *, backend: Any = None, backend_name: str | None = None) -
     )
 
 
+PUBLIC_LEGAL_CONTENT_ORIGINS = frozenset({
+    "authority_full_text",
+    "authority_reference_fallback",
+})
+PUBLIC_LEGAL_CORPUS_FAMILIES = frozenset({"legal_authority"})
+
+
 AUTOMATIC_PRIVATE_ARTIFACT_KINDS = frozenset({
     "session",
     "answers",
@@ -1424,6 +1431,40 @@ def store_automatic_private_artifact(*args: Any, **kwargs: Any) -> dict[str, Any
     if kind not in AUTOMATIC_PRIVATE_ARTIFACT_KINDS:
         raise ValueError(f"unsupported automatic private artifact kind: {kind}")
     return store_private_artifact(*args, **kwargs)
+
+
+def store_public_legal_corpus(
+    data: bytes,
+    *,
+    content_origin: str,
+    corpus_family: str = "legal_authority",
+    backend: Any = None,
+    backend_name: str | None = None,
+    pin_content: bool = True,
+) -> dict[str, Any]:
+    """Store an explicitly public legal corpus without the private artifact owner.
+
+    The caller must name a public legal origin and corpus. Private complaint
+    bytes are not accepted on this path, and a failed store does not invent a
+    content identifier.
+    """
+
+    if content_origin not in PUBLIC_LEGAL_CONTENT_ORIGINS or corpus_family not in PUBLIC_LEGAL_CORPUS_FAMILIES:
+        raise ValueError("public legal corpus must be explicitly classified")
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError("public legal corpus must be bytes")
+    stored = store_bytes(
+        bytes(data),
+        pin_content=pin_content,
+        backend=backend,
+        backend_name=backend_name,
+    )
+    receipt = dict(stored)
+    receipt["classification"] = "public_legal_corpus"
+    receipt["private_artifact"] = False
+    receipt["content_origin"] = content_origin
+    receipt["corpus_family"] = corpus_family
+    return receipt
 
 
 def retrieve_private_artifact(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -2574,7 +2615,10 @@ __all__ = [
     "store_bytes",
     "store_private_artifact",
     "store_automatic_private_artifact",
+    "store_public_legal_corpus",
     "AUTOMATIC_PRIVATE_ARTIFACT_KINDS",
+    "PUBLIC_LEGAL_CONTENT_ORIGINS",
+    "PUBLIC_LEGAL_CORPUS_FAMILIES",
     "retrieve_bytes",
     "retrieve_private_artifact",
     "pin_cid",

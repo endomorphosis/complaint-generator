@@ -3263,8 +3263,39 @@ class ComplaintWorkspaceService:
             claim_support_db_path=str(db_dir / "claim-support.db"),
         )
         mediator.state.username = user_id
+        self.activate_private_evidence_hook(mediator, user_id, case_id)
         self._interview_mediators[cache_key] = mediator
         return mediator
+
+    def activate_private_evidence_hook(self, mediator: Any, user_id: str, case_id: Optional[str] = None) -> Dict[str, Any]:
+        """Inject the current private artifact context into a newly activated evidence hook.
+
+        The Kit encryption owner stays in private storage. A missing key binds
+        the hook shut instead of leaving a raw byte path open.
+        """
+
+        hook = mediator.evidence_storage
+        try:
+            context = self._private_artifact_context(user_id, case_id, revision="attachment-1")
+        except WorkspacePersistenceError as exc:
+            hook.bind_private_artifact_context(None, unavailable_code=str(exc.code or "key_unavailable"))
+            return {"status": "unavailable", "code": exc.code, "private_route_bound": True, "plaintext_fallback": False}
+        bound = {
+            **context,
+            "backend": self._private_local_backend(),
+            "backend_name": "local_cache",
+            "pin_content": False,
+            "revision": "attachment-1",
+        }
+        hook.bind_private_artifact_context(bound)
+        return {
+            "status": "available",
+            "private_route_bound": True,
+            "tenant_id": bound["tenant_id"],
+            "case_id": bound["case_id"],
+            "principal_id": bound["principal_id"],
+            "plaintext_fallback": False,
+        }
 
     def _private_artifact_context(self, user_id: str, case_id: Optional[str] = None, *, revision: str = "session-v1") -> Dict[str, Any]:
         """Resolve current request admission and the live user-owned key session."""
