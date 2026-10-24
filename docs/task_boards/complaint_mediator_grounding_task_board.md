@@ -998,7 +998,7 @@ Implementation instructions:
 
 ## CIMP-MGND-39 Resume corrections and research across real terminal sessions
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
