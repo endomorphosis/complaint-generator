@@ -3377,7 +3377,8 @@ class DependencyGraphBuilder:
         jurisdiction_changed = bool(payload.get("jurisdiction_changed"))
         date_changed = bool(payload.get("date_changed") or payload.get("date_roles"))
         version_changed = bool(payload.get("version_changed") or payload.get("authority_version_changed"))
-        treatment_changed = bool(payload.get("treatment_changed"))
+        treatment_changed = bool(payload.get("treatment_changed") or payload.get("adverse_treatment_changed"))
+        definition_changed = bool(payload.get("definition_changed"))
         source_outage = bool(payload.get("source_outage"))
         fact_change = bool(payload.get("fact_change") or fact_ids or clarification_keys)
         updated_requirements = payload.get("updated_requirements") if isinstance(payload.get("updated_requirements"), dict) else {}
@@ -3394,7 +3395,10 @@ class DependencyGraphBuilder:
             if self._dependency_change_affects(
                 node, clarification_keys, fact_ids, rule_ids, jurisdiction_changed, date_changed, fact_change,
                 version_changed=version_changed, treatment_changed=treatment_changed,
-                source_outage=source_outage,
+                source_outage=source_outage, definition_changed=definition_changed,
+                definition_identity=payload.get("definition_identity"),
+                premise_identity=payload.get("premise_identity"),
+                adverse_treatment_identity=payload.get("adverse_treatment_identity"),
             ):
                 affected_ids.append(node.id)
             else:
@@ -3455,7 +3459,7 @@ class DependencyGraphBuilder:
                 invalidated.append(node_id)
             node.attributes["satisfaction_revision"] = int(node.attributes.get("satisfaction_revision") or 0) + 1
             node.attributes["dependency_recomputed"] = True
-            if version_changed or treatment_changed or source_outage:
+            if version_changed or treatment_changed or source_outage or definition_changed:
                 node.attributes["legal_support_invalidated"] = True
                 node.attributes["support_eligible"] = False
                 if source_outage:
@@ -3463,6 +3467,8 @@ class DependencyGraphBuilder:
                     node.attributes["source_available"] = False
                 elif version_changed:
                     node.attributes["invalidation_reason"] = "authority_version_changed"
+                elif definition_changed:
+                    node.attributes["invalidation_reason"] = "definition_changed"
                 elif treatment_changed:
                     node.attributes["invalidation_reason"] = "treatment_changed"
             if node.attributes.get("dependency_class") == _LEGALLY_SOURCED_CLASS:
@@ -3515,12 +3521,13 @@ class DependencyGraphBuilder:
             "factual_revision": payload.get("factual_revision"),
             "version_changed": version_changed,
             "treatment_changed": treatment_changed,
+            "definition_changed": definition_changed,
             "source_outage": source_outage,
             "user_facts_modified": False,
             "graph_replaced": False,
             "empty_success": False,
         }
-        if (version_changed or treatment_changed or source_outage) and not chronology_issue:
+        if (version_changed or treatment_changed or source_outage or definition_changed) and not chronology_issue:
             for node_id, (name, description, satisfied, attributes) in user_facts.items():
                 node = graph.nodes.get(node_id)
                 if node is None:
@@ -3562,6 +3569,10 @@ class DependencyGraphBuilder:
         version_changed: bool = False,
         treatment_changed: bool = False,
         source_outage: bool = False,
+        definition_changed: bool = False,
+        definition_identity: Any = None,
+        premise_identity: Any = None,
+        adverse_treatment_identity: Any = None,
     ) -> bool:
         attributes = node.attributes if isinstance(node.attributes, dict) else {}
         dependency_class = attributes.get("dependency_class")
@@ -3582,7 +3593,13 @@ class DependencyGraphBuilder:
             return True
         if fact_ids and node_facts & fact_ids:
             return True
-        if jurisdiction_changed or date_changed or version_changed or treatment_changed or source_outage:
+        if jurisdiction_changed or date_changed or version_changed or treatment_changed or source_outage or definition_changed:
+            return True
+        if definition_identity is not None and attributes.get("definition_identity") not in (None, definition_identity):
+            return True
+        if premise_identity is not None and attributes.get("premise_identity") not in (None, premise_identity):
+            return True
+        if adverse_treatment_identity is not None and attributes.get("adverse_treatment_identity") not in (None, adverse_treatment_identity):
             return True
         return False
 
