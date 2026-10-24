@@ -632,6 +632,7 @@ def answer_fingerprint(state: dict[str, Any], inquiry: Optional[dict]) -> dict[s
         "history_len": len(state.get("intake_history") or []),
         "narrative_revision": int(narrative.get("revision") or 0),
         "objective_id": _objective_id(state, inquiry),
+        "graph_revision_token": _shared_graph_revision_token(state),
     }
 
 
@@ -769,32 +770,42 @@ def _record_non_answer(state: dict[str, Any], inquiry: dict, kind: str, answer: 
     })
 
 
-def _apply_edit(state: dict[str, Any], replacement: str) -> str:
-    replacement = replacement.strip()
-    if not replacement:
-        return "Edit needs replacement text. The pending question is unchanged."
-    answers = state.setdefault("intake_answers", {})
-    history = state.setdefault("intake_history", [])
-    target = None
-    for item in reversed(history):
-        if isinstance(item, dict) and item.get("question_id") and item.get("disposition") not in {"skipped"}:
-            target = item
-            break
-    if target is None and not answers:
-        return "Nothing to edit yet. The pending question is unchanged."
-    question_id = str((target or {}).get("question_id") or next(iter(answers), ""))
-    previous = str(answers.get(question_id) or (target or {}).get("answer") or "")
-    if question_id:
-        answers[question_id] = replacement
-    if isinstance(target, dict):
-        target["answer"] = replacement
-        target["edited"] = True
-    _controls(state).setdefault("edits", []).append({
-        "question_id": question_id,
-        "previous": previous,
-        "replacement": replacement,
-    })
-    return "Edited the last recorded answer. The pending question is unchanged."
+def _shared_graph_revision_token(state: dict[str, Any]) -> str:
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+    payload = projection.get("knowledge_graph") if isinstance(projection.get("knowledge_graph"), dict) else None
+    if payload is None:
+        return ""
+    try:
+        from complaint_phases.knowledge_graph import KnowledgeGraph
+        from mediator.hook_runtime import graph_revision_token
+
+        return graph_revision_token(KnowledgeGraph.from_dict(payload))
+    except Exception:
+        return ""
+
+
+def _apply_edit(
+    state: dict[str, Any],
+    replacement: str,
+    *,
+    user_id: str,
+    expected_graph_revision: Optional[str] = None,
+    expected_session_revision: Optional[int] = None,
+) -> str:
+    """Correct the last accepted answer through the shared factual graph.
+
+    The saved session is the authority. This does not rewrite the caller's
+    history list in place; a later save of that stale dict would drop the graph.
+    """
+
+    del state
+    receipt = service.apply_terminal_graph_edit(
+        user_id,
+        replacement,
+        expected_graph_revision=expected_graph_revision,
+        expected_session_revision=expected_session_revision,
+    )
+    return str(receipt.get("message") or "Edit was not applied. The pending question is unchanged.")
 
 
 def read_original_complaint_input(stream=None, *, interactive: Optional[bool] = None, first_line: Optional[str] = None) -> str:
@@ -1080,10 +1091,31 @@ def chat(user_id: str = "demo-user", max_turns: int = 0, privacy_mode: str = "")
             if not replacement:
                 terminal_echo("Usage: /edit replacement text. Nothing was changed.")
                 continue
-            fresh = load_terminal_state(user_id)
-            terminal_echo(_apply_edit(fresh, replacement))
-            remember_pending_inquiry(fresh, inquiry, paused=False)
-            save_terminal_state(fresh)
+            shown_session = shown.get("session_revision")
+            receipt = service.apply_terminal_graph_edit(
+                user_id,
+                replacement,
+                expected_graph_revision=str(shown.get("graph_revision_token") or "") or None,
+                expected_session_revision=shown_session if isinstance(shown_session, int) else None,
+            )
+            terminal_echo(str(receipt.get("message") or "Edit was not applied. The pending question is unchanged."))
+            pending_after = receipt.get("pending_inquiry") if isinstance(receipt.get("pending_inquiry"), dict) else None
+            if receipt.get("status") == "applied" and pending_after:
+                inquiry = {
+                    **dict(inquiry or {}),
+                    "question_id": pending_after.get("inquiry_id") or inquiry.get("question_id"),
+                    "inquiry_id": pending_after.get("inquiry_id") or inquiry.get("inquiry_id"),
+                    "prompt": pending_after.get("question") or inquiry.get("prompt"),
+                    "question": pending_after.get("question") or inquiry.get("question"),
+                    "revision": pending_after.get("revision", inquiry.get("revision")),
+                    "target_id": pending_after.get("target_id") or inquiry.get("target_id"),
+                    "objective_id": pending_after.get("objective_id") or inquiry.get("objective_id"),
+                }
+            try:
+                fresh = load_terminal_state(user_id)
+                shown = dict(_controls(fresh).get("fingerprint") or {})
+            except Exception:
+                pass
             continue
         if str(inquiry.get("question_id") or "") == "original_complaint":
             try:
