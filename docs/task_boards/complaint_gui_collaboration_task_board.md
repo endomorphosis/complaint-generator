@@ -12,9 +12,9 @@ Implementation tasks begin pending. Completion requires behavioral validation ev
 - Priority: P0
 - Goal: goal.gui.baseline
 - Subgoal: subgoal.gui.baseline.journey
-- Depends on: 
+- Depends on:
 - Outputs: docs/task_boards/complaint_gui_collaboration_baseline_receipt.json, tests/test_cimp_gui_01.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_01.py --run-llm --run-network --run-heavy
 - Acceptance: Run the actual app/router with fresh synthetic cases: denied bootstrap must be observed as denied, and explicitly injected authorized fixtures must be labeled fixtures. Capture fixed-form versus shared-interview behavior, current KG/DG effects, revision/action support, plaintext browser-cache exposure and accessibility gaps without asserting production readiness. This task produces fresh Python ASGI/service observations only. Attribute prior DOM/accessibility/browser-storage observations to the pinned manual audit; fresh real DOM qualification belongs to Task02.
 - Implementation provider: grok
@@ -27,7 +27,7 @@ Implementation tasks begin pending. Completion requires behavioral validation ev
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Characterize current GUI assembly and shared interview gaps
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -46,7 +46,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.baseline.evidence
 - Depends on: CIMP-GUI-01
 - Outputs: tests/gui_native_browser.py, tests/test_gui_native_browser_capability.py, tests/test_cimp_gui_02.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_02.py --run-llm --run-network --run-heavy
 - Acceptance: Launch real installed Playwright Node and Chromium with pinned executable/argv custody, CDP pipes, a fresh private profile and unchanged inherited AF_UNIX-only network denial. Route same-origin browser HTTP into the actual ASGI app; abort external origins and service workers, prove DOM-to-handler-to-persisted synthetic state effects, measure child cleanup, and fail on missing browsers or required skips. Qualify cookies, headers and downloads explicitly; HTTP interception alone cannot claim WebSocket/SSE/streaming coverage. Forward real browser credentials/headers and Set-Cookie through the bridge. Qualify browser login/logout cookie transport with an explicit app-side synthetic fixture, without requiring future product sessions from Task05; test cross-context cookie isolation. Do not use an independent/shared HTTPX cookie jar or inject synthetic actor authority inside the bridge.
 - Implementation provider: grok
@@ -59,7 +59,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Qualify real browser execution under Native validation
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -78,7 +78,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.baseline.evidence
 - Depends on: CIMP-GUI-01
 - Outputs: integrations/gui_capabilities.py, tests/test_cimp_gui_03.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_03.py --run-llm --run-network --run-heavy
 - Acceptance: Probe exact current public service, mediator, Data KG/legal/formal, Kit storage and router owner symbols without installing packages or treating imports as operational proof. Record available, unavailable and not-executed states plus pinned revisions; browser audit or old44 completion cannot satisfy new GUI behavior.
 - Implementation provider: grok
@@ -91,7 +91,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Bind GUI capabilities to current mediator and SDK owners
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -108,7 +108,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.identity.principals
 - Depends on: CIMP-GUI-03
 - Outputs: applications/principal_store.py, tests/test_cimp_gui_04.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_04.py --run-llm --run-network --run-heavy
 - Acceptance: Persist opaque principal/tenant identifiers and server-owned role assignments; request bodies cannot create staff roles. Bind record integrity and recovery to the existing private storage/key boundary; operational admin metadata excludes case plaintext and credentials.
 - Implementation provider: grok
@@ -121,7 +121,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Persist server-owned principal identity and roles
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -138,7 +138,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.identity.principals
 - Depends on: CIMP-GUI-04
 - Outputs: applications/browser_sessions.py, applications/complaint_workspace_api.py, tests/test_cimp_gui_05.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_05.py --run-llm --run-network --run-heavy
 - Acceptance: Use a declared credential/session-verification adapter and server-issued bounded sessions; missing provider/configuration fails closed instead of trusted-local access. Test expiry, logout, rotation, forged role/user identifiers, CSRF/cookie policy and sanitized authentication errors with synthetic principals.
 - Implementation provider: grok
@@ -151,7 +151,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Bind authenticated browser sessions and logout
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -168,7 +168,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.identity.assembly
 - Depends on: CIMP-GUI-05, CIMP-GUI-07, CIMP-GUI-09
 - Outputs: applications/server.py, applications/review_api.py, applications/document_api.py, applications/review_ui.py, applications/case_routes.py, tests/test_cimp_gui_06.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_06.py --run-llm --run-network --run-heavy
 - Acceptance: Inject the real principal/action authorizer into production app assembly and require it across workspace, review, document, download, chat and MCP routes. Gate or retire profile/hash-password/cookie-echo and captured-global-mediator HTTP/WebSocket paths; unauthenticated legacy calls never disclose or mutate case data. Provide an explicit reusable static route-composition seam in applications/case_routes.py, called by actual app variants; later case, graph, message and admin modules must be mounted there with the same authorizer, not only in fixture apps.
 - Implementation provider: grok
@@ -181,7 +181,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Secure actual app assembly and legacy transports
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -199,7 +199,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.identity.assembly
 - Depends on: CIMP-GUI-04
 - Outputs: applications/case_directory.py, applications/complaint_workspace.py, tests/test_cimp_gui_07.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_07.py --run-llm --run-network --run-heavy
 - Acceptance: Represent multiple independent cases per authenticated principal with explicit tenant/case/resource identities, no selection from attacker-controlled user_id. Keep existing owner-only encrypted cases readable under declared version/migration rules; missing keys cannot silently create an empty case.
 - Implementation provider: grok
@@ -212,7 +212,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Introduce stable independent case namespaces
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -229,7 +229,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.identity.assembly
 - Depends on: CIMP-GUI-02, CIMP-GUI-06, CIMP-GUI-07, CIMP-GUI-09
 - Outputs: applications/case_api.py, templates/cases.html, applications/case_routes.py, tests/test_cimp_gui_08.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_08.py --run-llm --run-network --run-heavy
 - Acceptance: Case creation/list/read/select are scoped to the authenticated actor and explicit membership; unknown identifiers do not enumerate other users. Switching cases clears transient UI state and preserves independent encrypted revisions and unresolved gaps. Until the later membership/key-grant tasks are complete, newly created cases are owner-only. Do not anticipate collaboration by bypassing missing grants.
 - Implementation provider: grok
@@ -242,7 +242,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Expose authorized case creation and selection
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -260,7 +260,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.access.policy
 - Depends on: CIMP-GUI-04, CIMP-GUI-07
 - Outputs: applications/case_access.py, tests/test_cimp_gui_09.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_09.py --run-llm --run-network --run-heavy
 - Acceptance: Define owner, assigned-lawyer and operational-admin actions without assuming lawyer/admin roles grant case access. Authorize actor, tenant, resource case, action, membership and revision consistently across HTTP/MCP/review/download boundaries; trusted_local is never a production workaround.
 - Implementation provider: grok
@@ -273,7 +273,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Centralize server-side case action authorization
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -290,7 +290,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.access.policy
 - Depends on: CIMP-GUI-08, CIMP-GUI-09
 - Outputs: applications/case_membership.py, tests/test_cimp_gui_10.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_10.py --run-llm --run-network --run-heavy
 - Acceptance: Owner-approved memberships have stable grant IDs, explicit actions, expiry and version; caller flags cannot mint grants. Test cross-case/tenant denial, replay, concurrent grant edits, pending/declined memberships and removal while a request is open.
 - Implementation provider: grok
@@ -303,7 +303,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Persist explicit case membership and scoped grants
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -320,7 +320,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.access.grants
 - Depends on: CIMP-GUI-10
 - Outputs: integrations/private_collaboration.py, integrations/private_storage.py, tests/test_cimp_gui_11.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_11.py --run-llm --run-network --run-heavy
 - Acceptance: Keep authenticated actor distinct from canonical artifact owner and AAD tenant/case/principal/revision; delegated reads require verified membership and explicit recipient-bound key grants. Use existing authenticated encryption/key owners, never raw browser keys, admin master decryption or owner impersonation; preserve all owner-only denial contracts and version compatibility.
 - Implementation provider: grok
@@ -333,7 +333,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Implement explicit encrypted case resource key grants
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -350,7 +350,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.access.grants
 - Depends on: CIMP-GUI-11
 - Outputs: integrations/private_collaboration.py, tests/test_cimp_gui_12.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_12.py --run-llm --run-network --run-heavy
 - Acceptance: Recheck grant validity at reads, writes, downloads and late-result admission; revoke future access and rotate/re-wrap current case keys under a defined cutoff. Cold resume and stale sessions cannot recover revoked authority; state honestly that revocation cannot erase already downloaded plaintext or keys.
 - Implementation provider: grok
@@ -363,7 +363,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Revoke and rotate collaborative key access
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -380,7 +380,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.access.grants
 - Depends on: CIMP-GUI-09, CIMP-GUI-11, CIMP-GUI-12
 - Outputs: applications/case_audit.py, tests/test_cimp_gui_13.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_13.py --run-llm --run-network --run-heavy
 - Acceptance: Record append-only action, actor, resource, revision, grant and purpose references in encrypted case audit history. Replay/duplicate requests are idempotent; operational logs, notifications and error payloads omit complaint text and key material.
 - Implementation provider: grok
@@ -393,7 +393,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Persist encrypted actor-attributed case audit events
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -410,7 +410,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.interview.protocol
 - Depends on: CIMP-GUI-03, CIMP-GUI-08, CIMP-GUI-09
 - Outputs: applications/complaint_workspace_api.py, applications/complaint_mcp_protocol.py, applications/case_routes.py, tests/test_cimp_gui_14.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_14.py --run-llm --run-network --run-heavy
 - Acceptance: Carry pending inquiry identity, expected_question_revision, interview_action, explanation, graph targets and expected updates from WorkflowActionService. Exercise real service transitions and current graph revisions; stale/mismatched answers produce an explicit conflict instead of silently advancing.
 - Implementation provider: grok
@@ -423,7 +423,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Expose the canonical shared inquiry HTTP/MCP contract
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -440,7 +440,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.interview.protocol
 - Depends on: CIMP-GUI-02, CIMP-GUI-06, CIMP-GUI-14
 - Outputs: static/complaint_mcp_sdk.js, static/complaint_mcp_sdk.mjs, templates/workspace.html, tests/test_cimp_gui_15.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_15.py --run-llm --run-network --run-heavy
 - Acceptance: Treat MCP result.isError and HTTP authorization failures as failures; denied bootstrap never says ready or synchronized. Carry revision/action contracts and remove complaint narratives, evidence, summaries, tokens and raw keys from plaintext localStorage/sessionStorage and synchronization events; test clear/switch/logout behavior.
 - Implementation provider: grok
@@ -453,7 +453,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Make browser SDK failures and private state truthful
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -470,7 +470,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.interview.questions
 - Depends on: CIMP-GUI-15, CIMP-GUI-34
 - Outputs: templates/workspace.html, applications/complaint_workspace.py, tests/test_cimp_gui_16.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_16.py --run-llm --run-network --run-heavy
 - Acceptance: Enter a narrative and render the actual pending inquiry from the shared mediator; subsequent questions depend on answers and graph gaps rather than only fixed intake fields. Use persisted per-case remote processing consent and purpose minimization before any model-backed extraction/questioning; unknown/deferred answers preserve gaps.
 - Implementation provider: grok
@@ -483,7 +483,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Connect browser complaint entry to adaptive questions
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -500,7 +500,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.interview.questions
 - Depends on: CIMP-GUI-16, CIMP-GUI-21, CIMP-GUI-27
 - Outputs: templates/workspace.html, mediator/workflow_service.py, tests/test_cimp_gui_17.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_17.py --run-llm --run-network --run-heavy
 - Acceptance: Explain why each question is asked, its factual target and related sourced legal requirement with inspectable provenance. Why/review actions do not store an answer or change law; preserve explanation/revision identity through browser reload.
 - Implementation provider: grok
@@ -513,7 +513,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Show inquiry explanations and distinct graph sources
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -530,7 +530,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.interview.questions
 - Depends on: CIMP-GUI-16, CIMP-GUI-22
 - Outputs: templates/workspace.html, applications/complaint_workspace.py, tests/test_cimp_gui_18.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_18.py --run-llm --run-network --run-heavy
 - Acceptance: Correct factual answers using the existing canonical correction/invalidation path with expected revisions and actor attribution. Retain prior assertions, invalidate affected support/proof results, and deny stale or unauthorized edits without overwriting other participants.
 - Implementation provider: grok
@@ -543,7 +543,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Apply GUI corrections through mediator supersession
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -560,7 +560,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.interview.questions
 - Depends on: CIMP-GUI-16, CIMP-GUI-27
 - Outputs: templates/workspace.html, applications/complaint_workspace.py, tests/test_cimp_gui_19.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_19.py --run-llm --run-network --run-heavy
 - Acceptance: Stop on saturation, cap, pause, cancellation or unavailable capability with unresolved reasons visible; user waiting is not a development worker stall. Remove fixed-form promotion of all claim elements to supported: support requires source-bound factual/legal evidence, and interview completion never means legal sufficiency.
 - Implementation provider: grok
@@ -573,7 +573,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Render finite interview outcomes without false support
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -590,7 +590,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.interview.resume
 - Depends on: CIMP-GUI-12, CIMP-GUI-13, CIMP-GUI-18, CIMP-GUI-19, CIMP-GUI-36
 - Outputs: templates/workspace.html, applications/complaint_workspace.py, tests/test_cimp_gui_20.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_20.py --run-llm --run-network --run-heavy
 - Acceptance: A new browser/process resumes exact pending inquiry, case, consent, factual/legal graph revisions, deferred gaps and corrections from encrypted state. Do not replay hooks/messages or reconstruct plaintext case state from browser caches; denied/revoked/missing-key resume is explicit.
 - Implementation provider: grok
@@ -603,7 +603,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Resume the browser interview from encrypted revisions
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -620,7 +620,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.facts.projection
 - Depends on: CIMP-GUI-14, CIMP-GUI-34, CIMP-GUI-36
 - Outputs: applications/graph_api.py, mediator/integrations/graph_tools.py, applications/case_routes.py, tests/test_cimp_gui_21.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_21.py --run-llm --run-network --run-heavy
 - Acceptance: Project user statements, evidence revisions, allegations and hypotheses with immutable source IDs and confidence/authority distinctions. Use pinned Data graph owners through existing mediator hooks, and deny ungranted graph reads or cross-case IDs.
 - Implementation provider: grok
@@ -633,7 +633,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Expose an authorized factual KG projection
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -650,7 +650,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.facts.corrections
 - Depends on: CIMP-GUI-13, CIMP-GUI-21
 - Outputs: applications/graph_api.py, complaint_phases/knowledge_graph.py, applications/case_routes.py, tests/test_cimp_gui_22.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_22.py --run-llm --run-network --run-heavy
 - Acceptance: Support constrained user/lawyer factual proposals, supersession and contradiction review with expected graph revisions and explicit actor authority. Generated suggestions remain hypotheses until admitted; retraction invalidates affected support and proof caches without erasing source history.
 - Implementation provider: grok
@@ -663,7 +663,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Review contradictions and general factual edits
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -680,7 +680,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.facts.projection
 - Depends on: CIMP-GUI-02, CIMP-GUI-21, CIMP-GUI-22
 - Outputs: templates/workspace.html, static/complaint_graph_view.js, tests/test_cimp_gui_23.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_23.py --run-llm --run-network --run-heavy
 - Acceptance: Render accessible graph/list views, source details, revision diffs and contradiction links from actual authorized API data. Browser requests cannot fabricate graph support, hide unresolved nodes or leak facts into analytics/storage outside the private boundary.
 - Implementation provider: grok
@@ -693,7 +693,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Build the factual graph inspector
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -710,7 +710,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.law.context
 - Depends on: CIMP-GUI-09, CIMP-GUI-15
 - Outputs: templates/workspace.html, applications/legal_context_api.py, applications/case_routes.py, tests/test_cimp_gui_24.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_24.py --run-llm --run-network --run-heavy
 - Acceptance: Collect jurisdiction, forum and relevant dates explicitly, retaining unknown or disputed applicability instead of defaulting to governing law. Changing context invalidates affected legal dependencies/proofs while preserving factual provenance and prior context versions.
 - Implementation provider: grok
@@ -723,7 +723,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Select explicit jurisdiction and legal effective context
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -740,7 +740,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.law.context
 - Depends on: CIMP-GUI-24, CIMP-GUI-34
 - Outputs: applications/legal_research_api.py, templates/workspace.html, applications/case_routes.py, tests/test_cimp_gui_25.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_25.py --run-llm --run-network --run-heavy
 - Acceptance: Invoke current Data legal dataset/search owners through mediator research hooks with bounded queries, cancellation, source/version receipts and purpose/consent checks. Search results, snippets, missing archives and model text are candidates or research gaps, never admitted law.
 - Implementation provider: grok
@@ -753,7 +753,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Acquire bounded legal source candidates from the GUI
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -770,7 +770,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.law.admission
 - Depends on: CIMP-GUI-10, CIMP-GUI-13, CIMP-GUI-25
 - Outputs: applications/legal_research_api.py, templates/workspace.html, applications/case_routes.py, tests/test_cimp_gui_26.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_26.py --run-llm --run-network --run-heavy
 - Acceptance: An authorized owner/lawyer explicitly admits exact source passages, authority identity, jurisdiction, effective date, applicability, exceptions and treatment state. Source mismatch, stale version, missing passage or unauthorized reviewer remains unresolved; retain admission/rejection attribution.
 - Implementation provider: grok
@@ -783,7 +783,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Review and admit versioned legal authorities
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -800,7 +800,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.law.admission
 - Depends on: CIMP-GUI-21, CIMP-GUI-26
 - Outputs: applications/graph_api.py, static/complaint_graph_view.js, applications/case_routes.py, tests/test_cimp_gui_27.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_27.py --run-llm --run-network --run-heavy
 - Acceptance: Project requirements, burdens, exceptions and applicability from admitted authorities separately from user facts. Show factual support/contradiction and missing evidence links without allowing user narratives or model output to rewrite legal rules.
 - Implementation provider: grok
@@ -813,7 +813,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Expose a law-derived dependency graph
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -830,7 +830,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.law.refresh
 - Depends on: CIMP-GUI-22, CIMP-GUI-24, CIMP-GUI-27
 - Outputs: mediator/workflow_service.py, applications/graph_api.py, tests/test_cimp_gui_28.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_28.py --run-llm --run-network --run-heavy
 - Acceptance: Version legal refresh operations and invalidate stale links, questions and proof obligations after a source/context/factual correction. Late results must match current actor grants, case revisions, consent, legal source hashes and dependency generation.
 - Implementation provider: grok
@@ -843,7 +843,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Refresh graphs when facts or legal context changes
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -860,7 +860,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.formal.ir
 - Depends on: CIMP-GUI-27, CIMP-GUI-28
 - Outputs: integrations/ipfs_datasets/logic.py, applications/legal_analysis_api.py, applications/case_routes.py, tests/test_cimp_gui_29.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_29.py --run-llm --run-network --run-heavy
 - Acceptance: Reuse compile_canonical_legal_ir and current-source receipt verification with exact source spans, applicability context and typed obligations. IR parsing, consistency or emitted Lean text is not executed proof or governing legal authority.
 - Implementation provider: grok
@@ -873,7 +873,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Attach canonical legal IR and source obligations
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -890,7 +890,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.formal.ir
 - Depends on: CIMP-GUI-03, CIMP-GUI-29
 - Outputs: integrations/ipfs_datasets/logic.py, applications/legal_analysis_api.py, applications/case_routes.py, tests/test_cimp_gui_30.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_30.py --run-llm --run-network --run-heavy
 - Acceptance: Bind current pinned source correspondence, definition applicability/declaration and contextual review owners to exact legal source and complete declared populations. Accept only genuine current owner receipts; incomplete graph joins, model training metrics, unbound definitions and user-supplied receipt JSON cannot authorize law or proof.
 - Implementation provider: grok
@@ -903,7 +903,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Integrate current Data definition and correspondence owners
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -920,7 +920,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.formal.review
 - Depends on: CIMP-GUI-02, CIMP-GUI-29, CIMP-GUI-30
 - Outputs: applications/legal_analysis_api.py, templates/workspace.html, applications/case_routes.py, tests/test_cimp_gui_31.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_31.py --run-llm --run-network --run-heavy
 - Acceptance: Render source-bound obligations, counterexamples, executed/degraded/not-executed proof status and relevant engine versions. Missing prover, timeout and source drift remain visible and do not become green checkmarks or legal sufficiency.
 - Implementation provider: grok
@@ -933,7 +933,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Show proof traces and unavailable states in the GUI
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -950,7 +950,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.formal.review
 - Depends on: CIMP-GUI-11, CIMP-GUI-13, CIMP-GUI-31, CIMP-GUI-41
 - Outputs: applications/case_review.py, templates/lawyer_workspace.html, applications/case_routes.py, tests/test_cimp_gui_32.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_32.py --run-llm --run-network --run-heavy
 - Acceptance: Assigned lawyers can propose and review sourced legal interpretations under scoped permissions with exact case/source/proof revision. Human legal review, model suggestions and machine proof are separate attributed records; stale approval never promotes changed law or facts.
 - Implementation provider: grok
@@ -963,7 +963,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Record scoped lawyer review of requirements and proofs
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -980,7 +980,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.router.consent
 - Depends on: CIMP-GUI-09, CIMP-GUI-15
 - Outputs: applications/case_consent_api.py, templates/workspace.html, applications/case_routes.py, tests/test_cimp_gui_33.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_33.py --run-llm --run-network --run-heavy
 - Acceptance: Offer local-private versus explicitly authorized Grok processing per case/purpose; persist and display decisions with revocation. Lawyer membership, admin role, development Grok authorization and message receipt do not imply case egress consent.
 - Implementation provider: grok
@@ -993,7 +993,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Expose persisted case-specific processing consent
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1010,7 +1010,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.router.routing
 - Depends on: CIMP-GUI-13, CIMP-GUI-14, CIMP-GUI-33
 - Outputs: mediator/hook_runtime.py, applications/complaint_workspace.py, tests/test_cimp_gui_34.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_34.py --run-llm --run-network --run-heavy
 - Acceptance: Use existing consented hook dispatch with grok_cli/grok-4.7/llm_router and fallback disabled, minimal allowed inputs and source references. Revalidate consent/grants/source revisions at late-result admission; tests use observed synthetic transport and assert real router-call shape without pretending live model qualification.
 - Implementation provider: grok
@@ -1023,7 +1023,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Bound GUI inference through Grok 4.7 llm_router
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1040,7 +1040,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.router.routing
 - Depends on: CIMP-GUI-02, CIMP-GUI-34
 - Outputs: templates/workspace.html, static/complaint_mcp_sdk.js, static/complaint_mcp_sdk.mjs, tests/test_cimp_gui_35.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_35.py --run-llm --run-network --run-heavy
 - Acceptance: Show actual request lifecycle, cancellation, unavailable/rate-limit/timeout status and current revision without fabricated progress. Retries are finite/idempotent; partial responses cannot mark legal requirements supported or reenable revoked remote processing.
 - Implementation provider: grok
@@ -1053,7 +1053,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Render bounded inference progress and errors
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1070,7 +1070,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.durability.snapshots
 - Depends on: CIMP-GUI-07, CIMP-GUI-09, CIMP-GUI-13
 - Outputs: applications/complaint_workspace.py, integrations/private_storage.py, tests/test_cimp_gui_36.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_36.py --run-llm --run-network --run-heavy
 - Acceptance: Extend existing private manifest/CAS owners to complete case snapshots including KG/DG, inquiries, proof references, grants and workflow revisions. Crash/replay/concurrent write tests preserve acknowledged revisions and never silently start an empty replacement case.
 - Implementation provider: grok
@@ -1083,7 +1083,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Commit complete encrypted case revisions
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1100,7 +1100,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.durability.snapshots
 - Depends on: CIMP-GUI-11, CIMP-GUI-36
 - Outputs: integrations/private_collaboration.py, applications/case_attachment_api.py, applications/case_routes.py, tests/test_cimp_gui_37.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_37.py --run-llm --run-network --run-heavy
 - Acceptance: Encrypt before Kit storage/replication; bind ciphertext and downloads to canonical case/resource/revision and actual actor grant. Keep filenames/previews/derived indexes private, enforce size/content policies, and recheck revoked access before delivery.
 - Implementation provider: grok
@@ -1113,7 +1113,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Encrypt shared attachments and derived artifacts
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1130,7 +1130,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.durability.replicas
 - Depends on: CIMP-GUI-36, CIMP-GUI-37
 - Outputs: integrations/private_storage.py, applications/case_storage_api.py, applications/case_routes.py, tests/test_cimp_gui_38.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_38.py --run-llm --run-network --run-heavy
 - Acceptance: Use current ipfs_kit_py manifest/pin/readback APIs and record local commit, queued replication, pin and verified replica as distinct states. Verify ciphertext readback before declaring durable; avoid public gateway/CID inference for private case content.
 - Implementation provider: grok
@@ -1143,7 +1143,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Verify ciphertext durability through Kit owners
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1160,7 +1160,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.durability.replicas
 - Depends on: CIMP-GUI-02, CIMP-GUI-38
 - Outputs: templates/workspace.html, applications/case_storage_api.py, applications/case_routes.py, tests/test_cimp_gui_39.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_39.py --run-llm --run-network --run-heavy
 - Acceptance: Expose storage/key/backend failures and pending replica status without losing acknowledged work or leaking keys in UI/logs. Offline/unavailable/corrupt/truncated ciphertext paths retain unresolved state; storage readiness is independent of interview/legal readiness.
 - Implementation provider: grok
@@ -1173,7 +1173,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Show truthful durability and failure recovery states
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1190,7 +1190,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.durability.replicas
 - Depends on: CIMP-GUI-07, CIMP-GUI-11, CIMP-GUI-12, CIMP-GUI-36
 - Outputs: applications/case_migration.py, tests/test_cimp_gui_40.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_40.py --run-llm --run-network --run-heavy
 - Acceptance: Implement resumable versioned migration only for explicitly selected cases with authorized keys, encrypted readback and preserved old owner binding. No scans or rewrites of real user data in campaign validation; synthetic migration tests retain recovery evidence before cleanup.
 - Implementation provider: grok
@@ -1203,7 +1203,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Migrate explicitly selected legacy cases safely
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1220,7 +1220,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.collaboration.assignments
 - Depends on: CIMP-GUI-02, CIMP-GUI-10, CIMP-GUI-11, CIMP-GUI-12, CIMP-GUI-13
 - Outputs: applications/case_assignment_api.py, templates/cases.html, applications/case_routes.py, tests/test_cimp_gui_41.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_41.py --run-llm --run-network --run-heavy
 - Acceptance: Owners invite a selected lawyer, recipients accept explicit scope, and both parties see pending/declined/expired/removal states. Lawyer role alone, client-supplied role or guessed case ID grants nothing; content opens only after membership and key grant admission.
 - Implementation provider: grok
@@ -1233,7 +1233,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Invite and accept scoped lawyer assignments
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1250,7 +1250,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.collaboration.messages
 - Depends on: CIMP-GUI-13, CIMP-GUI-36, CIMP-GUI-41
 - Outputs: applications/case_messages.py, applications/case_message_api.py, applications/case_routes.py, tests/test_cimp_gui_42.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_42.py --run-llm --run-network --run-heavy
 - Acceptance: Implement case-scoped ordered threads, idempotent send, bounded authorized pagination and encrypted message versions. Message text is conversation until an authorized explicit transition adopts it as evidence, an answer or a model input.
 - Implementation provider: grok
@@ -1263,7 +1263,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Persist authorized encrypted case conversations
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1280,7 +1280,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.collaboration.messages
 - Depends on: CIMP-GUI-37, CIMP-GUI-42
 - Outputs: applications/case_message_api.py, applications/case_attachment_api.py, applications/case_routes.py, tests/test_cimp_gui_43.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_43.py --run-llm --run-network --run-heavy
 - Acceptance: Bind attachment reads/writes and previews to thread, membership, grant and resource revision with per-request revocation checks. No arbitrary path/CID attachment selection, plaintext browser cache or cross-tenant notification leak.
 - Implementation provider: grok
@@ -1293,7 +1293,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Share message attachments through private admission
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1310,7 +1310,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.collaboration.workspace
 - Depends on: CIMP-GUI-02, CIMP-GUI-15, CIMP-GUI-42, CIMP-GUI-43
 - Outputs: templates/case_messages.html, static/complaint_case_messages.js, applications/case_routes.py, tests/test_cimp_gui_44.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_44.py --run-llm --run-network --run-heavy
 - Acceptance: Exercise real user/lawyer browser contexts for send/read/pagination/reload/unread states with accessible controls and safe text rendering. Use qualified HTTP polling first; WebSocket/SSE is not required or claimed without a separately proven real transport adapter.
 - Implementation provider: grok
@@ -1323,7 +1323,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Build the user and lawyer conversation inbox
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1340,7 +1340,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.collaboration.workspace
 - Depends on: CIMP-GUI-23, CIMP-GUI-27, CIMP-GUI-32, CIMP-GUI-41, CIMP-GUI-44
 - Outputs: templates/lawyer_workspace.html, applications/lawyer_workspace_api.py, applications/case_routes.py, tests/test_cimp_gui_45.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_45.py --run-llm --run-network --run-heavy
 - Acceptance: List only assigned authorized cases and render factual/legal graph distinctions, unresolved work, timeline and private messages. Expired/revoked cases disappear or show denial on open sessions; lawyer view never substitutes a global admin bypass.
 - Implementation provider: grok
@@ -1353,7 +1353,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Build assigned-lawyer case review workspace
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1370,7 +1370,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.collaboration.assignments
 - Depends on: CIMP-GUI-12, CIMP-GUI-41, CIMP-GUI-44
 - Outputs: templates/workspace.html, applications/case_assignment_api.py, applications/case_routes.py, tests/test_cimp_gui_46.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_46.py --run-llm --run-network --run-heavy
 - Acceptance: Owners inspect and change effective participant scopes, expiry and revocation with current revisions and explicit confirmations for grant changes. Grant changes are idempotent, audited and immediately enforced on API, download, inference and browser resume.
 - Implementation provider: grok
@@ -1383,7 +1383,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Expose owner control over collaborators and grants
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1400,7 +1400,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.workflow.review
 - Depends on: CIMP-GUI-13, CIMP-GUI-18, CIMP-GUI-32, CIMP-GUI-42
 - Outputs: applications/case_review.py, mediator/workflow_service.py, applications/case_routes.py, tests/test_cimp_gui_47.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_47.py --run-llm --run-network --run-heavy
 - Acceptance: Review tasks/comments/proposals have explicit types; only authorized accepted transitions update facts, answers, legal admissions or draft revisions. Concurrent acceptance uses expected revisions, preserves dissent/history and invalidates stale downstream support.
 - Implementation provider: grok
@@ -1413,7 +1413,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Separate review comments from case-state transitions
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1430,7 +1430,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.workflow.notifications
 - Depends on: CIMP-GUI-09, CIMP-GUI-42, CIMP-GUI-47
 - Outputs: applications/case_notifications.py, templates/cases.html, applications/case_routes.py, tests/test_cimp_gui_48.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_48.py --run-llm --run-network --run-heavy
 - Acceptance: Create recipient-scoped notifications for assignment, message and review events without complaint/evidence text in badges or operational logs. Read/unread and retries are idempotent; no external email/SMS/chat delivery is activated by this campaign.
 - Implementation provider: grok
@@ -1443,7 +1443,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Deliver minimal private in-app notifications
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1460,7 +1460,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.workflow.review
 - Depends on: CIMP-GUI-28, CIMP-GUI-35, CIMP-GUI-36, CIMP-GUI-47
 - Outputs: applications/case_review.py, applications/document_api.py, templates/workspace.html, applications/case_routes.py, tests/test_cimp_gui_49.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_49.py --run-llm --run-network --run-heavy
 - Acceptance: Project stage, owner/lawyer actions and readiness from current factual/legal/evidence/proof states rather than checkbox completion. Version draft/review/export operations with scoped authorization; no automatic court filing or claim of legal sufficiency.
 - Implementation provider: grok
@@ -1473,7 +1473,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Coordinate workflow stages and draft review
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1490,7 +1490,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.admin.directory
 - Depends on: CIMP-GUI-02, CIMP-GUI-04, CIMP-GUI-05, CIMP-GUI-06, CIMP-GUI-09, CIMP-GUI-13
 - Outputs: applications/admin_api.py, templates/admin.html, applications/case_routes.py, tests/test_cimp_gui_50.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_50.py --run-llm --run-network --run-heavy
 - Acceptance: Admins manage authorized account lifecycle and server-owned role changes with separate audit rights and least-privilege fields. Admin screens/search cannot decrypt or enumerate case narratives, messages, evidence, keys or summaries without independent case grant. Account disabling and staff demotion invalidate existing sessions/authority immediately; test already-open browser contexts as well as forged new requests.
 - Implementation provider: grok
@@ -1503,7 +1503,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Build minimal operational user and role administration
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1521,7 +1521,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.admin.operations
 - Depends on: CIMP-GUI-41, CIMP-GUI-48, CIMP-GUI-50
 - Outputs: applications/admin_api.py, templates/admin.html, applications/case_routes.py, tests/test_cimp_gui_51.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_51.py --run-llm --run-network --run-heavy
 - Acceptance: Expose minimal case counts, assignment status, storage/worker operational states and bounded support diagnostics scoped to administrative authority. Operational incident handling never impersonates a case owner or silently grants case-content access.
 - Implementation provider: grok
@@ -1534,7 +1534,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Inspect assignment and campaign operations safely
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1551,7 +1551,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.admin.operations
 - Depends on: CIMP-GUI-37, CIMP-GUI-50, CIMP-GUI-51
 - Outputs: applications/case_audit.py, applications/admin_api.py, applications/case_routes.py, tests/test_cimp_gui_52.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_52.py --run-llm --run-network --run-heavy
 - Acceptance: Export only explicitly authorized audit fields/artifacts with case/actor purpose and current grants; private exports stay encrypted or explicitly user-decrypted. Test traversal, forged role, mixed-tenant batch, stale grant and direct download denial across all entry points.
 - Implementation provider: grok
@@ -1564,7 +1564,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Provide scoped encrypted audit and export controls
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1581,7 +1581,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.quality.interaction
 - Depends on: CIMP-GUI-02, CIMP-GUI-19, CIMP-GUI-23, CIMP-GUI-27, CIMP-GUI-44, CIMP-GUI-45, CIMP-GUI-50
 - Outputs: templates/workspace.html, templates/cases.html, static/complaint_app_shell.css, tests/test_cimp_gui_53.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_53.py --run-llm --run-network --run-heavy
 - Acceptance: Associate visible labels with every input, support keyboard/focus/error summaries and preserve current case context on mobile/narrow layouts. Use actual rendered DOM for contrast/layout/empty/loading/error states; missing external assets cannot be silently replaced by mocked markup.
 - Implementation provider: grok
@@ -1594,7 +1594,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Make authenticated GUI flows accessible and responsive
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1611,7 +1611,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.quality.interaction
 - Depends on: CIMP-GUI-23, CIMP-GUI-31, CIMP-GUI-35, CIMP-GUI-39, CIMP-GUI-44, CIMP-GUI-53
 - Outputs: static/complaint_app_shell.js, templates/workspace.html, tests/test_cimp_gui_54.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_54.py --run-llm --run-network --run-heavy
 - Acceptance: Show understandable authorization/conflict/unavailable/pending states with bounded retry/cancel actions and current revisions. No failed MCP call, missing proof, unsupported source or queued replica can render ready/supported/verified as a fallback.
 - Implementation provider: grok
@@ -1624,7 +1624,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Render graph, research and collaboration errors consistently
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1641,7 +1641,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.quality.boundaries
 - Depends on: CIMP-GUI-06, CIMP-GUI-12, CIMP-GUI-46, CIMP-GUI-52, CIMP-GUI-54
 - Outputs: tests/gui_security_fixtures.py, tests/test_cimp_gui_55.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_55.py --run-llm --run-network --run-heavy
 - Acceptance: Run synthetic owner/lawyer/admin/stranger browser/API contexts for role forgery, cross-tenant/case reads, stale edits, open-session revocation and message/download leakage. Cover legacy HTTP, workspace HTTP, MCP, review and download surfaces; unsupported WebSockets remain denied until qualified. Account disabling and staff demotion invalidate existing sessions/authority immediately; test already-open browser contexts as well as forged new requests.
 - Implementation provider: grok
@@ -1654,7 +1654,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Prove adversarial multi-role and transport isolation
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1672,7 +1672,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.quality.boundaries
 - Depends on: CIMP-GUI-20, CIMP-GUI-45, CIMP-GUI-46, CIMP-GUI-47, CIMP-GUI-48, CIMP-GUI-49, CIMP-GUI-55
 - Outputs: tests/gui_collaboration_fixtures.py, tests/test_cimp_gui_56.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_56.py --run-llm --run-network --run-heavy
 - Acceptance: Actual DOM narrative/question/why/correction/graph research/invitation/message/review/cold-resume flows use real application handlers, synthetic source rows and encrypted persistence. Assert distinct factual assertions, admitted legal requirements, conditional proof states and unresolved stopping; no canned mockApi packet stands in for backend behavior.
 - Implementation provider: grok
@@ -1685,7 +1685,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Exercise the complete owner-lawyer GUI journey
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1702,7 +1702,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.quality.boundaries
 - Depends on: CIMP-GUI-39, CIMP-GUI-54, CIMP-GUI-55
 - Outputs: tests/gui_collaboration_fixtures.py, tests/test_cimp_gui_57.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_57.py --run-llm --run-network --run-heavy
 - Acceptance: Exercise absent models/law/prover/storage, rate limits, network denial, missing keys, corrupt snapshots and revoked grants with required non-skipped cases. Maintain explicit pending/research/factual gaps and honest durability/proof status; no unavailable capability is silently accepted as a successful end-to-end route.
 - Implementation provider: grok
@@ -1715,7 +1715,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Prove offline and unavailable GUI outcomes
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1732,7 +1732,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.operations.health
 - Depends on: CIMP-GUI-02, CIMP-GUI-55, CIMP-GUI-57
 - Outputs: integrations/ipfs_accelerate/campaign_watchdog.py, tests/gui_native_browser.py, tests/test_cimp_gui_58.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_58.py --run-llm --run-network --run-heavy
 - Acceptance: Distinguish intentional user waits from development worker stalls with actual task/CID/attempt and browser/validator deadlines; preserve the existing finite Native/watchdog budgets. Exercise owned browser cleanup, cancelled validation, stale source, missing executable and repeated idle-ready recovery without rearming paid attempts or bypassing holds.
 - Implementation provider: grok
@@ -1745,7 +1745,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Qualify Native GUI task monitoring and recovery
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1762,7 +1762,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.operations.closure
 - Depends on: CIMP-GUI-56, CIMP-GUI-57, CIMP-GUI-58
 - Outputs: scripts/validate_gui_collaboration.py, tests/test_cimp_gui_59.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_59.py --run-llm --run-network --run-heavy
 - Acceptance: Run explicit nonempty mandatory cases per declared group under current source/SDK/runtime identity with actual DOM, ASGI handlers, encryption, provenance and negative access checks. Separate local synthetic GUI acceptance, historical Native completions and optional future live model/corpus/prover/replica qualification; unexecuted groups never count as passing.
 - Implementation provider: grok
@@ -1775,7 +1775,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Run bounded current-source GUI acceptance groups
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
@@ -1792,7 +1792,7 @@ Implementation instructions:
 - Subgoal: subgoal.gui.operations.closure
 - Depends on: CIMP-GUI-01, CIMP-GUI-02, CIMP-GUI-03, CIMP-GUI-04, CIMP-GUI-05, CIMP-GUI-06, CIMP-GUI-07, CIMP-GUI-08, CIMP-GUI-09, CIMP-GUI-10, CIMP-GUI-11, CIMP-GUI-12, CIMP-GUI-13, CIMP-GUI-14, CIMP-GUI-15, CIMP-GUI-16, CIMP-GUI-17, CIMP-GUI-18, CIMP-GUI-19, CIMP-GUI-20, CIMP-GUI-21, CIMP-GUI-22, CIMP-GUI-23, CIMP-GUI-24, CIMP-GUI-25, CIMP-GUI-26, CIMP-GUI-27, CIMP-GUI-28, CIMP-GUI-29, CIMP-GUI-30, CIMP-GUI-31, CIMP-GUI-32, CIMP-GUI-33, CIMP-GUI-34, CIMP-GUI-35, CIMP-GUI-36, CIMP-GUI-37, CIMP-GUI-38, CIMP-GUI-39, CIMP-GUI-40, CIMP-GUI-41, CIMP-GUI-42, CIMP-GUI-43, CIMP-GUI-44, CIMP-GUI-45, CIMP-GUI-46, CIMP-GUI-47, CIMP-GUI-48, CIMP-GUI-49, CIMP-GUI-50, CIMP-GUI-51, CIMP-GUI-52, CIMP-GUI-53, CIMP-GUI-54, CIMP-GUI-55, CIMP-GUI-56, CIMP-GUI-57, CIMP-GUI-58, CIMP-GUI-59
 - Outputs: docs/task_boards/complaint_gui_collaboration_operator_guide.md, docs/task_boards/complaint_gui_collaboration_completion_contract.json, tests/test_cimp_gui_60.py
-- Submodules: 
+- Submodules:
 - Validation: HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q tests/test_cimp_gui_60.py --run-llm --run-network --run-heavy
 - Acceptance: Document user/lawyer/admin authorization, key/grant recovery, consent, private messaging, graph provenance, finite stopping and authenticated watchdog operation. Completion requires actual Native member/callback receipts, current canonical task identities and settled merge queue; packet shape, ingestion and old58/44 completion do not complete this new program.
 - Implementation provider: grok
@@ -1805,7 +1805,7 @@ Implementation instructions:
 Implementation instructions:
 
 > Implement only this bounded task in the existing complaint-generator architecture. Use the actual shared application and mediator owners, not a duplicate interview, canned mockApi or global mediator singleton. Development implementation is authorized to Grok 4.7 via ipfs_accelerate_py.llm_router, provider grok_cli, no fallback. Tests remain offline and synthetic; development authorization never authorizes egress of a real complaint. Do not inspect real profiles, sessions, keys, .env, exports, evidence, browser profiles or other campaigns. Do not send real external messages, push/deploy, install dependencies or update submodule revisions. Preserve completed58/44 boards, histories and qualification artifacts. Use declared pinned A/Data/Kit owners. Claims, snippets, LLM text, parsed IR, training metrics and unexecuted proofs are not governing law or verified support. Keep actual actor identity separate from canonical encrypted owner binding. Preserve version/CAS, consent and revocation at late-result boundaries. Validation must be one bounded real Python pytest module, nonempty positive and negative behavior cases, zero required skips and no assertion-only smoke. A missing runtime/capability is a truthful failure, never a successful fallback. Do not weaken Native process/network/AST/source/claim/budget guards. Browser tasks depend on qualified Task02 harness: actual Chromium DOM with pipe transport and same-origin HTTP dispatched into actual ASGI handlers, not a public listener or canned responses; deny external origins and clean up owned descendants. Do not claim unsupported WS/SSE/streaming. Keep output scope small; reuse foundation helpers after their dependency tasks complete. Do not run the old full release suite inside a single900-second task. Native owns selection, attempts, merge and completion. Write the declared focused test and demonstrate behavior through public entry points. Be explicit about known limitations and unresolved states.
-> 
+>
 > Task: Document operations and authenticate new campaign completion
 > Source baseline: 2c1439a7029eb9035338133210d8b43319add8a4; see docs/GUI_COLLABORATION_IMPROVEMENT_PLAN.md and the new GUI baseline audit.
 > Acceptance:
