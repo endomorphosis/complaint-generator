@@ -452,7 +452,7 @@ Implementation instructions:
 
 ## CIMP-MGND-18 Preserve legal editions and adverse treatment across acquisition
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
