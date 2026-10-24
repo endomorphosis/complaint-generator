@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -888,18 +889,47 @@ def dispatch_declared_hook_purpose(
         "grok_tools": "",
         "may_mark_requirements_satisfied": False,
     }
+    request_id = uuid.uuid4().hex
+
+    def finish_synthetic(result: dict[str, Any], identity: Mapping[str, Any] | None) -> dict[str, Any]:
+        marked = dict(identity or {})
+        marked["transport_kind"] = "synthetic"
+        marked["native_observation_bound"] = False
+        marked["synthetic_transport_invoked"] = True
+        marked["live_model_identity_verified"] = False
+        result["request_id"] = request_id
+        result["provider_replayed"] = False
+        result["live_model_identity_verified"] = False
+        return _stamp_invocation_association(
+            result,
+            purpose=purpose_id,
+            case_id=case_id,
+            session_id=session_id,
+            graph_revision=graph_revision,
+            request_id=request_id,
+            receipt=marked,
+        )
+
+    guard_key, guard_open = _dispatch_guard("declared", case_id, session_id, purpose_id, graph_revision)
+    if not guard_open:
+        replay = _purpose_result(purpose_id=purpose_id, status="refused", code="duplicate_dispatch", model_dispatched=False, output=None, identity=None, route=route)
+        replay["provider_replayed"] = False
+        replay["request_id"] = request_id
+        return replay
     try:
         raw = model_transport(call)
     except Exception:
         identity = route_identity_diagnostics(requested=requested, selected=selected, observed={"router": "", "provider": "", "model": "", "build": ""}, transport_kind="synthetic")
         result = _purpose_result(purpose_id=purpose_id, status="unavailable", code="provider_exception", model_dispatched=True, output=None, identity=identity, route=route, synthetic_transport_invoked=True)
         result["dispatch"] = "refused"
-        return result
+        return finish_synthetic(result, identity)
+    finally:
+        _INFLIGHT_DISPATCHES.discard(guard_key)
     if not isinstance(raw, Mapping):
         identity = route_identity_diagnostics(requested=requested, selected=selected, observed={"router": "", "provider": "", "model": "", "build": ""}, transport_kind="synthetic")
         result = _purpose_result(purpose_id=purpose_id, status="unavailable", code="malformed", model_dispatched=True, output=None, identity=identity, route=route, synthetic_transport_invoked=True)
         result["dispatch"] = "refused"
-        return result
+        return finish_synthetic(result, identity)
     observed = {
         "router": raw.get("observed_router", ""),
         "provider": raw.get("observed_provider", ""),
@@ -914,26 +944,246 @@ def dispatch_declared_hook_purpose(
         native_observation_bound=False,
         evidence_class=str(raw.get("evidence_class") or ""),
     )
+    identity["native_observation_bound"] = False
+    identity["evidence_class"] = "synthetic"
     transport_status = raw.get("status")
     if transport_status != "available":
         code_text = transport_status if type(transport_status) is str and transport_status else "unavailable"
         result = _purpose_result(purpose_id=purpose_id, status="unavailable", code=code_text, model_dispatched=True, output=None, identity=identity, route=route, synthetic_transport_invoked=True)
         result["dispatch"] = "refused"
-        return result
+        return finish_synthetic(result, identity)
     out_code, clean_output = _validate_model_output(purpose_id, raw.get("output"), clean_inputs)
     if out_code:
         result = _purpose_result(purpose_id=purpose_id, status="refused", code=out_code, model_dispatched=True, output=None, identity=identity, route=route, synthetic_transport_invoked=True)
         result["dispatch"] = "refused"
-        return result
+        return finish_synthetic(result, identity)
     result = _purpose_result(purpose_id=purpose_id, status="available", code="proposal_accepted", model_dispatched=True, output=clean_output, identity=identity, route=route, synthetic_transport_invoked=True)
     result["dispatch"] = "model"
-    return result
+    return finish_synthetic(result, identity)
 
 
 def _pending_revision_token(pending_case: Any, graph_revision: str) -> str:
     if isinstance(pending_case, Mapping) and type(pending_case.get("revision")) is str:
         return pending_case["revision"]
     return graph_revision if type(graph_revision) is str else ""
+
+
+INVOCATION_ASSOCIATION_SCHEMA = "invocation_association_v1"
+_ASSOCIATION_PURPOSES = MODEL_PURPOSE_IDS | LOCAL_ONLY_PURPOSE_IDS
+_ROUTER_RECEIPT_PUBLIC_KEYS = (
+    "kind", "purpose_id", "status", "code", "request_id", "pending_revision",
+    "accepted", "session_retained", "session_id", "router", "requested_router",
+    "selected_router", "requested_provider", "selected_provider", "requested_model",
+    "selected_model", "route_observation", "provider_supported_identity",
+    "error_code", "prompt_logged", "intake_complete", "live_canary",
+    "live_model_identity_verified", "live_build_identity_verified", "transport_kind",
+    "observed_provider", "observed_model", "observed_build", "native_invocation_id",
+    "native_observation_bound", "evidence_class", "invocation_label", "tools_allowed",
+    "tools_invoked", "allow_local_fallback", "allow_cross_provider_fallback",
+)
+_INFLIGHT_DISPATCHES: set[tuple[str, str, str, str, str]] = set()
+
+
+def _bounded_association_token(value: Any, limit: int) -> str:
+    if type(value) is not str:
+        return ""
+    text = value.strip()
+    if not text or len(text) > limit or any(ord(char) < 32 for char in text):
+        return ""
+    return text
+
+
+def invocation_label_for_receipt(receipt: Mapping[str, Any] | None) -> str:
+    """Label a receipt real only when the native observation seam bound it.
+
+    Synthetic transports, unbound fake observation types, and receipts with no
+    invocation stay fake. The label is not a live Grok identity claim.
+    """
+
+    if not isinstance(receipt, Mapping):
+        return "fake"
+    transport = receipt.get("transport_kind")
+    observation = receipt.get("route_observation")
+    evidence = receipt.get("evidence_class")
+    if transport == "synthetic" or observation == "synthetic" or receipt.get("synthetic_transport_invoked") is True:
+        return "fake"
+    if type(evidence) is str and evidence.startswith("synthetic"):
+        return "fake"
+    if receipt.get("native_observation_bound") is False:
+        return "fake"
+    if receipt.get("native_observation_bound") is True and transport == "native_observation":
+        return "real"
+    if observation in {"not_dispatched", "", None} and not receipt.get("native_invocation_id"):
+        return "fake"
+    return "fake"
+
+
+def invocation_association(
+    *,
+    invocation_label: str,
+    purpose: Any,
+    request_id: Any,
+    case_id: Any,
+    session_id: Any,
+    accepted_graph_revision: Any,
+    live_model_identity_verified: bool = False,
+) -> dict[str, Any]:
+    """Public association. Prompts, passages, keys, environments, and tool arguments are omitted."""
+
+    label = invocation_label if invocation_label in {"real", "fake"} else "fake"
+    purpose_text = _bounded_association_token(purpose, 64)
+    if purpose_text not in _ASSOCIATION_PURPOSES:
+        purpose_text = ""
+    request = _bounded_association_token(request_id, 32)
+    if re.fullmatch(r"[0-9a-f]{32}", request) is None:
+        request = ""
+    live = live_model_identity_verified is True and label == "real"
+    return {
+        "schema": INVOCATION_ASSOCIATION_SCHEMA,
+        "invocation_label": label,
+        "purpose": purpose_text,
+        "request_id": request,
+        "case_id": _bounded_association_token(case_id, 80),
+        "session_id": _bounded_association_token(session_id, 80),
+        "accepted_graph_revision": _bounded_association_token(accepted_graph_revision, 80),
+        "live_model_identity_verified": live,
+        "prompt_logged": False,
+        "provider_replayed": False,
+    }
+
+
+def sanitized_router_receipt(receipt: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Copy the public receipt fields and drop payloads."""
+
+    if not isinstance(receipt, Mapping):
+        return {"prompt_logged": False}
+    safe: dict[str, Any] = {}
+    for key in _ROUTER_RECEIPT_PUBLIC_KEYS:
+        if key not in receipt:
+            continue
+        value = receipt[key]
+        if type(value) is bool or (type(value) is int and not isinstance(value, bool) and abs(value) <= 10000):
+            safe[key] = value
+        elif type(value) is str:
+            token = _bounded_association_token(value, 160)
+            if token:
+                safe[key] = token
+    safe["prompt_logged"] = False
+    return safe
+
+
+def public_router_trace_entry(
+    receipt: Mapping[str, Any] | None,
+    *,
+    purpose: Any,
+    case_id: Any,
+    session_id: Any,
+    accepted_graph_revision: Any,
+    interview_session_id: Any = "",
+    interview_revision: Any = None,
+) -> dict[str, Any] | None:
+    """One bounded trace entry. A receipt without a request id is not an invocation."""
+
+    public = sanitized_router_receipt(receipt)
+    association = invocation_association(
+        invocation_label=invocation_label_for_receipt(receipt),
+        purpose=purpose if purpose else public.get("purpose_id"),
+        request_id=public.get("request_id"),
+        case_id=case_id,
+        session_id=session_id,
+        accepted_graph_revision=accepted_graph_revision,
+        live_model_identity_verified=bool(public.get("live_model_identity_verified")) and invocation_label_for_receipt(receipt) == "real",
+    )
+    if not association["request_id"]:
+        return None
+    entry = {
+        "router_receipt": public,
+        "interview_session_id": _bounded_association_token(interview_session_id, 80),
+        "interview_revision": interview_revision if type(interview_revision) is int and not isinstance(interview_revision, bool) and 0 <= interview_revision <= 100000 else 0,
+        **association,
+    }
+    return entry
+
+
+def merge_router_trace(
+    previous: Mapping[str, Any] | None,
+    entries: Sequence[Mapping[str, Any]] | None,
+    *,
+    diagnostics: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Append associations once. This never calls a provider or invents a request."""
+
+    prior = previous if isinstance(previous, Mapping) else {}
+    stored: list[dict[str, Any]] = []
+    known: set[str] = set()
+    for item in prior.get("receipts") or []:
+        if not isinstance(item, Mapping):
+            continue
+        request_id = item.get("request_id") or (item.get("router_receipt") or {}).get("request_id")
+        if type(request_id) is not str or request_id in known:
+            continue
+        stored.append(dict(item))
+        known.add(request_id)
+    added = False
+    for item in entries or []:
+        if not isinstance(item, Mapping):
+            continue
+        request_id = item.get("request_id")
+        if type(request_id) is not str or not request_id or request_id in known:
+            continue
+        stored.append({key: item[key] for key in item})
+        known.add(request_id)
+        added = True
+    if diagnostics is not None and (added or not prior):
+        public_diagnostics = sanitized_router_receipt(diagnostics)
+        public_diagnostics["prompt_logged"] = False
+    else:
+        public_diagnostics = dict(prior.get("diagnostics") or {}) if isinstance(prior.get("diagnostics"), Mapping) else {}
+        if not public_diagnostics and diagnostics is not None:
+            public_diagnostics = sanitized_router_receipt(diagnostics)
+            public_diagnostics["prompt_logged"] = False
+    return {"diagnostics": public_diagnostics, "receipts": stored[-32:]}
+
+
+def _stamp_invocation_association(
+    result: dict[str, Any],
+    *,
+    purpose: str,
+    case_id: str,
+    session_id: str,
+    graph_revision: str,
+    request_id: str,
+    receipt: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not (result.get("model_dispatched") or result.get("provider_invoked") or result.get("synthetic_transport_invoked")):
+        return result
+    label_source = dict(receipt or {})
+    label_source.setdefault("transport_kind", (result.get("identity") or {}).get("transport_kind") if isinstance(result.get("identity"), Mapping) else "")
+    label_source.setdefault("synthetic_transport_invoked", result.get("synthetic_transport_invoked"))
+    association = invocation_association(
+        invocation_label=invocation_label_for_receipt(label_source),
+        purpose=purpose,
+        request_id=request_id,
+        case_id=case_id,
+        session_id=session_id,
+        accepted_graph_revision=graph_revision,
+        live_model_identity_verified=bool(label_source.get("live_model_identity_verified")),
+    )
+    result["invocation_association"] = association
+    if isinstance(result.get("receipt"), dict):
+        result["receipt"]["invocation_label"] = association["invocation_label"]
+        result["receipt"]["purpose_id"] = association["purpose"]
+        result["receipt"]["native_observation_bound"] = label_source.get("native_observation_bound") is True
+        result["receipt"]["evidence_class"] = _bounded_association_token(label_source.get("evidence_class"), 80)
+    return result
+
+
+def _dispatch_guard(kind: str, case_id: str, session_id: str, purpose_id: str, graph_revision: str) -> tuple[tuple[str, str, str, str, str], bool]:
+    key = (kind, case_id, session_id, purpose_id, graph_revision)
+    if key in _INFLIGHT_DISPATCHES:
+        return key, False
+    _INFLIGHT_DISPATCHES.add(key)
+    return key, True
 
 
 def _hook_observation_receipt(
@@ -975,6 +1225,9 @@ def _hook_observation_receipt(
         "observed_provider": str(observed.get("provider") or "")[:128],
         "observed_model": str(observed.get("model") or "")[:128],
         "observed_build": str(observed.get("build") or "")[:128],
+        "native_observation_bound": bool(isinstance(identity, Mapping) and identity.get("native_observation_bound") is True),
+        "evidence_class": _bounded_association_token(identity.get("evidence_class") if isinstance(identity, Mapping) else "", 80),
+        "invocation_label": invocation_label_for_receipt(identity if isinstance(identity, Mapping) else None),
     }
 
 
@@ -1044,6 +1297,23 @@ def dispatch_observed_hook_purpose(
             result["live_model_identity_verified"] = False
         else:
             result["live_model_identity_verified"] = True
+        observed_receipt = result.get("receipt") if isinstance(result.get("receipt"), dict) else {}
+        _stamp_invocation_association(
+            result,
+            purpose=purpose_id,
+            case_id=case_id,
+            session_id=session_id,
+            graph_revision=graph_revision,
+            request_id=str(result.get("request_id") or observed_receipt.get("request_id") or ""),
+            receipt={
+                **observed_receipt,
+                "transport_kind": (result.get("identity") or {}).get("transport_kind") if isinstance(result.get("identity"), Mapping) else observed_receipt.get("transport_kind"),
+                "native_observation_bound": (result.get("identity") or {}).get("native_observation_bound") if isinstance(result.get("identity"), Mapping) else False,
+                "evidence_class": (result.get("identity") or {}).get("evidence_class") if isinstance(result.get("identity"), Mapping) else "",
+                "live_model_identity_verified": result.get("live_model_identity_verified") is True,
+                "synthetic_transport_invoked": result.get("synthetic_transport_invoked") is True,
+            },
+        )
         return result
 
     if purpose_id not in MODEL_PURPOSE_IDS and purpose_id not in LOCAL_ONLY_PURPOSE_IDS:
@@ -1106,6 +1376,13 @@ def dispatch_observed_hook_purpose(
     requested = {"router": route["router"], "provider": route["provider"], "model": route["model"], "build": ""}
     selected = dict(requested)
     request_id = _uuid.uuid4().hex
+    guard_key, guard_open = _dispatch_guard("observed", case_id, session_id, purpose_id, graph_revision)
+    if not guard_open:
+        replay = _purpose_result(purpose_id=purpose_id, status="refused", code="duplicate_dispatch", model_dispatched=False, output=None, identity=None, route=route)
+        replay["provider_replayed"] = False
+        replay["request_id"] = request_id
+        replay["receipt"] = _hook_observation_receipt(purpose_id=purpose_id, status="refused", code="duplicate_dispatch", request_id=request_id, pending_revision=pending_revision, identity=None, accepted=False)
+        return seal(replay)
     invocation_id = bind_remote_invocation(
         user_id=owner_id,
         case_id=case_id,
@@ -1114,13 +1391,16 @@ def dispatch_observed_hook_purpose(
         data_class=data_class,
         generation=int(consent["generation"]),
     )
-    observed_call = generate_observed_hook_purpose(
-        purpose_id=purpose_id,
-        inputs=clean_inputs,
-        request_id=request_id,
-        timeout=timeout,
-        cancel_event=cancel_event,
-    )
+    try:
+        observed_call = generate_observed_hook_purpose(
+            purpose_id=purpose_id,
+            inputs=clean_inputs,
+            request_id=request_id,
+            timeout=timeout,
+            cancel_event=cancel_event,
+        )
+    finally:
+        _INFLIGHT_DISPATCHES.discard(guard_key)
     identity = route_identity_diagnostics(
         requested=requested,
         selected=selected,
@@ -1137,6 +1417,11 @@ def dispatch_observed_hook_purpose(
     # The diagnostics helper can mark a qualified Native class as live. A
     # loaded test double must not inherit that claim.
     if observed_call.get("live_model_identity_verified") is not True:
+        identity["live_model_identity_verified"] = False
+        identity["live_build_identity_verified"] = False
+    identity["native_observation_bound"] = observed_call.get("native_observation_bound") is True
+    identity["evidence_class"] = _bounded_association_token(observed_call.get("evidence_class"), 80)
+    if identity["native_observation_bound"] is not True:
         identity["live_model_identity_verified"] = False
         identity["live_build_identity_verified"] = False
     failure = str(observed_call.get("code") or "unavailable")
