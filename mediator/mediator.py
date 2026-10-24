@@ -13911,6 +13911,149 @@ class Mediator:
 		return (isinstance(record, dict) and len(record) <= 128
 			and DependencyGraphBuilder._bounded_source_record({key: value for key, value in record.items() if key in fields}))
 
+	def admit_acquired_authorities(self, acquisition, claims, intake_case_file, user_id=None):
+		"""Store acquired candidates, then admit only re-read source records.
+
+		Acquisition status stays on its own outcome. Legal dependency nodes are
+		added only after canonical storage and ``_collect_verified_legal_requirements``.
+		A missing legal source still leaves an unresolved dependency graph.
+		"""
+		from integrations.ipfs_datasets.logic import prepare_acquired_authority_record
+		from integrations.ipfs_datasets.legal import resolve_explicit_jurisdiction
+
+		payload = acquisition if isinstance(acquisition, dict) else {}
+		candidates = payload.get('candidates') if isinstance(payload.get('candidates'), list) else []
+		acquisition_outcome = {
+			'stage': 'acquisition',
+			'status': str(payload.get('status') or 'unavailable'),
+			'error_code': str(payload.get('error_code') or ''),
+			'candidate_count': len(candidates) if len(candidates) <= 128 else 128,
+			'remote_dispatched': bool(payload.get('remote_dispatched')),
+			'proof': False,
+			'worker_stalled': False,
+		}
+		selection = self.resolve_intake_legal_selection(claims, intake_case_file)
+		context = selection.get('legal_context') if isinstance(selection.get('legal_context'), dict) else {}
+		jurisdiction = resolve_explicit_jurisdiction(context.get('jurisdiction'))
+		date = context.get('applicable_law_date') if isinstance(context.get('applicable_law_date'), dict) else {}
+		query_date = date.get('precise_date') if date and not date.get('is_uncertain') else ''
+		claim_types = []
+		for item in list(claims or []):
+			if not isinstance(item, dict):
+				continue
+			claim_type = str(item.get('type') or item.get('claim_type') or '').strip()
+			if claim_type and claim_type not in claim_types:
+				claim_types.append(claim_type)
+		if not claim_types:
+			claim_types = ['unknown']
+		ready = bool(selection.get('ready_to_select')) and jurisdiction != 'unknown' and bool(query_date)
+		decisions = []
+		stored_ids = []
+		storage_unavailable = False
+		can_store = acquisition_outcome['status'] == 'candidates' and ready and len(candidates) <= 128
+		if can_store:
+			if user_id is None:
+				user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+			complaint_id = getattr(self.state, 'complaint_id', None)
+			for candidate in candidates:
+				prepared = prepare_acquired_authority_record(
+					candidate if isinstance(candidate, dict) else {},
+					jurisdiction=jurisdiction,
+					as_of_date=str(query_date),
+				)
+				decisions.append({
+					'status': prepared.get('status'),
+					'reason': prepared.get('reason'),
+					'hashes': dict(prepared.get('hashes') or {}),
+					'source_locator': prepared.get('source_locator') or '',
+					'authority_version': prepared.get('authority_version') or '',
+					'jurisdiction': prepared.get('jurisdiction') or '',
+					'effective_date': prepared.get('effective_date') or '',
+					'as_of_date': prepared.get('as_of_date') or '',
+				})
+				if prepared.get('status') != 'admitted':
+					continue
+				for claim_type in claim_types:
+					try:
+						stored = self.legal_authority_storage.store_acquired_authority(
+							prepared['record'],
+							user_id,
+							complaint_id=complaint_id,
+							claim_type=claim_type,
+						)
+					except Exception:
+						storage_unavailable = True
+						decisions.append({'status': 'unavailable', 'reason': 'storage_error'})
+						continue
+					if stored.get('status') != 'stored':
+						storage_unavailable = True
+						decisions.append({'status': stored.get('status') or 'unavailable', 'reason': stored.get('reason') or 'storage_unavailable'})
+						continue
+					stored_ids.append(stored.get('record_id'))
+		if storage_unavailable and not stored_ids:
+			admission_status = 'unavailable'
+			admission_reason = 'storage_unavailable'
+		elif acquisition_outcome['status'] == 'empty':
+			admission_status = 'empty'
+			admission_reason = 'no_legal_source'
+		elif acquisition_outcome['status'] != 'candidates':
+			admission_status = 'not_admitted'
+			admission_reason = acquisition_outcome['error_code'] or acquisition_outcome['status']
+		elif not ready:
+			admission_status = 'not_admitted'
+			admission_reason = 'legal_context_not_ready'
+		elif stored_ids and all(item.get('status') == 'admitted' for item in decisions if item.get('status') != 'stored'):
+			admission_status = 'admitted'
+			admission_reason = 'stored_source_record'
+		elif stored_ids:
+			admission_status = 'partial'
+			admission_reason = 'partial_source_records'
+		elif decisions:
+			admission_status = 'rejected'
+			admission_reason = str(decisions[0].get('reason') or 'rejected')
+		else:
+			admission_status = 'empty'
+			admission_reason = 'no_legal_source'
+		if selection.get('ready_to_select'):
+			grouped = self._collect_verified_legal_requirements(claims, intake_case_file)
+		else:
+			grouped = self._unresolved_requirements_for_selection(claims, selection)
+			self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'legal_source_status', 'unresolved_context')
+		grouped = self.summary_judgment.adapt_requirements_for_dependency_graph(
+			grouped,
+			selection.get('legal_context'),
+		)
+		graph_claims = [item for item in (claims or []) if isinstance(item, dict)] or [
+			{'type': claim_types[0], 'name': claim_types[0]}
+		]
+		graph = self.dg_builder.build_from_claims(
+			graph_claims,
+			legal_requirements=grouped,
+			require_verified_legal_sources=True,
+		)
+		if isinstance(getattr(graph, 'metadata', None), dict):
+			graph.metadata['legal_context_jurisdiction'] = jurisdiction or 'unknown'
+			graph.metadata['legal_selection_status'] = selection.get('selection_status')
+			graph.metadata['acquisition_status'] = acquisition_outcome['status']
+			graph.metadata['admission_status'] = admission_status
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'dependency_graph', graph)
+		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'verified_legal_requirements', grouped)
+		admission_outcome = {
+			'stage': 'admission',
+			'status': admission_status,
+			'reason': admission_reason,
+			'stored_record_ids': list(stored_ids),
+			'decisions': decisions,
+			'proof': False,
+			'worker_stalled': False,
+		}
+		return {
+			'acquisition': acquisition_outcome,
+			'admission': admission_outcome,
+			'dependency_graph': graph,
+			'requirements': grouped,
+		}
+
 	def _collect_verified_legal_requirements(self, claims, intake_case_file):
 		"""Promote current locally owned authority text, never caller verification flags.
 
