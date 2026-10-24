@@ -1032,6 +1032,22 @@ def format_legal_research_result(receipt: Dict[str, Any]) -> str:
     )
 
 
+def _public_why_inquiry(inquiry: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Show host bindings. Missing objective or target stays the word unknown."""
+    if not isinstance(inquiry, dict):
+        return None
+    if not (str(inquiry.get("question") or "").strip() or str(inquiry.get("why_it_matters") or "").strip()):
+        return None
+    chosen = dict(inquiry)
+    if not str(chosen.get("objective_id") or "").strip():
+        chosen["objective_id"] = "unknown"
+        chosen["grounding_status"] = "unknown"
+    if not str(chosen.get("target_id") or "").strip():
+        chosen["target_id"] = "unknown"
+        chosen["grounding_status"] = "unknown"
+    return chosen
+
+
 def format_terminal_why(
     inquiry: Optional[Dict[str, Any]] = None,
     *,
@@ -1042,19 +1058,17 @@ def format_terminal_why(
 
     chosen = inquiry if isinstance(inquiry, dict) else None
     if chosen is None and isinstance(state, dict):
-        stored = state.get("explained_inquiry")
-        if isinstance(stored, dict):
-            chosen = stored
-        else:
-            projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
-            pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else {}
-            phase_inquiry = None
-            phase_data = state.get("phase_data") if isinstance(state.get("phase_data"), dict) else {}
-            intake = phase_data.get("intake") if isinstance(phase_data.get("intake"), dict) else {}
-            if isinstance(intake.get("current_explained_inquiry"), dict):
-                phase_inquiry = intake.get("current_explained_inquiry")
-            chosen = phase_inquiry or (pending or None)
-    return render_terminal_why(chosen)
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else None
+        stored = state.get("explained_inquiry") if isinstance(state.get("explained_inquiry"), dict) else None
+        phase_inquiry = None
+        phase_data = state.get("phase_data") if isinstance(state.get("phase_data"), dict) else {}
+        intake = phase_data.get("intake") if isinstance(phase_data.get("intake"), dict) else {}
+        if isinstance(intake.get("current_explained_inquiry"), dict):
+            phase_inquiry = intake.get("current_explained_inquiry")
+        # The shared pending inquiry is the question the service is actually asking.
+        chosen = pending or stored or phase_inquiry
+    return render_terminal_why(_public_why_inquiry(chosen))
 
 
 def publish_explained_inquiry(state: Dict[str, Any], selection: Dict[str, Any]) -> Dict[str, Any]:
@@ -3209,6 +3223,24 @@ class ComplaintWorkspaceService:
             exported = mediator.workflow_actions.export_session_projection()
             if exported:
                 state["shared_interview"] = exported
+                pending = exported.get("pending_inquiry") if isinstance(exported.get("pending_inquiry"), dict) else None
+                if isinstance(pending, dict):
+                    state["explained_inquiry"] = {
+                        key: pending.get(key)
+                        for key in (
+                            "inquiry_id",
+                            "objective_id",
+                            "target_id",
+                            "target_revision",
+                            "why_it_matters",
+                            "expected_answer_contract",
+                            "expected_update_contract",
+                            "source_references",
+                            "source_references_status",
+                            "grounding_status",
+                            "question",
+                        )
+                    }
             snapshot_router = getattr(mediator, "intake_router_snapshot", None)
             if callable(snapshot_router):
                 snapshot = snapshot_router()
