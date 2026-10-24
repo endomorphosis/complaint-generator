@@ -138,7 +138,7 @@ Implementation instructions:
 
 ## CIMP-MGND-06 Declare typed legal and evidence hook operations
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
