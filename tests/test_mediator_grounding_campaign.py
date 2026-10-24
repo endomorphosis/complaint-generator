@@ -243,3 +243,41 @@ def test_new_campaign_validation_activity_requires_its_exact_bound_board(ownersh
         assert binding is not None and binding["canonical_task_cid"] == ownership.context["task_cid"]
     else:
         assert binding is None
+
+
+@pytest.mark.parametrize("new_campaign", [False, True])
+def test_genuine_native_measurement_freezes_spec_as_input_and_admits_only_declared_outputs(tmp_path, new_campaign):
+    from tests.test_improvement_evidence_gate import _gate, _task, _observation, _write_output
+    from integrations.ipfs_accelerate.improvement_plan import _MeasuredEvidence, bind_sources, canonical_model_policy
+    task = _task("CIMP-MGND-BIND")
+    _write_output(tmp_path, task["id"])
+    second = "out/second.py"
+    (tmp_path / second).write_text("VALUE = 2\n")
+    task["targets"].append(second)
+    source = _write(tmp_path, CAMPAIGN["spec_relative"], {"input_revision": 1})
+    context = {"campaign_spec_relative": CAMPAIGN["spec_relative"]} if new_campaign else {}
+    observation, _, _ = _gate(tmp_path, task,
+        _observation(tmp_path, task["id"], source_binding=bind_sources(tmp_path, task["targets"])),
+        _return_measurement=True, _measurement_context=context)
+    assert isinstance(observation, _MeasuredEvidence)
+    host = observation["host_measurement"]
+    assert host["source_before"] == host["source_after"]
+    assert (CAMPAIGN["spec_relative"] in host["source_after"]["files"]) is new_campaign
+    assert host["output_paths"] == task["targets"]
+    assert observation["source_binding"] == bind_sources(tmp_path, task["targets"])
+    receipt = runner.gate_task_completion(tmp_path, tmp_path / "state", task, observation,
+        model_policy=canonical_model_policy(), legal_data_version="synthetic-current-data")
+    assert receipt["admitted"] is True and receipt["completion_authority"] is False
+    spec = {"tasks": [task], **({"campaign": dict(CAMPAIGN)} if new_campaign else {})}
+    current = runner.recompute_dependent_readiness(tmp_path, tmp_path / "state", spec)
+    assert current["tasks"][task["id"]]["complete"] is True
+    source.write_text('{"input_revision": 2}')
+    changed = runner.recompute_dependent_readiness(tmp_path, tmp_path / "state", spec)
+    assert changed["tasks"][task["id"]]["complete"] is (not new_campaign)
+    if new_campaign:
+        assert changed["tasks"][task["id"]]["reason"] == "stale_source_hash"
+    repeated = runner.gate_task_completion(tmp_path, tmp_path / "state", task, observation,
+        model_policy=canonical_model_policy(), legal_data_version="synthetic-current-data")
+    assert repeated["admitted"] is (not new_campaign)
+    if new_campaign:
+        assert repeated["reason"] == "stale_source_hash"

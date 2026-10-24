@@ -804,8 +804,12 @@ def _host_evidence_reason(observation, task):
         expected = measured["observation_binding"]
         if any(observation.get(key) != value for key, value in expected.items()):
             return "measured_case_identity_mismatch"
-        from .improvement_runner import _source_freeze
-        if _source_freeze(Path(measured["workspace_path"]), measured["output_paths"]) != measured["source_after"]:
+        from .improvement_runner import _source_freeze, _task_freeze_inputs, _task_outputs
+        inputs = measured.get("freeze_inputs", measured["output_paths"])
+        if (measured["output_paths"] != _task_outputs(task)
+                or inputs != _task_freeze_inputs(task, context=observation["host_task_contract"].get("context"))):
+            return "task_contract_changed"
+        if _source_freeze(Path(measured["workspace_path"]), inputs) != measured["source_after"]:
             return "stale_source_hash"
         if observation["host_task_contract"]["task"] != dict(task):
             return "task_contract_changed"

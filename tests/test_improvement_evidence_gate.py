@@ -116,6 +116,7 @@ def _gate(tmp_path: Path, task: dict, observation: dict, **kwargs) -> dict:
     import os
     import subprocess
     measurement_fault = kwargs.pop("_measurement_fault", None)
+    measurement_context = kwargs.pop("_measurement_context", {})
     if observation.get("lane") == "local_node_integration" and all((tmp_path / p).is_file() for p in task["targets"]):
         tests = tmp_path / "tests"
         tests.mkdir(exist_ok=True)
@@ -203,7 +204,7 @@ def pytest_sessionfinish(session, exitstatus):
             return result
         measured = measure_behavioral_command(tmp_path, tmp_path / "state" / "runs", task, source_command,
                                                runner=delegate, environment=env, timeout_seconds=45, declared_command=COMMAND,
-                                               context={"require_child_guard": True, "pytest_guard_plugin": "complaint_fixture_guard"})
+                                               context={"require_child_guard": True, "pytest_guard_plugin": "complaint_fixture_guard", **measurement_context})
         from integrations.ipfs_accelerate.improvement_runner import _observed_artifacts
         observation["artifacts"] = _observed_artifacts(tmp_path, observation)
         if all(a["present"] for a in observation["artifacts"]):
@@ -931,6 +932,9 @@ def test_real_sealed_pytest_bootstrap_survives_declared_pythonpath_export(tmp_pa
     phase_source = Path(__file__).resolve().parents[1] / "integrations/ipfs_accelerate/improvement_plan.py"
     phase = package / "improvement_plan.py"
     phase.write_bytes(phase_source.read_bytes())
+    campaign_source = phase_source.with_name("campaign.py")
+    campaign = package / "campaign.py"
+    campaign.write_bytes(campaign_source.read_bytes())
     declared = tmp_path / "external/ipfs_datasets_py"
     decoy = declared / "ipfs_accelerate_py"
     decoy.mkdir(parents=True)
@@ -940,9 +944,11 @@ def test_real_sealed_pytest_bootstrap_survives_declared_pythonpath_export(tmp_pa
     test = tmp_path / "tests/test_improvement_evidence_gate.py"
     test.write_text("from pathlib import Path\n"
         "import integrations.ipfs_accelerate.improvement_plan as phase\n"
+        "import integrations.ipfs_accelerate.campaign as campaign\n"
         "import ipfs_accelerate_py.testing.pytest_ast_seal as seal\n"
         "def test_actual_plugin_origins():\n"
         f" assert Path(phase.__file__).resolve() == Path({str(phase)!r})\n"
+        f" assert Path(campaign.__file__).resolve() == Path({str(campaign)!r})\n"
         f" assert Path(seal.__file__).resolve() == Path({str(seal)!r})\n")
     # Reproduce the actual native scheduler's approved package-only environment
     # and the normalized task command's overwriting relative export.
@@ -960,6 +966,7 @@ def test_real_sealed_pytest_bootstrap_survives_declared_pythonpath_export(tmp_pa
     assert all(result["validation_python_launcher"]["sealed"] is True for result in measured["results"])
     assert measured["imported_sources"][str(seal)] == hashlib.sha256(seal.read_bytes()).hexdigest()
     assert measured["imported_sources"][str(phase)] == hashlib.sha256(phase_source.read_bytes()).hexdigest()
+    assert measured["imported_sources"][str(campaign)] == hashlib.sha256(campaign_source.read_bytes()).hexdigest()
     assert all(result["original_command"] == command for result in measured["results"])
     assert all("-p complaint_fixture_guard" in result["executed_command"] for result in measured["results"])
     assert observed["completion_authority"] is False if "completion_authority" in observed else measured["completion_authority"] is False

@@ -245,3 +245,87 @@ def test_later_repair_progress_cannot_extend_overall_attempt_deadline(tmp_path, 
     assert observed['provider_execution_verified'] is True
     assert observed['status'] == 'stalled' and observed['healthy'] is False
     assert observed['completion_authority'] is False
+
+
+def _validating_provider_repair(tmp_path, monkeypatch):
+    root, spec, state, record, log, start = _real_shaped_progress(tmp_path, monkeypatch)
+    payload_path = state / f'{runner.STATE_PREFIX}_task_state.json'
+    payload = json.loads(payload_path.read_text())
+    payload['active_phase'] = 'validating'
+    payload['active_phase_started_at'] = _stamp(60)
+    runner._atomic_json(payload_path, payload)
+    repair = {
+        'type': 'implementation_auto_rescue_provider_started', 'timestamp': _stamp(1),
+        'task_id': start['task_id'], 'canonical_task_cid': start['canonical_task_cid'],
+        'attempt': start['attempt'], 'strategy_changed': True, 'provider_pid': 991121,
+    }
+    events = state / f'{runner.STATE_PREFIX}_events.jsonl'
+    events.write_text(json.dumps(start) + '\n' + json.dumps(repair) + '\n')
+    with log.open('a') as handle:
+        handle.write('{"type":"end"}\n[auto-rescue] inline_provider_rescue start\n'
+                     '{"type":"usage","usage":{"inputTokens":19}}\n')
+    return root, spec, state, record, log, start, repair
+
+
+def test_native_provider_repair_progress_is_active_while_phase_remains_validating(tmp_path, monkeypatch):
+    root, spec, state, _, _, _, _ = _validating_provider_repair(tmp_path, monkeypatch)
+    result = runner.status(root, spec, state)
+    assert result['status'] == 'active' and result['healthy'] is True
+    assert result['provider_execution_evidence']['provider_repair_in_flight'] is True
+    assert result['validation_activity_verified'] is False
+    assert result['completion_authority'] is False
+
+
+@pytest.mark.parametrize('damage', ['no_event', 'foreign_cid', 'foreign_attempt', 'foreign_log',
+                                   'finished', 'failed', 'forged_reopen'])
+def test_validating_usage_requires_current_native_repair_with_unclosed_log_marker(tmp_path, monkeypatch, damage):
+    root, spec, state, _, log, start, repair = _validating_provider_repair(tmp_path, monkeypatch)
+    events = state / f'{runner.STATE_PREFIX}_events.jsonl'
+    if damage == 'no_event':
+        events.write_text(json.dumps(start) + '\n')
+    elif damage.startswith('foreign_'):
+        if damage == 'foreign_cid':
+            repair['canonical_task_cid'] = 'bafyforeign'
+        elif damage == 'foreign_attempt':
+            repair['attempt'] += 1
+        else:
+            repair['log_path'] = str(log) + '.foreign'
+        events.write_text(json.dumps(start) + '\n' + json.dumps(repair) + '\n')
+    else:
+        with log.open('a') as handle:
+            handle.write('[auto-rescue] inline_provider_rescue '
+                         + ('error: synthetic' if damage == 'failed' else 'returncode=0') + '\n')
+            if damage == 'forged_reopen':
+                handle.write('[auto-rescue] inline_provider_rescue start\n')
+            handle.write('{"type":"usage","usage":{"inputTokens":23}}\n')
+    result = runner.status(root, spec, state)
+    assert result['provider_progress_verified'] is True
+    assert result['provider_execution_evidence']['provider_repair_in_flight'] is False
+    assert result['status'] == 'stalled' and result['healthy'] is False
+
+
+@pytest.mark.parametrize('boundary', ['deadline', 'heartbeat', 'log'])
+def test_validating_native_repair_cannot_extend_existing_liveness_bounds(tmp_path, monkeypatch, boundary):
+    root, spec, state, record, log, start, repair = _validating_provider_repair(tmp_path, monkeypatch)
+    if boundary == 'deadline':
+        payload_path = state / f'{runner.STATE_PREFIX}_task_state.json'
+        payload = json.loads(payload_path.read_text())
+        old = payload['last_implementation_started_at']
+        payload['active_task_started_at'] = _stamp(runner.TIMEOUT_SECONDS + 20)
+        payload['last_implementation_started_at'] = _stamp(runner.TIMEOUT_SECONDS + 18)
+        runner._atomic_json(payload_path, payload)
+        log.write_text(log.read_text().replace('Started: ' + old, 'Started: ' + payload['last_implementation_started_at']))
+        start['timestamp'] = payload['last_implementation_started_at']
+        (state / f'{runner.STATE_PREFIX}_events.jsonl').write_text(json.dumps(start) + '\n' + json.dumps(repair) + '\n')
+        record['started_at'] = runner.time.time() - runner.TIMEOUT_SECONDS - 30
+        runner._atomic_json(state / 'launcher.json', record)
+    elif boundary == 'heartbeat':
+        heartbeat_path = state / f'{runner.STATE_PREFIX}_supervisor_status.json'
+        old = runner.time.time() - 121
+        os.utime(heartbeat_path, (old, old))
+    else:
+        old = runner.time.time() - runner.STALL_SECONDS - 1
+        os.utime(log, (old, old))
+    result = runner.status(root, spec, state)
+    assert result['status'] == 'stalled' and result['healthy'] is False
+    assert result['completion_authority'] is False

@@ -1215,10 +1215,23 @@ def _owned_attempt_log_evidence(events_path: Path, state_dir: Path, binding: Map
         if not events.endswith(b"\n"):
             return None
         start = None
+        repair_starts = 0
         for line in reversed(events.splitlines()):
             event = json.loads(line)
             if not isinstance(event, dict):
                 return None
+            if event.get("type") == "implementation_auto_rescue_provider_started":
+                # Native's repair event carries task/CID/attempt, but its
+                # workspace and log are inherited from the primary start.
+                # That exact start is independently verified below.
+                repair_binding = dict(binding)
+                if not (event.get("worktree_path") or event.get("worktree")):
+                    repair_binding.pop("worktree", None)
+                if (_event_matches_attempt(event, repair_binding, started_at=started_at, require_log=False)
+                        and event.get("strategy_changed") is True
+                        and type(event.get("provider_pid")) is int and event["provider_pid"] > 1
+                        and _event_timestamp(event) <= now + 2):
+                    repair_starts += 1
             if event.get("type") == "implementation_started":
                 # A later attempt/selection cannot borrow an earlier log.
                 if not _event_matches_attempt(event, binding, started_at=started_at, require_log=True):
@@ -1255,7 +1268,18 @@ def _owned_attempt_log_evidence(events_path: Path, state_dir: Path, binding: Map
         complete = raw[:raw.rfind(b"\n") + 1]
         counts = Counter()
         terminal = False
+        repair_markers = 0
+        repair_open = False
+        repair_progress = False
         for line in complete.splitlines():
+            if line == b"[auto-rescue] inline_provider_rescue start":
+                repair_markers += 1
+                repair_open = True
+                repair_progress = False
+            elif (line.startswith(b"[auto-rescue] inline_provider_rescue returncode=")
+                    or line.startswith(b"[auto-rescue] inline_provider_rescue error:")):
+                repair_open = False
+                repair_progress = False
             if not line.startswith(b"{"):
                 continue
             try:
@@ -1271,17 +1295,22 @@ def _owned_attempt_log_evidence(events_path: Path, state_dir: Path, binding: Map
                 counts["usage"] += 1
                 # A native repair round can append to this same owned log.
                 terminal = False
+                repair_progress = repair_open
             elif kind in {"tool_call", "tool_call_update"}:
                 counts[kind] += 1
                 terminal = False
+                repair_progress = repair_open
             elif kind in {"end", "error", "max_turns_reached"}:
                 terminal = True
+                repair_progress = False
         if not counts:
             return None
         return {"type": "grok_frame", "source": "owned_attempt_log", "task_id": binding["task_id"],
                 "task_cid": binding["task_cid"], "attempt": binding["attempt"],
                 "log_path": str(log), "log_bytes": len(raw), "log_mtime_ns": before.st_mtime_ns,
                 "frame_counts": dict(counts), "provider_terminal_observed": terminal,
+                "provider_repair_in_flight": bool(repair_starts and repair_markers == repair_starts
+                    and repair_open and repair_progress and not terminal),
                 "progress_fresh": not terminal, "completion_authority": False}
     except (OSError, ValueError, TypeError, KeyError, UnicodeDecodeError):
         return None
@@ -1454,8 +1483,10 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         log_stale = active_age is not None and active_age > STALL_SECONDS
         silent_window = attempt_age is not None and attempt_age > STALL_SECONDS
         in_validation = phase.startswith("valid")
+        provider_repair = bool(provider_progress and provider_evidence
+                               and provider_evidence.get("provider_repair_in_flight"))
         # Fresh generic log lines and a live PID are not provider or validation progress.
-        silent = silent_window and (validation_evidence is None if in_validation else not provider_progress)
+        silent = silent_window and (not (validation_evidence or provider_repair) if in_validation else not provider_progress)
         post_provider = bool(provider_evidence and provider_evidence.get("provider_terminal_observed"))
         health = ("stalled" if hard_expired or log_stale else "post_provider" if post_provider
                   else "stalled" if silent else "active")
@@ -2694,6 +2725,14 @@ def _task_outputs(task: Mapping[str, Any]) -> list[str]:
     return [str(item) for item in targets]
 
 
+def _task_freeze_inputs(task: Mapping[str, Any], *, context=None, spec=None) -> list[str]:
+    inputs = _task_outputs(task)
+    relative = (context or {}).get("campaign_spec_relative")
+    if relative is None and isinstance(spec, Mapping) and "campaign" in spec:
+        relative = campaign_artifacts(spec).spec_relative
+    return list(dict.fromkeys([*inputs, relative])) if relative else inputs
+
+
 def _observed_artifacts(repo_root: Path, observation: Mapping[str, Any]) -> list[dict[str, Any]]:
     from .improvement_plan import _hash_file, _safe_relative
 
@@ -2829,7 +2868,7 @@ def recompute_dependent_readiness(repo_root: Path, state_dir: Path, spec: Mappin
                     reason = "stale_source_hash" if fresh.get("digest") or receipt.get("implementation_digest") else "missing_output"
                     if fresh.get("missing") or fresh.get("empty"):
                         reason = "missing_output"
-                elif receipt.get("host_measurement") and (receipt["host_measurement"].get("source_after") != _source_freeze(root, _task_outputs(by_id[task_id])) or any(not Path(p).is_file() or hashlib.sha256(Path(p).read_bytes()).hexdigest() != h for p, h in receipt["host_measurement"].get("imported_sources", {}).items())):
+                elif receipt.get("host_measurement") and (receipt["host_measurement"].get("source_after") != _source_freeze(root, _task_freeze_inputs(by_id[task_id], spec=spec)) or any(not Path(p).is_file() or hashlib.sha256(Path(p).read_bytes()).hexdigest() != h for p, h in receipt["host_measurement"].get("imported_sources", {}).items())):
                     reason = "stale_source_hash"
                 elif not isinstance(receipt.get("host_task_contract"), dict) or receipt["host_task_contract"].get("task") != by_id[task_id]:
                     reason = "task_contract_changed"
@@ -3293,8 +3332,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     observation_command = declared_command or command
     contract = {"task": dict(task), "context": dict(context or {}), "command": command, "declared_command": observation_command}
     extra = _task_outputs(task)
-    if (context or {}).get("campaign_spec_relative"):
-        extra = list(dict.fromkeys([*extra, context["campaign_spec_relative"]]))
+    freeze_inputs = _task_freeze_inputs(task, context=context)
     start = time.monotonic()
     original_command = command
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native_source
@@ -3330,7 +3368,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         ) and
         "tests/test_intake_release_gate.py" in extra and
         command.rstrip().endswith("python scripts/validate_complaint_intake.py --phase pre-admission"))
-    before = _source_freeze(root, extra)
+    before = _source_freeze(root, freeze_inputs)
     artifacts, results = [], []
     required, cases, imported = [], [], {}
     reason = ""
@@ -3440,7 +3478,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             raise ValueError("zero_test_collection")
         if len(required) != len(set(required)) or any(not isinstance(n, str) or not n for n in required):
             raise ValueError("required_test_identity_malformed")
-        if before != _source_freeze(root, extra):
+        if before != _source_freeze(root, freeze_inputs):
             raise ValueError("stale_source_hash")
         executed, phases, (sealed_nodes, imported) = execute("run")
         if required != phases.get("nodeids"):
@@ -3482,7 +3520,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             reason = "trusted_replica_acceptance_changed"
     except (OSError, ValueError):
         reason = "trusted_replica_acceptance_changed"
-    after = _source_freeze(root, extra)
+    after = _source_freeze(root, freeze_inputs)
     try:
         replica_kit_after = _private_replica_kit_qualification(root, state_dir, task, after,
             campaign_state_dir=(context or {}).get("campaign_state_dir"))
@@ -3523,6 +3561,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                     "HOME": "fresh private native command directory; not operator home", "ambient_pytest_injection": False}}
     measured["workspace_path"] = str(root)
     measured["output_paths"] = extra
+    if freeze_inputs != extra:
+        measured["freeze_inputs"] = freeze_inputs
     artifact_rows = [{"relative_path": os.path.relpath(a["path"], root), "path": a["path"],
                       "present": True, "sha256": a["sha256"]} for a in artifacts]
     # These environment fields describe native policy, not access to the real home.
