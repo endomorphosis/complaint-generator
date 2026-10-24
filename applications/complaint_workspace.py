@@ -2790,7 +2790,7 @@ def _terminal_edit_receipt(
     error = None
     if error_code:
         error = {"code": error_code, "resumable": error_code != "event_conflict", "legal_sufficiency": False}
-    return {
+    receipt = {
         "contract_version": "terminal-graph-edit-v1",
         "status": status,
         "message": message,
@@ -2805,6 +2805,9 @@ def _terminal_edit_receipt(
         "correction": dict(correction) if isinstance(correction, Mapping) else None,
         "error": error,
     }
+    if error_code:
+        receipt["error_code"] = error_code
+    return receipt
 
 
 def _edit_source_context(envelope: Mapping[str, Any], replacement: str, event_id: str) -> Dict[str, Any]:
