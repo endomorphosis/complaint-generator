@@ -426,7 +426,7 @@ Implementation instructions:
 
 ## CIMP-MGND-17 Admit acquired authorities through stored source records
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
