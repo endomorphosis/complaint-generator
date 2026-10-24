@@ -3375,14 +3375,24 @@ class DependencyGraphBuilder:
         rule_ids = {str(item) for item in (payload.get("rule_ids") or []) if str(item).strip()}
         jurisdiction_changed = bool(payload.get("jurisdiction_changed"))
         date_changed = bool(payload.get("date_changed") or payload.get("date_roles"))
+        version_changed = bool(payload.get("version_changed") or payload.get("authority_version_changed"))
+        treatment_changed = bool(payload.get("treatment_changed"))
         fact_change = bool(payload.get("fact_change") or fact_ids or clarification_keys)
         updated_requirements = payload.get("updated_requirements") if isinstance(payload.get("updated_requirements"), dict) else {}
+        user_facts = {
+            node.id: (node.name, node.description, bool(node.satisfied), deepcopy(node.attributes))
+            for node in graph.nodes.values()
+            if node.node_type == NodeType.FACT or (isinstance(node.attributes, dict) and node.attributes.get("about_complainant") is True and node.attributes.get("dependency_class") != _LEGALLY_SOURCED_CLASS)
+        }
 
         affected_ids = []
         preserved_ids = []
         invalidated = []
         for node in list(graph.nodes.values()):
-            if self._dependency_change_affects(node, clarification_keys, fact_ids, rule_ids, jurisdiction_changed, date_changed, fact_change):
+            if self._dependency_change_affects(
+                node, clarification_keys, fact_ids, rule_ids, jurisdiction_changed, date_changed, fact_change,
+                version_changed=version_changed, treatment_changed=treatment_changed,
+            ):
                 affected_ids.append(node.id)
             else:
                 preserved_ids.append(node.id)
@@ -3442,6 +3452,13 @@ class DependencyGraphBuilder:
                 invalidated.append(node_id)
             node.attributes["satisfaction_revision"] = int(node.attributes.get("satisfaction_revision") or 0) + 1
             node.attributes["dependency_recomputed"] = True
+            if version_changed or treatment_changed:
+                node.attributes["legal_support_invalidated"] = True
+                node.attributes["support_eligible"] = False
+                if version_changed:
+                    node.attributes["invalidation_reason"] = "authority_version_changed"
+                elif treatment_changed:
+                    node.attributes["invalidation_reason"] = "treatment_changed"
             if node.attributes.get("proof_cache_identity"):
                 node.attributes["rejected_proof_cache_identity"] = node.attributes.get("proof_cache_identity")
                 node.attributes["proof_cache_reusable"] = False
@@ -3488,7 +3505,26 @@ class DependencyGraphBuilder:
             "fact_change": fact_change,
             "fact_ids": sorted(fact_ids),
             "factual_revision": payload.get("factual_revision"),
+            "version_changed": version_changed,
+            "treatment_changed": treatment_changed,
+            "user_facts_modified": False,
         }
+        if (version_changed or treatment_changed) and not chronology_issue:
+            for node_id, (name, description, satisfied, attributes) in user_facts.items():
+                node = graph.nodes.get(node_id)
+                if node is None:
+                    report["user_facts_modified"] = True
+                    continue
+                if node.name != name or node.description != description or bool(node.satisfied) != satisfied or node.attributes != attributes:
+                    node.name = name
+                    node.description = description
+                    node.satisfied = satisfied
+                    node.attributes = attributes
+                if node_id in report["affected_node_ids"]:
+                    report["affected_node_ids"] = [item for item in report["affected_node_ids"] if item != node_id]
+                    report["invalidated_node_ids"] = [item for item in report["invalidated_node_ids"] if item != node_id]
+                    if node_id not in report["preserved_node_ids"]:
+                        report["preserved_node_ids"].append(node_id)
         if graph.metadata.get("legal_requirement_mode") == "verified_sources":
             self._refresh_legal_source_gaps(graph)
         graph.metadata["last_dependency_refresh"] = {
@@ -3508,6 +3544,8 @@ class DependencyGraphBuilder:
         jurisdiction_changed: bool,
         date_changed: bool,
         fact_change: bool,
+        version_changed: bool = False,
+        treatment_changed: bool = False,
     ) -> bool:
         attributes = node.attributes if isinstance(node.attributes, dict) else {}
         dependency_class = attributes.get("dependency_class")
@@ -3528,7 +3566,7 @@ class DependencyGraphBuilder:
             return True
         if fact_ids and node_facts & fact_ids:
             return True
-        if jurisdiction_changed or date_changed:
+        if jurisdiction_changed or date_changed or version_changed or treatment_changed:
             return True
         return False
 

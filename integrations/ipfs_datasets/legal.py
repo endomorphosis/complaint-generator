@@ -4423,6 +4423,427 @@ def acquire_bounded_canonical_legal_sources(
     return base
 
 
+_TREATMENT_LAYER_KEYS = ("authority_treatment_edges", "treatment_records", "treatment_summary")
+_TREATMENT_TYPE_ALIASES = ("relation_type", "treatment_type", "type", "treatment", "effect", "disposition")
+_ADVERSE_TREATMENT_LABELS = frozenset({
+    "adverse", "superseded", "superseding", "repealed", "repealing", "repeal",
+})
+_TREATMENT_CANONICAL = {
+    "superseding": "superseded",
+    "repealing": "repealed",
+    "repeal": "repealed",
+}
+_OPEN_INTERVAL_END = "9999-12-31"
+
+
+def _iso_law_day(value: Any) -> str:
+    """Accept a calendar day. A retrieval timestamp is not an applicable-law day."""
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if len(text) != 10 or "T" in text:
+        return ""
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return ""
+
+
+def _mapping_layers(record: Mapping[str, Any]) -> List[Mapping[str, Any]]:
+    layers = [record]
+    for key in ("metadata", "provenance", "retrieval"):
+        nested = record.get(key)
+        if isinstance(nested, Mapping):
+            layers.append(nested)
+    return layers
+
+
+def retain_acquired_treatment_records(record: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Keep canonical and metadata treatment rows.
+
+    An empty list or an empty type alias does not erase an adverse,
+    superseding, or repealing row stored on another layer.
+    """
+    if not isinstance(record, Mapping):
+        return []
+    retained: List[Dict[str, Any]] = []
+    seen = set()
+    for container in _mapping_layers(record):
+        for key in _TREATMENT_LAYER_KEYS:
+            rows = container.get(key)
+            if key == "treatment_summary" and isinstance(rows, Mapping):
+                rows = rows.get("records")
+            if not rows:
+                continue
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, Mapping):
+                    continue
+                labels = []
+                for alias in _TREATMENT_TYPE_ALIASES:
+                    value = row.get(alias)
+                    if isinstance(value, str) and value.strip():
+                        label = value.strip()
+                        if label not in labels:
+                            labels.append(label)
+                if not labels:
+                    continue
+                for label in labels:
+                    canonical = _TREATMENT_CANONICAL.get(label.lower(), label)
+                    signature = (
+                        canonical.lower(),
+                        str(row.get("source_authority_id") or row.get("treated_by_authority_id") or ""),
+                        str(row.get("target_authority_id") or row.get("treated_authority_id") or row.get("target_id") or ""),
+                        str(row.get("treatment_id") or row.get("edge_id") or ""),
+                        str(row.get("explanation") or row.get("treatment_explanation") or ""),
+                    )
+                    if signature in seen:
+                        continue
+                    seen.add(signature)
+                    kept = {key: value for key, value in row.items() if key not in _TREATMENT_TYPE_ALIASES or row.get(key) not in ("", None)}
+                    kept["treatment_type"] = label
+                    kept["relation_type"] = canonical
+                    kept["layer_retained"] = True
+                    if label.lower() in _ADVERSE_TREATMENT_LABELS or canonical.lower() in _ADVERSE_TREATMENT_LABELS:
+                        kept["adverse_treatment_retained"] = True
+                    retained.append(kept)
+    return retained
+
+
+def _explicit_applicable_law_day(legal_context: Any) -> str:
+    if not isinstance(legal_context, Mapping):
+        return ""
+    dated = legal_context.get("applicable_law_date")
+    if isinstance(dated, Mapping):
+        if dated.get("role") not in (None, "", DATE_ROLE_APPLICABLE_LAW):
+            return ""
+        if dated.get("is_uncertain"):
+            return ""
+        return _iso_law_day(str(dated.get("precise_date") or ""))
+    return _iso_law_day(dated if isinstance(dated, str) else "")
+
+
+def _candidate_authority_id(candidate: Mapping[str, Any]) -> str:
+    for container in _mapping_layers(candidate):
+        for key in ("authority_id", "authority_identity", "id"):
+            value = container.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    locator = candidate.get("locator")
+    return locator.strip() if isinstance(locator, str) else ""
+
+
+def _candidate_version_rows(candidate: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    version = candidate.get("version") if isinstance(candidate.get("version"), str) else ""
+    version = version.strip()
+    authority_id = _candidate_authority_id(candidate)
+    retrieval = candidate.get("retrieval") if isinstance(candidate.get("retrieval"), Mapping) else {}
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), Mapping) else {}
+    effective = ""
+    for container in (candidate, retrieval, metadata):
+        day = _iso_law_day(container.get("effective_date"))
+        if day:
+            effective = day
+            break
+    ends = []
+    for key in ("sunset_date", "repeal_date", "superseded_date", "expiration_date"):
+        for container in (candidate, retrieval, metadata):
+            day = _iso_law_day(container.get(key))
+            if day:
+                ends.append(day)
+    primary = {
+        "authority_id": authority_id,
+        "version": version,
+        "law_version_id": str(candidate.get("law_version_id") or metadata.get("law_version_id") or (f"{authority_id}:{version}" if authority_id and version else "")),
+        "effective_date": effective,
+        "end_date": min(ends) if ends else "",
+        "source_text": candidate.get("source_text") if isinstance(candidate.get("source_text"), str) else "",
+        "citation": str(candidate.get("citation") or metadata.get("citation") or candidate.get("locator") or ""),
+        "retrieved_at": retrieval.get("retrieved_at"),
+    }
+    rows = [primary]
+    supplied = candidate.get("law_versions")
+    if not isinstance(supplied, list):
+        supplied = metadata.get("law_versions")
+    if isinstance(supplied, list):
+        for item in supplied:
+            if not isinstance(item, Mapping):
+                continue
+            item_version = str(item.get("version") or item.get("authority_version") or "").strip()
+            item_id = str(item.get("authority_id") or authority_id).strip()
+            if item_version == version and item_id == authority_id:
+                continue
+            item_ends = [_iso_law_day(item.get(key)) for key in ("sunset_date", "repeal_date", "superseded_date", "expiration_date")]
+            item_ends = [day for day in item_ends if day]
+            rows.append({
+                "authority_id": item_id or authority_id,
+                "version": item_version,
+                "law_version_id": str(item.get("law_version_id") or (f"{item_id or authority_id}:{item_version}" if item_version else "")),
+                "effective_date": _iso_law_day(item.get("effective_date")),
+                "end_date": min(item_ends) if item_ends else "",
+                "source_text": primary["source_text"] if item_version == version else "",
+                "citation": str(item.get("citation") or primary["citation"] or ""),
+                "retrieved_at": primary["retrieved_at"],
+                "embedded_other_version": True,
+            })
+    return rows
+
+
+def _interval_contains(row: Mapping[str, Any], day: str) -> bool:
+    start = str(row.get("effective_date") or "")
+    end = str(row.get("end_date") or "")
+    if not start or not day or start > day:
+        return False
+    return not end or day < end
+
+
+def _intervals_overlap(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    if not left.get("effective_date") or not right.get("effective_date"):
+        return False
+    left_end = str(left.get("end_date") or _OPEN_INTERVAL_END)
+    right_end = str(right.get("end_date") or _OPEN_INTERVAL_END)
+    return str(left.get("effective_date")) < right_end and str(right.get("effective_date")) < left_end
+
+
+def _version_known(version: str) -> bool:
+    return version.strip().lower() not in {"", "unknown", "unspecified", "n/a", "na", "none", "null", "current", "latest", "unverified"}
+
+
+def handoff_acquired_legal_sources(
+    acquisition: Any,
+    legal_context: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Admit one selected edition for the explicit legal context.
+
+    Overlapping or unknown versions stay unresolved. Retrieval time is kept
+    and is not copied into the applicable-law day. Treatment rows from the
+    canonical record and metadata stay attached. Two versions that share an
+    authority id are not folded into one admitted source.
+    """
+    from integrations.ipfs_datasets.logic import (
+        evaluate_temporal_requirement_applicability,
+        requirement_treatment_support,
+    )
+
+    payload = acquisition if isinstance(acquisition, Mapping) else {}
+    context = legal_context if isinstance(legal_context, Mapping) else {}
+    applicable_day = _explicit_applicable_law_day(context)
+    jurisdiction = resolve_explicit_jurisdiction(context.get("jurisdiction"))
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    base: Dict[str, Any] = {
+        "stage": "acquired_source_handoff",
+        "acquisition_status": str(payload.get("status") or "unavailable"),
+        "admitted": [],
+        "unresolved": [],
+        "withheld": [],
+        "proof": False,
+        "applicable": False,
+        "retrieval_time_used_as_applicable_law": False,
+        "applicable_law_date": applicable_day,
+        "worker_stalled": False,
+        "mixed_authority_versions": False,
+    }
+    acquisition_status = base["acquisition_status"]
+    if acquisition_status in {"cancelled", "unavailable", "timeout", "error", "blocked", "refused", "missing_edition", "incomplete"}:
+        base["status"] = acquisition_status if acquisition_status != "blocked" else "unresolved"
+        base["reason"] = str(payload.get("error_code") or acquisition_status)
+        return base
+    if not candidates:
+        base["status"] = "empty" if acquisition_status in {"empty", "candidates"} else acquisition_status or "empty"
+        base["reason"] = "no_legal_source" if base["status"] == "empty" else acquisition_status
+        return base
+    if jurisdiction == UNKNOWN_LEGAL_CONTEXT or not applicable_day:
+        base["status"] = "unresolved"
+        base["reason"] = "unknown_legal_context" if jurisdiction == UNKNOWN_LEGAL_CONTEXT else "unknown_applicable_law_date"
+        for candidate in candidates:
+            if isinstance(candidate, Mapping):
+                base["unresolved"].append({
+                    "authority_id": _candidate_authority_id(candidate),
+                    "version": str(candidate.get("version") or ""),
+                    "reason": base["reason"],
+                    "retrieved_at": (candidate.get("retrieval") or {}).get("retrieved_at") if isinstance(candidate.get("retrieval"), Mapping) else None,
+                })
+        return base
+
+    grouped: Dict[str, List[tuple]] = {}
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, Mapping):
+            base["withheld"].append({"reason": "candidate_malformed"})
+            continue
+        rows = _candidate_version_rows(candidate)
+        authority_id = rows[0]["authority_id"] if rows else ""
+        grouped.setdefault(authority_id or f"missing:{index}", []).append((candidate, rows))
+
+    for authority_id, items in grouped.items():
+        flat = []
+        for candidate, rows in items:
+            for row in rows:
+                flat.append((candidate, row))
+        distinct = {}
+        contradictory = False
+        for candidate, row in flat:
+            key = (row.get("authority_id") or authority_id, row.get("version") or "")
+            prior = distinct.get(key)
+            if prior is not None:
+                if prior[1].get("source_text") and row.get("source_text") and prior[1]["source_text"] != row["source_text"]:
+                    contradictory = True
+                if prior[1].get("effective_date") and row.get("effective_date") and prior[1]["effective_date"] != row["effective_date"]:
+                    contradictory = True
+                continue
+            distinct[key] = (candidate, row)
+        versions = list(distinct.values())
+        unknown = [row for _candidate, row in versions if not _version_known(str(row.get("version") or "")) or not row.get("effective_date")]
+        overlaps = False
+        for left_index, (_left_candidate, left) in enumerate(versions):
+            for _right_candidate, right in versions[left_index + 1:]:
+                if _intervals_overlap(left, right) or left.get("embedded_other_version") or right.get("embedded_other_version"):
+                    overlaps = True
+        shared = len(versions) > 1
+        if shared:
+            base["mixed_authority_versions"] = True
+        if contradictory or unknown or overlaps or any(row.get("embedded_other_version") for _candidate, row in versions):
+            reason = "overlapping_versions" if overlaps or any(row.get("embedded_other_version") for _candidate, row in versions) else "unknown_version" if unknown else "contradictory_versions"
+            for candidate, row in versions:
+                base["unresolved"].append({
+                    "authority_id": row.get("authority_id") or authority_id,
+                    "version": row.get("version") or "",
+                    "law_version_id": row.get("law_version_id") or "",
+                    "effective_date": row.get("effective_date") or "",
+                    "end_date": row.get("end_date") or "",
+                    "reason": reason,
+                    "retrieved_at": row.get("retrieved_at"),
+                    "applicable_law_date": applicable_day,
+                    "edition_selected": False,
+                    "treatment_records": retain_acquired_treatment_records(candidate),
+                    "source_text": row.get("source_text") or "",
+                })
+            continue
+        selected = [(candidate, row) for candidate, row in versions if _interval_contains(row, applicable_day)]
+        if len(selected) != 1:
+            reason = "edition_not_in_effect" if not selected else "overlapping_versions"
+            for candidate, row in versions:
+                base["unresolved"].append({
+                    "authority_id": row.get("authority_id") or authority_id,
+                    "version": row.get("version") or "",
+                    "reason": reason,
+                    "edition_selected": False,
+                    "retrieved_at": row.get("retrieved_at"),
+                    "applicable_law_date": applicable_day,
+                    "treatment_records": retain_acquired_treatment_records(candidate),
+                })
+            continue
+        candidate, row = selected[0]
+        for _other, other in versions:
+            if other is row:
+                continue
+            base["withheld"].append({
+                "authority_id": other.get("authority_id") or authority_id,
+                "version": other.get("version") or "",
+                "reason": "edition_not_selected",
+                "edition_selected": False,
+            })
+        treatments = retain_acquired_treatment_records(candidate)
+        temporal_payload = {
+            "authority_id": row.get("authority_id") or authority_id,
+            "citation": row.get("citation") or candidate.get("locator") or "",
+            "jurisdiction": jurisdiction,
+            "authority_version": row.get("version") or "",
+            "version": row.get("version") or "",
+            "source_text": row.get("source_text") or "",
+            "law_version_id": row.get("law_version_id") or "",
+            "effective_date": row.get("effective_date") or "",
+            "law_versions": [{
+                "law_version_id": row.get("law_version_id") or "",
+                "authority_id": row.get("authority_id") or authority_id,
+                "citation": row.get("citation") or "",
+                "jurisdiction": jurisdiction,
+                "version": row.get("version") or "",
+                "effective_date": row.get("effective_date") or "",
+                **({"sunset_date": row.get("end_date")} if row.get("end_date") else {}),
+            }],
+            "authority_treatment_edges": treatments,
+            "query_context": {
+                "jurisdiction": jurisdiction,
+                "query_date": applicable_day,
+                "authority_version": row.get("version") or "",
+                "law_version_id": row.get("law_version_id") or "",
+            },
+        }
+        if row.get("end_date"):
+            temporal_payload["sunset_date"] = row.get("end_date")
+        temporal = evaluate_temporal_requirement_applicability(temporal_payload)
+        treatment_support = requirement_treatment_support({"authority_treatment_edges": treatments})
+        retrieved_at = row.get("retrieved_at")
+        if isinstance(retrieved_at, str) and retrieved_at[:10] == applicable_day and "T" in retrieved_at:
+            base["retrieval_time_used_as_applicable_law"] = False
+        admitted = {
+            "authority_id": row.get("authority_id") or authority_id,
+            "authority_version": row.get("version") or "",
+            "version": row.get("version") or "",
+            "law_version_id": row.get("law_version_id") or "",
+            "jurisdiction": jurisdiction,
+            "citation": row.get("citation") or "",
+            "locator": candidate.get("locator"),
+            "source_text": row.get("source_text") or "",
+            "effective_date": row.get("effective_date") or "",
+            "end_date": row.get("end_date") or "",
+            "applicable_law_date": applicable_day,
+            "retrieved_at": retrieved_at,
+            "edition_selected": False,
+            "treatment_records": treatments,
+            "authority_treatment_edges": treatments,
+            "treatment_support": treatment_support,
+            "temporal_applicability": temporal,
+            "support_eligible": False,
+            "applicable": False,
+            "proof": False,
+            "mixed_with_other_version": False,
+        }
+        if temporal.get("available") is not True:
+            admitted["edition_selected"] = False
+            base["unresolved"].append(dict(admitted, reason=str(temporal.get("reason") or "temporal_unavailable")))
+            continue
+        if temporal.get("applicable") is not True:
+            admitted["edition_selected"] = False
+            base["unresolved"].append(dict(admitted, reason=str(temporal.get("reason") or temporal.get("applicability_status") or "not_applicable")))
+            continue
+        blocking = bool(treatment_support.get("treatment_blocks_support")) or any(
+            item.get("adverse_treatment_retained") for item in treatments
+        )
+        admitted["edition_selected"] = True
+        admitted["applicable"] = True
+        admitted["support_eligible"] = not blocking
+        admitted["treatment_blocks_support"] = blocking
+        base["admitted"].append(admitted)
+
+    if any(item.get("reason") == "temporal_authority_api_unavailable" or str(item.get("temporal_applicability", {}).get("reason") if isinstance(item.get("temporal_applicability"), Mapping) else "") == "temporal_authority_api_unavailable" for item in base["unresolved"]):
+        temporal_down = [item for item in base["unresolved"] if "temporal" in str(item.get("reason") or "")]
+        if temporal_down and not base["admitted"] and len(temporal_down) == len(base["unresolved"]):
+            base["status"] = "unavailable"
+            base["reason"] = "temporal_authority_api_unavailable"
+            return base
+    if base["admitted"] and not base["unresolved"]:
+        base["status"] = "admitted"
+        base["reason"] = "selected_edition"
+    elif base["admitted"]:
+        base["status"] = "partial"
+        base["reason"] = "partial_edition_selection"
+    elif base["unresolved"]:
+        base["status"] = "unresolved"
+        base["reason"] = str(base["unresolved"][0].get("reason") or "unresolved")
+    else:
+        base["status"] = "empty"
+        base["reason"] = "no_legal_source"
+    base["retrieval_time_used_as_applicable_law"] = False
+    for item in base["admitted"] + base["unresolved"]:
+        if item.get("retrieved_at") and item.get("applicable_law_date") and item.get("retrieved_at") == item.get("applicable_law_date"):
+            base["retrieval_time_used_as_applicable_law"] = True
+        if item.get("effective_date") and item.get("retrieved_at") and item.get("effective_date") == item.get("retrieved_at") and "T" not in str(item.get("retrieved_at")):
+            pass
+    return base
+
+
 def search_legal_authority_program(
     program: Dict[str, Any],
     *,
