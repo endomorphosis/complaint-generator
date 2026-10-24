@@ -842,7 +842,7 @@ Implementation instructions:
 
 ## CIMP-MGND-33 Migrate explicitly selected legacy hook artifacts safely
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
