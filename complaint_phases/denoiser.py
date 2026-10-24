@@ -443,6 +443,10 @@ def project_stopping_policy(
         } else "awaiting_user"
     if paused:
         outcome = "paused"
+    stalled = bool(payload.get("worker_stalled"))
+    if stalled and outcome in {"awaiting_user", "paused"}:
+        outcome = "no_progress"
+    lane = str(payload.get("dependency_lane") or "").strip()
     standing = {
         "reason": "interview_stop_is_not_legal_sufficiency",
         "legal_sufficiency": False,
@@ -460,17 +464,46 @@ def project_stopping_policy(
         "saturated": "review_unresolved_issues_then_resume",
         "complete": "review_evidence_gaps_before_filing",
     }
+    distinction = {
+        "awaiting_user": "awaiting_user",
+        "paused": "awaiting_user",
+        "deferred_needs_evidence": "evidence_request",
+        "blocked_provider": "unavailable_provider",
+        "no_progress": "no_progress",
+        "needs_review": "review",
+        "saturated": "saturated",
+        "complete": "complete",
+    }.get(outcome, outcome or "awaiting_user")
+    action = next_actions.get(outcome, "review_unresolved_issues_then_resume")
+    concrete = {
+        "source_research": "acquire_legal_sources",
+        "evidence_request": "ingest_private_evidence",
+        "review": "refresh_grounding",
+    }
+    if lane in concrete and outcome not in {"no_progress", "blocked_provider", "paused", "awaiting_user"}:
+        distinction = lane
+        action = concrete[lane]
+    elif outcome == "saturated" and lane == "source_research":
+        distinction = "source_research"
+        action = concrete["source_research"]
     return {
         "outcome": outcome,
         "state": state or None,
+        "dependency_lane": lane or None,
+        "stopping_distinction": distinction,
+        "operation_terminated": outcome == "no_progress",
+        "busy_loop": False,
+        "reads_developer_stdin": False,
         "remaining_issues": remaining,
         "unresolved_issue_summary": summary,
         "resumable_next_action": {
-            "action": next_actions.get(outcome, "review_unresolved_issues_then_resume"),
-            "resumable": True,
+            "action": action,
+            "resumable": outcome != "no_progress" or not stalled,
             "reason": outcome,
-            "worker_stalled": False,
+            "worker_stalled": stalled,
             "supervisory_restart": False,
+            "reads_developer_stdin": False,
+            "busy_loop": False,
         },
         "legal_sufficiency": False,
         "core_facts_complete": False,
@@ -479,6 +512,142 @@ def project_stopping_policy(
         "intake_complete": bool(payload.get("intake_complete")) and outcome == "complete",
         "rejected_shortcuts": shortcuts,
     }
+
+
+_DEPENDENCY_LANE_ALIASES = {
+    "source_research": "source_research",
+    "source": "source_research",
+    "legal_source": "source_research",
+    "authority": "source_research",
+    "evidence_request": "evidence_request",
+    "evidence": "evidence_request",
+    "proof": "evidence_request",
+    "review": "review",
+    "contradiction": "review",
+    "grounding": "review",
+}
+_DEPENDENCY_LANE_ACTIONS = {
+    "source_research": "acquire_legal_sources",
+    "evidence_request": "ingest_private_evidence",
+    "review": "refresh_grounding",
+}
+MAX_DEPENDENCY_ACTION_ATTEMPTS = 3
+
+
+def dependency_lane_for(item: Any) -> Optional[str]:
+    """Map one open dependency to a source, evidence, or review lane."""
+    if not isinstance(item, dict):
+        return None
+    for key in ("lane", "dependency_lane", "kind", "target_kind", "dependency_kind"):
+        token = str(item.get(key) or "").strip().lower()
+        if token in _DEPENDENCY_LANE_ALIASES:
+            return _DEPENDENCY_LANE_ALIASES[token]
+    disposition = str(item.get("disposition") or "").strip().lower()
+    if disposition == "contradictory":
+        return "review"
+    if item.get("needs_legal_source") or item.get("legal_source_open"):
+        return "source_research"
+    if item.get("needs_evidence") or item.get("evidence_open"):
+        return "evidence_request"
+    if item.get("needs_review"):
+        return "review"
+    return None
+
+
+def publish_authorized_dependency_action(
+    stop: Optional[Dict[str, Any]],
+    *,
+    attempt: int = 0,
+    context: Optional[Dict[str, Any]] = None,
+    hook_completed: bool = False,
+) -> Dict[str, Any]:
+    """Publish one authorized next action, or terminate when the bound is spent.
+
+    A completed hook, an empty question pool, and a stalled worker do not
+    establish factual, legal, proof, or filing sufficiency. This function
+    decides once. It does not loop and it does not read developer stdin.
+    """
+    payload = stop if isinstance(stop, dict) else {}
+    if payload.get("stopping_distinction"):
+        policy = payload
+    else:
+        policy = project_stopping_policy(payload)
+    distinction = str(policy.get("stopping_distinction") or "")
+    resumed = context if isinstance(context, dict) else {}
+    try:
+        used = int(attempt)
+    except (TypeError, ValueError):
+        used = 0
+    if used < 0:
+        used = 0
+    resumable_context = {
+        "case_id": resumed.get("case_id"),
+        "target_id": resumed.get("target_id"),
+        "target_revision": resumed.get("target_revision"),
+        "graph_revision": resumed.get("graph_revision"),
+        "session_revision": resumed.get("session_revision"),
+        "attempt": used,
+        "max_attempts": MAX_DEPENDENCY_ACTION_ATTEMPTS,
+    }
+    packet = {
+        "legal_sufficiency": False,
+        "core_facts_complete": False,
+        "proof_requirements_satisfied": False,
+        "filing_ready": False,
+        "hook_completed": bool(hook_completed),
+        "hook_completed_is_sufficiency": False,
+        "busy_loop": False,
+        "reads_developer_stdin": False,
+        "worker_stalled": bool((policy.get("resumable_next_action") or {}).get("worker_stalled")),
+        "awaiting_user": policy.get("outcome") in {"awaiting_user", "paused"} and not policy.get("operation_terminated"),
+        "attempt": used,
+        "max_attempts": MAX_DEPENDENCY_ACTION_ATTEMPTS,
+        "resumable_context": resumable_context,
+        "stopping_distinction": distinction or None,
+        "operation": _DEPENDENCY_LANE_ACTIONS.get(distinction),
+    }
+    if policy.get("operation_terminated") or distinction in {"no_progress", "unavailable_provider"}:
+        packet.update({
+            "status": "terminated" if distinction == "no_progress" or policy.get("operation_terminated") else "unavailable",
+            "published": False,
+            "authorized": False,
+            "awaiting_user": False,
+            "operation_terminated": distinction == "no_progress" or bool(policy.get("operation_terminated")),
+            "reason": distinction or "terminated",
+        })
+        return packet
+    if distinction not in _DEPENDENCY_LANE_ACTIONS:
+        packet.update({
+            "status": "withheld",
+            "published": False,
+            "authorized": False,
+            "operation": None,
+            "reason": distinction or "awaiting_user",
+        })
+        return packet
+    if used >= MAX_DEPENDENCY_ACTION_ATTEMPTS:
+        packet.update({
+            "status": "terminated",
+            "published": False,
+            "authorized": False,
+            "awaiting_user": False,
+            "operation_terminated": True,
+            "reason": "attempt_bound",
+        })
+        return packet
+    packet.update({
+        "status": "published",
+        "published": True,
+        "authorized": True,
+        "bounded": True,
+        "action": _DEPENDENCY_LANE_ACTIONS[distinction],
+        "operation": _DEPENDENCY_LANE_ACTIONS[distinction],
+        "reason": distinction,
+        "operation_terminated": False,
+    })
+    packet["resumable_context"]["attempt"] = used + 1
+    packet["attempt"] = used + 1
+    return packet
 
 
 class ComplaintDenoiser:
@@ -7688,6 +7857,10 @@ class ComplaintDenoiser:
         no_information_attempts: Optional[int] = None,
         model_retries: Optional[int] = None,
         contradictions: Optional[List[Dict[str, Any]]] = None,
+        open_dependencies: Optional[List[Dict[str, Any]]] = None,
+        hook_completed: bool = False,
+        budget_exhausted: bool = False,
+        worker_stalled: bool = False,
     ) -> Dict[str, Any]:
         """Classify the interview stop. Shortcuts cannot claim completion.
 
@@ -7729,6 +7902,27 @@ class ComplaintDenoiser:
                 "reason": "open_answerable_target",
             })
 
+        dependency_items: List[Dict[str, Any]] = []
+        lanes: List[str] = []
+        for dependency in open_dependencies or []:
+            lane = dependency_lane_for(dependency)
+            if lane is None or not isinstance(dependency, dict):
+                continue
+            target_id = str(dependency.get("target_id") or dependency.get("id") or "").strip() or None
+            dependency_items.append({
+                "target_id": target_id,
+                "target_revision": str(dependency.get("target_revision") or "") or None,
+                "target_kind": str(dependency.get("target_kind") or dependency.get("kind") or lane),
+                "reason": lane,
+                "dependency_lane": lane,
+            })
+            lanes.append(lane)
+        primary_lane = None
+        for lane_name in ("source_research", "evidence_request", "review"):
+            if lane_name in lanes:
+                primary_lane = lane_name
+                break
+
         disposed: List[Dict[str, Any]] = []
         unknown_only = True
         answered_count = 0
@@ -7758,6 +7952,7 @@ class ComplaintDenoiser:
                 unknown_only = False
 
         provider_token = str(provider_status or "").strip().lower()
+        stalled = bool(worker_stalled) or provider_token in {"worker_stalled", "stalled", "stuck"}
         provider_down = provider_token in self._PROVIDER_UNAVAILABLE_STATUSES
         asked_count = len(self.questions_asked)
         over_question_limit = asked_count > limit
@@ -7799,9 +7994,19 @@ class ComplaintDenoiser:
             rejected_shortcuts.append("no_information_bound")
         if retry_bounded:
             rejected_shortcuts.append("model_retry_bound")
+        if hook_completed:
+            rejected_shortcuts.append("completed_hook")
+        if any(
+            str(item.get("disposition") or "") in {"unknown", "skipped", "refused", "deferred"}
+            for item in disposed
+        ):
+            rejected_shortcuts.append("skipped_or_unknown_answer")
+        if budget_exhausted:
+            rejected_shortcuts.append("budget_exhausted")
         review_requested = bool(needs_review) or bool(contradictions)
 
         unresolved_items = list(open_targets)
+        unresolved_items.extend(dependency_items)
         for item in disposed:
             if item.get("disposition") != "answered":
                 unresolved_items.append(dict(item))
@@ -7831,12 +8036,22 @@ class ComplaintDenoiser:
             state = "cancelled"
         elif provider_down:
             state = "provider_unavailable"
+        elif stalled:
+            state = "no_progress"
+        elif budget_exhausted:
+            state = "no_progress"
         elif over_iteration_cap or over_question_limit:
             state = "limit_reached"
         elif open_targets and not (repeat_bounded or no_info_bounded or retry_bounded):
             state = "needs_answer"
-        elif disposed and unknown_only and answered_count == 0 and not (repeat_bounded or no_info_bounded or retry_bounded):
+        elif disposed and unknown_only and answered_count == 0 and not (repeat_bounded or no_info_bounded or retry_bounded) and not primary_lane:
             state = "deferred_unknown"
+        elif not open_targets and primary_lane and not (repeat_bounded or no_info_bounded or retry_bounded):
+            state = {
+                "source_research": "saturated",
+                "evidence_request": "deferred_needs_evidence",
+                "review": "needs_review",
+            }[primary_lane]
         elif disposed and not open_targets and not (repeat_bounded or no_info_bounded or retry_bounded):
             state = "saturated"
         elif repeat_bounded or no_info_bounded or retry_bounded:
@@ -7867,9 +8082,14 @@ class ComplaintDenoiser:
             "core_facts_complete": False,
             "proof_requirements_satisfied": False,
             "ready_for_evidence_phase": False,
-            "awaiting_user": state == "needs_answer",
-            "worker_stalled": False,
+            "awaiting_user": state == "needs_answer" and not stalled,
+            "worker_stalled": stalled,
+            "budget_exhausted": bool(budget_exhausted),
+            "dependency_lane": None if open_targets or stalled or budget_exhausted else primary_lane,
+            "hook_completed": bool(hook_completed),
             "supervisory_restart": False,
+            "busy_loop": False,
+            "reads_developer_stdin": False,
             "unresolved_issue_summary": summary,
             "message": self._interview_stop_message(state, intake_complete),
         }
@@ -7885,8 +8105,12 @@ class ComplaintDenoiser:
             "outcome": projected["outcome"],
             "remaining_issues": projected["remaining_issues"],
             "resumable_next_action": projected["resumable_next_action"],
+            "stopping_distinction": projected["stopping_distinction"],
+            "operation_terminated": projected["operation_terminated"],
+            "busy_loop": False,
+            "reads_developer_stdin": False,
         })
-        stop["awaiting_user"] = projected["outcome"] in {"awaiting_user", "paused"}
+        stop["awaiting_user"] = projected["outcome"] in {"awaiting_user", "paused"} and not stalled
         self.last_interview_stop = stop
         return stop
 
