@@ -2946,3 +2946,168 @@ def accept_bound_hook_effect(
         "mutated_pending_inquiry": _canonical_hash(pending_inquiry, prefix="inq_") != pending_fingerprint,
         "mutated_saved_case": _canonical_hash(saved_case, prefix="casebody_") != case_fingerprint,
     }
+
+
+PUBLIC_ADVERSE_OUTCOMES = (
+    "malformed_model_proposal",
+    "late_model_proposal",
+    "consent_revocation",
+    "wrong_key",
+    "legal_source_outage",
+    "interrupted_snapshot",
+    "corrupt_replica",
+)
+
+_ADVERSE_DEADLINE_CAP_SECONDS = 60.0
+
+
+def bounded_deadline_seconds(value: Any, *, default: float = 5.0) -> float:
+    """Clamp a caller deadline. Non-finite or non-positive values use the default."""
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = default
+    if number != number or number in {float("inf"), float("-inf")} or number <= 0:
+        number = default
+    if number > _ADVERSE_DEADLINE_CAP_SECONDS:
+        number = _ADVERSE_DEADLINE_CAP_SECONDS
+    return number
+
+
+class OwnedProcessGuard:
+    """Track child processes this operation started and reap only those.
+
+    Cleanup signals the process group of each child this guard spawned.
+    It does not scan or signal any other process, and it does not open a socket.
+    """
+
+    def __init__(self, deadline_seconds: float) -> None:
+        import time
+
+        self.deadline_seconds = bounded_deadline_seconds(deadline_seconds)
+        self._deadline = time.monotonic() + self.deadline_seconds
+        self._started = time.monotonic()
+        self._processes: list[Any] = []
+        self.pids: list[int] = []
+        self.reaped: list[int] = []
+        self.status = "not_started"
+        self.network_touched = False
+        self.provider_process_started = False
+
+    def expired(self) -> bool:
+        import time
+
+        return time.monotonic() >= self._deadline
+
+    def elapsed_seconds(self) -> float:
+        import time
+
+        return max(0.0, time.monotonic() - self._started)
+
+    def spawn_owned_idle_child(self) -> Optional[int]:
+        """Start one local idle interpreter. Failure is an asserted capability gap."""
+
+        import subprocess
+        import sys
+
+        if self.expired():
+            self.status = "deadline_elapsed"
+            return None
+        try:
+            process = subprocess.Popen(
+                [sys.executable, "-I", "-c", "import time; time.sleep(30)"],
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            self.status = "unavailable"
+            return None
+        self._processes.append(process)
+        self.pids.append(int(process.pid))
+        self.status = "running"
+        return int(process.pid)
+
+    def cleanup(self) -> dict[str, Any]:
+        """Reap owned children. A missing spawn stays an explicit unavailable status."""
+
+        import subprocess
+
+        for process in self._processes:
+            pid = int(process.pid)
+            if process.poll() is None:
+                try:
+                    process.terminate()
+                    process.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=1.0)
+            if pid not in self.reaped:
+                self.reaped.append(pid)
+        if self.status == "running":
+            self.status = "reaped" if self.reaped == self.pids and self.pids else "unavailable"
+        elif self.status == "not_started":
+            self.status = "unavailable"
+        return self.public_view()
+
+    def public_view(self) -> dict[str, Any]:
+        return {
+            "deadline_seconds": self.deadline_seconds,
+            "elapsed_seconds": self.elapsed_seconds(),
+            "within_deadline": self.elapsed_seconds() <= self.deadline_seconds,
+            "pids": list(self.pids),
+            "reaped": list(self.reaped),
+            "status": self.status,
+            "spawned": len(self.pids),
+            "provider_process_started": False,
+            "network_touched": False,
+            "unrelated_processes_signaled": False,
+        }
+
+
+def reject_public_model_proposal(proposal: Any) -> dict[str, Any]:
+    """Refuse a model proposal before any effect, graph write, or provider call.
+
+    Malformed proposals and proposals that claim legal completion stay refused.
+    The caller keeps the last graph revision and pending inquiry.
+    """
+
+    request = {
+        "operation": "acquire_legal_sources",
+        "model_proposal": proposal,
+    }
+    decision = dispatch_registered_hook_operation(
+        request,
+        context=None,
+        host_targets=(),
+        owner_id="",
+        case_id="",
+        session_id="",
+        session_revision=0,
+        graph_revision="",
+        legal_context=None,
+        purpose=None,
+        source_bindings=None,
+        privacy_context=None,
+        now=datetime.now(timezone.utc),
+        host=None,
+    )
+    code = str(decision.get("code") or "malformed")
+    return {
+        "accepted": False,
+        "code": code,
+        "status": "refused",
+        "legal_completion": False,
+        "proof": False,
+        "legal_sufficiency": False,
+        "requirements_satisfied": False,
+        "backend_completed": False,
+        "provider_invoked": False,
+        "effect_dispatched": False,
+        "resume_possible": True,
+        "nonrecoverable_boundary": None,
+        "next_action": "continue_pending_inquiry",
+        "operation": decision.get("operation") or "acquire_legal_sources",
+    }
