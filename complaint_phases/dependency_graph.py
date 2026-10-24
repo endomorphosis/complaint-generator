@@ -3230,6 +3230,7 @@ class DependencyGraphBuilder:
                 "satisfaction_state": "unsatisfied",
             },
         )
+        self._recompute_support_proof_and_question_targets(req_node)
         graph.add_node(req_node)
         graph.add_dependency(Dependency(
             id=self._get_dependency_id(),
@@ -3377,6 +3378,7 @@ class DependencyGraphBuilder:
         date_changed = bool(payload.get("date_changed") or payload.get("date_roles"))
         version_changed = bool(payload.get("version_changed") or payload.get("authority_version_changed"))
         treatment_changed = bool(payload.get("treatment_changed"))
+        source_outage = bool(payload.get("source_outage"))
         fact_change = bool(payload.get("fact_change") or fact_ids or clarification_keys)
         updated_requirements = payload.get("updated_requirements") if isinstance(payload.get("updated_requirements"), dict) else {}
         user_facts = {
@@ -3392,6 +3394,7 @@ class DependencyGraphBuilder:
             if self._dependency_change_affects(
                 node, clarification_keys, fact_ids, rule_ids, jurisdiction_changed, date_changed, fact_change,
                 version_changed=version_changed, treatment_changed=treatment_changed,
+                source_outage=source_outage,
             ):
                 affected_ids.append(node.id)
             else:
@@ -3452,13 +3455,18 @@ class DependencyGraphBuilder:
                 invalidated.append(node_id)
             node.attributes["satisfaction_revision"] = int(node.attributes.get("satisfaction_revision") or 0) + 1
             node.attributes["dependency_recomputed"] = True
-            if version_changed or treatment_changed:
+            if version_changed or treatment_changed or source_outage:
                 node.attributes["legal_support_invalidated"] = True
                 node.attributes["support_eligible"] = False
-                if version_changed:
+                if source_outage:
+                    node.attributes["invalidation_reason"] = "source_outage"
+                    node.attributes["source_available"] = False
+                elif version_changed:
                     node.attributes["invalidation_reason"] = "authority_version_changed"
                 elif treatment_changed:
                     node.attributes["invalidation_reason"] = "treatment_changed"
+            if node.attributes.get("dependency_class") == _LEGALLY_SOURCED_CLASS:
+                self._recompute_support_proof_and_question_targets(node)
             if node.attributes.get("proof_cache_identity"):
                 node.attributes["rejected_proof_cache_identity"] = node.attributes.get("proof_cache_identity")
                 node.attributes["proof_cache_reusable"] = False
@@ -3507,9 +3515,12 @@ class DependencyGraphBuilder:
             "factual_revision": payload.get("factual_revision"),
             "version_changed": version_changed,
             "treatment_changed": treatment_changed,
+            "source_outage": source_outage,
             "user_facts_modified": False,
+            "graph_replaced": False,
+            "empty_success": False,
         }
-        if (version_changed or treatment_changed) and not chronology_issue:
+        if (version_changed or treatment_changed or source_outage) and not chronology_issue:
             for node_id, (name, description, satisfied, attributes) in user_facts.items():
                 node = graph.nodes.get(node_id)
                 if node is None:
@@ -3527,6 +3538,10 @@ class DependencyGraphBuilder:
                         report["preserved_node_ids"].append(node_id)
         if graph.metadata.get("legal_requirement_mode") == "verified_sources":
             self._refresh_legal_source_gaps(graph)
+        if source_outage:
+            graph.metadata["source_outage"] = True
+            graph.metadata["empty_success"] = False
+            graph.metadata["admission_status"] = "unavailable"
         graph.metadata["last_dependency_refresh"] = {
             "affected_count": len(affected_ids),
             "preserved_count": len(report["preserved_node_ids"]),
@@ -3546,6 +3561,7 @@ class DependencyGraphBuilder:
         fact_change: bool,
         version_changed: bool = False,
         treatment_changed: bool = False,
+        source_outage: bool = False,
     ) -> bool:
         attributes = node.attributes if isinstance(node.attributes, dict) else {}
         dependency_class = attributes.get("dependency_class")
@@ -3566,9 +3582,51 @@ class DependencyGraphBuilder:
             return True
         if fact_ids and node_facts & fact_ids:
             return True
-        if jurisdiction_changed or date_changed or version_changed or treatment_changed:
+        if jurisdiction_changed or date_changed or version_changed or treatment_changed or source_outage:
             return True
         return False
+
+    @staticmethod
+    def _recompute_support_proof_and_question_targets(node: DependencyNode) -> None:
+        """Mint new support, proof, and question identities for one affected requirement."""
+        import hashlib
+
+        attributes = node.attributes if isinstance(node.attributes, dict) else {}
+        scope = attributes.get("dependency_scope") if isinstance(attributes.get("dependency_scope"), dict) else {}
+        basis = json.dumps({
+            "authority_id": attributes.get("authority_id"),
+            "authority_version": attributes.get("authority_version"),
+            "jurisdiction": scope.get("jurisdiction") or attributes.get("jurisdiction"),
+            "reason": attributes.get("invalidation_reason"),
+            "rule_id": scope.get("rule_id") or attributes.get("rule_id"),
+            "satisfaction_revision": attributes.get("satisfaction_revision"),
+            "source_hash": attributes.get("source_hash"),
+        }, sort_keys=True, default=str)
+        digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()
+        previous_support = str(attributes.get("support_identity") or "")
+        if previous_support and previous_support != digest:
+            attributes["rejected_support_identity"] = previous_support
+        attributes["support_identity"] = digest
+        previous_proof = str(attributes.get("proof_identity") or attributes.get("proof_cache_identity") or "")
+        if previous_proof:
+            attributes["rejected_proof_identity"] = previous_proof
+        attributes["proof_identity"] = ""
+        attributes["proof_cache_reusable"] = False
+        targets = attributes.get("inquiry_targets")
+        if isinstance(targets, list):
+            for inquiry in targets:
+                if not isinstance(inquiry, dict):
+                    continue
+                inquiry["status"] = "reopened"
+                inquiry["target_revision"] = digest[:16]
+                inquiry["invalidation_reason"] = attributes.get("invalidation_reason") or "dependency_refresh"
+        previous_target = str(attributes.get("question_target_id") or "")
+        new_target = "qt_" + digest[:24]
+        if previous_target and previous_target != new_target:
+            attributes["rejected_question_target_id"] = previous_target
+        attributes["question_target_id"] = new_target
+        attributes["question_target_revision"] = digest[:16]
+        node.attributes = attributes
 
     def _replace_changed_rules(
         self,
