@@ -504,7 +504,7 @@ Implementation instructions:
 
 ## CIMP-MGND-20 Refresh current legal dependencies after source or context changes
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
