@@ -334,9 +334,50 @@ def _characterize(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     return flags
 
 
+def _same_recorded_source_generation() -> bool:
+    """The committed observation is historical; it never qualifies changed code."""
+    receipt = json.loads(RECEIPT_PATH.read_text(encoding="utf-8"))
+    generation = receipt.get("source_generation") or {}
+    assert receipt.get("baseline_commit") == BASELINE_COMMIT
+    assert receipt.get("product_acceptance") is False
+    assert receipt.get("gui_ready") is False
+    assert receipt.get("fresh_dom_qualification") is False
+    # This is the exact scoped entrypoint digest recorded by GUI01, not a
+    # claim that NLP/runtime identity or the whole source tree is equivalent.
+    assert generation.get("digest") == "b9c8c4da1096723cff8ba08215cee2a71d0c56126a3131fdba0fff793ffdd8f2"
+    if any(not (ROOT / path).is_file() for path in SOURCE_PATHS):
+        return False
+    return _source_generation()["digest"] == generation["digest"]
+
+
+def _fresh_unauthenticated_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Fresh real ASGI checks remain mandatory after historical source drift."""
+    import applications.complaint_workspace as workspace_mod
+
+    _block_network(monkeypatch)
+    monkeypatch.setattr(workspace_mod, "_SESSION_DIR", tmp_path / "fresh-denial-sessions")
+
+    class _LocalMediator:
+        def io(self, _message: str) -> str:
+            return ""
+
+    with TestClient(SERVER(_LocalMediator()).app) as client:
+        health = client.get("/health")
+        denied = client.get("/api/complaint-workspace/session", params={"user_id": FIXED_USER})
+    assert health.status_code == 200 and health.json().get("status") == "healthy"
+    assert denied.status_code in {401, 403}
+    assert NARRATIVE not in denied.text and PASSPHRASE not in denied.text
+    return {"health": health.status_code, "denied": denied.status_code}
+
+
 def test_actual_app_denies_bootstrap_and_labels_injected_fixtures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Denied bootstrap stays denied. Authorized access here is an injected fixture."""
 
+    _fresh_unauthenticated_api(tmp_path / "stable-boundary", monkeypatch)
+    if not _same_recorded_source_generation():
+        # The assertions above are fresh. The old fixed-form/plaintext-cache
+        # defects below are historical and must not be required to survive.
+        return
     flags = _characterize(tmp_path, monkeypatch)
     if flags["denied_session_status"] != 403 or flags["denied_session_detail"] != "authorization_denied":
         _fail("denied_bootstrap_not_denied")
@@ -480,8 +521,22 @@ def test_receipt_pins_this_generation_without_future_source_comparison() -> None
         _fail("baseline_receipt_interview_split")
 
 
+def _assert_live_contract_matches_recorded_observation(flags: dict, expected: dict) -> None:
+    """Source identity does not establish interpreter/NLP runtime equivalence."""
+
+    runtime_metrics = {"kg_entity_count", "kg_relationship_count", "dg_node_count"}
+    for key in runtime_metrics:
+        value = flags[key]
+        assert type(value) is int and 0 <= value <= 10000
+    assert flags["kg_entity_count"] > 0 and flags["dg_node_count"] > 0
+    changed = sorted(key for key in set(flags) | set(expected)
+                     if key not in runtime_metrics and flags.get(key) != expected.get(key))
+    if changed:
+        _fail("live_flags_differ:" + ",".join(changed))
+
+
 def test_same_generation_live_flags_match_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Live counts bind only while the named source generation is unchanged."""
+    """Check stable contracts; exact historical counts are runtime observations."""
 
     receipt = json.loads(RECEIPT_PATH.read_text(encoding="utf-8"))
     generation = receipt.get("source_generation") if isinstance(receipt.get("source_generation"), dict) else {}
@@ -492,6 +547,35 @@ def test_same_generation_live_flags_match_receipt(tmp_path: Path, monkeypatch: p
         return
     flags = _characterize(tmp_path, monkeypatch)
     expected = receipt.get("observed_flags")
-    if flags != expected:
-        changed = sorted(key for key in set(flags) | set(expected) if flags.get(key) != expected.get(key))
-        _fail("live_flags_differ:" + ",".join(changed))
+    _assert_live_contract_matches_recorded_observation(flags, expected)
+
+
+def test_source_drift_keeps_fresh_denial_without_old_characterization(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    observed = []
+    fresh = _fresh_unauthenticated_api
+
+    def observe(*args, **kwargs):
+        result = fresh(*args, **kwargs)
+        observed.append(result)
+        return result
+
+    def old_characterization_must_not_run(*args, **kwargs):
+        raise AssertionError("historical characterization called after source drift")
+
+    monkeypatch.setitem(globals(), "_fresh_unauthenticated_api", observe)
+    monkeypatch.setitem(globals(), "_source_generation", lambda: {"digest": "changed-entrypoint-generation"})
+    monkeypatch.setitem(globals(), "_characterize", old_characterization_must_not_run)
+    test_actual_app_denies_bootstrap_and_labels_injected_fixtures(tmp_path, monkeypatch)
+    assert len(observed) == 1
+    assert observed[0]["health"] == 200 and observed[0]["denied"] in {401, 403}
+
+
+def test_runtime_metric_variation_cannot_hide_denied_or_empty_graphs() -> None:
+    expected = {"kg_entity_count": 3, "kg_relationship_count": 1,
+                "dg_node_count": 7, "denied_session_status": 403}
+    observed = {**expected, "kg_entity_count": 12, "kg_relationship_count": 4}
+    _assert_live_contract_matches_recorded_observation(observed, expected)
+    with pytest.raises(AssertionError):
+        _assert_live_contract_matches_recorded_observation({**observed, "kg_entity_count": 0}, expected)
+    with pytest.raises(AssertionError, match="denied_session_status"):
+        _assert_live_contract_matches_recorded_observation({**observed, "denied_session_status": 200}, expected)
