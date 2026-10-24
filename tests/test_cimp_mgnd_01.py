@@ -131,11 +131,24 @@ def _block_network_and_provider_subprocesses(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(subprocess, "check_output", guarded(subprocess.check_output))
 
 
-def _source_generation() -> dict:
+def _source_generation(*, revision: str | None = None) -> dict:
+    if revision is not None and (
+        len(revision) != 40 or any(character not in "0123456789abcdef" for character in revision)
+    ):
+        _fail("baseline_source_revision_invalid")
     digest = hashlib.sha256()
     files = []
     for relative in SOURCE_PATHS:
-        data = (ROOT / relative).read_bytes()
+        if revision is None:
+            data = (ROOT / relative).read_bytes()
+        else:
+            # The committed baseline is historical evidence. Read its actual
+            # Git blobs without changing the checkout or refreshing receipts.
+            data = subprocess.run(
+                ["git", "--no-optional-locks", "-c", "core.hooksPath=/dev/null", "-C", str(ROOT),
+                 "show", f"{revision}:{relative}"],
+                check=True, capture_output=True, timeout=10,
+            ).stdout
         file_hash = hashlib.sha256(data).hexdigest()
         files.append({"path": relative, "sha256": file_hash, "bytes": len(data)})
         digest.update(relative.encode("utf-8"))
@@ -519,7 +532,7 @@ def test_public_chat_characterizes_grounding_edit_and_resume(tmp_path: Path, mon
 
 
 def test_receipt_pins_source_generation_without_campaign_claim() -> None:
-    """The receipt names this source generation and does not accept the campaign."""
+    """The receipt pins the declared historical baseline, not later fixes."""
 
     if not RECEIPT_PATH.is_file():
         _fail("baseline_receipt_absent")
@@ -539,12 +552,16 @@ def test_receipt_pins_source_generation_without_campaign_claim() -> None:
     generation = receipt.get("source_generation")
     if not isinstance(generation, dict) or not str(generation.get("name") or "").strip():
         _fail("baseline_receipt_source_generation_unnamed")
-    current = _source_generation()
-    if generation.get("algorithm") != "sha256" or generation.get("digest") != current["digest"]:
+    spec = json.loads((ROOT / "docs/task_boards/complaint_mediator_grounding_spec.json").read_text(encoding="utf-8"))
+    baseline = spec.get("baseline_commit")
+    if not isinstance(baseline, str):
+        _fail("baseline_source_revision_absent")
+    historical = _source_generation(revision=baseline)
+    if generation.get("algorithm") != "sha256" or generation.get("digest") != historical["digest"]:
         _fail("baseline_receipt_source_generation_mismatch")
-    if generation.get("files") != current["files"]:
+    if generation.get("files") != historical["files"]:
         _fail("baseline_receipt_source_files_mismatch")
-    if generation.get("name") != current["name"]:
+    if generation.get("name") != historical["name"]:
         _fail("baseline_receipt_source_name_mismatch")
     observations = receipt.get("observations")
     if not isinstance(observations, list) or len(observations) < 2:

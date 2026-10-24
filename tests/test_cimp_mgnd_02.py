@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 
 from integrations.ipfs_datasets.capabilities import (
     DECLARED_OWNER_PINS,
@@ -19,6 +20,10 @@ from integrations.ipfs_datasets.capabilities import (
 from integrations.ipfs_datasets.loader import classify_owner_checkout, observe_checked_out_commit
 
 INVENTORY_PATH = Path("docs/task_boards/complaint_mediator_grounding_owner_inventory.json")
+ROOT = Path(__file__).resolve().parents[1]
+_CHECKOUT_OBSERVATION_FIELDS = frozenset({
+    "checked_out_commit", "checked_out_commit_status", "checked_out_commit_error_type", "pin_is_observed_head",
+})
 NAMED_MODULES = {
     "ipfs_datasets_py.knowledge_graphs.extraction.extractor",
     "ipfs_datasets_py.knowledge_graphs",
@@ -35,6 +40,33 @@ NAMED_MODULES = {
     "ipfs_datasets_py.logic.formalization.autoencoder.legal_compact_content_predicate_training_v1",
     "integrations.ipfs_datasets.storage",
 }
+
+
+def _inventory_contract(inventory: dict) -> dict:
+    """Compare the owned-source contract independently of a checkout observation."""
+    return {
+        **inventory,
+        "owners": [
+            {key: value for key, value in row.items() if key not in _CHECKOUT_OBSERVATION_FIELDS}
+            for row in inventory["owners"]
+        ],
+    }
+
+
+def _assert_checkout_observation(row: dict) -> None:
+    assert _CHECKOUT_OBSERVATION_FIELDS <= set(row)
+    assert row["checked_out_commit_status"] in {"available", "unavailable"}
+    if row["checked_out_commit_status"] == "available":
+        commit = row["checked_out_commit"]
+        assert isinstance(commit, str) and len(commit) == 40
+        assert all(character in "0123456789abcdef" for character in commit)
+        assert row["checked_out_commit_error_type"] == ""
+    else:
+        assert row["checked_out_commit"] == ""
+        assert isinstance(row["checked_out_commit_error_type"], str) and row["checked_out_commit_error_type"]
+    assert row["pin_is_observed_head"] is (
+        row["checked_out_commit"] == row["declared_pin"] and row["checked_out_commit_status"] == "available"
+    )
 
 
 def test_synthetic_checkout_kinds_distinguish_gitlink_from_populated_tree(tmp_path: Path):
@@ -93,7 +125,11 @@ def test_owner_inventory_records_pins_paths_flags_and_seam_invocations():
     committed = json.loads(INVENTORY_PATH.read_text(encoding="utf-8"))
 
     assert inventory["schema_version"] == OWNER_INVENTORY_SCHEMA_VERSION
-    assert inventory == committed
+    # The recorded worker observed GitdirPointer; a proper clone can now
+    # observe HEAD. Preserve every non-observational source/pin/API contract.
+    assert _inventory_contract(inventory) == _inventory_contract(committed)
+    for row in [*committed["owners"], *inventory["owners"]]:
+        _assert_checkout_observation(row)
     assert inventory["api_count"] == len(NAMED_MODULES)
     assert inventory["conditional_engineering_count"] >= 1
 
@@ -101,6 +137,17 @@ def test_owner_inventory_records_pins_paths_flags_and_seam_invocations():
     assert set(owners) == set(DECLARED_OWNER_PINS)
     for name, pin in DECLARED_OWNER_PINS.items():
         row = owners[name]
+        observed = observe_checked_out_commit(ROOT / row["relative_path"])
+        assert row["checked_out_commit"] == observed["commit"]
+        assert row["checked_out_commit_status"] == observed["status"]
+        assert row["checked_out_commit_error_type"] == observed["error_type"]
+        if observed["status"] == "available":
+            actual = subprocess.run(
+                ["git", "--no-optional-locks", "-c", "core.hooksPath=/dev/null", "-C",
+                 str(ROOT / row["relative_path"]), "rev-parse", "--verify", "HEAD^{commit}"],
+                check=True, capture_output=True, text=True, timeout=10,
+            ).stdout.strip()
+            assert observed["commit"] == actual
         assert row["declared_pin"] == pin
         assert row["canonical_source_path"].endswith("__init__.py")
         assert row["checkout_kind"] in {"populated_checkout", "opaque_gitlink", "missing_checkout"}

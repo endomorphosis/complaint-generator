@@ -864,7 +864,8 @@ def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: s
                             "Cross-worktree reconciliation and dynamic guardrail/refill task generation are disabled for this fixed campaign; native dependency readiness, process fencing and implementation watchdog remain enabled."]}
 
 
-def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: Path | None = None) -> dict[str, Any]:
+def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: Path | None = None,
+          expected_launcher_sha256: str | None = None) -> dict[str, Any]:
     state_dir = state_dir.resolve()
     prospective_root, _ = _select_worktree_root(repo_root, state_dir, _read_json(state_dir / "launcher.json"), worktree_root)
     resources = _resource_capacity(repo_root, state_dir, prospective_root, os.environ)
@@ -874,6 +875,19 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
     with _lock(state_dir):
         owner_path = state_dir / "launcher.json"
         previous = _read_json(owner_path)
+        def watchdog_refusal():
+            if expected_launcher_sha256 is None:
+                return None
+            current = _read_json(owner_path)
+            digest = hashlib.sha256(json.dumps(current, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            if not re.fullmatch(r"[0-9a-f]{64}", expected_launcher_sha256) or digest != expected_launcher_sha256:
+                return {"status": "stop_incomplete", "reason": "launcher_changed_before_start", "execution_started": False}
+            if any(os.path.lexists(state_dir / "watchdog" / name) for name in ("HOLD", "OPERATOR_STOP")):
+                return {"status": "not_ready", "reason": "watchdog_manual_hold", "execution_started": False}
+            return None
+        refusal = watchdog_refusal()
+        if refusal is not None:
+            return refusal
         if previous.get("read_error"):
             return _stop_incomplete(state_dir, "launcher_receipt_unreadable")
         selected_root, root_binding = _select_worktree_root(repo_root, state_dir, previous, worktree_root)
@@ -944,6 +958,9 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
         log_path = state_dir / "launcher.log"
         from .improvement_plan import load_spec
         policy = load_spec(spec_path)["execution_policy"]
+        refusal = watchdog_refusal()
+        if refusal is not None:
+            return refusal
         with log_path.open("ab", buffering=0) as log:
             process = subprocess.Popen(argv, cwd=repo_root, env=campaign_environment(repo_root, context_exclude=policy.get("context_exclude"), state_dir=state_dir),
                                        stdin=campaign_worker_stdin(), stdout=log, stderr=subprocess.STDOUT,
@@ -2277,10 +2294,17 @@ def _descendants(root: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def stop(state_dir: Path, *, timeout: float = 15.0,
-         retained_native_child_proof: Mapping[str, Any] | None = None) -> dict[str, Any]:
+         retained_native_child_proof: Mapping[str, Any] | None = None,
+         expected_launcher_sha256: str | None = None) -> dict[str, Any]:
     with _lock(state_dir):
         path = state_dir / "launcher.json"
         record = _read_json(path)
+        if expected_launcher_sha256 is not None:
+            current_digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            if (not re.fullmatch(r"[0-9a-f]{64}", expected_launcher_sha256)
+                    or current_digest != expected_launcher_sha256):
+                return {"status": "stop_incomplete", "signalled": False,
+                        "reason": "launcher_changed_before_stop", "manual_holds_preserved": True}
         from .improvement_shutdown import close_campaign_containers
         try:
             recorded_worktree_root(record, state_dir)
@@ -3306,7 +3330,7 @@ def recompute_dependent_readiness(repo_root: Path, state_dir: Path, spec: Mappin
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare, run and observe the Grok-only complaint improvement campaign.")
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("prepare", "doctor", "start", "status", "recover", "stop", "watch", "_run"):
+    for command in ("prepare", "doctor", "start", "status", "recover", "stop", "watch", "watchdog", "_run"):
         child = commands.add_parser(command, help=argparse.SUPPRESS if command == "_run" else command)
         child.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
         child.add_argument("--spec", type=Path)
@@ -3319,6 +3343,14 @@ def main(argv: list[str] | None = None) -> int:
         if command == "start":
             child.add_argument("--watch", action="store_true",
                                help="Watch this launch and close its verified orphan if the launcher exits.")
+        if command == "watchdog":
+            mode = child.add_mutually_exclusive_group()
+            mode.add_argument("--once", action="store_true", help="One durable progress/recovery check, suitable for a timer.")
+            mode.add_argument("--install-user-timer", action="store_true", help="Install and enable this campaign's minutely user timer.")
+            child.add_argument("--interval-seconds", type=float, default=60)
+            child.add_argument("--stop-completed", action="store_true", help="Close this owned launcher after verified completion.")
+            child.add_argument("--expected-spec-sha256")
+            child.add_argument("--expected-plan-id")
         if command == "_run":
             child.add_argument("--owner-token", required=True)
             child.add_argument("--merge-target", required=True)
@@ -3339,6 +3371,14 @@ def main(argv: list[str] | None = None) -> int:
             return run_internal(root, spec, state, args.owner_token, args.merge_target, worktree_root=args.worktree_root)
         if args.command == "stop":
             result = stop(state)
+        elif args.command == "watchdog":
+            from .campaign_watchdog import install_user_timer, watch_campaign
+            if args.install_user_timer:
+                result = install_user_timer(root, spec, state)
+            else:
+                result = watch_campaign(root, spec, state, once=args.once,
+                    interval_seconds=args.interval_seconds, stop_completed=args.stop_completed,
+                    expected_spec_sha256=args.expected_spec_sha256, expected_plan_id=args.expected_plan_id)
         elif args.command == "watch":
             from .improvement_monitor import watch_owned_launch
             result = watch_owned_launch(root, spec, state, maximum_seconds=args.monitor_seconds)
@@ -3350,6 +3390,12 @@ def main(argv: list[str] | None = None) -> int:
                 initial = result
                 result = watch_owned_launch(root, spec, state, maximum_seconds=args.monitor_seconds)
                 result["start_result"] = initial
+        if args.command == "watchdog":
+            print(json.dumps({**{key: result.get(key) for key in
+                ("status", "reason", "completed", "task_count", "active_task_id", "completion_cleanup")},
+                **{key: result[key] for key in ("unit", "timer_enabled") if key in result},
+                "report_path": str(state / "watchdog" / "latest.json")}, sort_keys=True))
+            return 2 if result.get("status") in {"error", "refused", "exhausted"} else 0
         print(json.dumps(result, indent=2, sort_keys=True))
         return 2 if result.get("status") in {"not_ready", "board_error", "state_error", "identity_mismatch", "stop_incomplete",
             "monitor_refused", "monitor_window_consumed", "monitor_owner_changed", "monitor_source_changed",
