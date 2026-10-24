@@ -530,7 +530,7 @@ Implementation instructions:
 
 ## CIMP-MGND-21 Carry admitted source identities into canonical LegalIR stages
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
