@@ -70,7 +70,7 @@ Implementation instructions:
 
 ## CIMP-GUI-03 Bind GUI capabilities to current mediator and SDK owners
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
