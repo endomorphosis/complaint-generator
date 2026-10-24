@@ -2188,3 +2188,84 @@ def test_invalid_monitor_window_cannot_start_an_unmonitored_runner(tmp_path, mon
     monkeypatch.setattr(runner, "start", lambda *_a, **_k: pytest.fail("invalid monitor window started a runner"))
     result = runner.main(["start", "--watch", "--monitor-seconds", "nan", "--repo-root", str(ROOT), "--state-dir", str(tmp_path)])
     assert result == 2
+
+
+@pytest.mark.parametrize("damage", [None, "reopened", "revision", "no_branch_event", "unknown_reason", "unfinished"])
+def test_native_completed_candidate_is_retained_without_blocking_startup(tmp_path, monkeypatch, damage):
+    import subprocess
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as native
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as daemon_native
+    from ipfs_accelerate_py.agent_supervisor.task_sources.persistent_task_queue import PersistentTaskQueue
+
+    root, worktrees, state = (tmp_path / name for name in ("repo", "worktrees", "state"))
+    root.mkdir(); worktrees.mkdir(); state.mkdir()
+    def git(*args, cwd=root):
+        return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+    git("init", "-q", "-b", "main")
+    git("config", "user.name", "Synthetic startup fixture")
+    git("config", "user.email", "synthetic@example.invalid")
+    board = root / "board.md"
+    board_text = ("# Synthetic tasks\n\n## CIMP-MGND-01 Retained candidate\n\n"
+        "- Status: " + ("ready" if damage == "unfinished" else "completed") + "\n"
+        "- Completion: manual\n- Priority: P1\n- Track: ops\n"
+        "- Outputs: out/task.py\n- Acceptance: A synthetic check passes.\n")
+    board.write_text(board_text)
+    git("add", "board.md"); git("commit", "-qm", "Synthetic completed board")
+    original = "rescue/worktree/implementation-cimp-mgnd-01-synthetic"
+    leaf = worktrees / "retained"
+    git("worktree", "add", "-q", "-b", original, str(leaf), "HEAD")
+    (leaf / "retained.txt").write_text("Preserve the original candidate.\n")
+    git("add", "retained.txt", cwd=leaf); git("commit", "-qm", "Synthetic retained candidate", cwd=leaf)
+    candidate = git("rev-parse", "HEAD", cwd=leaf)
+    daemon = object.__new__(daemon_native.PortalImplementationDaemon)
+    daemon.task_source = None
+    daemon.todo_path = board
+    daemon.task_header_prefix = "CIMP-"
+    daemon.task_queue = PersistentTaskQueue()
+    event = {"type": "worktree_reconciliation_validation_started", "task_id": "CIMP-MGND-01", "branch": original}
+    daemon._iter_events = lambda: iter([] if damage == "no_branch_event" else [event])
+    daemon.reconcile_validated_worktree_candidate = lambda **kwargs: {
+        "merge_result": {"attempted": False, "merged": False, "reason": "synthetic_validation_rejected"}}
+    observed, dispatched = [], []
+
+    class Startup(native.PortalImplementationSupervisor):
+        def run_once(self, *, include_refill=True):
+            result = self.reconcile_backlogged_worktrees()
+            observed.append(result)
+            if damage == "reopened":
+                board.write_text(board_text.replace("Status: completed", "Status: ready"))
+            elif damage == "revision":
+                board.write_text(board_text.replace("out/task.py", "out/changed.py"))
+            elif damage == "unknown_reason":
+                result["processed"][0]["merge_result"]["reason"] = "unknown_terminal_claim"
+            return {"worktree_reconciliation": result}
+
+        def _run_forever_loop(self):
+            self.run_once(include_refill=False)
+            dispatched.append(True)
+
+    supervisor = object.__new__(runner._validation_aware_supervisor_class(Startup))
+    supervisor.config = SimpleNamespace(repo_root=root, state_dir=state, state_path=state / "task-state.json",
+        state_prefix="synthetic", worktree_root=worktrees, todo_path=board, task_prefix="CIMP-",
+        merge_target_branch="main", worktree_reconciliation_enabled=True,
+        worktree_reconciliation_max_merges=1, worktree_reconciliation_dry_run=False,
+        worktree_reconciliation_preflight_enabled=False, worktree_scan_cache_enabled=False,
+        worktree_scan_cache_ttl_seconds=0)
+    monkeypatch.setattr(supervisor, "_build_worktree_reconciliation_daemon", lambda: daemon)
+    monkeypatch.setattr(supervisor, "_list_process_commands", lambda: [])
+    monkeypatch.setattr(supervisor, "_shared_active_worktree_owners", lambda path: {})
+    monkeypatch.setattr(supervisor, "_record_event", lambda *_args: None)
+    if damage is None:
+        supervisor._run_forever_loop()
+        assert dispatched == [True]
+        assert supervisor._complaint_startup_reconciliation_context is None
+    else:
+        with pytest.raises(RuntimeError, match="candidate recovery remains unresolved"):
+            supervisor._run_forever_loop()
+        assert dispatched == []
+    row = observed[0]["processed"][0]
+    assert row["merged"] is False and row["merge_result"]["attempted"] is False
+    if damage not in {"unknown_reason", "unfinished"}:
+        assert row["merge_result"]["reason"] == "reconciliation_candidate_task_already_completed"
+    assert leaf.is_dir() and git("rev-parse", original) == candidate
+    assert (leaf / "retained.txt").read_text() == "Preserve the original candidate.\n"

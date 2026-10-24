@@ -2578,6 +2578,40 @@ def _rescue_receipt_daemon_class(native_class, supervisor):
     return RescueReceiptDaemon
 
 
+def _startup_candidate_is_completed(supervisor, candidate):
+    """Recognize Native's retained terminal candidate without retiring it."""
+    if not isinstance(candidate, Mapping):
+        return False
+    merge = candidate.get("merge_result")
+    context = getattr(supervisor, "_complaint_startup_reconciliation_context", None)
+    if (candidate.get("merged") is not False or not isinstance(merge, Mapping)
+            or merge.get("attempted") is not False or merge.get("merged") is not False
+            or merge.get("reason") != "reconciliation_candidate_task_already_completed"
+            or not isinstance(context, Mapping)):
+        return False
+    try:
+        from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
+        daemon = context["daemon"]
+        if not isinstance(daemon, PortalImplementationDaemon):
+            return False
+        # Only Native's event-derived branch mapping qualifies. Its fallback
+        # branch-name parser cannot turn a reason string into task authority.
+        branch = str(candidate.get("branch") or "").removeprefix("refs/heads/")
+        task_id = context["task_ids_by_branch"].get(branch)
+        task = context["tasks_by_id"].get(task_id)
+        if not branch or not task_id or task is None:
+            return False
+        identity = daemon._identity_for_task(task)
+        if not identity.canonical_task_cid or not identity.canonical_task_key:
+            return False
+        return not PortalImplementationDaemon._completed_task_binding_error(daemon, {
+            "task": {"task_id": task_id},
+            "completion_task_cids": {task_id: identity.canonical_task_cid},
+        })
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        return False
+
+
 def _validation_aware_supervisor_class(native_class):
     class ValidationAwareSupervisor(native_class):
         @staticmethod
@@ -2588,17 +2622,27 @@ def _validation_aware_supervisor_class(native_class):
 
         def _run_forever_loop(self):
             self._complaint_startup_preflight_pending = True
+            self._complaint_startup_reconciliation_context = None
             return super()._run_forever_loop()
+
+        def _reconciliation_task_context(self, daemon):
+            context = super()._reconciliation_task_context(daemon)
+            if getattr(self, "_complaint_startup_preflight_pending", False):
+                self._complaint_startup_reconciliation_context = {
+                    "daemon": daemon, "tasks_by_id": context[0], "task_ids_by_branch": context[1],
+                }
+            return context
 
         def run_once(self, *, include_refill=True):
             result = super().run_once(include_refill=include_refill)
             if getattr(self, "_complaint_startup_preflight_pending", False):
                 if result.get("maintenance_blocked") is True:
                     raise RuntimeError("Native startup preflight blocked: " + str(result.get("reason") or "maintenance unavailable"))
-                if any(item.get("merged") is not True for item in
+                if any(item.get("merged") is not True and not _startup_candidate_is_completed(self, item) for item in
                         result.get("worktree_reconciliation", {}).get("processed", ())):
                     raise RuntimeError("Native startup candidate recovery remains unresolved")
                 self._complaint_startup_preflight_pending = False
+                self._complaint_startup_reconciliation_context = None
             return result
 
         def _implementation_attempt_is_active(self, state, *, now_ts):
