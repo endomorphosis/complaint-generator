@@ -608,7 +608,7 @@ Implementation instructions:
 
 ## CIMP-MGND-24 Preserve independent norm review and bound-variable decisions
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
