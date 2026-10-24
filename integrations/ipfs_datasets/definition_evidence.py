@@ -18,13 +18,21 @@ through their current owners. Source, edition, meaning, and context permissions
 stay separate. This adapter does not sign reviews or turn generated Lean into
 a build or a proof unless that owner report already records execution and a
 declared prover result matches the source-pinned hashes.
+
+Qualified compact-content and predicate-training outputs are described here as
+engineering candidates. Load, score, inspect, and checkpoint identity stay tied
+to the caller's exact source-space, conditioning, policy, and checkpoint pins.
+Preparation and numerical qualification do not select governing law, close a
+definition review, or prove an element.
 """
 
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+import re
 from copy import deepcopy
-from typing import Any
+from typing import Any, Mapping
 
 from .loader import import_module_optional
 
@@ -84,6 +92,35 @@ _DENIED_AUTHORITY = {
     "graph": False,
     "proof": False,
 }
+
+_PERSISTENT_OWNER = (
+    "ipfs_datasets_py.logic.formalization.autoencoder.legal_compact_content_persistent_v1"
+)
+_PREDICATE_OWNER = (
+    "ipfs_datasets_py.logic.formalization.autoencoder.legal_compact_content_predicate_training_v1"
+)
+QUALIFIED_MODEL_CANDIDATE_SCHEMA = "complaint-mediator-qualified-model-candidate/v1"
+_PERSISTENT_SCORE_SCHEMA = "legal-compact-content-persistent-score/v1"
+_PREDICATE_CHECKPOINT_SCHEMA = "legal-compact-predicate-training-checkpoint/v1"
+_SHA256_TEXT = re.compile(r"[0-9a-f]{64}\Z")
+_CANDIDATE_AUTHORITY = {
+    "selects_governing_law": False,
+    "satisfies_definition_review": False,
+    "proves_element": False,
+    "governing_law": False,
+    "definition_review": False,
+    "element_proof": False,
+    "semantic_authority": False,
+    "proof_authority": False,
+}
+_REFUSED_MODEL_EFFECTS = (
+    "train_compact_content_persistent_v1",
+    "training",
+    "optimizer",
+    "model_download",
+    "restore",
+    "numerical_fit",
+)
 
 
 def _diagnostic(error: Any) -> dict[str, str] | None:
@@ -1537,4 +1574,356 @@ def forward_independent_norm_decisions(
         "reviews_synthesized": False,
         "governing_definition": None,
         "unresolved_dependency": base.get("unresolved_dependency"),
+    }
+
+
+def _sha256_text(value: Any) -> bool:
+    return isinstance(value, str) and _SHA256_TEXT.fullmatch(value) is not None
+
+
+def _source_space_text(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= 256
+        and bool(value.strip())
+        and "\x00" not in value
+    )
+
+
+def _runtime_available() -> bool:
+    return importlib.util.find_spec("torch") is not None
+
+
+def _owner_call(module: Any, name: str, *args: Any, **kwargs: Any) -> tuple[Any, str | None]:
+    function = getattr(module, name, None)
+    if not callable(function):
+        return None, "owner_function_unavailable"
+    try:
+        return function(*args, **kwargs), None
+    except Exception as exc:
+        return None, type(exc).__name__
+
+
+def _effects_not_run() -> dict[str, bool]:
+    return {name: False for name in _REFUSED_MODEL_EFFECTS}
+
+
+def _persistent_identity(
+    module: Any,
+    error: Any,
+    *,
+    source_space: Any,
+    conditioning_mode: Any,
+    expected_raw_sha256: Any,
+    expected_checkpoint_sha256: Any,
+    checkpoint: Any,
+    checkpoint_raw: Any,
+    observed_score: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Describe load/score identity. Do not train, restore, download, or fit."""
+
+    requested = {
+        "source_space": source_space,
+        "conditioning_mode": conditioning_mode,
+        "expected_raw_sha256": expected_raw_sha256,
+        "expected_checkpoint_sha256": expected_checkpoint_sha256,
+    }
+    record: dict[str, Any] = {
+        "owner": _PERSISTENT_OWNER,
+        "load_function": "load_compact_content_persistent_v1",
+        "score_function": "score_compact_content_persistent_v1",
+        "qualified_name_load": _PERSISTENT_OWNER + ".load_compact_content_persistent_v1",
+        "qualified_name_score": _PERSISTENT_OWNER + ".score_compact_content_persistent_v1",
+        "requested": requested,
+        "observed": {
+            "raw_sha256": hashlib.sha256(checkpoint_raw).hexdigest() if isinstance(checkpoint_raw, bytes) else None,
+            "checkpoint_sha256": None,
+            "conditioning_mode": None,
+            "source_space": None,
+            "profile": None,
+            "modes": [],
+        },
+        "load_called": False,
+        "score_called": False,
+        "restore_called": False,
+        "runtime_available": _runtime_available(),
+        "metadata_exact": False,
+        "score_schema_exact": False,
+        "engineering_evidence": False,
+        "effects": _effects_not_run(),
+    }
+    if module is None:
+        diagnostic = _diagnostic(error)
+        record.update({
+            "status": "unavailable",
+            "eligible": False,
+            "reason": "owner_unavailable",
+            "error_type": None if diagnostic is None else diagnostic.get("error_type"),
+        })
+        return record
+    modes = tuple(getattr(module, "MODES", ()) or ())
+    record["observed"]["modes"] = list(modes)
+    record["observed"]["profile"] = getattr(module, "PROFILE", None)
+    checkpoint_sha, hash_error = (None, None)
+    if isinstance(checkpoint, dict):
+        checkpoint_sha, hash_error = _owner_call(module, "compact_content_persistent_sha256", checkpoint)
+    record["observed"]["checkpoint_sha256"] = checkpoint_sha if isinstance(checkpoint_sha, str) else None
+    mode_exact = isinstance(conditioning_mode, str) and conditioning_mode in modes
+    space_exact = _source_space_text(source_space)
+    raw_exact = (
+        isinstance(record["observed"]["raw_sha256"], str)
+        and record["observed"]["raw_sha256"] == expected_raw_sha256
+        and _sha256_text(expected_raw_sha256)
+    )
+    checkpoint_exact = (
+        isinstance(checkpoint_sha, str)
+        and checkpoint_sha == expected_checkpoint_sha256
+        and _sha256_text(expected_checkpoint_sha256)
+    )
+    record["metadata_exact"] = bool(mode_exact and space_exact and raw_exact and checkpoint_exact)
+    record["observed"]["conditioning_mode"] = conditioning_mode if mode_exact else None
+    record["observed"]["source_space"] = source_space if space_exact else None
+    score_exact = False
+    if isinstance(observed_score, Mapping):
+        score_exact = (
+            observed_score.get("schema") == _PERSISTENT_SCORE_SCHEMA
+            and observed_score.get("conditioning_mode") == conditioning_mode
+            and observed_score.get("source_space") == source_space
+            and observed_score.get("checkpoint_sha256") == expected_checkpoint_sha256
+            and record["metadata_exact"]
+        )
+    record["score_schema_exact"] = score_exact
+    if not record["runtime_available"]:
+        status, reason = "unavailable", "runtime_unavailable"
+    elif hash_error == "owner_function_unavailable":
+        status, reason = "unavailable", "owner_function_unavailable"
+    elif hash_error is not None:
+        status, reason = "ineligible", "incompatible_checkpoint"
+    elif not record["metadata_exact"]:
+        status, reason = "ineligible", "incompatible_metadata"
+    elif not score_exact:
+        status, reason = "ineligible", "model_output_absent"
+    else:
+        status, reason = "candidate", "metadata_and_score_identity"
+    record.update({
+        "status": status,
+        "eligible": status == "candidate",
+        "reason": reason,
+        "error_type": hash_error if hash_error not in {None, "owner_function_unavailable"} else record.get("error_type"),
+        "engineering_evidence": bool(record["metadata_exact"] and status != "unavailable"),
+        "claimed_authority_ignored": True,
+    })
+    return record
+
+
+def _predicate_identity(
+    module: Any,
+    error: Any,
+    *,
+    objective_kind: Any,
+    expected_policy_sha256: Any,
+    expected_checkpoint_sha256: Any,
+    checkpoint: Any,
+    observed_inspect: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Describe inspect/checkpoint identity and objective preparation. Do not train."""
+
+    requested = {
+        "objective_kind": objective_kind,
+        "expected_policy_sha256": expected_policy_sha256,
+        "expected_checkpoint_sha256": expected_checkpoint_sha256,
+    }
+    record: dict[str, Any] = {
+        "owner": _PREDICATE_OWNER,
+        "inspect_function": "inspect",
+        "checkpoint_function": "checkpoint_sha256",
+        "policy_function": "policy",
+        "qualified_name_inspect": _PREDICATE_OWNER + ".inspect",
+        "qualified_name_checkpoint": _PREDICATE_OWNER + ".checkpoint_sha256",
+        "qualified_name_policy": _PREDICATE_OWNER + ".policy",
+        "requested": requested,
+        "observed": {
+            "policy_sha256": None,
+            "checkpoint_sha256": None,
+            "objective_kind": None,
+            "policy_schema": None,
+            "profile": None,
+            "authority_all_false": None,
+        },
+        "inspect_called": False,
+        "checkpoint_called": False,
+        "policy_called": False,
+        "training_executed": False,
+        "optimizer_constructed": False,
+        "metadata_exact": False,
+        "inspect_schema_exact": False,
+        "engineering_evidence": False,
+        "effects": _effects_not_run(),
+    }
+    if module is None:
+        diagnostic = _diagnostic(error)
+        record.update({
+            "status": "unavailable",
+            "eligible": False,
+            "reason": "owner_unavailable",
+            "error_type": None if diagnostic is None else diagnostic.get("error_type"),
+        })
+        return record
+    policy, policy_error = _owner_call(module, "policy", objective_kind)
+    policy_sha = None
+    policy_sha_error = None
+    if isinstance(policy, dict):
+        policy_sha, policy_sha_error = _owner_call(module, "policy_sha256", policy)
+        record["policy_called"] = policy_sha_error is None
+    checkpoint_sha, checkpoint_error = (None, None)
+    if isinstance(checkpoint, dict):
+        checkpoint_sha, checkpoint_error = _owner_call(module, "checkpoint_sha256", checkpoint)
+        record["checkpoint_called"] = checkpoint_error is None
+    authority = getattr(module, "AUTHORITY", None)
+    authority_all_false = (
+        isinstance(authority, dict)
+        and bool(authority)
+        and all(value is False for value in authority.values())
+    )
+    record["observed"].update({
+        "policy_sha256": policy_sha if isinstance(policy_sha, str) else None,
+        "checkpoint_sha256": checkpoint_sha if isinstance(checkpoint_sha, str) else None,
+        "objective_kind": policy.get("objective_kind") if isinstance(policy, dict) else None,
+        "policy_schema": policy.get("schema") if isinstance(policy, dict) else None,
+        "profile": getattr(module, "PROFILE", None),
+        "authority_all_false": authority_all_false,
+    })
+    policy_exact = (
+        isinstance(policy_sha, str)
+        and policy_sha == expected_policy_sha256
+        and _sha256_text(expected_policy_sha256)
+        and isinstance(policy, dict)
+        and policy.get("objective_kind") == objective_kind
+    )
+    checkpoint_exact = (
+        isinstance(checkpoint_sha, str)
+        and checkpoint_sha == expected_checkpoint_sha256
+        and _sha256_text(expected_checkpoint_sha256)
+    )
+    record["metadata_exact"] = bool(policy_exact and checkpoint_exact and authority_all_false)
+    inspect_exact = False
+    if isinstance(observed_inspect, Mapping):
+        inspect_exact = (
+            observed_inspect.get("schema") == _PREDICATE_CHECKPOINT_SCHEMA
+            and observed_inspect.get("checkpoint_sha256") == expected_checkpoint_sha256
+            and observed_inspect.get("objective_policy_sha256") == expected_policy_sha256
+            and record["metadata_exact"]
+        )
+    record["inspect_schema_exact"] = inspect_exact
+    owner_error = policy_error or policy_sha_error or checkpoint_error
+    if owner_error == "owner_function_unavailable":
+        status, reason = "unavailable", "owner_function_unavailable"
+    elif owner_error is not None and not isinstance(checkpoint, dict):
+        status, reason = "unavailable", "owner_call_failed"
+    elif not record["metadata_exact"]:
+        status, reason = "ineligible", "incompatible_checkpoint"
+    elif isinstance(observed_inspect, Mapping) and not inspect_exact:
+        status, reason = "ineligible", "incompatible_inspect_identity"
+    elif not inspect_exact:
+        status, reason = "ineligible", "inspect_not_executed"
+    else:
+        status, reason = "candidate", "policy_checkpoint_and_inspect_identity"
+    record.update({
+        "status": status,
+        "eligible": status == "candidate",
+        "reason": reason,
+        "error_type": owner_error if status == "unavailable" else None,
+        "engineering_evidence": bool(record["metadata_exact"] and authority_all_false),
+        "numerical_qualification_is_engineering_evidence": True,
+        "training_preparation_is_engineering_evidence": bool(record["policy_called"]),
+    })
+    return record
+
+
+def describe_qualified_model_candidate(
+    *,
+    source_space: Any = None,
+    conditioning_mode: Any = None,
+    objective_kind: Any = None,
+    expected_policy_sha256: Any = None,
+    expected_checkpoint_sha256: Any = None,
+    expected_persistent_checkpoint_sha256: Any = None,
+    expected_raw_sha256: Any = None,
+    checkpoint: Any = None,
+    persistent_checkpoint: Any = None,
+    checkpoint_raw: Any = None,
+    observed_score: Mapping[str, Any] | None = None,
+    observed_inspect: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Record qualified model identity as engineering evidence, never as authority.
+
+    Persistent load/score and predicate inspect are named and pin-checked.
+    This function does not call training, optimizer, download, restore, numerical
+    fit, load, score, or inspect. A schema-matching supplied output can be a
+    candidate only when its source-space, conditioning, policy, and checkpoint
+    pins match the owner hashes. Candidate status still grants no legal effect.
+    """
+
+    persistent_module, persistent_error = import_module_optional(_PERSISTENT_OWNER)
+    predicate_module, predicate_error = import_module_optional(_PREDICATE_OWNER)
+    persistent_sha = expected_persistent_checkpoint_sha256
+    if persistent_sha is None:
+        persistent_sha = expected_checkpoint_sha256
+    persistent = _persistent_identity(
+        persistent_module,
+        persistent_error,
+        source_space=source_space,
+        conditioning_mode=conditioning_mode,
+        expected_raw_sha256=expected_raw_sha256,
+        expected_checkpoint_sha256=persistent_sha,
+        checkpoint=persistent_checkpoint if persistent_checkpoint is not None else checkpoint,
+        checkpoint_raw=checkpoint_raw,
+        observed_score=observed_score,
+    )
+    predicate = _predicate_identity(
+        predicate_module,
+        predicate_error,
+        objective_kind=objective_kind,
+        expected_policy_sha256=expected_policy_sha256,
+        expected_checkpoint_sha256=expected_checkpoint_sha256,
+        checkpoint=checkpoint,
+        observed_inspect=observed_inspect,
+    )
+    if persistent["status"] == "unavailable" or predicate["status"] == "unavailable":
+        status = "unavailable"
+        reason = persistent["reason"] if persistent["status"] == "unavailable" else predicate["reason"]
+    elif persistent["status"] == "candidate" and predicate["status"] == "candidate":
+        status = "candidate"
+        reason = "qualified_engineering_candidate"
+    else:
+        status = "ineligible"
+        reason = persistent["reason"] if persistent["status"] != "candidate" else predicate["reason"]
+    return {
+        "schema": QUALIFIED_MODEL_CANDIDATE_SCHEMA,
+        "status": status,
+        "reason": reason,
+        "eligible": status == "candidate",
+        "eligible_as_authority": False,
+        "legally_eligible": False,
+        "role": "candidate" if status == "candidate" else "not_admitted",
+        "engineering_evidence": bool(persistent.get("engineering_evidence") or predicate.get("engineering_evidence")),
+        "live_owner_verified": False,
+        "model_executed": False,
+        "skipped": False,
+        "authority": dict(_CANDIDATE_AUTHORITY),
+        "selects_governing_law": False,
+        "satisfies_definition_review": False,
+        "proves_element": False,
+        "effects": _effects_not_run(),
+        "requested": {
+            "source_space": source_space,
+            "conditioning_mode": conditioning_mode,
+            "objective_kind": objective_kind,
+            "expected_policy_sha256": expected_policy_sha256,
+            "expected_checkpoint_sha256": expected_checkpoint_sha256,
+            "expected_persistent_checkpoint_sha256": persistent_sha,
+            "expected_raw_sha256": expected_raw_sha256,
+        },
+        "persistent": persistent,
+        "predicate": predicate,
     }

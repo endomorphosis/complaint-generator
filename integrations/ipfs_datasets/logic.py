@@ -7406,6 +7406,77 @@ def _nonproof_packet_outcome(handoff: Mapping[str, Any]) -> str:
     return "unknown"
 
 
+def gate_qualified_model_candidate(
+    requirement: Mapping[str, Any] | None = None,
+    candidate: Mapping[str, Any] | None = None,
+    **identity: Any,
+) -> Dict[str, Any]:
+    """Admit a qualified model record only as a candidate.
+
+    Predicate preparation and numerical qualification stay engineering evidence.
+    The returned record cannot select governing law, satisfy a definition review,
+    or prove an element. Missing and incompatible owners stay unavailable or
+    ineligible. This gate does not train, restore, download, or fit a model.
+    """
+
+    from .definition_evidence import describe_qualified_model_candidate
+
+    requirement_map = dict(requirement or {})
+    if candidate is None:
+        described = describe_qualified_model_candidate(**identity)
+    else:
+        described = describe_qualified_model_candidate(**identity) if identity else None
+        supplied = dict(candidate)
+        if described is None:
+            described = supplied
+        else:
+            described = dict(described)
+            described["supplied_candidate"] = {
+                "status": supplied.get("status"),
+                "selects_governing_law": False,
+                "satisfies_definition_review": False,
+                "proves_element": False,
+            }
+            if supplied.get("status") in {"unavailable", "ineligible"}:
+                described["status"] = supplied.get("status")
+                described["reason"] = supplied.get("reason") or described.get("reason")
+    status = described.get("status")
+    if status not in {"unavailable", "ineligible", "candidate"}:
+        status = "ineligible"
+        described = dict(described)
+        described["status"] = status
+        described["reason"] = "unrecognized_candidate_status"
+    admitted_text = requirement_map.get("admitted_legal_text")
+    return {
+        "schema": "qualified-model-candidate-gate/v1",
+        "status": status,
+        "reason": described.get("reason"),
+        "role": "candidate" if status == "candidate" else "not_admitted",
+        "eligible": status == "candidate",
+        "eligible_as_authority": False,
+        "legally_eligible": False,
+        "selects_governing_law": False,
+        "satisfies_definition_review": False,
+        "proves_element": False,
+        "governing_definition": None,
+        "definition_review_satisfied": False,
+        "element_proved": False,
+        "numerical_qualification_is_authority": False,
+        "training_preparation_is_authority": False,
+        "engineering_evidence": bool(described.get("engineering_evidence")),
+        "live_owner_verified": False,
+        "model_executed": False,
+        "training_executed": False,
+        "skipped": False,
+        "admitted_legal_text": admitted_text,
+        "admitted_legal_text_changed": False,
+        "proof": requirement_map.get("proof"),
+        "proof_changed": False,
+        "proof_satisfied": False,
+        "candidate": described,
+    }
+
+
 def legacy_procedural_template_attributes() -> Dict[str, Any]:
     return {
         "category": "civil_procedure",
@@ -7479,4 +7550,5 @@ __all__ = [
     "verify_element_proof_evaluation",
     "replay_satisfied_element_proof",
     "connect_definition_handoff_proof",
+    "gate_qualified_model_candidate",
 ]
