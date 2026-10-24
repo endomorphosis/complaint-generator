@@ -86,7 +86,7 @@ Implementation instructions:
 
 ## CIMP-MGND-04 Build reusable guarded synthetic case fixtures
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
