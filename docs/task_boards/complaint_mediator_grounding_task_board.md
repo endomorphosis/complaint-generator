@@ -400,7 +400,7 @@ Implementation instructions:
 
 ## CIMP-MGND-16 Acquire bounded canonical legal-source candidates
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
