@@ -139,6 +139,548 @@ class EvidencePersistenceError(EvidenceHookError):
     """Evidence metadata could not be persisted."""
 
 
+class PrivateDerivedIndexUnavailable(EvidenceHookError):
+    """Private derived text could not be contained without a plaintext fallback."""
+
+    def __init__(self, message: str = "", *, code: str = "persistence_unavailable") -> None:
+        super().__init__(message or "Private derived index is unavailable.")
+        self.code = code
+        self.public_status = "unavailable"
+
+
+class PrivateDerivedIndex:
+    """Case-owned index for private derived text.
+
+    Directory names and permission bits are recorded and are never treated as
+    encryption. Durable mode seals through the private artifact owner. Ephemeral
+    mode keeps plaintext only in this process and can be rebuilt only from that
+    owner, never from a plaintext fallback file.
+    """
+
+    def __init__(self) -> None:
+        self.bound = False
+        self.unavailable_code = ""
+        self.context: Optional[Dict[str, Any]] = None
+        self.mode = "unbound"
+        self.case_id = ""
+        self.directory_mode_private = False
+        self.entries: Dict[str, Dict[str, Any]] = {}
+        self.public_law_cache: Dict[str, Dict[str, str]] = {}
+        self.created_rows: List[int] = []
+        self._secrets: List[str] = []
+        self._counter = 0
+        self._row_counter = 0
+        self.closed = False
+        self.plaintext_fallback_published = False
+
+    def bind(
+        self,
+        context: Optional[Dict[str, Any]],
+        *,
+        unavailable_code: str = "",
+        directory_mode_private: bool = False,
+    ) -> None:
+        self.bound = True
+        self.closed = False
+        self.directory_mode_private = bool(directory_mode_private)
+        self.unavailable_code = str(unavailable_code or "")
+        self.entries = {}
+        self.created_rows = []
+        self._secrets = []
+        self.context = None
+        self.case_id = ""
+        if self.unavailable_code or not context:
+            self.mode = "unavailable"
+            return
+        case_id = str(context.get("case_id") or "")
+        if not case_id:
+            self.mode = "unavailable"
+            self.unavailable_code = self.unavailable_code or "case_unavailable"
+            return
+        self.case_id = case_id
+        self.context = {
+            "access": context.get("access"),
+            "tenant_id": context.get("tenant_id"),
+            "case_id": case_id,
+            "principal_id": context.get("principal_id") or context.get("tenant_id"),
+            "key_provider": context.get("key_provider"),
+            "backend": context.get("backend"),
+            "backend_name": context.get("backend_name") or "local_cache",
+            "pin_content": bool(context.get("pin_content", False)),
+        }
+        requested = str(context.get("index_mode") or "ephemeral")
+        if requested == "durable":
+            if not self.context.get("key_provider"):
+                self.mode = "unavailable"
+                self.unavailable_code = "key_unavailable"
+                return
+            self.mode = "durable"
+            return
+        self.mode = "ephemeral"
+
+    def status(self) -> Dict[str, Any]:
+        encrypted = self.mode == "durable" and not self.unavailable_code and not self.closed
+        return {
+            "status": "unavailable" if self.mode in {"unavailable", "unbound"} or self.unavailable_code else "available",
+            "code": self.unavailable_code,
+            "index_mode": self.mode,
+            "case_id": self.case_id,
+            "encrypted": encrypted,
+            "encryption_from_path_or_mode_bits": False,
+            "directory_mode_private": self.directory_mode_private,
+            "plaintext_fallback": False,
+            "plaintext_fallback_published": self.plaintext_fallback_published,
+            "owned": self.bound and self.mode in {"durable", "ephemeral"},
+            "rebuildable": self.mode in {"durable", "ephemeral"},
+            "closed": self.closed,
+        }
+
+    def accepts_writes(self) -> bool:
+        return self.bound and self.mode in {"durable", "ephemeral"} and not self.closed and not self.unavailable_code
+
+    def contain(self, text: str, *, kind: str) -> str:
+        if not self.accepts_writes():
+            raise PrivateDerivedIndexUnavailable(
+                "Private derived index is unavailable.",
+                code=self.unavailable_code or "persistence_unavailable",
+            )
+        payload = str(text)
+        if self.mode == "ephemeral":
+            self._counter += 1
+            token = f"cgidx:eph:{self._counter}"
+            self.entries[token] = {
+                "text": payload,
+                "case_id": self.case_id,
+                "kind": kind,
+                "durable": False,
+            }
+            self._secrets.append(payload)
+            return token
+        self._counter += 1
+        revision = f"index-{self._counter}"
+        body = json.dumps({"text": payload, "kind": kind, "case_id": self.case_id}, sort_keys=True).encode("utf-8")
+        try:
+            from integrations.private_storage import (
+                PrivateCryptoCapabilityError,
+                PrivateKeyMaterialError,
+                PrivateStorageError,
+                store_private_artifact,
+            )
+
+            context = self.context or {}
+            receipt = store_private_artifact(
+                body,
+                access=context.get("access"),
+                tenant_id=str(context.get("tenant_id") or ""),
+                case_id=self.case_id,
+                artifact_kind="index",
+                revision=revision,
+                principal_id=str(context.get("principal_id") or ""),
+                key_provider=context.get("key_provider"),
+                backend=context.get("backend"),
+                backend_name=str(context.get("backend_name") or "local_cache"),
+                pin_content=bool(context.get("pin_content", False)),
+            )
+        except PrivateDerivedIndexUnavailable:
+            raise
+        except Exception as exc:
+            code = str(getattr(exc, "code", "") or "")
+            if not code:
+                name = type(exc).__name__
+                if "Key" in name:
+                    code = "key_unavailable"
+                elif "Crypto" in name:
+                    code = "private_crypto_unavailable"
+                else:
+                    code = "persistence_unavailable"
+            raise PrivateDerivedIndexUnavailable(
+                "Private derived index is unavailable.",
+                code=code,
+            ) from exc
+        cid = str(receipt.get("cid") or "")
+        if not cid or str(receipt.get("status") or "") not in {"available", "degraded"}:
+            raise PrivateDerivedIndexUnavailable("Private derived index is unavailable.", code="persistence_unavailable")
+        token = f"cgidx:cid:{self._counter}"
+        self.entries[token] = {
+            "text": None,
+            "case_id": self.case_id,
+            "kind": kind,
+            "durable": True,
+            "cid": cid,
+            "revision": revision,
+        }
+        self._secrets.append(payload)
+        return token
+
+    def cache_public_law(self, *, citation: str, text: str) -> str:
+        digest = hashlib.sha256(f"{citation}\n{text}".encode("utf-8")).hexdigest()[:24]
+        cache_id = f"pubcache:{digest}"
+        self.public_law_cache[cache_id] = {
+            "citation": str(citation or ""),
+            "text": str(text or ""),
+            "storage_class": "public_legal_corpus",
+        }
+        return cache_id
+
+    def reveal(self, token: str, *, case_id: str = "") -> Dict[str, Any]:
+        expected = case_id or self.case_id
+        if expected and expected != self.case_id:
+            return {"status": "unavailable", "code": "case_mismatch", "plaintext_fallback": False}
+        if self.mode == "unavailable":
+            return {
+                "status": "unavailable",
+                "code": self.unavailable_code or "persistence_unavailable",
+                "plaintext_fallback": False,
+            }
+        if self.mode == "ephemeral" and self.closed:
+            return {"status": "unavailable", "code": "index_closed", "plaintext_fallback": False}
+        entry = self.entries.get(token)
+        if not entry or entry.get("case_id") != self.case_id:
+            return {"status": "unavailable", "code": "case_mismatch", "plaintext_fallback": False}
+        if entry.get("durable"):
+            opened = self._open_durable(entry)
+            if opened.get("status") != "available":
+                return opened
+            return {"status": "available", "text": opened["text"], "case_id": self.case_id, "encrypted": True}
+        if self.closed:
+            return {"status": "unavailable", "code": "index_closed", "plaintext_fallback": False}
+        return {"status": "available", "text": entry.get("text") or "", "case_id": self.case_id, "encrypted": False}
+
+    def _open_durable(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        context = self.context or {}
+        try:
+            from integrations.private_storage import retrieve_private_artifact
+
+            opened = retrieve_private_artifact(
+                str(entry.get("cid") or ""),
+                access=context.get("access"),
+                tenant_id=str(context.get("tenant_id") or ""),
+                case_id=self.case_id,
+                artifact_kind="index",
+                revision=str(entry.get("revision") or ""),
+                principal_id=str(context.get("principal_id") or ""),
+                key_provider=context.get("key_provider"),
+                backend=context.get("backend"),
+                backend_name=str(context.get("backend_name") or "local_cache"),
+            )
+        except Exception as exc:
+            return {
+                "status": "unavailable",
+                "code": str(getattr(exc, "code", "") or "persistence_unavailable"),
+                "plaintext_fallback": False,
+            }
+        data = opened.get("data")
+        if not isinstance(data, (bytes, bytearray)):
+            return {"status": "unavailable", "code": "persistence_unavailable", "plaintext_fallback": False}
+        try:
+            payload = json.loads(bytes(data).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {"status": "unavailable", "code": "persistence_unavailable", "plaintext_fallback": False}
+        if str(payload.get("case_id") or "") != self.case_id:
+            return {"status": "unavailable", "code": "case_mismatch", "plaintext_fallback": False}
+        return {"status": "available", "text": str(payload.get("text") or "")}
+
+    def close(self, *, crash: bool = False) -> Dict[str, Any]:
+        self.closed = True
+        self._secrets = []
+        if self.mode == "ephemeral":
+            self.entries = {}
+        else:
+            for entry in self.entries.values():
+                entry["text"] = None
+        return {
+            "status": "closed",
+            "crash": bool(crash),
+            "plaintext_fallback_published": False,
+            "plaintext_fallback": False,
+            "case_id": self.case_id,
+        }
+
+    def rebuild(self) -> Dict[str, Any]:
+        if not self.bound or self.mode == "unavailable":
+            return {
+                "status": "unavailable",
+                "code": self.unavailable_code or "persistence_unavailable",
+                "rebuilt": 0,
+                "plaintext_fallback": False,
+            }
+        if self.mode == "ephemeral":
+            if self.closed or not self.entries:
+                return {
+                    "status": "unavailable",
+                    "code": "ephemeral_closed",
+                    "rebuilt": 0,
+                    "plaintext_fallback": False,
+                    "case_id": self.case_id,
+                }
+            own = [entry for entry in self.entries.values() if entry.get("case_id") == self.case_id]
+            return {
+                "status": "available",
+                "rebuilt": len(own),
+                "case_id": self.case_id,
+                "plaintext_fallback": False,
+                "encrypted": False,
+            }
+        rebuilt = 0
+        for entry in list(self.entries.values()):
+            if entry.get("case_id") != self.case_id or not entry.get("durable"):
+                continue
+            opened = self._open_durable(entry)
+            if opened.get("status") != "available":
+                return {
+                    "status": "unavailable",
+                    "code": opened.get("code") or "persistence_unavailable",
+                    "rebuilt": rebuilt,
+                    "plaintext_fallback": False,
+                }
+            entry["text"] = opened["text"]
+            rebuilt += 1
+        self.closed = False
+        return {
+            "status": "available",
+            "rebuilt": rebuilt,
+            "case_id": self.case_id,
+            "plaintext_fallback": False,
+            "encrypted": True,
+        }
+
+
+class PrivateDerivedIndexMixin:
+    """Constructor-level private column containment shared by hook databases."""
+
+    def _derived(self) -> PrivateDerivedIndex:
+        index = getattr(self, "_derived_index_state", None)
+        if index is None:
+            index = PrivateDerivedIndex()
+            self._derived_index_state = index
+        return index
+
+    def bind_private_derived_index(
+        self,
+        context: Optional[Dict[str, Any]],
+        *,
+        unavailable_code: str = "",
+        directory_mode_private: bool = False,
+    ) -> Dict[str, Any]:
+        self._derived().bind(
+            context,
+            unavailable_code=unavailable_code,
+            directory_mode_private=directory_mode_private,
+        )
+        return self.private_derived_index_status()
+
+    def private_derived_index_status(self) -> Dict[str, Any]:
+        return self._derived().status()
+
+    def _private_columns_sealed(self) -> bool:
+        return self._derived().accepts_writes()
+
+    def _seal_column(self, value: Any, kind: str) -> Any:
+        if not self._private_columns_sealed() or value is None:
+            return value
+        text = str(value)
+        if text == "":
+            return text
+        return self._derived().contain(text, kind=kind)
+
+    def _seal_json(self, payload: Any) -> str:
+        if not self._private_columns_sealed():
+            return json.dumps(payload if payload is not None else {})
+        return json.dumps(self._seal_nested(payload))
+
+    def _seal_nested(self, value: Any, *, kind: str = "nested") -> Any:
+        if not self._private_columns_sealed():
+            return value
+        if isinstance(value, str):
+            if len(value) < 8:
+                return value
+            return self._seal_column(value, kind)
+        if isinstance(value, dict):
+            return {key: self._seal_nested(item, kind=str(key)) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._seal_nested(item, kind=kind) for item in value]
+        return value
+
+    def cache_public_law_source(self, *, citation: str, text: str) -> Dict[str, Any]:
+        cache_id = self._derived().cache_public_law(citation=citation, text=text)
+        return {
+            "status": "available",
+            "cache_id": cache_id,
+            "storage_class": "public_legal_corpus",
+            "separated_from_private_associations": True,
+        }
+
+    def read_public_law_source(self, cache_id: str) -> Dict[str, Any]:
+        found = self._derived().public_law_cache.get(cache_id)
+        if not found:
+            return {"status": "unavailable", "code": "public_cache_miss"}
+        return {"status": "available", **found}
+
+    def commit_private_derived(
+        self,
+        *,
+        case_id: str,
+        kind: str,
+        text: str,
+        public_cache_id: str = "",
+    ) -> Dict[str, Any]:
+        index = self._derived()
+        if not index.bound or index.mode == "unavailable" or index.unavailable_code:
+            return {
+                "status": "unavailable",
+                "code": index.unavailable_code or "persistence_unavailable",
+                "plaintext_persisted": False,
+                "plaintext_fallback": False,
+                "persisted": False,
+            }
+        if str(case_id or "") != index.case_id:
+            return {
+                "status": "unavailable",
+                "code": "case_mismatch",
+                "plaintext_persisted": False,
+                "plaintext_fallback": False,
+                "persisted": False,
+            }
+        try:
+            token = index.contain(str(text or ""), kind=kind)
+        except PrivateDerivedIndexUnavailable as exc:
+            return {
+                "status": "unavailable",
+                "code": exc.code,
+                "plaintext_persisted": False,
+                "plaintext_fallback": False,
+                "persisted": False,
+            }
+        db_path = getattr(self, "db_path", None)
+        if not DUCKDB_AVAILABLE or not db_path:
+            return {
+                "status": "unavailable" if index.mode == "durable" else "available",
+                "code": "persistence_unavailable" if index.mode == "durable" else "",
+                "token": token,
+                "plaintext_persisted": False,
+                "plaintext_fallback": False,
+                "row_persisted": False,
+                "index_mode": index.mode,
+                "case_id": index.case_id,
+            }
+        try:
+            conn = duckdb.connect(db_path)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS private_derived_index (
+                    id BIGINT,
+                    case_id VARCHAR,
+                    kind VARCHAR,
+                    token VARCHAR,
+                    public_cache_id VARCHAR
+                )
+                """
+            )
+            index._row_counter += 1
+            row_id = index._row_counter
+            conn.execute(
+                "INSERT INTO private_derived_index VALUES (?, ?, ?, ?, ?)",
+                [row_id, index.case_id, kind, token, public_cache_id or ""],
+            )
+            conn.close()
+        except Exception:
+            return {
+                "status": "unavailable",
+                "code": "persistence_unavailable",
+                "plaintext_persisted": False,
+                "plaintext_fallback": False,
+                "persisted": False,
+            }
+        index.created_rows.append(row_id)
+        return {
+            "status": "available",
+            "row_id": row_id,
+            "token": token,
+            "case_id": index.case_id,
+            "index_mode": index.mode,
+            "encrypted": index.mode == "durable",
+            "encryption_from_path_or_mode_bits": False,
+            "plaintext_persisted": False,
+            "plaintext_fallback": False,
+            "row_persisted": True,
+            "public_cache_id": public_cache_id or "",
+        }
+
+    def read_private_derived(self, token: str, *, case_id: str = "") -> Dict[str, Any]:
+        return self._derived().reveal(token, case_id=case_id)
+
+    def close_private_derived_index(self, *, crash: bool = False) -> Dict[str, Any]:
+        return self._derived().close(crash=crash)
+
+    def rebuild_private_derived_index(self) -> Dict[str, Any]:
+        rebuilt = self._derived().rebuild()
+        if rebuilt.get("status") != "available" or self._derived().mode != "durable":
+            return rebuilt
+        for entry in self._derived().entries.values():
+            if entry.get("case_id") == self._derived().case_id and entry.get("text"):
+                entry["text"] = None
+        return rebuilt
+
+    def audit_new_derived_rows(self) -> Dict[str, Any]:
+        index = self._derived()
+        if not index.bound:
+            return {"status": "unavailable", "code": "not_bound", "scope": "newly_created", "row_count": 0}
+        if not index.created_rows:
+            return {
+                "status": "available",
+                "scope": "newly_created",
+                "row_count": 0,
+                "plaintext_private_columns": 0,
+                "encryption_from_path_or_mode_bits": False,
+            }
+        db_path = getattr(self, "db_path", None)
+        if not DUCKDB_AVAILABLE or not db_path:
+            return {
+                "status": "unavailable",
+                "code": "persistence_unavailable",
+                "scope": "newly_created",
+                "plaintext_persisted": False,
+            }
+        leaked = 0
+        found = 0
+        try:
+            conn = duckdb.connect(db_path)
+            for row_id in list(index.created_rows):
+                row = conn.execute(
+                    "SELECT case_id, kind, token, public_cache_id FROM private_derived_index WHERE id = ?",
+                    [row_id],
+                ).fetchone()
+                if row is None:
+                    continue
+                found += 1
+                blob = " ".join(str(part or "") for part in row)
+                if str(row[0] or "") != index.case_id:
+                    leaked += 1
+                for secret in index._secrets:
+                    if secret and secret in blob:
+                        leaked += 1
+                if str(row[2] or "").startswith("cgidx:"):
+                    continue
+                leaked += 1
+            conn.close()
+        except Exception:
+            return {
+                "status": "unavailable",
+                "code": "persistence_unavailable",
+                "scope": "newly_created",
+                "plaintext_fallback": False,
+            }
+        return {
+            "status": "available",
+            "scope": "newly_created",
+            "row_count": found,
+            "plaintext_private_columns": leaked,
+            "encrypted": index.mode == "durable",
+            "encryption_from_path_or_mode_bits": False,
+            "directory_mode_private": index.directory_mode_private,
+        }
+
+
 class EvidenceQueryError(EvidenceHookError):
     """Evidence metadata could not be queried from the configured backend."""
 
@@ -1013,7 +1555,7 @@ class EvidenceStorageHook:
         return bytes(data)
 
 
-class EvidenceStateHook:
+class EvidenceStateHook(PrivateDerivedIndexMixin):
     """
     Hook for managing evidence state in DuckDB.
     
@@ -1320,8 +1862,8 @@ class EvidenceStateHook:
                     chunk.get('index'),
                     chunk.get('start'),
                     chunk.get('end'),
-                    chunk.get('text'),
-                    json.dumps(_merge_intake_summary_handoff_metadata(chunk_metadata, self.mediator)),
+                    self._seal_column(chunk.get('text'), 'chunk_text'),
+                    self._seal_json(_merge_intake_summary_handoff_metadata(chunk_metadata, self.mediator)),
                 ],
             )
 
@@ -1341,9 +1883,9 @@ class EvidenceStateHook:
                     evidence_id,
                     entity.get('id'),
                     entity.get('type'),
-                    entity.get('name'),
+                    self._seal_column(entity.get('name'), 'entity_name'),
                     entity.get('confidence', 0.0),
-                    json.dumps(_merge_intake_summary_handoff_metadata(
+                    self._seal_json(_merge_intake_summary_handoff_metadata(
                         entity.get('attributes', {}),
                         self.mediator,
                     )),
@@ -1449,11 +1991,11 @@ class EvidenceStateHook:
                 [
                     evidence_id,
                     fact.fact_id,
-                    fact.text,
+                    self._seal_column(fact.text, 'fact_text'),
                     fact.source_artifact_id,
                     fact.confidence,
-                    json.dumps(fact.metadata),
-                    json.dumps(fact.provenance.as_dict()),
+                    self._seal_json(fact.metadata),
+                    self._seal_json(fact.provenance.as_dict()),
                     fact.source_family,
                     fact.source_record_id,
                     fact.source_ref,
@@ -1468,7 +2010,7 @@ class EvidenceStateHook:
                     fact.page_count,
                     str(fact.metadata.get('chunk_id') or ''),
                     int(fact.metadata.get('chunk_index') or 0),
-                    json.dumps(fact.metadata.get('source_passage') or {}),
+                    self._seal_json(fact.metadata.get('source_passage') or {}),
                 ],
             )
 
@@ -1885,24 +2427,24 @@ class EvidenceStateHook:
                 evidence_info['cid'],
                 evidence_info['type'],
                 evidence_info['size'],
-                json.dumps(normalized_evidence_metadata),
+                self._seal_json(normalized_evidence_metadata),
                 complaint_id,
                 claim_type,
-                description,
+                self._seal_column(description, 'description'),
                 provenance_payload.get('content_hash'),
                 provenance_payload.get('source_url'),
                 provenance_payload.get('acquisition_method'),
-                json.dumps(provenance_payload),
+                self._seal_json(provenance_payload),
                 claim_element_id,
-                claim_element,
+                self._seal_column(claim_element, 'claim_element'),
                 parse_contract.get('status') or parse_metadata.get('status'),
                 parse_contract.get('chunk_count', 0),
-                parsed_text_preview,
-                json.dumps(parse_metadata),
+                self._seal_column(parsed_text_preview, 'parsed_text_preview'),
+                self._seal_json(parse_metadata),
                 document_graph.get('status') or document_graph_summary.get('status'),
                 len(document_graph.get('entities', []) or []),
                 len(document_graph.get('relationships', []) or []),
-                json.dumps(graph_metadata),
+                self._seal_json(graph_metadata),
             ]).fetchone()
             
             record_id = result[0]

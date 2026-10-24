@@ -3264,6 +3264,7 @@ class ComplaintWorkspaceService:
         )
         mediator.state.username = user_id
         self.activate_private_evidence_hook(mediator, user_id, case_id)
+        self.activate_private_derived_indexes(mediator, user_id, case_id)
         self._interview_mediators[cache_key] = mediator
         return mediator
 
@@ -3295,6 +3296,59 @@ class ComplaintWorkspaceService:
             "case_id": bound["case_id"],
             "principal_id": bound["principal_id"],
             "plaintext_fallback": False,
+        }
+
+    def activate_private_derived_indexes(self, mediator: Any, user_id: str, case_id: Optional[str] = None) -> Dict[str, Any]:
+        """Bind hook derived text to the encrypted owner or leave persistence unavailable.
+
+        An interview-db directory name or mode 0700 is not encryption. Missing
+        keys do not open a plaintext preview path.
+        """
+
+        hooks = (
+            getattr(mediator, "evidence_state", None),
+            getattr(mediator, "claim_support", None),
+            getattr(mediator, "legal_authority_storage", None),
+        )
+        present = [hook for hook in hooks if hook is not None and hasattr(hook, "bind_private_derived_index")]
+        try:
+            context = self._private_artifact_context(user_id, case_id, revision="index-1")
+        except WorkspacePersistenceError as exc:
+            for hook in present:
+                hook.bind_private_derived_index(
+                    None,
+                    unavailable_code=str(exc.code or "key_unavailable"),
+                    directory_mode_private=True,
+                )
+            return {
+                "status": "unavailable",
+                "code": exc.code,
+                "encrypted": False,
+                "encryption_from_path_or_mode_bits": False,
+                "directory_mode_private": True,
+                "plaintext_fallback": False,
+                "index_mode": "unavailable",
+            }
+        bound = {
+            **context,
+            "backend": self._private_local_backend(),
+            "backend_name": "local_cache",
+            "pin_content": False,
+            "index_mode": "durable",
+            "revision": "index-1",
+        }
+        for hook in present:
+            hook.bind_private_derived_index(bound, directory_mode_private=True)
+        return {
+            "status": "available",
+            "encrypted": True,
+            "encryption_from_path_or_mode_bits": False,
+            "directory_mode_private": True,
+            "plaintext_fallback": False,
+            "index_mode": "durable",
+            "case_id": bound["case_id"],
+            "tenant_id": bound["tenant_id"],
+            "remote_durable": False,
         }
 
     def _private_artifact_context(self, user_id: str, case_id: Optional[str] = None, *, revision: str = "session-v1") -> Dict[str, Any]:
