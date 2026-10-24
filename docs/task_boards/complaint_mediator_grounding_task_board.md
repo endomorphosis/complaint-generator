@@ -296,7 +296,7 @@ Implementation instructions:
 
 ## CIMP-MGND-12 Route terminal edit through canonical graph correction
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
