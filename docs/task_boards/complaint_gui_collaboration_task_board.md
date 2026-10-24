@@ -191,7 +191,7 @@ Implementation instructions:
 
 ## CIMP-GUI-07 Introduce stable independent case namespaces
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
