@@ -3463,6 +3463,213 @@ def _unavailable_rule_candidates(reason: str) -> Dict[str, Any]:
             "promoted_requirements": [], "candidate_count": 1, "promoted_count": 0}
 
 
+_ACQUIRED_TRUE_FLAGS = ("verified", "applicable", "support_eligible", "promoted", "proof")
+_ACQUIRED_TEXT_ALIASES = ("source_text", "text", "content", "source_passage", "full_text", "section_text")
+
+
+def _acquired_flag_is_true(payload: Any) -> bool:
+    if not isinstance(payload, Mapping):
+        return False
+    return any(payload.get(key) is True for key in _ACQUIRED_TRUE_FLAGS)
+
+
+def _acquired_hash_hex(value: Any) -> str:
+    return _normalize_sha256(value)
+
+
+def prepare_acquired_authority_record(
+    candidate: Mapping[str, Any],
+    *,
+    jurisdiction: str,
+    as_of_date: str,
+) -> Dict[str, Any]:
+    """Turn one acquired owned candidate into a canonical storage record.
+
+    Source, authority-text, and span hashes are recomputed from the owned
+    passage bytes. Caller verification flags are not stored. Metadata text
+    that is not the owned passage, and a citation that is neither the source
+    locator nor present in the owned passage, are rejected.
+    """
+    rejected = {
+        "status": "rejected",
+        "record": None,
+        "hashes": {},
+        "source_locator": "",
+        "authority_version": "",
+        "jurisdiction": "",
+        "effective_date": "",
+        "as_of_date": "",
+    }
+    if not isinstance(candidate, Mapping) or len(candidate) > 64:
+        return dict(rejected, reason="candidate_malformed")
+    if _acquired_flag_is_true(candidate) or _acquired_flag_is_true(candidate.get("metadata")):
+        return dict(rejected, reason="caller_verification_flag")
+    source_text = candidate.get("source_text")
+    locator = candidate.get("locator")
+    version = candidate.get("version")
+    if not isinstance(source_text, str) or not source_text or len(source_text) > _TEMPORAL_MAX_TEXT:
+        return dict(rejected, reason="source_text_missing")
+    if not isinstance(locator, str) or not locator.strip() or len(locator) > 1024:
+        return dict(rejected, reason="locator_missing")
+    if not isinstance(version, str) or not version.strip() or len(version) > 1024:
+        return dict(rejected, reason="missing_edition")
+    owned = source_text.encode("utf-8")
+    if candidate.get("source_byte_length") not in (None, len(owned)):
+        return dict(rejected, reason="owned_byte_mismatch")
+    locator = locator.strip()
+    version = version.strip()
+    retrieval = candidate.get("retrieval") if isinstance(candidate.get("retrieval"), Mapping) else {}
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), Mapping) else {}
+    if len(retrieval) > 64 or len(metadata) > 64:
+        return dict(rejected, reason="candidate_malformed")
+    for container in (candidate, metadata, retrieval):
+        for key in _ACQUIRED_TEXT_ALIASES:
+            value = container.get(key)
+            if isinstance(value, str) and value and value != source_text and not (container is candidate and key == "source_text"):
+                return dict(rejected, reason="substituted_metadata_text")
+    citation = candidate.get("citation")
+    if citation not in (None, ""):
+        if not isinstance(citation, str) or not citation.strip() or len(citation) > 1024:
+            return dict(rejected, reason="model_invented_citation")
+        citation = citation.strip()
+        if citation != locator and citation not in source_text:
+            return dict(rejected, reason="model_invented_citation")
+    else:
+        citation = ""
+    for container in (metadata, candidate):
+        alternate = container.get("authority_version") or container.get("corpus_version")
+        if container is candidate:
+            alternate = container.get("authority_version")
+        if isinstance(alternate, str) and alternate.strip() and alternate.strip() != version:
+            return dict(rejected, reason="substituted_authority_version")
+    meta_version = metadata.get("authority_version") or metadata.get("version") or metadata.get("corpus_version")
+    if isinstance(meta_version, str) and meta_version.strip() and meta_version.strip() != version:
+        return dict(rejected, reason="substituted_authority_version")
+    resolved_jurisdiction = str(jurisdiction or "").strip()
+    if not resolved_jurisdiction or resolved_jurisdiction.lower() in _UNKNOWN_TOKENS:
+        return dict(rejected, reason="missing_jurisdiction")
+    for container in (candidate, metadata):
+        supplied_jurisdiction = container.get("jurisdiction")
+        if isinstance(supplied_jurisdiction, str) and supplied_jurisdiction.strip():
+            if supplied_jurisdiction.strip().lower() in _UNKNOWN_TOKENS:
+                return dict(rejected, reason="substituted_jurisdiction")
+            if supplied_jurisdiction.strip() not in {resolved_jurisdiction, resolved_jurisdiction.upper(), resolved_jurisdiction.lower()}:
+                # Accept only the explicit jurisdiction already selected for admission.
+                folded = supplied_jurisdiction.strip()
+                if folded.lower() != resolved_jurisdiction.lower():
+                    return dict(rejected, reason="substituted_jurisdiction")
+    if str(retrieval.get("jurisdiction_status") or "") == "mismatch":
+        return dict(rejected, reason="substituted_jurisdiction")
+    effective = retrieval.get("effective_date")
+    if not isinstance(effective, str) or not _iso_date(effective):
+        meta_effective = metadata.get("effective_date")
+        effective = meta_effective if isinstance(meta_effective, str) else ""
+    effective = _iso_date(effective)
+    if not effective:
+        return dict(rejected, reason="missing_effective_date")
+    for container in (candidate, metadata):
+        supplied_effective = container.get("effective_date")
+        if isinstance(supplied_effective, str) and supplied_effective.strip() and _iso_date(supplied_effective) != effective:
+            return dict(rejected, reason="substituted_effective_date")
+    as_of = _iso_date(as_of_date)
+    candidate_as_of = candidate.get("law_query_date")
+    if isinstance(candidate_as_of, Mapping):
+        candidate_as_of = candidate_as_of.get("precise_date")
+    if isinstance(candidate_as_of, str) and candidate_as_of.strip() and _iso_date(candidate_as_of) not in {"", as_of}:
+        return dict(rejected, reason="substituted_as_of_date")
+    if not as_of:
+        return dict(rejected, reason="missing_as_of_date")
+    source_hash = sha256_utf8(source_text)
+    sentences = _iter_rule_sentences(source_text)
+    span_hash = ""
+    span: Optional[Dict[str, Any]] = None
+    if len(sentences) == 1:
+        sentence, char_start, char_end = sentences[0]
+        start, end = _byte_span(source_text, char_start, char_end)
+        span_bytes = owned[start:end]
+        if span_bytes.decode("utf-8") != sentence:
+            return dict(rejected, reason="span_byte_mismatch")
+        span_hash = hashlib.sha256(span_bytes).hexdigest()
+        span = {"start": start, "end": end, "text": sentence, "unit": "utf-8-bytes"}
+    elif source_text and not sentences:
+        span_hash = source_hash
+        span = {"start": 0, "end": len(owned), "text": source_text, "unit": "utf-8-bytes"}
+    supplied_span = candidate.get("source_span")
+    if isinstance(supplied_span, Mapping) and span is not None:
+        try:
+            if int(supplied_span.get("start")) != span["start"] or int(supplied_span.get("end")) != span["end"]:
+                return dict(rejected, reason="substituted_source_span")
+        except (TypeError, ValueError):
+            return dict(rejected, reason="substituted_source_span")
+        if isinstance(supplied_span.get("text"), str) and supplied_span.get("text") != span["text"]:
+            return dict(rejected, reason="substituted_source_span")
+    for container in (candidate, metadata, retrieval):
+        for key in ("source_hash", "content_hash", "authority_hash", "authority_text_sha256"):
+            if key not in container or container.get(key) in (None, ""):
+                continue
+            if _acquired_hash_hex(container.get(key)) != source_hash:
+                return dict(rejected, reason="caller_hash_mismatch")
+        if container.get("span_sha256") not in (None, "") and span_hash:
+            if _acquired_hash_hex(container.get("span_sha256")) != span_hash:
+                return dict(rejected, reason="caller_hash_mismatch")
+    authority_id = locator
+    stored_citation = citation or locator
+    hashes = {
+        "source_hash": source_hash,
+        "authority_text_sha256": source_hash,
+        "span_sha256": span_hash,
+    }
+    record_metadata = {
+        "authority_id": authority_id,
+        "authority_version": version,
+        "version": version,
+        "jurisdiction": resolved_jurisdiction,
+        "source_hash": source_hash,
+        "authority_text_sha256": source_hash,
+        "span_sha256": span_hash,
+        "content_hash_scope": "authority_text",
+        "effective_date": effective,
+        "as_of_date": as_of,
+        "source_locator": locator,
+        "locator_kind": str(candidate.get("locator_kind") or ""),
+        "law_version_id": authority_id + ":" + version,
+        "law_versions": [{
+            "law_version_id": authority_id + ":" + version,
+            "authority_id": authority_id,
+            "citation": stored_citation,
+            "jurisdiction": resolved_jurisdiction,
+            "version": version,
+            "effective_date": effective,
+        }],
+        "changes": [],
+        "source_family": str(candidate.get("source_family") or retrieval.get("source_family") or ""),
+        "parameter_api": str(candidate.get("parameter_api") or ""),
+    }
+    if span is not None:
+        record_metadata["source_span"] = span
+    record = {
+        "type": str(candidate.get("source_family") or "statute"),
+        "source": str(candidate.get("parameter_api") or candidate.get("source_family") or "canonical_corpus"),
+        "citation": stored_citation,
+        "title": locator,
+        "content": source_text,
+        "url": locator if candidate.get("locator_kind") == "uri" else "",
+        "jurisdiction": resolved_jurisdiction,
+        "metadata": record_metadata,
+    }
+    return {
+        "status": "admitted",
+        "reason": "owned_bytes",
+        "record": record,
+        "hashes": hashes,
+        "source_locator": locator,
+        "authority_version": version,
+        "jurisdiction": resolved_jurisdiction,
+        "effective_date": effective,
+        "as_of_date": as_of,
+    }
+
+
 def extract_source_bound_rule_candidates(authority: Mapping[str, Any]) -> Dict[str, Any]:
     """Extract rule candidates from authority text and promote only exact matches.
 
@@ -6717,6 +6924,7 @@ __all__ = [
     "_COMPLAINT_PREDICATE_TEMPLATES",
     "SOURCE_BOUND_RULE_CONTRACT",
     "extract_source_bound_rule_candidates",
+    "prepare_acquired_authority_record",
     "evaluate_temporal_requirement_applicability",
     "is_applicable_legal_requirement",
     "requirement_treatment_support",

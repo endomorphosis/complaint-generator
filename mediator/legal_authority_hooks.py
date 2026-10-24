@@ -2763,6 +2763,44 @@ class LegalAuthorityStorageHook(PrivateDerivedIndexMixin):
 
         return None
     
+    def store_acquired_authority(self, authority_data: Dict[str, Any],
+                                user_id: str, complaint_id: Optional[str] = None,
+                                claim_type: Optional[str] = None) -> Dict[str, Any]:
+        """Store one canonical acquired record through upsert_authority.
+
+        Caller verification flags are refused here. This method does not add
+        dependency-graph nodes and does not treat storage as proof.
+        """
+        refused = {'record_id': -1, 'created': False, 'reused': False, 'status': 'rejected'}
+        if not isinstance(authority_data, dict):
+            return dict(refused, reason='malformed_record')
+        metadata = authority_data.get('metadata') if isinstance(authority_data.get('metadata'), dict) else {}
+        for key in ('verified', 'applicable', 'support_eligible', 'promoted', 'proof'):
+            if authority_data.get(key) is True or metadata.get(key) is True:
+                return dict(refused, reason='caller_verification_flag')
+        content = authority_data.get('content')
+        if not isinstance(content, str) or not content:
+            return dict(refused, reason='source_text_missing')
+        for key in ('source_text', 'text', 'source_passage'):
+            alternate = metadata.get(key)
+            if isinstance(alternate, str) and alternate and alternate != content:
+                return dict(refused, reason='substituted_metadata_text')
+        result = self.upsert_authority(
+            authority_data,
+            user_id,
+            complaint_id=complaint_id,
+            claim_type=claim_type,
+            search_query=None,
+        )
+        stored = dict(result)
+        if stored.get('record_id') in (None, -1):
+            stored['status'] = 'unavailable'
+            stored['reason'] = 'storage_unavailable'
+        else:
+            stored['status'] = 'stored'
+            stored['reason'] = 'upsert_authority'
+        return stored
+
     def add_authority(self, authority_data: Dict[str, Any],
                      user_id: str, complaint_id: Optional[str] = None,
                      claim_type: Optional[str] = None,
