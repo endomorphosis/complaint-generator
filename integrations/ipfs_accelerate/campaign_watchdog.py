@@ -145,6 +145,19 @@ class ComplaintCampaignWatchdog:
                  or (state == "stopped" and automatic_stop)))
         selected_at = self.runner._event_timestamp({"timestamp": native.get("active_task_started_at")}) or 0
         grace_started = max(float(launch.get("started_at") or 0), selected_at)
+        # A live heartbeat can coexist with an orphaned claim or an idle
+        # selector. Logical ready work distinguishes that mechanical block
+        # from a task genuinely waiting for dependencies or user input.
+        if (state in {"blocked", "running"} and not hold and pending
+                and status.get("board", {}).get("ready_task_ids")
+                and not active and not native.get("implementation_in_progress")
+                and not status.get("provider_progress_verified")
+                and not status.get("validation_activity_verified")
+                and self.clock() >= grace_started + self.runner.STALL_SECONDS):
+            state = "no_progress"
+            permitted = bool(bound and not status.get("native_read_errors")
+                and not self.runner._claim_proof_conflict(native)
+                and status.get("worker_liveness") not in {"unknown", "pid_reuse"})
         result = {"schema": "campaign-progress-observation@1", "scope": dict(self.scope),
             "status": "complete" if completed else state, "healthy": completed or status.get("healthy") is True,
             "completion_verified": completed, "manual_hold": bool(hold), "hold_reason": hold,

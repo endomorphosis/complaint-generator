@@ -51,6 +51,9 @@ Disable it with `systemctl --user disable --now UNIT.timer`.
 Healthy provider or validation progress is observed without restarting. A
 heartbeat or PID alone does not count as work. Startup grace derives from the
 actual launch or task-selection time; polling cannot extend it.
+An idle selector or blocked queue with logically ready tasks and no active
+worker is treated as lack of progress after the stall threshold. A board with
+unmet dependencies or an explicit hold remains held.
 
 A recoverable failure must be observed twice, at least 30 seconds apart, with
 the same task and progress identity. Changing the owner resets confirmation,

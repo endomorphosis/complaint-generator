@@ -33,7 +33,7 @@ def _adapter(tmp_path, monkeypatch, *, state="stalled", hold=False, completed=Fa
             "manual_hold": hold, "implementation_in_progress": False}}
     runner = SimpleNamespace(status=lambda *_: deepcopy(view),
         _native_modules=lambda *_: (None, SimpleNamespace(parse_task_file=lambda *a, **k: [task])),
-        TASK_PREFIX="## TASK-", STARTUP_SECONDS=90,
+        TASK_PREFIX="## TASK-", STARTUP_SECONDS=90, STALL_SECONDS=180,
         _event_timestamp=lambda _: None,
         _claim_proof_conflict=lambda _: None,
         _atomic_json=lambda p, x: p.write_text(json.dumps(x)), owns_process=lambda _: True)
@@ -87,6 +87,31 @@ def test_observation_token_excludes_polling_heartbeat_and_age(tmp_path, monkeypa
     assert watcher.observe() == first
     view["provider_execution_evidence"] = {"frame_counts": {"usage": 1}, "log_bytes": 80}
     assert watcher.observe()["progress_token"] != first["progress_token"]
+
+
+@pytest.mark.parametrize("native_status", ["blocked", "running"])
+def test_ready_work_without_selected_worker_is_recoverable_despite_heartbeat(tmp_path, monkeypatch, native_status):
+    watcher, _, view = _adapter(tmp_path, monkeypatch, state=native_status)
+    view.update(healthy=True, native_heartbeat_age_seconds=0.001)
+    view["board"]["ready_task_ids"] = ["TASK-1"]
+    result = watcher.observe()
+    assert result["status"] == "no_progress" and result["recovery_permitted"]
+
+
+@pytest.mark.parametrize("legitimate_wait", ["dependencies", "active_worker", "manual_hold", "startup"])
+def test_ready_work_detection_preserves_legitimate_waits(tmp_path, monkeypatch, legitimate_wait):
+    watcher, _, view = _adapter(tmp_path, monkeypatch, state="blocked")
+    view["board"]["ready_task_ids"] = ["TASK-1"]
+    if legitimate_wait == "dependencies":
+        view["board"]["ready_task_ids"] = []
+    elif legitimate_wait == "active_worker":
+        view["native_state"].update(active_task_id="TASK-1", active_task_cid="current-cid", implementation_in_progress=True)
+    elif legitimate_wait == "manual_hold":
+        view["native_state"]["manual_hold"] = True
+    else:
+        watcher.clock = lambda: 10
+    result = watcher.observe()
+    assert result["status"] == "blocked" and not result["recovery_permitted"]
 
 
 @pytest.mark.parametrize("damage", ["owner", "hold", "progress"])
