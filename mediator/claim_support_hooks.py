@@ -35,6 +35,7 @@ from complaint_analysis.temporal_rule_profiles import (
     rank_follow_ups,
 )
 from claim_support_review import _merge_intake_summary_handoff_metadata
+from mediator.evidence_hooks import PrivateDerivedIndexMixin
 from ._claim_support_reasoning import (
     extract_logic_contradiction_count as _extract_logic_contradiction_count_payload,
     extract_logic_proof_counts as _extract_logic_proof_counts_payload,
@@ -96,7 +97,7 @@ _ENRICHMENT_QUEUE_DDL = """
 """
 
 
-class ClaimSupportHook:
+class ClaimSupportHook(PrivateDerivedIndexMixin):
     """Track which evidence and authorities support each claim type."""
 
     _CONTENT_ORIGIN_ARTIFACT_FAMILY = CONTENT_ORIGIN_ARTIFACT_FAMILY
@@ -4802,13 +4803,13 @@ class ClaimSupportHook:
                     complaint_id,
                     claim_type,
                     claim_element_id,
-                    claim_element_text,
+                    self._seal_column(claim_element_text, 'claim_element_text'),
                     support_kind,
                     support_ref,
-                    support_label,
+                    self._seal_column(support_label, 'support_label'),
                     source_table,
                     support_strength,
-                    json.dumps(normalized_metadata or {}),
+                    self._seal_json(normalized_metadata or {}),
                 ],
             ).fetchone()
             conn.close()

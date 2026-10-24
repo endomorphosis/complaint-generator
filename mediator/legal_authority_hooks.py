@@ -29,6 +29,7 @@ from integrations.ipfs_datasets.types import (
     ProvenanceRecord,
     RuleCandidate,
 )
+from mediator.evidence_hooks import PrivateDerivedIndexMixin
 from integrations.ipfs_datasets.legal import (
     LEGAL_SCRAPERS_AVAILABLE,
     LEGAL_SOURCE_AVAILABILITY,
@@ -1250,7 +1251,7 @@ Return only the search terms, one per line."""
         return envelope
 
 
-class LegalAuthorityStorageHook:
+class LegalAuthorityStorageHook(PrivateDerivedIndexMixin):
     """
     Hook for storing legal authorities in DuckDB.
     
@@ -1616,8 +1617,8 @@ class LegalAuthorityStorageHook:
                     chunk.get('index'),
                     chunk.get('start'),
                     chunk.get('end'),
-                    chunk.get('text'),
-                    json.dumps(_merge_intake_summary_handoff_metadata(chunk_metadata, self.mediator)),
+                    '' if getattr(self, '_suppress_authority_plaintext', False) else self._seal_column(chunk.get('text'), 'chunk_text'),
+                    self._seal_json(_merge_intake_summary_handoff_metadata(chunk_metadata, self.mediator)),
                 ],
             )
 
@@ -1681,7 +1682,7 @@ class LegalAuthorityStorageHook:
                 [
                     authority_id,
                     fact.fact_id,
-                    fact.text,
+                    '' if getattr(self, '_suppress_authority_plaintext', False) else self._seal_column(fact.text, 'fact_text'),
                     fact.source_authority_id,
                     fact.confidence,
                     json.dumps(fact.metadata),
@@ -2873,7 +2874,35 @@ class LegalAuthorityStorageHook:
                     claim_element_id=normalized_authority.get('claim_element_id'),
                 )
                 return {'record_id': existing_record_id, 'created': False, 'reused': True}
-            
+
+            stored_content = normalized_authority.get('content')
+            stored_preview = parsed_text_preview
+            stored_title = normalized_authority.get('title')
+            stored_claim_element = claim_element.get('claim_element')
+            authority_meta = authority_data.get('metadata') if isinstance(authority_data.get('metadata'), dict) else {}
+            is_public_law = (
+                authority_data.get('storage_class') == 'public_legal_corpus'
+                or authority_data.get('classification') == 'public_legal_corpus'
+                or authority_meta.get('storage_class') == 'public_legal_corpus'
+            )
+            if is_public_law and self._private_columns_sealed():
+                cached = self.cache_public_law_source(
+                    citation=str(normalized_authority.get('citation') or ''),
+                    text=str(stored_content or stored_preview or ''),
+                )
+                authority_record_metadata = dict(authority_record_metadata)
+                authority_record_metadata['public_cache_id'] = cached['cache_id']
+                authority_record_metadata['storage_class'] = 'public_legal_corpus'
+                stored_content = ''
+                stored_preview = ''
+            if self._private_columns_sealed() and not is_public_law:
+                stored_content = self._seal_column(stored_content, 'content')
+                stored_preview = self._seal_column(stored_preview, 'parsed_text_preview')
+                stored_title = self._seal_column(stored_title, 'title')
+            if self._private_columns_sealed():
+                stored_claim_element = self._seal_column(stored_claim_element, 'claim_element')
+                search_query = self._seal_column(search_query, 'search_query')
+
             result = conn.execute("""
                 INSERT INTO legal_authorities (
                     user_id, complaint_id, claim_type, authority_type,
@@ -2892,21 +2921,21 @@ class LegalAuthorityStorageHook:
                 normalized_authority.get('type', 'unknown'),
                 normalized_authority.get('source', 'unknown'),
                 normalized_authority.get('citation'),
-                normalized_authority.get('title'),
-                normalized_authority.get('content'),
+                stored_title,
+                stored_content,
                 normalized_authority.get('url'),
-                json.dumps(normalized_authority.get('metadata', {})),
+                self._seal_json(authority_record_metadata),
                 normalized_authority.get('relevance_score', 0.5),
                 search_query,
                 provenance.jurisdiction,
                 provenance.source_system,
-                json.dumps(provenance.as_dict()),
+                self._seal_json(provenance.as_dict()),
                 claim_element.get('claim_element_id'),
-                claim_element.get('claim_element'),
+                stored_claim_element,
                 parse_contract.get('status'),
                 parse_contract.get('chunk_count', 0),
-                parsed_text_preview,
-                json.dumps(parse_storage_metadata),
+                stored_preview,
+                self._seal_json(parse_storage_metadata),
                 None,
                 0,
                 0,
@@ -2960,6 +2989,7 @@ class LegalAuthorityStorageHook:
                     record_id,
                 ],
             )
+            self._suppress_authority_plaintext = bool(is_public_law and self._private_columns_sealed())
             self._store_authority_chunks(conn, record_id, document_parse)
             self._store_authority_graph(conn, record_id, graph_payload)
             self._store_authority_facts(
@@ -2969,6 +2999,7 @@ class LegalAuthorityStorageHook:
                 provenance,
                 document_parse,
             )
+            self._suppress_authority_plaintext = False
             self._store_authority_search_programs(
                 conn,
                 record_id,
