@@ -4058,6 +4058,8 @@ def _compile_cache_key(
     citation: str,
     legal_text_origin: str,
     excluded_user_facts: Sequence[str],
+    factual_premises: Sequence[Mapping[str, Any]] = (),
+    unresolved_assumptions: Sequence[Mapping[str, Any]] = (),
 ) -> str:
     payload = {
         "allow_explicit_partial": allow_explicit_partial,
@@ -4065,6 +4067,8 @@ def _compile_cache_key(
         "citation": citation,
         "legal_text_origin": legal_text_origin,
         "excluded_user_facts": list(excluded_user_facts),
+        "factual_premises": [dict(item) for item in factual_premises],
+        "unresolved_assumptions": [dict(item) for item in unresolved_assumptions],
         "identities": dict(identities),
         "request_id": request_id,
         "source_cid": source_cid,
@@ -4490,6 +4494,229 @@ def _finish(receipt: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+_RETAINED_STAGE_IDS = (
+    "typed_family_parse",
+    "elaboration",
+    "formalization",
+    "bridge",
+)
+
+
+def _optional_exact_int(value: Any, field_name: str) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or isinstance(value, bool):
+        raise ValueError(field_name)
+    return value
+
+
+def _bind_admitted_law(
+    source_text: str,
+    legal_context: Mapping[str, Any] | None,
+    admitted_law: Mapping[str, Any] | None,
+) -> tuple[str, str, Dict[str, Any], str]:
+    """Select legal bytes from admitted law when that record is present.
+
+    A factual narrative passed as ``source_text`` cannot replace an admitted
+    statute, and a hash or length that does not match the UTF-8 text is a
+    typed failure rather than a compiled source.
+    """
+
+    context = dict(legal_context) if isinstance(legal_context, Mapping) else {}
+    if admitted_law is None:
+        legal_text, origin = _legal_source_text(source_text, context)
+        return legal_text, origin, context, ""
+    if not isinstance(admitted_law, Mapping):
+        return "", "admitted_law", context, "admitted_law_malformed"
+    text = admitted_law.get("source_text")
+    if not isinstance(text, str) or not text.strip():
+        return "", "admitted_law", context, "admitted_law_missing_text"
+    try:
+        raw = text.encode("utf-8")
+        if raw.decode("utf-8") != text:
+            return "", "admitted_law", context, "utf8_correspondence_failed"
+        expected_hash = admitted_law.get("source_sha256")
+        if expected_hash is not None:
+            if not isinstance(expected_hash, str) or expected_hash != hashlib.sha256(raw).hexdigest():
+                return "", "admitted_law", context, "admitted_source_hash_mismatch"
+        if _optional_exact_int(admitted_law.get("source_character_length"), "source_character_length") not in (None, len(text)):
+            return "", "admitted_law", context, "character_length_mismatch"
+        if _optional_exact_int(admitted_law.get("source_byte_length"), "source_byte_length") not in (None, len(raw)):
+            return "", "admitted_law", context, "byte_length_mismatch"
+    except (UnicodeError, ValueError):
+        return "", "admitted_law", context, "admitted_law_malformed"
+    argument = source_text if isinstance(source_text, str) else ""
+    if argument.strip() and argument != text:
+        return "", "admitted_law", context, "source_text_conflicts_with_admitted_law"
+    context_text = str(context.get("source_text") or context.get("normalized_text") or "")
+    if context_text.strip() and context_text != text:
+        return "", "admitted_law", context, "legal_context_conflicts_with_admitted_law"
+    for key in ("citation", "authority_locator", "authority_id", "authority_version", "corpus_version", "version"):
+        if key in admitted_law and key not in context:
+            context[key] = admitted_law[key]
+    context["source_text"] = text
+    return text, "admitted_law", context, ""
+
+
+def _bind_factual_premises(
+    premises: Sequence[Any] | None,
+    legal_text: str,
+) -> tuple[List[Dict[str, Any]], str]:
+    """Bind factual premises beside the statute without copying them into it."""
+
+    if premises is None:
+        return [], ""
+    if isinstance(premises, (str, bytes)) or not isinstance(premises, Sequence):
+        return [], "factual_premises_malformed"
+    bound: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(premises):
+        if not isinstance(item, Mapping):
+            return [], "factual_premise_malformed"
+        text = item.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return [], "factual_premise_missing_text"
+        if text == legal_text:
+            return [], "factual_premise_replaced_admitted_law"
+        try:
+            raw = text.encode("utf-8")
+            if raw.decode("utf-8") != text:
+                return [], "factual_premise_utf8_mismatch"
+            expected_hash = item.get("text_sha256")
+            digest = hashlib.sha256(raw).hexdigest()
+            if expected_hash is not None and expected_hash != digest:
+                return [], "factual_premise_hash_mismatch"
+        except UnicodeError:
+            return [], "factual_premise_malformed"
+        premise_id = str(item.get("premise_id") or f"premise-{index}").strip()
+        if not premise_id or premise_id in seen:
+            return [], "factual_premise_identity_malformed"
+        seen.add(premise_id)
+        bound.append({
+            "premise_id": premise_id,
+            "text": text,
+            "text_sha256": digest,
+            "character_length": len(text),
+            "byte_length": len(raw),
+            "span_unit": "character",
+            "role": "factual_premise",
+            "bound_separately": True,
+            "included_in_legal_source": False,
+        })
+    return bound, ""
+
+
+def _bind_unresolved_assumptions(
+    assumptions: Sequence[Any] | None,
+) -> tuple[List[Dict[str, Any]], str]:
+    """Keep caller assumptions unresolved. Resolution is not a compiler result."""
+
+    if assumptions is None:
+        return [], ""
+    if isinstance(assumptions, (str, bytes)) or not isinstance(assumptions, Sequence):
+        return [], "unresolved_assumptions_malformed"
+    bound: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(assumptions):
+        record = {"assumption_id": f"assumption-{index}", "statement": item} if isinstance(item, str) else item
+        if not isinstance(record, Mapping):
+            return [], "unresolved_assumption_malformed"
+        if record.get("resolved") is True or record.get("status") in {"resolved", "proved", "satisfied"}:
+            return [], "assumption_resolution_unsupported"
+        statement = record.get("statement")
+        if not isinstance(statement, str) or not statement.strip():
+            return [], "unresolved_assumption_missing_statement"
+        assumption_id = str(record.get("assumption_id") or f"assumption-{index}").strip()
+        if not assumption_id or assumption_id in seen:
+            return [], "unresolved_assumption_identity_malformed"
+        seen.add(assumption_id)
+        source_ref_ids = record.get("source_ref_ids") or []
+        if not isinstance(source_ref_ids, Sequence) or isinstance(source_ref_ids, (str, bytes)):
+            return [], "unresolved_assumption_malformed"
+        bound.append({
+            "assumption_id": assumption_id,
+            "statement": statement,
+            "source_ref_ids": [str(ref) for ref in source_ref_ids],
+            "resolved": False,
+            "proves_claim": False,
+        })
+    return bound, ""
+
+
+def _retained_stage_identities(
+    stages: Sequence[Any],
+    source_map: Mapping[str, Any] | None,
+    identities: Mapping[str, Any] | None,
+) -> Dict[str, Any]:
+    by_id = {
+        str(stage.get("stage_id")): stage
+        for stage in stages
+        if isinstance(stage, Mapping) and stage.get("stage_id")
+    }
+    retained: Dict[str, Any] = {}
+    for stage_id in _RETAINED_STAGE_IDS:
+        stage = by_id.get(stage_id)
+        if stage is None:
+            retained[stage_id] = None
+            continue
+        retained[stage_id] = {
+            "stage_id": stage.get("stage_id"),
+            "interface": stage.get("interface"),
+            "identity_cid": stage.get("identity_cid"),
+            "input_cid": stage.get("input_cid"),
+            "output_cid": stage.get("output_cid"),
+            "config_cid": stage.get("config_cid"),
+            "status": stage.get("status"),
+        }
+    if isinstance(source_map, Mapping):
+        retained["source_map"] = {
+            "schema_version": source_map.get("schema_version") or (identities or {}).get("source_map_schema"),
+            "source_map_id": source_map.get("source_map_id"),
+        }
+    else:
+        retained["source_map"] = None
+    return retained
+
+
+def _binding_failure_receipt(
+    *,
+    identities: Mapping[str, Any],
+    reason: str,
+    user_facts: Sequence[str],
+    legal_origin: str,
+    authority_version: str,
+    factual_premises: Sequence[Mapping[str, Any]],
+    unresolved_assumptions: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    capability = classify_canonical_compiler_capability(
+        _canonical_evidence(executed=True, status="failed", reason=reason)
+    )
+    return _receipt_shell(
+        status="failed",
+        capability=capability,
+        identities=identities,
+        reason=reason,
+        cache_outcome="not_cached",
+        extra={
+            "user_facts": list(user_facts),
+            "legal_text_origin": legal_origin,
+            "authority_version": authority_version,
+            "factual_premises": [dict(item) for item in factual_premises],
+            "unresolved_assumptions": [dict(item) for item in unresolved_assumptions],
+            "retained_stage_identities": _retained_stage_identities((), None, identities),
+            "stage_evidence": {
+                "kind": "canonical_legal_ir_stage_evidence",
+                "status": "failed",
+                "fabricated_ir": False,
+                "source_map_present": False,
+            },
+            "establishes_governing_law_meaning": False,
+            "proves_claim": False,
+            "factual_premises_included_in_source": False,
+        },
+    )
+
+
 def compile_canonical_legal_ir(
     source_text: str,
     *,
@@ -4497,6 +4724,9 @@ def compile_canonical_legal_ir(
     vocabulary: Mapping[str, Sequence[str]],
     legal_context: Mapping[str, Any] | None = None,
     user_facts: Sequence[str] | None = None,
+    admitted_law: Mapping[str, Any] | None = None,
+    factual_premises: Sequence[Any] | None = None,
+    unresolved_assumptions: Sequence[Any] | None = None,
     allow_explicit_partial: bool = False,
     expected_schema_version: str | None = None,
     expected_compiler_interface: str | None = None,
@@ -4567,10 +4797,29 @@ def compile_canonical_legal_ir(
         )
         return _finish(_store_receipt(receipt))
 
-    legal_text, legal_origin = _legal_source_text(source_text, legal_context)
+    legal_text, legal_origin, bound_context, binding_error = _bind_admitted_law(
+        source_text, legal_context, admitted_law,
+    )
+    premise_records, premise_error = _bind_factual_premises(factual_premises, legal_text)
+    assumption_records, assumption_error = _bind_unresolved_assumptions(unresolved_assumptions)
+    input_error = binding_error or premise_error or assumption_error
     excluded_facts = [str(item) for item in (user_facts or ()) if str(item).strip()]
-    authority_version = _version_from_context(legal_context)
-    citation = _citation_from_context(legal_context, request_id)
+    for premise in premise_records:
+        if premise["text"] not in excluded_facts:
+            excluded_facts.append(premise["text"])
+    authority_version = _version_from_context(bound_context)
+    citation = _citation_from_context(bound_context, request_id)
+    if input_error:
+        receipt = _binding_failure_receipt(
+            identities=identities,
+            reason=input_error,
+            user_facts=excluded_facts,
+            legal_origin=legal_origin,
+            authority_version=authority_version,
+            factual_premises=premise_records,
+            unresolved_assumptions=assumption_records,
+        )
+        return _finish(_store_receipt(receipt))
     if not str(legal_text or "").strip():
         capability = classify_canonical_compiler_capability(
             _canonical_evidence(
@@ -4589,6 +4838,18 @@ def compile_canonical_legal_ir(
                 "user_facts": excluded_facts,
                 "legal_text_origin": legal_origin,
                 "authority_version": authority_version,
+                "factual_premises": premise_records,
+                "unresolved_assumptions": assumption_records,
+                "retained_stage_identities": _retained_stage_identities((), None, identities),
+                "stage_evidence": {
+                    "kind": "canonical_legal_ir_stage_evidence",
+                    "status": "failed",
+                    "fabricated_ir": False,
+                    "source_map_present": False,
+                },
+                "establishes_governing_law_meaning": False,
+                "proves_claim": False,
+                "factual_premises_included_in_source": False,
             },
         )
         return _finish(_store_receipt(receipt))
@@ -4611,7 +4872,21 @@ def compile_canonical_legal_ir(
             identities=identities,
             reason=str(exc),
             cache_outcome="not_cached",
-            extra={"user_facts": excluded_facts, "authority_version": authority_version},
+            extra={
+            "user_facts": excluded_facts,
+            "authority_version": authority_version,
+            "factual_premises": premise_records,
+            "unresolved_assumptions": assumption_records,
+            "retained_stage_identities": _retained_stage_identities((), None, identities),
+            "stage_evidence": {
+                "kind": "canonical_legal_ir_stage_evidence",
+                "status": "failed",
+                "fabricated_ir": False,
+                "source_map_present": False,
+            },
+            "establishes_governing_law_meaning": False,
+            "proves_claim": False,
+        },
         )
         return _finish(_store_receipt(receipt))
 
@@ -4625,6 +4900,8 @@ def compile_canonical_legal_ir(
         citation=citation,
         legal_text_origin=legal_origin,
         excluded_user_facts=excluded_facts,
+        factual_premises=premise_records,
+        unresolved_assumptions=assumption_records,
     )
     if use_cache and cache_key in _CANONICAL_FORMALIZATION_CACHE:
         cached_id = _CANONICAL_FORMALIZATION_CACHE[cache_key]
@@ -4649,7 +4926,21 @@ def compile_canonical_legal_ir(
             identities=identities,
             reason=str(exc),
             cache_outcome="not_cached",
-            extra={"user_facts": excluded_facts, "cache_key": cache_key},
+            extra={
+                "user_facts": excluded_facts,
+                "cache_key": cache_key,
+                "factual_premises": premise_records,
+                "unresolved_assumptions": assumption_records,
+                "retained_stage_identities": _retained_stage_identities((), None, identities),
+                "stage_evidence": {
+                    "kind": "canonical_legal_ir_stage_evidence",
+                    "status": "failed",
+                    "fabricated_ir": False,
+                    "source_map_present": False,
+                },
+                "establishes_governing_law_meaning": False,
+                "proves_claim": False,
+            },
         )
         return _finish(_store_receipt(receipt))
 
@@ -4758,6 +5049,22 @@ def compile_canonical_legal_ir(
         "traces": [] if bridge is None else list(bridge["traces"]),
         "vocabulary": atom_vocabulary.to_dict(),
         "allow_explicit_partial": bool(allow_explicit_partial),
+        "factual_premises": premise_records,
+        "unresolved_assumptions": assumption_records,
+        "factual_premises_included_in_source": False,
+        "establishes_governing_law_meaning": False,
+        "proves_claim": False,
+        "retained_stage_identities": _retained_stage_identities(
+            stage_payload,
+            None if bridge is None else bridge["source_map"],
+            identities,
+        ),
+        "stage_evidence": {
+            "kind": "canonical_legal_ir_stage_evidence",
+            "status": outcome,
+            "fabricated_ir": False,
+            "source_map_present": bridge is not None,
+        },
     }
     if any(fact and fact in legal_text for fact in excluded_facts):
         receipt_extra["user_facts_overlap_warning"] = (
