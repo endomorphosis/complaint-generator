@@ -13859,6 +13859,45 @@ class Mediator:
 		context = refresh_explicit_legal_context(intake_case_file if isinstance(intake_case_file, dict) else {})
 		return list(context.get("questions") or [])
 
+	def build_legal_acquisition_request(
+		self,
+		intake_case_file,
+		claims=None,
+		requirements=None,
+		query_terms=None,
+		authority_families=None,
+		jurisdiction_default=None,
+		corpus_default=None,
+		storage_available=None,
+		max_results=5,
+		timeout_seconds=5.0,
+	):
+		"""Build a bounded acquisition request only after explicit legal selection.
+
+		Reuses intake selection and legal-context questions. Does not search,
+		guess a jurisdiction, or treat the case narrative as a citation query.
+		"""
+		from integrations.ipfs_datasets.legal import build_bounded_legal_acquisition_request
+
+		case = intake_case_file if isinstance(intake_case_file, dict) else {}
+		selection = self.resolve_intake_legal_selection(claims, case)
+		context = selection.get('legal_context') if isinstance(selection.get('legal_context'), dict) else {}
+		candidates = list(selection.get('claim_candidates') or [])
+		return build_bounded_legal_acquisition_request(
+			context,
+			candidates,
+			requirements=requirements,
+			query_terms=query_terms,
+			narrative=case.get('source_complaint_text') or '',
+			authority_families=authority_families,
+			jurisdiction_default=jurisdiction_default,
+			corpus_default=corpus_default,
+			max_results=max_results,
+			timeout_seconds=timeout_seconds,
+			storage_available=storage_available,
+			context_questions=self._legal_selection_questions(selection) + self.legal_context_questions(case),
+		)
+
 	@staticmethod
 	def _bounded_legal_source_record(record):
 		"""Bound locally loaded source records before copying or source promotion."""
