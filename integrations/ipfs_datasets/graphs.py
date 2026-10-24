@@ -2741,6 +2741,263 @@ def _seal_private_materials(graph_payload: Mapping[str, Any], private_context: M
     return receipts
 
 
+FACTUAL_GRAPH_ARTIFACT_SCHEMA = "cimp-mgnd-14-factual-graph-v1"
+FACTUAL_GRAPH_ARTIFACT_KIND = "fact-graph"
+_FACTUAL_ID_KEYS = frozenset({
+    "id",
+    "stable_id",
+    "source_id",
+    "entity_id",
+    "message_id",
+    "source_identity",
+    "graph_id",
+    "previous_stable_id",
+    "new_stable_id",
+    "previous_entity_id",
+    "new_entity_id",
+    "invalidated_entity_id",
+    "superseded_by",
+    "retracted_by",
+})
+
+
+def _factual_raw_graph(graph: Any) -> Dict[str, Any]:
+    if hasattr(graph, "to_dict") and callable(graph.to_dict):
+        raw = graph.to_dict()
+    elif isinstance(graph, Mapping):
+        raw = dict(graph)
+    else:
+        raise TypeError("factual graph must be a mapping or knowledge graph")
+    if not isinstance(raw, Mapping):
+        raise TypeError("factual graph document must be a mapping")
+    return dict(raw)
+
+
+def _factual_pairs(value: Any) -> List[tuple]:
+    if isinstance(value, Mapping):
+        return [(str(key), item) for key, item in value.items() if isinstance(item, Mapping)]
+    if isinstance(value, list):
+        return [(str(item.get("id") or ""), item) for item in value if isinstance(item, Mapping)]
+    return []
+
+
+def factual_graph_invalidations(raw: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Support that a revision marked stale. Contradiction rows are not included."""
+    found: List[Dict[str, Any]] = []
+    for record_id, relationship in _factual_pairs(raw.get("relationships")):
+        attributes = relationship.get("attributes") if isinstance(relationship.get("attributes"), Mapping) else {}
+        if attributes.get("activity_status") != "invalidated" and attributes.get("support_invalidated") is not True:
+            continue
+        found.append({
+            "id": str(record_id or relationship.get("id") or ""),
+            "kind": "relationship",
+            "activity_status": str(attributes.get("activity_status") or "invalidated"),
+            "reason": str(attributes.get("invalidation_reason") or ""),
+            "invalidated_entity_id": str(attributes.get("invalidated_entity_id") or ""),
+        })
+    for record_id, entity in _factual_pairs(raw.get("entities")):
+        attributes = entity.get("attributes") if isinstance(entity.get("attributes"), Mapping) else {}
+        if attributes.get("support_invalidated") is not True:
+            continue
+        found.append({
+            "id": str(record_id or entity.get("id") or ""),
+            "kind": "entity",
+            "activity_status": "invalidated",
+            "reason": "support_invalidated",
+            "invalidated_entity_id": str(record_id or entity.get("id") or ""),
+        })
+    found.sort(key=lambda item: (item["kind"], item["id"], item["reason"]))
+    return found
+
+
+def factual_graph_plaintext_ids(document: Mapping[str, Any]) -> set[str]:
+    """Source and assertion identities that must not be reused as storage ids."""
+    found: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                if key in _FACTUAL_ID_KEYS and isinstance(item, str) and item:
+                    found.add(item)
+                else:
+                    walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(document)
+    return found
+
+
+def build_factual_graph_artifact(graph: Any) -> Dict[str, Any]:
+    """Canonical factual revision document. It carries no ciphertext storage id."""
+    raw = _factual_raw_graph(graph)
+    metadata = dict(raw.get("metadata") or {}) if isinstance(raw.get("metadata"), Mapping) else {}
+    ledger = metadata.get("factual_ledger") if isinstance(metadata.get("factual_ledger"), Mapping) else {}
+    revisions = [dict(item) for item in list(ledger.get("revisions") or []) if isinstance(item, Mapping)]
+    states = ledger.get("assertion_states") if isinstance(ledger.get("assertion_states"), Mapping) else {}
+    conflicts = []
+    for item in list(ledger.get("conflicts") or []):
+        if isinstance(item, Mapping) and str(item.get("status") or "unresolved") == "unresolved":
+            conflicts.append(dict(item))
+    provenance = dict(raw.get("provenance") or {}) if isinstance(raw.get("provenance"), Mapping) else {}
+    return {
+        "schema": FACTUAL_GRAPH_ARTIFACT_SCHEMA,
+        "graph_id": str(raw.get("graph_id") or metadata.get("graph_id") or ""),
+        "graph_version": str(raw.get("graph_version") or metadata.get("graph_version") or "0"),
+        "provenance": provenance,
+        "revisions": revisions,
+        "assertion_states": {str(key): dict(value) for key, value in states.items() if isinstance(value, Mapping)},
+        "entities": dict(raw.get("entities") or {}) if isinstance(raw.get("entities"), Mapping) else list(raw.get("entities") or []),
+        "relationships": dict(raw.get("relationships") or {}) if isinstance(raw.get("relationships"), Mapping) else list(raw.get("relationships") or []),
+        "invalidations": factual_graph_invalidations(raw),
+        "unresolved_conflicts": conflicts,
+        "metadata": metadata,
+    }
+
+
+def encode_factual_graph_artifact(document: Mapping[str, Any]) -> bytes:
+    if str(document.get("schema") or "") != FACTUAL_GRAPH_ARTIFACT_SCHEMA:
+        raise ValueError("factual graph artifact schema mismatch")
+    return json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def seal_factual_graph_artifact(
+    graph: Any,
+    *,
+    access: Any,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    backend: Any,
+    backend_name: str,
+    key: Optional[bytes] = None,
+    key_id: Optional[str] = None,
+    key_provider: Any = None,
+    pin_content: bool = False,
+) -> Dict[str, Any]:
+    """Seal one factual graph through the automatic private-artifact owner.
+
+    There is no plaintext CID, local-cache, or JSON fallback. A rejected
+    backend leaves no graph document behind. The returned storage id is the
+    ciphertext address, never a source or assertion id.
+    """
+    if backend is None:
+        raise ValueError("factual graph storage requires the bound private backend")
+    document = build_factual_graph_artifact(graph)
+    payload = encode_factual_graph_artifact(document)
+    plaintext_ids = factual_graph_plaintext_ids(document)
+    from integrations.ipfs_datasets.storage import store_automatic_private_artifact
+    from integrations.private_storage import PrivateStorageError
+
+    try:
+        receipt = store_automatic_private_artifact(
+            payload,
+            access=access,
+            tenant_id=str(tenant_id),
+            case_id=str(case_id),
+            principal_id=str(principal_id),
+            artifact_kind=FACTUAL_GRAPH_ARTIFACT_KIND,
+            revision=str(revision),
+            key=key,
+            key_id=key_id,
+            key_provider=key_provider,
+            backend=backend,
+            backend_name=str(backend_name),
+            pin_content=bool(pin_content),
+        )
+    except PrivateStorageError:
+        raise
+    except Exception as exc:
+        raise PrivateStorageError(
+            "factual graph artifact store failed",
+            code="artifact_unavailable",
+        ) from exc
+    storage_id = str(receipt.get("cid") or "")
+    if not storage_id or storage_id in plaintext_ids or storage_id.startswith("assertion:"):
+        raise PrivateStorageError(
+            "ciphertext storage id collided with a plaintext identifier",
+            code="storage_id_rejected",
+        )
+    if receipt.get("verified") is not True or receipt.get("private_artifact") is False:
+        raise PrivateStorageError("factual graph ciphertext was not verified", code="readback_mismatch")
+    return {
+        "status": "stored-private",
+        "persisted": True,
+        "private_artifact": True,
+        "plaintext_fallback": False,
+        "plaintext_catalog": False,
+        "plaintext_cache": False,
+        "plaintext_publication": False,
+        "graph_registry_used": False,
+        "artifact_kind": FACTUAL_GRAPH_ARTIFACT_KIND,
+        "artifact_revision": str(revision),
+        "ciphertext_storage_id": storage_id,
+        "key_id": str(receipt.get("key_id") or ""),
+        "document": document,
+        "payload": payload,
+        "receipt": receipt,
+    }
+
+
+def open_factual_graph_artifact(
+    storage_id: str,
+    *,
+    access: Any,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    backend: Any,
+    backend_name: str,
+    key: Optional[bytes] = None,
+    key_id: Optional[str] = None,
+    key_provider: Any = None,
+) -> Dict[str, Any]:
+    """Open one sealed factual graph for the same owner and case binding.
+
+    Wrong key, wrong case, and corrupt ciphertext raise. This function does
+    not read a plaintext JSON document and does not write a replacement graph.
+    """
+    if backend is None:
+        raise ValueError("factual graph reload requires the bound private backend")
+    if not isinstance(storage_id, str) or not storage_id or storage_id.startswith("assertion:"):
+        raise ValueError("ciphertext storage id is required")
+    from integrations.ipfs_datasets.storage import retrieve_private_artifact
+
+    opened = retrieve_private_artifact(
+        storage_id,
+        access=access,
+        tenant_id=str(tenant_id),
+        case_id=str(case_id),
+        principal_id=str(principal_id),
+        artifact_kind=FACTUAL_GRAPH_ARTIFACT_KIND,
+        revision=str(revision),
+        key=key,
+        key_id=key_id,
+        key_provider=key_provider,
+        backend=backend,
+        backend_name=str(backend_name),
+    )
+    data = opened.get("data")
+    if opened.get("status") != "available" or not isinstance(data, (bytes, bytearray)):
+        from integrations.private_storage import PrivateStorageError
+        raise PrivateStorageError("factual graph ciphertext is unavailable", code="artifact_unavailable")
+    try:
+        document = json.loads(bytes(data).decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        from integrations.private_storage import PrivateArtifactIntegrityError
+        raise PrivateArtifactIntegrityError("malformed") from exc
+    if not isinstance(document, dict) or document.get("schema") != FACTUAL_GRAPH_ARTIFACT_SCHEMA:
+        from integrations.private_storage import PrivateArtifactIntegrityError
+        raise PrivateArtifactIntegrityError("malformed")
+    if encode_factual_graph_artifact(document) != bytes(data):
+        from integrations.private_storage import PrivateArtifactIntegrityError
+        raise PrivateArtifactIntegrityError("malformed")
+    return document
+
+
 def persist_private_graph_snapshot(
     graph_payload: Dict[str, Any],
     private_context: Mapping[str, Any],
