@@ -2497,6 +2497,30 @@ def _state_case_id(state: Mapping[str, Any], user_id: str) -> str:
     return case_id or str(user_id or "")
 
 
+def _sync_operation_consent_state(state: Dict[str, Any], user_id: str, case_id: str) -> None:
+    """Bump the case consent generation when the saved processing choice changes."""
+
+    from integrations.ipfs_datasets.llm import (
+        OPERATION_CONSENT_CONTRACT,
+        OPERATION_CONSENT_VERSION,
+        PRIVACY_PROCESSING_GROK,
+    )
+
+    prior = state.get("operation_consent") if isinstance(state.get("operation_consent"), dict) else {}
+    raw_generation = prior.get("generation")
+    generation = raw_generation + 1 if type(raw_generation) is int and not isinstance(raw_generation, bool) and raw_generation >= 0 else 1
+    mode = str((state.get("privacy_policy") or {}).get("processing_mode") or "")
+    state["operation_consent"] = {
+        "contract": OPERATION_CONSENT_CONTRACT,
+        "version": OPERATION_CONSENT_VERSION,
+        "user_id": user_id,
+        "case_id": case_id,
+        "generation": generation,
+        "revoked": mode != PRIVACY_PROCESSING_GROK,
+        "grants": [],
+    }
+
+
 def _apply_effective_privacy_policy(state: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     helpers = _privacy_helpers()
     case_id = _state_case_id(state, user_id)
@@ -11904,6 +11928,7 @@ class ComplaintWorkspaceService:
             return payload
         helpers = _privacy_helpers()
         state["privacy_policy"] = helpers["privacy_policy_for_mode"](resolved_user_id, bound_case, mode)
+        _sync_operation_consent_state(state, resolved_user_id, bound_case)
         self._save_state(state)
         payload = self.get_privacy_policy(resolved_user_id)
         payload["updated"] = True
@@ -11961,6 +11986,93 @@ class ComplaintWorkspaceService:
         result["user_id"] = resolved_user_id
         result["case_id"] = case_id
         return result
+
+    def read_persisted_owner_case_policy(
+        self,
+        user_id: Optional[str] = None,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Load the saved owner/case policy. This does not open a provider."""
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        bound_case = _state_case_id(state, resolved_user_id)
+        requested_case = str(case_id or bound_case)
+        matched = requested_case == bound_case
+        return {
+            "found": True,
+            "policy_read": True,
+            "user_id": resolved_user_id,
+            "case_id": bound_case if matched else requested_case,
+            "requested_case_id": requested_case,
+            "case_match": matched,
+            "privacy_policy": state.get("privacy_policy") if matched else None,
+            "operation_consent": state.get("operation_consent") if matched else None,
+        }
+
+    def dispatch_consented_hook_query(
+        self,
+        user_id: Optional[str],
+        *,
+        purpose: str,
+        provider_kind: str,
+        data_class: str,
+        provider_loader: Optional[Any] = None,
+        query_submitter: Optional[Any] = None,
+        case_id: Optional[str] = None,
+        tools: bool = False,
+        citation: Any = None,
+        complaint_text: Any = None,
+        private_fields: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Read the persisted case policy before a provider loader or hook query."""
+
+        from mediator.hook_runtime import prepare_remote_hook_query
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+
+        def reader() -> Dict[str, Any]:
+            return self.read_persisted_owner_case_policy(resolved_user_id, case_id=case_id)
+
+        return prepare_remote_hook_query(
+            policy_reader=reader,
+            provider_loader=provider_loader,
+            query_submitter=query_submitter,
+            owner_id=resolved_user_id,
+            case_id=str(case_id or reader()["case_id"]) if case_id is None else str(case_id),
+            purpose=purpose,
+            provider_kind=provider_kind,
+            data_class=data_class,
+            tools=tools,
+            citation=citation,
+            complaint_text=complaint_text,
+            private_fields=private_fields,
+        )
+
+    def accept_late_consented_hook_result(
+        self,
+        user_id: Optional[str],
+        *,
+        invocation_id: str,
+        case_id: str,
+        result_acceptor: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Load the current persisted policy again before accepting a late result."""
+
+        from mediator.hook_runtime import accept_late_hook_result
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+
+        def reader() -> Dict[str, Any]:
+            return self.read_persisted_owner_case_policy(resolved_user_id, case_id=case_id)
+
+        return accept_late_hook_result(
+            policy_reader=reader,
+            invocation_id=invocation_id,
+            owner_id=resolved_user_id,
+            case_id=case_id,
+            result_acceptor=result_acceptor,
+        )
 
     def inventory_private_data_classes(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Describe private case classes without reading other sessions, evidence, exports, or secrets."""

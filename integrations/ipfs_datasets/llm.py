@@ -3239,6 +3239,274 @@ def public_query_reference(query: str) -> Dict[str, Any]:
 	}
 
 
+# Per-operation consent. Grok raw-intake consent authorizes one provider and
+# one data class. It does not authorize web/archive providers, tools, or any
+# other case data class. Invocation bindings are process-local and case-scoped.
+OPERATION_CONSENT_CONTRACT = "complaint_operation_consent"
+OPERATION_CONSENT_VERSION = "1"
+_RAW_INTAKE_PURPOSES = frozenset({"extract_facts", "propose_questions"})
+_CITATION_PURPOSES = frozenset({"citation_acquisition", "public_law_citation"})
+_PURPOSE_QUERY_FIELDS = {
+	"extract_facts": ("source_text", "target_ref"),
+	"propose_questions": ("gap_code", "target_ref"),
+	"explain_candidate": ("candidate_ref", "gap_code"),
+	"citation_acquisition": ("citation",),
+	"public_law_citation": ("citation",),
+}
+_UNRELATED_REMOTE_KINDS = frozenset({
+	"web_search", "web", "web_provider", "archive", "archive_fetch", "archive_provider", "wayback",
+})
+_REMOTE_INVOCATIONS: Dict[str, Dict[str, Any]] = {}
+_INVOCATION_LOCK = threading.Lock()
+
+
+def clear_remote_invocation_bindings() -> None:
+	with _INVOCATION_LOCK:
+		_REMOTE_INVOCATIONS.clear()
+
+
+def _consent_generation(consent: Any) -> int:
+	if not isinstance(consent, Mapping):
+		return 0
+	raw = consent.get("generation")
+	if type(raw) is not int or isinstance(raw, bool) or raw < 0:
+		return 0
+	return raw
+
+
+def _bounded_query_piece(value: Any, *, limit: int) -> str:
+	if type(value) is not str:
+		return ""
+	text = value.strip()
+	if not text or len(text.encode("utf-8")) > limit:
+		return ""
+	if any(ord(char) < 32 for char in text):
+		return ""
+	return text
+
+
+def minimize_purpose_query(
+	purpose: str,
+	*,
+	private_fields: Optional[Mapping[str, Any]] = None,
+	citation: Any = None,
+	complaint_text: Any = None,
+) -> Dict[str, Any]:
+	"""Keep a purpose query to its declared fields.
+
+	Public-law queries carry the citation only. A complaint body passed beside
+	the citation is not copied into the query.
+	"""
+
+	purpose_id = purpose if type(purpose) is str else ""
+	complaint = complaint_text if type(complaint_text) is str else ""
+	if purpose_id in _CITATION_PURPOSES:
+		citation_text = _bounded_query_piece(citation, limit=160)
+		if complaint and citation_text:
+			citation_text = citation_text.replace(complaint, "").strip()
+		query = {
+			"purpose": purpose_id,
+			"query_class": "public_law_citation_only",
+			"citation": citation_text,
+		}
+		return query
+	allowed = _PURPOSE_QUERY_FIELDS.get(purpose_id, ())
+	source = private_fields if isinstance(private_fields, Mapping) else {}
+	fields: Dict[str, str] = {}
+	for key in allowed:
+		piece = _bounded_query_piece(source.get(key), limit=500 if key == "source_text" else 128)
+		if piece and (not complaint or piece != complaint):
+			fields[key] = piece
+	return {
+		"purpose": purpose_id,
+		"query_class": "minimized_fields",
+		"fields": fields,
+	}
+
+
+def _explicit_operation_grant(
+	consent: Any,
+	*,
+	purpose: str,
+	provider_kind: str,
+	data_class: str,
+) -> Optional[Mapping[str, Any]]:
+	if not isinstance(consent, Mapping) or consent.get("revoked") is True:
+		return None
+	grants = consent.get("grants")
+	if not isinstance(grants, list):
+		return None
+	for grant in grants:
+		if not isinstance(grant, Mapping) or grant.get("explicit") is not True:
+			continue
+		if grant.get("tools") is not False:
+			continue
+		if str(grant.get("purpose") or "") != purpose:
+			continue
+		if str(grant.get("provider_kind") or "") != provider_kind:
+			continue
+		if str(grant.get("data_class") or "") != data_class:
+			continue
+		if provider_kind == "grok_inference":
+			if str(grant.get("provider") or "") != PRIVACY_GROK_PROVIDER:
+				continue
+			if str(grant.get("model") or "") != PRIVACY_GROK_MODEL:
+				continue
+		return grant
+	return None
+
+
+def evaluate_remote_operation_consent(
+	record: Any,
+	*,
+	user_id: str,
+	case_id: str,
+	purpose: str,
+	provider_kind: str,
+	data_class: str,
+	tools: bool = False,
+) -> Dict[str, Any]:
+	"""Decide one remote operation from an already loaded owner/case record.
+
+	This function does not load a provider. Missing, local, and revoked
+	records refuse effectful dispatch. Raw-intake Grok consent matches only
+	``grok_cli`` / ``grok-4.7`` for ``raw_intake`` purposes that do not use tools.
+	"""
+
+	def decision(code: str, *, effectful: bool = False, local: bool = False, generation: int = 0, revoked: bool = False) -> Dict[str, Any]:
+		return {
+			"effectful_allowed": effectful,
+			"local_query_allowed": local,
+			"code": code,
+			"generation": generation,
+			"revoked": revoked,
+			"tools_authorized": False,
+			"provider": PRIVACY_GROK_PROVIDER if effectful and provider_kind == "grok_inference" else "",
+			"model": PRIVACY_GROK_MODEL if effectful and provider_kind == "grok_inference" else "",
+			"data_class": data_class if type(data_class) is str else "",
+			"provider_kind": provider_kind if type(provider_kind) is str else "",
+			"live_model_identity_verified": False,
+		}
+
+	if not isinstance(record, Mapping) or record.get("found") is False:
+		return decision("consent_missing")
+	if record.get("case_match") is False:
+		return decision("wrong_case")
+	if str(record.get("user_id") or "") != str(user_id or "") or str(record.get("case_id") or "") != str(case_id or ""):
+		return decision("wrong_case")
+	consent = record.get("operation_consent")
+	generation = _consent_generation(consent)
+	revoked = isinstance(consent, Mapping) and consent.get("revoked") is True
+	purpose_id = purpose if type(purpose) is str else ""
+	kind = provider_kind if type(provider_kind) is str else ""
+	kind_normalized = kind.strip().lower()
+	data = data_class if type(data_class) is str else ""
+	local_kind = kind_normalized in {"", "none", "local", "local_private"}
+	if purpose_id in _CITATION_PURPOSES and local_kind and tools is not True:
+		return decision("local_only", effectful=False, local=True, generation=generation, revoked=revoked)
+	if tools is True:
+		return decision("tools_not_authorized", effectful=False, generation=generation, revoked=revoked)
+	inspection = inspect_privacy_policy(record.get("privacy_policy"), user_id=str(user_id or ""), case_id=str(case_id or ""))
+	policy = inspection.get("policy") if isinstance(inspection.get("policy"), Mapping) else {}
+	mode = str(policy.get("processing_mode") or "")
+	cloud = inspection.get("admitted") is True and inspection.get("cloud_processing_enabled") is True and mode == PRIVACY_PROCESSING_GROK
+	if revoked:
+		return decision("consent_revoked", effectful=False, generation=generation, revoked=True)
+	if not cloud:
+		if not inspection.get("admitted"):
+			return decision("consent_missing", effectful=False, generation=generation, revoked=False)
+		return decision("local_private", effectful=False, generation=generation, revoked=False)
+	explicit = _explicit_operation_grant(consent, purpose=purpose_id, provider_kind=kind_normalized, data_class=data)
+	raw_intake = (
+		explicit is None
+		and kind_normalized == "grok_inference"
+		and data == "raw_intake"
+		and purpose_id in _RAW_INTAKE_PURPOSES
+	)
+	if explicit is not None or raw_intake:
+		return decision("authorized", effectful=True, generation=generation, revoked=False)
+	if kind_normalized in _UNRELATED_REMOTE_KINDS or kind_normalized != "grok_inference":
+		return decision("provider_not_authorized", effectful=False, generation=generation, revoked=False)
+	if data != "raw_intake":
+		return decision("data_class_not_authorized", effectful=False, generation=generation, revoked=False)
+	return decision("purpose_not_authorized", effectful=False, generation=generation, revoked=False)
+
+
+def bind_remote_invocation(
+	*,
+	user_id: str,
+	case_id: str,
+	purpose: str,
+	provider_kind: str,
+	data_class: str,
+	generation: int,
+) -> str:
+	"""Bind one invocation to this owner and case. Another case cannot reuse it."""
+
+	invocation_id = os.urandom(16).hex()
+	binding = {
+		"invocation_id": invocation_id,
+		"user_id": str(user_id or ""),
+		"case_id": str(case_id or ""),
+		"purpose": purpose if type(purpose) is str else "",
+		"provider_kind": provider_kind if type(provider_kind) is str else "",
+		"data_class": data_class if type(data_class) is str else "",
+		"generation": int(generation),
+		"live_model_identity_verified": False,
+	}
+	with _INVOCATION_LOCK:
+		_REMOTE_INVOCATIONS[invocation_id] = binding
+	return invocation_id
+
+
+def remote_invocation_binding(invocation_id: str) -> Optional[Dict[str, Any]]:
+	if type(invocation_id) is not str:
+		return None
+	with _INVOCATION_LOCK:
+		found = _REMOTE_INVOCATIONS.get(invocation_id)
+		return deepcopy(found) if found is not None else None
+
+
+def accept_late_remote_result(
+	record: Any,
+	*,
+	invocation_id: str,
+	user_id: str,
+	case_id: str,
+) -> Dict[str, Any]:
+	"""Re-read consent before a late result can be accepted.
+
+	The caller supplies the persisted record loaded immediately before this
+	call. A revoked choice or a different case leaves the result unaccepted.
+	"""
+
+	binding = remote_invocation_binding(invocation_id)
+	if binding is None:
+		return {"accepted": False, "code": "invocation_missing", "live_model_identity_verified": False}
+	if binding["user_id"] != str(user_id or "") or binding["case_id"] != str(case_id or ""):
+		return {"accepted": False, "code": "invocation_not_reusable", "live_model_identity_verified": False}
+	decision = evaluate_remote_operation_consent(
+		record,
+		user_id=binding["user_id"],
+		case_id=binding["case_id"],
+		purpose=str(binding["purpose"]),
+		provider_kind=str(binding["provider_kind"]),
+		data_class=str(binding["data_class"]),
+		tools=False,
+	)
+	if decision["generation"] != binding["generation"] or decision["revoked"] or not decision["effectful_allowed"]:
+		code = "consent_revoked" if decision["revoked"] or decision["generation"] != binding["generation"] else str(decision["code"])
+		if decision["code"] == "wrong_case":
+			code = "wrong_case"
+		return {"accepted": False, "code": code, "live_model_identity_verified": False}
+	return {
+		"accepted": True,
+		"code": "accepted",
+		"invocation_id": invocation_id,
+		"live_model_identity_verified": False,
+	}
+
+
 __all__ = [
 	"generate_text",
 	"generate_text_via_router",
@@ -3278,6 +3546,14 @@ __all__ = [
 	"open_private_embedding",
 	"redact_generation_diagnostic",
 	"public_query_reference",
+	"OPERATION_CONSENT_CONTRACT",
+	"OPERATION_CONSENT_VERSION",
+	"minimize_purpose_query",
+	"evaluate_remote_operation_consent",
+	"bind_remote_invocation",
+	"remote_invocation_binding",
+	"accept_late_remote_result",
+	"clear_remote_invocation_bindings",
 	"MINIMAL_TURN_SCHEMA",
 	"PRIVATE_TURN_TIMEOUT_SECONDS",
 	"ARCH_CLASSIFICATION_BLOCKED",

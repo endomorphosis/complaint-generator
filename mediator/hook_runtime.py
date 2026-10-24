@@ -1289,3 +1289,175 @@ def dispatch_registered_hook_operation(
         prerequisites=prerequisites,
         role=role if type(role) is str else None,
     )
+
+
+def prepare_remote_hook_query(
+    *,
+    policy_reader: Callable[[], Any],
+    provider_loader: Optional[Callable[[], Any]] = None,
+    query_submitter: Optional[Callable[[Mapping[str, Any]], Any]] = None,
+    owner_id: str,
+    case_id: str,
+    purpose: str,
+    provider_kind: str,
+    data_class: str,
+    tools: bool = False,
+    citation: Any = None,
+    complaint_text: Any = None,
+    private_fields: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
+    """Read persisted owner/case policy before any provider load or query submit.
+
+    Unknown, missing, local, and revoked consent refuse effectful remote
+    dispatch. A synthetic loader result is not a live Grok identity.
+    """
+
+    from integrations.ipfs_datasets.llm import (
+        bind_remote_invocation,
+        evaluate_remote_operation_consent,
+        minimize_purpose_query,
+    )
+
+    base = {
+        "purpose": purpose if type(purpose) is str else "",
+        "policy_read": False,
+        "provider_loader_called": False,
+        "query_submitted": False,
+        "effectful": False,
+        "status": "refused",
+        "code": "consent_missing",
+        "query": None,
+        "invocation_id": None,
+        "tools_authorized": False,
+        "complaint_included": False,
+        "live_model_identity_verified": False,
+        "provider_status": "",
+    }
+    try:
+        record = policy_reader()
+    except Exception:
+        base["status"] = "unavailable"
+        base["code"] = "policy_unavailable"
+        return base
+    base["policy_read"] = True
+    decision = evaluate_remote_operation_consent(
+        record,
+        user_id=owner_id,
+        case_id=case_id,
+        purpose=purpose,
+        provider_kind=provider_kind,
+        data_class=data_class,
+        tools=tools,
+    )
+    query = minimize_purpose_query(
+        purpose,
+        private_fields=private_fields,
+        citation=citation,
+        complaint_text=complaint_text,
+    )
+    complaint = complaint_text if type(complaint_text) is str else ""
+    encoded = json.dumps(query, sort_keys=True, ensure_ascii=False)
+    base["query"] = query
+    base["complaint_included"] = bool(complaint) and complaint in encoded
+    base["tools_authorized"] = False
+    if base["complaint_included"]:
+        base["code"] = "query_not_minimized"
+        base["query"] = None
+        return base
+    if decision["local_query_allowed"] and not decision["effectful_allowed"]:
+        if query_submitter is not None:
+            query_submitter(query)
+            base["query_submitted"] = True
+        base["status"] = "local_only"
+        base["code"] = "local_only"
+        return base
+    if not decision["effectful_allowed"]:
+        base["code"] = str(decision["code"])
+        base["query"] = None
+        return base
+    if provider_loader is None:
+        base["status"] = "unavailable"
+        base["code"] = "provider_unavailable"
+        return base
+    base["provider_loader_called"] = True
+    try:
+        loaded = provider_loader()
+    except Exception:
+        base["status"] = "unavailable"
+        base["code"] = "provider_unavailable"
+        return base
+    provider_status = ""
+    if isinstance(loaded, Mapping):
+        provider_status = str(loaded.get("status") or "")
+    elif loaded is None:
+        provider_status = "unavailable"
+    else:
+        provider_status = "available"
+    base["provider_status"] = provider_status
+    if provider_status != "available":
+        base["status"] = "unavailable"
+        base["code"] = "provider_unavailable"
+        return base
+    invocation_id = bind_remote_invocation(
+        user_id=owner_id,
+        case_id=case_id,
+        purpose=purpose,
+        provider_kind=provider_kind,
+        data_class=data_class,
+        generation=int(decision["generation"]),
+    )
+    base["invocation_id"] = invocation_id
+    if query_submitter is not None:
+        try:
+            query_submitter(query)
+        except Exception:
+            base["status"] = "unavailable"
+            base["code"] = "query_unavailable"
+            return base
+        base["query_submitted"] = True
+    base["effectful"] = True
+    base["status"] = "available"
+    base["code"] = "authorized"
+    return base
+
+
+def accept_late_hook_result(
+    *,
+    policy_reader: Callable[[], Any],
+    invocation_id: str,
+    owner_id: str,
+    case_id: str,
+    result_acceptor: Optional[Callable[[], Any]] = None,
+) -> dict[str, Any]:
+    """Recheck the persisted policy before accepting a late remote result."""
+
+    from integrations.ipfs_datasets.llm import accept_late_remote_result
+
+    try:
+        record = policy_reader()
+    except Exception:
+        return {
+            "accepted": False,
+            "code": "policy_unavailable",
+            "policy_read": False,
+            "acceptor_called": False,
+            "live_model_identity_verified": False,
+        }
+    decision = accept_late_remote_result(
+        record,
+        invocation_id=invocation_id,
+        user_id=owner_id,
+        case_id=case_id,
+    )
+    accepted = decision["accepted"] is True
+    acceptor_called = False
+    if accepted and result_acceptor is not None:
+        result_acceptor()
+        acceptor_called = True
+    return {
+        "accepted": accepted,
+        "code": str(decision["code"]),
+        "policy_read": True,
+        "acceptor_called": acceptor_called,
+        "live_model_identity_verified": False,
+    }
