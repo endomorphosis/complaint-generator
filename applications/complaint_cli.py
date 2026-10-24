@@ -155,28 +155,47 @@ class TerminalComplaintWorkspaceService(ComplaintWorkspaceService):
         backend = getattr(mediator, "_terminal_router_backend", None)
         if backend is not None:
             from copy import deepcopy
-            projection = state.get("shared_interview") or {}
-            previous = state.get("router_trace") or {}
-            stored = list(previous.get("receipts") or [])
-            known = {(item.get("router_receipt") or {}).get("request_id") for item in stored}
-            # Only real calls/errors enter history. Cold resume preserves the
-            # original invocation association rather than inventing a dispatch.
+            from complaint_phases.knowledge_graph import KnowledgeGraph
+            from mediator.hook_runtime import graph_revision_token, merge_router_trace, public_router_trace_entry
+
+            projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+            previous = state.get("router_trace") if isinstance(state.get("router_trace"), dict) else {}
+            graph_payload = projection.get("knowledge_graph") if isinstance(projection.get("knowledge_graph"), dict) else None
+            accepted_revision = ""
+            if graph_payload is not None:
+                try:
+                    accepted_revision = graph_revision_token(KnowledgeGraph.from_dict(graph_payload))
+                except Exception:
+                    accepted_revision = ""
+            intake_by_request = {}
+            intake = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
+            for operation in intake.get("receipts") or []:
+                if isinstance(operation, dict) and type(operation.get("request_id")) is str:
+                    intake_by_request[operation["request_id"]] = operation
+            entries = []
             for item in backend.task_receipts:
-                if item.get("request_id") and item["request_id"] in known:
+                if not isinstance(item, dict):
                     continue
-                if item in [entry.get("router_receipt") for entry in stored]:
-                    continue
-                entry = {"router_receipt": deepcopy(item),
-                         "interview_session_id": projection.get("session_id"),
-                         "interview_revision": projection.get("session_revision")}
-                stored.append(entry)
-                if item.get("request_id"):
-                    known.add(item["request_id"])
-            if backend.task_receipts:
-                state["router_trace"] = {"diagnostics": backend.sanitized_session_diagnostics(),
-                                         "receipts": stored[-32:]}
-            elif not previous:
-                state["router_trace"] = {"diagnostics": backend.sanitized_session_diagnostics(), "receipts": []}
+                operation = intake_by_request.get(item.get("request_id")) or {}
+                purpose = item.get("purpose_id") or operation.get("purpose") or operation.get("operation")
+                entry = public_router_trace_entry(
+                    item,
+                    purpose=purpose,
+                    case_id=_state_case_id(state, user_id),
+                    session_id=projection.get("session_id") or operation.get("session_id") or "",
+                    accepted_graph_revision=operation.get("accepted_graph_revision") or accepted_revision,
+                    interview_session_id=projection.get("session_id") or "",
+                    interview_revision=projection.get("session_revision") if type(projection.get("session_revision")) is int else 0,
+                )
+                if entry is not None:
+                    entries.append(entry)
+            # Duplicate receipts are ignored. An empty backend does not invent one.
+            if entries or not previous:
+                state["router_trace"] = merge_router_trace(
+                    previous,
+                    entries,
+                    diagnostics=backend.sanitized_session_diagnostics(),
+                )
             receipt["router_diagnostics"] = deepcopy((state.get("router_trace") or {}).get("diagnostics") or {})
         return receipt
 
@@ -707,6 +726,22 @@ def _status_text(state: dict[str, Any]) -> str:
     prompt = str(pending.get("prompt") or pending.get("question") or "").strip()
     if prompt:
         lines.append(prompt)
+    trace = state.get("router_trace") if isinstance(state.get("router_trace"), dict) else {}
+    associations = [
+        item for item in (trace.get("receipts") or [])
+        if isinstance(item, dict) and item.get("invocation_label") in {"real", "fake"} and item.get("request_id")
+    ]
+    lines.append(f"invocations={len(associations)}")
+    for item in associations:
+        lines.append(
+            "invocation"
+            f" label={item.get('invocation_label')}"
+            f" purpose={item.get('purpose') or ''}"
+            f" request={item.get('request_id') or ''}"
+            f" case={item.get('case_id') or ''}"
+            f" session={item.get('session_id') or ''}"
+            f" accepted_graph_revision={item.get('accepted_graph_revision') or ''}"
+        )
     return "\n".join(lines)
 
 

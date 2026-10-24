@@ -3149,6 +3149,17 @@ class ComplaintWorkspaceService:
         self.request_handlers = ComplaintWorkspaceRequestHandlers(self)
         self._interview_mediators: Dict[tuple[str, str], Any] = {}
 
+    def remember_invocation_associations(self, user_id: Optional[str], entries: Any) -> Dict[str, Any]:
+        """Store invocation associations in the encrypted session without a provider call."""
+
+        from mediator.hook_runtime import merge_router_trace
+
+        state = self._load_state(user_id)
+        state["router_trace"] = merge_router_trace(state.get("router_trace"), entries if isinstance(entries, list) else [])
+        self._save_state(state)
+        receipts = list((state.get("router_trace") or {}).get("receipts") or [])
+        return {"provider_replayed": False, "receipts": receipts, "invocations": len(receipts)}
+
     def apply_shared_interview(
         self,
         state: Dict[str, Any],
@@ -3246,14 +3257,60 @@ class ComplaintWorkspaceService:
                 snapshot = snapshot_router()
                 previous_router = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
                 prior_receipts = []
+                association_keys = {
+                    "schema", "invocation_label", "purpose", "case_id", "session_id",
+                    "accepted_graph_revision", "live_model_identity_verified", "prompt_logged",
+                    "provider_replayed",
+                }
                 for item in previous_router.get("receipts") or []:
-                    if (isinstance(item, dict) and set(item) == {"operation", "request_id", "binding_id", "status", "intake_complete"}
-                            and item.get("operation") in {"extract_facts", "propose_questions"}
+                    if not isinstance(item, dict):
+                        continue
+                    keys = set(item)
+                    core = {"operation", "request_id", "binding_id", "status", "intake_complete"}
+                    if not core <= keys or keys - core - association_keys:
+                        continue
+                    if (item.get("operation") in {"extract_facts", "propose_questions"}
                             and item.get("status") in {"available", "privacy_denied", "provider_unavailable", "malformed_output", "quota", "timeout", "cancelled", "stale_request"}
-                            and all(isinstance(item.get(key), str) and re.fullmatch(r"[0-9a-f]{32}", item[key]) for key in ("request_id", "binding_id"))):
+                            and all(isinstance(item.get(key), str) and re.fullmatch(r"[0-9a-f]{32}", item[key]) for key in ("request_id", "binding_id"))
+                            and (item.get("invocation_label") in {None, "real", "fake"})):
                         prior_receipts.append(dict(item))
                 seen = {item["request_id"] for item in prior_receipts}
-                prior_receipts.extend(item for item in snapshot["receipts"] if item["request_id"] not in seen)
+                from mediator.hook_runtime import invocation_association, invocation_label_for_receipt
+
+                graph_payload = exported.get("knowledge_graph") if isinstance(exported, dict) else None
+                accepted_revision = ""
+                if isinstance(graph_payload, dict):
+                    try:
+                        from complaint_phases.knowledge_graph import KnowledgeGraph
+                        from mediator.hook_runtime import graph_revision_token
+                        accepted_revision = graph_revision_token(KnowledgeGraph.from_dict(graph_payload))
+                    except Exception:
+                        accepted_revision = ""
+                backend = getattr(mediator, "_terminal_router_backend", None)
+                if backend is None:
+                    backends = getattr(mediator, "backends", None) or []
+                    backend = backends[0] if backends else None
+                backend_by_request = {}
+                for backend_receipt in getattr(backend, "task_receipts", []) or []:
+                    if isinstance(backend_receipt, dict) and type(backend_receipt.get("request_id")) is str:
+                        backend_by_request[backend_receipt["request_id"]] = backend_receipt
+                for item in snapshot["receipts"]:
+                    if item["request_id"] in seen:
+                        continue
+                    matched = backend_by_request.get(item["request_id"]) or {}
+                    association = invocation_association(
+                        invocation_label=invocation_label_for_receipt(matched) if matched else "fake",
+                        purpose=item.get("operation"),
+                        request_id=item.get("request_id"),
+                        case_id=case_id,
+                        session_id=router_session,
+                        accepted_graph_revision=accepted_revision,
+                        live_model_identity_verified=bool(matched.get("live_model_identity_verified")) if matched else False,
+                    )
+                    stored = dict(item)
+                    stored.update(association)
+                    prior_receipts.append(stored)
+                    seen.add(item["request_id"])
                 state["intake_router"] = {**snapshot, "session_id": router_session,
                                           "receipts": prior_receipts[-32:]}
                 if snapshot["errors"] and not receipt.get("error"):
