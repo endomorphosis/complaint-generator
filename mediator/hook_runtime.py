@@ -506,3 +506,425 @@ def authorize_hook_execution(
     decision["effect_dispatched"] = False
     decision["provider_invoked"] = False
     return decision
+
+
+# Declared hook purposes. Model purposes are proposals only: they cannot call
+# tools or mark a legal requirement satisfied. Local purposes never dispatch.
+MODEL_PURPOSE_IDS = frozenset({"extract_facts", "propose_questions", "explain_candidate"})
+LOCAL_ONLY_PURPOSE_IDS = frozenset({"local_extraction", "citation_acquisition", "source_graph_check"})
+_PURPOSE_INPUT_LIMIT = 8192
+_EXPLANATION_LIMIT = 500
+_TOOL_KEYS = frozenset({"tools", "tool_calls", "grok_tools", "invoke_tool", "tool"})
+_SATISFACTION_KEYS = frozenset({"requirements_satisfied", "requirement_satisfied", "satisfied_requirements"})
+
+
+def is_local_only_purpose(purpose_id: Any) -> bool:
+    return type(purpose_id) is str and purpose_id in LOCAL_ONLY_PURPOSE_IDS
+
+
+def is_model_purpose(purpose_id: Any) -> bool:
+    return type(purpose_id) is str and purpose_id in MODEL_PURPOSE_IDS
+
+
+def _purpose_ref_pattern():
+    import re
+    return re.compile(r"^[A-Za-z0-9_.:-]{1,128}\Z")
+
+
+def _pinned_route() -> dict[str, Any]:
+    from integrations.ipfs_datasets.llm import pinned_hook_inference_route
+
+    return pinned_hook_inference_route()
+
+
+def inference_purpose_catalog() -> tuple[dict[str, Any], ...]:
+    """Bounded purpose declarations. The route pin is the same for every model purpose."""
+
+    route = _pinned_route()
+    shared = {
+        "inference_owner": route["inference_owner"],
+        "provider": route["provider"],
+        "model": route["model"],
+        "allow_local_fallback": False,
+        "allow_cross_provider_fallback": False,
+        "tools_allowed": False,
+        "may_mark_requirements_satisfied": False,
+        "max_input_bytes": _PURPOSE_INPUT_LIMIT,
+    }
+    return (
+        {**shared, "purpose_id": "extract_facts", "dispatch": "model", "allowed_inputs": ("source_text", "target_ref"), "allowed_outputs": ("facts",), "max_output_items": 16},
+        {**shared, "purpose_id": "propose_questions", "dispatch": "model", "allowed_inputs": ("gap_code", "target_ref"), "allowed_outputs": ("questions",), "max_output_items": 8},
+        {**shared, "purpose_id": "explain_candidate", "dispatch": "model", "allowed_inputs": ("candidate_ref", "gap_code"), "allowed_outputs": ("candidate_ref", "explanation"), "max_output_items": 1},
+        {"purpose_id": "local_extraction", "dispatch": "local", "model_dispatch": False, "allowed_inputs": ("source_text", "excerpt"), "allowed_outputs": ("source_start", "source_end", "excerpt"), "tools_allowed": False, "may_mark_requirements_satisfied": False, "max_input_bytes": _PURPOSE_INPUT_LIMIT},
+        {"purpose_id": "citation_acquisition", "dispatch": "local", "model_dispatch": False, "allowed_inputs": ("citation", "authority_id"), "allowed_outputs": ("authority_id", "citation", "acquired_locally"), "tools_allowed": False, "may_mark_requirements_satisfied": False, "max_input_bytes": _PURPOSE_INPUT_LIMIT},
+        {"purpose_id": "source_graph_check", "dispatch": "local", "model_dispatch": False, "allowed_inputs": ("graph_revision", "source_id", "expected_revision"), "allowed_outputs": ("consistent", "graph_revision", "source_id"), "tools_allowed": False, "may_mark_requirements_satisfied": False, "max_input_bytes": _PURPOSE_INPUT_LIMIT},
+    )
+
+
+def _scan_forbidden(value: Any, *, depth: int = 0) -> Optional[str]:
+    if depth > 8:
+        return "malformed"
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            name = str(key)
+            if name in _TOOL_KEYS:
+                return "model_cannot_invoke_tools"
+            if name in _SATISFACTION_KEYS:
+                return "model_cannot_satisfy_requirements"
+            found = _scan_forbidden(item, depth=depth + 1)
+            if found:
+                return found
+    elif isinstance(value, (list, tuple)):
+        if len(value) > 64:
+            return "malformed"
+        for item in value:
+            found = _scan_forbidden(item, depth=depth + 1)
+            if found:
+                return found
+    return None
+
+
+def _bounded_text(value: Any, *, limit: int) -> Optional[str]:
+    if type(value) is not str:
+        return None
+    text = value.strip()
+    if not text or len(text.encode("utf-8")) > limit:
+        return None
+    if any(ord(char) < 32 for char in text):
+        return None
+    return text
+
+
+def _as_ref(value: Any) -> Optional[str]:
+    text = _bounded_text(value, limit=128)
+    if text is None or _purpose_ref_pattern().fullmatch(text) is None:
+        return None
+    return text
+
+
+def _validate_purpose_inputs(purpose_id: str, inputs: Any) -> tuple[Optional[str], dict[str, Any]]:
+    if not isinstance(inputs, Mapping):
+        return "malformed", {}
+    code = _scan_forbidden(inputs)
+    if code:
+        return code, {}
+    try:
+        encoded = json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    except (TypeError, ValueError):
+        return "malformed", {}
+    if len(encoded) > _PURPOSE_INPUT_LIMIT:
+        return "input_bounds", {}
+    if purpose_id == "extract_facts":
+        if set(inputs) != {"source_text", "target_ref"}:
+            return "input_bounds", {}
+        source_text = _bounded_text(inputs.get("source_text"), limit=4096)
+        target = _as_ref(inputs.get("target_ref"))
+        if source_text is None or target is None:
+            return "input_bounds", {}
+        return None, {"source_text": source_text, "target_ref": target}
+    if purpose_id == "propose_questions":
+        if set(inputs) != {"gap_code", "target_ref"}:
+            return "input_bounds", {}
+        gap = _bounded_text(inputs.get("gap_code"), limit=128)
+        target = _as_ref(inputs.get("target_ref"))
+        if gap is None or target is None:
+            return "input_bounds", {}
+        return None, {"gap_code": gap, "target_ref": target}
+    if purpose_id == "explain_candidate":
+        if set(inputs) != {"candidate_ref", "gap_code"}:
+            return "input_bounds", {}
+        candidate = _as_ref(inputs.get("candidate_ref"))
+        gap = _bounded_text(inputs.get("gap_code"), limit=128)
+        if candidate is None or gap is None:
+            return "input_bounds", {}
+        return None, {"candidate_ref": candidate, "gap_code": gap}
+    if purpose_id == "local_extraction":
+        if set(inputs) != {"source_text", "excerpt"}:
+            return "input_bounds", {}
+        source_text = _bounded_text(inputs.get("source_text"), limit=4096)
+        excerpt = _bounded_text(inputs.get("excerpt"), limit=500)
+        if source_text is None or excerpt is None:
+            return "input_bounds", {}
+        return None, {"source_text": source_text, "excerpt": excerpt}
+    if purpose_id == "citation_acquisition":
+        if set(inputs) != {"citation", "authority_id"}:
+            return "input_bounds", {}
+        citation = _bounded_text(inputs.get("citation"), limit=160)
+        authority = _as_ref(inputs.get("authority_id"))
+        if citation is None or authority is None:
+            return "input_bounds", {}
+        return None, {"citation": citation, "authority_id": authority}
+    if purpose_id == "source_graph_check":
+        if set(inputs) != {"graph_revision", "source_id", "expected_revision"}:
+            return "input_bounds", {}
+        revision = _bounded_text(inputs.get("graph_revision"), limit=80)
+        expected = _bounded_text(inputs.get("expected_revision"), limit=80)
+        source_id = _as_ref(inputs.get("source_id"))
+        if revision is None or expected is None or source_id is None:
+            return "input_bounds", {}
+        return None, {"graph_revision": revision, "source_id": source_id, "expected_revision": expected}
+    return "undeclared_purpose", {}
+
+
+def _validate_model_output(purpose_id: str, output: Any, inputs: Mapping[str, Any]) -> tuple[Optional[str], dict[str, Any]]:
+    if not isinstance(output, Mapping):
+        return "malformed", {}
+    code = _scan_forbidden(output)
+    if code:
+        return code, {}
+    from integrations.ipfs_datasets.llm import INTAKE_FACT_FIELDS
+
+    if purpose_id == "extract_facts":
+        if set(output) != {"facts"} or type(output.get("facts")) is not list:
+            return "malformed", {}
+        facts = output["facts"]
+        if len(facts) > 16:
+            return "malformed", {}
+        clean = []
+        for item in facts:
+            if type(item) is not dict or set(item) != {"field", "value", "target_ref"}:
+                return "malformed", {}
+            field = item.get("field")
+            value = _bounded_text(item.get("value"), limit=500)
+            target = _as_ref(item.get("target_ref"))
+            if type(field) is not str or field not in INTAKE_FACT_FIELDS or value is None or target is None:
+                return "malformed", {}
+            if target != inputs["target_ref"]:
+                return "malformed", {}
+            clean.append({"field": field, "value": value, "target_ref": target})
+        return None, {"facts": clean}
+    if purpose_id == "propose_questions":
+        if set(output) != {"questions"} or type(output.get("questions")) is not list:
+            return "malformed", {}
+        questions = output["questions"]
+        if len(questions) > 8:
+            return "malformed", {}
+        clean = []
+        seen: set[str] = set()
+        for item in questions:
+            if type(item) is not dict or set(item) != {"question_id", "prompt", "target_ref"}:
+                return "malformed", {}
+            question_id = _as_ref(item.get("question_id"))
+            prompt = _bounded_text(item.get("prompt"), limit=500)
+            target = _as_ref(item.get("target_ref"))
+            if question_id is None or prompt is None or target is None or target != inputs["target_ref"]:
+                return "malformed", {}
+            if question_id in seen:
+                return "malformed", {}
+            seen.add(question_id)
+            clean.append({"question_id": question_id, "prompt": prompt, "target_ref": target})
+        return None, {"questions": clean}
+    if purpose_id == "explain_candidate":
+        if set(output) != {"candidate_ref", "explanation"}:
+            return "malformed", {}
+        candidate = _as_ref(output.get("candidate_ref"))
+        explanation = _bounded_text(output.get("explanation"), limit=_EXPLANATION_LIMIT)
+        if candidate is None or explanation is None or candidate != inputs["candidate_ref"]:
+            return "malformed", {}
+        return None, {"candidate_ref": candidate, "explanation": explanation}
+    return "undeclared_purpose", {}
+
+
+def _run_local_purpose(purpose_id: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
+    if purpose_id == "local_extraction":
+        source = inputs["source_text"].encode("utf-8")
+        excerpt = inputs["excerpt"]
+        start = inputs["source_text"].find(excerpt)
+        if start < 0:
+            return {"status": "not_found", "output": None}
+        start_byte = len(inputs["source_text"][:start].encode("utf-8"))
+        end_byte = start_byte + len(excerpt.encode("utf-8"))
+        if source[start_byte:end_byte].decode("utf-8") != excerpt:
+            return {"status": "not_found", "output": None}
+        return {"status": "local_only", "output": {"source_start": start_byte, "source_end": end_byte, "excerpt": excerpt}}
+    if purpose_id == "citation_acquisition":
+        return {"status": "local_only", "output": {"authority_id": inputs["authority_id"], "citation": inputs["citation"], "acquired_locally": True}}
+    consistent = inputs["graph_revision"] == inputs["expected_revision"]
+    return {
+        "status": "local_only",
+        "output": {"consistent": consistent, "graph_revision": inputs["graph_revision"], "source_id": inputs["source_id"]},
+    }
+
+
+def _purpose_result(
+    *,
+    purpose_id: str,
+    status: str,
+    code: str,
+    model_dispatched: bool,
+    output: Any,
+    identity: Optional[dict[str, Any]],
+    route: Optional[dict[str, Any]],
+    synthetic_transport_invoked: bool = False,
+) -> dict[str, Any]:
+    return {
+        "purpose_id": purpose_id,
+        "dispatch": "local" if status == "local_only" else ("model" if model_dispatched and status == "available" else "refused"),
+        "status": status,
+        "code": code,
+        "model_dispatched": model_dispatched,
+        "model_dispatch_count": 1 if model_dispatched else 0,
+        "provider_invoked": False,
+        "synthetic_transport_invoked": synthetic_transport_invoked,
+        "requirements_satisfied": False,
+        "requirements_satisfied_by_model": False,
+        "tools_invoked": False,
+        "tools_allowed": False,
+        "output": output,
+        "route": route or {},
+        "identity": identity,
+    }
+
+
+def dispatch_declared_hook_purpose(
+    context: HookExecutionContext | None,
+    purpose_id: str,
+    inputs: Mapping[str, Any] | None,
+    *,
+    owner_id: str,
+    case_id: str,
+    session_id: str,
+    session_revision: int,
+    graph_revision: str,
+    legal_context: Mapping[str, Any] | None,
+    source_bindings: Sequence[Mapping[str, Any]] | None,
+    privacy_context: Mapping[str, Any] | None,
+    now: datetime,
+    host: Any = None,
+    storage_available: bool = True,
+    request_state: str = "active",
+    model_transport: Optional[Callable[..., Any]] = None,
+    requested_provider: Optional[str] = None,
+    requested_model: Optional[str] = None,
+    allow_local_fallback: bool = False,
+    allow_cross_provider_fallback: bool = False,
+) -> dict[str, Any]:
+    """Run one declared purpose. Local work never calls the model transport.
+
+    Injected transports are synthetic. This function does not verify a live
+    Grok model or build identity.
+    """
+
+    from integrations.ipfs_datasets.llm import route_identity_diagnostics
+
+    route = _pinned_route()
+    if purpose_id not in MODEL_PURPOSE_IDS and purpose_id not in LOCAL_ONLY_PURPOSE_IDS:
+        return _purpose_result(purpose_id=str(purpose_id), status="unavailable", code="undeclared_purpose", model_dispatched=False, output=None, identity=None, route=None)
+    code, clean_inputs = _validate_purpose_inputs(purpose_id, inputs)
+    if code:
+        return _purpose_result(purpose_id=purpose_id, status="refused", code=code, model_dispatched=False, output=None, identity=None, route=route if is_model_purpose(purpose_id) else None)
+    if not isinstance(context, HookExecutionContext) or context.purpose != purpose_id:
+        return _purpose_result(purpose_id=purpose_id, status="refused", code="purpose_mismatch" if isinstance(context, HookExecutionContext) else "binding_missing", model_dispatched=False, output=None, identity=None, route=None)
+    decision = authorize_hook_execution(
+        context,
+        owner_id=owner_id,
+        case_id=case_id,
+        session_id=session_id,
+        session_revision=session_revision,
+        graph_revision=graph_revision,
+        legal_context=legal_context,
+        purpose=purpose_id,
+        source_bindings=source_bindings,
+        privacy_context=privacy_context,
+        now=now,
+        host=host,
+        storage_available=storage_available,
+        request_state=request_state,
+        effect=None,
+    )
+    if not decision["authorized"]:
+        return _purpose_result(purpose_id=purpose_id, status="refused", code=str(decision["code"]), model_dispatched=False, output=None, identity=None, route=None)
+    if is_local_only_purpose(purpose_id):
+        if model_transport is not None:
+            # Present but unused. Calling it would be an unnecessary model dispatch.
+            pass
+        local = _run_local_purpose(purpose_id, clean_inputs)
+        return _purpose_result(
+            purpose_id=purpose_id,
+            status=str(local["status"]),
+            code=str(local["status"]),
+            model_dispatched=False,
+            output=local["output"],
+            identity=None,
+            route=None,
+        )
+    requested = {
+        "router": route["router"],
+        "provider": requested_provider if requested_provider is not None else route["provider"],
+        "model": requested_model if requested_model is not None else route["model"],
+        "build": "",
+    }
+    if (
+        requested["provider"] != route["provider"]
+        or requested["model"] != route["model"]
+        or requested["router"] != route["router"]
+        or allow_local_fallback is not False
+        or allow_cross_provider_fallback is not False
+        or route["allow_local_fallback"] is not False
+        or route["allow_cross_provider_fallback"] is not False
+    ):
+        identity = route_identity_diagnostics(
+            requested=requested,
+            selected={"router": "", "provider": "", "model": "", "build": ""},
+            observed={"router": "", "provider": "", "model": "", "build": ""},
+            transport_kind="synthetic",
+        )
+        return _purpose_result(purpose_id=purpose_id, status="refused", code="unpinned_route", model_dispatched=False, output=None, identity=identity, route=route)
+    if decision.get("provider_call_allowed") is not True:
+        return _purpose_result(purpose_id=purpose_id, status="refused", code="provider_not_allowed", model_dispatched=False, output=None, identity=None, route=route)
+    selected = {"router": route["router"], "provider": route["provider"], "model": route["model"], "build": ""}
+    if model_transport is None:
+        identity = route_identity_diagnostics(requested=requested, selected=selected, observed={"router": "", "provider": "", "model": "", "build": ""}, transport_kind="synthetic")
+        return _purpose_result(purpose_id=purpose_id, status="unavailable", code="model_transport_unavailable", model_dispatched=False, output=None, identity=identity, route=route)
+    call = {
+        "purpose_id": purpose_id,
+        "inputs": clean_inputs,
+        "router": route["router"],
+        "provider": route["provider"],
+        "model": route["model"],
+        "allow_local_fallback": False,
+        "allow_cross_provider_fallback": False,
+        "tools_allowed": False,
+        "grok_tools": "",
+        "may_mark_requirements_satisfied": False,
+    }
+    try:
+        raw = model_transport(call)
+    except Exception:
+        identity = route_identity_diagnostics(requested=requested, selected=selected, observed={"router": "", "provider": "", "model": "", "build": ""}, transport_kind="synthetic")
+        result = _purpose_result(purpose_id=purpose_id, status="unavailable", code="provider_exception", model_dispatched=True, output=None, identity=identity, route=route, synthetic_transport_invoked=True)
+        result["dispatch"] = "refused"
+        return result
+    if not isinstance(raw, Mapping):
+        identity = route_identity_diagnostics(requested=requested, selected=selected, observed={"router": "", "provider": "", "model": "", "build": ""}, transport_kind="synthetic")
+        result = _purpose_result(purpose_id=purpose_id, status="unavailable", code="malformed", model_dispatched=True, output=None, identity=identity, route=route, synthetic_transport_invoked=True)
+        result["dispatch"] = "refused"
+        return result
+    observed = {
+        "router": raw.get("observed_router", ""),
+        "provider": raw.get("observed_provider", ""),
+        "model": raw.get("observed_model", ""),
+        "build": raw.get("observed_build", ""),
+    }
+    identity = route_identity_diagnostics(
+        requested=requested,
+        selected=selected,
+        observed=observed,
+        transport_kind="synthetic",
+        native_observation_bound=False,
+        evidence_class=str(raw.get("evidence_class") or ""),
+    )
+    transport_status = raw.get("status")
+    if transport_status != "available":
+        code_text = transport_status if type(transport_status) is str and transport_status else "unavailable"
+        result = _purpose_result(purpose_id=purpose_id, status="unavailable", code=code_text, model_dispatched=True, output=None, identity=identity, route=route, synthetic_transport_invoked=True)
+        result["dispatch"] = "refused"
+        return result
+    out_code, clean_output = _validate_model_output(purpose_id, raw.get("output"), clean_inputs)
+    if out_code:
+        result = _purpose_result(purpose_id=purpose_id, status="refused", code=out_code, model_dispatched=True, output=None, identity=identity, route=route, synthetic_transport_invoked=True)
+        result["dispatch"] = "refused"
+        return result
+    result = _purpose_result(purpose_id=purpose_id, status="available", code="proposal_accepted", model_dispatched=True, output=clean_output, identity=identity, route=route, synthetic_transport_invoked=True)
+    result["dispatch"] = "model"
+    return result
