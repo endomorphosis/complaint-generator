@@ -88,6 +88,105 @@ def get_repo_paths() -> RepoPaths:
     )
 
 
+def declared_submodule_paths(repo_root: Path | None = None) -> frozenset[str]:
+    """Return submodule paths declared in ``.gitmodules``.
+
+    This reads the committed declaration only. It does not update submodules
+    or walk their trees.
+    """
+
+    root = repo_root if repo_root is not None else get_repo_paths().repo_root
+    gitmodules = root / ".gitmodules"
+    try:
+        text = gitmodules.read_text(encoding="utf-8")
+    except OSError:
+        return frozenset()
+    paths: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("path =") or stripped.startswith("path="):
+            paths.append(stripped.split("=", 1)[1].strip())
+    return frozenset(paths)
+
+
+def classify_owner_checkout(
+    owner_path: Path,
+    *,
+    canonical_relative: str,
+    declared_submodule: bool,
+) -> dict[str, object]:
+    """Distinguish a populated checkout from a committed opaque gitlink.
+
+    A populated checkout has the named canonical source file. A declared
+    submodule whose working tree does not contain that file is an opaque
+    gitlink, even when the git index itself cannot be read. This does not
+    invent a commit id for either case.
+    """
+
+    canonical = owner_path / canonical_relative
+    try:
+        populated = canonical.is_file()
+    except OSError:
+        populated = False
+    if populated:
+        kind = "populated_checkout"
+    elif declared_submodule:
+        kind = "opaque_gitlink"
+    else:
+        kind = "missing_checkout"
+    return {
+        "checkout_kind": kind,
+        "populated": populated,
+        "declared_submodule": declared_submodule,
+        "canonical_relative": canonical_relative.replace("\\", "/"),
+    }
+
+
+def observe_checked_out_commit(owner_path: Path) -> dict[str, str]:
+    """Read a checked-out commit when ``.git`` is readable.
+
+    Permission errors and unresolved gitdir pointers stay typed unavailable
+    records. They are not replaced with a declared pin. A file-shaped ``.git``
+    entry is a gitdir pointer even when the sandbox cannot read it.
+    """
+
+    unavailable = {"status": "unavailable", "error_type": "", "commit": ""}
+    git_entry = owner_path / ".git"
+    try:
+        if git_entry.is_file():
+            try:
+                payload = git_entry.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                unavailable["error_type"] = "GitdirPointer"
+                return unavailable
+            if payload.startswith("gitdir:"):
+                unavailable["error_type"] = "GitdirPointer"
+                return unavailable
+            unavailable["error_type"] = "NotAGitDirectory"
+            return unavailable
+        head_path = git_entry / "HEAD"
+        head = head_path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError as exc:
+        unavailable["error_type"] = type(exc).__name__
+        return unavailable
+    if len(head) == 40 and all(character in "0123456789abcdef" for character in head):
+        return {"status": "available", "error_type": "", "commit": head}
+    if head.startswith("ref:"):
+        ref_name = head.split(":", 1)[1].strip()
+        ref_path = git_entry / ref_name
+        try:
+            commit = ref_path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError as exc:
+            unavailable["error_type"] = type(exc).__name__
+            return unavailable
+        if len(commit) == 40 and all(character in "0123456789abcdef" for character in commit):
+            return {"status": "available", "error_type": "", "commit": commit}
+        unavailable["error_type"] = "UnresolvedHead"
+        return unavailable
+    unavailable["error_type"] = "UnresolvedHead"
+    return unavailable
+
+
 def _matches_package_root(module_name: str, package_root: str) -> bool:
     return module_name == package_root or module_name.startswith(f"{package_root}.")
 
