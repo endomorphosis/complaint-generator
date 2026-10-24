@@ -100,7 +100,7 @@ Implementation instructions:
 
 ## CIMP-GUI-04 Persist server-owned principal identity and roles
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
