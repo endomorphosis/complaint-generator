@@ -494,6 +494,40 @@ class LLMRouterBackend:
         }
         return result
 
+    def run_observed_hook_purpose(self, context, purpose_id, inputs, **kwargs):
+        """Observed hook dispatch. Fallbacks and injected transports are not used.
+
+        The qualified Native constructor and this backend's cancel event stay
+        the resource owners. A failure receipt is recorded and returned so the
+        caller can keep the pending case revision.
+        """
+
+        from mediator.hook_runtime import dispatch_observed_hook_purpose
+
+        kwargs.pop("model_transport", None)
+        kwargs.pop("allow_local_fallback", None)
+        kwargs.pop("allow_cross_provider_fallback", None)
+        kwargs.setdefault("cancel_event", self._cancel_event)
+        if self.timeout_seconds is not None:
+            kwargs.setdefault("timeout", min(float(self.timeout_seconds), 60.0))
+        result = dispatch_observed_hook_purpose(context, purpose_id, inputs, **kwargs)
+        receipt = result.get("receipt") if isinstance(result.get("receipt"), dict) else {}
+        safe = {key: receipt.get(key) for key in (
+            "kind", "purpose_id", "status", "code", "request_id", "pending_revision",
+            "pending_revision_recoverable", "case_revision_mutated", "accepted",
+            "session_retained", "tools_allowed", "tools_invoked", "allow_local_fallback",
+            "allow_cross_provider_fallback", "prompt_logged", "live_canary",
+            "live_model_identity_verified", "live_build_identity_verified", "transport_kind",
+            "observed_provider", "observed_model", "observed_build",
+        )}
+        safe["router"] = INFERENCE_OWNER
+        safe["provider_supported_identity"] = False
+        self.task_receipts.append(safe)
+        self.task_receipts[:] = self.task_receipts[-32:]
+        self.session_retained = True
+        result["backend_receipt"] = dict(safe)
+        return result
+
     def run_synthetic_live_canary(self, *, transport=None, confirm_live=False):
         """Use the existing bounded public-token API once; injected evidence is synthetic."""
         if type(confirm_live) is not bool:

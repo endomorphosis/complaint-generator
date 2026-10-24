@@ -930,6 +930,322 @@ def dispatch_declared_hook_purpose(
     return result
 
 
+def _pending_revision_token(pending_case: Any, graph_revision: str) -> str:
+    if isinstance(pending_case, Mapping) and type(pending_case.get("revision")) is str:
+        return pending_case["revision"]
+    return graph_revision if type(graph_revision) is str else ""
+
+
+def _hook_observation_receipt(
+    *,
+    purpose_id: str,
+    status: str,
+    code: str,
+    request_id: str,
+    pending_revision: str,
+    identity: Optional[dict[str, Any]],
+    accepted: bool,
+) -> dict[str, Any]:
+    """Public failure/success receipt. It omits prompts, source text, and tool arguments."""
+
+    observed = {}
+    if isinstance(identity, Mapping) and isinstance(identity.get("observed"), Mapping):
+        observed = identity["observed"]
+    request_ok = type(request_id) is str and len(request_id) == 32
+    return {
+        "kind": "hook_observation_receipt",
+        "purpose_id": purpose_id if purpose_id in MODEL_PURPOSE_IDS or purpose_id in LOCAL_ONLY_PURPOSE_IDS else "",
+        "status": status,
+        "code": code,
+        "request_id": request_id if request_ok else "",
+        "pending_revision": pending_revision[:80],
+        "pending_revision_recoverable": True,
+        "case_revision_mutated": False,
+        "accepted": accepted,
+        "session_retained": True,
+        "tools_allowed": False,
+        "tools_invoked": False,
+        "allow_local_fallback": False,
+        "allow_cross_provider_fallback": False,
+        "prompt_logged": False,
+        "live_canary": False,
+        "live_model_identity_verified": bool(identity and identity.get("live_model_identity_verified") is True and accepted),
+        "live_build_identity_verified": bool(identity and identity.get("live_build_identity_verified") is True and accepted),
+        "transport_kind": str(identity.get("transport_kind") or "") if isinstance(identity, Mapping) else "",
+        "observed_provider": str(observed.get("provider") or "")[:128],
+        "observed_model": str(observed.get("model") or "")[:128],
+        "observed_build": str(observed.get("build") or "")[:128],
+    }
+
+
+def dispatch_observed_hook_purpose(
+    context: HookExecutionContext | None,
+    purpose_id: str,
+    inputs: Mapping[str, Any] | None,
+    *,
+    owner_id: str,
+    case_id: str,
+    session_id: str,
+    session_revision: int,
+    graph_revision: str,
+    legal_context: Mapping[str, Any] | None,
+    source_bindings: Sequence[Mapping[str, Any]] | None,
+    privacy_context: Mapping[str, Any] | None,
+    now: datetime,
+    host: Any = None,
+    storage_available: bool = True,
+    request_state: str = "active",
+    consent_record: Mapping[str, Any] | None = None,
+    pending_case: Any = None,
+    revision_reader: Optional[Callable[[], Mapping[str, Any]]] = None,
+    cancel_event: Any = None,
+    timeout: float = 30.0,
+    data_class: str = "raw_intake",
+    provider_kind: str = "grok_inference",
+) -> dict[str, Any]:
+    """Dispatch a declared hook purpose through the Native observation seam.
+
+    Injected synthetic transports stay on ``dispatch_declared_hook_purpose``.
+    This path does not substitute another model, does not enable tools, and
+    does not write the pending case. Timeout, cancellation, quota, and
+    malformed output return a bounded receipt and leave that revision in place.
+    """
+
+    import json as _json
+    import uuid as _uuid
+
+    from integrations.ipfs_datasets.llm import (
+        accept_late_remote_result,
+        bind_remote_invocation,
+        evaluate_remote_operation_consent,
+        generate_observed_hook_purpose,
+        route_identity_diagnostics,
+    )
+
+    route = _pinned_route()
+    pending_revision = _pending_revision_token(pending_case, graph_revision)
+    pending_before = _json.dumps(pending_case, sort_keys=True, default=str) if pending_case is not None else None
+
+    def seal(result: dict[str, Any]) -> dict[str, Any]:
+        if pending_before is not None:
+            after = _json.dumps(pending_case, sort_keys=True, default=str)
+            result["pending_revision_recoverable"] = after == pending_before
+            result["case_revision_mutated"] = after != pending_before
+        else:
+            result["pending_revision_recoverable"] = True
+            result["case_revision_mutated"] = False
+        result["pending_revision"] = pending_revision
+        result["requirements_satisfied"] = False
+        result["requirements_satisfied_by_model"] = False
+        result["tools_invoked"] = False
+        result["tools_allowed"] = False
+        result["live_canary"] = False
+        if result.get("identity") is None or result["identity"].get("live_model_identity_verified") is not True:
+            result["live_model_identity_verified"] = False
+        else:
+            result["live_model_identity_verified"] = True
+        return result
+
+    if purpose_id not in MODEL_PURPOSE_IDS and purpose_id not in LOCAL_ONLY_PURPOSE_IDS:
+        refused = _purpose_result(purpose_id=str(purpose_id), status="unavailable", code="undeclared_purpose", model_dispatched=False, output=None, identity=None, route=None)
+        refused["receipt"] = _hook_observation_receipt(purpose_id=str(purpose_id), status="unavailable", code="undeclared_purpose", request_id="", pending_revision=pending_revision, identity=None, accepted=False)
+        return seal(refused)
+    code, clean_inputs = _validate_purpose_inputs(purpose_id, inputs)
+    if code:
+        refused = _purpose_result(purpose_id=purpose_id, status="refused", code=code, model_dispatched=False, output=None, identity=None, route=route if is_model_purpose(purpose_id) else None)
+        refused["receipt"] = _hook_observation_receipt(purpose_id=purpose_id, status="refused", code=code, request_id="", pending_revision=pending_revision, identity=None, accepted=False)
+        return seal(refused)
+    if not isinstance(context, HookExecutionContext) or context.purpose != purpose_id:
+        mismatch = "purpose_mismatch" if isinstance(context, HookExecutionContext) else "binding_missing"
+        refused = _purpose_result(purpose_id=purpose_id, status="refused", code=mismatch, model_dispatched=False, output=None, identity=None, route=None)
+        refused["receipt"] = _hook_observation_receipt(purpose_id=purpose_id, status="refused", code=mismatch, request_id="", pending_revision=pending_revision, identity=None, accepted=False)
+        return seal(refused)
+    decision = authorize_hook_execution(
+        context,
+        owner_id=owner_id,
+        case_id=case_id,
+        session_id=session_id,
+        session_revision=session_revision,
+        graph_revision=graph_revision,
+        legal_context=legal_context,
+        purpose=purpose_id,
+        source_bindings=source_bindings,
+        privacy_context=privacy_context,
+        now=now,
+        host=host,
+        storage_available=storage_available,
+        request_state=request_state,
+        effect=None,
+    )
+    if not decision["authorized"]:
+        refused = _purpose_result(purpose_id=purpose_id, status="refused", code=str(decision["code"]), model_dispatched=False, output=None, identity=None, route=None)
+        refused["receipt"] = _hook_observation_receipt(purpose_id=purpose_id, status="refused", code=str(decision["code"]), request_id="", pending_revision=pending_revision, identity=None, accepted=False)
+        return seal(refused)
+    if is_local_only_purpose(purpose_id):
+        local = _run_local_purpose(purpose_id, clean_inputs)
+        result = _purpose_result(purpose_id=purpose_id, status=str(local["status"]), code=str(local["status"]), model_dispatched=False, output=local["output"], identity=None, route=None)
+        result["receipt"] = _hook_observation_receipt(purpose_id=purpose_id, status=str(local["status"]), code=str(local["status"]), request_id="", pending_revision=pending_revision, identity=None, accepted=False)
+        return seal(result)
+    if decision.get("provider_call_allowed") is not True:
+        refused = _purpose_result(purpose_id=purpose_id, status="refused", code="provider_not_allowed", model_dispatched=False, output=None, identity=None, route=route)
+        refused["receipt"] = _hook_observation_receipt(purpose_id=purpose_id, status="refused", code="provider_not_allowed", request_id="", pending_revision=pending_revision, identity=None, accepted=False)
+        return seal(refused)
+    consent = evaluate_remote_operation_consent(
+        consent_record,
+        user_id=owner_id,
+        case_id=case_id,
+        purpose=purpose_id,
+        provider_kind=provider_kind,
+        data_class=data_class,
+        tools=False,
+    )
+    if consent["effectful_allowed"] is not True:
+        refused = _purpose_result(purpose_id=purpose_id, status="refused", code=str(consent["code"]), model_dispatched=False, output=None, identity=None, route=route)
+        refused["receipt"] = _hook_observation_receipt(purpose_id=purpose_id, status="refused", code=str(consent["code"]), request_id="", pending_revision=pending_revision, identity=None, accepted=False)
+        return seal(refused)
+    requested = {"router": route["router"], "provider": route["provider"], "model": route["model"], "build": ""}
+    selected = dict(requested)
+    request_id = _uuid.uuid4().hex
+    invocation_id = bind_remote_invocation(
+        user_id=owner_id,
+        case_id=case_id,
+        purpose=purpose_id,
+        provider_kind=provider_kind,
+        data_class=data_class,
+        generation=int(consent["generation"]),
+    )
+    observed_call = generate_observed_hook_purpose(
+        purpose_id=purpose_id,
+        inputs=clean_inputs,
+        request_id=request_id,
+        timeout=timeout,
+        cancel_event=cancel_event,
+    )
+    identity = route_identity_diagnostics(
+        requested=requested,
+        selected=selected,
+        observed={
+            "router": observed_call.get("observed_router") or "",
+            "provider": observed_call.get("observed_provider") or "",
+            "model": observed_call.get("observed_model") or "",
+            "build": observed_call.get("observed_build") or "",
+        },
+        transport_kind="native_observation",
+        native_observation_bound=observed_call.get("native_observation_bound") is True,
+        evidence_class=str(observed_call.get("evidence_class") or ""),
+    )
+    # The diagnostics helper can mark a qualified Native class as live. A
+    # loaded test double must not inherit that claim.
+    if observed_call.get("live_model_identity_verified") is not True:
+        identity["live_model_identity_verified"] = False
+        identity["live_build_identity_verified"] = False
+    failure = str(observed_call.get("code") or "unavailable")
+    if failure != "available":
+        status = "unavailable" if failure not in {"cancelled", "timeout", "quota", "malformed"} else failure
+        if failure in {"substitution_refused", "route_unverified"}:
+            status = "unavailable"
+        result = _purpose_result(
+            purpose_id=purpose_id,
+            status=status if status != "malformed" else "refused",
+            code=failure,
+            model_dispatched=bool(observed_call.get("model_dispatched")),
+            output=None,
+            identity=identity,
+            route=route,
+        )
+        result["dispatch"] = "refused"
+        result["provider_invoked"] = bool(observed_call.get("model_dispatched"))
+        result["synthetic_transport_invoked"] = False
+        result["invocation_id"] = invocation_id
+        result["request_id"] = request_id
+        result["accepted"] = False
+        result["receipt"] = _hook_observation_receipt(
+            purpose_id=purpose_id, status=result["status"], code=failure, request_id=request_id,
+            pending_revision=pending_revision, identity=identity, accepted=False,
+        )
+        return seal(result)
+
+    def current_late() -> dict[str, Any]:
+        if revision_reader is None:
+            return {
+                "graph_revision": graph_revision,
+                "session_revision": session_revision,
+                "record": consent_record,
+            }
+        state = revision_reader()
+        if not isinstance(state, Mapping):
+            return {"graph_revision": "", "session_revision": None, "record": None}
+        return {
+            "graph_revision": state.get("graph_revision"),
+            "session_revision": state.get("session_revision"),
+            "record": state.get("record", consent_record),
+        }
+
+    late_state = current_late()
+    late = accept_late_remote_result(
+        late_state.get("record"),
+        invocation_id=invocation_id,
+        user_id=owner_id,
+        case_id=case_id,
+        bound_graph_revision=graph_revision,
+        current_graph_revision=late_state.get("graph_revision") if type(late_state.get("graph_revision")) is str else "",
+        bound_session_revision=session_revision,
+        current_session_revision=late_state.get("session_revision") if type(late_state.get("session_revision")) is int else -1,
+    )
+    if late["accepted"] is not True:
+        result = _purpose_result(
+            purpose_id=purpose_id, status="refused", code=str(late["code"]),
+            model_dispatched=True, output=None, identity=identity, route=route,
+        )
+        result["dispatch"] = "refused"
+        result["provider_invoked"] = True
+        result["synthetic_transport_invoked"] = False
+        result["invocation_id"] = invocation_id
+        result["request_id"] = request_id
+        result["accepted"] = False
+        result["receipt"] = _hook_observation_receipt(
+            purpose_id=purpose_id, status="refused", code=str(late["code"]), request_id=request_id,
+            pending_revision=pending_revision, identity=identity, accepted=False,
+        )
+        return seal(result)
+    try:
+        parsed = _json.loads(observed_call.get("output_text") or "")
+    except (TypeError, ValueError):
+        parsed = None
+    out_code, clean_output = _validate_model_output(purpose_id, parsed, clean_inputs)
+    if out_code:
+        result = _purpose_result(
+            purpose_id=purpose_id, status="refused", code="malformed" if out_code == "malformed" else out_code,
+            model_dispatched=True, output=None, identity=identity, route=route,
+        )
+        result["dispatch"] = "refused"
+        result["provider_invoked"] = True
+        result["synthetic_transport_invoked"] = False
+        result["accepted"] = False
+        result["request_id"] = request_id
+        result["invocation_id"] = invocation_id
+        result["receipt"] = _hook_observation_receipt(
+            purpose_id=purpose_id, status="refused", code=result["code"], request_id=request_id,
+            pending_revision=pending_revision, identity=identity, accepted=False,
+        )
+        return seal(result)
+    result = _purpose_result(
+        purpose_id=purpose_id, status="available", code="proposal_accepted",
+        model_dispatched=True, output=clean_output, identity=identity, route=route,
+    )
+    result["dispatch"] = "model"
+    result["provider_invoked"] = True
+    result["synthetic_transport_invoked"] = False
+    result["accepted"] = True
+    result["request_id"] = request_id
+    result["invocation_id"] = invocation_id
+    result["receipt"] = _hook_observation_receipt(
+        purpose_id=purpose_id, status="available", code="proposal_accepted", request_id=request_id,
+        pending_revision=pending_revision, identity=identity, accepted=True,
+    )
+    return seal(result)
+
+
 # Operation contracts. Registration records owners and disabled handlers.
 # It does not search, ingest, refresh, persist, or call a provider.
 HOOK_OPERATION_REGISTRY_SCHEMA = "hook_operation_registry_v1"
@@ -1842,8 +2158,15 @@ def accept_late_hook_result(
     owner_id: str,
     case_id: str,
     result_acceptor: Optional[Callable[[], Any]] = None,
+    bound_graph_revision: Optional[str] = None,
+    current_graph_revision: Optional[str] = None,
+    bound_session_revision: Optional[int] = None,
+    current_session_revision: Optional[int] = None,
 ) -> dict[str, Any]:
-    """Recheck the persisted policy before accepting a late remote result."""
+    """Recheck the persisted policy before accepting a late remote result.
+
+    A changed graph or session revision is stale even when consent still matches.
+    """
 
     from integrations.ipfs_datasets.llm import accept_late_remote_result
 
@@ -1862,6 +2185,10 @@ def accept_late_hook_result(
         invocation_id=invocation_id,
         user_id=owner_id,
         case_id=case_id,
+        bound_graph_revision=bound_graph_revision,
+        current_graph_revision=current_graph_revision,
+        bound_session_revision=bound_session_revision,
+        current_session_revision=current_session_revision,
     )
     accepted = decision["accepted"] is True
     acceptor_called = False
