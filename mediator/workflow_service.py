@@ -1066,6 +1066,135 @@ class WorkflowActionService:
 			'workflow_action_focus_areas': matched_focus_areas,
 		}
 
+	def research_legal_source_gap(
+		self,
+		*,
+		user_id: str,
+		case_id: str,
+		intake_case_file: Dict[str, Any],
+		claims: Optional[List[Dict[str, Any]]] = None,
+		query_terms: Optional[List[str]] = None,
+		local_rows: Optional[Dict[str, Any]] = None,
+		retrieval_mode: str = "cache",
+		storage_available: bool = True,
+		cancelled: bool = False,
+		deadline_seconds: float = 5.0,
+		max_bytes: int = 4096,
+		max_results: int = 5,
+	) -> Dict[str, Any]:
+		"""Acquire and admit sources for the current legal-source gap.
+
+		This is the typed bounded acquisition/admission operation. It does not
+		record a factual answer and it does not treat a research receipt as proof.
+		"""
+		self._legal_research_dispatch_count = int(getattr(self, "_legal_research_dispatch_count", 0) or 0) + 1
+		mediator = self._mediator
+		case = intake_case_file if isinstance(intake_case_file, dict) else {}
+		claim_rows = [item for item in list(claims or []) if isinstance(item, dict)]
+		try:
+			binding = mediator.build_legal_acquisition_request(
+				case,
+				claim_rows,
+				query_terms=query_terms,
+				storage_available=storage_available,
+				max_results=max_results,
+				timeout_seconds=deadline_seconds,
+			)
+			acquisition = mediator.legal_authority_search.acquire_bounded_canonical_sources(
+				binding,
+				owner_id=str(user_id or ""),
+				case_id=str(case_id or ""),
+				purpose="public_law_citation",
+				data_class="public_legal_source_graph",
+				provider_kind="local",
+				retrieval_mode=retrieval_mode,
+				local_rows=local_rows,
+				deadline_seconds=deadline_seconds,
+				max_bytes=max_bytes,
+				max_results=max_results,
+				cancelled=bool(cancelled),
+			)
+		except Exception:
+			acquisition = {
+				"status": "unavailable",
+				"error_code": "acquisition_unavailable",
+				"candidates": [],
+				"proof": False,
+				"resume": {"resumable": True, "next_action": "retry_unavailable", "worker_stalled": False},
+			}
+		if not isinstance(acquisition, dict):
+			acquisition = {
+				"status": "unavailable",
+				"error_code": "acquisition_unavailable",
+				"candidates": [],
+				"proof": False,
+				"resume": {"resumable": True, "next_action": "retry_unavailable", "worker_stalled": False},
+			}
+		try:
+			admitted = mediator.admit_acquired_authorities(acquisition, claim_rows, case, user_id=user_id)
+		except Exception:
+			admitted = {
+				"acquisition": {"status": acquisition.get("status") or "unavailable", "error_code": "storage_unavailable"},
+				"admission": {
+					"status": "unavailable",
+					"reason": "storage_unavailable",
+					"decisions": [{"status": "unavailable", "reason": "storage_error"}],
+					"stored_record_ids": [],
+					"proof": False,
+				},
+			}
+		admission = admitted.get("admission") if isinstance(admitted, dict) and isinstance(admitted.get("admission"), dict) else {}
+		decisions = [item for item in list(admission.get("decisions") or []) if isinstance(item, dict)]
+		candidates = acquisition.get("candidates") if isinstance(acquisition.get("candidates"), list) else []
+		retrieved = len(candidates)
+		admitted_count = sum(1 for item in decisions if item.get("status") == "admitted")
+		rejected_count = sum(1 for item in decisions if item.get("status") not in {"admitted", "unavailable", "stored"})
+		unavailable_count = sum(1 for item in decisions if item.get("status") == "unavailable")
+		acquisition_status = str(acquisition.get("status") or "unavailable")
+		admission_status = str(admission.get("status") or "")
+		if acquisition_status in {"unavailable", "timeout", "error"} and unavailable_count == 0:
+			unavailable_count = 1
+		elif admission_status == "unavailable" and unavailable_count == 0:
+			unavailable_count = 1
+		if admission_status == "rejected" and rejected_count == 0:
+			rejected_count = len(decisions) or 1
+		resume = acquisition.get("resume") if isinstance(acquisition.get("resume"), dict) else {}
+		next_action = str(resume.get("next_action") or "")
+		if not next_action or next_action == "none":
+			next_action = "continue_pending_inquiry"
+		resumable = bool(resume.get("resumable")) or next_action in {
+			"continue_pending_inquiry",
+			"resolve_legal_context",
+			"retry_unavailable",
+			"retry_timeout",
+			"supply_edition",
+			"supply_owned_source_text",
+			"awaiting_user",
+		}
+		return {
+			"action": "legal_research",
+			"operation": "acquire_bounded_canonical_sources+admit_acquired_authorities",
+			"stored_as_answer": False,
+			"proves_complaint": False,
+			"legal_sufficiency": False,
+			"replayed": False,
+			"dispatched": True,
+			"status": acquisition_status if acquisition_status != "candidates" else (admission_status or acquisition_status),
+			"acquisition_status": acquisition_status,
+			"admission_status": admission_status,
+			"error_code": str(acquisition.get("error_code") or admission.get("reason") or ""),
+			"counts": {
+				"retrieved": retrieved,
+				"admitted": admitted_count,
+				"rejected": rejected_count,
+				"unavailable": unavailable_count,
+			},
+			"next_action": next_action,
+			"resumable": resumable,
+			"worker_stalled": False,
+			"proof": False,
+		}
+
 	def declare_legal_evidence_hook_operations(self) -> Dict[str, Any]:
 		"""Record the disabled legal/evidence registry. Does not write case state."""
 		from mediator.hook_runtime import register_legal_evidence_operations

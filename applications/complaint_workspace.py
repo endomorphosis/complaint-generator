@@ -1016,6 +1016,22 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
 }
 
 
+def format_legal_research_result(receipt: Dict[str, Any]) -> str:
+    """Public counts and the next resumable step. Research is not proof."""
+
+    counts = receipt.get("counts") if isinstance(receipt.get("counts"), dict) else {}
+    retrieved = int(counts.get("retrieved") or 0)
+    admitted = int(counts.get("admitted") or 0)
+    rejected = int(counts.get("rejected") or 0)
+    unavailable = int(counts.get("unavailable") or 0)
+    next_action = str(receipt.get("next_action") or "continue_pending_inquiry")
+    return (
+        f"Legal research retrieved={retrieved} admitted={admitted} "
+        f"rejected={rejected} unavailable={unavailable}. "
+        f"Next action: {next_action}. The pending question is unchanged."
+    )
+
+
 def format_terminal_why(
     inquiry: Optional[Dict[str, Any]] = None,
     *,
@@ -2699,6 +2715,17 @@ class ComplaintWorkspaceRequestHandlers:
             payload["stored_as_answer"] = False
             payload["awaiting_user"] = True
             payload["message"] = why["display"]
+            return payload
+        if normalized_message.lower() == "/research":
+            research = workspace.run_legal_research(str(state.get("user_id") or user_id))
+            fresh = workspace._load_state(str(state.get("user_id") or user_id))
+            payload = workspace._build_intake_chat_payload(fresh)
+            payload["legal_research"] = research
+            payload["command"] = "/research"
+            payload["stored_as_answer"] = False
+            payload["awaiting_user"] = True
+            payload["legal_sufficiency"] = False
+            payload["message"] = str(research.get("display") or format_legal_research_result(research))
             return payload
         normalized_action = str(interview_action or "").strip().lower()
         if normalized_action == "resume":
@@ -7571,6 +7598,165 @@ class ComplaintWorkspaceService:
             expected_question_revision=expected_question_revision,
             interview_action=interview_action,
         )
+
+    def run_legal_research(
+        self,
+        user_id: Optional[str],
+        *,
+        local_rows: Optional[Dict[str, Any]] = None,
+        cancelled: bool = False,
+        retrieval_mode: str = "cache",
+    ) -> Dict[str, Any]:
+        """Run one deliberate legal-research action for the saved case.
+
+        Status and resume do not call this. Replaying the same action returns
+        the stored receipt and does not acquire or admit again. The receipt is
+        not an intake answer.
+        """
+
+        resolved = self._check_access(str(user_id or DEFAULT_USER_ID), ability="write")
+        try:
+            state = self._load_state(resolved)
+        except WorkspacePersistenceError as exc:
+            return self._legal_research_failure(exc.code or "unavailable", public_status=exc.public_status)
+        case_id = _state_case_id(state, resolved)
+        narrative = _narrative_record(state)
+        narrative_text = str(narrative.get("text") or "")
+        claim_type = str(state.get("claim_type") or "termination")
+        claims = [{"type": claim_type, "name": claim_type, "claim_type": claim_type}]
+        case_file = {
+            "source_complaint_text": narrative_text,
+            "candidate_claims": list(claims),
+        }
+        storage_available = self._legal_research_storage_available()
+        fingerprint = self._legal_research_fingerprint(
+            case_id=case_id,
+            narrative_text=narrative_text,
+            claim_type=claim_type,
+            local_rows=local_rows,
+            storage_available=storage_available,
+            cancelled=cancelled,
+            retrieval_mode=retrieval_mode,
+        )
+        stored = state.get("legal_research") if isinstance(state.get("legal_research"), dict) else {}
+        receipts = stored.get("receipts") if isinstance(stored.get("receipts"), dict) else {}
+        previous = receipts.get(fingerprint)
+        if isinstance(previous, dict):
+            replay = dict(previous)
+            replay["replayed"] = True
+            replay["dispatched"] = False
+            replay["stored_as_answer"] = False
+            replay["proves_complaint"] = False
+            replay["legal_sufficiency"] = False
+            replay["proof"] = False
+            replay["display"] = format_legal_research_result(replay)
+            return replay
+        answers_before = deepcopy(state.get("intake_answers") or {})
+        history_before = deepcopy(state.get("intake_history") or [])
+        try:
+            mediator = self._mediator_for_shared_interview(resolved, case_id)
+            receipt = mediator.workflow_actions.research_legal_source_gap(
+                user_id=resolved,
+                case_id=case_id,
+                intake_case_file=case_file,
+                claims=claims,
+                query_terms=[f"{claim_type} statute"],
+                local_rows=local_rows,
+                retrieval_mode=retrieval_mode,
+                storage_available=storage_available,
+                cancelled=cancelled,
+            )
+        except WorkspacePersistenceError as exc:
+            return self._legal_research_failure(exc.code or "unavailable", public_status=exc.public_status)
+        except Exception:
+            receipt = self._legal_research_failure("acquisition_unavailable", public_status="unavailable")
+        self._legal_research_dispatch_count = int(getattr(self, "_legal_research_dispatch_count", 0) or 0) + 1
+        receipt = dict(receipt)
+        receipt["stored_as_answer"] = False
+        receipt["proves_complaint"] = False
+        receipt["legal_sufficiency"] = False
+        receipt["proof"] = False
+        receipt["fingerprint"] = fingerprint
+        receipt["display"] = format_legal_research_result(receipt)
+        state["intake_answers"] = answers_before
+        state["intake_history"] = history_before
+        legal_research = state.setdefault("legal_research", {})
+        if not isinstance(legal_research, dict):
+            legal_research = {}
+            state["legal_research"] = legal_research
+        legal_receipts = legal_research.setdefault("receipts", {})
+        if not isinstance(legal_receipts, dict):
+            legal_receipts = {}
+            legal_research["receipts"] = legal_receipts
+        legal_receipts[fingerprint] = {key: value for key, value in receipt.items() if key != "display"}
+        legal_research["latest_fingerprint"] = fingerprint
+        try:
+            self._save_state(state)
+        except WorkspacePersistenceError as exc:
+            failed = self._legal_research_failure(exc.code or "durability_unproven", public_status=exc.public_status)
+            failed["counts"] = dict(receipt.get("counts") or failed["counts"])
+            failed["dispatched"] = True
+            return failed
+        return receipt
+
+    def _legal_research_storage_available(self) -> bool:
+        cache = self._session_dir / "legal-source-cache"
+        try:
+            if cache.exists() and not cache.is_dir():
+                return False
+            if not cache.exists():
+                cache.mkdir(mode=0o700)
+            return cache.is_dir()
+        except OSError:
+            return False
+
+    @staticmethod
+    def _legal_research_fingerprint(
+        *,
+        case_id: str,
+        narrative_text: str,
+        claim_type: str,
+        local_rows: Optional[Dict[str, Any]],
+        storage_available: bool,
+        cancelled: bool,
+        retrieval_mode: str,
+    ) -> str:
+        corpus = json.dumps(local_rows, sort_keys=True, default=str) if local_rows is not None else ""
+        body = json.dumps(
+            {
+                "cancelled": bool(cancelled),
+                "case_id": case_id,
+                "claim_type": claim_type,
+                "corpus": corpus,
+                "narrative": narrative_text,
+                "retrieval_mode": retrieval_mode,
+                "storage_available": bool(storage_available),
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _legal_research_failure(code: str, *, public_status: str) -> Dict[str, Any]:
+        next_action = "unlock_private_case" if public_status == "unlock_needed" else "retry_unavailable"
+        receipt = {
+            "action": "legal_research",
+            "operation": "acquire_bounded_canonical_sources+admit_acquired_authorities",
+            "stored_as_answer": False,
+            "proves_complaint": False,
+            "legal_sufficiency": False,
+            "replayed": False,
+            "dispatched": False,
+            "status": "unavailable" if public_status != "unlock_needed" else "unlock_needed",
+            "error_code": str(code or "unavailable"),
+            "counts": {"retrieved": 0, "admitted": 0, "rejected": 0, "unavailable": 1},
+            "next_action": next_action,
+            "resumable": True,
+            "worker_stalled": False,
+            "proof": False,
+        }
+        receipt["display"] = format_legal_research_result(receipt)
+        return receipt
 
     def save_evidence(
         self,
