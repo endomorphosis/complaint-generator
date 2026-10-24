@@ -8,13 +8,20 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from .browser_sessions import (
+    SESSION_COOKIE,
+    BrowserSessionError,
+    BrowserSessionService,
+    browser_session_http_status,
+)
 from .complaint_mcp_protocol import handle_jsonrpc_message, tool_list_payload
 from .complaint_workspace import (
     ComplaintWorkspaceService,
     PrincipalRegistry,
+    WorkspaceAccess,
     WorkspaceAuthorizationDenied,
     access_from_http_headers,
     generate_decentralized_id,
@@ -355,29 +362,52 @@ class PackagedDocketRevalidationPersistRequest(BaseModel):
     chain_until_satisfied: bool = True
 
 
+def _browser_session_http_error(error: BrowserSessionError) -> HTTPException:
+    status, code = browser_session_http_status(error)
+    return HTTPException(status_code=status, detail=code)
+
+
 def create_complaint_workspace_router(
     service: Optional[ComplaintWorkspaceService] = None,
     *,
     principal_registry: Optional[PrincipalRegistry] = None,
     trusted_local: bool = False,
+    browser_sessions: Optional[BrowserSessionService] = None,
 ) -> APIRouter:
     """HTTP and MCP routes share one principal/case authorizer.
 
     ``trusted_local`` must be passed explicitly for a local operator binding.
     A process-wide bearer token or a caller-supplied ``user_id`` does not
     authorize a private read, write, or export.
+
+    When ``browser_sessions`` is installed, including an unavailable service
+    from a missing verifier or signing key, requests fail closed. That path
+    does not fall back to trusted-local access.
     """
 
     router = APIRouter()
     workspace = service or ComplaintWorkspaceService()
     registry = principal_registry
+    sessions = browser_sessions
 
     async def _bind_request_access(http_request: Request):
-        access = access_from_http_headers(
-            http_request.headers,
-            principal_registry=registry,
-            trusted_local=trusted_local,
-        )
+        if sessions is not None:
+            anonymous = http_request.url.path.rstrip("/").endswith("/api/complaint-workspace/auth/login")
+            try:
+                bound = await sessions.bind_http(http_request, allow_anonymous=anonymous)
+            except BrowserSessionError as error:
+                raise _browser_session_http_error(error) from None
+            if bound is None:
+                access = WorkspaceAccess.unauthenticated()
+            else:
+                access = WorkspaceAccess.authenticated(bound.principal_id)
+                http_request.state.browser_principal = bound
+        else:
+            access = access_from_http_headers(
+                http_request.headers,
+                principal_registry=registry,
+                trusted_local=trusted_local,
+            )
         with workspace_access_scope(access):
             yield
 
@@ -407,6 +437,57 @@ def create_complaint_workspace_router(
     router.get = _register(router.get)  # type: ignore[method-assign]
     router.post = _register(router.post)  # type: ignore[method-assign]
     router.dependencies.append(Depends(_bind_request_access))
+
+    def _json_payload(http_request: Request) -> Dict[str, Any]:
+        payload = getattr(http_request.state, "browser_json", None)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=401, detail="authentication_failed")
+        return payload
+
+    @router.post("/api/complaint-workspace/auth/login")
+    async def login_browser_session(http_request: Request) -> JSONResponse:
+        if sessions is None or not sessions.configured:
+            raise HTTPException(status_code=503, detail="authentication_unavailable")
+        try:
+            issued = sessions.login(_json_payload(http_request))
+        except BrowserSessionError as error:
+            raise _browser_session_http_error(error) from None
+        response = JSONResponse(issued.public_view())
+        sessions.attach_session_cookie(response, issued)
+        return response
+
+    @router.post("/api/complaint-workspace/auth/logout")
+    async def logout_browser_session(http_request: Request) -> JSONResponse:
+        if sessions is None or not sessions.configured:
+            raise HTTPException(status_code=503, detail="authentication_unavailable")
+        token = str(http_request.cookies.get(SESSION_COOKIE) or "")
+        try:
+            sessions.logout(token, csrf_token=str(http_request.headers.get("x-csrf-token") or ""))
+        except BrowserSessionError as error:
+            raise _browser_session_http_error(error) from None
+        response = JSONResponse({"authenticated": False})
+        sessions.clear_session_cookie(response)
+        return response
+
+    @router.post("/api/complaint-workspace/auth/rotate")
+    async def rotate_browser_session(http_request: Request) -> JSONResponse:
+        if sessions is None or not sessions.configured:
+            raise HTTPException(status_code=503, detail="authentication_unavailable")
+        token = str(http_request.cookies.get(SESSION_COOKIE) or "")
+        try:
+            issued = sessions.rotate(token, csrf_token=str(http_request.headers.get("x-csrf-token") or ""))
+        except BrowserSessionError as error:
+            raise _browser_session_http_error(error) from None
+        response = JSONResponse(issued.public_view())
+        sessions.attach_session_cookie(response, issued)
+        return response
+
+    @router.get("/api/complaint-workspace/auth/session")
+    async def read_browser_session(http_request: Request) -> Dict[str, Any]:
+        bound = getattr(http_request.state, "browser_principal", None)
+        if bound is None:
+            raise HTTPException(status_code=401, detail="session_required")
+        return bound.public_view()
 
     @router.get("/api/complaint-workspace/session")
     async def get_session(
@@ -940,6 +1021,7 @@ def attach_complaint_workspace_routes(
     *,
     principal_registry: Optional[PrincipalRegistry] = None,
     trusted_local: bool = False,
+    browser_sessions: Optional[BrowserSessionService] = None,
 ) -> FastAPI:
     return attach_router_routes(
         app,
@@ -947,5 +1029,6 @@ def attach_complaint_workspace_routes(
             service,
             principal_registry=principal_registry,
             trusted_local=trusted_local,
+            browser_sessions=browser_sessions,
         ),
     )
