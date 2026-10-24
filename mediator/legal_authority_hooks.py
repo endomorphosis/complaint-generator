@@ -1250,6 +1250,24 @@ Return only the search terms, one per line."""
         )
         return envelope
 
+    def acquire_bounded_canonical_sources(self, binding: Any, **kwargs: Any) -> Dict[str, Any]:
+        """Acquire owned source candidates. This does not initialize CommonCrawl."""
+        from integrations.ipfs_datasets.legal import acquire_bounded_canonical_legal_sources
+
+        result = acquire_bounded_canonical_legal_sources(binding, **kwargs)
+        self.mediator.log(
+            'legal_source_candidate_acquisition',
+            status=str(result.get('status') or ''),
+            error_code=str(result.get('error_code') or ''),
+            found=int(result.get('result_count') or 0),
+            remote_dispatched=bool(result.get('remote_dispatched')),
+            model_inference_used=bool(result.get('model_inference_used')),
+            commoncrawl_initialized=False,
+        )
+        result['commoncrawl_initialized'] = False
+        result['corpus_download_started'] = False
+        return result
+
 
 class LegalAuthorityStorageHook(PrivateDerivedIndexMixin):
     """
