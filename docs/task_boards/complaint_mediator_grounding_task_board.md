@@ -582,7 +582,7 @@ Implementation instructions:
 
 ## CIMP-MGND-23 Bind norm definitions and scope correspondence to source evidence
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
