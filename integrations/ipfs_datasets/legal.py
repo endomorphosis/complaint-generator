@@ -1067,6 +1067,367 @@ def intake_legal_selection(
     }
 
 
+_ACQUISITION_QUERY_TERM_CAP = 12
+_ACQUISITION_TARGET_CAP = 16
+_ACQUISITION_RESULT_CAP = 25
+_ACQUISITION_TIMEOUT_CAP_SECONDS = 30.0
+
+
+def _explicit_jurisdiction_token(value: Any) -> str:
+    """Normalize an already-explicit code. Ambiguous text is left unchanged."""
+    text = " ".join(str(value or "").split())
+    prefixed = re.fullmatch(r"US-([A-Za-z]{2})", text)
+    if not prefixed:
+        return text
+    code = prefixed.group(1).upper()
+    if code in set(_EXPLICIT_STATE_NAMES.values()):
+        return code
+    return text
+
+
+def _supported_claim_record(record: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """A selected claim is supported only when the intake registry names it."""
+    from complaint_phases.intake_claim_registry import CLAIM_INTAKE_REQUIREMENTS, normalize_claim_type
+
+    claim_type = _text(record.get("claim_type") or record.get("type"))
+    normalized = normalize_claim_type(claim_type)
+    if not normalized or normalized == "unknown" or normalized not in CLAIM_INTAKE_REQUIREMENTS:
+        return None
+    registry = CLAIM_INTAKE_REQUIREMENTS[normalized]
+    return {
+        "claim_type": normalized,
+        "name": _text(record.get("name") or record.get("label") or registry.get("label") or normalized),
+        "requirement_elements": [
+            {
+                "requirement_id": _text(element.get("element_id")),
+                "label": _text(element.get("label")),
+            }
+            for element in (registry.get("elements") or [])
+            if isinstance(element, Mapping) and _text(element.get("element_id"))
+        ],
+    }
+
+
+def _classified_role(context: Mapping[str, Any], role: str) -> Dict[str, Any]:
+    return classify_legal_date(context.get(role), role=role)
+
+
+def _public_query_terms(
+    *groups: Any,
+    narrative: str,
+) -> List[str]:
+    """Keep short public-law terms. The case narrative is not a query."""
+    narrative_text = " ".join(str(narrative or "").split())
+    terms: List[str] = []
+    seen = set()
+    for group in groups:
+        values = group if isinstance(group, (list, tuple)) else [group]
+        for value in values:
+            text = _text(value)
+            if not text or len(text) > 80:
+                continue
+            if narrative_text and (text == narrative_text or (len(text) > 40 and text in narrative_text)):
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            terms.append(text)
+            if len(terms) >= _ACQUISITION_QUERY_TERM_CAP:
+                return terms
+    return terms
+
+
+def _closed_corpus_plan(jurisdiction: str, authority_families: Optional[Iterable[Any]]) -> Dict[str, Any]:
+    """Search flags follow the explicit jurisdiction. Unknown stays closed."""
+    program: Dict[str, Any] = {"jurisdiction": jurisdiction}
+    families = [_text(family) for family in (authority_families or []) if _text(family)]
+    if families:
+        program["authority_families"] = families
+    plan = legal_requirement_search_plan(program, state=jurisdiction if jurisdiction != UNKNOWN_LEGAL_CONTEXT else None)
+    plan["default_applied"] = False
+    plan["guessed_jurisdiction"] = False
+    return plan
+
+
+def build_bounded_legal_acquisition_request(
+    legal_context: Optional[Mapping[str, Any]],
+    claim_candidates: Optional[Iterable[Any]],
+    *,
+    requirements: Optional[Iterable[Any]] = None,
+    query_terms: Optional[Iterable[Any]] = None,
+    narrative: Any = None,
+    authority_families: Optional[Iterable[Any]] = None,
+    jurisdiction_default: Any = None,
+    corpus_default: Any = None,
+    max_results: int = 5,
+    timeout_seconds: float = 5.0,
+    storage_available: Optional[bool] = None,
+    context_questions: Optional[Iterable[Any]] = None,
+) -> Dict[str, Any]:
+    """Bind a citation fetch to explicit jurisdiction, law date, and claims.
+
+    A missing, ambiguous, or uncertain gate returns a targeted inquiry. This
+    function does not choose Oregon, federal law, or a corpus, and it does not
+    copy a law-query date into the factual chronology. The raw case narrative
+    is not stored on the request and is not required to name a public-law query.
+    """
+    source = dict(legal_context) if isinstance(legal_context, Mapping) else empty_legal_context()
+    if "jurisdiction" in source:
+        source["jurisdiction"] = _explicit_jurisdiction_token(source.get("jurisdiction"))
+    selection = intake_legal_selection(source, claim_candidates)
+    jurisdiction = str(selection.get("jurisdiction") or UNKNOWN_LEGAL_CONTEXT)
+    applicable = _classified_role(source, DATE_ROLE_APPLICABLE_LAW)
+    event_date = _classified_role(source, DATE_ROLE_EVENT)
+    filing_date = _classified_role(source, DATE_ROLE_FILING_REFERENCE)
+    retrieval_date = _classified_role(source, DATE_ROLE_CORPUS_RETRIEVAL)
+    law_query_date = applicable.get("precise_date") if _resolved_legal_date(applicable) else None
+    event_resolved = _resolved_legal_date(event_date)
+    chronology_gap = not event_resolved
+
+    supported: List[Dict[str, Any]] = []
+    unsupported: List[str] = []
+    for item in selection.get("claim_candidates") or []:
+        if not isinstance(item, Mapping):
+            continue
+        record = _supported_claim_record(item)
+        if record is None:
+            label = _text(item.get("claim_type") or item.get("name")) or "unspecified"
+            if label not in unsupported:
+                unsupported.append(label)
+            continue
+        supported.append(record)
+    for item in claim_candidates or []:
+        if isinstance(item, str):
+            probe = {"claim_type": item}
+        elif isinstance(item, Mapping):
+            probe = item
+        else:
+            continue
+        if _supported_claim_record(probe) is None:
+            label = _text(probe.get("claim_type") if isinstance(probe, Mapping) else probe) or "unspecified"
+            if label and label.lower() != "unknown" and label not in unsupported:
+                unsupported.append(label)
+
+    requirement_targets: List[Dict[str, str]] = []
+    requirement_terms: List[str] = []
+    supported_types = {item["claim_type"] for item in supported}
+    explicit_requirements = list(requirements or [])
+    for item in explicit_requirements:
+        if not isinstance(item, Mapping):
+            continue
+        claim_type = _text(item.get("claim_type") or item.get("type"))
+        supported_record = _supported_claim_record({"claim_type": claim_type}) if claim_type else None
+        normalized = supported_record["claim_type"] if supported_record else ""
+        if not normalized or normalized not in supported_types:
+            label = claim_type or "unspecified"
+            if label not in unsupported:
+                unsupported.append(label)
+            continue
+        requirement_id = _text(item.get("requirement_id") or item.get("element_id") or item.get("name"))
+        if not requirement_id:
+            continue
+        requirement_targets.append({
+            "claim_type": normalized,
+            "requirement_id": requirement_id,
+            "label": _text(item.get("label") or item.get("name") or requirement_id),
+            "target_kind": "caller_requirement",
+        })
+        requirement_terms.extend([
+            _text(item.get("citation")),
+            _text(item.get("public_query") or item.get("query")),
+            _text(item.get("label") or item.get("name")),
+        ])
+    if not requirement_targets:
+        for claim in supported:
+            for element in claim["requirement_elements"]:
+                requirement_targets.append({
+                    "claim_type": claim["claim_type"],
+                    "requirement_id": element["requirement_id"],
+                    "label": element["label"] or element["requirement_id"],
+                    "target_kind": "claim_requirement",
+                })
+                if len(requirement_targets) >= _ACQUISITION_TARGET_CAP:
+                    break
+    requirement_targets = requirement_targets[:_ACQUISITION_TARGET_CAP]
+    claim_targets = [
+        {"claim_type": claim["claim_type"], "name": claim["name"], "target_kind": "claim"}
+        for claim in supported[:_ACQUISITION_TARGET_CAP]
+    ]
+    claim_terms = [claim["name"] or claim["claim_type"].replace("_", " ") for claim in supported]
+    public_terms = _public_query_terms(query_terms or [], requirement_terms, claim_terms, narrative=str(narrative or ""))
+
+    reasons = list(selection.get("unresolved_reasons") or [])
+    if applicable.get("raw_text") and not law_query_date and "uncertain_applicable_law_date" not in reasons:
+        reasons = [("uncertain_applicable_law_date" if reason == "missing_applicable_law_date" else reason) for reason in reasons]
+        if "uncertain_applicable_law_date" not in reasons:
+            reasons.append("uncertain_applicable_law_date")
+    if unsupported and not supported and "unsupported_claim" not in reasons:
+        reasons.append("unsupported_claim")
+    if supported and not public_terms and "missing_public_law_query_terms" not in reasons:
+        reasons.append("missing_public_law_query_terms")
+    ready = bool(selection.get("ready_to_select") and supported and law_query_date and public_terms and jurisdiction != UNKNOWN_LEGAL_CONTEXT)
+
+    questions: List[Dict[str, Any]] = []
+    seen_questions = set()
+
+    def _add_question(item: Mapping[str, Any]) -> None:
+        field = _text(item.get("field") or item.get("question_id"))
+        reason = _text(item.get("reason"))
+        prompt = _text(item.get("prompt") or item.get("question"))
+        if not prompt:
+            return
+        key = (field, reason, prompt)
+        if key in seen_questions:
+            return
+        seen_questions.add(key)
+        questions.append({
+            "question_id": _text(item.get("question_id")) or f"legal_acquisition.{field or 'context'}",
+            "field": field,
+            "prompt": prompt,
+            "reason": reason,
+        })
+
+    if not ready:
+        for item in selection.get("questions") or []:
+            if isinstance(item, Mapping):
+                copied = dict(item)
+                if copied.get("reason") == "missing_applicable_law_date" and applicable.get("raw_text") and not law_query_date:
+                    copied["reason"] = "uncertain_applicable_law_date"
+                    copied["prompt"] = (
+                        "Which exact day should select the version of the law? "
+                        "An uncertain date or range is kept as stated and is not treated as that day."
+                    )
+                _add_question(copied)
+        for item in context_questions or []:
+            if isinstance(item, Mapping):
+                _add_question(item)
+        if supported and not public_terms:
+            _add_question({
+                "question_id": "legal_acquisition.query_terms",
+                "field": "query_terms",
+                "reason": "missing_public_law_query_terms",
+                "prompt": "Which public-law terms should be used to fetch the citation? The case narrative is not used as the query.",
+            })
+    if unsupported:
+        listed = ", ".join(unsupported)
+        _add_question({
+            "question_id": "legal_acquisition.claim_candidates",
+            "field": "claim_candidates",
+            "reason": "unsupported_claim",
+            "prompt": (
+                f"Which supported claim should be acquired? {listed} is not a selected supported claim, "
+                "so no jurisdiction or corpus was chosen for it."
+            ),
+        })
+    if chronology_gap:
+        _add_question({
+            "question_id": "legal_context.event_dates",
+            "field": "event_date",
+            "reason": "missing_event_dates",
+            "prompt": (
+                "What dates or date ranges are relevant to the events? "
+                "The date used to select a version of the law does not fill this chronology gap."
+            ),
+        })
+
+    try:
+        bounded_results = max(1, min(int(max_results), _ACQUISITION_RESULT_CAP))
+    except (TypeError, ValueError):
+        bounded_results = 5
+    try:
+        bounded_timeout = max(0.1, min(float(timeout_seconds), _ACQUISITION_TIMEOUT_CAP_SECONDS))
+    except (TypeError, ValueError):
+        bounded_timeout = 5.0
+    corpus_plan = _closed_corpus_plan(jurisdiction if ready else UNKNOWN_LEGAL_CONTEXT, authority_families if ready else None)
+    if not ready:
+        for flag in (
+            "search_us_code",
+            "search_federal_register",
+            "search_state_laws",
+            "search_state_administrative_rules",
+            "search_case_law",
+        ):
+            corpus_plan[flag] = False
+        corpus_plan["jurisdiction"] = UNKNOWN_LEGAL_CONTEXT if jurisdiction == UNKNOWN_LEGAL_CONTEXT else jurisdiction
+        corpus_plan["state_code"] = ""
+        corpus_plan["context_status"] = UNKNOWN_LEGAL_CONTEXT
+
+    dates = {
+        DATE_ROLE_EVENT: event_date,
+        DATE_ROLE_APPLICABLE_LAW: applicable,
+        DATE_ROLE_FILING_REFERENCE: filing_date,
+        DATE_ROLE_CORPUS_RETRIEVAL: retrieval_date,
+    }
+    rejected_defaults = {}
+    if _text(jurisdiction_default):
+        rejected_defaults["jurisdiction_default"] = _text(jurisdiction_default)
+    if _text(corpus_default):
+        rejected_defaults["corpus_default"] = _text(corpus_default)
+
+    if storage_available is False:
+        execution_status = "unavailable"
+    elif ready:
+        execution_status = "not_executed"
+    else:
+        execution_status = "blocked"
+
+    request = None
+    if ready:
+        families = list(corpus_plan.get("authority_families") or [])
+        request = {
+            "request_id": "acq:" + ":".join([jurisdiction, str(law_query_date), "+".join(claim["claim_type"] for claim in claim_targets)]),
+            "jurisdiction": jurisdiction,
+            "law_query_date": law_query_date,
+            "dates": dates,
+            "claim_targets": claim_targets,
+            "requirement_targets": requirement_targets,
+            "public_law_query_terms": public_terms,
+            "program": {
+                "program_type": "bounded_legal_acquisition",
+                "query_text": " ".join(public_terms),
+                "jurisdiction": jurisdiction,
+                "authority_families": families,
+                "retrieval_mode": RETRIEVAL_MODE_OFFLINE,
+                "contains_private_facts": False,
+            },
+            "corpus_plan": corpus_plan,
+            "bounds": {
+                "max_results": bounded_results,
+                "timeout_seconds": bounded_timeout,
+                "max_query_terms": _ACQUISITION_QUERY_TERM_CAP,
+                "max_targets": _ACQUISITION_TARGET_CAP,
+            },
+            "contains_private_narrative": False,
+        }
+    return {
+        "ready": ready,
+        "request": request,
+        "questions": questions,
+        "inquiry": questions,
+        "jurisdiction": jurisdiction if ready or jurisdiction != UNKNOWN_LEGAL_CONTEXT else UNKNOWN_LEGAL_CONTEXT,
+        "selection_status": selection.get("selection_status"),
+        "unresolved_reasons": [] if ready else list(dict.fromkeys(reasons)),
+        "unsupported_claims": unsupported,
+        "dates": dates,
+        "law_query_date": law_query_date,
+        "factual_chronology_gap": chronology_gap,
+        "law_query_date_satisfies_factual_chronology": False,
+        "corpus_plan": corpus_plan,
+        "rejected_defaults": rejected_defaults,
+        "execution": {
+            "attempted": False,
+            "status": execution_status,
+            "backend_invoked": False,
+            "results_claimed": False,
+            "results": None,
+            "storage_available": storage_available,
+        },
+        "narrative_required": False,
+        "contains_private_narrative": False,
+    }
+
+
 def legal_requirement_search_plan(
     program: Optional[Dict[str, Any]],
     *,
@@ -3747,6 +4108,7 @@ __all__ = [
     "SourcedLegalRequirement",
     "adapt_sourced_legal_requirements",
     "intake_legal_selection",
+    "build_bounded_legal_acquisition_request",
     "unresolved_legal_requirement",
     "legal_requirement_search_plan",
     "lookup_bounded_legal_corpus",
