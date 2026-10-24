@@ -73,7 +73,8 @@ def _context(state_dir: Path, record: Mapping[str, Any]) -> dict[str, Any] | Non
     if not any(key in record for key in ('schema_version', 'repo_root', 'plan_id', 'state_dir')):
         return None
     from . import improvement_recovery as recovery
-    from .improvement_plan import BOARD_RELATIVE
+    from .improvement_plan import load_spec
+    from .campaign import campaign_artifacts
     from .improvement_runner import recorded_worktree_root
     if record.get('schema_version') != 'complaint-improvement-launcher@1':
         raise ValueError('full launcher ownership record required')
@@ -88,8 +89,11 @@ def _context(state_dir: Path, record: Mapping[str, Any]) -> dict[str, Any] | Non
     repo = Path(str(record.get('repo_root') or ''))
     spec = Path(str(record.get('spec_path') or ''))
     if (not repo.is_absolute() or repo.resolve() != repo or record.get('state_dir') != str(state_dir)
-            or not spec.is_absolute() or spec.resolve() != spec or not spec.is_relative_to(repo)
-            or record.get('board_path') != str(repo / BOARD_RELATIVE)):
+            or not spec.is_absolute() or spec.resolve() != spec or not spec.is_relative_to(repo)):
+        raise ValueError('launcher repository/epoch paths differ')
+    artifacts = campaign_artifacts(load_spec(spec))
+    artifacts.validate_source(repo, spec)
+    if record.get('board_path') != str(repo / artifacts.board_relative):
         raise ValueError('launcher repository/epoch paths differ')
     plan = recovery._plan_id(repo, spec)
     if record.get('plan_id') != plan or record.get('provider') != 'grok_cli' or record.get('model') != 'grok-4.7' or record.get('allow_fallback') is not False:

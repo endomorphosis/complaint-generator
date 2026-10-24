@@ -14,6 +14,8 @@ import re
 import tempfile
 from typing import Any, Mapping, Sequence
 
+from .campaign import campaign_artifacts
+
 
 SPEC_RELATIVE = "docs/task_boards/complaint_intake_improvement_spec.json"
 PLAN_RELATIVE = "docs/task_boards/complaint_intake_formal_work_plan.json"
@@ -51,6 +53,7 @@ def validate_spec(spec: Any) -> dict[str, Any]:
         raise ValueError("spec must be an object")
     _text(spec.get("schema_version"), "schema_version")
     _text(spec.get("title"), "title")
+    campaign_artifacts(spec)
     if spec.get("provider") != _PROVIDER or spec["provider"].get("allow_fallback") is not False:
         raise ValueError("provider must use grok-4.7 through llm_router with fallback disabled")
     if not isinstance(spec.get("execution_policy"), dict) or not spec["execution_policy"]:
@@ -144,6 +147,7 @@ def build_improvement_work_plan(spec: Mapping[str, Any]) -> Any:
     """Build canonical contracts with behavior-test evidence, without executing it."""
 
     spec = validate_spec(dict(spec))
+    artifacts = campaign_artifacts(spec)
     from integrations.ipfs_datasets.loader import ensure_import_paths
 
     ensure_import_paths("ipfs_accelerate_py.agent_supervisor")
@@ -179,7 +183,7 @@ def build_improvement_work_plan(spec: Mapping[str, Any]) -> Any:
             goal_id=goal["id"], owner_actor_id=_ACTOR_ID,
             satisfaction_formula_id=formula.formula_id,
             evidence_requirement_ids=tuple(f"test.{task['id']}" for task in spec["tasks"] if task["goal_id"] == goal["id"]),
-            source_ids=(SPEC_RELATIVE,), metadata={"title": goal["title"]},
+            source_ids=(artifacts.spec_relative,), metadata={"title": goal["title"]},
         ))
         for subgoal in goal["subgoals"]:
             formula = subgoal_satisfied(subgoal["id"])
@@ -205,7 +209,7 @@ def build_improvement_work_plan(spec: Mapping[str, Any]) -> Any:
     ) for task in spec["tasks"])
     return FormalWorkPlan(
         vocabulary_profile_id="supervisor-reviewed", vocabulary_version=LOGIC_VOCABULARY_VERSION,
-        source_ids=("complaint-generator", SPEC_RELATIVE), repository_tree_id="",
+        source_ids=("complaint-generator", artifacts.spec_relative), repository_tree_id="",
         trace_bound=1,
         actors=(Actor(actor_id=_ACTOR_ID, kind=ActorKind.AGENT, principal_id="complaint-generator",
                       capabilities=("implementation", "behavioral_validation"), metadata={"provider": dict(_PROVIDER)}),),
@@ -249,12 +253,12 @@ _CONTRACT_METADATA = (
 )
 
 
-def _parsed_projection(text: str, root: Path) -> dict[str, Any]:
+def _parsed_projection(text: str, root: Path, *, board_relative: str = BOARD_RELATIVE) -> dict[str, Any]:
     """Parse with the production board path so semantic identities stay path-bound."""
 
     from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import parse_task_text
 
-    parsed = parse_task_text(text, path=root / BOARD_RELATIVE, task_header_prefix=_TASK_HEADER_PREFIX)
+    parsed = parse_task_text(text, path=root / board_relative, task_header_prefix=_TASK_HEADER_PREFIX)
     tasks: dict[str, Any] = {}
     for task in parsed:
         if task.task_id in tasks:
@@ -288,7 +292,9 @@ def _projection_drift(existing: Any, expected: Any) -> list[str]:
 
 def _require_matching_projection(existing_text: str, spec: Mapping[str, Any], plan_id: str, root: Path) -> None:
     expected_text = _render_board(spec, plan_id)
-    existing, expected = _parsed_projection(existing_text, root), _parsed_projection(expected_text, root)
+    relative = campaign_artifacts(spec).board_relative
+    existing, expected = (_parsed_projection(existing_text, root, board_relative=relative),
+                          _parsed_projection(expected_text, root, board_relative=relative))
     planned = {task["id"] for task in spec["tasks"]}
     if set(existing) != planned or set(expected) != planned:
         raise ValueError("existing task board differs from this plan; preserve it and migrate explicitly")
@@ -305,7 +311,7 @@ def _require_matching_projection(existing_text: str, spec: Mapping[str, Any], pl
 
 def _require_emitted_projection(text: str, spec: Mapping[str, Any], root: Path) -> None:
     """Validate the actual native projection before publishing a new board."""
-    tasks = _parsed_projection(text, root)
+    tasks = _parsed_projection(text, root, board_relative=campaign_artifacts(spec).board_relative)
     if set(tasks) != {item["id"] for item in spec["tasks"]}:
         raise ValueError("rendered native projection differs from the specification")
     for item in spec["tasks"]:
@@ -369,6 +375,8 @@ def generate(spec_path: Path | str, repo_root: Path | str) -> dict[str, Any]:
     spec_path = Path(spec_path).resolve()
     root = Path(repo_root).resolve()
     spec = load_spec(spec_path)
+    artifacts = campaign_artifacts(spec)
+    artifacts.validate_source(root, spec_path)
     plan = build_improvement_work_plan(spec)
     from ipfs_accelerate_py.agent_supervisor.planning.formal_planning_contracts import FormalWorkPlan
     from ipfs_accelerate_py.agent_supervisor.planning.formal_plan_validator import FormalPlanValidator
@@ -380,7 +388,7 @@ def generate(spec_path: Path | str, repo_root: Path | str) -> dict[str, Any]:
     validation = FormalPlanValidator().validate(restored)
     rendered = _render_board(spec, plan.plan_id)
     _require_emitted_projection(rendered, spec, root)
-    plan_path, board_path = root / PLAN_RELATIVE, root / BOARD_RELATIVE
+    plan_path, board_path = root / artifacts.plan_relative, root / artifacts.board_relative
     marker = f"<!-- plan_id: {plan.plan_id} -->"
     board_preserved = board_path.exists()
     if not board_preserved:

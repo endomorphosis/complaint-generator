@@ -32,6 +32,12 @@ import threading
 import time
 from typing import Any, Mapping
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    __package__ = "integrations.ipfs_accelerate"
+
+from .campaign import DEFAULT_ARTIFACTS, campaign_artifacts
+
 
 SPEC_RELATIVE = "docs/task_boards/complaint_intake_improvement_spec.json"
 STATE_PREFIX = "complaint_intake"
@@ -208,7 +214,40 @@ def _requested_plan_id(spec_path: Path) -> str | None:
         return None
 
 
+def _campaign_spec(repo_root: Path, spec_path: Path):
+    from .improvement_plan import load_spec
+    spec = load_spec(spec_path)
+    artifacts = campaign_artifacts(spec)
+    artifacts.validate_source(repo_root, spec_path)
+    return spec, artifacts
+
+
+def _native_campaign_spec(repo_root: Path, state_dir: Path, *, todo_path=None, board_namespace=None):
+    """Resolve the specification bound to this Native launch, never a global override."""
+    root = Path(repo_root).resolve()
+    record = _read_json(Path(state_dir) / "launcher.json")
+    bound = _full_launch_record(record)
+    if bound:
+        path = Path(str(record.get("spec_path") or ""))
+        if not _campaign_tuple_matches(record, root, path, Path(state_dir)):
+            raise ValueError("Native campaign specification is not bound to its launcher")
+        spec, artifacts = _campaign_spec(root, path)
+    else:
+        spec, artifacts = _campaign_spec(root, root / SPEC_RELATIVE)
+    expected = root / artifacts.board_relative
+    if bound and todo_path is not None and Path(todo_path).resolve() != expected:
+        raise ValueError("Native task board differs from its campaign specification")
+    if ((board_namespace or artifacts != DEFAULT_ARTIFACTS)
+            and board_namespace is not None and board_namespace != artifacts.board_namespace):
+        raise ValueError("Native board namespace differs from its campaign specification")
+    return spec
+
+
 def _campaign_tuple_matches(record: Mapping[str, Any], repo_root: Path, spec_path: Path, state_dir: Path) -> bool:
+    try:
+        _, artifacts = _campaign_spec(repo_root, spec_path)
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
     plan_id = _requested_plan_id(spec_path)
     return bool(
         plan_id and record.get("schema_version") == "complaint-improvement-launcher@1"
@@ -219,6 +258,7 @@ def _campaign_tuple_matches(record: Mapping[str, Any], repo_root: Path, spec_pat
         and record.get("provider") == "grok_cli"
         and record.get("model") == MODEL
         and record.get("allow_fallback") is False
+        and (artifacts == DEFAULT_ARTIFACTS or record.get("board_path") == str(repo_root / artifacts.board_relative))
     )
 
 
@@ -714,11 +754,13 @@ def _resource_admission_hook(repo_root: Path, state_dir: Path, worktree_root: Pa
     return DaemonLoopHook(phase="before", message="Campaign resource admission hold: %s", callback=before_pass)
 
 
-def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktree_root: Path | None = None) -> list[str]:
+def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktree_root: Path | None = None,
+                board_namespace: str = DEFAULT_ARTIFACTS.board_namespace,
+                protected_paths: tuple[str, ...] = ()) -> list[str]:
     """Compile only options supported by the actual native supervisor parser."""
     return [
         "--todo-path", str(board_path), "--state-dir", str(state_dir),
-        "--state-prefix", STATE_PREFIX, "--board-namespace", "complaint-intake-improvement",
+        "--state-prefix", STATE_PREFIX, "--board-namespace", board_namespace,
         "--task-prefix", TASK_PREFIX, "--task-source-kind", "legacy-markdown",
         "--authority-mode", "legacy_markdown", "--explicit-legacy-task-source", "--implement",
         "--check-interval", "5", "--daemon-interval", "10",
@@ -741,7 +783,7 @@ def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktre
         "--no-objective-goal-completion-reconcile", "--no-objective-goal-migration",
         "--no-objective-ast-dataset", "--no-objective-todo-vector-index",
         "--no-retry-budget-guardrail", "--no-dependency-guardrail", "--no-reconciliation-guardrail",
-    ]
+    ] + [argument for path in protected_paths for argument in ("--implementation-protected-path", path)]
 
 
 def _board_summary(tasks: list[Any]) -> dict[str, Any]:
@@ -793,15 +835,16 @@ def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: s
         return {"status": "not_ready", "reason": CampaignResourceHold.code, "resource_capacity": resources,
                 "paid_calls": 0, "native_config_validated": False, "execution_started": False}
     os.chdir(repo_root)
-    from .improvement_plan import BOARD_RELATIVE, build_improvement_work_plan, load_spec
-    spec = load_spec(spec_path)
+    from .improvement_plan import build_improvement_work_plan
+    spec, artifacts = _campaign_spec(repo_root, spec_path)
     plan = build_improvement_work_plan(spec)
     branch = merge_target or _branch(repo_root)
     supervisor, _ = _native_modules(repo_root)
-    args = native_argv(repo_root / BOARD_RELATIVE, state_dir, branch, worktree_root=selected_root)
+    args = native_argv(repo_root / artifacts.board_relative, state_dir, branch, worktree_root=selected_root,
+                       board_namespace=artifacts.board_namespace, protected_paths=artifacts.protected_paths)
     parsed = supervisor.parse_args(args)
     config = supervisor.supervisor_config_from_args(parsed, repo_root=repo_root)
-    board = _validate_board(repo_root, repo_root / BOARD_RELATIVE, spec)
+    board = _validate_board(repo_root, repo_root / artifacts.board_relative, spec)
     env = campaign_environment(repo_root, context_exclude=spec["execution_policy"].get("context_exclude"), state_dir=state_dir)
     grok = shutil.which(env.get("IPFS_ACCELERATE_AGENT_GROK_BIN") or "grok", path=env.get("PATH"))
     auth_present = _auth_material_present(env)
@@ -1273,7 +1316,6 @@ def _owner_liveness(birth: Any) -> str:
 
 
 def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
-    from .improvement_plan import BOARD_RELATIVE, load_spec
     record = _read_json(state_dir / "launcher.json")
     owned = owns_process(record)
     identity = record.get("identity")
@@ -1288,7 +1330,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     now = time.time()
     heartbeat_age = _age(heartbeat_path, now)
     try:
-        board = _validate_board(repo_root, repo_root / BOARD_RELATIVE, load_spec(spec_path))
+        spec, artifacts = _campaign_spec(repo_root, spec_path)
+        board = _validate_board(repo_root, repo_root / artifacts.board_relative, spec)
     except Exception as exc:
         board = {"read_error": str(exc), "count": 0, "completed": 0, "ready_task_ids": [], "manual_hold_task_ids": []}
     # Native selection sets active_task_id before an attempt or worker exists.
@@ -1542,7 +1585,10 @@ def _recovery_config(repo_root: Path, state_dir: Path, record: Mapping[str, Any]
     """Derive the native paths/options from the first-party compiler only."""
     supervisor, _ = _native_modules(repo_root)
     selected_root, _ = recorded_worktree_root(record, state_dir)
-    args = native_argv(Path(record["board_path"]), state_dir, record["merge_target"], worktree_root=selected_root)
+    spec = _native_campaign_spec(repo_root, state_dir, todo_path=record["board_path"])
+    artifacts = campaign_artifacts(spec)
+    args = native_argv(Path(record["board_path"]), state_dir, record["merge_target"], worktree_root=selected_root,
+                       board_namespace=artifacts.board_namespace, protected_paths=artifacts.protected_paths)
     return supervisor.supervisor_config_from_args(supervisor.parse_args(args), repo_root=repo_root)
 
 
@@ -2013,8 +2059,18 @@ def _validation_activity_binding(workspace: Path, task: Mapping[str, Any], conte
         birth = native.read_process_birth(owner_pid)
         if lease is None or claim is None or identity is None or birth is None:
             return None
+        launcher = _read_validation_watchdog_authority(campaign / "launcher.json")
+        if (launcher is None or launcher.get("repo_root") != str(target)
+                or launcher.get("state_dir") != str(campaign)):
+            return None
+        artifacts = DEFAULT_ARTIFACTS
+        if any(key in launcher for key in ("schema_version", "spec_path", "plan_id")):
+            spec_path = Path(str(launcher.get("spec_path") or ""))
+            if not _campaign_tuple_matches(launcher, target, spec_path, campaign):
+                return None
+            _, artifacts = _campaign_spec(target, spec_path)
         scope = {"repo_root": str(target), "state_dir": str(campaign), "state_prefix": STATE_PREFIX,
-                 "todo_path": str(target / "docs/task_boards/complaint_intake_task_board.md"),
+                 "todo_path": str(target / artifacts.board_relative),
                  "daemon_entrypoint": str(Path(__file__).resolve())}
         if (dict(identity.owner_scope) != scope or identity.process_birth != birth or birth.pid != owner_pid
                 or native.ProcessBirthIdentity.from_dict(claim.get("owner_process_birth")) != birth
@@ -2029,10 +2085,6 @@ def _validation_activity_binding(workspace: Path, task: Mapping[str, Any], conte
                 or claim.get("state_dir") != str(campaign) or claim.get("state_path") != str(state_path)
                 or not native.checkout_lock_repository_matches(claim, target)
                 or claim.get("dispatch_authority_cid") != daemon.PortalImplementationDaemon._implementation_dispatch_authority_cid(claim)):
-            return None
-        launcher = _read_validation_watchdog_authority(campaign / "launcher.json")
-        if (launcher is None or launcher.get("repo_root") != str(target)
-                or launcher.get("state_dir") != str(campaign)):
             return None
         worktree_root, _ = recorded_worktree_root(launcher, campaign)
         if workspace == worktree_root or not workspace.is_relative_to(worktree_root):
@@ -2530,7 +2582,6 @@ def _validation_aware_supervisor_class(native_class):
             from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
             if isinstance(daemon, PortalImplementationDaemon):
                 daemon.__class__ = _rescue_receipt_daemon_class(type(daemon), self)
-            from .improvement_plan import load_spec
             from ipfs_accelerate_py.agent_supervisor.validation.validation_scheduler import ValidationScheduler
             native_scheduler = daemon.validation_scheduler
             if isinstance(native_scheduler, ValidationScheduler):
@@ -2542,7 +2593,9 @@ def _validation_aware_supervisor_class(native_class):
                 )
             scheduler = EvidenceValidationScheduler(
                 native_scheduler, state_dir=self.config.state_dir,
-                spec=load_spec(self.config.repo_root / SPEC_RELATIVE),
+                spec=_native_campaign_spec(self.config.repo_root, self.config.state_dir,
+                    todo_path=getattr(self.config, "todo_path", None),
+                    board_namespace=getattr(self.config, "board_namespace", None)),
                 defer_readiness=True,
             )
             daemon.validation_scheduler = scheduler
@@ -2601,8 +2654,8 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
             raise RuntimeError("internal worktree root differs from its owned launch")
     with _lock(state_dir, "runner.lock", blocking=False):
         os.chdir(repo_root)
-        from .improvement_plan import BOARD_RELATIVE, build_improvement_work_plan, load_spec
-        spec = load_spec(spec_path)
+        from .improvement_plan import build_improvement_work_plan
+        spec, artifacts = _campaign_spec(repo_root, spec_path)
         if build_improvement_work_plan(spec).plan_id != record.get("plan_id"):
             raise RuntimeError("specification changed after the owned launch was prepared")
         effective = campaign_environment(repo_root, context_exclude=spec["execution_policy"].get("context_exclude"), state_dir=state_dir)
@@ -2610,7 +2663,7 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
             raise RuntimeError("auth_material_unavailable")
         os.environ.clear()
         os.environ.update(effective)
-        _validate_board(repo_root, repo_root / BOARD_RELATIVE, spec)
+        _validate_board(repo_root, repo_root / artifacts.board_relative, spec)
         privacy = _private_runtime_checks(repo_root, effective)
         if not privacy["ready"]:
             raise RuntimeError(privacy["reason"])
@@ -2620,7 +2673,8 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
             raise RuntimeError("worktree root changed before native admission")
         # No --once: this is the real native run_forever watchdog and daemon.
         _run_native_supervisor(
-            native_argv(repo_root / BOARD_RELATIVE, state_dir, merge_target, worktree_root=selected_root),
+            native_argv(repo_root / artifacts.board_relative, state_dir, merge_target, worktree_root=selected_root,
+                        board_namespace=artifacts.board_namespace, protected_paths=artifacts.protected_paths),
             repo_root=repo_root, logger=_LOGGER,
             daemon_script_path=Path(__file__).resolve(),
         )
@@ -3239,6 +3293,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     observation_command = declared_command or command
     contract = {"task": dict(task), "context": dict(context or {}), "command": command, "declared_command": observation_command}
     extra = _task_outputs(task)
+    if (context or {}).get("campaign_spec_relative"):
+        extra = list(dict.fromkeys([*extra, context["campaign_spec_relative"]]))
     start = time.monotonic()
     original_command = command
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native_source
@@ -3525,6 +3581,8 @@ class EvidenceValidationScheduler:
                          "changed_paths": list(getattr(getattr(args[0], "proposal", None), "changed_paths", ())) if method == "run_validated" else [],
                          "attempt_ordinal": None, "attempt_binding_status": "ordinal_unavailable_from_public_task_hook; native_proposal_context_retained",
                          "repository_tree_id": str(getattr(getattr(args[0], "proposal", None), "repository_tree_id", "")) if method == "run_validated" else "",
+                         **({"campaign_spec_relative": campaign_artifacts(self.spec).spec_relative}
+                            if "campaign" in self.spec else {}),
                          "model_policy": {"model": MODEL, "fallback": False}})
             receipt = gate_task_completion(root, self.state_dir, task, observed,
                 legal_data_version=observed["host_measurement"]["source_before"]["dependencies"].get("external/ipfs_datasets_py", {}).get("head", "unavailable"))
@@ -3699,20 +3757,16 @@ def _run_evidence_daemon_adapter(argv, *, repo_root, validation_scheduler, proof
 def evidence_daemon_main(argv):
     root = Path(__file__).resolve().parents[2]
     _native_modules(root)
-    from .improvement_plan import load_spec
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
     from ipfs_accelerate_py.agent_supervisor.validation.validation_scheduler import ValidationScheduler
     args = native.parse_args(list(argv))
     scheduler = EvidenceValidationScheduler(ValidationScheduler(max_workers=args.validation_max_workers,
         resource_budget=args.validation_resource_budget, default_timeout_seconds=args.implementation_timeout),
-        state_dir=args.state_dir, spec=load_spec(root / SPEC_RELATIVE), defer_readiness=True)
+        state_dir=args.state_dir, spec=_native_campaign_spec(root, args.state_dir,
+            todo_path=args.todo_path, board_namespace=getattr(args, "board_namespace", None)), defer_readiness=True)
     return _run_evidence_daemon_adapter(argv, repo_root=root, validation_scheduler=scheduler, proof_workflow=scheduler.bind_task)
 
 
 if __name__ == "__main__":
     # The native supervisor executes its public daemon_script_path directly.
-    # Bootstrap before relative imports; ordinary application CLI stays intact.
-    if __package__ in {None, ""}:
-        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-        __package__ = "integrations.ipfs_accelerate"
     raise SystemExit(evidence_daemon_main(sys.argv[1:]) if "--todo-path" in sys.argv[1:] else main())
