@@ -660,7 +660,7 @@ Implementation instructions:
 
 ## CIMP-MGND-26 Gate qualified model outputs as candidates rather than authority
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
