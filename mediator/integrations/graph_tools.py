@@ -7,9 +7,41 @@ from typing import Any, Dict, List, Set
 
 logger = logging.getLogger(__name__)
 
+_CANDIDATE_NOMINATION = "candidate_nomination"
+_SPAN_KEYS = ("start", "end", "text")
+
+
+def _exact_source_span(left: Any, right: Any) -> bool:
+    """Byte-span binding is exact. A missing or partial span is not a match."""
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    if any(left.get(key) in (None, "") or right.get(key) in (None, "") for key in _SPAN_KEYS):
+        return False
+    if any(left.get(key) != right.get(key) for key in _SPAN_KEYS):
+        return False
+    if "unit" in left and "unit" in right and left.get("unit") != right.get("unit"):
+        return False
+    return True
+
+
+def _payload_source_span(payload: Dict[str, Any]) -> Any:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    return payload.get("source_span") or metadata.get("source_span")
+
+
+def _payload_requirement_id(payload: Dict[str, Any]) -> str:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    return str(payload.get("requirement_id") or metadata.get("requirement_id") or "").strip()
+
 
 class GraphRetrievalAugmentor:
-    """Builds graph-ingestable evidence payloads from normalized retrieval artifacts."""
+    """Builds graph-ingestable evidence payloads from normalized retrieval artifacts.
+
+    Claim ids and retrieval confidence are candidate nominations. They become
+    bound support only after ``recheck_support_binding`` sees the same claim,
+    requirement, and source span. Retrieval confidence never satisfies a legal
+    requirement by itself.
+    """
 
     def build_evidence_payloads(
         self,
@@ -33,6 +65,7 @@ class GraphRetrievalAugmentor:
             seen_ids.add(record_id)
 
             confidence = float(item.get("confidence", item.get("score", 0.6)) or 0.6)
+            metadata = dict(item.get("metadata", {}) or {})
             payloads.append(
                 {
                     "id": record_id,
@@ -41,9 +74,18 @@ class GraphRetrievalAugmentor:
                     "description": str(item.get("snippet", "") or item.get("content", "") or ""),
                     "confidence": confidence,
                     "relevance": confidence,
-                    "supports_claims": claim_ids,
+                    "confidence_role": "retrieval_candidate",
+                    "retrieval_confidence": confidence,
+                    "supports_claims": list(claim_ids),
+                    "support_status": _CANDIDATE_NOMINATION,
+                    "binding_status": "unbound",
+                    "bound_support": False,
+                    "satisfied_support": False,
+                    "satisfied_legal_requirement": False,
                     "source_type": "normalized_legal_authority",
-                    "metadata": dict(item.get("metadata", {}) or {}),
+                    "requirement_id": str(item.get("requirement_id") or metadata.get("requirement_id") or ""),
+                    "source_span": item.get("source_span") or metadata.get("source_span"),
+                    "metadata": metadata,
                 }
             )
 
@@ -56,6 +98,7 @@ class GraphRetrievalAugmentor:
             seen_ids.add(record_id)
 
             confidence = float(item.get("confidence", item.get("score", 0.5)) or 0.5)
+            metadata = dict(item.get("metadata", {}) or {})
             payloads.append(
                 {
                     "id": record_id,
@@ -64,13 +107,81 @@ class GraphRetrievalAugmentor:
                     "description": str(item.get("snippet", "") or item.get("content", "") or ""),
                     "confidence": confidence,
                     "relevance": confidence,
-                    "supports_claims": claim_ids,
+                    "confidence_role": "retrieval_candidate",
+                    "retrieval_confidence": confidence,
+                    "supports_claims": list(claim_ids),
+                    "support_status": _CANDIDATE_NOMINATION,
+                    "binding_status": "unbound",
+                    "bound_support": False,
+                    "satisfied_support": False,
+                    "satisfied_legal_requirement": False,
                     "source_type": "normalized_web_evidence",
-                    "metadata": dict(item.get("metadata", {}) or {}),
+                    "requirement_id": str(item.get("requirement_id") or metadata.get("requirement_id") or ""),
+                    "source_span": item.get("source_span") or metadata.get("source_span"),
+                    "metadata": metadata,
                 }
             )
 
         return payloads
+
+    def recheck_support_binding(
+        self,
+        payload: Dict[str, Any],
+        *,
+        claim_id: str,
+        requirement_id: str,
+        source_span: Any,
+    ) -> Dict[str, Any]:
+        """Promote a nomination only when claim, requirement, and span all match.
+
+        A failed recheck stays a candidate nomination. Retrieval confidence is
+        not rewritten into legal satisfaction.
+        """
+        source = dict(payload or {})
+        nominated = [str(item) for item in (source.get("supports_claims") or []) if str(item).strip()]
+        retrieval_confidence = source.get("retrieval_confidence", source.get("confidence"))
+        result = dict(source)
+        result["supports_claims"] = list(nominated)
+        result["support_status"] = _CANDIDATE_NOMINATION
+        result["binding_status"] = "unbound"
+        result["bound_support"] = False
+        result["satisfied_support"] = False
+        result["satisfied_legal_requirement"] = False
+        result["confidence_role"] = "retrieval_candidate"
+        result["retrieval_confidence"] = retrieval_confidence
+        result["bound_claim_id"] = ""
+        result["bound_requirement_id"] = ""
+        result["bound_source_span"] = None
+
+        reasons = []
+        if not claim_id or claim_id not in nominated:
+            reasons.append("claim_not_nominated")
+        recorded_requirement = _payload_requirement_id(source)
+        if not requirement_id or not recorded_requirement or recorded_requirement != requirement_id:
+            reasons.append("requirement_not_exact")
+        if not _exact_source_span(_payload_source_span(source), source_span):
+            reasons.append("source_span_not_exact")
+        if reasons:
+            result["binding_reason"] = ",".join(reasons)
+            return result
+
+        result["support_status"] = "bound_allegation_support"
+        result["binding_status"] = "exact"
+        result["bound_support"] = True
+        result["satisfied_support"] = True
+        result["satisfied_legal_requirement"] = False
+        result["binding_reason"] = "exact_claim_requirement_source_span"
+        result["bound_claim_id"] = claim_id
+        result["bound_requirement_id"] = requirement_id
+        result["bound_source_span"] = {
+            "start": source_span["start"],
+            "end": source_span["end"],
+            "text": source_span["text"],
+        }
+        if "unit" in source_span:
+            result["bound_source_span"]["unit"] = source_span["unit"]
+        result["supports_claims"] = [claim_id]
+        return result
 
 
 class GraphAwareRetrievalReranker:
