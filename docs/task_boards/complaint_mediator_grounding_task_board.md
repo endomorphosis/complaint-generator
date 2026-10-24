@@ -270,7 +270,7 @@ Implementation instructions:
 
 ## CIMP-MGND-11 Expose a revision-safe public factual correction operation
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
