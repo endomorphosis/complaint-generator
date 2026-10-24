@@ -1290,12 +1290,24 @@ class WorkflowActionService:
 		deadline_seconds: float = 5.0,
 		max_bytes: int = 4096,
 		max_results: int = 5,
+		operation_id: Optional[str] = None,
 	) -> Dict[str, Any]:
 		"""Acquire and admit sources for the current legal-source gap.
 
 		This is the typed bounded acquisition/admission operation. It does not
 		record a factual answer and it does not treat a research receipt as proof.
+		The same operation id returns the stored receipt and does not acquire again.
 		"""
+		operation_key = str(operation_id or "").strip()
+		seen = getattr(self, "_research_operation_ids", None)
+		if not isinstance(seen, dict):
+			seen = {}
+			self._research_operation_ids = seen
+		if operation_key and operation_key in seen:
+			prior = dict(seen[operation_key])
+			prior["replayed"] = True
+			prior["dispatched"] = False
+			return prior
 		self._legal_research_dispatch_count = int(getattr(self, "_legal_research_dispatch_count", 0) or 0) + 1
 		mediator = self._mediator
 		case = intake_case_file if isinstance(intake_case_file, dict) else {}
@@ -1380,9 +1392,10 @@ class WorkflowActionService:
 			"supply_owned_source_text",
 			"awaiting_user",
 		}
-		return {
+		receipt = {
 			"action": "legal_research",
 			"operation": "acquire_bounded_canonical_sources+admit_acquired_authorities",
+			"operation_id": operation_key,
 			"stored_as_answer": False,
 			"proves_complaint": False,
 			"legal_sufficiency": False,
@@ -1403,6 +1416,9 @@ class WorkflowActionService:
 			"worker_stalled": False,
 			"proof": False,
 		}
+		if operation_key:
+			seen[operation_key] = dict(receipt)
+		return receipt
 
 	def publish_finite_dependency_action(
 		self,
