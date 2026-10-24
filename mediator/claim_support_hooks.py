@@ -22,6 +22,7 @@ from integrations.ipfs_datasets.graphs import persist_graph_snapshot, query_grap
 from integrations.ipfs_datasets.logic import (
     build_legal_ir_premise_inventory,
     check_contradictions,
+    connect_definition_handoff_proof,
     generate_bound_legal_ir_proof_obligations,
     proof_cache_identity,
     replay_satisfied_element_proof,
@@ -3426,6 +3427,9 @@ class ClaimSupportHook(PrivateDerivedIndexMixin):
             'coverage_status': str(element.get('coverage_status') or element.get('status') or ''),
             'max_obligations': element.get('max_obligations'),
             'source_text': element.get('source_text') if isinstance(element.get('source_text'), str) else None,
+            'requirement_id': str(element.get('requirement_id') or element.get('element_id') or ''),
+            'definition_handoff': element.get('definition_handoff') if isinstance(element.get('definition_handoff'), dict) else None,
+            'adverse_treatment': element.get('adverse_treatment'),
         }
 
     def _build_reasoning_ontology_fallback(
@@ -3677,6 +3681,9 @@ class ClaimSupportHook(PrivateDerivedIndexMixin):
                     legal_context_version=obligation_inputs['legal_context_version'],
                     coverage_status=obligation_inputs['coverage_status'],
                     source_text=obligation_inputs['source_text'],
+                    requirement_id=obligation_inputs.get('requirement_id') or '',
+                    definition_binding=obligation_inputs.get('definition_handoff'),
+                    adverse_treatment=obligation_inputs.get('adverse_treatment'),
                 )
             except Exception as exc:
                 legal_ir_proof_obligations = {
@@ -3732,6 +3739,11 @@ class ClaimSupportHook(PrivateDerivedIndexMixin):
                 'premise_inventory': deepcopy(inventory) if isinstance(inventory, dict) else {},
                 'sample_or_document': deepcopy(obligation_inputs.get('sample_or_document')),
                 'canonical_receipt': deepcopy(obligation_inputs.get('canonical_receipt')),
+                'requirement_id': str(versions.get('requirement_id') or obligation_inputs.get('requirement_id') or ''),
+                'definition_identity': str(versions.get('definition_identity') or ''),
+                'assumption_identity': str(versions.get('assumption_identity') or ''),
+                'adverse_treatment_identity': str(versions.get('adverse_treatment_identity') or ''),
+                'source_identity': str(versions.get('source_identity') or versions.get('document_sha256') or ''),
             },
             compiler={
                 'execution_identity': identity,
@@ -3782,6 +3794,16 @@ class ClaimSupportHook(PrivateDerivedIndexMixin):
                     'lean_reconstruction': 0.25,
                 },
                 required_trust='kernel',
+                requirement_id=str(versions.get('requirement_id') or ''),
+                expected_requirement_id=str(versions.get('requirement_id') or ''),
+                definition_identity=str(versions.get('definition_identity') or ''),
+                expected_definition_identity=str(versions.get('definition_identity') or ''),
+                assumption_identity=str(versions.get('assumption_identity') or ''),
+                expected_assumption_identity=str(versions.get('assumption_identity') or ''),
+                adverse_treatment_identity=str(versions.get('adverse_treatment_identity') or ''),
+                expected_adverse_treatment_identity=str(versions.get('adverse_treatment_identity') or ''),
+                source_identity=str(versions.get('source_identity') or versions.get('document_sha256') or ''),
+                expected_source_identity=str(versions.get('source_identity') or versions.get('document_sha256') or ''),
             )
 
         try:
@@ -10516,3 +10538,18 @@ class ClaimSupportHook(PrivateDerivedIndexMixin):
         handoff['proof_satisfied'] = False
         handoff['reviews_synthesized'] = False
         return handoff
+
+    def connect_definition_handoff_proof(
+        self,
+        requirement: Dict[str, Any],
+        handoff: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Route the current definition handoff without promoting review or Lean to proof."""
+
+        bound = connect_definition_handoff_proof(requirement, handoff)
+        bound['factual_assertion_is_legal_sufficiency'] = False
+        if bound.get('proof_field_supported') is not True:
+            bound['proof'] = requirement.get('proof')
+            bound['proof_satisfied'] = False
+            bound['proof_changed'] = False
+        return bound

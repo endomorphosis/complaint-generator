@@ -133,6 +133,7 @@ _BOUND_ROUTING_RECEIPT_ORIGINS: Dict[str, Dict[str, Any]] = {}
 _ELEMENT_PROOF_EVALUATION_ORIGINS: Dict[str, Dict[str, Any]] = {}
 PROOF_ROUTING_OUTCOMES = (
     "proved",
+    "disproved",
     "refuted",
     "inconsistent",
     "unknown",
@@ -5785,6 +5786,47 @@ def _obligation_shell(
     return body
 
 
+def _definition_binding_identity(binding: Mapping[str, Any] | None) -> str:
+    if not isinstance(binding, Mapping) or not binding:
+        return ""
+    identities = binding.get("identities")
+    if isinstance(identities, Mapping) and identities:
+        return _stable_payload_digest(dict(identities))
+    retained = binding.get("retained") if isinstance(binding.get("retained"), Mapping) else {}
+    pins = retained.get("source_pins") if isinstance(retained, Mapping) else {}
+    payload = {
+        "requirement_id": binding.get("requirement_id"),
+        "definition": (binding.get("definition_scope") or {}).get("identities") if isinstance(binding.get("definition_scope"), Mapping) else None,
+        "source_pins": pins,
+    }
+    if not any(payload.values()):
+        return ""
+    return _stable_payload_digest(payload)
+
+
+def _assumption_binding_identity(inventory: Mapping[str, Any], binding: Mapping[str, Any] | None) -> str:
+    rows = [
+        {"premise_id": item.get("premise_id"), "revision": item.get("revision"), "text_sha256": item.get("text_sha256")}
+        for item in (inventory or {}).get("assumptions") or []
+        if isinstance(item, Mapping)
+    ]
+    retained = binding.get("retained") if isinstance(binding, Mapping) and isinstance(binding.get("retained"), Mapping) else {}
+    extra = retained.get("assumptions") if isinstance(retained, Mapping) else None
+    if extra:
+        rows.append({"retained_assumptions": extra})
+    if not rows:
+        return ""
+    return _stable_payload_digest(rows)
+
+
+def _adverse_treatment_identity(treatment: Any) -> str:
+    if treatment is None or treatment == "" or treatment == {} or treatment == []:
+        return ""
+    if isinstance(treatment, str):
+        return treatment
+    return _stable_payload_digest(treatment)
+
+
 def _store_obligation_receipt(receipt: Mapping[str, Any], *, cache_key: str = "") -> Dict[str, Any]:
     stored = deepcopy(dict(receipt))
     receipt_id = str(stored.get("receipt_id") or "")
@@ -5814,6 +5856,9 @@ def generate_bound_legal_ir_proof_obligations(
     structural_validation: Mapping[str, Any] | None = None,
     source_text: str | None = None,
     use_cache: bool = True,
+    requirement_id: str = "",
+    definition_binding: Mapping[str, Any] | None = None,
+    adverse_treatment: Any = None,
 ) -> Dict[str, Any]:
     """Generate native Legal IR obligations and bind them to premise identity.
 
@@ -5872,6 +5917,11 @@ def generate_bound_legal_ir_proof_obligations(
         ],
         "assumption_ids": [item.get("premise_id") for item in inventory["assumptions"]],
         "assumption_labels": [item.get("label") for item in inventory["assumptions"]],
+        "requirement_id": str(requirement_id or (definition_binding or {}).get("requirement_id") or ""),
+        "definition_identity": _definition_binding_identity(definition_binding),
+        "assumption_identity": _assumption_binding_identity(inventory, definition_binding),
+        "adverse_treatment_identity": _adverse_treatment_identity(adverse_treatment if adverse_treatment is not None else (definition_binding or {}).get("adverse_treatment")),
+        "source_identity": document_hash,
         "checker_version": PROOF_OBLIGATION_CHECKER_VERSION,
         "policy_version": PROOF_OBLIGATION_POLICY_VERSION,
         "native_backend": PROOF_OBLIGATION_BACKEND_IDENTITY,
@@ -6695,18 +6745,21 @@ def _classify_route(*, native_status: str, native_trust: str, native_reason: str
     elif native_status == "cancelled":
         outcome = "cancelled"
     elif native_status in {"unsupported_translation", "unsupported", "theorem_failed"}:
-        outcome = "refuted" if native_status == "theorem_failed" and negative_artifact_verified else "unsupported"
+        outcome = "disproved" if native_status == "theorem_failed" and negative_artifact_verified else "unsupported"
     elif native_status == "proved" and native_trust == "kernel" and goal_bound_kernel and not structural_proved:
         outcome = "proved"
+    elif native_status in {"disproved", "refuted"} and negative_artifact_verified:
+        outcome = "disproved"
     elif native_status in {"error", "unavailable"}:
         outcome = "unavailable"
     else:
         outcome = "unknown"
-    return {"outcome": outcome, "substantive_trust_satisfied": outcome == "proved",
+    return {"outcome": outcome, "disproved": outcome == "disproved",
+        "substantive_trust_satisfied": outcome == "proved",
         "structural_route_proved": structural_proved, "structural_proof_is_substantive": False,
         "similarity_score_ignored": similarity_score is not None, "model_assertion_ignored": model_assertion is not None,
         "consistency_is_entailment": False, "unsat_proves_arbitrary_claim": False,
-        "theorem_failed_is_counterexample": outcome == "refuted", "native_status": native_status,
+        "theorem_failed_is_counterexample": outcome == "disproved", "native_status": native_status,
         "native_trust": native_trust, "native_reason": native_reason}
 
 
@@ -6765,6 +6818,16 @@ def route_bound_legal_ir_proof(
     expected_obligation_version: str = "",
     premise_version: str = "",
     expected_premise_version: str = "",
+    requirement_id: str = "",
+    expected_requirement_id: str = "",
+    definition_identity: str = "",
+    expected_definition_identity: str = "",
+    assumption_identity: str = "",
+    expected_assumption_identity: str = "",
+    adverse_treatment_identity: str = "",
+    expected_adverse_treatment_identity: str = "",
+    source_identity: str = "",
+    expected_source_identity: str = "",
 ) -> Dict[str, Any]:
     """Own the actual native router within one request deadline.
 
@@ -6793,11 +6856,25 @@ def route_bound_legal_ir_proof(
         "expected_obligation_version": str(expected_obligation_version or obligation_version or ""),
         "premise_version": str(premise_version or ""),
         "expected_premise_version": str(expected_premise_version or premise_version or ""),
+        "requirement_id": str(requirement_id or ""),
+        "expected_requirement_id": str(expected_requirement_id or requirement_id or ""),
+        "definition_identity": str(definition_identity or ""),
+        "expected_definition_identity": str(expected_definition_identity or definition_identity or ""),
+        "assumption_identity": str(assumption_identity or ""),
+        "expected_assumption_identity": str(expected_assumption_identity or assumption_identity or ""),
+        "adverse_treatment_identity": str(adverse_treatment_identity or ""),
+        "expected_adverse_treatment_identity": str(expected_adverse_treatment_identity or adverse_treatment_identity or ""),
+        "source_identity": str(source_identity or ""),
+        "expected_source_identity": str(expected_source_identity or source_identity or ""),
         "policy_version": PROOF_ROUTING_POLICY_VERSION,
         "premises": _premise_identity(premise_inventory),
     }
     versions_match = all(versions[key] == versions["expected_" + key]
-                         for key in ("execution_identity", "obligation_version", "premise_version"))
+                         for key in (
+                             "execution_identity", "obligation_version", "premise_version",
+                             "requirement_id", "definition_identity", "assumption_identity",
+                             "adverse_treatment_identity", "source_identity",
+                         ))
     missing = _missing_fact_values(premise_inventory)
     common = {
         "missing_facts": missing, "backend_available": False, "attempts": [], "process": None,
@@ -6977,6 +7054,11 @@ def proof_cache_identity(
             "source_version": str(source.get("source_version") or source.get("legal_context_version") or ""),
             "legal_context_version": str(source.get("legal_context_version") or ""),
             "law_as_of": str(source.get("law_as_of") or source.get("applicable_law_date") or ""),
+            "requirement_id": str(source.get("requirement_id") or ""),
+            "definition_identity": str(source.get("definition_identity") or ""),
+            "assumption_identity": str(source.get("assumption_identity") or ""),
+            "adverse_treatment_identity": str(source.get("adverse_treatment_identity") or _adverse_treatment_identity(source.get("adverse_treatment"))),
+            "source_identity": str(source.get("source_identity") or source.get("source_hash") or ""),
             "rules": rules,
         },
         "compiler": {
@@ -7054,6 +7136,13 @@ def _current_routing_origin(result: Mapping[str, Any], identity: Mapping[str, An
     inventory = components['legal_source'].get('premise_inventory')
     if isinstance(inventory, Mapping) and versions.get('premises') != _premise_identity(inventory):
         return False
+    source = components['legal_source']
+    for key in ('requirement_id', 'definition_identity', 'assumption_identity', 'adverse_treatment_identity', 'source_identity'):
+        expected = str(source.get(key) or '')
+        if not expected:
+            continue
+        if versions.get(key) != expected or versions.get('expected_' + key) != expected:
+            return False
     return True
 
 
@@ -7181,8 +7270,140 @@ def replay_satisfied_element_proof(
         record.update(status='uncertain', reason='superseded_rule')
     # Retry transient absence/errors; preserve a stable actual negative/structural
     # observation only while source/premise/compiler/policy inputs remain current.
-    cacheable = produced_map.get('outcome') in {'unknown', 'unsupported', 'refuted'}
+    cacheable = produced_map.get('outcome') in {'unknown', 'unsupported', 'refuted', 'disproved'}
     return _publish_element_evaluation(record, current, cache=cacheable)
+
+
+def connect_definition_handoff_proof(
+    requirement: Mapping[str, Any],
+    handoff: Mapping[str, Any] | None = None,
+    *,
+    provider: Any = None,
+) -> Dict[str, Any]:
+    """Bind current definition-handoff identities to obligation and route owners.
+
+    A solver selector, generated Lean packet, or review packet is recorded and
+    is not a proved result. The requirement proof field changes only when an
+    issued evaluation is verified and satisfied against the same identities.
+    Factual assertion stays separate from legal sufficiency.
+    """
+
+    requirement_map = dict(requirement or {})
+    bound = dict(handoff or {})
+    retained = bound.get("retained") if isinstance(bound.get("retained"), Mapping) else {}
+    assumptions = list(retained.get("assumptions") or requirement_map.get("assumptions") or [])
+    requirement_id = str(bound.get("requirement_id") or requirement_map.get("requirement_id") or "")
+    source_text = requirement_map.get("admitted_legal_text")
+    if not isinstance(source_text, str):
+        source_text = str(bound.get("admitted_legal_text") or "")
+    treatment = bound.get("adverse_treatment", requirement_map.get("adverse_treatment"))
+    obligations = generate_bound_legal_ir_proof_obligations(
+        None,
+        claim_id=str(requirement_map.get("claim_id") or ""),
+        element_id=str(requirement_map.get("element_id") or requirement_id),
+        assumptions=assumptions,
+        asserted_facts=requirement_map.get("asserted_facts") if isinstance(requirement_map.get("asserted_facts"), list) else [],
+        selected_legal_rules=requirement_map.get("selected_legal_rules") if isinstance(requirement_map.get("selected_legal_rules"), list) else [],
+        source_text=source_text,
+        requirement_id=requirement_id,
+        definition_binding=bound,
+        adverse_treatment=treatment,
+        use_cache=False,
+    )
+    versions = obligations.get("versions") if isinstance(obligations.get("versions"), Mapping) else {}
+    inventory = obligations.get("premise_inventory") if isinstance(obligations.get("premise_inventory"), Mapping) else {}
+    identity = proof_cache_identity(
+        claim_id=str(requirement_map.get("claim_id") or ""),
+        element_id=str(requirement_map.get("element_id") or requirement_id),
+        factual_revisions=versions.get("fact_revisions") or [],
+        legal_source={
+            "source_id": str(requirement_map.get("source_id") or ""),
+            "source_version": str(versions.get("legal_context_version") or ""),
+            "requirement_id": str(versions.get("requirement_id") or ""),
+            "definition_identity": str(versions.get("definition_identity") or ""),
+            "assumption_identity": str(versions.get("assumption_identity") or ""),
+            "adverse_treatment_identity": str(versions.get("adverse_treatment_identity") or ""),
+            "source_identity": str(versions.get("source_identity") or ""),
+            "premise_inventory": inventory,
+        },
+        compiler={"execution_identity": str(versions.get("execution_identity") or "")},
+    )
+    packet_outcome = _nonproof_packet_outcome(bound)
+
+    def _route():
+        if provider is not None:
+            return provider()
+        return route_bound_legal_ir_proof(
+            premise_inventory=inventory,
+            goal_statement=source_text,
+            execution_identity=str(versions.get("execution_identity") or ""),
+            expected_execution_identity=str(versions.get("execution_identity") or ""),
+            requirement_id=str(versions.get("requirement_id") or ""),
+            expected_requirement_id=str(versions.get("requirement_id") or ""),
+            definition_identity=str(versions.get("definition_identity") or ""),
+            expected_definition_identity=str(versions.get("definition_identity") or ""),
+            assumption_identity=str(versions.get("assumption_identity") or ""),
+            expected_assumption_identity=str(versions.get("assumption_identity") or ""),
+            adverse_treatment_identity=str(versions.get("adverse_treatment_identity") or ""),
+            expected_adverse_treatment_identity=str(versions.get("adverse_treatment_identity") or ""),
+            source_identity=str(versions.get("source_identity") or ""),
+            expected_source_identity=str(versions.get("source_identity") or ""),
+            premise_version=str(inventory.get("digest") or ""),
+            expected_premise_version=str(inventory.get("digest") or ""),
+        )
+
+    evaluation = replay_satisfied_element_proof(identity, provider=_route)
+    routed = evaluation.get("result") if isinstance(evaluation.get("result"), Mapping) else {}
+    outcome = str(routed.get("outcome") or evaluation.get("status") or "unknown")
+    if packet_outcome:
+        outcome = packet_outcome
+    verified = verify_element_proof_evaluation(evaluation)
+    proof_supported = bool(verified.get("verified") and verified.get("satisfied") and outcome == "proved")
+    original_proof = requirement_map.get("proof")
+    return {
+        "schema": "definition-handoff-proof-binding/v1",
+        "requirement_id": requirement_id,
+        "admitted_legal_text": source_text,
+        "admitted_legal_text_changed": False,
+        "proof": original_proof if proof_supported else original_proof,
+        "proof_field_supported": proof_supported,
+        "proof_satisfied": proof_supported,
+        "proof_changed": False,
+        "factual_assertion": {
+            "asserted": bool(requirement_map.get("asserted_facts")),
+            "satisfies_element": False,
+        },
+        "legal_sufficiency": {
+            "outcome": outcome,
+            "satisfied": proof_supported,
+        },
+        "outcome": outcome,
+        "outcome_distinctions": list(PROOF_ROUTING_OUTCOMES),
+        "solver_is_proof": False,
+        "generated_lean_is_proof": False,
+        "review_packet_is_proof": False,
+        "legal_ir_proof_obligations": obligations,
+        "legal_ir_proof_routing": dict(routed) if routed else {"outcome": outcome, "substantive_trust_satisfied": False},
+        "proof_cache_identity": identity.get("cache_identity"),
+        "evaluation": evaluation,
+        "versions": dict(versions),
+    }
+
+
+def _nonproof_packet_outcome(handoff: Mapping[str, Any]) -> str:
+    """Solver, Lean, and review packets stay diagnostic. They are not proved."""
+
+    lean = handoff.get("conditional_lean")
+    review = handoff.get("review")
+    solver = handoff.get("solver") or handoff.get("declared_prover_result")
+    packets = [item for item in (lean, review, solver) if isinstance(item, Mapping) and item]
+    if not packets:
+        return ""
+    for packet in packets:
+        status = str(packet.get("status") or packet.get("outcome") or "").lower()
+        if status in {"timeout", "cancelled", "unavailable", "disproved", "unknown"}:
+            return status
+    return "unknown"
 
 
 def legacy_procedural_template_attributes() -> Dict[str, Any]:
@@ -7257,4 +7478,5 @@ __all__ = [
     "lookup_satisfied_element_proof",
     "verify_element_proof_evaluation",
     "replay_satisfied_element_proof",
+    "connect_definition_handoff_proof",
 ]
