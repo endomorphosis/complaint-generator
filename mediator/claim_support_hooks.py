@@ -10456,3 +10456,27 @@ class ClaimSupportHook(PrivateDerivedIndexMixin):
                 'top_results': [],
                 'has_retrieval_context': False,
             }
+
+    def forward_conditional_norm_evidence(
+        self,
+        requirement: Dict[str, Any],
+        definition_envelope: Optional[Dict[str, Any]] = None,
+        scope_envelope: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Forward definition and scope evidence without changing admitted text or proof.
+
+        The requirement mapping is left as the caller supplied it. Conflicting or
+        absent owner evidence stays an unresolved dependency on the returned handoff.
+        """
+        from integrations.ipfs_datasets.definition_evidence import forward_conditional_norm_evidence
+
+        admitted = requirement.get('admitted_legal_text')
+        proof = requirement.get('proof')
+        proof_satisfied = requirement.get('proof_satisfied')
+        handoff = forward_conditional_norm_evidence(requirement, definition_envelope, scope_envelope)
+        if requirement.get('admitted_legal_text') != admitted or requirement.get('proof') != proof:
+            handoff['admitted_legal_text_changed'] = True
+            handoff['proof_changed'] = requirement.get('proof') != proof
+        handoff['prior_proof_satisfied'] = proof_satisfied
+        handoff['proof_satisfied'] = False
+        return handoff
