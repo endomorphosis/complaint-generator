@@ -1128,7 +1128,7 @@ Implementation instructions:
 
 ## CIMP-MGND-44 Document grounded operations and audit campaign completion honestly
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
