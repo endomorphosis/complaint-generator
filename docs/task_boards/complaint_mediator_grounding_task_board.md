@@ -634,7 +634,7 @@ Implementation instructions:
 
 ## CIMP-MGND-25 Connect proof obligations and truthful available/unavailable outcomes
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
