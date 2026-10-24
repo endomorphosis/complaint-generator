@@ -356,6 +356,139 @@ class IntakeContractError(ValueError):
 		super().__init__(self.code)
 
 
+def pinned_hook_inference_route() -> Dict[str, Any]:
+	"""Pinned Grok route for declared hook purposes. Fallbacks stay off."""
+
+	pin = pinned_grok47_dispatch_kwargs()
+	if pin.get("provider") != PINNED_GROK_PROVIDER or pin.get("model_name") != PINNED_GROK_MODEL:
+		raise RuntimeError("unpinned_hook_route")
+	if pin.get("allow_local_fallback") is not False or pin.get("allow_cross_provider_fallback") is not False:
+		raise RuntimeError("hook_fallback_enabled")
+	return {
+		"inference_owner": INFERENCE_OWNER,
+		"router": INFERENCE_OWNER,
+		"provider": PINNED_GROK_PROVIDER,
+		"model": PINNED_GROK_MODEL,
+		"allow_local_fallback": False,
+		"allow_cross_provider_fallback": False,
+		"tools_allowed": False,
+		"may_mark_requirements_satisfied": False,
+	}
+
+
+def _route_identity_slot(slot: Any) -> Dict[str, str]:
+	source = slot if isinstance(slot, Mapping) else {}
+
+	def text(key: str) -> str:
+		value = source.get(key, "")
+		if type(value) is not str:
+			return ""
+		cleaned = value.strip()
+		if len(cleaned) > 128 or any(ord(char) < 32 for char in cleaned):
+			return ""
+		return cleaned
+
+	return {"router": text("router"), "provider": text("provider"), "model": text("model"), "build": text("build")}
+
+
+def route_identity_diagnostics(
+	*,
+	requested: Any,
+	selected: Any,
+	observed: Any,
+	transport_kind: str,
+	native_observation_bound: bool = False,
+	evidence_class: str = "",
+) -> Dict[str, Any]:
+	"""Keep requested, selected, and observed identity in separate slots.
+
+	A synthetic transport cannot verify a live model or build, even when the
+	payload copies the pinned names or claims native evidence.
+	"""
+
+	kind = transport_kind if type(transport_kind) is str else ""
+	requested_slot = _route_identity_slot(requested)
+	selected_slot = _route_identity_slot(selected)
+	observed_slot = _route_identity_slot(observed)
+	live_model = False
+	live_build = False
+	if kind == "native_observation" and native_observation_bound is True and evidence_class == "native_final_end_model_usage":
+		live_model = (
+			observed_slot["provider"] == PINNED_GROK_PROVIDER
+			and observed_slot["model"] == PINNED_GROK_MODEL
+			and observed_slot["router"] == INFERENCE_OWNER
+		)
+		live_build = live_model and observed_slot["build"] in {PINNED_GROK_MODEL, "grok-4.7-build"}
+	if kind == "synthetic" or kind != "native_observation":
+		live_model = False
+		live_build = False
+	return {
+		"requested": requested_slot,
+		"selected": selected_slot,
+		"observed": observed_slot,
+		"transport_kind": "synthetic" if kind == "synthetic" else (kind or "unspecified"),
+		"live_model_identity_verified": live_model,
+		"live_build_identity_verified": live_build,
+		"inference_owner": INFERENCE_OWNER,
+		"allow_local_fallback": False,
+		"allow_cross_provider_fallback": False,
+	}
+
+
+def _declared_purpose_short_circuit(kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+	"""Local and undeclared purpose labels never enter the provider call."""
+
+	if "inference_purpose" not in kwargs:
+		return None
+	purpose = kwargs.pop("inference_purpose")
+	from mediator.hook_runtime import is_local_only_purpose, is_model_purpose
+
+	if is_local_only_purpose(purpose):
+		return {
+			"status": "local_only",
+			"text": "",
+			"dispatch": "none",
+			"model_dispatched": False,
+			"inference_purpose": purpose,
+			"live_canary": False,
+			"live_model_identity_verified": False,
+			"failure_kind": "",
+			"error": "",
+			"prompt_logged": False,
+			"provider_name": "",
+			"model_name": "",
+		}
+	if is_model_purpose(purpose):
+		return {
+			"status": "unavailable",
+			"text": "",
+			"dispatch": "none",
+			"model_dispatched": False,
+			"inference_purpose": purpose,
+			"live_canary": False,
+			"live_model_identity_verified": False,
+			"failure_kind": "use_declared_hook_boundary",
+			"error": "use_declared_hook_boundary",
+			"prompt_logged": False,
+			"provider_name": PINNED_GROK_PROVIDER,
+			"model_name": PINNED_GROK_MODEL,
+		}
+	return {
+		"status": "unavailable",
+		"text": "",
+		"dispatch": "none",
+		"model_dispatched": False,
+		"inference_purpose": str(purpose) if type(purpose) is str else "",
+		"live_canary": False,
+		"live_model_identity_verified": False,
+		"failure_kind": "undeclared_purpose",
+		"error": "undeclared_purpose",
+		"prompt_logged": False,
+		"provider_name": "",
+		"model_name": "",
+	}
+
+
 def intake_request_response_format() -> Dict[str, Any]:
 	"""Fixed schema description; typed streaming enforces it on the host."""
 
@@ -1161,6 +1294,11 @@ def generate_text_via_router(
 	model_name: Optional[str] = None,
 	**kwargs: Any,
 ) -> str:
+	short = _declared_purpose_short_circuit(kwargs)
+	if short is not None:
+		if short["status"] == "local_only":
+			raise RuntimeError("local_purpose_no_model_dispatch")
+		raise RuntimeError(str(short.get("error") or "undeclared_purpose"))
 	if kwargs.get("intake_operation") is not None:
 		result = generate_text_with_metadata(prompt, provider=provider, model_name=model_name, **kwargs)
 		if result.get("status") != "available":
@@ -1257,6 +1395,15 @@ def generate_text_with_metadata(
 	model_name: Optional[str] = None,
 	**kwargs: Any,
 ) -> Dict[str, Any]:
+	short = _declared_purpose_short_circuit(kwargs)
+	if short is not None:
+		return with_adapter_metadata(
+			short,
+			operation="generate_text",
+			backend_available=generate_text is not None,
+			degraded_reason=short.get("error") or None,
+			implementation_status="available" if generate_text is not None else "unavailable",
+		)
 	host_meta = _pop_host_metadata(kwargs)
 	request_id = host_meta["request_id"]
 	intake_operation = host_meta["intake_operation"]
@@ -3116,6 +3263,8 @@ __all__ = [
 	"classify_router_failure",
 	"intake_request_response_format",
 	"parse_intake_request",
+	"pinned_hook_inference_route",
+	"route_identity_diagnostics",
 	"coerce_effective_privacy_policy",
 	"complaint_data_class_inventory",
 	"inspect_privacy_policy",
