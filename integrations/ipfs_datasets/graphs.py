@@ -812,7 +812,10 @@ _PERSON_PATTERNS = (
     re.compile(r"\bI am " + _PERSON_NAME),
     re.compile(r"(?i:\b(?:manager|supervisor|landlord|owner) )" + _PERSON_NAME),
 )
-_ALLEGATION_MARKERS = ("fired", "discriminat", "denied", "retaliat", "harass", "evict", "allege")
+_ALLEGATION_MARKERS = (
+    "fired", "discriminat", "denied", "retaliat", "harass", "evict", "allege",
+    "not stated", "unresolved",
+)
 
 
 def classify_epistemic_class(text: str, *, explicit: Optional[str] = None, legal: bool = False) -> str:
