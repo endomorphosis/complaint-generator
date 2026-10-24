@@ -126,6 +126,7 @@ _CALLER_CONTEXT_FIELDS = (
     "source_kind",
     "source_id",
     "message_id",
+    "answer_id",
     "document_id",
     "assertion_status",
     "extractor_version",
@@ -194,24 +195,25 @@ def _is_exact_int(value: Any) -> bool:
 
 
 def _normalize_span_payload(raw: Any, source_text: str) -> Optional[Dict[str, Any]]:
-    """Normalize a span to UTF-8 byte offsets. Character spans must say so."""
+    """Keep the caller's span coordinates. Do not retarget them onto this text.
+
+    Character offsets stay character offsets. Conversion happens only inside
+    resolve_source_span when the span names this exact source generation.
+    """
+    del source_text
     if not isinstance(raw, Mapping):
         return None
     start = raw.get("start")
     end = raw.get("end")
-    if not _is_exact_int(start) or not _is_exact_int(end):
-        return {"start": start, "end": end, "text": raw.get("text")}
-    unit = _clean_context_text(raw.get("unit")).lower() or "byte"
-    if unit in {"char", "chars", "character", "characters"}:
-        if not isinstance(source_text, str):
-            return {"start": start, "end": end, "text": raw.get("text")}
-        if start < 0 or end < start or end > len(source_text):
-            return {"start": start, "end": end, "text": raw.get("text"), "unit": "char"}
-        start = len(source_text[:start].encode("utf-8"))
-        end = len(source_text[:end].encode("utf-8"))
     payload: Dict[str, Any] = {"start": start, "end": end}
     if "text" in raw and raw.get("text") is not None:
         payload["text"] = raw.get("text")
+    unit = _clean_context_text(raw.get("unit")).lower()
+    if unit:
+        payload["unit"] = unit
+    generation = _clean_context_text(raw.get("source_generation"))
+    if generation:
+        payload["source_generation"] = generation
     return payload
 
 
@@ -260,18 +262,21 @@ def _record_type_for_extraction(record: Mapping[str, Any]) -> str:
     )
     origin = _clean_context_text(record.get("origin") or attributes.get("origin") or "").lower()
     entity_type = _clean_context_text(record.get("type") or record.get("entity_type") or "").lower()
+    explicit_class = _clean_context_text(
+        record.get("factual_record_class") or attributes.get("factual_record_class") or ""
+    )
     if explicit in _NON_USER_RECORD_TYPES:
         return explicit
-    if origin in {"model", "llm"}:
-        return "model_suggestion"
     if entity_type == "claim" or explicit == "claim":
         return "inferred_claim_label"
-    if entity_type in {"legal", "authority", "statute", "regulation", "case_law", "legal_text"}:
+    if explicit_class == "legal_text" or entity_type in {"legal", "authority", "statute", "regulation", "case_law", "legal_text"}:
         return "legal_text"
+    if explicit_class == "extraction_hypothesis" or origin in {"model", "llm"}:
+        return "model_suggestion"
     label = _clean_context_text(record.get("name") or "").lower()
     if label in _PLACEHOLDER_LABELS:
         return "model_suggestion"
-    if entity_type == "evidence":
+    if entity_type == "evidence" and explicit_class != "supporting_evidence":
         return "model_suggestion"
     if origin in {"heuristic", "heuristic_label"} and entity_type != "fact" and entity_type != "date" and entity_type != "person" and entity_type != "organization":
         return "model_suggestion"
@@ -280,6 +285,26 @@ def _record_type_for_extraction(record: Mapping[str, Any]) -> str:
         if relation_origin in {"heuristic", "model", "llm"}:
             return "model_suggestion"
     return ""
+
+
+def _factual_record_class(record: Mapping[str, Any], forced_type: str, relation_type: str) -> str:
+    """Keep user facts, hypotheses, relationships, and evidence on separate classes."""
+    attributes = record.get("attributes") if isinstance(record.get("attributes"), Mapping) else {}
+    explicit = _clean_context_text(
+        record.get("factual_record_class") or attributes.get("factual_record_class") or ""
+    )
+    allowed = {"user_fact", "extraction_hypothesis", "relationship", "supporting_evidence", "legal_text"}
+    if explicit in allowed:
+        return explicit
+    if forced_type == "legal_text":
+        return "legal_text"
+    if forced_type in {"model_suggestion", "inferred_claim_label"}:
+        return "extraction_hypothesis"
+    if relation_type:
+        return "relationship"
+    if _clean_context_text(record.get("type") or record.get("entity_type")).lower() == "evidence":
+        return "supporting_evidence"
+    return "user_fact"
 
 
 def _subject_key_for_record(record: Mapping[str, Any], span_text: str) -> str:
@@ -330,11 +355,15 @@ def envelope_for_extracted_record(
         extra.append("ambiguous_source_context")
     spans = _candidate_spans(record, source_text)
     selected_span: Optional[Dict[str, Any]] = None
+    forced_type = _record_type_for_extraction(record)
+    origin_norm = _clean_context_text(record.get("origin") or "").lower()
+    # A model claim cannot fill a missing or foreign span by searching the source.
+    model_supplied = bool(forced_type) or origin_norm in {"model", "llm"}
     if len(spans) > 1:
         extra.append("ambiguous_source_span")
     elif len(spans) == 1:
         selected_span = spans[0]
-    else:
+    elif not model_supplied:
         description = _clean_context_text(attributes.get("description") or "")
         if description:
             lookup = locate_unique_byte_span(source_text, description)
@@ -362,7 +391,6 @@ def envelope_for_extracted_record(
                 or " ".join(supported_text.split()) != " ".join(span_text.split())
                 or not name_is_user_text):
             extra.append("unsupported_extracted_content")
-    forced_type = _record_type_for_extraction(record)
     relation_type = _clean_context_text(record.get("relation_type") or "")
     if relation_type and _clean_context_text(record.get("origin") or "").lower() in {"heuristic", "model", "llm"}:
         forced_type = forced_type or "model_suggestion"
@@ -394,6 +422,8 @@ def envelope_for_extracted_record(
         actor=_clean_context_text(context.get("actor")),
         name=_clean_context_text(context.get("name")),
         event_date=_clean_context_text(context.get("event_date")),
+        answer_id=_clean_context_text(context.get("answer_id")),
+        factual_record_class=_factual_record_class(record, forced_type, relation_type),
         extra_deficiencies=extra,
     )
 
@@ -498,6 +528,12 @@ def record_answer_graph_revision(
     span = provenance.get("source_span")
     envelope = None
     entity = None
+    # Unknown, refused, skipped, and deferred answers stay on the revision
+    # ledger. They are not complainant facts.
+    non_fact_status = str(value_status or "").strip().lower() in {
+        "unknown", "refused", "skipped", "deferred", "invalidated",
+    }
+    answer_identity = str(context.get("answer_id") or event_id or "")
     if isinstance(span, Mapping) and not provenance.get("deficiency"):
         envelope = build_user_assertion_envelope(
             source_text=source_text,
@@ -505,18 +541,15 @@ def record_answer_graph_revision(
             source_id=str(context.get("source_id") or event_id or "answer"),
             message_id=str(context.get("message_id") or context.get("source_id") or event_id or "answer"),
             document_id=str(context.get("document_id") or ""),
-            assertion_status=str(context.get("assertion_status") or "asserted"),
+            assertion_status=str(value_status if non_fact_status else (context.get("assertion_status") or "asserted")),
             extractor_version=str(context.get("extractor_version") or DEFAULT_USER_ASSERTION_EXTRACTOR_VERSION),
             source_hash=str(context.get("source_hash") or ""),
             source_span=span,
             role="answer",
             subject_key=f"answer|{event_id}|{epistemic_class}|{value_status}",
+            answer_id=answer_identity,
+            factual_record_class="user_fact" if not non_fact_status else "",
         )
-    # Unknown, refused, skipped, and deferred answers stay on the revision
-    # ledger. They are not complainant facts.
-    non_fact_status = str(value_status or "").strip().lower() in {
-        "unknown", "refused", "skipped", "deferred", "invalidated",
-    }
     if envelope is not None and envelope.is_asserted_user_fact and not non_fact_status:
         entity = Entity(
             id=f"answer_{len(graph.entities) + 1}",
@@ -556,6 +589,9 @@ def record_answer_graph_revision(
         "question": dict(question) if isinstance(question, Mapping) else {},
         "entity_id": entity.id if entity is not None else "",
         "stable_id": envelope.stable_id if envelope is not None and envelope.is_asserted_user_fact else "",
+        "answer_id": answer_identity,
+        "message_id": str(context.get("message_id") or ""),
+        "source_kind": str(context.get("source_kind") or "user_statement"),
         "support_changes": [dict(item) for item in (support_changes or [])],
         "audit_retained": True,
         "provenance": {
@@ -2432,7 +2468,9 @@ class KnowledgeGraphBuilder:
             carried_extractor = _merge_provenance(preserved_extractor, raw_extractor)
             if carried_extractor:
                 provenance_payload["extractor"] = carried_extractor
-            attributes = entity_data.get("attributes") if isinstance(entity_data.get("attributes"), Mapping) else {}
+            attributes = dict(entity_data.get("attributes") if isinstance(entity_data.get("attributes"), Mapping) else {})
+            if envelope.factual_record_class:
+                attributes["factual_record_class"] = envelope.factual_record_class
             upstream_unverified = attributes.get("upstream_extraction") is True and not entity_is_legal and not envelope.is_asserted_user_fact
             if upstream_unverified:
                 # Legacy support consumers inspect entity.type. Keeping a model
@@ -2545,7 +2583,9 @@ class KnowledgeGraphBuilder:
             carried_extractor = _merge_provenance(preserved_extractor, raw_extractor)
             if carried_extractor:
                 provenance_payload["extractor"] = carried_extractor
-            attributes = rel_data.get("attributes") if isinstance(rel_data.get("attributes"), Mapping) else {}
+            attributes = dict(rel_data.get("attributes") if isinstance(rel_data.get("attributes"), Mapping) else {})
+            if envelope.factual_record_class:
+                attributes["factual_record_class"] = envelope.factual_record_class
             upstream_support_suggestion = (attributes.get("upstream_extraction") is True
                 and not envelope.is_asserted_user_fact
                 and relation_type in (_SUPPORT_RELATION_TYPES | {"has_fact"}))
