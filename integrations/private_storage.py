@@ -35,10 +35,12 @@ Dependency contract (not a Kit package version):
   original size and other rich fields. The canonical envelope does not
   serialize that object. Kit is not started as a daemon.
 
-Existing sessions and artifacts are not migrated here. Coverage of historical
-bytes is DUR002. A missing ``cryptography`` install raises
-``PrivateCryptoCapabilityError`` and writes nothing. There is no XOR, plaintext
-tempfile, or fake encrypted-success path.
+Existing sessions and artifacts are not migrated automatically. Coverage of
+historical bytes is DUR002. One explicit legacy private hook artifact can be
+preflighted and committed by the caller; that path does not scan sessions,
+user trees, campaign artifacts, or historical qualifiers. A missing
+``cryptography`` install raises ``PrivateCryptoCapabilityError`` and writes
+nothing. There is no XOR, plaintext tempfile, or fake encrypted-success path.
 """
 
 from __future__ import annotations
@@ -6142,6 +6144,658 @@ def delete_private_case(
     return receipt
 
 
+LEGACY_HOOK_ARTIFACT_CLASS = "legacy-private-hook"
+LEGACY_HOOK_RETENTION = ("retain", "retire_plaintext_after_verified_commit")
+_LEGACY_HOOK_HEAD = "legacy-hook-head.json"
+_LEGACY_HOOK_SCHEMA = "legacy-hook-encrypted-head"
+_LEGACY_HOOK_RECEIPT = "legacy-hook-migration-receipt"
+_LEGACY_HOOK_MAX_BYTES = 1024 * 1024
+
+
+def _legacy_hook_ref(revision: str, preimage: str) -> str:
+    return f"{LEGACY_HOOK_ARTIFACT_CLASS}:{revision}:{preimage}"
+
+
+def _legacy_hook_binding(
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+) -> dict[str, str]:
+    return {
+        "tenant_id": tenant_id,
+        "case_id": case_id,
+        "principal_id": principal_id,
+        "artifact_kind": LEGACY_HOOK_ARTIFACT_CLASS,
+        "artifact_class": LEGACY_HOOK_ARTIFACT_CLASS,
+        "revision": revision,
+    }
+
+
+def _legacy_hook_receipt(
+    *,
+    status: str,
+    code: str,
+    revision: str,
+    preimage: str,
+    binding: Mapping[str, str],
+    retention_policy: str,
+    encrypted: bool,
+    pending_kind: str,
+    verified_commit: bool,
+    plaintext_retired: bool,
+    plaintext_retirement: str,
+    source_bytes_preserved: bool,
+    last_valid_head_preserved: bool,
+    prior_head_present: bool,
+    encryption_established: bool,
+) -> dict[str, Any]:
+    ref = _legacy_hook_ref(revision, preimage)
+    encrypted_items = [{"ref": ref, "case_id": binding["case_id"], "revision": revision, "source_preimage": preimage}] if encrypted else []
+    pending_items: list[dict[str, str]] = []
+    if pending_kind:
+        pending_items.append({"ref": ref, "pending": pending_kind})
+    return {
+        "schema": _LEGACY_HOOK_RECEIPT,
+        "schema_version": 1,
+        "status": status,
+        "code": code,
+        "artifact_class": LEGACY_HOOK_ARTIFACT_CLASS,
+        "single_case": True,
+        "automatic_scan": False,
+        "imported_sessions": False,
+        "rewrote_user_tree": False,
+        "rewrote_campaign_artifacts": False,
+        "rewrote_historical_qualifiers": False,
+        "encrypted": encrypted,
+        "pending": bool(pending_items),
+        "encrypted_items": encrypted_items,
+        "pending_items": pending_items,
+        "verified_commit": verified_commit,
+        "encryption_established": encryption_established,
+        "plaintext_retired": plaintext_retired,
+        "plaintext_retirement": plaintext_retirement,
+        "source_bytes_preserved": source_bytes_preserved,
+        "last_valid_head_preserved": last_valid_head_preserved,
+        "prior_head_present": prior_head_present,
+        "retention_policy": retention_policy,
+        "source_preimage": preimage,
+        "destination_binding": dict(binding),
+        "durable": False,
+        "network_durable": False,
+        "stored_local": encrypted,
+        "mode_bits_establish_encryption": False,
+        "local_copy_establishes_encryption": False,
+        "local_copy_establishes_durability": False,
+    }
+
+
+def legacy_hook_migration_claim(
+    *,
+    mode_private: bool = False,
+    local_copy: bool = False,
+    receipt: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Mode bits and a local copy do not establish encryption or durability."""
+
+    established = bool(
+        isinstance(receipt, Mapping)
+        and receipt.get("encryption_established") is True
+        and receipt.get("verified_commit") is True
+    )
+    return {
+        "encrypted": established,
+        "encryption_established": established,
+        "durable": False,
+        "network_durable": False,
+        "mode_private": bool(mode_private),
+        "local_copy": bool(local_copy),
+        "mode_bits_establish_encryption": False,
+        "local_copy_establishes_encryption": False,
+        "local_copy_establishes_durability": False,
+        "automatic_scan": False,
+    }
+
+
+def _legacy_preimage(value: str) -> str:
+    if not isinstance(value, str) or len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+        raise PrivateArtifactIntegrityError("preimage")
+    return value
+
+
+def _inspect_legacy_hook_source(path: Path) -> dict[str, Any]:
+    if path.is_symlink():
+        return {"ok": False, "code": "aliased_source"}
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except FileNotFoundError:
+        return {"ok": False, "code": "source_missing"}
+    except OSError:
+        return {"ok": False, "code": "aliased_source"}
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            return {"ok": False, "code": "source_not_file"}
+        if info.st_nlink != 1:
+            return {"ok": False, "code": "aliased_source"}
+        if info.st_size > _LEGACY_HOOK_MAX_BYTES:
+            return {"ok": False, "code": "oversized"}
+        chunks: list[bytes] = []
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+            if sum(len(item) for item in chunks) > _LEGACY_HOOK_MAX_BYTES:
+                return {"ok": False, "code": "oversized"}
+        payload = b"".join(chunks)
+    finally:
+        os.close(descriptor)
+    if not payload:
+        return {"ok": False, "code": "empty_source", "dev": info.st_dev, "ino": info.st_ino}
+    return {"ok": True, "data": payload, "dev": info.st_dev, "ino": info.st_ino, "nlink": info.st_nlink}
+
+
+def _read_nofollow_bytes(path: Path) -> bytes | None:
+    if not path.exists():
+        return None
+    if path.is_symlink():
+        raise PrivateArtifactIntegrityError("aliased_destination")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise PrivateArtifactIntegrityError("aliased_destination")
+        return os.read(descriptor, info.st_size + 1)
+    finally:
+        os.close(descriptor)
+
+
+def _write_exclusive(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        view = payload
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise PrivateStorageError("private write failed", code="legacy_hook_io")
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _publish_legacy_head(destination: Path, payload: bytes) -> None:
+    destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = destination / (".legacy-hook-head-" + uuid.uuid4().hex + ".tmp")
+    _write_exclusive(temporary, payload)
+    os.replace(temporary, destination / _LEGACY_HOOK_HEAD)
+    try:
+        directory = os.open(destination, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        return
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def _load_legacy_head(destination: Path) -> dict[str, Any]:
+    head_path = destination / _LEGACY_HOOK_HEAD
+    if not head_path.exists() and not head_path.is_symlink():
+        return {"present": False}
+    try:
+        raw = _read_nofollow_bytes(head_path)
+    except PrivateArtifactIntegrityError:
+        return {"present": True, "aliased": True}
+    except OSError:
+        return {"present": True, "corrupt": True, "raw": b""}
+    if raw is None:
+        return {"present": False}
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"present": True, "corrupt": True, "raw": raw}
+    if not isinstance(document, dict) or document.get("schema") != _LEGACY_HOOK_SCHEMA:
+        return {"present": True, "corrupt": True, "raw": raw}
+    digest = str(document.get("ciphertext_sha256") or "")
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        return {"present": True, "corrupt": True, "raw": raw}
+    object_path = destination / "objects" / f"{digest}.bin"
+    try:
+        envelope = _read_nofollow_bytes(object_path)
+    except (PrivateArtifactIntegrityError, OSError):
+        return {"present": True, "corrupt": True, "raw": raw, "document": document}
+    if envelope is None or hashlib.sha256(envelope).hexdigest() != digest:
+        return {"present": True, "corrupt": True, "raw": raw, "document": document}
+    return {"present": True, "corrupt": False, "raw": raw, "document": document, "envelope": envelope}
+
+
+def _legacy_hook_keys(
+    binding: PrivateArtifactBinding,
+    *,
+    key: bytes | None,
+    key_id: str | None,
+    key_provider: InjectedCaseKeyProvider | None,
+) -> tuple[str, bytes]:
+    return _resolve_key(binding, key=key, key_id=key_id, key_provider=key_provider)
+
+
+def _retire_legacy_source(path: Path, snapshot: Mapping[str, Any], payload: bytes) -> bool:
+    inspected = _inspect_legacy_hook_source(path)
+    if not inspected.get("ok"):
+        return False
+    if inspected["data"] != payload or inspected["dev"] != snapshot["dev"] or inspected["ino"] != snapshot["ino"]:
+        return False
+    if inspected["nlink"] != 1:
+        return False
+    path.unlink()
+    return not path.exists()
+
+
+def preflight_legacy_hook_migration(
+    source_path: str | Path,
+    *,
+    source_preimage: str,
+    destination: str | Path,
+    access: Any,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    retention_policy: str = "retain",
+    key: bytes | None = None,
+    key_id: str | None = None,
+    key_provider: InjectedCaseKeyProvider | None = None,
+) -> dict[str, Any]:
+    """Inspect one caller-selected legacy hook artifact. Writes nothing."""
+
+    return _legacy_hook_migration(
+        source_path,
+        source_preimage=source_preimage,
+        destination=destination,
+        access=access,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        revision=revision,
+        retention_policy=retention_policy,
+        key=key,
+        key_id=key_id,
+        key_provider=key_provider,
+        commit=False,
+        interrupt_at=None,
+    )
+
+
+def commit_legacy_hook_migration(
+    source_path: str | Path,
+    *,
+    source_preimage: str,
+    destination: str | Path,
+    access: Any,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    retention_policy: str = "retain",
+    key: bytes | None = None,
+    key_id: str | None = None,
+    key_provider: InjectedCaseKeyProvider | None = None,
+    interrupt_at: str | None = None,
+) -> dict[str, Any]:
+    """Seal one explicit legacy hook artifact, then retire plaintext only if verified.
+
+    ``interrupt_at`` may be ``before_object``, ``before_head``, or ``before_retire``.
+    A mode change or local copy is not a commit.
+    """
+
+    return _legacy_hook_migration(
+        source_path,
+        source_preimage=source_preimage,
+        destination=destination,
+        access=access,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        revision=revision,
+        retention_policy=retention_policy,
+        key=key,
+        key_id=key_id,
+        key_provider=key_provider,
+        commit=True,
+        interrupt_at=interrupt_at,
+    )
+
+
+def open_legacy_hook_artifact(
+    destination: str | Path,
+    *,
+    access: Any,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    key: bytes | None = None,
+    key_id: str | None = None,
+    key_provider: InjectedCaseKeyProvider | None = None,
+) -> dict[str, Any]:
+    """Open the last valid encrypted head for one destination binding."""
+
+    binding = PrivateArtifactBinding(
+        tenant_id=tenant_id,
+        case_id=case_id,
+        artifact_kind=LEGACY_HOOK_ARTIFACT_CLASS,
+        revision=revision,
+        principal_id=principal_id,
+    )
+    assert_access_matches_binding(access, binding)
+    loaded = _load_legacy_head(Path(destination))
+    if not loaded.get("present") or loaded.get("corrupt") or loaded.get("aliased"):
+        raise PrivateArtifactIntegrityError("corrupt_head" if loaded.get("present") else "head_missing")
+    document = loaded["document"]
+    if str(document.get("case_id") or "") != case_id or str(document.get("revision") or "") != revision:
+        raise PrivateArtifactBindingError("foreign_case")
+    resolved_id, resolved_key = _legacy_hook_keys(binding, key=key, key_id=key_id, key_provider=key_provider)
+    if str(document.get("key_id") or "") != resolved_id:
+        raise PrivateArtifactIntegrityError("authentication_failed")
+    plaintext = open_private_artifact(
+        loaded["envelope"],
+        binding=binding,
+        key=resolved_key,
+        expected_key_id=resolved_id,
+    )
+    return {
+        "status": "available",
+        "data": plaintext,
+        "source_preimage": hashlib.sha256(plaintext).hexdigest(),
+        "verified_commit": document.get("verified_commit") is True,
+        "network_durable": False,
+        "durable": False,
+    }
+
+
+def _legacy_hook_migration(
+    source_path: str | Path,
+    *,
+    source_preimage: str,
+    destination: str | Path,
+    access: Any,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    retention_policy: str,
+    key: bytes | None,
+    key_id: str | None,
+    key_provider: InjectedCaseKeyProvider | None,
+    commit: bool,
+    interrupt_at: str | None,
+) -> dict[str, Any]:
+    if interrupt_at not in {None, "before_object", "before_head", "before_retire"}:
+        raise PrivateStorageError("unknown migration interrupt", code="interrupt_at")
+    preimage = _legacy_preimage(source_preimage)
+    _require_label(revision)
+    if retention_policy not in LEGACY_HOOK_RETENTION:
+        raise PrivateKeyMaterialError("retention_policy")
+    binding_record = _legacy_hook_binding(
+        tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, revision=revision,
+    )
+    artifact_binding = PrivateArtifactBinding(
+        tenant_id=tenant_id,
+        case_id=case_id,
+        artifact_kind=LEGACY_HOOK_ARTIFACT_CLASS,
+        revision=revision,
+        principal_id=principal_id,
+    )
+    assert_access_matches_binding(access, artifact_binding)
+
+    def finish(**kwargs: Any) -> dict[str, Any]:
+        return _legacy_hook_receipt(
+            revision=revision,
+            preimage=preimage,
+            binding=binding_record,
+            retention_policy=retention_policy,
+            **kwargs,
+        )
+
+    source = Path(source_path)
+    dest = Path(destination)
+    if source.is_symlink():
+        return finish(status="rejected", code="aliased_source", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=True, last_valid_head_preserved=True, prior_head_present=False,
+                      encryption_established=False)
+    try:
+        source_resolved = source.resolve()
+        dest_resolved = dest.resolve() if dest.exists() else dest.absolute()
+    except OSError:
+        return finish(status="unavailable", code="destination_unavailable", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=True, last_valid_head_preserved=True, prior_head_present=False,
+                      encryption_established=False)
+    if source_resolved == dest_resolved or dest_resolved in source_resolved.parents or source_resolved in dest_resolved.parents:
+        return finish(status="rejected", code="source_destination_overlap", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=True, last_valid_head_preserved=True, prior_head_present=False,
+                      encryption_established=False)
+    if dest.is_symlink() or (dest.exists() and not dest.is_dir()):
+        return finish(status="unavailable", code="destination_unavailable", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=True, last_valid_head_preserved=True, prior_head_present=False,
+                      encryption_established=False)
+    head_before = _load_legacy_head(dest) if dest.exists() else {"present": False}
+    prior = bool(head_before.get("present"))
+    inspected = _inspect_legacy_hook_source(source)
+    source_existed = source.exists() or source.is_symlink()
+    original = inspected.get("data") if inspected.get("ok") else (source.read_bytes() if source.is_file() and not source.is_symlink() else None)
+
+    def preserved() -> bool:
+        if original is None:
+            return not source.exists()
+        if not source.is_file() or source.is_symlink():
+            return False
+        try:
+            return source.read_bytes() == original and source.stat().st_nlink >= 1
+        except OSError:
+            return False
+
+    if head_before.get("aliased"):
+        return finish(status="rejected", code="aliased_source", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+    if not inspected.get("ok"):
+        code = str(inspected.get("code") or "source_missing")
+        status = "rejected" if code in {"aliased_source", "corrupt_source", "empty_source", "preimage_mismatch"} else "pending"
+        if code == "source_missing" and prior and not head_before.get("corrupt"):
+            status = "pending"
+        return finish(status=status, code=code, encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved() if source_existed or original is not None else True,
+                      last_valid_head_preserved=True, prior_head_present=prior, encryption_established=False)
+    payload = bytes(inspected["data"])
+    if hashlib.sha256(payload).hexdigest() != preimage:
+        return finish(status="rejected", code="corrupt_source", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+    if head_before.get("corrupt"):
+        return finish(status="rejected", code="corrupt_head", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=True,
+                      encryption_established=False)
+    try:
+        resolved_id, resolved_key = _legacy_hook_keys(
+            artifact_binding, key=key, key_id=key_id, key_provider=key_provider,
+        )
+    except PrivateCryptoCapabilityError:
+        return finish(status="unavailable", code="private_crypto_unavailable", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+    except PrivateKeyMaterialError as exc:
+        return finish(status="unavailable", code=str(exc.reason or "key_unavailable"), encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+
+    document = head_before.get("document") if head_before.get("present") else None
+    if isinstance(document, dict):
+        same_binding = (
+            document.get("tenant_id") == tenant_id
+            and document.get("case_id") == case_id
+            and document.get("principal_id") == principal_id
+            and document.get("revision") == revision
+            and document.get("artifact_class") == LEGACY_HOOK_ARTIFACT_CLASS
+        )
+        if not same_binding:
+            return finish(status="rejected", code="binding_mismatch", encrypted=False, pending_kind="encryption",
+                          verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                          source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=True,
+                          encryption_established=False)
+        if str(document.get("key_id") or "") != resolved_id:
+            return finish(status="rejected", code="wrong_key", encrypted=False, pending_kind="encryption",
+                          verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                          source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=True,
+                          encryption_established=False)
+        try:
+            opened = open_private_artifact(
+                head_before["envelope"], binding=artifact_binding, key=resolved_key, expected_key_id=resolved_id,
+            )
+        except PrivateArtifactIntegrityError:
+            return finish(status="rejected", code="wrong_key", encrypted=False, pending_kind="encryption",
+                          verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                          source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=True,
+                          encryption_established=False)
+        if opened != payload or str(document.get("source_preimage") or "") != preimage:
+            return finish(status="rejected", code="preimage_mismatch", encrypted=False, pending_kind="encryption",
+                          verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                          source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=True,
+                          encryption_established=False)
+        retired = document.get("plaintext_retired") is True and not source.exists()
+        if commit and retention_policy == "retire_plaintext_after_verified_commit" and not retired and interrupt_at != "before_retire":
+            retired = _retire_legacy_source(source, inspected, payload)
+            if retired:
+                updated = dict(document)
+                updated["plaintext_retired"] = True
+                _publish_legacy_head(dest, _json_bytes(updated))
+        retirement = "retired" if retired else ("pending" if retention_policy == "retire_plaintext_after_verified_commit" else "retained")
+        return finish(
+            status="committed" if commit else "preflight",
+            code="",
+            encrypted=True,
+            pending_kind="" if retirement != "pending" else "plaintext_retirement",
+            verified_commit=True,
+            plaintext_retired=retired,
+            plaintext_retirement=retirement,
+            source_bytes_preserved=not retired,
+            last_valid_head_preserved=True,
+            prior_head_present=True,
+            encryption_established=True,
+        )
+
+    if not commit or interrupt_at == "before_object":
+        return finish(
+            status="preflight" if not commit else "interrupted",
+            code="" if not commit else "interrupted",
+            encrypted=False,
+            pending_kind="encryption",
+            verified_commit=False,
+            plaintext_retired=False,
+            plaintext_retirement="retained",
+            source_bytes_preserved=preserved(),
+            last_valid_head_preserved=True,
+            prior_head_present=prior,
+            encryption_established=False,
+        )
+    try:
+        load_aesgcm()
+        envelope = seal_private_artifact(payload, binding=artifact_binding, key=resolved_key, key_id=resolved_id)
+        if open_private_artifact(envelope, binding=artifact_binding, key=resolved_key, expected_key_id=resolved_id) != payload:
+            raise PrivateArtifactIntegrityError("readback_mismatch")
+    except PrivateCryptoCapabilityError:
+        return finish(status="unavailable", code="private_crypto_unavailable", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+    digest = hashlib.sha256(envelope).hexdigest()
+    object_path = dest / "objects" / f"{digest}.bin"
+    if not object_path.exists():
+        _write_exclusive(object_path, envelope)
+    else:
+        existing = _read_nofollow_bytes(object_path)
+        if existing != envelope:
+            return finish(status="rejected", code="destination_conflict", encrypted=False, pending_kind="encryption",
+                          verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                          source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                          encryption_established=False)
+    if interrupt_at == "before_head":
+        return finish(status="interrupted", code="interrupted", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+    head_document = {
+        "schema": _LEGACY_HOOK_SCHEMA,
+        "schema_version": 1,
+        "artifact_class": LEGACY_HOOK_ARTIFACT_CLASS,
+        "tenant_id": tenant_id,
+        "case_id": case_id,
+        "principal_id": principal_id,
+        "revision": revision,
+        "source_preimage": preimage,
+        "ciphertext_sha256": digest,
+        "key_id": resolved_id,
+        "verified_commit": True,
+        "plaintext_retired": False,
+    }
+    _publish_legacy_head(dest, _json_bytes(head_document))
+    reread = _load_legacy_head(dest)
+    if reread.get("corrupt") or reread.get("envelope") != envelope:
+        return finish(status="rejected", code="readback_mismatch", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+    confirmed = open_private_artifact(reread["envelope"], binding=artifact_binding, key=resolved_key, expected_key_id=resolved_id)
+    if confirmed != payload or not preserved():
+        return finish(status="rejected", code="readback_mismatch", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=True,
+                      encryption_established=False)
+    retired = False
+    if retention_policy == "retire_plaintext_after_verified_commit" and interrupt_at != "before_retire":
+        retired = _retire_legacy_source(source, inspected, payload)
+        if retired:
+            head_document["plaintext_retired"] = True
+            _publish_legacy_head(dest, _json_bytes(head_document))
+    retirement = "retired" if retired else ("pending" if retention_policy == "retire_plaintext_after_verified_commit" else "retained")
+    return finish(
+        status="committed",
+        code="",
+        encrypted=True,
+        pending_kind="" if retirement != "pending" else "plaintext_retirement",
+        verified_commit=True,
+        plaintext_retired=retired,
+        plaintext_retirement=retirement,
+        source_bytes_preserved=not retired,
+        last_valid_head_preserved=True,
+        prior_head_present=prior,
+        encryption_established=True,
+    )
+
+
 def assert_store_isolated_from_exports(store_dir: str | Path, export_dir: str | Path) -> None:
     """Refuse to keep a key store inside or next to an encrypted export directory."""
 
@@ -6227,4 +6881,10 @@ __all__ = [
     "read_case_tombstone",
     "record_managed_replica",
     "write_case_local_private_file",
+    "LEGACY_HOOK_ARTIFACT_CLASS",
+    "LEGACY_HOOK_RETENTION",
+    "preflight_legacy_hook_migration",
+    "commit_legacy_hook_migration",
+    "open_legacy_hook_artifact",
+    "legacy_hook_migration_claim",
 ]
