@@ -218,7 +218,7 @@ Implementation instructions:
 
 ## CIMP-MGND-09 Connect declared KG extraction to factual candidate roles
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
