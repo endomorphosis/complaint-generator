@@ -145,6 +145,7 @@ class Mediator:
 		self.legal_graph_builder = LegalGraphBuilder(mediator=self)
 		self.neurosymbolic_matcher = NeurosymbolicMatcher(mediator=self)
 		self._legal_evidence_hook_contexts = {}
+		self._hook_outcome_receipts = []
 		self.workflow_actions = WorkflowActionService(
 			self,
 			recovery_action_builder=lambda *args, **kwargs: _build_document_grounding_recovery_action(
@@ -14515,6 +14516,41 @@ class Mediator:
 			self.log('legal_evidence_hook_context', operation_id=operation_id, code=decision['code'],
 				prompt_logged=False, response_logged=False)
 		return decision
+
+	def _remember_hook_outcome(self, trace):
+		"""Append one sanitized dispatcher trace and mirror it to the router log."""
+		from .hook_runtime import public_hook_outcome_log
+		if not isinstance(trace, dict):
+			return None
+		bucket = getattr(self, '_hook_outcome_receipts', None)
+		if not isinstance(bucket, list):
+			bucket = []
+			self._hook_outcome_receipts = bucket
+		bucket.append(trace)
+		del bucket[:-32]
+		fields = public_hook_outcome_log(trace)
+		self.log('legal_evidence_hook_outcome', **fields)
+		return fields
+
+	def record_bounded_hook_outcome(self, observation):
+		"""Record a host stage observation without dispatch, retry, or payload logs."""
+		from .hook_runtime import record_bounded_hook_outcome
+		trace = record_bounded_hook_outcome(observation if isinstance(observation, dict) else {})
+		self._remember_hook_outcome(trace)
+		return trace
+
+	def dispatch_registered_legal_evidence_hook(self, request, **kwargs):
+		"""Dispatch one registered operation and log its sanitized outcome trace.
+
+		The trace is the dispatcher result. Tool payloads and error text are not
+		written to the mediator log. This does not add a provider or a retry.
+		"""
+		from .hook_runtime import dispatch_registered_hook_operation
+		result = dispatch_registered_hook_operation(request, **kwargs)
+		trace = result.get('trace') if isinstance(result, dict) else None
+		if isinstance(trace, dict):
+			self._remember_hook_outcome(trace)
+		return result
 
 	def log(self, event_type, **data):
 		self.state.log.append({
