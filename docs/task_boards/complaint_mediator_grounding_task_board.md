@@ -894,7 +894,7 @@ Implementation instructions:
 
 ## CIMP-MGND-35 Verify encrypted replica durability and restore bindings
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
