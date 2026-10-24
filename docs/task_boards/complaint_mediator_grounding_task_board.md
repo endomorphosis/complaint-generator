@@ -322,7 +322,7 @@ Implementation instructions:
 
 ## CIMP-MGND-13 Invalidate factual dependents without promoting retrieval nominations
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
