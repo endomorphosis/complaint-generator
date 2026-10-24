@@ -244,7 +244,7 @@ Implementation instructions:
 
 ## CIMP-MGND-10 Preserve exact factual source spans and assertion identity
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
