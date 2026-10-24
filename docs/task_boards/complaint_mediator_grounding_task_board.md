@@ -686,7 +686,7 @@ Implementation instructions:
 
 ## CIMP-MGND-27 Declare Grok inference purposes at the hook boundary
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
