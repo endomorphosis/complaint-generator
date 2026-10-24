@@ -2661,12 +2661,21 @@ def _apply_effective_privacy_policy(state: Dict[str, Any], user_id: str) -> Dict
     helpers = _privacy_helpers()
     case_id = _state_case_id(state, user_id)
     state["case_id"] = case_id
+    raw_policy = state.get("privacy_policy")
+    public_local = str(state.get("public_processing_mode") or "") == "local"
+    if isinstance(raw_policy, dict) and str(raw_policy.get("processing_mode") or "") == "local":
+        public_local = True
+        raw_policy = dict(raw_policy)
+        raw_policy["processing_mode"] = "local_private"
     inspection = helpers["inspect_privacy_policy"](
-        state.get("privacy_policy"),
+        raw_policy,
         user_id=user_id,
         case_id=case_id,
     )
-    state["privacy_policy"] = inspection["policy"]
+    policy = inspection["policy"]
+    if public_local and policy.get("cloud_processing_enabled") is not True:
+        state["public_processing_mode"] = "local"
+    state["privacy_policy"] = policy
     state["privacy_policy_load"] = {
         "admitted": bool(inspection["admitted"]),
         "reason": str(inspection["reason"] or ""),
@@ -2844,6 +2853,36 @@ def _active_assertion_matches(knowledge: Any, answer: str) -> list[tuple[int, st
     return matches
 
 
+def _contained_assertion_matches(knowledge: Any, answer: str) -> list[tuple[int, str, Dict[str, Any]]]:
+    """One active source that contains the answer, or that the answer contains."""
+
+    needle = str(answer or "").strip()
+    if len(needle) < 4:
+        return []
+    ledger = knowledge.factual_ledger()
+    states = ledger.get("assertion_states") if isinstance(ledger.get("assertion_states"), Mapping) else {}
+    revisions = ledger.get("revisions") if isinstance(ledger.get("revisions"), list) else []
+    indexes: Dict[str, int] = {}
+    for record in revisions:
+        if not isinstance(record, Mapping):
+            continue
+        stable = str(record.get("stable_id") or record.get("new_stable_id") or "")
+        if stable:
+            indexes[stable] = max(indexes.get(stable, 0), int(record.get("revision_index") or 0))
+    matches: list[tuple[int, str, Dict[str, Any]]] = []
+    for stable_id, record in states.items():
+        if not isinstance(record, Mapping) or str(record.get("status") or "") != "active":
+            continue
+        envelope = record.get("envelope") if isinstance(record.get("envelope"), Mapping) else {}
+        span = envelope.get("source_span") if isinstance(envelope.get("source_span"), Mapping) else {}
+        text = str(span.get("text") or envelope.get("source_text") or "").strip()
+        if not text or text == needle:
+            continue
+        if needle in text or text in needle:
+            matches.append((indexes.get(str(stable_id), 0), str(stable_id), dict(envelope)))
+    return matches
+
+
 def _last_eligible_accepted_answer(state: Mapping[str, Any], knowledge: Any) -> Optional[Dict[str, Any]]:
     """Last accepted answer that still has one active assertion."""
 
@@ -2874,6 +2913,9 @@ def _last_eligible_accepted_answer(state: Mapping[str, Any], knowledge: Any) -> 
                     "history_audit": str(item.get("audit_id") or ""),
                 }
         matches = _active_assertion_matches(knowledge, answer)
+        if not matches:
+            contained = _contained_assertion_matches(knowledge, answer)
+            matches = contained if len(contained) == 1 else []
         if not matches:
             continue
         _index, matched_id, envelope = sorted(matches)[-1]
@@ -3070,6 +3112,8 @@ class ComplaintWorkspaceRequestHandlers:
         question_id: Optional[str] = None,
         expected_question_revision: Optional[int] = None,
         interview_action: Optional[str] = None,
+        expected_graph_revision: Optional[str] = None,
+        expected_session_revision: Optional[int] = None,
     ) -> Dict[str, Any]:
         workspace = self.workspace
         state = self._load_state(user_id)
@@ -3088,14 +3132,19 @@ class ComplaintWorkspaceRequestHandlers:
             payload["message"] = why["display"]
             return payload
         if normalized_message.lower() == "/research":
-            research = workspace.run_legal_research(str(state.get("user_id") or user_id))
+            research = workspace.run_legal_research(
+                str(state.get("user_id") or user_id),
+                expected_graph_revision=expected_graph_revision,
+                expected_session_revision=expected_session_revision,
+            )
             fresh = workspace._load_state(str(state.get("user_id") or user_id))
             payload = workspace._build_intake_chat_payload(fresh)
             payload["legal_research"] = research
             payload["command"] = "/research"
             payload["stored_as_answer"] = False
-            payload["awaiting_user"] = True
+            payload["awaiting_user"] = research.get("error_code") != "stale_research"
             payload["legal_sufficiency"] = False
+            payload["status"] = research.get("status")
             payload["message"] = str(research.get("display") or format_legal_research_result(research))
             return payload
         normalized_action = str(interview_action or "").strip().lower()
@@ -3145,6 +3194,7 @@ class ComplaintWorkspaceRequestHandlers:
                 case_id,
                 mode,
             )
+            state["public_processing_mode"] = "grok" if mode == "grok" else "local"
             state["privacy_notice_shown"] = True
             workspace._save_state(state)
             payload = workspace._build_intake_chat_payload(
@@ -3297,6 +3347,19 @@ class ComplaintWorkspaceRequestHandlers:
                         pending_inquiry=_pending_inquiry_copy(state),
                     )
             actions.bind_interview_privacy(state.get("privacy_policy"), user_id=user, case_id=case_id)
+            router_state = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
+            router_session = str(router_state.get("session_id") or "")
+            if not re.fullmatch(r"[0-9a-f]{32}", router_session):
+                router_session = uuid.uuid4().hex
+            begin_router = getattr(mediator, "begin_intake_router_action", None)
+            if callable(begin_router):
+                begin_router(
+                    owner_id=user,
+                    case_id=case_id,
+                    session_id=router_session,
+                    revision=int((actions._interview_meta or {}).get("session_revision") or 0),
+                    previous=router_state,
+                )
         except WorkspacePersistenceError as exc:
             return _terminal_edit_receipt(
                 status="unavailable",
@@ -8742,6 +8805,8 @@ class ComplaintWorkspaceService:
         question_id: Optional[str] = None,
         expected_question_revision: Optional[int] = None,
         interview_action: Optional[str] = None,
+        expected_graph_revision: Optional[str] = None,
+        expected_session_revision: Optional[int] = None,
     ) -> Dict[str, Any]:
         return self.request_handlers.run_intake_chat_turn(
             user_id,
@@ -8749,6 +8814,8 @@ class ComplaintWorkspaceService:
             question_id=question_id,
             expected_question_revision=expected_question_revision,
             interview_action=interview_action,
+            expected_graph_revision=expected_graph_revision,
+            expected_session_revision=expected_session_revision,
         )
 
     def apply_terminal_graph_edit(
@@ -8776,6 +8843,8 @@ class ComplaintWorkspaceService:
         context_updates: Optional[Dict[str, Any]] = None,
         dependency_change: Optional[Dict[str, Any]] = None,
         effect_receipt: Optional[Dict[str, Any]] = None,
+        expected_graph_revision: Optional[str] = None,
+        expected_session_revision: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Run one deliberate legal-research action for the saved case.
 
@@ -8813,6 +8882,34 @@ class ComplaintWorkspaceService:
         )
         stored = state.get("legal_research") if isinstance(state.get("legal_research"), dict) else {}
         receipts = stored.get("receipts") if isinstance(stored.get("receipts"), dict) else {}
+        stale = self._legal_research_stale(
+            state,
+            expected_graph_revision=expected_graph_revision,
+            expected_session_revision=expected_session_revision,
+        )
+        if stale is not None:
+            stale["fingerprint"] = fingerprint
+            stale["display"] = "Stale concurrent research rejected. The pending inquiry was kept."
+            return stale
+        pending_operation = stored.get("pending_operation") if isinstance(stored.get("pending_operation"), dict) else None
+        if (
+            isinstance(pending_operation, dict)
+            and pending_operation.get("fingerprint") == fingerprint
+            and pending_operation.get("dispatched") is True
+            and not isinstance(receipts.get(fingerprint), dict)
+        ):
+            receipt = self._legal_research_failure("interrupted_operation", public_status="unavailable")
+            receipt["replayed"] = True
+            receipt["dispatched"] = False
+            receipt["fingerprint"] = fingerprint
+            receipt["next_action"] = "continue_pending_inquiry"
+            receipt["display"] = format_legal_research_result(receipt)
+            self._store_legal_research_receipt(state, fingerprint, receipt)
+            try:
+                self._save_state(state)
+            except WorkspacePersistenceError as exc:
+                return self._legal_research_failure(exc.code or "durability_unproven", public_status=exc.public_status)
+            return receipt
         previous = receipts.get(fingerprint)
         if isinstance(previous, dict):
             replay = dict(previous)
@@ -8826,6 +8923,21 @@ class ComplaintWorkspaceService:
             return replay
         answers_before = deepcopy(state.get("intake_answers") or {})
         history_before = deepcopy(state.get("intake_history") or [])
+        legal_research = state.setdefault("legal_research", {})
+        if not isinstance(legal_research, dict):
+            legal_research = {}
+            state["legal_research"] = legal_research
+        legal_research["pending_operation"] = {
+            "kind": "legal_research",
+            "fingerprint": fingerprint,
+            "status": "claimed",
+            "dispatched": True,
+        }
+        legal_research["dispatch_count"] = int(legal_research.get("dispatch_count") or 0) + 1
+        try:
+            self._save_state(state)
+        except WorkspacePersistenceError as exc:
+            return self._legal_research_failure(exc.code or "durability_unproven", public_status=exc.public_status)
         mediator = None
         try:
             from complaint_phases.intake_case_file import apply_explicit_legal_context
@@ -8851,6 +8963,7 @@ class ComplaintWorkspaceService:
                 retrieval_mode=retrieval_mode,
                 storage_available=storage_available,
                 cancelled=cancelled,
+                operation_id=fingerprint,
             )
         except WorkspacePersistenceError as exc:
             return self._legal_research_failure(exc.code or "unavailable", public_status=exc.public_status)
@@ -8888,6 +9001,17 @@ class ComplaintWorkspaceService:
             }
         state["intake_answers"] = answers_before
         state["intake_history"] = history_before
+        self._store_legal_research_receipt(state, fingerprint, receipt)
+        try:
+            self._save_state(state)
+        except WorkspacePersistenceError as exc:
+            failed = self._legal_research_failure(exc.code or "durability_unproven", public_status=exc.public_status)
+            failed["counts"] = dict(receipt.get("counts") or failed["counts"])
+            failed["dispatched"] = True
+            return failed
+        return receipt
+
+    def _store_legal_research_receipt(self, state: Dict[str, Any], fingerprint: str, receipt: Mapping[str, Any]) -> None:
         legal_research = state.setdefault("legal_research", {})
         if not isinstance(legal_research, dict):
             legal_research = {}
@@ -8896,15 +9020,42 @@ class ComplaintWorkspaceService:
         if not isinstance(legal_receipts, dict):
             legal_receipts = {}
             legal_research["receipts"] = legal_receipts
-        legal_receipts[fingerprint] = {key: value for key, value in receipt.items() if key != "display"}
+        legal_receipts[fingerprint] = {key: value for key, value in dict(receipt).items() if key != "display"}
         legal_research["latest_fingerprint"] = fingerprint
-        try:
-            self._save_state(state)
-        except WorkspacePersistenceError as exc:
-            failed = self._legal_research_failure(exc.code or "durability_unproven", public_status=exc.public_status)
-            failed["counts"] = dict(receipt.get("counts") or failed["counts"])
-            failed["dispatched"] = True
-            return failed
+        legal_research["pending_operation"] = None
+
+    def _legal_research_stale(
+        self,
+        state: Mapping[str, Any],
+        *,
+        expected_graph_revision: Optional[str],
+        expected_session_revision: Optional[int],
+    ) -> Optional[Dict[str, Any]]:
+        if expected_graph_revision is None and expected_session_revision is None:
+            return None
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+        current_session = int(projection.get("session_revision") or 0) if isinstance(projection, Mapping) else 0
+        current_token = ""
+        graph = projection.get("knowledge_graph") if isinstance(projection, Mapping) else None
+        if isinstance(graph, Mapping):
+            try:
+                from complaint_phases.knowledge_graph import KnowledgeGraph
+                from mediator.hook_runtime import graph_revision_token
+
+                current_token = graph_revision_token(KnowledgeGraph.from_dict(dict(graph)))
+            except Exception:
+                current_token = ""
+        token_mismatch = expected_graph_revision is not None and str(expected_graph_revision) != current_token
+        session_mismatch = expected_session_revision is not None and int(expected_session_revision) != current_session
+        if not token_mismatch and not session_mismatch:
+            return None
+        receipt = self._legal_research_failure("stale_research", public_status="refused")
+        receipt["status"] = "refused"
+        receipt["error_code"] = "stale_research"
+        receipt["dispatched"] = False
+        receipt["replayed"] = False
+        receipt["next_action"] = "continue_pending_inquiry"
+        receipt["counts"] = {"retrieved": 0, "admitted": 0, "rejected": 0, "unavailable": 0}
         return receipt
 
     def _legal_research_storage_available(self) -> bool:
@@ -13413,7 +13564,12 @@ class ComplaintWorkspaceService:
             payload["updated"] = False
             return payload
         helpers = _privacy_helpers()
+        normalized_mode = str(mode or "").strip().lower()
         state["privacy_policy"] = helpers["privacy_policy_for_mode"](resolved_user_id, bound_case, mode)
+        if normalized_mode == "local":
+            state["public_processing_mode"] = "local"
+        elif normalized_mode in {"grok", "grok_cloud"}:
+            state["public_processing_mode"] = "grok"
         _sync_operation_consent_state(state, resolved_user_id, bound_case)
         self._save_state(state)
         payload = self.get_privacy_policy(resolved_user_id)

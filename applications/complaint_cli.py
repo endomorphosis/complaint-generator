@@ -126,7 +126,8 @@ Input:
   End a line with \\ to continue a multiline answer.
   NO_COLOR, COMPLAINT_CLI_NO_COLOR, or TERM=dumb disables color.
   COMPLAINT_CLI_ASCII=1 prints ASCII only. COLUMNS wraps narrow terminals.
-  A stale concurrent answer is rejected and is not saved.
+  A stale concurrent answer, edit, or research request is rejected and is not saved.
+  EOF, Ctrl-C, and /quit keep the pending inquiry and any claimed operation.
 """.strip()
 
 
@@ -143,7 +144,17 @@ class TerminalComplaintWorkspaceService(ComplaintWorkspaceService):
         mediator = super()._mediator_for_shared_interview(user_id, case_id)
         from backends.llm_router_backend import load_terminal_router_backend
         if not hasattr(mediator, "_terminal_router_backend"):
-            backend = load_terminal_router_backend(str(Path(__file__).resolve().parents[1] / "config.llm_router.json"))
+            try:
+                backend = load_terminal_router_backend(str(Path(__file__).resolve().parents[1] / "config.llm_router.json"))
+            except ImportError as exc:
+                # The interview still resumes from the encrypted session. A missing
+                # router package is not a live model and is not legal completion.
+                mediator._terminal_router_backend = None
+                mediator._terminal_router_unavailable = {
+                    "error_type": type(exc).__name__,
+                    "live_model_identity_verified": False,
+                }
+                return mediator
             mediator.backends = [backend]
             mediator._terminal_router_backend = backend
         return mediator
@@ -672,6 +683,9 @@ def stale_answer_rejection(user_id: str, shown: dict[str, Any]) -> Optional[str]
     compared = ("inquiry_id", "question_revision", "session_revision", "history_len", "narrative_revision")
     if any(current.get(key) != shown.get(key) for key in compared):
         return "stale_question"
+    shown_token = str(shown.get("graph_revision_token") or "")
+    if shown_token and shown_token != str(current.get("graph_revision_token") or ""):
+        return "stale_question"
     return None
 
 
@@ -684,6 +698,11 @@ def _pause_and_exit(user_id: Optional[str], reason: str, code: int, inquiry: Opt
             if reason in {"eof", "interrupted"} and controls.get("paused") and controls.get("stop_reason"):
                 stored_reason = str(controls.get("stop_reason"))
             remember_pending_inquiry(state, inquiry, stop_reason=stored_reason, paused=True)
+            research = state.get("legal_research") if isinstance(state.get("legal_research"), dict) else {}
+            pending_operation = research.get("pending_operation")
+            if isinstance(pending_operation, dict):
+                controls = _controls(state)
+                controls["pending_operation"] = dict(pending_operation)
             save_terminal_state(state)
         except Exception:
             terminal_echo("Recoverable pause could not be saved. The pending inquiry was not submitted.")
@@ -1043,7 +1062,20 @@ def chat(user_id: str = "demo-user", max_turns: int = 0, privacy_mode: str = "")
             payload = service.run_intake_chat_turn(user_id, message="/why", question_id=str(inquiry.get("question_id") or "") or None)
             continue
         if command == "/research":
-            payload = service.run_intake_chat_turn(user_id, message="/research")
+            rejection = stale_answer_rejection(user_id, shown)
+            if rejection:
+                terminal_echo("Stale concurrent research rejected. The pending inquiry was kept.")
+                continue
+            shown_session = shown.get("session_revision")
+            try:
+                payload = service.run_intake_chat_turn(
+                    user_id,
+                    message="/research",
+                    expected_graph_revision=str(shown.get("graph_revision_token") or "") or None,
+                    expected_session_revision=shown_session if isinstance(shown_session, int) else None,
+                )
+            except KeyboardInterrupt:
+                _pause_and_exit(user_id, "interrupted", EXIT_INTERRUPTED, inquiry)
             continue
         if command == "/pause":
             paused = True
@@ -1092,12 +1124,15 @@ def chat(user_id: str = "demo-user", max_turns: int = 0, privacy_mode: str = "")
                 terminal_echo("Usage: /edit replacement text. Nothing was changed.")
                 continue
             shown_session = shown.get("session_revision")
-            receipt = service.apply_terminal_graph_edit(
-                user_id,
-                replacement,
-                expected_graph_revision=str(shown.get("graph_revision_token") or "") or None,
-                expected_session_revision=shown_session if isinstance(shown_session, int) else None,
-            )
+            try:
+                receipt = service.apply_terminal_graph_edit(
+                    user_id,
+                    replacement,
+                    expected_graph_revision=str(shown.get("graph_revision_token") or "") or None,
+                    expected_session_revision=shown_session if isinstance(shown_session, int) else None,
+                )
+            except KeyboardInterrupt:
+                _pause_and_exit(user_id, "interrupted", EXIT_INTERRUPTED, inquiry)
             terminal_echo(str(receipt.get("message") or "Edit was not applied. The pending question is unchanged."))
             pending_after = receipt.get("pending_inquiry") if isinstance(receipt.get("pending_inquiry"), dict) else None
             if receipt.get("status") == "applied" and pending_after:
