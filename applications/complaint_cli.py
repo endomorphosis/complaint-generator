@@ -101,7 +101,7 @@ DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
 EXIT_OK = 0
 EXIT_EOF_PAUSE = 1
 EXIT_INTERRUPTED = 130
-TERMINAL_COMMANDS = ("/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy")
+TERMINAL_COMMANDS = ("/help", "/status", "/why", "/research", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy")
 _UNKNOWN_ANSWERS = {
     "unknown", "i don't know", "i do not know", "idk", "not sure", "unsure", "n/a", "na",
 }
@@ -112,6 +112,7 @@ Terminal controls (a command is never stored as an answer):
   /privacy  select /privacy local or /privacy grok for this case; remote Grok receives submitted prompts
   /status   show the pending question, objective, graph revision, stop reason, and unknown/skipped answers
   /why      explain why the pending question matters; the question stays pending
+  /research run bounded legal-source acquisition for the current gap; it is not an answer and does not establish the complaint
   /skip     record the pending question as skipped; it does not satisfy the legal requirement
   /edit     replace the last recorded answer: /edit new text
   /pause    persist a recoverable pause and keep the pending inquiry
@@ -229,7 +230,7 @@ INTAKE_OPERATOR_EXAMPLES = (
         "model": "grok-4.7",
         "backend_id": "llm-router-grok-4.7",
         "config_path": "config.llm_router.json",
-        "controls": ["/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy local", "/privacy grok"],
+        "controls": ["/help", "/status", "/why", "/research", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy local", "/privacy grok"],
         "notes": "Save is /pause or a recoverable exit. Resume is the same command with the same USER_ID, then /resume.",
     },
     {
@@ -982,6 +983,9 @@ def chat(user_id: str = "demo-user", max_turns: int = 0, privacy_mode: str = "")
             continue
         if command == "/why":
             payload = service.run_intake_chat_turn(user_id, message="/why", question_id=str(inquiry.get("question_id") or "") or None)
+            continue
+        if command == "/research":
+            payload = service.run_intake_chat_turn(user_id, message="/research")
             continue
         if command == "/pause":
             paused = True
