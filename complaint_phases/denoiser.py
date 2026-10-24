@@ -27,23 +27,315 @@ from .intake_claim_registry import (
 
 logger = logging.getLogger(__name__)
 
+_SUPPORT_STATE_NAMES = ("user_assertion", "corroboration", "candidate", "applicability", "proof")
+_SUPPORT_STATE_TOKENS = frozenset({
+    "unknown", "asserted", "unasserted", "corroborated", "uncorroborated",
+    "candidate", "not_candidate", "applicable", "inapplicable", "unproved",
+    "proved", "missing", "unavailable", "contradicted", "needs_review",
+    "admitted", "rejected", "recorded",
+})
+_PRIVATE_DIAGNOSTIC_KEYS = frozenset({
+    "narrative", "prompt", "answer", "question", "why_it_matters", "text", "wording",
+    "span_text", "quote", "secret", "passphrase", "content", "candidate",
+    "expected_information", "display", "password", "token", "recovery",
+})
+_CONDITION_COPY = {
+    "unknown_authority": (
+        "Admitted authority for this question is unknown.",
+        "identify_or_research_admitted_authority",
+    ),
+    "source_outage": (
+        "A legal source is unavailable. This outage is not legal sufficiency.",
+        "retry_when_source_available",
+    ),
+    "contradiction": (
+        "Accounts conflict. Neither account is treated as proved.",
+        "clarify_the_conflicting_accounts",
+    ),
+    "missing_definition": (
+        "The element definition is missing and still needs review.",
+        "review_the_element_definition",
+    ),
+    "missing_review": (
+        "A required review is missing.",
+        "complete_manual_review",
+    ),
+}
+_WHY_DISPLAY_CHAR_BUDGET = 3500
+_FIELD_CHAR_BUDGET = 160
+
+
+def _clip_public(value: Any, limit: int = _FIELD_CHAR_BUDGET) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) > limit:
+        return text[: limit - 3] + "..."
+    return text
+
+
+def _state_token(value: Any) -> str:
+    token = str(value or "").strip().lower().replace(" ", "_")
+    if token in _SUPPORT_STATE_TOKENS:
+        return token
+    return "recorded" if token else "unknown"
+
+
+def _mapping(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _factual_target_view(inquiry: Dict[str, Any]) -> Dict[str, str]:
+    raw = _mapping(inquiry.get("factual_target"))
+    unresolved = _mapping(inquiry.get("unresolved_target"))
+    kind = str(raw.get("kind") or unresolved.get("target_kind") or inquiry.get("target_kind") or inquiry.get("gap_family") or "")
+    target_id = str(raw.get("target_id") or "").strip()
+    label = str(raw.get("label") or raw.get("name") or "").strip()
+    factual_kinds = {"factual", "factual_uncertainty", "timeline", "clarification"}
+    if not target_id and kind.strip().lower() in factual_kinds:
+        target_id = str(unresolved.get("target_id") or inquiry.get("target_id") or "").strip()
+    if not label and kind.strip().lower() in factual_kinds:
+        label = str(unresolved.get("label") or unresolved.get("name") or "").strip()
+    return {
+        "target_id": _clip_public(target_id) or "unknown",
+        "label": _clip_public(label) or "unknown",
+        "kind": "factual",
+    }
+
+
+def _law_requirement_view(inquiry: Dict[str, Any], factual: Dict[str, str]) -> Dict[str, str]:
+    raw = _mapping(inquiry.get("law_derived_requirement") or inquiry.get("legal_requirement"))
+    requirement_id = str(raw.get("requirement_id") or raw.get("element_id") or "").strip()
+    label = str(raw.get("label") or raw.get("name") or raw.get("element") or "").strip()
+    law_derived = raw.get("law_derived")
+    if law_derived is None:
+        law_derived = bool(requirement_id or label) or str(inquiry.get("gap_family") or "") == "legal_element_support"
+    if not requirement_id and str(inquiry.get("gap_family") or "") == "legal_element_support":
+        requirement_id = str(inquiry.get("requirement_id") or "").strip()
+    # A factual target id is not a law-derived requirement, even when it is the only id present.
+    if requirement_id and requirement_id == factual.get("target_id") and factual.get("target_id") != "unknown":
+        if not raw:
+            requirement_id = ""
+    if label and label == factual.get("label") and factual.get("label") != "unknown" and not raw:
+        label = ""
+    return {
+        "requirement_id": _clip_public(requirement_id) or "unknown",
+        "label": _clip_public(label) or "unknown",
+        "law_derived": "true" if law_derived and (requirement_id or label) else "false",
+    }
+
+
+def _admitted_authorities(inquiry: Dict[str, Any]) -> List[Dict[str, str]]:
+    raw = inquiry.get("admitted_authorities")
+    if not isinstance(raw, list):
+        raw = inquiry.get("authority_references")
+    if not isinstance(raw, list):
+        single = _mapping(inquiry.get("admitted_authority"))
+        raw = [single] if single else []
+    admitted: List[Dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status") or item.get("admission") or "").strip().lower()
+        if item.get("admitted") is False or status in {"rejected", "unknown", "candidate", "unavailable"}:
+            continue
+        if item.get("admitted") is not True and status not in {"admitted", "admitted_authority"}:
+            continue
+        citation = _clip_public(item.get("citation") or item.get("cite") or "")
+        version = _clip_public(item.get("version") or item.get("edition") or "")
+        span = _clip_public(item.get("span") or item.get("span_id") or item.get("span_ref") or "")
+        if not (citation or version or span):
+            continue
+        admitted.append({
+            "citation": citation or "unknown",
+            "version": version or "unknown",
+            "span": span or "unknown",
+        })
+        if len(admitted) >= 4:
+            break
+    return admitted
+
+
+def _support_states(inquiry: Dict[str, Any]) -> Dict[str, str]:
+    raw = _mapping(inquiry.get("support_states"))
+    states = {name: _state_token(raw.get(name, inquiry.get(name))) for name in _SUPPORT_STATE_NAMES}
+    score = inquiry.get("retrieval_score", inquiry.get("relevance_score"))
+    raw_proof = raw.get("proof", inquiry.get("proof"))
+    raw_proof_text = str(raw_proof).strip() if raw_proof is not None else ""
+    score_text = str(score).strip() if score is not None else ""
+    # A retrieval score never fills proof, including when a caller copies the score into proof.
+    if not raw_proof_text or (score_text and raw_proof_text == score_text):
+        states["proof"] = "unknown"
+    return states
+
+
+def _support_conditions(inquiry: Dict[str, Any], authorities: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    authority_status = str(inquiry.get("authority_status") or "").strip().lower()
+    source_status = str(inquiry.get("source_status") or inquiry.get("legal_source_status") or "").strip().lower()
+    definition_status = str(inquiry.get("definition_status") or "").strip().lower()
+    review_status = str(inquiry.get("review_status") or "").strip().lower()
+    reasons = {str(item).strip().lower() for item in (inquiry.get("unknown_reasons") or [])}
+    family = str(inquiry.get("gap_family") or "").strip().lower()
+    flags = {
+        "unknown_authority": (not authorities) or authority_status in {"unknown", "missing"},
+        "source_outage": source_status in {"outage", "unavailable", "source_outage"} or "source_outage" in reasons,
+        "contradiction": family == "contradiction" or bool(inquiry.get("contradiction")) or "contradiction" in reasons,
+        "missing_definition": definition_status in {"missing", "unknown"} or bool(inquiry.get("missing_definition")) or "missing_definition" in reasons,
+        "missing_review": review_status in {"missing", "needs_review"} or bool(inquiry.get("missing_review")) or "missing_review" in reasons,
+    }
+    # Unknown authority is the standing case. Other conditions appear only when the inquiry says so.
+    if authority_status in {"admitted", "known"} and authorities:
+        flags["unknown_authority"] = False
+    conditions: List[Dict[str, str]] = []
+    for kind, enabled in flags.items():
+        if not enabled:
+            continue
+        message, action = _CONDITION_COPY[kind]
+        conditions.append({"kind": kind, "message": message, "next_action": action})
+    return conditions
+
+
+def question_support_view(inquiry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Separate factual, law-derived, authority, and support facts for /why.
+
+    Retrieval rank stays a retrieval fact. It is not proof, applicability, or admission.
+    """
+    record = inquiry if isinstance(inquiry, dict) else {}
+    factual = _factual_target_view(record)
+    requirement = _law_requirement_view(record, factual)
+    authorities = _admitted_authorities(record)
+    states = _support_states(record)
+    conditions = _support_conditions(record, authorities)
+    score = record.get("retrieval_score", record.get("relevance_score"))
+    score_text = "none"
+    if score is not None and str(score).strip():
+        score_text = _clip_public(score, 32)
+    return {
+        "factual_target": factual,
+        "law_derived_requirement": requirement,
+        "admitted_authorities": authorities,
+        "authority_status": "admitted" if authorities else "unknown",
+        "support_states": states,
+        "retrieval_score": score_text,
+        "retrieval_score_is_proof": False,
+        "conditions": conditions,
+        "legal_sufficiency": False,
+        "proof_established": states.get("proof") == "proved",
+    }
+
+
+def _support_display_lines(support: Dict[str, Any]) -> List[str]:
+    factual = support["factual_target"]
+    requirement = support["law_derived_requirement"]
+    lines = [
+        f"Factual target: {factual['label']} [{factual['target_id']}]",
+        (
+            "Law-derived requirement: "
+            f"{requirement['label']} [{requirement['requirement_id']}] "
+            f"law_derived={requirement['law_derived']}"
+        ),
+    ]
+    authorities = support["admitted_authorities"]
+    if authorities:
+        for item in authorities:
+            lines.append(
+                "Admitted authority: "
+                f"citation={item['citation']}; version={item['version']}; span={item['span']}"
+            )
+    else:
+        lines.append("Admitted authority: unknown")
+    state_text = "; ".join(f"{name}={support['support_states'][name]}" for name in _SUPPORT_STATE_NAMES)
+    lines.append(f"Support states: {state_text}")
+    lines.append(
+        f"Retrieval score: {support['retrieval_score']}. A retrieval score is not proof, corroboration, applicability, or admission."
+    )
+    for condition in support["conditions"]:
+        lines.append(f"Condition {condition['kind']}: {condition['message']}")
+        lines.append(f"Next action: {condition['next_action']}")
+    rendered: List[str] = []
+    budget = _WHY_DISPLAY_CHAR_BUDGET
+    for line in lines:
+        safe = line.encode("ascii", "replace").decode("ascii")
+        if budget <= 0:
+            rendered.append("Further support lines omitted to keep this explanation bounded.")
+            break
+        if len(safe) > budget:
+            safe = safe[: max(0, budget - 3)] + "..."
+        rendered.append(safe)
+        budget -= len(safe) + 1
+    return rendered
+
+
+def public_why_diagnostic_receipt(why: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Codes and references only. Question text and narrative stay out of the receipt."""
+    payload = why if isinstance(why, dict) else {}
+    support = payload.get("question_support") if isinstance(payload.get("question_support"), dict) else {}
+    factual = _mapping(support.get("factual_target"))
+    requirement = _mapping(support.get("law_derived_requirement"))
+    states = _mapping(support.get("support_states"))
+    conditions = [item for item in (support.get("conditions") or []) if isinstance(item, dict)]
+    authorities = [item for item in (support.get("admitted_authorities") or []) if isinstance(item, dict)]
+    return {
+        "schema": "why-diagnostic-receipt-v1",
+        "command": "/why",
+        "objective_id": _clip_public(payload.get("objective_id") or "unknown", 80) or "unknown",
+        "target_id": _clip_public(payload.get("target_id") or "unknown", 80) or "unknown",
+        "factual_target_id": _clip_public(factual.get("target_id") or "unknown", 80),
+        "law_requirement_id": _clip_public(requirement.get("requirement_id") or "unknown", 80),
+        "authority_status": "admitted" if authorities else "unknown",
+        "authority_count": len(authorities),
+        "authority_citations": [_clip_public(item.get("citation") or "unknown", 80) for item in authorities],
+        "support_states": {name: _state_token(states.get(name)) for name in _SUPPORT_STATE_NAMES},
+        "retrieval_score_is_proof": False,
+        "condition_kinds": [str(item.get("kind") or "") for item in conditions],
+        "next_actions": [str(item.get("next_action") or "") for item in conditions],
+        "legal_sufficiency": False,
+        "contains_private_content": False,
+        "awaiting_user": True,
+        "worker_stalled": False,
+    }
+
+
+def redact_diagnostic_value(value: Any) -> Any:
+    """Drop private complaint text from a diagnostic receipt before it is shown."""
+    if isinstance(value, dict):
+        redacted: Dict[str, Any] = {}
+        for key, item in value.items():
+            if str(key).strip().lower() in _PRIVATE_DIAGNOSTIC_KEYS:
+                continue
+            redacted[str(key)] = redact_diagnostic_value(item)
+        redacted.setdefault("contains_private_content", False)
+        return redacted
+    if isinstance(value, list):
+        return [redact_diagnostic_value(item) for item in value[:20]]
+    if isinstance(value, str):
+        if len(value) > 180:
+            return "[redacted]"
+        return value
+    return value
+
 
 def format_terminal_why(inquiry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Render a /why explanation a person can read without seeing ranking internals."""
     if not isinstance(inquiry, dict) or not (
         str(inquiry.get("question") or "").strip() or str(inquiry.get("why_it_matters") or "").strip()
     ):
+        support = question_support_view({})
         display = (
             "There is no current question to explain. "
-            "The interview is waiting for a selected gap, and this is not a stalled worker."
+            "The interview is waiting for a selected gap, and this is not a stalled worker.\n"
+            + "\n".join(_support_display_lines(support))
         )
-        return {
+        payload = {
             "command": "/why",
             "display": display,
             "stored_as_answer": False,
             "awaiting_user": True,
+            "worker_stalled": False,
             "inquiry": None,
+            "legal_sufficiency": False,
+            "question_support": support,
         }
+        payload["diagnostic_receipt"] = public_why_diagnostic_receipt(payload)
+        return payload
     why = str(inquiry.get("why_it_matters") or inquiry.get("question_reason") or "").strip()
     if not why:
         why = "This question asks for information that is still missing from the complaint record."
@@ -58,6 +350,8 @@ def format_terminal_why(inquiry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         or "facts, dates, people, or documents you observed"
     ).strip()
     update_kind = str(update_contract.get("update_kind") or "record the answer against this target").replace("_", " ")
+    support = question_support_view(inquiry)
+    support_lines = "\n".join(_support_display_lines(support))
     display = (
         f"Why this question: {why}\n"
         f"Question: {question}\n"
@@ -65,19 +359,27 @@ def format_terminal_why(inquiry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         f"Target id: {target_id}\n"
         f"Expected answer: {expected}.\n"
         f"Expected update: {update_kind} for this target. "
-        "An unknown, refused, or skipped answer is recorded as that response and does not satisfy the underlying legal requirement."
+        "An unknown, refused, or skipped answer is recorded as that response and does not satisfy the underlying legal requirement.\n"
+        f"{support_lines}"
     )
-    return {
+    if len(display) > _WHY_DISPLAY_CHAR_BUDGET:
+        display = display[: _WHY_DISPLAY_CHAR_BUDGET - 3] + "..."
+    payload = {
         "command": "/why",
         "display": display,
         "stored_as_answer": False,
         "awaiting_user": True,
+        "worker_stalled": False,
         "objective_id": objective_id,
         "target_id": target_id,
         "why_it_matters": why,
         "expected_answer_contract": answer_contract,
         "expected_update_contract": update_contract,
+        "question_support": support,
+        "legal_sufficiency": False,
     }
+    payload["diagnostic_receipt"] = public_why_diagnostic_receipt(payload)
+    return payload
 
 
 MODULE_OWNERSHIP = require_module_ownership("complaint_phases.denoiser")

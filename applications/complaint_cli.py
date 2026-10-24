@@ -964,7 +964,19 @@ def chat(user_id: str = "demo-user", max_turns: int = 0, privacy_mode: str = "")
         _require_readable_session(payload)
         trace = (payload.get("session") or {}).get("router_trace") or {}
         if trace.get("diagnostics"):
-            terminal_echo("Router diagnostics: " + json.dumps(trace["diagnostics"], sort_keys=True))
+            from complaint_phases.denoiser import redact_diagnostic_value
+
+            terminal_echo(
+                "Router diagnostics: "
+                + json.dumps(redact_diagnostic_value(trace["diagnostics"]), sort_keys=True)
+            )
+        if isinstance(payload.get("diagnostic_receipt"), dict):
+            from complaint_phases.denoiser import redact_diagnostic_value
+
+            terminal_echo(
+                "Why diagnostic receipt: "
+                + json.dumps(redact_diagnostic_value(payload["diagnostic_receipt"]), sort_keys=True)
+            )
         inquiry = dict(payload.get("inquiry") or {})
         try:
             state = _sync_controls_from_payload(user_id, payload, inquiry or None)

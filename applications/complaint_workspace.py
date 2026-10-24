@@ -2728,6 +2728,10 @@ class ComplaintWorkspaceRequestHandlers:
             payload["command"] = "/why"
             payload["stored_as_answer"] = False
             payload["awaiting_user"] = True
+            payload["worker_stalled"] = False
+            payload["legal_sufficiency"] = False
+            payload["question_support"] = why.get("question_support")
+            payload["diagnostic_receipt"] = why.get("diagnostic_receipt")
             payload["message"] = why["display"]
             return payload
         if normalized_message.lower() == "/research":
