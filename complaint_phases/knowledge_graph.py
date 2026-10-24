@@ -354,8 +354,13 @@ def envelope_for_extracted_record(
     if not record.get("relation_type"):
         entity_type = _clean_context_text(record.get("type") or record.get("entity_type"))
         supported_text = record.get("name") if entity_type in {"person", "organization", "location", "date"} else attributes.get("description") or record.get("name") or ""
+        display_name = _clean_context_text(record.get("name") or "")
+        # A legal or classifier prefix can sit on a real span. The displayed
+        # name stays a candidate until it is itself exact user source text.
+        name_is_user_text = bool(display_name) and " ".join(display_name.split()) in " ".join(source_text.split())
         if (not isinstance(supported_text, str) or not supported_text.strip()
-                or " ".join(supported_text.split()) != " ".join(span_text.split())):
+                or " ".join(supported_text.split()) != " ".join(span_text.split())
+                or not name_is_user_text):
             extra.append("unsupported_extracted_content")
     forced_type = _record_type_for_extraction(record)
     relation_type = _clean_context_text(record.get("relation_type") or "")
@@ -703,7 +708,11 @@ def _validated_graph_provenance(provenance, *, record_type="", name="", attribut
                 assertion_status="unverified", deficiencies=("relationship_binding_mismatch",))
     elif envelope.is_asserted_user_fact:
         text = name if record_type in {"person", "organization", "location", "date"} else attrs.get("description") or name
-        if not isinstance(text, str) or " ".join(text.split()) != " ".join(envelope.source_span_text.split()):
+        display_name = " ".join(str(name or "").split())
+        source_text = " ".join(str(envelope.source_text or "").split())
+        name_is_user_text = bool(display_name) and display_name in source_text
+        if (not isinstance(text, str) or " ".join(text.split()) != " ".join(envelope.source_span_text.split())
+                or not name_is_user_text):
             envelope = replace(envelope, record_type="unverified_candidate", source_kind="unverified",
                 assertion_status="unverified", deficiencies=("unsupported_extracted_content",))
     result["user_assertion"] = envelope.as_dict()
@@ -2352,6 +2361,7 @@ class KnowledgeGraphBuilder:
         )
 
         from integrations.ipfs_datasets.graphs import (
+            legal_candidate_role_handoff,
             legal_namespace_kind,
             mint_graph_record_id,
             prepare_private_extraction,
@@ -2364,12 +2374,18 @@ class KnowledgeGraphBuilder:
         private_relationships: List[Mapping[str, Any]] = []
         # Explicit record projection is also used by the standalone adapter.
         # It must not recurse or repeat the owned extractor invocation.
-        if include_local_heuristics and extracted_entities is None and extracted_relationships is None and not legal_passage:
+        if legal_passage:
+            graph.metadata["factual_candidate_roles"] = legal_candidate_role_handoff()
+        elif include_local_heuristics and extracted_entities is None and extracted_relationships is None:
             extraction = prepare_private_extraction(source_text, caller_context)
             graph.metadata["private_extraction"] = {
-                key: extraction[key] for key in ("status", "diagnostic", "diagnostics", "provenance", "bounded")
+                key: extraction[key]
+                for key in ("status", "diagnostic", "diagnostics", "provenance", "bounded", "factual_candidate_roles")
                 if key in extraction
             }
+            graph.metadata["factual_candidate_roles"] = extraction.get("factual_candidate_roles") or {}
+            if extraction["status"] != "available":
+                graph.metadata["private_extraction"]["local_fallback"] = True
             if extraction["status"] == "available":
                 private_entities = extraction["entities"]
                 private_relationships = extraction["relationships"]
