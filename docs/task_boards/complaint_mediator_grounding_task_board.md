@@ -790,7 +790,7 @@ Implementation instructions:
 
 ## CIMP-MGND-31 Route private evidence hook bytes through encrypted storage
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
