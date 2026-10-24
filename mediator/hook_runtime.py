@@ -1875,3 +1875,462 @@ def accept_late_hook_result(
         "acceptor_called": acceptor_called,
         "live_model_identity_verified": False,
     }
+
+
+EFFECT_ACCEPTANCE_SCHEMA = "hook_effect_acceptance_v1"
+EFFECT_RECEIPT_SCHEMA = "hook_effect_receipt_v1"
+CANDIDATE_ACQUISITION_SCHEMA = "hook_candidate_acquisition_v1"
+_EFFECT_RECORD_KINDS = frozenset({"source", "evidence", "support"})
+
+
+def saved_case_hash(saved_case: Mapping[str, Any] | None) -> str:
+    """Identity of the saved case document. Not a durability or proof claim."""
+
+    if saved_case is None:
+        return _canonical_hash(None, prefix="case_")
+    if not isinstance(saved_case, Mapping):
+        raise HookContextError("malformed")
+    return _canonical_hash(dict(saved_case), prefix="case_")
+
+
+def receipt_establishes_durability(receipt: Mapping[str, Any] | None) -> bool:
+    """A receipt record is not evidence that the effect was durably stored."""
+
+    del receipt
+    return False
+
+
+def receipt_establishes_proof(receipt: Mapping[str, Any] | None) -> bool:
+    """A receipt record does not prove a legal requirement or admitted support."""
+
+    del receipt
+    return False
+
+
+def _inquiry_token(inquiry: Any) -> Optional[str]:
+    if inquiry is None:
+        return None
+    if not isinstance(inquiry, Mapping):
+        raise HookContextError("malformed")
+    inquiry_id = inquiry.get("inquiry_id")
+    revision = inquiry.get("revision")
+    if inquiry_id is None and revision is None:
+        return None
+    if type(inquiry_id) is not str or type(revision) is not int:
+        raise HookContextError("malformed")
+    return f"{inquiry_id}|{revision}"
+
+
+def _normalize_effect_records(records: Sequence[Mapping[str, Any]] | None) -> tuple[dict[str, str], ...]:
+    if records is None:
+        return ()
+    if isinstance(records, (str, bytes)) or not isinstance(records, Sequence):
+        raise HookContextError("malformed")
+    normalized: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in records:
+        if not isinstance(item, Mapping):
+            raise HookContextError("malformed")
+        _reject_secret_fields(item)
+        kind = item.get("kind")
+        if type(kind) is not str or kind not in _EFFECT_RECORD_KINDS:
+            raise HookContextError("malformed")
+        source_id = _require_token(item.get("source_id"), code="malformed")
+        content_hash = item.get("content_hash")
+        if type(content_hash) is not str or len(content_hash) != 64:
+            raise HookContextError("malformed")
+        try:
+            int(content_hash, 16)
+        except ValueError as exc:
+            raise HookContextError("malformed") from exc
+        record_id = item.get("record_id")
+        if record_id is None:
+            record_id = _canonical_hash(
+                {"kind": kind, "source_id": source_id, "content_hash": content_hash},
+                prefix=kind[:3] + "_",
+            )
+        else:
+            record_id = _require_token(str(record_id) if type(record_id) is str else record_id, code="malformed")
+        identity = (kind, record_id)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        normalized.append({
+            "kind": kind,
+            "record_id": record_id,
+            "source_id": source_id,
+            "content_hash": content_hash,
+        })
+    normalized.sort(key=lambda row: (row["kind"], row["record_id"]))
+    return tuple(normalized)
+
+
+def _graph_effect_fingerprint(graph: Any) -> str:
+    metadata = getattr(graph, "metadata", None)
+    ledger = metadata.get("factual_ledger") if isinstance(metadata, Mapping) else None
+    if not isinstance(ledger, Mapping):
+        ledger = {}
+    payload = {
+        "revisions": list(ledger.get("revisions") or []),
+        "hook_effect_records": dict(ledger.get("hook_effect_records") or {}),
+        "answer_events": sorted((ledger.get("answer_events") or {}).keys()) if isinstance(ledger.get("answer_events"), Mapping) else [],
+        "entities": sorted((getattr(graph, "entities", {}) or {}).keys()),
+        "relationships": sorted((getattr(graph, "relationships", {}) or {}).keys()),
+    }
+    return _canonical_hash(payload, prefix="gf_")
+
+
+def _candidate_acquisition(
+    *,
+    operation: str,
+    request_id: str,
+    source_preimage: str,
+    context_preimage: str,
+    records: Sequence[Mapping[str, str]],
+    status: str,
+) -> dict[str, Any]:
+    acquisition_id = _canonical_hash(
+        {
+            "operation": operation,
+            "request_id": request_id,
+            "source_preimage": source_preimage,
+            "context_preimage": context_preimage,
+            "records": [dict(row) for row in records],
+            "status": status,
+        },
+        prefix="acq_",
+    )
+    return {
+        "schema": CANDIDATE_ACQUISITION_SCHEMA,
+        "acquisition_id": acquisition_id,
+        "operation": operation,
+        "request_id": request_id,
+        "source_preimage": source_preimage,
+        "context_preimage": context_preimage,
+        "candidate_status": status,
+        "source_count": sum(1 for row in records if row["kind"] == "source"),
+        "evidence_count": sum(1 for row in records if row["kind"] == "evidence"),
+        "support_count": sum(1 for row in records if row["kind"] == "support"),
+        "admitted": False,
+        "durable": False,
+        "proof": False,
+        "proof_status": "not_proof",
+    }
+
+
+def _remember_candidate(log: list | None, candidate: Mapping[str, Any]) -> None:
+    if log is None:
+        return
+    acquisition_id = candidate.get("acquisition_id")
+    for item in log:
+        if isinstance(item, Mapping) and item.get("acquisition_id") == acquisition_id:
+            return
+    log.append(dict(candidate))
+
+
+def _refusal(
+    *,
+    code: str,
+    candidate: Mapping[str, Any],
+    operation: str,
+    request_id: str,
+    source_preimage: str,
+    context_preimage: str,
+    graph_revision: str,
+    graph_fingerprint: str,
+    pending_fingerprint: str,
+    case_fingerprint: str,
+    graph: Any,
+    pending_inquiry: Any,
+    saved_case: Any,
+) -> dict[str, Any]:
+    receipt = {
+        "schema": EFFECT_RECEIPT_SCHEMA,
+        "accepted": False,
+        "code": code,
+        "operation": operation,
+        "request_id": request_id,
+        "source_preimage": source_preimage,
+        "context_preimage": context_preimage,
+        "accepted_graph_revision": graph_revision,
+        "revision_index": None,
+        "source_ids": [],
+        "evidence_ids": [],
+        "support_ids": [],
+        "durable": False,
+        "proof": False,
+        "proof_status": "not_proof",
+    }
+    return {
+        "schema": EFFECT_ACCEPTANCE_SCHEMA,
+        "accepted": False,
+        "code": code,
+        "idempotent_replay": False,
+        "candidate_acquisition": dict(candidate),
+        "effect_receipt": receipt,
+        "mutated_graph": _graph_effect_fingerprint(graph) != graph_fingerprint,
+        "mutated_pending_inquiry": _canonical_hash(pending_inquiry, prefix="inq_") != pending_fingerprint,
+        "mutated_saved_case": _canonical_hash(saved_case, prefix="casebody_") != case_fingerprint,
+    }
+
+
+def _payload_mismatch_code(existing_payload: Mapping[str, Any], source_preimage: str, context_preimage: str, graph_revision: str) -> str:
+    context = existing_payload.get("source_context") if isinstance(existing_payload.get("source_context"), Mapping) else {}
+    if context.get("source_preimage") != source_preimage:
+        return "source_preimage_changed"
+    if context.get("context_preimage") != context_preimage:
+        return "context_preimage_changed"
+    if context.get("graph_revision") != graph_revision:
+        return "stale_revision"
+    return "effect_conflict"
+
+
+def accept_bound_hook_effect(
+    *,
+    context: HookExecutionContext | None,
+    graph: Any,
+    source_bindings: Sequence[Mapping[str, Any]] | None,
+    legal_context: Mapping[str, Any] | None,
+    request_id: Any,
+    records: Sequence[Mapping[str, Any]] | None = None,
+    pending_inquiry: Any = None,
+    saved_case: Mapping[str, Any] | None = None,
+    bound_pending_inquiry: Any = None,
+    bound_saved_case_hash: str | None = None,
+    result_state: str = "active",
+    storage_available: bool = True,
+    acquisition_log: list | None = None,
+) -> dict[str, Any]:
+    """Admit one hook effect once, bound to the current preimages and graph revision.
+
+    Candidate acquisition is recorded on ``acquisition_log`` only. It is not an
+    admitted source, evidence, or support record. An effect receipt does not
+    establish durability or proof. Replay of the same request, preimages, and
+    accepted graph revision returns the stored admission. A changed preimage,
+    stale revision, cancelled result, or stale result does not mutate the graph,
+    the pending inquiry, or the saved case.
+    """
+
+    from complaint_phases.knowledge_graph import answer_event_fingerprint, answer_event_payload
+
+    operation = context.operation if isinstance(context, HookExecutionContext) else ""
+    request_token = request_id if type(request_id) is str else ""
+    source_preimage = ""
+    context_preimage = ""
+    graph_revision = context.graph_revision if isinstance(context, HookExecutionContext) else ""
+    if graph is None or not hasattr(graph, "factual_ledger") or not hasattr(graph, "append_revision"):
+        candidate = _candidate_acquisition(
+            operation=operation,
+            request_id=request_token,
+            source_preimage="",
+            context_preimage="",
+            records=(),
+            status="unavailable",
+        )
+        _remember_candidate(acquisition_log, candidate)
+        receipt = _refusal(
+            code="graph_unavailable",
+            candidate=candidate,
+            operation=operation,
+            request_id=request_token,
+            source_preimage="",
+            context_preimage="",
+            graph_revision=graph_revision,
+            graph_fingerprint=_graph_effect_fingerprint(graph),
+            pending_fingerprint=_canonical_hash(pending_inquiry, prefix="inq_"),
+            case_fingerprint=_canonical_hash(saved_case, prefix="casebody_"),
+            graph=graph,
+            pending_inquiry=pending_inquiry,
+            saved_case=saved_case,
+        )
+        receipt["mutated_graph"] = False
+        receipt["mutated_pending_inquiry"] = False
+        receipt["mutated_saved_case"] = False
+        return receipt
+
+    graph_fingerprint = _graph_effect_fingerprint(graph)
+    pending_fingerprint = _canonical_hash(pending_inquiry, prefix="inq_")
+    case_fingerprint = _canonical_hash(saved_case, prefix="casebody_")
+
+    def refuse(code: str, candidate: Mapping[str, Any]) -> dict[str, Any]:
+        _remember_candidate(acquisition_log, candidate)
+        return _refusal(
+            code=code,
+            candidate=candidate,
+            operation=operation,
+            request_id=request_token,
+            source_preimage=source_preimage,
+            context_preimage=context_preimage,
+            graph_revision=graph_revision,
+            graph_fingerprint=graph_fingerprint,
+            pending_fingerprint=pending_fingerprint,
+            case_fingerprint=case_fingerprint,
+            graph=graph,
+            pending_inquiry=pending_inquiry,
+            saved_case=saved_case,
+        )
+
+    if not isinstance(context, HookExecutionContext):
+        candidate = _candidate_acquisition(
+            operation="", request_id=request_token, source_preimage="", context_preimage="", records=(), status="failed",
+        )
+        return refuse("binding_missing", candidate)
+    try:
+        request_token = _require_token(request_id, code="malformed")
+        rows = normalize_source_bindings(source_bindings)
+        source_preimage = source_binding_hash(rows)
+        legal_id = legal_context_identity(legal_context)
+        context_preimage = context_binding_hash(
+            legal_context_id=legal_id,
+            owner_id=context.owner_id,
+            case_id=context.case_id,
+            session_id=context.session_id,
+        )
+        effect_records = _normalize_effect_records(records)
+        if bound_saved_case_hash is not None and not isinstance(saved_case, Mapping) and saved_case is not None:
+            raise HookContextError("malformed")
+        current_inquiry = _inquiry_token(pending_inquiry)
+        bound_inquiry = None if bound_pending_inquiry is None else _inquiry_token(bound_pending_inquiry)
+    except HookContextError as exc:
+        candidate = _candidate_acquisition(
+            operation=operation,
+            request_id=request_id if type(request_id) is str else "",
+            source_preimage=source_preimage,
+            context_preimage=context_preimage,
+            records=(),
+            status="failed",
+        )
+        return refuse(exc.code, candidate)
+
+    candidate_status = "acquired" if effect_records else "empty"
+    candidate = _candidate_acquisition(
+        operation=operation,
+        request_id=request_token,
+        source_preimage=source_preimage,
+        context_preimage=context_preimage,
+        records=effect_records,
+        status=candidate_status,
+    )
+    if source_preimage != context.source_binding_hash:
+        return refuse("source_preimage_changed", candidate)
+    if context_preimage != context.context_binding_hash or legal_id != context.legal_context_id:
+        return refuse("context_preimage_changed", candidate)
+    if storage_available is not True:
+        failed = dict(candidate)
+        failed["candidate_status"] = "unavailable"
+        return refuse("storage_unavailable", failed)
+    state = result_state if type(result_state) is str else "malformed"
+    if state == "cancelled":
+        return refuse("cancelled", candidate)
+    if state == "stale":
+        return refuse("stale_result", candidate)
+    if state == "timeout":
+        failed = dict(candidate)
+        failed["candidate_status"] = "failed"
+        return refuse("timeout", failed)
+    if state != "active":
+        return refuse("malformed", candidate)
+    if bound_pending_inquiry is not None and current_inquiry != bound_inquiry:
+        return refuse("stale_inquiry", candidate)
+    if bound_saved_case_hash is not None:
+        try:
+            current_case_hash = saved_case_hash(saved_case if isinstance(saved_case, Mapping) else None)
+        except HookContextError as exc:
+            return refuse(exc.code, candidate)
+        if current_case_hash != bound_saved_case_hash:
+            return refuse("stale_case", candidate)
+
+    record_ids = {
+        "source": [row["record_id"] for row in effect_records if row["kind"] == "source"],
+        "evidence": [row["record_id"] for row in effect_records if row["kind"] == "evidence"],
+        "support": [row["record_id"] for row in effect_records if row["kind"] == "support"],
+    }
+    payload = answer_event_payload(
+        question=operation,
+        answer=request_token,
+        source_context={
+            "source_preimage": source_preimage,
+            "context_preimage": context_preimage,
+            "graph_revision": context.graph_revision,
+            "records": [dict(row) for row in effect_records],
+        },
+    )
+    event_id = f"hook-effect:{operation}:{request_token}"
+    ledger = graph.factual_ledger()
+    events = ledger.get("answer_events") or {}
+    existing = events.get(event_id) if isinstance(events, Mapping) else None
+    if isinstance(existing, Mapping):
+        if existing.get("fingerprint") == answer_event_fingerprint(payload):
+            stored = existing.get("stored_acceptance")
+            if isinstance(stored, Mapping) and isinstance(stored.get("effect_receipt"), Mapping):
+                _remember_candidate(acquisition_log, stored.get("candidate_acquisition") or candidate)
+                return {
+                    "schema": EFFECT_ACCEPTANCE_SCHEMA,
+                    "accepted": True,
+                    "code": "accepted",
+                    "idempotent_replay": True,
+                    "candidate_acquisition": dict(stored.get("candidate_acquisition") or candidate),
+                    "effect_receipt": dict(stored["effect_receipt"]),
+                    "mutated_graph": _graph_effect_fingerprint(graph) != graph_fingerprint,
+                    "mutated_pending_inquiry": _canonical_hash(pending_inquiry, prefix="inq_") != pending_fingerprint,
+                    "mutated_saved_case": _canonical_hash(saved_case, prefix="casebody_") != case_fingerprint,
+                }
+        else:
+            existing_payload = existing.get("payload") if isinstance(existing.get("payload"), Mapping) else {}
+            return refuse(
+                _payload_mismatch_code(existing_payload, source_preimage, context_preimage, context.graph_revision),
+                candidate,
+            )
+
+    current_revision = graph_revision_token(graph)
+    if current_revision != context.graph_revision:
+        return refuse("stale_revision", candidate)
+
+    receipt = {
+        "schema": EFFECT_RECEIPT_SCHEMA,
+        "accepted": True,
+        "code": "accepted",
+        "effect_id": event_id,
+        "operation": operation,
+        "request_id": request_token,
+        "source_preimage": source_preimage,
+        "context_preimage": context_preimage,
+        "accepted_graph_revision": context.graph_revision,
+        "revision_index": None,
+        "source_ids": list(record_ids["source"]),
+        "evidence_ids": list(record_ids["evidence"]),
+        "support_ids": list(record_ids["support"]),
+        "durable": False,
+        "proof": False,
+        "proof_status": "not_proof",
+    }
+    revision = graph.append_revision({
+        "action": "hook_effect",
+        "event_id": event_id,
+        "source_preimage": source_preimage,
+        "context_preimage": context_preimage,
+        "accepted_graph_revision": context.graph_revision,
+        "source_ids": list(record_ids["source"]),
+        "evidence_ids": list(record_ids["evidence"]),
+        "support_ids": list(record_ids["support"]),
+    })
+    receipt["revision_index"] = revision.get("revision_index")
+    admitted = graph.factual_ledger().setdefault("hook_effect_records", {})
+    admitted[event_id] = [dict(row) for row in effect_records]
+    stored_acceptance = {
+        "candidate_acquisition": dict(candidate),
+        "effect_receipt": dict(receipt),
+    }
+    graph.finish_answer_event(event_id, payload, stored_acceptance=stored_acceptance)
+    _remember_candidate(acquisition_log, candidate)
+    return {
+        "schema": EFFECT_ACCEPTANCE_SCHEMA,
+        "accepted": True,
+        "code": "accepted",
+        "idempotent_replay": False,
+        "candidate_acquisition": dict(candidate),
+        "effect_receipt": dict(receipt),
+        "mutated_graph": True,
+        "mutated_pending_inquiry": _canonical_hash(pending_inquiry, prefix="inq_") != pending_fingerprint,
+        "mutated_saved_case": _canonical_hash(saved_case, prefix="casebody_") != case_fingerprint,
+    }
