@@ -1024,7 +1024,7 @@ Implementation instructions:
 
 ## CIMP-MGND-40 Cover adverse hook and storage outcomes in the public flow
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
