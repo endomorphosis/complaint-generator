@@ -374,7 +374,7 @@ Implementation instructions:
 
 ## CIMP-MGND-15 Bind acquisition plans to explicit legal context
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
