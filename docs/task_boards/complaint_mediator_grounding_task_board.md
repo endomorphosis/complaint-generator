@@ -816,7 +816,7 @@ Implementation instructions:
 
 ## CIMP-MGND-32 Contain private derived hook indexes and caches
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
