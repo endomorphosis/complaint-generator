@@ -556,7 +556,7 @@ Implementation instructions:
 
 ## CIMP-MGND-22 Attach current source-sampling context and contextual definition evidence
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
