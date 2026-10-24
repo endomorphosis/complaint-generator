@@ -764,7 +764,7 @@ Implementation instructions:
 
 ## CIMP-MGND-30 Persist private invocation associations without replay dispatch
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
