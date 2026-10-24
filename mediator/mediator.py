@@ -14335,6 +14335,69 @@ class Mediator:
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'legal_source_status', ('available' if normalized else 'empty_or_unavailable') if available else 'unavailable')
 		return grouped
 
+	def carry_admitted_source_legal_ir(
+		self,
+		admitted_law,
+		factual_premises,
+		request_id,
+		vocabulary=None,
+		unresolved_assumptions=None,
+		allow_explicit_partial=False,
+	):
+		"""Hand admitted law and separate factual premises to the canonical compiler.
+
+		Stage identities and unresolved assumptions are retained. A compilable
+		formula does not establish governing-law meaning and does not prove a claim.
+		"""
+		from complaint_phases.phase_manager import ComplaintPhase
+		from integrations.ipfs_datasets.logic import compile_canonical_legal_ir
+
+		if not isinstance(vocabulary, dict):
+			vocabulary = {'actors': (), 'actions': (), 'objects': (), 'qualifiers': ()}
+		premise_rows = factual_premises if isinstance(factual_premises, (list, tuple)) else factual_premises
+		user_facts = []
+		if isinstance(premise_rows, (list, tuple)):
+			for item in premise_rows:
+				if isinstance(item, dict) and isinstance(item.get('text'), str):
+					user_facts.append(item['text'])
+		payload = compile_canonical_legal_ir(
+			'',
+			request_id=str(request_id or ''),
+			vocabulary=vocabulary,
+			admitted_law=admitted_law,
+			factual_premises=premise_rows,
+			unresolved_assumptions=unresolved_assumptions,
+			user_facts=user_facts,
+			allow_explicit_partial=bool(allow_explicit_partial),
+		)
+		handoff = {
+			'operation': 'carry_admitted_source_legal_ir',
+			'status': payload.get('status'),
+			'reason': payload.get('reason') or '',
+			'receipt_id': payload.get('receipt_id'),
+			'retained_stage_identities': payload.get('retained_stage_identities'),
+			'unresolved_assumptions': list(payload.get('unresolved_assumptions') or []),
+			'factual_premises': list(payload.get('factual_premises') or []),
+			'source_text': payload.get('source_text'),
+			'source_character_length': payload.get('source_character_length'),
+			'source_byte_length': payload.get('source_byte_length'),
+			'span_unit': payload.get('span_unit') or 'character',
+			'stage_evidence': payload.get('stage_evidence'),
+			'establishes_governing_law_meaning': False,
+			'proves_claim': False,
+			'entails_claim': False,
+			'entails_applicability': False,
+			'fabricated_ir': False,
+			'worker_stalled': False,
+			'awaiting_user': False,
+		}
+		self.phase_manager.update_phase_data(
+			ComplaintPhase.INTAKE,
+			'canonical_legal_ir_handoff',
+			handoff,
+		)
+		return handoff
+
 	def refresh_verified_legal_dependencies(self, change):
 		"""Re-read local sources and reconcile admission before invalidating support."""
 		dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
