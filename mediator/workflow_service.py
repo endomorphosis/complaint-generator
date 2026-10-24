@@ -1404,6 +1404,97 @@ class WorkflowActionService:
 			"proof": False,
 		}
 
+	def publish_finite_dependency_action(
+		self,
+		*,
+		open_questions: Optional[List[Dict[str, Any]]] = None,
+		open_dependencies: Optional[List[Dict[str, Any]]] = None,
+		context: Optional[Dict[str, Any]] = None,
+		provider_status: Any = None,
+		budget_exhausted: bool = False,
+		worker_stalled: bool = False,
+		hook_completed: bool = False,
+		cancelled: bool = False,
+		loss_converged: bool = False,
+		pool_empty: Optional[bool] = None,
+		paused: bool = False,
+		needs_review: bool = False,
+	) -> Dict[str, Any]:
+		"""Publish one source, evidence, or review action from the interview stop.
+
+		The denoiser remains the only stop engine. A stalled worker, a spent
+		budget, or a completed hook is not an awaiting-user session and is not
+		legal sufficiency. One call makes one decision and does not read stdin.
+		"""
+		from complaint_phases.denoiser import publish_authorized_dependency_action
+
+		denoiser = getattr(self._mediator, "denoiser", None)
+		if denoiser is None or not hasattr(denoiser, "evaluate_interview_stop"):
+			return {
+				"status": "unavailable",
+				"published": False,
+				"authorized": False,
+				"operation": None,
+				"legal_sufficiency": False,
+				"core_facts_complete": False,
+				"proof_requirements_satisfied": False,
+				"filing_ready": False,
+				"awaiting_user": False,
+				"worker_stalled": bool(worker_stalled),
+				"busy_loop": False,
+				"reads_developer_stdin": False,
+				"operation_terminated": False,
+				"reason": "denoiser_unavailable",
+			}
+		stop = denoiser.evaluate_interview_stop(
+			open_questions=open_questions,
+			open_dependencies=open_dependencies,
+			provider_status=provider_status,
+			budget_exhausted=bool(budget_exhausted),
+			worker_stalled=bool(worker_stalled),
+			hook_completed=bool(hook_completed),
+			cancelled=bool(cancelled),
+			loss_converged=bool(loss_converged),
+			pool_empty=pool_empty,
+			paused=bool(paused),
+			needs_review=bool(needs_review),
+		)
+		resumed = context if isinstance(context, dict) else {}
+		lane = str(stop.get("dependency_lane") or stop.get("stopping_distinction") or "")
+		key = (
+			str(resumed.get("case_id") or ""),
+			lane,
+			str(resumed.get("target_id") or ""),
+		)
+		attempts = self.__dict__.setdefault("_dependency_action_attempts", {})
+		if resumed.get("attempt") is None:
+			attempt = int(attempts.get(key) or 0)
+		else:
+			try:
+				attempt = int(resumed.get("attempt") or 0)
+			except (TypeError, ValueError):
+				attempt = 0
+		packet = publish_authorized_dependency_action(
+			stop,
+			attempt=attempt,
+			context=resumed,
+			hook_completed=bool(hook_completed),
+		)
+		packet["interview_stop"] = {
+			"state": stop.get("state"),
+			"outcome": stop.get("outcome"),
+			"stopping_distinction": stop.get("stopping_distinction"),
+			"legal_sufficiency": False,
+			"filing_ready": False,
+		}
+		if packet.get("published"):
+			attempts[key] = int(packet.get("attempt") or attempt + 1)
+		elif packet.get("operation_terminated"):
+			attempts[key] = max(int(attempts.get(key) or 0), attempt)
+		packet["busy_loop"] = False
+		packet["reads_developer_stdin"] = False
+		return packet
+
 	def declare_legal_evidence_hook_operations(self) -> Dict[str, Any]:
 		"""Record the disabled legal/evidence registry. Does not write case state."""
 		from mediator.hook_runtime import register_legal_evidence_operations

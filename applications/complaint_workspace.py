@@ -630,6 +630,60 @@ def _workspace_stopping_policy(
     return project_stopping_policy(stop, paused=paused)
 
 
+def publish_workspace_dependency_action(state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Publish the stored interview's next source, evidence, or review action.
+
+    The workspace reuses the denoiser projection. It does not start another
+    stop engine, wait on stdin, or treat a hook receipt as sufficiency.
+    """
+    from complaint_phases.denoiser import dependency_lane_for, project_stopping_policy, publish_authorized_dependency_action
+
+    session = state if isinstance(state, dict) else {}
+    wait = session.get("intentional_user_wait") if isinstance(session.get("intentional_user_wait"), dict) else {}
+    paused = bool(wait.get("paused")) and bool(wait.get("intentional", True))
+    stored = session.get("interview_stop") if isinstance(session.get("interview_stop"), dict) else None
+    dependencies = [item for item in (session.get("open_dependencies") or []) if isinstance(item, dict)]
+    if stored is None and dependencies:
+        lane = dependency_lane_for(dependencies[0])
+        stored = {
+            "state": "saturated" if lane == "source_research" else (
+                "needs_review" if lane == "review" else "deferred_needs_evidence"
+            ),
+            "dependency_lane": lane,
+            "intake_complete": False,
+            "legal_sufficiency": False,
+            "worker_stalled": bool(session.get("worker_stalled")),
+            "unresolved_issue_summary": {
+                "items": dependencies,
+                "open_answerable_count": 0,
+                "legal_sufficiency": False,
+                "core_facts_complete": False,
+                "proof_requirements_satisfied": False,
+                "rejected_shortcuts": ["completed_hook"] if session.get("hook_completed") else [],
+            },
+        }
+    policy = project_stopping_policy(stored or {"state": "needs_answer"}, paused=paused)
+    if session.get("worker_stalled") and policy.get("outcome") in {"awaiting_user", "paused"}:
+        policy = project_stopping_policy({**(stored or {}), "state": "no_progress", "worker_stalled": True}, paused=False)
+    context = session.get("dependency_action_context") if isinstance(session.get("dependency_action_context"), dict) else {}
+    if dependencies and not context.get("target_id"):
+        context = {
+            **context,
+            "target_id": dependencies[0].get("target_id"),
+            "target_revision": dependencies[0].get("target_revision"),
+        }
+    try:
+        attempt = int(context.get("attempt") or 0)
+    except (TypeError, ValueError):
+        attempt = 0
+    return publish_authorized_dependency_action(
+        policy,
+        attempt=attempt,
+        context=context,
+        hook_completed=bool(session.get("hook_completed")),
+    )
+
+
 _CLAIM_TYPE_LABELS: Dict[str, str] = {
     "retaliation": "Retaliation",
     "employment_discrimination": "Employment Discrimination",
@@ -5654,6 +5708,10 @@ class ComplaintWorkspaceService:
             payload["conversation_state"]["active_engine"] = "shared_interview"
             payload["legal_sufficiency"] = False
         payload["stopping_policy"] = _workspace_stopping_policy(state, active_question=active_question, answers=answers)
+        if state.get("open_dependencies") or state.get("dependency_action_context") or (
+            isinstance(state.get("interview_stop"), dict) and state["interview_stop"].get("dependency_lane")
+        ):
+            payload["authorized_next_action"] = publish_workspace_dependency_action(state)
         payload["legal_sufficiency"] = False
         payload["core_facts_complete"] = False
         payload["filing_ready"] = False
