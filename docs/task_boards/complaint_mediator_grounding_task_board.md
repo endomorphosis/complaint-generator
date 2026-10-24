@@ -1076,7 +1076,7 @@ Implementation instructions:
 
 ## CIMP-MGND-42 Bound worker health and recovery while preserving legitimate user waits
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
