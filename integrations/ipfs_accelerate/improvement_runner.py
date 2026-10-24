@@ -946,7 +946,7 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
         policy = load_spec(spec_path)["execution_policy"]
         with log_path.open("ab", buffering=0) as log:
             process = subprocess.Popen(argv, cwd=repo_root, env=campaign_environment(repo_root, context_exclude=policy.get("context_exclude"), state_dir=state_dir),
-                                       stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                       stdin=campaign_worker_stdin(), stdout=log, stderr=subprocess.STDOUT,
                                        start_new_session=True, close_fds=True)
         identity = None
         for _ in range(20):
@@ -1003,6 +1003,47 @@ def _timestamp_age(value: Any, now: float) -> float | None:
         return None
 
 
+def _direct_legacy_task_state(state_path: Path) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Read a JSON claim mirror when this campaign has no DuckDB authority.
+
+    The isolated reader clears ambient Quack and DuckDB endpoints, then looks
+    only beside the state file. A missing mirror still uses that reader so a
+    configured control plane cannot be skipped and a deadline still applies.
+    This path creates nothing and does not import the native catalog stack.
+    """
+
+    try:
+        path = Path(state_path)
+        if path.is_symlink() or not path.is_file():
+            return None
+        control = path.parent / "control-plane"
+        if control.exists() and not control.is_symlink():
+            for candidate in control.rglob("*"):
+                if candidate.is_symlink():
+                    continue
+                if candidate.is_file() and candidate.suffix == ".duckdb":
+                    return None
+        current = path.parent
+        for parent in (current, *current.parents):
+            if (parent / ".git").exists() or (parent / ".git" / "agent-board-control-plane").exists():
+                return None
+            if parent == parent.parent:
+                break
+        raw = path.read_bytes()
+        payload = json.loads(raw.decode("utf-8"))
+        if not isinstance(payload, dict):
+            payload = {}
+        if len(json.dumps(payload)) > 2_000_000:
+            raise ValueError("native_state_size_limit")
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        return {"read_error": type(exc).__name__}, {"source": "unavailable", "completion_authority": False}
+    return payload, {
+        "source": "legacy_json",
+        "authority_path": str(path),
+        "completion_authority": False,
+    }
+
+
 def _native_state_reader(connection: Any, state_path: Path) -> None:
     """Read a real native projection without opening/creating a new catalog."""
     try:
@@ -1033,6 +1074,9 @@ def _native_state_reader(connection: Any, state_path: Path) -> None:
 
 
 def _read_native_state(repo_root: Path, state_path: Path, *, timeout_seconds: float = 3.0) -> tuple[dict[str, Any], dict[str, Any]]:
+    direct = _direct_legacy_task_state(state_path)
+    if direct is not None:
+        return direct
     _native_modules(repo_root)
     # Native file-lock/transport timeouts can be much longer than a status
     # check. Isolate this read, enforce a deadline, and never call .load(),
@@ -1325,6 +1369,108 @@ def _provider_event_evidence(path: Path, *, task_id: str, started_at: float,
 
 def _validation_event_evidence(path: Path, binding: Mapping[str, Any], *, started_at: float) -> dict[str, Any] | None:
     return _matching_event(path, binding, started_at=started_at, kind="validation")
+
+
+def campaign_worker_stdin():
+    """Campaign workers never read a complaint or interview answer from stdin."""
+    return subprocess.DEVNULL
+
+
+def _campaign_scope_liveness(native_state: Mapping[str, Any], *, phase: str, interview_state: str | None,
+                             worker_liveness: str, active: bool, attempt_age: float | None,
+                             active_age: float | None, heartbeat_fresh: bool,
+                             provider_fresh: bool, provider_terminal: bool,
+                             validation_fresh: bool, now: float) -> dict[str, Any]:
+    """Project five execution scopes without folding in an application interview.
+
+    Typed stall classification comes from the existing native progress and
+    worktree monitors. This projection does not edit claims, refund attempts,
+    complete tasks, or retry a provider.
+    """
+    interview_hold = interview_state in {"awaiting_user", "paused", "manual_hold", "cancelled"}
+    claim_id = str(native_state.get("active_task_id") or "")
+    if not claim_id:
+        claim = "absent"
+    elif attempt_age is not None and attempt_age > TIMEOUT_SECONDS:
+        claim = "expired"
+    elif worker_liveness in {"dead", "pid_reuse"}:
+        claim = "owner_dead"
+    elif worker_liveness == "alive":
+        claim = "held"
+    else:
+        claim = "unknown"
+    provider_phase = active and not interview_hold and phase in {"", "implementing", "implementation", "provider"}
+    validation_phase = active and not interview_hold and phase.startswith("valid")
+    merge_phase = active and not interview_hold and "merge" in phase
+    monitors: dict[str, Any] = {"completion_authority": False, "progress": {}, "worktree_worker": None,
+                                "dependency_error": None}
+    try:
+        from ipfs_accelerate_py.agent_supervisor.rescue.supervisor_watchdog import classify_progress_stall
+        from ipfs_accelerate_py.agent_supervisor.todo_daemon.supervisor import worktree_phase_worker_status
+    except Exception as exc:
+        monitors["dependency_error"] = type(exc).__name__
+        unavailable = "unavailable"
+        return {"claim": claim if monitors["dependency_error"] is None else unavailable,
+                "worker": worker_liveness, "provider": unavailable, "validation": unavailable,
+                "merge": unavailable, "monitors": monitors, "completion_authority": False}
+
+    def progress(scope: str, in_scope: bool) -> dict[str, Any]:
+        report = classify_progress_stall(
+            process_alive=worker_liveness == "alive",
+            heartbeat_stale=not heartbeat_fresh,
+            active_task_id="" if interview_hold or not in_scope else claim_id,
+            log_age_seconds=active_age,
+            task_transition_age_seconds=attempt_age,
+            quiet_seconds=float(STALL_SECONDS),
+        )
+        monitors["progress"][scope] = report
+        return report
+
+    for name, enabled in (("provider", provider_phase), ("validation", validation_phase), ("merge", merge_phase)):
+        progress(name, enabled)
+    started = native_state.get("active_phase_started_at") or native_state.get("active_task_started_at")
+    worktree = worktree_phase_worker_status(
+        {"active_phase": phase, "active_phase_started_at": started},
+        daemon_pid=0, threshold_seconds=float(STALL_SECONDS), descendants=[],
+        now=datetime.fromtimestamp(now, timezone.utc),
+    )
+    monitors["worktree_worker"] = {
+        "phase": worktree.get("phase"),
+        "required": worktree.get("required"),
+        "stalled_without_active_worker": worktree.get("stalled_without_active_worker"),
+        "stall_evidence_unavailable_reason": worktree.get("stall_evidence_unavailable_reason"),
+        "completion_authority": False,
+    }
+
+    def activity(scope: str, in_scope: bool, fresh: bool, terminal: bool) -> str:
+        if interview_hold:
+            return "excluded_interview"
+        if not in_scope:
+            return "idle"
+        if fresh:
+            return "fresh"
+        if terminal:
+            return "terminal"
+        report = monitors["progress"][scope]
+        if report.get("progress_stalled") or worktree.get("stalled_without_active_worker") is True:
+            return "stalled"
+        if attempt_age is not None and attempt_age > TIMEOUT_SECONDS:
+            return "expired"
+        if worker_liveness in {"dead", "pid_reuse"}:
+            return "owner_dead"
+        if not heartbeat_fresh:
+            return "heartbeat_stale"
+        return "quiet"
+
+    return {
+        "claim": claim,
+        "worker": worker_liveness,
+        "provider": activity("provider", provider_phase, provider_fresh, provider_terminal),
+        "validation": activity("validation", validation_phase, validation_fresh, False),
+        "merge": activity("merge", merge_phase, False, False),
+        "monitors": monitors,
+        "completion_authority": False,
+    }
 
 
 def _owner_liveness(birth: Any) -> str:
@@ -1713,6 +1859,13 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     elif phase in {"cancelled", "canceled"} or native_state.get("manual_cancellation"):
         interview_state = "cancelled"
     heartbeat_fresh = heartbeat_age is not None and heartbeat_age <= 120
+    provider_terminal = bool(provider_evidence and provider_evidence.get("provider_terminal_observed"))
+    scope_liveness = _campaign_scope_liveness(
+        native_state, phase=phase, interview_state=interview_state, worker_liveness=worker_liveness,
+        active=active, attempt_age=attempt_age, active_age=active_age, heartbeat_fresh=heartbeat_fresh,
+        provider_fresh=provider_progress, provider_terminal=provider_terminal,
+        validation_fresh=bool(validation_evidence), now=now,
+    )
     identity_ok = worker_liveness == "alive" and health not in {"identity_mismatch", "heartbeat_identity_mismatch", "state_error"}
     activity_ok = (not active) or bool(provider_progress or validation_evidence
         or (provider_evidence and provider_evidence.get("provider_terminal_observed"))) or not (
@@ -1723,6 +1876,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     })
     return {"status": health, "healthy": healthy, "owned_process_alive": owned,
             "worker_liveness": worker_liveness,
+            "scope_liveness": {key: scope_liveness[key] for key in ("claim", "worker", "provider", "validation", "merge")},
+            "scope_monitors": scope_liveness["monitors"],
             "application_interview_state": interview_state,
             "pid": identity.get("pid"), "state_dir": str(state_dir),
             "worktree_root": str(selected_root) if selected_root is not None else None,
