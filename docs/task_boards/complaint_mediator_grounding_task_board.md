@@ -738,7 +738,7 @@ Implementation instructions:
 
 ## CIMP-MGND-29 Preserve observed route identity and bounded cancellation
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
