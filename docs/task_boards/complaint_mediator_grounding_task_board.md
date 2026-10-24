@@ -712,7 +712,7 @@ Implementation instructions:
 
 ## CIMP-MGND-28 Apply per-case consent and minimization to all new remote operations
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
