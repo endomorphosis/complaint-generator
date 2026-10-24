@@ -3677,6 +3677,261 @@ class ComplaintWorkspaceService:
         receipt["question_id"] = str(question_id)
         return receipt
 
+    def commit_factual_graph_revision(
+        self,
+        user_id: str,
+        graph: Any,
+        *,
+        case_id: str,
+        transaction_id: str,
+        effect_id: str,
+        expected_revision: Optional[str] = None,
+        backend: Any = None,
+    ) -> Dict[str, Any]:
+        """Commit factual revision provenance inside the encrypted case transaction.
+
+        The graph bytes are sealed by the automatic private-artifact owner.
+        The transaction records that ciphertext id with the canonical document.
+        A failed seal or commit does not replace the last committed head, and
+        nothing is written as plaintext JSON, a plaintext CID, or a second graph store.
+        """
+        from integrations.ipfs_datasets.graphs import (
+            FACTUAL_GRAPH_ARTIFACT_KIND,
+            encode_factual_graph_artifact,
+            seal_factual_graph_artifact,
+        )
+        from integrations.private_storage import PrivateRevisionError, PrivateStorageError, commit_private_revision
+
+        resolved = self._check_access(user_id, ability="write", case_id=case_id)
+        context = self._private_artifact_context(resolved, case_id)
+        binding_case = str(context["case_id"])
+        state = self._load_state(resolved, case_id=binding_case)
+        if str(state.get("user_id") or "") != resolved:
+            raise WorkspaceAuthorizationDenied()
+        current = str(state.get("private_revision") or "0")
+        expected = current if expected_revision in {None, ""} else str(expected_revision)
+        if current != expected:
+            raise WorkspacePersistenceError(
+                "stale revision",
+                code="revision_conflict",
+                public_status="recoverable",
+            )
+        history = [item for item in list(state.get("intake_history") or []) if isinstance(item, dict)]
+        if any(str(item.get("effect_id") or "") == effect_id for item in history):
+            raise WorkspacePersistenceError(
+                "effect already recorded",
+                code="duplicate_effect",
+                public_status="recoverable",
+            )
+        next_revision = str(int(expected) + 1)
+        artifact_revision = f"fact-graph-{next_revision}"
+        transport = backend if backend is not None else self._private_local_backend()
+        backend_name = "local_cache" if backend is None else "kit"
+        try:
+            sealed = seal_factual_graph_artifact(
+                graph,
+                access=context["access"],
+                tenant_id=str(context["tenant_id"]),
+                case_id=binding_case,
+                principal_id=str(context["principal_id"]),
+                revision=artifact_revision,
+                backend=transport,
+                backend_name=backend_name,
+                key_provider=context["key_provider"],
+                pin_content=backend is not None,
+            )
+        except (PrivateStorageError, ValueError, TypeError) as exc:
+            raise WorkspacePersistenceError(
+                "Factual graph storage is unavailable.",
+                code=str(getattr(exc, "code", "") or "artifact_unavailable"),
+                public_status="unavailable",
+            ) from None
+        document = sealed["document"]
+        if encode_factual_graph_artifact(document) != sealed["payload"]:
+            raise WorkspacePersistenceError(
+                "Factual graph artifact did not round-trip before commit.",
+                code="readback_mismatch",
+                public_status="recoverable",
+            )
+        annotation = state.get("annotation_knowledge_graph")
+        if not isinstance(annotation, dict):
+            annotation = {"entities": [], "relationships": []}
+        relationships = [item for item in list(annotation.get("relationships") or []) if isinstance(item, dict)]
+        annotation["relationships"] = relationships
+        state["annotation_knowledge_graph"] = annotation
+        proofs = [item for item in list(state.get("proof_history") or []) if isinstance(item, dict)]
+        proofs.append({
+            "effect_id": effect_id,
+            "transaction_id": transaction_id,
+            "kind": "factual-graph-revision",
+            "revision": next_revision,
+            "ciphertext_storage_id": sealed["ciphertext_storage_id"],
+        })
+        history.append({
+            "question_id": "factual-graph",
+            "answer": "",
+            "effect_id": effect_id,
+            "transaction_id": transaction_id,
+            "kind": "factual-graph-revision",
+        })
+        state["intake_history"] = history
+        state["proof_history"] = proofs
+        state["private_revision"] = next_revision
+        state["factual_graph_binding"] = {
+            "artifact_kind": FACTUAL_GRAPH_ARTIFACT_KIND,
+            "artifact_revision": artifact_revision,
+            "ciphertext_storage_id": sealed["ciphertext_storage_id"],
+            "case_id": binding_case,
+            "owner": resolved,
+        }
+        state.update(missing_new_session=False, session_readable=True, at_rest_protection="private_envelope")
+        fact_document = {
+            "relationships": relationships,
+            "effect_id": effect_id,
+            "revision": next_revision,
+            "artifact_kind": FACTUAL_GRAPH_ARTIFACT_KIND,
+            "artifact_revision": artifact_revision,
+            "ciphertext_storage_id": sealed["ciphertext_storage_id"],
+            "factual_artifact": document,
+        }
+        proof_document = {"entries": proofs, "effect_id": effect_id, "revision": next_revision}
+        _joined_context, key_id, key = self._joined_key(resolved, binding_case)
+        try:
+            publication = commit_private_revision(
+                self.joined_revision_repository(resolved, binding_case),
+                tenant_id=resolved,
+                case_id=binding_case,
+                principal_id=resolved,
+                key=key,
+                key_id=key_id,
+                expected_revision=expected,
+                session=json.dumps(state, sort_keys=True).encode("utf-8"),
+                fact_graph=json.dumps(fact_document, sort_keys=True).encode("utf-8"),
+                proof=json.dumps(proof_document, sort_keys=True).encode("utf-8"),
+                transaction_id=transaction_id,
+                effect_id=effect_id,
+            )
+        except PrivateRevisionError as exc:
+            raise WorkspacePersistenceError(
+                "Factual graph revision did not commit.",
+                code=str(exc.code or "transaction_failed"),
+                public_status="recoverable",
+            ) from None
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError(
+                "Factual graph revision did not commit.",
+                code=str(exc.code or "artifact_unavailable"),
+                public_status="recoverable",
+            ) from None
+        if not publication.committed:
+            raise WorkspacePersistenceError(
+                "Factual graph revision did not commit.",
+                code="durability_unproven",
+                public_status="recoverable",
+            )
+        receipt = publication.as_dict()
+        receipt.update({
+            "network_pinned": False,
+            "private_artifact": True,
+            "plaintext_fallback": False,
+            "plaintext_catalog": False,
+            "ciphertext_storage_id": sealed["ciphertext_storage_id"],
+            "artifact_kind": FACTUAL_GRAPH_ARTIFACT_KIND,
+            "artifact_revision": artifact_revision,
+            "case_id": binding_case,
+            "owner": resolved,
+            "graph_registry_used": False,
+        })
+        return receipt
+
+    def reload_factual_graph_revision(
+        self,
+        user_id: str,
+        *,
+        case_id: str,
+        backend: Any = None,
+    ) -> Dict[str, Any]:
+        """Reload the committed factual graph for the same owner and case.
+
+        The ciphertext artifact is required. A plaintext JSON, cache, or CID
+        document is not accepted in its place. Authentication and corruption
+        failures leave the committed head untouched.
+        """
+        from integrations.ipfs_datasets.graphs import (
+            FACTUAL_GRAPH_ARTIFACT_KIND,
+            encode_factual_graph_artifact,
+            open_factual_graph_artifact,
+        )
+        from integrations.private_storage import (
+            PrivateArtifactIntegrityError,
+            PrivateRevisionError,
+            PrivateStorageError,
+            read_private_revision,
+        )
+
+        resolved = self._check_access(user_id, ability="read", case_id=case_id)
+        context = self._private_artifact_context(resolved, case_id)
+        binding_case = str(context["case_id"])
+        _context, key_id, key = self._joined_key(resolved, binding_case)
+        transport = backend if backend is not None else self._private_local_backend()
+        backend_name = "local_cache" if backend is None else "kit"
+        try:
+            opened = read_private_revision(
+                self.joined_revision_repository(resolved, binding_case),
+                tenant_id=resolved,
+                case_id=binding_case,
+                principal_id=resolved,
+                key=key,
+                key_id=key_id,
+            )
+            if not isinstance(opened, dict):
+                raise PrivateRevisionError("factual graph revision is missing", code="authentication_failed")
+            fact = json.loads(opened["fact_graph"])
+            if not isinstance(fact, dict):
+                raise PrivateArtifactIntegrityError("malformed")
+            storage_id = str(fact.get("ciphertext_storage_id") or "")
+            artifact_revision = str(fact.get("artifact_revision") or "")
+            embedded = fact.get("factual_artifact")
+            if fact.get("artifact_kind") != FACTUAL_GRAPH_ARTIFACT_KIND or not isinstance(embedded, dict):
+                raise PrivateArtifactIntegrityError("malformed")
+            loaded = open_factual_graph_artifact(
+                storage_id,
+                access=context["access"],
+                tenant_id=str(context["tenant_id"]),
+                case_id=binding_case,
+                principal_id=str(context["principal_id"]),
+                revision=artifact_revision,
+                backend=transport,
+                backend_name=backend_name,
+                key_provider=context["key_provider"],
+            )
+            if encode_factual_graph_artifact(loaded) != encode_factual_graph_artifact(embedded):
+                raise PrivateStorageError("factual graph ciphertext mismatch", code="readback_mismatch")
+        except (PrivateStorageError, PrivateRevisionError, PrivateArtifactIntegrityError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            raise WorkspacePersistenceError(
+                "Factual graph did not authenticate; the last committed graph was preserved.",
+                code="authentication_failed",
+                public_status="recoverable",
+            ) from None
+        return {
+            "status": "available",
+            "owner": resolved,
+            "case_id": binding_case,
+            "tenant_id": str(context["tenant_id"]),
+            "revision": str(opened["revision"]),
+            "ciphertext_storage_id": storage_id,
+            "artifact_kind": FACTUAL_GRAPH_ARTIFACT_KIND,
+            "artifact_revision": artifact_revision,
+            "artifact": loaded,
+            "assertion_states": loaded.get("assertion_states") or {},
+            "relationships": loaded.get("relationships") or {},
+            "invalidations": list(loaded.get("invalidations") or []),
+            "unresolved_conflicts": list(loaded.get("unresolved_conflicts") or []),
+            "revisions": list(loaded.get("revisions") or []),
+            "plaintext_fallback": False,
+            "private_artifact": True,
+        }
+
     def recover_joined_intake_revision(self, user_id: str, *, case_id: Optional[str] = None) -> Dict[str, Any]:
         from integrations.private_storage import PrivateArtifactBinding, recover_private_revision
 
