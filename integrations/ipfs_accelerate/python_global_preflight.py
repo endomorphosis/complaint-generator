@@ -11,7 +11,7 @@ Arbitrary decorators, rebound aliases, and local typing shadows do not qualify.
 Inputs are the actual accepted Native result, exact Git baseline blobs and
 no-follow owned candidate bytes; serialized/model-provided source locators
 cannot substitute for that result. Bounds are 64 entries, 1 MiB per file,
-8 MiB total, 100,000 AST nodes per file and a ten-second Git/inspection budget.
+8 MiB total, 250,000 AST nodes per file and a ten-second Git/inspection budget.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ import time
 _MAX_FILE = 1_048_576
 _MAX_TOTAL = 8 * _MAX_FILE
 _MAX_FILES = 64
-_MAX_NODES = 100_000
+_MAX_NODES = 250_000
 _SECONDS = 10.0
 _DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
