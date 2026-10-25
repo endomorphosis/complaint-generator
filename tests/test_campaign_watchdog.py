@@ -3,6 +3,8 @@ from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 import json
+import os
+import shlex
 
 import pytest
 
@@ -293,6 +295,7 @@ def _install_fixture(tmp_path, monkeypatch):
     watcher = SimpleNamespace(root=root, spec_path=spec, state=state, directory=state / "watchdog",
         plan_id="plan", spec_sha="ab" * 32)
     monkeypatch.setattr(module, "ComplaintCampaignWatchdog", lambda *a, **kw: watcher)
+    monkeypatch.setattr(module, "_watchdog_executable_path", lambda *a, **kw: os.defpath)
     return watcher, tmp_path / "units"
 
 
@@ -347,3 +350,300 @@ def test_rendered_units_pass_installed_systemd_parser_with_spaced_paths(tmp_path
         paths.append(str(path))
     result = subprocess.run(["systemd-analyze", "--user", "verify", *paths], capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
+
+
+def _executable(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\nexit 98\n")
+    path.chmod(0o700)
+    return path
+
+
+def _environment_path(service):
+    assignments = [shlex.split(line.partition("=")[2]) for line in service.splitlines()
+                   if line.startswith('Environment="PATH=')]
+    assert len(assignments) == 1 and len(assignments[0]) == 1
+    # Environment= expands percent specifiers, but dollars are literal.
+    return assignments[0][0].removeprefix("PATH=").replace("%%", "%")
+
+
+def _ready_preflight():
+    return {"status": "ready", "grok_binary_present": True, "auth_material_present": True,
+            "privacy": {"ready": True}, "worktree_capacity": {"sufficient": True},
+            "resource_capacity": {"ready": True}}
+
+
+def test_executable_path_retains_symlink_entrypoints_and_local_node_without_running_them(tmp_path, monkeypatch):
+    import subprocess
+    interpreter_target = _executable(tmp_path / "system/bin/python-real")
+    interpreter = tmp_path / "venv/bin/python"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.symlink_to(interpreter_target)
+    provider_target = _executable(tmp_path / "downloads/provider-release")
+    provider = tmp_path / "local tools/bin/grok"
+    provider.parent.mkdir(parents=True)
+    provider.symlink_to(provider_target)
+    tools = [_executable(tmp_path / name / "bin" / name) for name in ("node", "docker", "git")]
+    unused = tmp_path / "unused-secret-directory"
+    unused.mkdir()
+    environment = {"PATH": os.pathsep.join([str(provider.parent), *(str(p.parent) for p in tools),
+                    ".", "relative", "", str(unused)]), "XAI_API_KEY": "synthetic-secret-must-not-copy"}
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: pytest.fail("PATH discovery executed a tool"))
+    result = module._watchdog_executable_path(interpreter, environment)
+    directories = result.split(os.pathsep)
+    assert directories[0] == str(interpreter.parent.resolve())
+    assert str(provider.parent.resolve()) in directories
+    assert str(provider_target.parent.resolve()) not in directories
+    assert all(str(tool.parent.resolve()) in directories for tool in tools)
+    assert all(Path(value).is_absolute() and Path(value).is_dir() for value in directories)
+    assert len(directories) == len(set(directories))
+    assert not {"", ".", "relative", str(unused)} & set(directories)
+    assert "synthetic-secret-must-not-copy" not in result
+    for tool in ("grok", "node", "docker", "git"):
+        assert module.shutil.which(tool, path=result), tool
+
+
+def test_executable_path_rejects_missing_provider_without_activation(tmp_path, monkeypatch):
+    import subprocess
+    interpreter = _executable(tmp_path / "venv/bin/python")
+    monkeypatch.setattr(module.shutil, "which", lambda *a, **kw: None)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: pytest.fail("missing provider was executed"))
+    with pytest.raises(ValueError, match="watchdog_grok_executable_unavailable"):
+        module._watchdog_executable_path(interpreter, {"PATH": str(tmp_path)})
+
+
+@pytest.mark.parametrize("relative", [".", "relative-bin"])
+def test_executable_path_does_not_turn_cwd_commands_into_service_authority(tmp_path, monkeypatch, relative):
+    interpreter = _executable(tmp_path / "venv/bin/python")
+    _executable(tmp_path / relative / "grok")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="watchdog_executable_path_invalid"):
+        module._watchdog_executable_path(interpreter, {"PATH": relative})
+
+
+def test_service_path_defaults_are_absolute_and_explicit_path_preserves_literal_dollars(tmp_path):
+    root, state = tmp_path / "repo", tmp_path / "campaign"
+    root.mkdir()
+    state.mkdir()
+    spec = root / "spec.json"
+    spec.write_text('{}')
+    arguments = dict(interpreter="/usr/bin/python3", plan_id="plan", spec_sha256="ab" * 32)
+    default = module.systemd_units(root, spec, state, **arguments)
+    assert _environment_path(default["service"]) == os.defpath
+    assert all(Path(part).is_absolute() for part in _environment_path(default["service"]).split(os.pathsep))
+    directory = tmp_path / 'tools with $literal %percent "quote"'
+    directory.mkdir()
+    executable_path = str(directory) + os.pathsep + os.defpath
+    explicit = module.systemd_units(root, spec, state, executable_path=executable_path, **arguments)
+    assert _environment_path(explicit["service"]) == executable_path
+    assert "$literal" in explicit["service"] and "$$literal" not in explicit["service"]
+    assert "%%percent" in explicit["service"]
+
+
+@pytest.mark.parametrize("executable_path", ["", ".:/usr/bin", "/usr/bin:", "relative", "/usr/bin\nXAI_API_KEY=secret"])
+def test_service_path_rejects_empty_relative_and_environment_injection(tmp_path, executable_path):
+    spec = tmp_path / "spec.json"
+    spec.write_text('{}')
+    with pytest.raises(ValueError, match="watchdog_executable_path_invalid"):
+        module.systemd_units(tmp_path, spec, tmp_path, interpreter="/usr/bin/python3", plan_id="plan",
+                             spec_sha256="ab" * 32, executable_path=executable_path)
+
+
+def test_installer_captures_discovered_executables_and_only_that_public_environment(tmp_path, monkeypatch):
+    watcher, folder = _install_fixture(tmp_path, monkeypatch)
+    tools = tmp_path / "public tools"
+    tools.mkdir()
+    executable_path = str(tools) + os.pathsep + os.defpath
+    calls = []
+    monkeypatch.setattr(module, "_watchdog_executable_path",
+        lambda interpreter: calls.append(interpreter) or executable_path)
+    monkeypatch.setenv("XAI_API_KEY", "synthetic-secret-must-not-copy")
+    result = module.install_user_timer(watcher.root, watcher.spec_path, watcher.state,
+        interpreter="/usr/bin/python3", unit_directory=folder, command_runner=lambda *a, **kw: None)
+    service = (folder / (result["unit"] + ".service")).read_text()
+    assert calls == ["/usr/bin/python3"]
+    assert _environment_path(service) == executable_path
+    assert "synthetic-secret-must-not-copy" not in service and "XAI_API_KEY" not in service
+
+
+def test_installer_missing_provider_cannot_enable_units(tmp_path, monkeypatch):
+    watcher, folder = _install_fixture(tmp_path, monkeypatch)
+    def unavailable(*a, **kw):
+        raise ValueError("watchdog_grok_executable_unavailable")
+    monkeypatch.setattr(module, "_watchdog_executable_path", unavailable)
+    with pytest.raises(ValueError, match="watchdog_grok_executable_unavailable"):
+        module.install_user_timer(watcher.root, watcher.spec_path, watcher.state,
+            interpreter="/usr/bin/python3", unit_directory=folder,
+            command_runner=lambda *a, **kw: pytest.fail("unavailable provider enabled a unit"))
+    assert not folder.exists() or not list(folder.iterdir())
+
+
+def _legacy_units(watcher, folder):
+    units = module.systemd_units(watcher.root, watcher.spec_path, watcher.state,
+        interpreter="/usr/bin/python3", plan_id=watcher.plan_id, spec_sha256=watcher.spec_sha)
+    folder.mkdir()
+    service = folder / (units["name"] + ".service")
+    timer = folder / (units["name"] + ".timer")
+    legacy = "\n".join(line for line in units["service"].splitlines()
+                       if not line.startswith('Environment="PATH=')) + "\n"
+    service.write_text(legacy)
+    timer.write_text(units["timer"])
+    return units, service, timer
+
+
+def test_installer_upgrades_only_exact_previous_managed_service_and_is_idempotent(tmp_path, monkeypatch):
+    watcher, folder = _install_fixture(tmp_path, monkeypatch)
+    units, service, timer = _legacy_units(watcher, folder)
+    timer_before = (timer.read_bytes(), timer.stat().st_ino)
+    dropin = folder / (units["name"] + ".service.d")
+    dropin.mkdir()
+    custom = dropin / "operator.conf"
+    custom.write_text('[Service]\nNice=5\n')
+    calls = []
+    first = module.install_user_timer(watcher.root, watcher.spec_path, watcher.state,
+        interpreter="/usr/bin/python3", unit_directory=folder, command_runner=lambda *a, **kw: calls.append(a))
+    assert first["updated_units"] == [service.name]
+    assert service.read_text() == units["service"]
+    assert (timer.read_bytes(), timer.stat().st_ino) == timer_before
+    assert custom.read_text() == '[Service]\nNice=5\n'
+    inode = service.stat().st_ino
+    second = module.install_user_timer(watcher.root, watcher.spec_path, watcher.state,
+        interpreter="/usr/bin/python3", unit_directory=folder, command_runner=lambda *a, **kw: calls.append(a))
+    assert second["updated_units"] == [] and service.stat().st_ino == inode
+    assert len(calls) == 8
+
+
+@pytest.mark.parametrize("damage", ["customized", "foreign_plan", "hardlink"])
+def test_managed_upgrade_preserves_custom_foreign_or_aliased_service(tmp_path, monkeypatch, damage):
+    watcher, folder = _install_fixture(tmp_path, monkeypatch)
+    _, service, _ = _legacy_units(watcher, folder)
+    if damage == "customized":
+        service.write_text(service.read_text() + '# operator customization\n')
+    elif damage == "foreign_plan":
+        service.write_text(service.read_text().replace('"plan"', '"foreign-plan"'))
+    else:
+        os.link(service, tmp_path / "alias.service")
+    before = service.read_bytes()
+    with pytest.raises(ValueError, match="watchdog_existing_unit_conflict"):
+        module.install_user_timer(watcher.root, watcher.spec_path, watcher.state,
+            interpreter="/usr/bin/python3", unit_directory=folder,
+            command_runner=lambda *a, **kw: pytest.fail("conflicting managed service enabled"))
+    assert service.read_bytes() == before
+
+
+def test_managed_upgrade_rechecks_service_before_atomic_replacement(tmp_path, monkeypatch):
+    import tempfile
+    watcher, folder = _install_fixture(tmp_path, monkeypatch)
+    _, service, _ = _legacy_units(watcher, folder)
+    mkstemp = tempfile.mkstemp
+    replacement = '# operator replaced the service during preflight\n'
+    def race(*a, **kw):
+        result = mkstemp(*a, **kw)
+        service.write_text(replacement)
+        return result
+    monkeypatch.setattr(tempfile, "mkstemp", race)
+    with pytest.raises(ValueError, match="watchdog_existing_unit_conflict"):
+        module.install_user_timer(watcher.root, watcher.spec_path, watcher.state,
+            interpreter="/usr/bin/python3", unit_directory=folder,
+            command_runner=lambda *a, **kw: pytest.fail("raced managed service enabled"))
+    assert service.read_text() == replacement
+
+
+@pytest.mark.parametrize("field,member,reason", [
+    ("grok_binary_present", None, "grok_executable_missing"),
+    ("auth_material_present", None, "provider_auth_material_missing"),
+    ("privacy", "ready", "private_runtime_unavailable"),
+    ("worktree_capacity", "sufficient", "worktree_capacity_insufficient"),
+    ("resource_capacity", "ready", "resource_capacity_unavailable"),
+])
+def test_preflight_reports_the_specific_missing_dependency_without_sensitive_bodies(field, member, reason):
+    check = _ready_preflight()
+    check["status"] = "not_ready"
+    if member is None:
+        check[field] = False
+    else:
+        check[field][member] = False
+    check.update(reason="secret diagnostic body", auth={"token": "synthetic-private-token"})
+    summary = module._preflight_summary(check)
+    assert summary["status"] == "not_ready" and summary["reasons"] == [reason]
+    assert "secret diagnostic body" not in json.dumps(summary)
+    assert "synthetic-private-token" not in json.dumps(summary)
+
+
+@pytest.mark.parametrize("check", [None, [], {}, {"status": []}, {"status": {"private": "value"}}])
+def test_preflight_missing_or_malformed_status_is_unknown_not_healthy(check):
+    summary = module._preflight_summary(check)
+    assert summary["status"] == "unknown" and summary["reasons"] == ["preflight_status_unknown"]
+    assert all(summary[key] is None for key in ("grok_binary_present", "auth_material_present",
+        "private_runtime_ready", "worktree_capacity_sufficient", "resource_capacity_ready"))
+
+
+def test_preflight_does_not_promote_truthy_strings_or_integers_to_observed_booleans():
+    summary = module._preflight_summary({"status": "not_ready", "grok_binary_present": "False",
+        "auth_material_present": 1, "privacy": {"ready": "yes"},
+        "worktree_capacity": {"sufficient": []}, "resource_capacity": {"ready": 0}})
+    assert summary == {"status": "not_ready", "reasons": ["preflight_not_ready"],
+        "grok_binary_present": None, "auth_material_present": None, "private_runtime_ready": None,
+        "worktree_capacity_sufficient": None, "resource_capacity_ready": None}
+    ready = module._preflight_summary(_ready_preflight())
+    assert ready["status"] == "ready" and ready["reasons"] == []
+
+
+def test_missing_grok_hold_clears_without_resetting_persistent_recovery_budget_or_paid_counts(tmp_path, monkeypatch):
+    from ipfs_accelerate_py.agent_supervisor.rescue import campaign_watchdog as native
+    watcher, runner, view = _adapter(tmp_path, monkeypatch, state="stopped")
+    watcher.spec = {}
+    now = [1000.0]
+    watcher.clock = lambda: now[0]
+    actual_watchdog = native.CampaignProgressWatchdog
+    def deterministic_watchdog(*a, **kw):
+        return actual_watchdog(*a, **kw, clock_ms=lambda: int(now[0] * 1000))
+    monkeypatch.setattr(native, "CampaignProgressWatchdog", deterministic_watchdog)
+    monkeypatch.setattr(watcher, "_launch", lambda: ({"started_at": 0, "status": "stopped"}, True, "owner-1"))
+    monkeypatch.setattr(watcher, "_automatic_stop_matches", lambda *_: True)
+    check = _ready_preflight()
+    check.update(status="not_ready", grok_binary_present=False)
+    runner.doctor = lambda *_: deepcopy(check)
+    paid = {"implementation_attempts": {"TASK-1": 2}, "protected_implementation_attempts": {"TASK-1": 2}}
+    paid_before = deepcopy(paid)
+    monkeypatch.setattr(watcher, "_accounting", lambda: deepcopy(paid))
+    effects = []
+    runner.stop = lambda *a, **kw: effects.append("stop") or {"status": "stopped"}
+    runner.recover_stalled_worker = lambda *_: effects.append("recover") or {"recovery": "reconciled"}
+    def start(*a, **kw):
+        effects.append("start")
+        view.update(status="active", healthy=True, provider_progress_verified=True)
+        view["native_state"].update(active_task_id="TASK-1", active_task_cid="current-cid", active_attempt=2)
+        return {"status": "starting"}
+    runner.start = start
+    ledger = watcher.directory / "campaign-progress-watchdog.json"
+    held = watcher.run_once()
+    assert held["status"] == "held" and held["reason"] == "dependency_unavailable"
+    assert held["preflight"]["reasons"] == ["grok_executable_missing"]
+    assert not ledger.exists() and effects == []
+    check.update(status="ready", grok_binary_present=True)
+    for ordinal in (1, 2):
+        first = watcher.run_once()
+        assert first["status"] == "confirming"
+        assert watcher.run_once()["status"] == "confirming"  # Same clock is not another confirmation.
+        assert len(effects) == (ordinal - 1) * 3
+        now[0] += 31
+        recovered = watcher.run_once()
+        assert recovered["status"] == "recovered"
+        state = json.loads(ledger.read_text())
+        assert len(state["incidents"]) == 1
+        assert next(iter(state["incidents"].values()))["attempts"] == ordinal
+        assert next(iter(state["incidents"].values()))["phase"] == "finished"
+        assert paid == paid_before
+        # A later unavailable service context must preserve this ledger exactly.
+        view.update(status="stopped", healthy=False, provider_progress_verified=False)
+        view["native_state"].update(active_task_id="", active_task_cid="", active_attempt=0)
+        check.update(status="not_ready", grok_binary_present=False)
+        before = ledger.read_bytes()
+        assert watcher.run_once()["status"] == "held"
+        assert ledger.read_bytes() == before
+        check.update(status="ready", grok_binary_present=True)
+        now[0] += 61
+    exhausted = watcher.run_once()
+    assert exhausted["status"] == "exhausted" and exhausted["reason"] == "incident_recovery_budget_exhausted"
+    assert effects == ["stop", "recover", "start"] * 2 and paid == paid_before

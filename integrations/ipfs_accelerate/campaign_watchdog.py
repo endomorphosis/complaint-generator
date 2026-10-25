@@ -9,11 +9,79 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import time
 
 
 def _digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _watchdog_executable_path(interpreter, environment=None):
+    """Bind public executable locations without inheriting shell/cwd authority.
+
+    A user service does not inherit the interactive shell's PATH. Keep the
+    selected command's directory (including a Grok symlink's directory), not
+    the resolved script's directory. This does not change validation's
+    separately sealed executable search path or copy any credentials.
+    """
+    source = os.environ if environment is None else environment
+    executable = Path(interpreter)
+    if not executable.is_absolute():
+        raise ValueError("watchdog_interpreter_not_absolute")
+    provider = shutil.which(source.get("IPFS_ACCELERATE_AGENT_GROK_BIN") or "grok",
+                          path=source.get("PATH", os.defpath))
+    if not provider:
+        raise ValueError("watchdog_grok_executable_unavailable")
+    selected = [executable, Path(provider)]
+    for command in ("node", "docker", "git"):
+        found = shutil.which(command, path=source.get("PATH", os.defpath))
+        if found:
+            selected.append(Path(found))
+    if any(not item.is_absolute() for item in selected):
+        raise ValueError("watchdog_executable_path_invalid")
+    directories = []
+    for path in [*(item.absolute().parent for item in selected),
+                 *(Path(part) for part in os.defpath.split(os.pathsep) if part)]:
+        if not path.is_absolute() or any(c in str(path) for c in "\n\r\0"):
+            raise ValueError("watchdog_executable_path_invalid")
+        directory = str(path.resolve(strict=True))
+        if not path.is_dir() or os.pathsep in directory:
+            raise ValueError("watchdog_executable_path_invalid")
+        if directory not in directories:
+            directories.append(directory)
+    return os.pathsep.join(directories)
+
+
+def _preflight_summary(check):
+    """Return closed diagnostic metadata; never serialize auth/config bodies."""
+    if not isinstance(check, dict):
+        check = {}
+    def observed_boolean(value):
+        return value if type(value) is bool else None
+    def nested(key, member):
+        value = check.get(key)
+        return observed_boolean(value.get(member)) if isinstance(value, dict) else None
+    flags = {
+        "grok_binary_present": observed_boolean(check.get("grok_binary_present")),
+        "auth_material_present": observed_boolean(check.get("auth_material_present")),
+        "private_runtime_ready": nested("privacy", "ready"),
+        "worktree_capacity_sufficient": nested("worktree_capacity", "sufficient"),
+        "resource_capacity_ready": nested("resource_capacity", "ready"),
+    }
+    codes = {
+        "grok_binary_present": "grok_executable_missing",
+        "auth_material_present": "provider_auth_material_missing",
+        "private_runtime_ready": "private_runtime_unavailable",
+        "worktree_capacity_sufficient": "worktree_capacity_insufficient",
+        "resource_capacity_ready": "resource_capacity_unavailable",
+    }
+    raw_status = check.get("status")
+    status = raw_status if type(raw_status) is str and raw_status in {"ready", "not_ready"} else "unknown"
+    reasons = [codes[key] for key, value in flags.items() if value is False]
+    if status != "ready" and not reasons:
+        reasons = ["preflight_not_ready" if status == "not_ready" else "preflight_status_unknown"]
+    return {"status": status, "reasons": reasons, **flags}
 
 
 class ComplaintCampaignWatchdog:
@@ -46,6 +114,7 @@ class ComplaintCampaignWatchdog:
         self.latest_completion = {}
         self.latest_observation = {}
         self.last_action = {}
+        self.latest_preflight = {}
 
     def _contract_current(self):
         if hashlib.sha256(self.spec_path.read_bytes()).hexdigest() != self.spec_sha:
@@ -84,6 +153,7 @@ class ComplaintCampaignWatchdog:
 
     def observe(self):
         self._contract_current()
+        self.latest_preflight = {}
         status = self.runner.status(self.root, self.spec_path, self.state)
         self.latest_status = status
         launch, bound, owner = self._launch()
@@ -120,8 +190,11 @@ class ComplaintCampaignWatchdog:
         elif launch.get("status") == "stopped" and pending and not automatic_stop:
             # An operator's deliberate stop is not an unexpected owner death.
             hold = "manual_hold"
-        elif automatic_stop and pending and self.runner.doctor(self.root, self.spec_path, self.state).get("status") != "ready":
-            hold = "dependency_unavailable"
+        elif automatic_stop and pending:
+            check = self.runner.doctor(self.root, self.spec_path, self.state)
+            self.latest_preflight = _preflight_summary(check)
+            if check.get("status") != "ready":
+                hold = "dependency_unavailable"
         active = str(native.get("active_task_id") or "")
         cid = str(native.get("active_task_cid") or "")
         if not active or not cid:
@@ -223,6 +296,8 @@ class ComplaintCampaignWatchdog:
             return RecoveryActionObservation(False, tuple(effects), reason="native_reconciliation_refused")
         action["stage"] = "doctor"
         check = self.runner.doctor(self.root, self.spec_path, self.state)
+        self.latest_preflight = _preflight_summary(check)
+        action["preflight"] = self.latest_preflight
         if check.get("status") != "ready":
             return RecoveryActionObservation(False, tuple(effects), reason="native_preflight_not_ready")
         remaining()
@@ -280,7 +355,8 @@ class ComplaintCampaignWatchdog:
             "completed": (self.latest_status.get("board") or {}).get("completed"),
             "task_count": (self.latest_status.get("board") or {}).get("count"),
             "active_task_id": self.latest_observation.get("active_task_id"),
-            "last_action": self.last_action, "completion": self.latest_completion}
+            "last_action": self.last_action, "completion": self.latest_completion,
+            "preflight": getattr(self, "latest_preflight", {})}
         import stat
         self.directory.mkdir(mode=0o700, exist_ok=True)
         info = self.directory.lstat()
@@ -304,7 +380,8 @@ def watch_campaign(repo_root, spec_path, state_dir, *, once=False, interval_seco
         time.sleep(interval_seconds)
 
 
-def systemd_units(repo_root, spec_path, state_dir, *, interpreter, plan_id, spec_sha256):
+def systemd_units(repo_root, spec_path, state_dir, *, interpreter, plan_id, spec_sha256,
+                  executable_path=None):
     """Render dedicated user units; installation and enabling are explicit."""
     root, spec, state = (Path(p).resolve(strict=True) for p in (repo_root, spec_path, state_dir))
     name = "complaint-agent-watchdog-" + _digest(str(state))[:12]
@@ -319,6 +396,14 @@ def systemd_units(repo_root, spec_path, state_dir, *, interpreter, plan_id, spec
     working_directory = str(root).replace("%", "%%")
     if any(c in working_directory for c in "\n\r\0"):
         raise ValueError("watchdog_unit_argument_invalid")
+    runtime_path = executable_path if executable_path is not None else os.defpath
+    if (not isinstance(runtime_path, str) or not runtime_path
+            or any(c in runtime_path for c in "\n\r\0")
+            or any(not Path(part).is_absolute() for part in runtime_path.split(os.pathsep))):
+        raise ValueError("watchdog_executable_path_invalid")
+    # Environment= expands unit specifiers but does not expand '$'. ExecStart
+    # has a different expansion contract, so do not reuse its dollar escaping.
+    path_assignment = '"PATH=' + runtime_path.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
     service = "\n".join(["[Unit]", "Description=Verify and recover the complaint agent campaign", "",
         "[Service]", "Type=oneshot", "WorkingDirectory=" + working_directory,
         "ExecStart=" + " ".join(quoted(v) for v in command), "TimeoutStartSec=1800",
@@ -327,6 +412,7 @@ def systemd_units(repo_root, spec_path, state_dir, *, interpreter, plan_id, spec
         "KillMode=process", "UMask=0077", "Environment=HF_HUB_OFFLINE=1",
         "Environment=HF_DATASETS_OFFLINE=1", "Environment=TRANSFORMERS_OFFLINE=1",
         "Environment=IPFS_DATASETS_PY_MINIMAL_IMPORTS=1", "Environment=IPFS_DATASETS_PY_AUTO_NLTK_DOWNLOAD=0",
+        "Environment=" + path_assignment,
         "SyslogIdentifier=" + name, ""])
     timer = "\n".join(["[Unit]", "Description=Check complaint agent campaign progress every minute", "",
         "[Timer]", "OnCalendar=*-*-* *:*:00", "Persistent=true", "AccuracySec=1s",
@@ -342,29 +428,49 @@ def install_user_timer(repo_root, spec_path, state_dir, *, interpreter=None, uni
     import tempfile
     watcher = ComplaintCampaignWatchdog(repo_root, spec_path, state_dir)
     units = systemd_units(watcher.root, watcher.spec_path, watcher.state,
-        interpreter=interpreter or sys.executable, plan_id=watcher.plan_id, spec_sha256=watcher.spec_sha)
+        interpreter=interpreter or sys.executable, plan_id=watcher.plan_id, spec_sha256=watcher.spec_sha,
+        executable_path=_watchdog_executable_path(interpreter or sys.executable))
     folder = (Path(unit_directory) if unit_directory else
         Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd/user")
     folder.mkdir(parents=True, exist_ok=True)
     if folder.resolve(strict=True) != folder.absolute() or folder.stat().st_uid != os.getuid():
         raise ValueError("watchdog_unit_directory_unowned")
     files = {folder / (units["name"] + "." + kind): units[kind] for kind in ("service", "timer")}
+    # The previous renderer omitted PATH. Upgrade only its exact, same-campaign
+    # managed bytes; any operator customization or foreign binding still fails.
+    legacy_service = "\n".join(line for line in units["service"].splitlines()
+                               if not line.startswith('Environment="PATH=')) + "\n"
+    upgrades = {}
     for path, content in files.items():
         if os.path.lexists(path):
             info = path.lstat()
-            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1
-                    or path.read_text() != content):
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1:
                 raise ValueError("watchdog_existing_unit_conflict")
+            existing = path.read_text()
+            if existing == content:
+                continue
+            if path.suffix != ".service" or existing != legacy_service:
+                raise ValueError("watchdog_existing_unit_conflict")
+            upgrades[path] = (existing, info)
     for path, content in files.items():
-        if not path.exists():
+        if not path.exists() or path in upgrades:
             descriptor, temporary = tempfile.mkstemp(prefix=".watchdog-unit-", dir=folder)
             try:
                 with os.fdopen(descriptor, "w") as stream:
                     stream.write(content)
                     stream.flush()
                     os.fsync(stream.fileno())
-                # Do not replace a different unit created after preflight.
-                os.link(temporary, path)
+                if path in upgrades:
+                    expected, previous = upgrades[path]
+                    current = path.lstat()
+                    if (any(getattr(current, key) != getattr(previous, key) for key in
+                            ("st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns"))
+                            or path.read_text() != expected):
+                        raise ValueError("watchdog_existing_unit_conflict")
+                    os.replace(temporary, path)
+                else:
+                    # Do not replace a different unit created after preflight.
+                    os.link(temporary, path)
             finally:
                 if os.path.exists(temporary):
                     os.unlink(temporary)
@@ -376,4 +482,5 @@ def install_user_timer(repo_root, spec_path, state_dir, *, interpreter=None, uni
     for command in commands:
         run(command, check=True, capture_output=True, text=True, timeout=1800)
     return {"status": "installed", "unit": units["name"], "timer_enabled": True,
-        "state_dir": str(watcher.state), "report_path": str(watcher.directory / "latest.json")}
+        "state_dir": str(watcher.state), "report_path": str(watcher.directory / "latest.json"),
+        "updated_units": [path.name for path in upgrades]}

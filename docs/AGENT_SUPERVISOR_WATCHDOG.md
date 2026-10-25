@@ -29,9 +29,18 @@ python scripts/run_complaint_improvement_supervisor.py watchdog \
 Without `--once`, the command checks every 60 seconds until it verifies completion.
 The installer creates only this campaign's dedicated user service and minutely
 calendar timer, verifies the units, enables the timer and runs its first check.
-It refuses conflicting existing unit files. The timer persists across user
+It refuses conflicting or customized unit files, but can atomically upgrade the
+exact previous managed service for the same campaign. The timer persists across user
 manager restarts; unattended boot operation requires an existing lingering user
 manager. The installed service binds the expected plan ID and specification hash.
+
+The installer captures a bounded executable PATH: the selected Python and Grok
+entrypoint directories, discovered Node/Docker/Git directories and system
+executable directories. A Grok symlink keeps its entrypoint directory. This fixes
+background services that could not find Grok although interactive startup worked.
+It copies no credentials, sources no shell profiles, and leaves validation's
+separately sealed executable path unchanged. Missing Grok fails installation
+explicitly. Existing timer settings and campaign-specific drop-ins remain intact.
 
 The service intentionally uses `KillMode=process`: Native's public `start`
 detaches its successor, but detachment does not escape a systemd cgroup. Ending
@@ -41,7 +50,13 @@ The service timeout allows bounded Native reconciliation and startup work;
 implementation attempts retain their existing 900-second deadline and caps.
 
 Inspect `CAMPAIGN_STATE/watchdog/latest.json` for the last result, reason,
-completion evidence and recovery stage. The command prints a compact summary.
+completion evidence, recovery stage and typed `preflight` diagnostics.
+`preflight.reasons` distinguishes `grok_executable_missing`,
+`provider_auth_material_missing`, `private_runtime_unavailable`,
+`worktree_capacity_insufficient` and `resource_capacity_unavailable`. A null
+component flag means it was not observed, rather than that it failed. The summary
+excludes credential values and raw provider/error bodies. The command prints a
+compact summary.
 Use `systemctl --user status UNIT.timer` and `journalctl --user -u UNIT.service`,
 with the unit name returned by installation, to inspect scheduling and execution.
 Disable it with `systemctl --user disable --now UNIT.timer`.
@@ -75,7 +90,9 @@ Unknown or interrupted effects remain recorded as uncertain rather than being
 repeated blindly.
 
 Place `HOLD` or `OPERATOR_STOP` in `CAMPAIGN_STATE/watchdog/` to prevent automatic
-recovery. Existing manual holds, cancellation, user-input waits, quarantine,
+recovery. A temporary maintenance hold prevents dispatch while candidates or
+source are reviewed; remove only the maintenance hold you created. Existing
+manual holds, cancellation, user-input waits, quarantine,
 protected incidents and retry limits remain authoritative. Missing credentials,
 legal authority or user answers are reported; the watchdog cannot invent them.
 
