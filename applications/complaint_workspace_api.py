@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from .browser_sessions import (
@@ -18,7 +19,8 @@ from .browser_sessions import (
     browser_session_http_status,
 )
 from .case_routes import INQUIRY_CONFLICT_STATUS, shared_inquiry_conflict
-from .complaint_mcp_protocol import handle_jsonrpc_message, project_shared_inquiry_contract, tool_list_payload
+from .complaint_mcp_protocol import (handle_jsonrpc_message, project_shared_inquiry_contract,
+    tool_list_payload, gui_inference_tool_failed)
 from .complaint_workspace import (
     ComplaintWorkspaceService,
     PrincipalRegistry,
@@ -151,6 +153,18 @@ def _attach_case_calendar(payload: Dict[str, Any]) -> Dict[str, Any]:
 class IntakeRequest(BaseModel):
     user_id: Optional[str] = None
     answers: Dict[str, Any] = Field(default_factory=dict)
+
+
+class GuiInferenceRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    purpose: str
+    inputs: Dict[str, Any]
+    timeout_seconds: float = Field(default=30.0, gt=0, le=60)
+
+
+class GuiInferenceAdmissionRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    invocation_id: str
 
 
 class IntakeChatTurnRequest(BaseModel):
@@ -1002,14 +1016,28 @@ def create_complaint_workspace_router(
             chain_until_satisfied=request.chain_until_satisfied,
         )
 
+    @router.post("/api/complaint-workspace/inference/dispatch")
+    async def dispatch_gui_inference(request: GuiInferenceRequest) -> Dict[str, Any]:
+        return await run_in_threadpool(workspace.dispatch_bounded_gui_inference, None, purpose=request.purpose,
+            inputs=request.inputs, timeout_seconds=request.timeout_seconds)
+
+    @router.post("/api/complaint-workspace/inference/admit")
+    async def admit_gui_inference(request: GuiInferenceAdmissionRequest) -> Dict[str, Any]:
+        return await run_in_threadpool(workspace.admit_bounded_gui_inference, None, invocation_id=request.invocation_id)
+
     @router.post("/api/complaint-workspace/mcp/call")
     async def call_mcp_tool(request: McpCallRequest) -> Response:
         try:
-            payload = workspace.call_mcp_tool(request.tool_name, request.arguments)
+            if request.tool_name in {"complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}:
+                payload = await run_in_threadpool(workspace.call_mcp_tool, request.tool_name, request.arguments)
+            else:
+                payload = workspace.call_mcp_tool(request.tool_name, request.arguments)
         except WorkspaceAuthorizationDenied:
             return JSONResponse(status_code=200, content={"ok": False, "error": "authorization_denied", "isError": True})
         except Exception:
             return JSONResponse(status_code=200, content={"ok": False, "error": "workspace_operation_failed", "isError": True})
+        if gui_inference_tool_failed(request.tool_name, payload):
+            return JSONResponse(status_code=200, content={**payload, "ok": False, "isError": True})
         if request.tool_name == "complaint.run_intake_chat_turn":
             payload = project_shared_inquiry_contract(payload)
             if shared_inquiry_conflict(payload):
@@ -1026,7 +1054,12 @@ def create_complaint_workspace_router(
             authorization = http_request.headers.get("authorization", "")
             if authorization != f"Bearer {token}":
                 raise HTTPException(status_code=401, detail="MCP bearer token required")
-        response = handle_jsonrpc_message(workspace, request.model_dump())
+        params = request.params if isinstance(request.params, dict) else {}
+        if request.method == "tools/call" and params.get("name") in {
+                "complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}:
+            response = await run_in_threadpool(handle_jsonrpc_message, workspace, request.model_dump())
+        else:
+            response = handle_jsonrpc_message(workspace, request.model_dump())
         body = response or {"jsonrpc": "2.0", "id": request.id, "result": None}
         return Response(
             content=json.dumps(body),
