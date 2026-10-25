@@ -46,7 +46,7 @@ nothing. There is no XOR, plaintext tempfile, or fake encrypted-success path.
 from __future__ import annotations
 
 import base64
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from functools import wraps
 import hashlib
 import hmac
@@ -1124,6 +1124,11 @@ def _key_session_operation(*, authenticate: bool = True):
     return decorate
 
 
+_CASE_EPOCH_LOCKS: dict[tuple[int, str], threading.RLock] = {}
+_CASE_EPOCH_LOCKS_GUARD = threading.Lock()
+_CASE_EPOCH_HELD = threading.local()
+
+
 class UserOwnedKeySession:
     """Passphrase- or keyring-wrapped master key with per-case data keys.
 
@@ -1390,8 +1395,84 @@ class UserOwnedKeySession:
         self._recipient_wrap = (key_id, material)
         return key_id
 
-    @_key_session_operation()
+    @contextmanager
+    def case_key_epoch_scope(self, tenant_id: str, case_id: str):
+        """Hold one case key epoch before Grant, Member or key-store locks.
+
+        No key material or authority is yielded. Callers must acquire this
+        scope before entering key RMW operations. Independent unlocked handles
+        for this same owned store share the lock; nested same-thread calls are
+        reentrant. The lock is separate from Keys so publication callbacks can
+        retain their established Grant -> Member -> Keys order.
+        """
+        _require_label(tenant_id)
+        _require_label(case_id)
+        directory = self.directory
+        if directory.resolve(strict=True) != directory:
+            raise PrivateKeyMaterialError("permissions")
+        directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        descriptor = None
+        try:
+            info = os.fstat(directory_fd)
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o700):
+                raise PrivateKeyMaterialError("permissions")
+            digest = hashlib.sha256(json.dumps([tenant_id, case_id], separators=(",", ":")).encode()).hexdigest()
+            name = ".case-epoch-" + digest + ".lock"
+            identity = (os.getpid(), str(directory / name))
+            with _CASE_EPOCH_LOCKS_GUARD:
+                lock = _CASE_EPOCH_LOCKS.setdefault(identity, threading.RLock())
+            with lock:
+                held = getattr(_CASE_EPOCH_HELD, "locks", None)
+                if held is None:
+                    held = _CASE_EPOCH_HELD.locks = {}
+                # A fork must not reuse a parent's reentrancy or keep its copied
+                # descriptor alive while attempting a second flock.
+                for inherited, handle in list(held.items()):
+                    if inherited[0] != os.getpid():
+                        os.close(handle)
+                        del held[inherited]
+                if identity in held:
+                    yield
+                    return
+                descriptor = os.open(name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                     0o600, dir_fd=directory_fd)
+                before = os.fstat(descriptor)
+                def reprove():
+                    named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    parent = directory.lstat()
+                    if (not stat.S_ISREG(named.st_mode) or named.st_uid != os.getuid()
+                            or stat.S_IMODE(named.st_mode) != 0o600 or named.st_nlink != 1
+                            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+                            or (info.st_dev, info.st_ino) != (parent.st_dev, parent.st_ino)
+                            or parent.st_uid != os.getuid() or stat.S_IMODE(parent.st_mode) != 0o700):
+                        raise PrivateKeyMaterialError("permissions")
+                reprove()
+                import fcntl
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                reprove()
+                held[identity] = descriptor
+                try:
+                    yield
+                finally:
+                    del held[identity]
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            os.close(directory_fd)
+
     def rotate_case_grant_data_key(self, tenant_id: str, case_id: str, *,
+                                   resource_id: str, expected_data_key_id: str,
+                                   operation_id: str,
+                                   before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
+        # Epoch must precede the Keys decorator, including direct trusted calls.
+        with self.case_key_epoch_scope(tenant_id, case_id):
+            return self._rotate_case_grant_data_key(tenant_id, case_id, resource_id=resource_id,
+                expected_data_key_id=expected_data_key_id, operation_id=operation_id,
+                **({"before_publish":before_publish} if before_publish is not None else {}))
+
+    @_key_session_operation()
+    def _rotate_case_grant_data_key(self, tenant_id: str, case_id: str, *,
                                    resource_id: str, expected_data_key_id: str,
                                    operation_id: str,
                                    before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
@@ -3440,6 +3521,7 @@ def commit_private_revision(
     fsync_directory: Callable[[int], None] | None = None,
     before_publish: Callable[[], Any] | None = None,
     key_resolver: Callable[[str], bytes | None] | None = None,
+    publication_scope: Callable[[], Any] | None = None,
 ) -> RevisionPublication:
     """Publish one answer revision across session, fact graph, and proof.
 
@@ -3456,6 +3538,8 @@ def commit_private_revision(
 
     if before_publish is not None and not callable(before_publish):
         raise TypeError("before_publish must be a trusted callable")
+    if publication_scope is not None and not callable(publication_scope):
+        raise TypeError("publication_scope must be a trusted scope factory")
     wal = _load_wal()
     root = Path(repository)
     transaction_id, effect_id = _identity_args(transaction_id, effect_id)
@@ -3576,12 +3660,22 @@ def commit_private_revision(
             crash_injector=crash_injector,
         )
 
+        publication_hold = ExitStack()
+        publication_entered = False
+        def admit_publication():
+            nonlocal publication_entered
+            if publication_scope is not None and not publication_entered:
+                publication_hold.enter_context(publication_scope())
+                publication_entered = True
+            if before_publish is not None:
+                return before_publish()
+
         def effect() -> bool:
             _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
                                  principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
             return _apply_intent(
                 root, intent, install=True, fsync_file=fsync_file, fsync_directory=fsync_directory,
-                **({"before_publish": before_publish} if before_publish is not None else {}),
+                **({"before_publish": admit_publication} if before_publish is not None or publication_scope is not None else {}),
             )
 
         def compensate() -> bool:
@@ -3591,36 +3685,37 @@ def commit_private_revision(
                 root, intent, install=False, fsync_file=fsync_file, fsync_directory=fsync_directory,
             )
 
-        try:
-            result = coordinator.execute(
-                intent,
-                effect,
-                compensate,
-                transaction_id=wal_transaction_id,
-                effect_id=wal_effect_id,
+        with publication_hold:
+            try:
+                result = coordinator.execute(
+                    intent,
+                    effect,
+                    compensate,
+                    transaction_id=wal_transaction_id,
+                    effect_id=wal_effect_id,
+                )
+            except wal["WALTransactionCrash"] as exc:
+                raise PrivateRevisionInterrupted(str(getattr(exc, "args", ["crash"])[0]), transaction_id) from exc
+            except wal["WALQueueFullError"] as exc:
+                raise PrivateRevisionError("WAL backpressure", code="wal_backpressure", state="recoverable") from exc
+            except wal["WALWriterError"] as exc:
+                raise PrivateRevisionError("WAL writer is closed", code="wal_closed", state="recoverable") from exc
+            except wal["WALTransactionError"] as exc:
+                raise PrivateRevisionError(str(exc), code="transaction_failed", state="recoverable") from exc
+            except PrivateRevisionError:
+                raise
+            if not result.committed or not bridge.receipts:
+                raise PrivateRevisionError("commit receipt missing", code="durability_unproven", state="recoverable")
+            mode = bridge.receipts[-1].acknowledgement_mode
+            return RevisionPublication(
+                True,
+                "committed",
+                transaction_id,
+                effect_id,
+                next_revision,
+                getattr(mode, "value", str(mode)),
+                len(bridge.receipts),
             )
-        except wal["WALTransactionCrash"] as exc:
-            raise PrivateRevisionInterrupted(str(getattr(exc, "args", ["crash"])[0]), transaction_id) from exc
-        except wal["WALQueueFullError"] as exc:
-            raise PrivateRevisionError("WAL backpressure", code="wal_backpressure", state="recoverable") from exc
-        except wal["WALWriterError"] as exc:
-            raise PrivateRevisionError("WAL writer is closed", code="wal_closed", state="recoverable") from exc
-        except wal["WALTransactionError"] as exc:
-            raise PrivateRevisionError(str(exc), code="transaction_failed", state="recoverable") from exc
-        except PrivateRevisionError:
-            raise
-        if not result.committed or not bridge.receipts:
-            raise PrivateRevisionError("commit receipt missing", code="durability_unproven", state="recoverable")
-        mode = bridge.receipts[-1].acknowledgement_mode
-        return RevisionPublication(
-            True,
-            "committed",
-            transaction_id,
-            effect_id,
-            next_revision,
-            getattr(mode, "value", str(mode)),
-            len(bridge.receipts),
-        )
     finally:
         if coordinator is not None:
             coordinator.close()

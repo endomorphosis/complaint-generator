@@ -448,101 +448,102 @@ class CaseResourceKeyGrantStore:
             "idempotency_sha256": hashlib.sha256(key_name.encode()).hexdigest()}
         operation_id = hashlib.sha256(json.dumps(operation_identity, sort_keys=True,
                                                  separators=(",", ":")).encode()).hexdigest()
-        owner_session.ensure_data_key(case.tenant_id, case.case_id)
-        # Global order is KeyGrant -> Member -> owner key store. A trusted
-        # caller may hold a prepared membership against concurrent changes.
-        with self._locked(), (publication_scope() if publication_scope is not None else nullcontext()):
-            if before_publish is not None and before_publish() is False:
-                raise CaseResourceKeyGrantError("publication_denied")
-            state = self._generation_state(case.tenant_id, case.case_id, case.resource_id, allow_pending=True)
-            replay = self._revoke_replay(key_name)
-            pending = state.get("pending_revoke")
-            if replay is not None:
-                if any(replay.get(k) != v for k, v in operation_identity.items() if k != "idempotency_sha256"):
-                    raise CaseResourceKeyGrantError("replay_mismatch")
+        with owner_session.case_key_epoch_scope(case.tenant_id, case.case_id):
+            owner_session.ensure_data_key(case.tenant_id, case.case_id)
+            # Global order is Epoch -> KeyGrant -> Member -> owner key store. A trusted
+            # caller may hold a prepared membership against concurrent changes.
+            with self._locked(), (publication_scope() if publication_scope is not None else nullcontext()):
+                if before_publish is not None and before_publish() is False:
+                    raise CaseResourceKeyGrantError("publication_denied")
+                state = self._generation_state(case.tenant_id, case.case_id, case.resource_id, allow_pending=True)
+                replay = self._revoke_replay(key_name)
+                pending = state.get("pending_revoke")
+                if replay is not None:
+                    if any(replay.get(k) != v for k, v in operation_identity.items() if k != "idempotency_sha256"):
+                        raise CaseResourceKeyGrantError("replay_mismatch")
+                    if pending is None:
+                        return _revoke_view(replay, retained_plaintext, retained_key)
+                if pending is None and state.get("last_revoke", {}).get("operation_id") == operation_id:
+                    summary = state["last_revoke"]["summary"]
+                    self._write_revoke_replay(key_name, summary, **({"before_publish":before_publish} if before_publish is not None else {}))
+                    return _revoke_view(summary, retained_plaintext, retained_key)
+                if pending is not None:
+                    if pending.get("operation_id") != operation_id or pending.get("identity") != operation_identity:
+                        raise CaseResourceKeyGrantError("case_key_rotation_incomplete")
+                    grants = [_grant_from_document(doc) for doc in pending["grants"]]
+                else:
+                    if int(state["generation"]) != cutoff or int(state["cutoff"]) >= cutoff:
+                        raise CaseResourceKeyGrantError("cutoff_mismatch")
+                    grants = [grant for grant in self._grants_for_case(case.tenant_id, case.case_id)
+                              if grant.status == "active"]
+                targets = [grant for grant in grants if grant.recipient_principal_id == recipient.principal_id]
+                if not targets:
+                    raise CaseResourceKeyGrantError("grant_not_active")
+                if any(grant.generation != cutoff for grant in grants):
+                    raise CaseResourceKeyGrantError("stale_grant_generation")
+                survivors = [grant for grant in grants if grant not in targets]
+                missing = sorted({grant.recipient_principal_id for grant in survivors
+                                  if grant.recipient_principal_id not in sessions})
+                if missing:
+                    raise CaseResourceKeyGrantError("recipient_session_required")
+                # Validate every recipient before changing any key epoch.
+                for grant in survivors:
+                    wrap_id, _wrap_key = sessions[grant.recipient_principal_id].recipient_wrap_key()
+                    if wrap_id != grant.recipient_wrap_key_id:
+                        raise CaseResourceKeyGrantError("recipient_mismatch")
+                old_key_id = str(state.get("data_key_id") or targets[0].data_key_id)
+                if any(grant.data_key_id != old_key_id for grant in grants):
+                    raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
                 if pending is None:
-                    return _revoke_view(replay, retained_plaintext, retained_key)
-            if pending is None and state.get("last_revoke", {}).get("operation_id") == operation_id:
-                summary = state["last_revoke"]["summary"]
+                    state["data_key_id"] = old_key_id
+                    state["pending_revoke"] = {"operation_id": operation_id, "identity": operation_identity,
+                                               "grants": [_grant_document(grant) for grant in grants]}
+                    # A crash from this point fences delegated access. Cold retry
+                    # uses the same authenticated snapshots and keystore operation.
+                    self._write_generation(state, **({"before_publish":before_publish} if before_publish is not None else {}))
+                rotation = owner_session.rotate_case_grant_data_key(case.tenant_id, case.case_id,
+                    resource_id=case.resource_id, expected_data_key_id=old_key_id, operation_id=operation_id,
+                    **({"before_publish":before_publish} if before_publish is not None else {}))
+                new_key_id = str(rotation["new_data_key_id"])
+                if new_key_id == old_key_id or rotation.get("old_data_key_id") != old_key_id:
+                    raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
+                rewrapped = []
+                for grant in survivors:
+                    wrap_id, wrap_key = sessions[grant.recipient_principal_id].recipient_wrap_key()
+                    wrapped = owner_session.wrap_case_key_for_recipient(tenant_id=case.tenant_id,
+                        case_id=case.case_id, recipient_wrap_key=wrap_key, recipient_wrap_key_id=wrap_id,
+                        canonical_principal_id=case.tenant_id, revision=grant.artifact_revision,
+                        recipient_principal_id=grant.recipient_principal_id, artifact_kind=grant.artifact_kind,
+                        resource_id=case.resource_id, membership_grant_id=grant.membership_grant_id,
+                        membership_version=grant.membership_version)
+                    if str(wrapped["data_key_id"]) != new_key_id:
+                        raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
+                    rewrapped.append(replace(grant, version=grant.version + 1, generation=cutoff + 1,
+                        status="active", data_key_id=new_key_id, wrapped_nonce=str(wrapped["nonce"]),
+                        wrapped_ciphertext=str(wrapped["ciphertext"]),
+                        historical_wrapped_keys=grant.historical_wrapped_keys + (
+                            (grant.data_key_id, grant.wrapped_nonce, grant.wrapped_ciphertext),)))
+                for grant in targets:
+                    self._seal(replace(grant, version=grant.version + 1, status="revoked",
+                                       wrapped_nonce="", wrapped_ciphertext="", historical_wrapped_keys=()), **({"before_publish":before_publish} if before_publish is not None else {}))
+                for grant in rewrapped:
+                    self._seal(grant, **({"before_publish":before_publish} if before_publish is not None else {}))
+                summary = {"schema_version": SCHEMA_VERSION, "operation": "revoke_and_rewrap",
+                    **{k: v for k, v in operation_identity.items() if k != "idempotency_sha256"},
+                    "generation": cutoff + 1, "revoked_key_grant_ids": [g.key_grant_id for g in targets],
+                    "rewrapped_key_grant_ids": [g.key_grant_id for g in rewrapped],
+                    "previous_data_key_id": old_key_id, "data_key_id": new_key_id,
+                    "data_key_rotated": True, "grant_wrap_rotated": True, "future_access_revoked": True,
+                    "downloaded_plaintext_erased": False, "downloaded_keys_erased": False,
+                    "limitation": LIMITATIONS[0]}
+                # Publish the complete cutoff in one authenticated atomic record.
+                # Its embedded receipt covers the gap before the replay sidecar.
+                self._write_generation({"schema_version": SCHEMA_VERSION, "tenant_id": case.tenant_id,
+                    "case_id": case.case_id, "resource_id": case.resource_id, "generation": cutoff + 1,
+                    "cutoff": cutoff, "data_key_id": new_key_id,
+                    "last_revoke": {"operation_id": operation_id, "summary": summary}}, **({"before_publish":before_publish} if before_publish is not None else {}))
                 self._write_revoke_replay(key_name, summary, **({"before_publish":before_publish} if before_publish is not None else {}))
                 return _revoke_view(summary, retained_plaintext, retained_key)
-            if pending is not None:
-                if pending.get("operation_id") != operation_id or pending.get("identity") != operation_identity:
-                    raise CaseResourceKeyGrantError("case_key_rotation_incomplete")
-                grants = [_grant_from_document(doc) for doc in pending["grants"]]
-            else:
-                if int(state["generation"]) != cutoff or int(state["cutoff"]) >= cutoff:
-                    raise CaseResourceKeyGrantError("cutoff_mismatch")
-                grants = [grant for grant in self._grants_for_case(case.tenant_id, case.case_id)
-                          if grant.status == "active"]
-            targets = [grant for grant in grants if grant.recipient_principal_id == recipient.principal_id]
-            if not targets:
-                raise CaseResourceKeyGrantError("grant_not_active")
-            if any(grant.generation != cutoff for grant in grants):
-                raise CaseResourceKeyGrantError("stale_grant_generation")
-            survivors = [grant for grant in grants if grant not in targets]
-            missing = sorted({grant.recipient_principal_id for grant in survivors
-                              if grant.recipient_principal_id not in sessions})
-            if missing:
-                raise CaseResourceKeyGrantError("recipient_session_required")
-            # Validate every recipient before changing any key epoch.
-            for grant in survivors:
-                wrap_id, _wrap_key = sessions[grant.recipient_principal_id].recipient_wrap_key()
-                if wrap_id != grant.recipient_wrap_key_id:
-                    raise CaseResourceKeyGrantError("recipient_mismatch")
-            old_key_id = str(state.get("data_key_id") or targets[0].data_key_id)
-            if any(grant.data_key_id != old_key_id for grant in grants):
-                raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
-            if pending is None:
-                state["data_key_id"] = old_key_id
-                state["pending_revoke"] = {"operation_id": operation_id, "identity": operation_identity,
-                                           "grants": [_grant_document(grant) for grant in grants]}
-                # A crash from this point fences delegated access. Cold retry
-                # uses the same authenticated snapshots and keystore operation.
-                self._write_generation(state, **({"before_publish":before_publish} if before_publish is not None else {}))
-            rotation = owner_session.rotate_case_grant_data_key(case.tenant_id, case.case_id,
-                resource_id=case.resource_id, expected_data_key_id=old_key_id, operation_id=operation_id,
-                **({"before_publish":before_publish} if before_publish is not None else {}))
-            new_key_id = str(rotation["new_data_key_id"])
-            if new_key_id == old_key_id or rotation.get("old_data_key_id") != old_key_id:
-                raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
-            rewrapped = []
-            for grant in survivors:
-                wrap_id, wrap_key = sessions[grant.recipient_principal_id].recipient_wrap_key()
-                wrapped = owner_session.wrap_case_key_for_recipient(tenant_id=case.tenant_id,
-                    case_id=case.case_id, recipient_wrap_key=wrap_key, recipient_wrap_key_id=wrap_id,
-                    canonical_principal_id=case.tenant_id, revision=grant.artifact_revision,
-                    recipient_principal_id=grant.recipient_principal_id, artifact_kind=grant.artifact_kind,
-                    resource_id=case.resource_id, membership_grant_id=grant.membership_grant_id,
-                    membership_version=grant.membership_version)
-                if str(wrapped["data_key_id"]) != new_key_id:
-                    raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
-                rewrapped.append(replace(grant, version=grant.version + 1, generation=cutoff + 1,
-                    status="active", data_key_id=new_key_id, wrapped_nonce=str(wrapped["nonce"]),
-                    wrapped_ciphertext=str(wrapped["ciphertext"]),
-                    historical_wrapped_keys=grant.historical_wrapped_keys + (
-                        (grant.data_key_id, grant.wrapped_nonce, grant.wrapped_ciphertext),)))
-            for grant in targets:
-                self._seal(replace(grant, version=grant.version + 1, status="revoked",
-                                   wrapped_nonce="", wrapped_ciphertext="", historical_wrapped_keys=()), **({"before_publish":before_publish} if before_publish is not None else {}))
-            for grant in rewrapped:
-                self._seal(grant, **({"before_publish":before_publish} if before_publish is not None else {}))
-            summary = {"schema_version": SCHEMA_VERSION, "operation": "revoke_and_rewrap",
-                **{k: v for k, v in operation_identity.items() if k != "idempotency_sha256"},
-                "generation": cutoff + 1, "revoked_key_grant_ids": [g.key_grant_id for g in targets],
-                "rewrapped_key_grant_ids": [g.key_grant_id for g in rewrapped],
-                "previous_data_key_id": old_key_id, "data_key_id": new_key_id,
-                "data_key_rotated": True, "grant_wrap_rotated": True, "future_access_revoked": True,
-                "downloaded_plaintext_erased": False, "downloaded_keys_erased": False,
-                "limitation": LIMITATIONS[0]}
-            # Publish the complete cutoff in one authenticated atomic record.
-            # Its embedded receipt covers the gap before the replay sidecar.
-            self._write_generation({"schema_version": SCHEMA_VERSION, "tenant_id": case.tenant_id,
-                "case_id": case.case_id, "resource_id": case.resource_id, "generation": cutoff + 1,
-                "cutoff": cutoff, "data_key_id": new_key_id,
-                "last_revoke": {"operation_id": operation_id, "summary": summary}}, **({"before_publish":before_publish} if before_publish is not None else {}))
-            self._write_revoke_replay(key_name, summary, **({"before_publish":before_publish} if before_publish is not None else {}))
-            return _revoke_view(summary, retained_plaintext, retained_key)
 
     def decrypt_with_admin_master(self, *_args: Any, **_kwargs: Any) -> bytes:
         """Operational admins have no master decrypt path."""
