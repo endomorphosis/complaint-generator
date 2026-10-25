@@ -26,7 +26,7 @@ def observe_actual_executor(world, mode):
     """Run inside the real Native child of the inert owned _run parent."""
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
     from ipfs_accelerate_py.agent_supervisor.validation.validation_runtime import (
-        build_validation_environment, VALIDATION_PYTHON_ENV)
+        build_validation_environment, validation_environment_for_runner, VALIDATION_PYTHON_ENV)
     campaign, workspace = world['campaign'], world['workspace']
     stamp = lambda seconds: datetime.fromtimestamp(seconds, timezone.utc).isoformat()
     now = time.time()
@@ -65,14 +65,15 @@ def observe_actual_executor(world, mode):
         "while not (root/'executor-release').exists(): time.sleep(.01)\n")
     command = 'python -I -B '+shlex.quote(str(program))
     executor = native.PortalImplementationDaemon._validation_command_runner
-    assert Path(executor.__code__.co_filename).resolve() == Path(native.__file__).resolve() or hasattr(executor,'__wrapped__')
+    assert Path(executor.__code__.co_filename).resolve() == Path(native.__file__).resolve()
+    environment = validation_environment_for_runner(build_validation_environment(
+        {**os.environ,VALIDATION_PYTHON_ENV:sys.executable}),executor)
     results, errors = [], []
     def execute():
         try:
             results.append(runner._call_validation_with_activity(executor=executor,
                 spec=SimpleNamespace(command=command,raw_command=command), workspace_path=workspace,
-                timeout_seconds=25, environment=build_validation_environment(
-                    {**os.environ,VALIDATION_PYTHON_ENV:sys.executable}), task=task, context=context))
+                timeout_seconds=25, environment=environment, task=task, context=context))
         except BaseException as exc:
             errors.append(exc)
     thread = threading.Thread(target=execute,daemon=True); thread.start()
