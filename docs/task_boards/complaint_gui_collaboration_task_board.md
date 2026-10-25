@@ -312,7 +312,7 @@ Implementation instructions:
 
 ## CIMP-GUI-11 Implement explicit encrypted case resource key grants
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
