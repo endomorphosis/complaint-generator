@@ -1,7 +1,8 @@
 """Compact synthetic worlds for offline and unavailable GUI outcomes.
 
-Recipes bind the shared case, storage, research, proof, and inference owners.
-They do not invent a second interview, a mock API, or a global mediator.
+The original recipes isolate failure mapping with explicit in-process
+collaborators. Actual owner/recipient HTTP and Chromium cases below use the
+existing real encrypted fixture worlds instead of those unit collaborators.
 """
 
 from __future__ import annotations
@@ -38,6 +39,35 @@ SESSION = "session-57"
 GRAPH = "graph-57"
 PASSPHRASE = "synthetic-passphrase-57"
 SECRET = b"synthetic-ciphertext-57"
+
+
+def actual_unavailable_world(tmp_path):
+    """Real actor, canonical case, encrypted workspace and persisted consent.
+
+    No model transport, storage service, corpus, or proof producer is injected.
+    The app and all positive private reads are the actual production owners.
+    """
+    from applications.case_consent_api import CaseConsentService
+    from tests.test_cimp_gui_14 import _composed_case_world
+    world = _composed_case_world(tmp_path)
+    world.service = world.services[world.case.case_id]
+    world.app.state.case_consent = CaseConsentService(tmp_path / 'actual-consent',
+        cases=world.cases, key=os.urandom(32), key_id='synthetic-unavailable-consent',
+        clock=lambda: 1_700_000_100)
+    return world
+
+
+def choose_actual_purpose(client, world, csrf_token, purpose, *, cloud=False):
+    path = '/api/cases/' + world.case.case_id + '/processing-consent'
+    current = client.get(path)
+    assert current.status_code == 200, current.text
+    body = {'purpose': purpose, 'mode': 'grok_cloud' if cloud else 'local_private',
+        'expected_generation': current.json()['generation']}
+    if cloud:
+        body['explicit_case_purpose'] = True
+    response = client.post(path, headers={'x-csrf-token': csrf_token}, json=body)
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 class Kit:
