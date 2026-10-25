@@ -195,6 +195,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
                         case_assignments: Any = None,
                         case_messages: Any = None,
                         case_attachments: Any = None,
+                        case_storage: Any = None,
                         case_consent: Any = None, gui_inference_transport: Any = None,
                         gui_inference_route: Any = None,
                         operational_admin: Any = None) -> Any:
@@ -246,6 +247,10 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     if case_attachments is not None and not isinstance(case_attachments, CaseAttachmentService):
         raise CaseAccessError("case_attachments")
     mount_case_attachments(app)
+    from .case_storage_api import CaseStorageService, mount_case_storage
+    if case_storage is not None and not isinstance(case_storage, CaseStorageService):
+        raise CaseAccessError("case_storage")
+    mount_case_storage(app)
     if case_messages is not None and case_attachments is not None:
         case_attachments.bind_message_admission(case_messages.store)
         case_messages.bind_attachments(case_attachments)
@@ -301,6 +306,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     app.state.case_assignments = case_assignments
     app.state.case_messages = case_messages
     app.state.case_attachments = case_attachments
+    app.state.case_storage = case_storage
     app.state.case_consent = case_consent
     app.state.gui_inference_transport = selected_inference_transport
     app.state.gui_inference_route = gui_inference_route
