@@ -282,7 +282,7 @@ Implementation instructions:
 
 ## CIMP-GUI-10 Persist explicit case membership and scoped grants
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
