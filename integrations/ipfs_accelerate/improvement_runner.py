@@ -1772,6 +1772,9 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         and since_start <= STARTUP_SECONDS and not heartbeat.get("daemon_pid")
         and not heartbeat.get("last_agentic_maintenance_error")
     )
+    from .startup_maintenance_activity import observe as observe_startup_maintenance
+    startup_activity = (observe_startup_maintenance(sys.modules[__name__], repo_root, spec_path, state_dir,
+        record, heartbeat, native_state, now_ts=now) if owned else None)
     maintenance_ready = False
     if heartbeat_status in {"agentic_maintenance_started", "agentic_maintenance_completed"} and daemon_alive:
         from ipfs_accelerate_py.agent_supervisor.todo_daemon.supervisor_activity import observe_supervisor_activity
@@ -1813,7 +1816,7 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     if canonical_activity_evidence is not None:
         validation_evidence = canonical_activity_evidence
     worker_liveness = _owner_liveness(native_state.get("owner_process_birth"))
-    if canonical_activity_evidence is not None:
+    if canonical_activity_evidence is not None or startup_activity is not None:
         worker_liveness = "alive"  # Exact live maintenance birth, re-proved above.
     if worker_liveness == "missing":
         worker_liveness = "alive" if daemon_alive else ("absent" if not owned else "unknown")
@@ -1848,6 +1851,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "stalled"
     elif rescue_active:
         health = "active"  # Exact live repair inside the original provider cap.
+    elif startup_activity is not None:
+        health = "maintenance"  # Liveness only, within Native's fixed window/handoff.
     elif heartbeat_age is not None and startup_maintenance:
         health = "starting"
     elif heartbeat_age is not None and maintenance_ready:
@@ -1960,6 +1965,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
             "provider_execution_evidence": provider_evidence,
             "auto_rescue_activity_verified": rescue_active,
             "auto_rescue_activity_evidence": rescue_activity,
+            "startup_activity_verified": startup_activity is not None,
+            "startup_activity_evidence": startup_activity,
             "validation_activity_verified": bool(owned and validation_evidence),
             "validation_activity_evidence": validation_evidence,
             "progress_verified": bool(owned and (provider_progress or canonical_activity_evidence)),
