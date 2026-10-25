@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import time
 
 
 _MARKER = b"[auto-rescue] inline_provider_rescue start"
@@ -165,7 +166,9 @@ def observe(runner, repo_root, campaign, state, *, now_ts):
         _require((info.st_dev, info.st_ino) == tuple(binding["log_identity"]), "log_custody_changed")
         report.update(provider_birth=provider.to_dict(), rescue_started_at=event_time,
             log_device=info.st_dev, log_inode=info.st_ino, log_bytes=len(raw), log_mtime_ns=info.st_mtime_ns)
-        _require(0 <= now_ts - info.st_mtime <= runner.STALL_SECONDS, "rescue_log_stale")
+        observed_now = max(now_ts, time.time())
+        _require(observed_now < deadline, "provider_deadline_expired")
+        _require(0 <= observed_now - info.st_mtime <= runner.STALL_SECONDS, "rescue_log_stale")
         headers = {}
         for line in raw.splitlines()[:8]:
             key, sep, value = line.partition(b": ")
@@ -198,8 +201,9 @@ def observe(runner, repo_root, campaign, state, *, now_ts):
         _require(_provider_birth(native, born["provider_pid"], owner, workspace,
                 binding["log_identity"], event_time) == provider, "provider_birth_changed")
         fresh = runner._validation_activity_binding(workspace, {"id": context["task_id"]}, context,
-                                                   now_ts=now_ts, owner_pid=owner.pid)
+                                                   now_ts=max(now_ts,time.time()), owner_pid=owner.pid)
         _require(fresh == binding, "native_binding_changed")
+        _require(max(now_ts,time.time()) < deadline, "provider_deadline_expired")
         report.update(activity_verified=True, work_progress_verified=last in _WORK,
             frame_counts=dict(counts), last_frame_kind=last, reason="bounded_native_rescue_activity")
     except _Unavailable as exc:
