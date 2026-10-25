@@ -1032,7 +1032,7 @@ Implementation instructions:
 
 ## CIMP-GUI-35 Render bounded inference progress and errors
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
