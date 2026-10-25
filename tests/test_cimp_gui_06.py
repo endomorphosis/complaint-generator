@@ -6,6 +6,8 @@ non-dispatch, not legal support, live inference or complete GUI qualification.
 from __future__ import annotations
 
 import os
+import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,7 +19,7 @@ from applications.browser_sessions import (BrowserSessionConfiguration, BrowserS
     PrincipalStoreCredentialAdapter, SESSION_COOKIE)
 from applications.case_access import CaseAccessError, CaseActionAuthorizer
 from applications.case_directory import CaseDirectory
-from applications.case_routes import (COMPOSITION_NAME, CaseHandlerRegistry, compose_case_routes,
+from applications.case_routes import (COMPOSITION_NAME, CaseHandlerRegistry, CaseJSONBodyLimits, compose_case_routes,
     register_case_route_module, unregister_case_route_module)
 from applications.principal_store import PrincipalStore
 from applications.review_api import create_review_api_app
@@ -115,9 +117,9 @@ def _login(client, credential=OWNER_CREDENTIAL):
     return response.json()["csrf_token"]
 
 
-def _app(world, variant="server", *, handlers=True, sessions=True):
+def _app(world, variant="server", *, handlers=True, sessions=True, json_body_limits=None):
     kwargs = {"browser_sessions": world.sessions if sessions else None,
-              "case_handlers": world.handlers if handlers else None}
+              "case_handlers": world.handlers if handlers else None, "json_body_limits": json_body_limits}
     if variant == "review":
         return create_review_api_app(world.mediator, world.authorizer, **kwargs)
     if variant == "surface":
@@ -360,3 +362,191 @@ def test_uncomposed_legacy_review_and_document_routers_fail_closed(tmp_path):
             response = client.get(path)
             assert response.status_code == 401 and response.json()["detail"] == "authorizer_required"
     assert world.mediator.calls == []
+
+
+async def _asgi_post(app, path, headers, receive):
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
+             "http_version": "1.1", "method": "POST", "scheme": "https", "path": path,
+             "raw_path": path.encode(), "query_string": b"", "root_path": "",
+             "server": ("testserver", 443), "client": ("synthetic", 1),
+             "headers": [(key.lower().encode(), str(value).encode()) for key, value in headers.items()]}
+    await app(scope, receive, send)
+    start = next(message for message in sent if message["type"] == "http.response.start")
+    body = b"".join(message.get("body", b"") for message in sent if message["type"] == "http.response.body")
+    return start["status"], json.loads(body)
+
+
+def _wire_credentials(client, csrf, case):
+    return {**_headers(case), "cookie": f"{SESSION_COOKIE}={client.cookies.get(SESSION_COOKIE)}",
+            "x-csrf-token": csrf, "content-type": "application/json"}
+
+
+@pytest.mark.parametrize("mode", ["missing_cookie", "invalid_cookie", "missing_csrf"])
+def test_private_body_is_never_read_before_session_and_csrf_verification(tmp_path, mode):
+    world = _world(tmp_path)
+    app = _app(world)
+    reads = []
+
+    async def forbidden_receive():
+        reads.append(True)
+        raise AssertionError("unauthenticated request body was read")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        csrf = _login(client)
+        headers = _wire_credentials(client, csrf, world.case)
+        headers["content-length"] = "999999999"
+        if mode == "missing_cookie":
+            headers.pop("cookie")
+        elif mode == "invalid_cookie":
+            headers["cookie"] = f"{SESSION_COOKIE}=synthetic-invalid-cookie"
+        else:
+            headers.pop("x-csrf-token")
+        status, payload = asyncio.run(_asgi_post(app, "/api/complaint-workspace/mcp/rpc", headers, forbidden_receive))
+    assert status == (403 if mode == "missing_csrf" else 401)
+    assert payload["error"] in {"session_required", "authentication_failed", "csrf_rejected"}
+    assert reads == []
+    assert world.mediator.calls == [] and world.workspace.calls == []
+
+
+def test_json_admission_bounds_actual_bytes_not_only_content_length(tmp_path):
+    world = _world(tmp_path)
+    app = _app(world, json_body_limits=CaseJSONBodyLimits(max_bytes=256, read_timeout_seconds=0.2))
+    reads = []
+
+    async def oversized_receive():
+        reads.append(True)
+        return {"type": "http.request", "body": b"{" + b" " * 1024 + b"}", "more_body": False}
+
+    with TestClient(app, base_url="https://testserver") as client:
+        csrf = _login(client)
+        headers = _wire_credentials(client, csrf, world.case)
+        headers["content-length"] = "1"
+        status, payload = asyncio.run(_asgi_post(app, "/api/complaint-workspace/mcp/rpc", headers, oversized_receive))
+    assert status == 413 and payload["error"] == "request_body_too_large"
+    assert len(reads) == 1
+    assert world.mediator.calls == [] and world.workspace.calls == []
+
+
+def test_declared_oversized_json_is_rejected_without_reading(tmp_path):
+    world = _world(tmp_path)
+    app = _app(world, json_body_limits=CaseJSONBodyLimits(max_bytes=256))
+    reads = []
+
+    async def forbidden_receive():
+        reads.append(True)
+        raise AssertionError("declared oversized body was read")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        csrf = _login(client)
+        headers = _wire_credentials(client, csrf, world.case)
+        headers["content-length"] = "257"
+        status, payload = asyncio.run(_asgi_post(app, "/api/complaint-workspace/mcp/rpc", headers, forbidden_receive))
+    assert status == 413 and payload["error"] == "request_body_too_large"
+    assert reads == []
+    assert world.mediator.calls == [] and world.workspace.calls == []
+
+
+def test_slow_json_body_is_cancelled_at_admission_deadline(tmp_path):
+    world = _world(tmp_path)
+    app = _app(world, json_body_limits=CaseJSONBodyLimits(max_bytes=256, read_timeout_seconds=0.02))
+    events = []
+
+    async def slow_receive():
+        events.append("read")
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            events.append("cancelled")
+            raise
+        return {"type": "http.request", "body": b"{}", "more_body": False}
+
+    async def bounded_request(headers):
+        return await asyncio.wait_for(_asgi_post(app, "/api/complaint-workspace/mcp/rpc", headers, slow_receive), timeout=1)
+
+    with TestClient(app, base_url="https://testserver") as client:
+        csrf = _login(client)
+        status, payload = asyncio.run(bounded_request(_wire_credentials(client, csrf, world.case)))
+    assert status == 408 and payload["error"] == "request_body_timeout"
+    assert events == ["read", "cancelled"]
+    assert world.mediator.calls == [] and world.workspace.calls == []
+
+
+def test_multipart_claimed_user_is_unqualified_and_never_reaches_mediator(tmp_path):
+    world = _world(tmp_path)
+    app = _app(world)
+    with TestClient(app, base_url="https://testserver") as client:
+        csrf = _login(client)
+        headers = {**_headers(world.case), "x-csrf-token": csrf}
+        response = client.post("/api/claim-support/upload-document", headers=headers,
+            data={"user_id": world.stranger.principal_id},
+            files={"file": ("synthetic.txt", b"synthetic multipart marker", "text/plain")})
+        assert response.status_code == 415
+        assert response.json()["error"] == "upload_transport_unqualified"
+        reads = []
+
+        async def forbidden_receive():
+            reads.append(True)
+            raise AssertionError("unqualified multipart was parsed")
+
+        wire = _wire_credentials(client, csrf, world.case)
+        wire["content-type"] = "multipart/form-data; boundary=synthetic-boundary"
+        status, payload = asyncio.run(_asgi_post(app, "/api/claim-support/upload-document", wire, forbidden_receive))
+        assert status == 415 and payload["error"] == "upload_transport_unqualified"
+        assert reads == []
+    assert world.mediator.calls == [] and world.workspace.calls == []
+
+
+def test_session_revocation_during_body_admission_is_rechecked(tmp_path):
+    world = _world(tmp_path)
+    app = _app(world)
+    with TestClient(app, base_url="https://testserver") as client:
+        csrf = _login(client)
+        token = client.cookies.get(SESSION_COOKIE)
+
+        async def revoked_receive():
+            world.sessions.logout(token, csrf_token=csrf)
+            return {"type": "http.request", "body": b'{"jsonrpc":"2.0","id":1,"method":"ping"}', "more_body": False}
+
+        status, payload = asyncio.run(_asgi_post(app, "/api/complaint-workspace/mcp/rpc",
+            _wire_credentials(client, csrf, world.case), revoked_receive))
+    assert status == 401 and payload["error"] == "authentication_failed"
+    assert world.mediator.calls == [] and world.workspace.calls == []
+
+
+def test_json_message_population_is_bounded_even_for_empty_chunks(tmp_path):
+    world = _world(tmp_path)
+    app = _app(world, json_body_limits=CaseJSONBodyLimits(max_bytes=256, max_messages=2))
+    reads = []
+
+    async def empty_receive():
+        reads.append(True)
+        return {"type": "http.request", "body": b"", "more_body": True}
+
+    with TestClient(app, base_url="https://testserver") as client:
+        csrf = _login(client)
+        status, payload = asyncio.run(_asgi_post(app, "/api/complaint-workspace/mcp/rpc",
+            _wire_credentials(client, csrf, world.case), empty_receive))
+    assert status == 413 and payload["error"] == "request_body_too_many_messages"
+    assert len(reads) == 3
+    assert world.mediator.calls == [] and world.workspace.calls == []
+
+
+def test_anonymous_login_has_explicit_small_json_admission(tmp_path):
+    world = _world(tmp_path)
+    app = _app(world)
+    reads = []
+
+    async def forbidden_receive():
+        reads.append(True)
+        raise AssertionError("declared oversized login body was read")
+
+    status, payload = asyncio.run(_asgi_post(app, "/api/complaint-workspace/auth/login",
+        {"content-type": "application/json", "content-length": str(16 * 1024 + 1)}, forbidden_receive))
+    assert status == 413 and payload["error"] == "request_body_too_large"
+    assert reads == []
+    assert world.mediator.calls == [] and world.workspace.calls == []

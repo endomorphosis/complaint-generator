@@ -3,11 +3,17 @@
 Case identifiers select a resource; they never authenticate its caller. A
 BrowserSessionService verifies the received cookie and CSRF token before the
 shared CaseActionAuthorizer sees the actor. Case tenants and principal-roster
-tenants are distinct namespaces. Legacy captured-mediator chat stays retired.
+tenants are distinct namespaces. Legacy captured-mediator chat stays retired. JSON control bodies default to
+1 MiB, 1024 ASGI messages and five seconds after authentication (login is
+bounded to 16 KiB before credential verification). Multipart/raw uploads are
+explicitly unqualified and denied; these limits do not claim upload support.
 """
 from __future__ import annotations
 
 from contextvars import ContextVar
+from dataclasses import dataclass
+import asyncio
+import math
 from pathlib import Path
 import json
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -27,6 +33,30 @@ AUTH_PATHS = frozenset("/api/complaint-workspace/auth/" + name for name in ("log
 _MODULES: List[Tuple[str, Callable[..., None], Tuple[str, ...]]] = []
 RouteMount = Callable[[Any, Optional[CaseActionAuthorizer]], None]
 _BOUND_HANDLERS: ContextVar[Optional[Callable[[], Tuple[Any, Any, Any]]]] = ContextVar("case_route_handlers", default=None)
+
+
+@dataclass(frozen=True)
+class CaseJSONBodyLimits:
+    """Explicit bounded JSON control admission; never a multipart upload cap."""
+
+    max_bytes: int = 1024 * 1024
+    max_messages: int = 1024
+    read_timeout_seconds: float = 5.0
+
+    def __post_init__(self):
+        if (type(self.max_bytes) is not int or not 1 <= self.max_bytes <= 16 * 1024 * 1024
+                or type(self.max_messages) is not int or not 1 <= self.max_messages <= 4096
+                or isinstance(self.read_timeout_seconds, bool)
+                or not isinstance(self.read_timeout_seconds, (int, float))
+                or not math.isfinite(self.read_timeout_seconds)
+                or not 0 < self.read_timeout_seconds <= 30):
+            raise ValueError("invalid_case_json_body_limits")
+
+
+class _BodyAdmissionError(Exception):
+    def __init__(self, status: int, code: str):
+        self.status, self.code = status, code
+        super().__init__(code)
 
 
 class CaseHandlerRegistry:
@@ -139,7 +169,8 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
                         include_workspace: bool = True, include_review: bool = True,
                         include_document: bool = True, workspace_service: Any = None,
                         browser_sessions: Optional[BrowserSessionService] = None,
-                        case_handlers: Optional[CaseHandlerRegistry] = None) -> Any:
+                        case_handlers: Optional[CaseHandlerRegistry] = None,
+                        json_body_limits: Optional[CaseJSONBodyLimits] = None) -> Any:
     """Mount the same fail-closed boundary in every production app variant.
 
     Historical mediator/workspace arguments grant no ambient case access.
@@ -152,6 +183,9 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
         raise CaseAccessError("authentication_configuration")
     if case_handlers is not None and not isinstance(case_handlers, CaseHandlerRegistry):
         raise CaseAccessError("case_handler_binding")
+    if json_body_limits is not None and not isinstance(json_body_limits, CaseJSONBodyLimits):
+        raise ValueError("invalid_case_json_body_limits")
+    limits = json_body_limits if json_body_limits is not None else CaseJSONBodyLimits()
     sessions = browser_sessions if browser_sessions is not None else BrowserSessionService.unavailable()
     from .complaint_workspace_api import create_complaint_workspace_router
     from .fastapi_compat import attach_router_routes
@@ -172,11 +206,12 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     app.state.case_authorizer = authorizer
     app.state.browser_sessions = sessions
     app.state.case_handlers = case_handlers
+    app.state.case_json_body_limits = limits
     app.state.case_route_composition = COMPOSITION_NAME
     app.state.case_route_extension_kinds = tuple(kind for kind, _mount, _prefixes in modules)
     app.state.case_route_boundaries = BOUNDARIES
     app.add_middleware(CaseRouteAuthorizationMiddleware, authorizer=authorizer, sessions=sessions,
-                       case_handlers=case_handlers, extensions=extensions)
+                       case_handlers=case_handlers, extensions=extensions, json_body_limits=limits)
     return app
 
 
@@ -290,26 +325,71 @@ def _required_action(path: str, method: str, material: Mapping[str, Any], extens
     return "case.read" if method in {"GET", "HEAD"} else "case.update"
 
 
-async def _read_body(receive):
-    messages, chunks = [], []
-    while True:
-        message = await receive()
-        messages.append(message)
-        if message.get("type") != "http.request":
-            break
-        chunks.append(message.get("body", b""))
-        if not message.get("more_body", False):
-            break
-    index = 0
+async def _read_json_body(scope, receive, limits: CaseJSONBodyLimits, *, login=False):
+    """Bound actual bytes/messages/time, then replay the identical JSON body."""
+    headers = {key.lower(): value for key, value in scope.get("headers", [])}
+    content_type = headers.get(b"content-type", b"").decode("latin1").split(";", 1)[0].strip().lower()
+    if content_type and content_type != "application/json" and not content_type.endswith("+json"):
+        raise _BodyAdmissionError(415, "body_transport_unqualified")
+    maximum = min(limits.max_bytes, 16 * 1024) if login else limits.max_bytes
+    length = headers.get(b"content-length")
+    if length is not None:
+        try:
+            declared = int(length)
+        except (ValueError, TypeError):
+            raise _BodyAdmissionError(400, "request_body_length") from None
+        if declared < 0:
+            raise _BodyAdmissionError(400, "request_body_length")
+        if declared > maximum:
+            raise _BodyAdmissionError(413, "request_body_too_large")
+    chunks, total, messages = [], 0, 0
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + limits.read_timeout_seconds
+    try:
+        async with asyncio.timeout(limits.read_timeout_seconds):
+            while True:
+                if loop.time() >= deadline:
+                    raise _BodyAdmissionError(408, "request_body_timeout")
+                message = await receive()
+                if loop.time() >= deadline:
+                    raise _BodyAdmissionError(408, "request_body_timeout")
+                messages += 1
+                if messages > limits.max_messages:
+                    raise _BodyAdmissionError(413, "request_body_too_many_messages")
+                if message.get("type") != "http.request":
+                    raise _BodyAdmissionError(400, "request_body_incomplete")
+                chunk = message.get("body", b"")
+                if not isinstance(chunk, bytes):
+                    raise _BodyAdmissionError(400, "request_body_invalid")
+                total += len(chunk)
+                if total > maximum:
+                    raise _BodyAdmissionError(413, "request_body_too_large")
+                if chunk:
+                    chunks.append(chunk)
+                if not message.get("more_body", False):
+                    break
+    except TimeoutError:
+        raise _BodyAdmissionError(408, "request_body_timeout") from None
+    body = b"".join(chunks)
+    if body:
+        if not content_type:
+            raise _BodyAdmissionError(415, "body_transport_unqualified")
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            raise _BodyAdmissionError(400, "request_body_invalid") from None
+        if not isinstance(payload, dict):
+            raise _BodyAdmissionError(400, "request_body_invalid")
+    if loop.time() >= deadline:
+        raise _BodyAdmissionError(408, "request_body_timeout")
+    sent = False
 
     async def replay():
-        nonlocal index
-        if index < len(messages):
-            message = messages[index]
-            index += 1
-            return message
-        return {"type": "http.request", "body": b"", "more_body": False}
-    return b"".join(chunks), replay
+        nonlocal sent
+        data = b"" if sent else body
+        sent = True
+        return {"type": "http.request", "body": data, "more_body": False}
+    return body, replay
 
 
 async def _send_json(send, status, payload):
@@ -320,9 +400,10 @@ async def _send_json(send, status, payload):
 
 
 class CaseRouteAuthorizationMiddleware:
-    def __init__(self, app: Any, *, authorizer, sessions, case_handlers, extensions) -> None:
+    def __init__(self, app: Any, *, authorizer, sessions, case_handlers, extensions, json_body_limits) -> None:
         self.app, self.authorizer, self.sessions = app, authorizer, sessions
         self.case_handlers, self.extensions = case_handlers, extensions
+        self.json_body_limits = json_body_limits
         self.prefixes = PROTECTED_PREFIXES + tuple(prefix for _kind, prefix in extensions)
 
     async def __call__(self, scope, receive, send):
@@ -341,15 +422,34 @@ class CaseRouteAuthorizationMiddleware:
             await self._deny(scope, send, 401, "transport_unqualified")
             return
         if path in AUTH_PATHS:
-            await self.app(scope, receive, send)
+            inbound = receive
+            try:
+                if not path.endswith("/auth/login"):
+                    await self.sessions.bind_http(_credential_request(scope), allow_anonymous=False)
+                if scope.get("method") not in {"GET", "HEAD", "OPTIONS"}:
+                    _body, inbound = await _read_json_body(scope, receive, self.json_body_limits, login=path.endswith("/auth/login"))
+            except BrowserSessionError as exc:
+                status, code = browser_session_http_status(exc)
+                await self._deny(scope, send, status, code)
+                return
+            except _BodyAdmissionError as exc:
+                await self._deny(scope, send, exc.status, exc.code)
+                return
+            await self.app(scope, inbound, send)
             return
         if not isinstance(self.authorizer, CaseActionAuthorizer):
             await self._deny(scope, send, 401, "authorizer_required")
             return
         body, inbound = b"", receive
-        if scope.get("method") not in {"GET", "HEAD", "OPTIONS"}:
-            body, inbound = await _read_body(receive)
         try:
+            # Verify the received cookie/CSRF before awaiting or buffering even
+            # one private request-body message.
+            bound = await self.sessions.bind_http(_credential_request(scope), allow_anonymous=False)
+            if path == "/api/claim-support/upload-document":
+                raise _BodyAdmissionError(415, "upload_transport_unqualified")
+            if scope.get("method") not in {"GET", "HEAD", "OPTIONS"}:
+                body, inbound = await _read_json_body(scope, receive, self.json_body_limits)
+            # A session may expire or be revoked while an admitted body arrives.
             bound = await self.sessions.bind_http(_credential_request(scope), allow_anonymous=False)
             _check_actor_claims(scope, body, bound.principal_id)
             material = _material_from_scope(scope, body)
@@ -367,6 +467,9 @@ class CaseRouteAuthorizationMiddleware:
         except BrowserSessionError as exc:
             status, code = browser_session_http_status(exc)
             await self._deny(scope, send, status, code)
+            return
+        except _BodyAdmissionError as exc:
+            await self._deny(scope, send, exc.status, exc.code)
             return
         except CaseAccessError as exc:
             await self._deny(scope, send, _status_for_denial(exc.code), exc.code)

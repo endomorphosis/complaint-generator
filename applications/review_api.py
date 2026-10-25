@@ -262,64 +262,12 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
             build_claim_support_document_payload(mediator, request)
         )
 
-    if _MULTIPART_AVAILABLE:
-
-        @router.post("/api/claim-support/upload-document")
-        async def claim_support_upload_document(
-            file: UploadFile = File(...),
-            user_id: Optional[str] = Form(default=None),
-            claim_type: Optional[str] = Form(default=None),
-            claim_element_id: Optional[str] = Form(default=None),
-            claim_element: Optional[str] = Form(default=None),
-            document_label: Optional[str] = Form(default=None),
-            source_url: Optional[str] = Form(default=None),
-            mime_type: Optional[str] = Form(default=None),
-            evidence_type: str = Form(default="document"),
-            testimony_id: Optional[str] = Form(default=None),
-            required_support_kinds: Optional[str] = Form(default=None),
-            include_post_save_review: bool = Form(default=True),
-            include_support_summary: bool = Form(default=True),
-            include_overview: bool = Form(default=True),
-            include_follow_up_plan: bool = Form(default=True),
-        ) -> Dict[str, Any]:
-            file_bytes = await file.read()
-            return normalize_review_response_dto(
-                build_claim_support_uploaded_document_payload(
-                    mediator,
-                    user_id=user_id,
-                    claim_type=claim_type,
-                    claim_element_id=claim_element_id,
-                    claim_element=claim_element,
-                    file_bytes=file_bytes,
-                    filename=file.filename,
-                    document_label=document_label,
-                    source_url=source_url,
-                    mime_type=mime_type or file.content_type,
-                    evidence_type=evidence_type,
-                    testimony_id=testimony_id,
-                    document_metadata={},
-                    required_support_kinds=_normalize_required_support_kinds_form(required_support_kinds),
-                    include_post_save_review=include_post_save_review,
-                    include_support_summary=include_support_summary,
-                    include_overview=include_overview,
-                    include_follow_up_plan=include_follow_up_plan,
-                )
-            )
-    else:
-
-        @router.post("/api/claim-support/upload-document")
-        async def claim_support_upload_document_unavailable(_: Request) -> Dict[str, Any]:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Document upload requires the optional dependency 'python-multipart'. "
-                    "Install it to enable multipart evidence uploads."
-                ),
-            )
-
-    # -----------------------------------------------------------------------
-    # M1: Document Intake And Decomposition — reparse action
-    # -----------------------------------------------------------------------
+    @router.post("/api/claim-support/upload-document")
+    async def claim_support_upload_document() -> Dict[str, Any]:
+        # No Form/File dependencies: FastAPI must not parse a caller-selected
+        # user_id or an unbounded upload before authentication. A later bounded
+        # case-attachment transport must qualify identity and encrypted storage.
+        raise HTTPException(status_code=415, detail="upload_transport_unqualified")
 
     @router.post("/api/claim-support/reparse-document")
     async def claim_support_reparse_document(
@@ -593,7 +541,7 @@ def attach_claim_support_review_routes(app: FastAPI, mediator: Any) -> FastAPI:
 
 
 def create_review_api_app(mediator: Any, authorizer: Any = None, workspace_service: Any = None,
-                          *, browser_sessions: Any = None, case_handlers: Any = None) -> FastAPI:
+                          *, browser_sessions: Any = None, case_handlers: Any = None, json_body_limits: Any = None) -> FastAPI:
     """Production review variant. Case routes come from the shared composition seam."""
 
     from .case_routes import compose_case_routes
@@ -606,5 +554,6 @@ def create_review_api_app(mediator: Any, authorizer: Any = None, workspace_servi
         workspace_service=workspace_service,
         browser_sessions=browser_sessions,
         case_handlers=case_handlers,
+        json_body_limits=json_body_limits,
     )
     return app
