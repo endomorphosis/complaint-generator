@@ -103,6 +103,38 @@ def _source_snapshot(root: Path, spec_file: Path, artifacts) -> dict[str, Any]:
                       for path in paths}}
 
 
+def _task_completion_observation(root: Path, state: Path, task, native, rows, journal_pin,
+                                 latest, *, interrupted_view=None, integration_head=None) -> dict[str, Any]:
+    """Keep ordinary finish rules; separately observe a proven interrupted callback."""
+    candidates = [row for row in rows if row.get("task_id") == task.task_id
+                  and row.get("canonical_task_cid") == task.canonical_task_cid]
+    head = integration_head or evidence._git(root, "rev-parse", "HEAD")
+    if not candidates:
+        if latest.get(task.task_id) is not None or interrupted_view is None:
+            raise evidence.ReleaseEvidenceError("native_callback_history_missing")
+        from .completed_claim_recovery import observe_interrupted_completion
+        try:
+            return observe_interrupted_completion(interrupted_view, task_id=task.task_id,
+                canonical_task_cid=task.canonical_task_cid, journal_pin=journal_pin, integration_head=head)
+        except (ValueError, OSError, RuntimeError) as error:
+            raise evidence.ReleaseEvidenceError("interrupted_callback_" + str(error)) from None
+    row = candidates[-1]
+    if latest.get(task.task_id) != row["sequence"]:
+        raise evidence.ReleaseEvidenceError("latest_native_finish_not_successful")
+    if row.get("behavioral_evidence_present") and not isinstance(row.get("todo", {}).get("completion_callback_evidence"), dict):
+        raise evidence.ReleaseEvidenceError("native_callback_evidence_missing")
+    receipt, callback_commit = evidence._callback(row, task, native)
+    history = evidence._historical_execution(state, row, task, journal_pin)
+    commits = (row.get("implementation_commit"), row.get("merge_commit"), callback_commit)
+    if any(evidence._COMMIT.fullmatch(str(commit or "")) is None for commit in commits):
+        raise evidence.ReleaseEvidenceError("native_integration_commit_missing")
+    for commit in set(commits):
+        evidence._git(root, "merge-base", "--is-ancestor", commit, head)
+    return {"task_cid": task.canonical_task_cid, "event_id": row["event_id"],
+        "event_kind": "implementation_finished", "callback_commit": callback_commit,
+        "member_receipt_digest": _digest(receipt), "historical_evidence_digest": _digest(history)}
+
+
 def verify_campaign_completion(repo_root: Path | str, spec_path: Path | str,
                                state_dir: Path | str) -> dict[str, Any]:
     """Verify existing Native completion without provider, task or recovery effects.
@@ -174,30 +206,20 @@ def verify_campaign_completion(repo_root: Path | str, spec_path: Path | str,
             raise evidence.ReleaseEvidenceError("native_merge_queue_open")
         rows, journal_pin = evidence._journal(state, event_log)
         latest = _latest_terminals(state, journal_pin, tasks)
+        interrupted_view = None
         for task_id, task in tasks.items():
             if (task.status != "completed" or statuses.get(task_id) != "completed"
                     or identities.get(task_id, {}).get("canonical_task_cid") != task.canonical_task_cid
                     or task.canonical_task_cid not in queue["bindings"].get(task_id, [])):
                 raise evidence.ReleaseEvidenceError("actual_native_revision_completion_missing")
-            candidates = [row for row in rows if row.get("task_id") == task_id
-                          and row.get("canonical_task_cid") == task.canonical_task_cid]
-            if not candidates:
-                raise evidence.ReleaseEvidenceError("native_callback_history_missing")
-            row = candidates[-1]
-            if latest.get(task_id) != row["sequence"]:
-                raise evidence.ReleaseEvidenceError("latest_native_finish_not_successful")
-            if row.get("behavioral_evidence_present") and not isinstance(row.get("todo", {}).get("completion_callback_evidence"), dict):
-                raise evidence.ReleaseEvidenceError("native_callback_evidence_missing")
-            receipt, callback_commit = evidence._callback(row, task, native)
-            history = evidence._historical_execution(state, row, task, journal_pin)
-            commits = (row.get("implementation_commit"), row.get("merge_commit"), callback_commit)
-            if any(evidence._COMMIT.fullmatch(str(commit or "")) is None for commit in commits):
-                raise evidence.ReleaseEvidenceError("native_integration_commit_missing")
-            for commit in set(commits):
-                evidence._git(root, "merge-base", "--is-ancestor", commit, before["head"])
-            result["tasks"][task_id] = {"task_cid": task.canonical_task_cid,
-                "event_id": row["event_id"], "callback_commit": callback_commit,
-                "member_receipt_digest": _digest(receipt), "historical_evidence_digest": _digest(history)}
+            if (interrupted_view is None and latest.get(task_id) is None
+                    and not any(row.get("task_id") == task_id
+                        and row.get("canonical_task_cid") == task.canonical_task_cid for row in rows)):
+                from .improvement_runner import _recovery_config
+                from .completed_claim_recovery import read_only_completion_view
+                interrupted_view = read_only_completion_view(_recovery_config(root, state, launcher))
+            result["tasks"][task_id] = _task_completion_observation(root, state, task, native,
+                rows, journal_pin, latest, interrupted_view=interrupted_view, integration_head=before["head"])
         after = _source_snapshot(root, spec_file, artifacts)
         if (after != before or evidence._read(launcher_path) != launcher_raw
                 or _state(root, state) != projection or _queue(root, state, branch) != queue

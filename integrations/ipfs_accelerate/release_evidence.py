@@ -480,6 +480,31 @@ def _historical_execution(state: Path, row: Mapping[str, Any], task: Any, journa
                             "Historical case counts, AST seals, and skip outcomes are unavailable; current semantic coverage requires fresh mandatory measurements."]}
 
 
+def historical_queue_validation(state: Path, validation: Mapping[str, Any], task: Any,
+                                journal_pin: Mapping[str, Any], *, callback_sequence: int,
+                                callback_event_id: str) -> dict[str, Any]:
+    """Read the same historical seals from an actual completed queue proof.
+
+    This is a distinct queue/callback observation, never a synthesized Native
+    implementation_finished event. Malformed modern data cannot use legacy.
+    """
+    if "behavioral_evidence" in validation:
+        raw = _sidecar(state, validation.get("behavioral_evidence"))
+        selected = ([{name: item.get(name) for name in ("admitted", "measurement_record")}
+                     if isinstance(item, dict) else None for item in raw]
+                    if isinstance(raw, list) else None)
+        history = _historical_measurements(state, selected)
+    else:
+        # Reuse the exact existing Native DAG/command/launcher checks. This
+        # projection labels the genuine callback event as its provenance.
+        legacy = _legacy_native_validation(validation)
+        history = _historical_execution(state, {"behavioral_evidence_present": False,
+            "legacy_native_validation": legacy, "sequence": callback_sequence,
+            "event_id": callback_event_id}, task, journal_pin)
+    return {**history, "observation_provenance": "completed_queue_validation_and_durable_callback",
+            "native_finish_event_synthesized": False}
+
+
 def _callback(row: Mapping[str, Any], task: Any, native) -> tuple[dict[str, Any], str]:
     if (type(row.get("returncode")) is not int or row["returncode"] != 0
             or row.get("validation_passed") is not True or row.get("merged") is not True

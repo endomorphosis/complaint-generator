@@ -2065,7 +2065,7 @@ def _recovery_checkout_lease(repo_root: Path, *, board_namespace: str = "complai
     if lease is None:
         raise BlockingIOError("native checkout mutation owner is present")
     try:
-        yield
+        yield lease
     finally:
         if not locks.release_checkout_mutation_lease(lease, require_exact_metadata=True):
             raise RuntimeError("native recovery checkout lease changed; retained")
@@ -2189,7 +2189,8 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
                 return _refusal("recovery_preimage_changed", observed)
             _parent_closed(state_dir, record, context, False)
             _, recovery_artifacts = _campaign_spec(repo_root, spec_path)
-            stack.enter_context(_recovery_checkout_lease(repo_root, board_namespace=recovery_artifacts.board_namespace))
+            checkout_lease = stack.enter_context(_recovery_checkout_lease(repo_root,
+                board_namespace=recovery_artifacts.board_namespace))
             # Even preparing an existing queue can touch its schema/import
             # projection. Prove current process/container closure first.
             _parent_closed(state_dir, record, context, False)
@@ -2243,6 +2244,7 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             attempt_result = daemon.reconcile_quiesced_active_attempt()
             claim_result = None
             pending_claim_result = None
+            completed_claim_result = None
             blocked = bool(attempt_result.get("blocked"))
             reason = str(attempt_result.get("reason") or "")
             terminal_claim_ok = (not blocked) or reason == "task_claim_reconciliation_blocked"
@@ -2253,6 +2255,29 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             }
             if terminal_claim_ok and not unsafe:
                 claim_result = daemon.reconcile_quiesced_implementation_task_claim()
+            if (terminal_claim_ok and not unsafe and isinstance(claim_result, dict)
+                    and claim_result.get("blocked") is True
+                    and claim_result.get("reason") == "task_claim_worktree_lifecycle_missing"):
+                from .completed_claim_recovery import completed_claim_daemon, reconcile_completed_claim
+                from ipfs_accelerate_py.agent_supervisor.merge.checkout_lock import read_checkout_mutation_lease
+                def completed_claim_closed():
+                    _parent_closed(state_dir, record, context, False)
+                    if read_checkout_mutation_lease(checkout_lease.lock_path) != checkout_lease:
+                        raise ValueError("completed_claim_checkout_guard_changed")
+                    current_containers = _read_json(state_dir / "container_shutdown.json")
+                    if (not _fence_owned_tree(record).get("fenced")
+                            or not _shutdown_verified(record, current_containers, repo_root, state_dir)
+                            or not _observe_campaign_containers(repo_root, state_dir, selected_root,
+                                record, current_containers)):
+                        raise ValueError("completed_claim_process_or_container_closure_unverified")
+                completed_claim_closed()
+                daemon = completed_claim_daemon(_recovery_config(repo_root, state_dir, record),
+                    merge_queue=queue_instance)
+                completed_claim_result = reconcile_completed_claim(daemon, reprove_closure=completed_claim_closed)
+                attempt_result = daemon.reconcile_quiesced_active_attempt()
+                claim_result = daemon.reconcile_quiesced_implementation_task_claim()
+                reason = str(attempt_result.get("reason") or "")
+                completed_claim_closed()
             from .pending_claim_runtime import reconcile_pending_claim, unfinished_handoff_task
             unfinished = unfinished_handoff_task(state_dir)
             nonterminal_claim = (isinstance(claim_result, dict) and claim_result.get("blocked") is True
@@ -2272,22 +2297,29 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             after_state, _ = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
             count_keys = ("implementation_attempts", "implementation_attempts_by_cid")
             before_state = preimage["native_payload"]
+            if completed_claim_result is not None and after_state != before_state:
+                return _refusal("completed_claim_native_payload_changed", observed,
+                    counters_preserved=False, progress_preserved=False, effects_uncertain=True,
+                    completed_claim_reconciliation=completed_claim_result)
             if (after_state.get("read_error") or any(after_state.get(key) != before_state.get(key) for key in count_keys)
                     or after_state.get("completed_task_ids") != before_state.get("completed_task_ids")):
                 return _refusal("native_accounting_or_completion_changed", observed,
                     counters_preserved=False, progress_preserved=False,
                     attempt_refunded=None, diagnostics=["native invariant observation changed; no rollback attempted"],
                     attempt_reconciliation=attempt_result, claim_reconciliation=claim_result,
-                    pending_claim_reconciliation=pending_claim_result)
+                    pending_claim_reconciliation=pending_claim_result,
+                    completed_claim_reconciliation=completed_claim_result)
             reconciled = (not attempt_result.get("blocked") and
                 not (isinstance(claim_result, dict) and claim_result.get("blocked"))) and (bool(attempt_result.get("reconciled")) or (
                 isinstance(claim_result, dict) and bool(claim_result.get("reconciled")) and not claim_result.get("blocked")
-            ))
+            ) or (isinstance(completed_claim_result, dict)
+                and completed_claim_result.get("reconciled") is True and not completed_claim_result.get("blocked")))
             if not reconciled:
                 return _refusal(reason or "native_reconciliation_blocked", observed,
                                 diagnostics=[reason or "native_reconciliation_blocked"],
                                 attempt_reconciliation=attempt_result, claim_reconciliation=claim_result,
                                 pending_claim_reconciliation=pending_claim_result,
+                                completed_claim_reconciliation=completed_claim_result,
                                 fence=fence, container_shutdown=containers)
             return {"recovery": "reconciled", "eligible": True, "reconciled": True,
                     "reason": reason or "quiesced_active_attempt_reconciled", "status": observed.get("status"),
@@ -2296,6 +2328,7 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
                     "diagnostics": [reason or "quiesced_active_attempt_reconciled"],
                     "attempt_reconciliation": attempt_result, "claim_reconciliation": claim_result,
                     "pending_claim_reconciliation": pending_claim_result,
+                    "completed_claim_reconciliation": completed_claim_result,
                     "fence": fence, "container_shutdown": containers,
                     "selection_performed": False, "paid_dispatch": False, "attempt_refunded": False,
                     "completion_authority": False, "counters_preserved": True, "progress_preserved": True,

@@ -24,8 +24,8 @@ def git(root, *args):
 def daemon_for(root, state):
     return native.PortalImplementationDaemon(
         todo_path=root / "board.md", state_path=state / "task_state.json",
-        strategy_path=state / "strategy.json", events_path=state / "events.jsonl",
-        repo_root=root, task_header_prefix="## SYN-", implement=False, max_task_attempts=3,
+        strategy_path=state / "strategy.json", events_path=state / "complaint_intake_events.jsonl",
+        repo_root=root, task_header_prefix="## CIMP-SYN-", implement=False, max_task_attempts=3,
         use_ephemeral_worktree=True, worktree_root=root.parent / "worktrees",
         worktree_submodule_paths=[], merge_target_branch="main", implementation_protected_paths=["board.md"],
         merge_queue_dir=state / "merge-queue", llm_merge_resolver_command="")
@@ -41,9 +41,9 @@ def world(tmp_path_factory):
     git(root, "init", "-q", "-b", "main")
     git(root, "config", "user.name", "Synthetic Native callback fixture")
     git(root, "config", "user.email", "synthetic@example.invalid")
-    (root / "board.md").write_text("# Synthetic task\n\n## SYN-40 Interrupted callback\n\n"
+    (root / "board.md").write_text("# Synthetic task\n\n## CIMP-SYN-40 Interrupted callback\n\n"
         "- Status: ready\n- Completion: validation\n- Priority: P1\n- Track: ops\n"
-        "- Outputs: result.txt\n- Validation: test -f result.txt\n"
+        "- Outputs: result.txt, tests/test_synthetic.py\n- Validation: python -m pytest -q tests/test_synthetic.py\n"
         "- Acceptance: A synthetic local result is recorded.\n")
     git(root, "add", "board.md"); git(root, "commit", "-qm", "Synthetic pending task")
     baseline = git(root, "rev-parse", "HEAD")
@@ -61,7 +61,7 @@ def world(tmp_path_factory):
         "from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as n\n"
         "d=n.PortalImplementationDaemon(todo_path=Path(sys.argv[1]),state_path=Path(sys.argv[2]),"
         "strategy_path=Path(sys.argv[3]),events_path=Path(sys.argv[4]),repo_root=Path(sys.argv[5]),"
-        "task_header_prefix='## SYN-',implement=False,use_ephemeral_worktree=False,"
+        "task_header_prefix='## CIMP-SYN-',implement=False,use_ephemeral_worktree=False,"
         "worktree_submodule_paths=[],merge_queue_dir=Path(sys.argv[6]),llm_merge_resolver_command='')\n"
         "t=d._load_tasks()[0]\nm=d._build_implementation_task_claim_metadata(t,1,sys.argv[7])\n"
         "p=d._implementation_task_claim_path(t.task_id,canonical_task_cid=d._identity_for_task(t).canonical_task_cid)\n"
@@ -93,12 +93,37 @@ def world(tmp_path_factory):
     emit("implementation_started", {**common, "branch": branch, "worktree_path": str(lease.path),
                                   "baseline_ref": baseline})
     (lease.path / "result.txt").write_text("synthetic local result\n")
-    git(lease.path, "add", "result.txt")
+    (lease.path / "tests").mkdir()
+    (lease.path / "tests/test_synthetic.py").write_text("from pathlib import Path\n"
+        "def test_synthetic_artifact():\n assert Path('result.txt').read_text() == 'synthetic local result\\n'\n")
+    git(lease.path, "add", "result.txt", "tests/test_synthetic.py")
     git(lease.path, "commit", "-qm", "Synthetic implementation")
     candidate = git(lease.path, "rev-parse", "HEAD")
     emit("implementation_proposal_validated", {**common, "accepted": True, "proposal_id": "synthetic-local-only"})
     emit("implementation_candidate_handoff_verified", {**common, "allowed": True,
         "implementation_commit": candidate})
+    # Genuine Host measurement: sealed Native executor, independent collection,
+    # JUnit, fresh AST catalog and source freeze. No authored success receipt.
+    from integrations.ipfs_accelerate import improvement_runner as runner
+    from integrations.ipfs_accelerate.improvement_plan import canonical_model_policy
+    from ipfs_accelerate_py.agent_supervisor.validation.validation_runtime import (
+        build_validation_environment, validation_environment_for_runner)
+    import shlex
+    executor = native.PortalImplementationDaemon._validation_command_runner
+    environment = build_validation_environment(dict(os.environ))
+    roots = [lease.path, Path(runner.__file__).resolve().parents[2], Path(native.__file__).resolve().parents[3],
+             Path(pytest.__file__).resolve().parents[1]]
+    environment["PYTHONPATH"] = os.pathsep.join(map(str, roots))
+    environment = validation_environment_for_runner(environment, executor)
+    command = "python -m pytest -q tests/test_synthetic.py"
+    contract = {"id": task.task_id, "targets": ["result.txt", "tests/test_synthetic.py"],
+                "validation_commands": [command], "depends_on": []}
+    measured = runner.measure_behavioral_command(lease.path, state / "evidence-runs", contract,
+        "PYTHONPATH=" + shlex.quote(environment["PYTHONPATH"]) + " " + command,
+        runner=executor, environment=environment, timeout_seconds=90, declared_command=command)
+    admission = runner.gate_task_completion(lease.path, state / "host-gate", contract, measured,
+        model_policy=canonical_model_policy(), legal_data_version="synthetic-pinned-runtime")
+    assert admission["admitted"], admission.get("reason")
     released = lease.release()
     assert released["released"] and released["reason"] == "clean_prepared_workspace"
     emit("worktree_pool_lease_released", released)
@@ -108,7 +133,7 @@ def world(tmp_path_factory):
         "events_path": str(daemon.events_path), "implementation_commit": candidate, "baseline_ref": baseline,
         "target_repository_id": daemon.merge_target_repository_id, "target_branch": "main",
         "validation_proof": {"passed": True, "returncode": 0, "selection": {"scope": "pre_merge"},
-                             "synthetic_local_validation_only": True}}
+                             "behavioral_evidence": [admission], "synthetic_local_validation_only": True}}
     request = daemon.merge_queue.enqueue(branch_name=branch, task_id=task.task_id,
         canonical_task_id=identity.canonical_task_cid, canonical_task_key=identity.canonical_task_key,
         commit_sha=candidate, metadata=metadata, target_repository_id=daemon.merge_target_repository_id,
@@ -133,7 +158,8 @@ def world(tmp_path_factory):
     assert not daemon.worktree_lifecycle.workspace_path_for(lease.path).exists()
     return dict(daemon=daemon, root=root, state=state, claim_path=claim_path,
         claim=claim, task=task, identity=identity, branch=branch, workspace=lease.path,
-        head=git(root, "rev-parse", "HEAD"), callback=callback, request=request)
+        head=git(root, "rev-parse", "HEAD"), callback=callback, request=request, admission=admission,
+        candidate=candidate, merged=merged, validation=metadata["validation_proof"])
 
 
 @pytest.fixture
@@ -241,4 +267,108 @@ def test_real_retained_checkout_guard_is_distinct_and_preserved(unchanged_world)
         assert result["reconciled"]
         assert guard.read_bytes() == original
         assert not w["claim_path"].exists() and not w["daemon"]._implementation_lock_path().exists()
+
+
+def _readonly_view(w):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor import PortalSupervisorConfig
+    d = w["daemon"]
+    config = PortalSupervisorConfig(todo_path=d.todo_path, state_path=d.state_path,
+        strategy_path=d.strategy_path, events_path=w["state"] / "supervisor_events.jsonl",
+        state_dir=w["state"], repo_root=w["root"], task_prefix="## CIMP-SYN-",
+        state_prefix="complaint_intake", merge_target_branch="main", merge_queue_dir=d.merge_queue_dir,
+        implementation_protected_paths=("board.md",))
+    return repair.read_only_completion_view(config)
+
+
+def test_automatic_recovery_factory_keeps_real_native_filename_identity(unchanged_world):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor import PortalSupervisorConfig
+    w = unchanged_world; d = w["daemon"]
+    config = PortalSupervisorConfig(todo_path=d.todo_path, state_path=d.state_path,
+        strategy_path=d.strategy_path, events_path=w["state"] / "supervisor_events.jsonl",
+        state_dir=w["state"], repo_root=w["root"], task_prefix="## CIMP-SYN-",
+        state_prefix="complaint_intake", merge_target_branch="main", merge_queue_dir=d.merge_queue_dir,
+        max_task_attempts=3, board_namespace="synthetic-supervisor-runtime",
+        implementation_protected_paths=("board.md",))
+    before = asdict(native.PortalTaskState.load(d.state_path))
+    actual = repair.completed_claim_daemon(config, merge_queue=d.merge_queue)
+    assert type(actual) is native.PortalImplementationDaemon and actual.implement is False
+    assert actual._identity_for_task(actual._load_tasks()[0]).board_namespace == w["claim"]["board_namespace"]
+    refused = actual.reconcile_quiesced_implementation_task_claim()
+    assert refused["blocked"] and refused["reason"] == "task_claim_worktree_lifecycle_missing"
+    result = repair.reconcile_completed_claim(actual, reprove_closure=lambda: None)
+    assert result["reconciled"]
+    assert not actual.reconcile_quiesced_active_attempt()["blocked"]
+    assert not actual.reconcile_quiesced_implementation_task_claim()["blocked"]
+    assert asdict(native.PortalTaskState.load(d.state_path)) == before
+
+
+def _observe(w):
+    from integrations.ipfs_accelerate import campaign_completion as completion
+    from integrations.ipfs_accelerate import release_evidence as evidence
+    from ipfs_accelerate_py.agent_supervisor.runtime import event_log
+    view = _readonly_view(w)
+    rows, pin = evidence._journal(w["state"], event_log)
+    task = view._load_tasks()[0]
+    latest = completion._latest_terminals(w["state"], pin, {task.task_id: task})
+    return completion._task_completion_observation(w["root"], w["state"], task, native,
+        rows, pin, latest, interrupted_view=view)
+
+
+def test_final_verifier_observes_real_source_seal_after_claim_retirement(unchanged_world):
+    w = unchanged_world
+    repair.reconcile_completed_claim(w["daemon"], reprove_closure=lambda: None)
+    before = {p: p.read_bytes() for p in w["state"].rglob("*") if p.is_file()}
+    result = _observe(w)
+    after = {p: p.read_bytes() for p in w["state"].rglob("*") if p.is_file()}
+    assert before == after
+    assert result["event_kind"] == "todo_status_updated"
+    assert result["native_finish_event_synthesized"] is False
+    assert result["observation_provenance"] == "interrupted_finish_completed_queue_and_durable_callback"
+    assert result["member_receipt_digest"] and result["historical_evidence_digest"]
+
+
+@pytest.mark.parametrize("damage", ["new_start", "failed_finish", "conflicting_identity", "seal_tampered"])
+def test_interrupted_verifier_cannot_hide_new_execution_failure_or_bad_source_seal(unchanged_world, damage):
+    w = unchanged_world; d = w["daemon"]
+    saved = None
+    if damage == "seal_tampered":
+        path = Path(w["admission"]["measurement_record"]["path"])
+        saved = (path, path.read_bytes())
+        path.write_text("{}")
+    else:
+        payload = {"task_id": w["task"].task_id, "attempt": 1, "synthetic_history": True}
+        if damage == "new_start":
+            kind = "implementation_started"
+            payload.update(branch="different", worktree_path=str(w["workspace"]))
+        elif damage == "failed_finish":
+            kind = "implementation_finished"; payload["returncode"] = 1
+        else:
+            kind = "synthetic_conflicting_identity"
+            payload["canonical_task_cid"] = "different"
+        d._record_event(kind, payload)
+    try:
+        with pytest.raises(ValueError): _observe(w)
+    finally:
+        if saved is not None: saved[0].write_bytes(saved[1])
+
+
+def test_readonly_native_view_cannot_be_used_for_mutation(unchanged_world):
+    w = unchanged_world
+    with pytest.raises(ValueError, match="read_only_view"):
+        repair.reconcile_completed_claim(_readonly_view(w), reprove_closure=lambda: pytest.fail("no closure effect"))
+    assert w["claim_path"].exists()
+
+
+def test_real_successful_finish_allows_cleanup_without_missing_finish_fallback(unchanged_world):
+    w = unchanged_world
+    w["daemon"]._record_event("implementation_finished", {
+        "task_id": w["task"].task_id, "attempt": 1, "returncode": 0, "synthetic_history": True,
+        "implementation_commit": w["candidate"], "validation_result": w["validation"],
+        "merge_result": {"merged": True, "returncode": 0, "merge_commit": w["merged"],
+                         "todo_update_result": w["callback"]}})
+    value = repair.review_completed_claim(w["daemon"])
+    assert len(value["finish_event_ids"]) == 1
+    result = repair.reconcile_completed_claim(w["daemon"], reprove_closure=lambda: None)
+    assert result["reconciled"]
+    assert not w["claim_path"].exists()
 
