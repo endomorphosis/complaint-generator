@@ -402,7 +402,7 @@ Implementation instructions:
 
 ## CIMP-GUI-14 Expose the canonical shared inquiry HTTP/MCP contract
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
