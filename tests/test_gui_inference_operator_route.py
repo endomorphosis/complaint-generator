@@ -214,3 +214,62 @@ def test_real_browser_sdk_does_not_publish_success_for_actual_consent_refusal(tm
         assert not any(event.get("status") == "success" for event in result["events"])
         stored = w.consent.read(w.principal.principal_id, w.case.case_id)
         assert stored["egress_authorized"] is False and stored["generation"] == 0
+
+
+def _actual_mcp_call(w, frontdoor, tool_name, arguments):
+    if frontdoor == "mcp":
+        response = w.client.post("/api/complaint-workspace/mcp/call", headers=w.headers,
+            json={"tool_name": tool_name, "arguments": arguments})
+        assert response.status_code == 200
+        result = response.json()
+        return result, result
+    response = w.client.post("/api/complaint-workspace/mcp/rpc", headers=w.headers,
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "name": tool_name, "arguments": arguments}})
+    assert response.status_code == 200
+    result = response.json()["result"]
+    return result, result["structuredContent"]
+
+
+@pytest.mark.parametrize("frontdoor", ["mcp", "rpc"])
+def test_actual_late_workflow_rejection_without_status_is_mcp_error(native_world, monkeypatch, frontdoor):
+    from tests.test_cimp_gui_34 import dispatch
+    w = native_world
+    _install_gui_observed_boundary(w, monkeypatch)
+    choose(w)
+    held = dispatch(w).json()
+    assert held["status"] == "held"
+    current = w.client.get("/api/complaint-workspace/session", headers=w.headers)
+    assert current.status_code == 200
+    before = current.json()["session"]["shared_interview"]
+    inquiry = before["pending_inquiry"]
+    advanced = w.client.post("/api/complaint-workspace/intake-chat", headers=w.headers,
+        json={"message": "Federal law applies to this synthetic employment matter.",
+              "question_id": inquiry["inquiry_id"], "expected_question_revision": inquiry["revision"],
+              "interview_action": "answer"})
+    assert advanced.status_code == 200
+    assert advanced.json()["interview"]["session_revision"] > before["session_revision"]
+    result, body = _actual_mcp_call(w, frontdoor, "complaint.admit_bounded_gui_inference",
+                                  {"invocation_id": held["invocation_id"]})
+    assert body["accepted"] is False and body["output"] is None
+    assert "status" not in body, "exercise the real untagged late-result contract"
+    assert body["code"].startswith("stale_")
+    assert result["isError"] is True
+    if frontdoor == "rpc":
+        assert result["content"] == [{"type": "text", "text": "mcp_tool_error"}]
+
+
+@pytest.mark.parametrize("frontdoor", ["mcp", "rpc"])
+def test_actual_held_dispatch_and_successful_admission_remain_nonerror(native_world, monkeypatch, frontdoor):
+    w = native_world
+    observed = _install_gui_observed_boundary(w, monkeypatch)
+    choose(w)
+    envelope, held = _actual_mcp_call(w, frontdoor, "complaint.dispatch_bounded_gui_inference",
+        {"purpose": "extract_facts", "inputs": {"source_text": FRAGMENT, "target_ref": w.target}})
+    assert held["status"] == "held" and held["accepted"] is False and held["output"] is None
+    assert envelope.get("isError") is not True
+    envelope, accepted = _actual_mcp_call(w, frontdoor, "complaint.admit_bounded_gui_inference",
+                                         {"invocation_id": held["invocation_id"]})
+    assert accepted["accepted"] is True and accepted["output"]["facts"][0]["target_ref"] == w.target
+    assert envelope.get("isError") is not True
+    assert len(observed) == 1

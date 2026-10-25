@@ -14,8 +14,11 @@ DEFAULT_MCP_PROTOCOL_VERSION = "2025-06-18"
 
 def gui_inference_tool_failed(tool_name: str, payload: Any) -> bool:
     """A returned refusal is a tool error; a pending proposal is not."""
-    return (tool_name in {"complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}
-            and isinstance(payload, dict)
+    if not isinstance(payload, dict):
+        return False
+    if tool_name == "complaint.admit_bounded_gui_inference":
+        return payload.get("accepted") is not True
+    return (tool_name == "complaint.dispatch_bounded_gui_inference"
             and payload.get("status") in {"refused", "unavailable", "timeout", "cancelled", "error", "failed"})
 
 
