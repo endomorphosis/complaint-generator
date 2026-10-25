@@ -3929,6 +3929,20 @@
                             </div>
                             <div class="status" id="factual-correction-status" data-status="" data-actor="" data-error="" data-prior-retained="false" data-support-invalidated="false">No correction has been applied.</div>
                         </section>
+                        <section id="encrypted-interview-resume" data-task="CIMP-GUI-20" data-restored="false" data-code="" data-status="" data-hooks-replayed="false" data-messages-replayed="false" data-browser-cache-used="false">
+                            <h3>Resume from encrypted state</h3>
+                            <p class="muted">A new browser resumes the pending inquiry, case, consent, factual and legal graph revisions, deferred gaps, and corrections from the encrypted snapshot. Page storage is not a case record. A denied, revoked, or missing key is shown explicitly and does not rebuild the case.</p>
+                            <div class="button-row">
+                                <button class="secondary" id="encrypted-interview-resume-button" type="button">Resume from encrypted state</button>
+                            </div>
+                            <div class="status" id="encrypted-interview-resume-status" role="status" data-code="" data-restored="false" data-hooks-replayed="false" data-messages-replayed="false" data-browser-cache-used="false">Encrypted resume has not run.</div>
+                            <p id="encrypted-interview-resume-inquiry"></p>
+                            <p id="encrypted-interview-resume-case"></p>
+                            <p id="encrypted-interview-resume-consent"></p>
+                            <p id="encrypted-interview-resume-graphs"></p>
+                            <p id="encrypted-interview-resume-gaps"></p>
+                            <p id="encrypted-interview-resume-corrections"></p>
+                        </section>
                         <section id="factual-graph-inspector" data-task="CIMP-GUI-23" aria-labelledby="factual-graph-inspector-title" data-view="list" data-authorized="false" data-unresolved-hidden="false" data-support-fabricated="false" data-private-boundary="true">
                             <h3 id="factual-graph-inspector-title">Factual graph inspector</h3>
                             <p class="muted">List and graph views render the authorized factual projection. Unresolved nodes stay visible. Source details, revision diffs, and contradiction links come from that read. This view does not write facts to browser storage or analytics.</p>
@@ -14934,6 +14948,87 @@ function extractComplaintOutputSignals(result) {
             return Boolean(piece) && Boolean(whole) && piece !== whole && whole.indexOf(piece) !== -1;
         }
 
+        function renderEncryptedInterviewResume(payload) {
+            const panel = document.getElementById('encrypted-interview-resume');
+            const statusNode = document.getElementById('encrypted-interview-resume-status');
+            if (!panel || !statusNode) return;
+            const receipt = (payload && payload.encrypted_resume) || {};
+            const session = (payload && payload.session) || {};
+            const interview = session.shared_interview && typeof session.shared_interview === 'object' ? session.shared_interview : {};
+            const pending = interview.pending_inquiry && typeof interview.pending_inquiry === 'object' ? interview.pending_inquiry : {};
+            const consent = session.operation_consent && typeof session.operation_consent === 'object' ? session.operation_consent : {};
+            const gaps = Array.isArray(session.deferred_gaps) ? session.deferred_gaps : [];
+            const corrections = Array.isArray(session.factual_corrections) ? session.factual_corrections : [];
+            const factual = session.factual_graph_binding || {};
+            const legal = session.legal_graph_binding || {};
+            const restored = receipt.restored === true;
+            const code = String(receipt.code || '');
+            panel.dataset.restored = restored ? 'true' : 'false';
+            panel.dataset.code = code;
+            panel.dataset.status = String(receipt.status || '');
+            panel.dataset.hooksReplayed = 'false';
+            panel.dataset.messagesReplayed = 'false';
+            panel.dataset.browserCacheUsed = 'false';
+            statusNode.dataset.code = code;
+            statusNode.dataset.restored = restored ? 'true' : 'false';
+            statusNode.dataset.hooksReplayed = 'false';
+            statusNode.dataset.messagesReplayed = 'false';
+            statusNode.dataset.browserCacheUsed = 'false';
+            statusNode.textContent = restored
+                ? 'Resumed from the encrypted snapshot. Hooks and messages were not replayed.'
+                : `Encrypted resume did not restore the case: ${code || 'refused'}.`;
+            const inquiryNode = document.getElementById('encrypted-interview-resume-inquiry');
+            const caseNode = document.getElementById('encrypted-interview-resume-case');
+            const consentNode = document.getElementById('encrypted-interview-resume-consent');
+            const graphNode = document.getElementById('encrypted-interview-resume-graphs');
+            const gapNode = document.getElementById('encrypted-interview-resume-gaps');
+            const correctionNode = document.getElementById('encrypted-interview-resume-corrections');
+            if (inquiryNode) inquiryNode.textContent = restored ? String(pending.question || '') : '';
+            if (caseNode) caseNode.textContent = restored ? String(session.case_id || '') : '';
+            if (consentNode) consentNode.textContent = restored ? `consent generation ${consent.generation === undefined || consent.generation === null ? '' : consent.generation}` : '';
+            if (graphNode) graphNode.textContent = restored ? `factual ${factual.revision || ''} legal ${legal.revision || ''}` : '';
+            if (gapNode) gapNode.textContent = restored ? gaps.map((item) => String((item && item.inquiry_id) || '')).join(',') : '';
+            if (correctionNode) correctionNode.textContent = restored ? corrections.map((item) => String((item && item.correction_id) || '')).join(',') : '';
+        }
+
+        async function resumeEncryptedInterview() {
+            const capture = adaptiveRequestCapture();
+            if (!adaptiveRequestCurrent(capture)) return;
+            setBusyStatus('Resuming the interview from encrypted state…');
+            let result;
+            try {
+                result = await client.runIntakeChatTurn(workspaceUserId, '', '', {interview_action: 'encrypted_resume'});
+                if (!adaptiveRequestCurrent(capture)) return;
+            } catch (error) {
+                if (!adaptiveRequestCurrent(capture)) return;
+                const panel = document.getElementById('encrypted-interview-resume');
+                const statusNode = document.getElementById('encrypted-interview-resume-status');
+                const code = String((error && error.message) || 'refused');
+                if (panel) {
+                    panel.dataset.restored = 'false';
+                    panel.dataset.code = code;
+                    panel.dataset.browserCacheUsed = 'false';
+                    panel.dataset.hooksReplayed = 'false';
+                    panel.dataset.messagesReplayed = 'false';
+                }
+                if (statusNode) {
+                    statusNode.dataset.restored = 'false';
+                    statusNode.dataset.code = code;
+                    statusNode.dataset.browserCacheUsed = 'false';
+                    statusNode.textContent = `Encrypted resume did not restore the case: ${code}.`;
+                }
+                setStatus(`Encrypted resume was refused: ${code}`);
+                return;
+            }
+            workspaceSession = result;
+            renderAdaptiveInquiry(result, capture);
+            renderEncryptedInterviewResume(result);
+            const receipt = result.encrypted_resume || {};
+            setStatus(receipt.restored === true
+                ? 'The interview resumed from encrypted state.'
+                : `Encrypted resume was explicit: ${receipt.code || 'refused'}.`);
+        }
+
         async function enterAdaptiveNarrative() {
             const capture = adaptiveRequestCapture();
             if (!adaptiveRequestCurrent(capture)) return;
@@ -16191,6 +16286,7 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('finite-interview-pause').addEventListener('click', () => controlFiniteInterview('pause'));
         document.getElementById('finite-interview-cancel').addEventListener('click', () => controlFiniteInterview('cancel'));
         document.getElementById('factual-correction-submit').addEventListener('click', applyFactualCorrection);
+        document.getElementById('encrypted-interview-resume-button').addEventListener('click', resumeEncryptedInterview);
         let factualGraphRequestEpoch = 0;
         async function refreshFactualGraphInspector() {
             const panel = document.getElementById('factual-graph-inspector');
