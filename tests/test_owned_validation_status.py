@@ -27,7 +27,7 @@ def observe_actual_executor(world, mode):
     campaign, workspace = world['campaign'], world['workspace']
     stamp = lambda seconds: datetime.fromtimestamp(seconds, timezone.utc).isoformat()
     now = time.time()
-    state = native.PortalTaskState(**world['body'])
+    state = native.PortalTaskState.load(world['daemon'].state_path)
     state.active_task_started_at = state.last_implementation_started_at = stamp(now-1000)
     state.heartbeat_at = state.last_progress_at = stamp(now)
     state.save(world['daemon'].state_path)
