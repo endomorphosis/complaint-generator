@@ -3929,7 +3929,7 @@
                             </div>
                             <div class="status" id="factual-correction-status" data-status="" data-actor="" data-error="" data-prior-retained="false" data-support-invalidated="false">No correction has been applied.</div>
                         </section>
-                        <section id="encrypted-interview-resume" data-task="CIMP-GUI-20" data-restored="false" data-code="" data-status="" data-hooks-replayed="false" data-messages-replayed="false" data-browser-cache-used="false">
+                        <section id="encrypted-interview-resume" data-resumed="false" data-case-id="" data-task="CIMP-GUI-20" data-restored="false" data-code="" data-status="" data-hooks-replayed="false" data-messages-replayed="false" data-browser-cache-used="false">
                             <h3>Resume from encrypted state</h3>
                             <p class="muted">A new browser resumes the pending inquiry, case, consent, factual and legal graph revisions, deferred gaps, and corrections from the encrypted snapshot. Page storage is not a case record. A denied, revoked, or missing key is shown explicitly and does not rebuild the case.</p>
                             <div class="button-row">
@@ -14948,6 +14948,22 @@ function extractComplaintOutputSignals(result) {
             return Boolean(piece) && Boolean(whole) && piece !== whole && whole.indexOf(piece) !== -1;
         }
 
+        function discardBrowserCaseCache() {
+            [window.localStorage, window.sessionStorage].forEach((bucket) => {
+                if (!bucket || typeof bucket.key !== 'function') return;
+                const keys = [];
+                for (let index = 0; index < bucket.length; index += 1) {
+                    const key = bucket.key(index);
+                    if (key) keys.push(key);
+                }
+                keys.forEach((key) => {
+                    if (/synopsis|handoff|narrative|evidence|intake|inquiry|complaint|answer|consent|graph/i.test(key)) {
+                        bucket.removeItem(key);
+                    }
+                });
+            });
+        }
+
         function renderEncryptedInterviewResume(payload) {
             const panel = document.getElementById('encrypted-interview-resume');
             const statusNode = document.getElementById('encrypted-interview-resume-status');
@@ -14957,13 +14973,17 @@ function extractComplaintOutputSignals(result) {
             const interview = session.shared_interview && typeof session.shared_interview === 'object' ? session.shared_interview : {};
             const pending = interview.pending_inquiry && typeof interview.pending_inquiry === 'object' ? interview.pending_inquiry : {};
             const consent = session.operation_consent && typeof session.operation_consent === 'object' ? session.operation_consent : {};
-            const gaps = Array.isArray(session.deferred_gaps) ? session.deferred_gaps : [];
-            const corrections = Array.isArray(session.factual_corrections) ? session.factual_corrections : [];
+            const gaps = Array.isArray(session.deferred_gaps) ? session.deferred_gaps : (Array.isArray(receipt.deferred_gaps) ? receipt.deferred_gaps : []);
+            const corrections = Array.isArray(session.factual_corrections) ? session.factual_corrections : (Array.isArray(receipt.corrections) ? receipt.corrections : []);
             const factual = session.factual_graph_binding || {};
+            const factualRevision = factual.revision || (interview.knowledge_graph || {}).graph_revision || receipt.factual_graph_revision || '';
             const legal = session.legal_graph_binding || {};
-            const restored = receipt.restored === true;
+            const legalRevision = legal.revision || (interview.dependency_graph || {}).graph_revision || receipt.legal_graph_revision || '';
+            const restored = receipt.restored === true || receipt.resumed === true;
             const code = String(receipt.code || '');
             panel.dataset.restored = restored ? 'true' : 'false';
+            panel.dataset.resumed = restored ? 'true' : 'false';
+            panel.dataset.caseId = restored ? String(session.case_id || (receipt.case && receipt.case.case_id) || '') : '';
             panel.dataset.code = code;
             panel.dataset.status = String(receipt.status || '');
             panel.dataset.hooksReplayed = 'false';
@@ -14983,50 +15003,65 @@ function extractComplaintOutputSignals(result) {
             const graphNode = document.getElementById('encrypted-interview-resume-graphs');
             const gapNode = document.getElementById('encrypted-interview-resume-gaps');
             const correctionNode = document.getElementById('encrypted-interview-resume-corrections');
-            if (inquiryNode) inquiryNode.textContent = restored ? String(pending.question || '') : '';
+            if (inquiryNode) {
+                inquiryNode.dataset.inquiryId = restored ? String(pending.inquiry_id || '') : '';
+                inquiryNode.textContent = restored ? String(pending.question || '') : '';
+            }
             if (caseNode) caseNode.textContent = restored ? String(session.case_id || '') : '';
             if (consentNode) consentNode.textContent = restored ? `consent generation ${consent.generation === undefined || consent.generation === null ? '' : consent.generation}` : '';
-            if (graphNode) graphNode.textContent = restored ? `factual ${factual.revision || ''} legal ${legal.revision || ''}` : '';
+            if (graphNode) graphNode.textContent = restored ? `factual ${factualRevision} legal ${legalRevision}` : '';
             if (gapNode) gapNode.textContent = restored ? gaps.map((item) => String((item && item.inquiry_id) || '')).join(',') : '';
             if (correctionNode) correctionNode.textContent = restored ? corrections.map((item) => String((item && item.correction_id) || '')).join(',') : '';
         }
 
+        let encryptedResumeRequestEpoch = 0;
         async function resumeEncryptedInterview() {
             const capture = adaptiveRequestCapture();
-            if (!adaptiveRequestCurrent(capture)) return;
-            setBusyStatus('Resuming the interview from encrypted state…');
-            let result;
+            const requestEpoch = ++encryptedResumeRequestEpoch;
+            const current = () => requestEpoch === encryptedResumeRequestEpoch && adaptiveRequestCurrent(capture);
+            if (!current()) return;
+            renderEncryptedInterviewResume({encrypted_resume: {status: 'pending', resumed: false}});
+            discardBrowserCaseCache();
+            setBusyStatus('Resuming the interview from the encrypted revision…');
             try {
-                result = await client.runIntakeChatTurn(workspaceUserId, '', '', {interview_action: 'encrypted_resume'});
-                if (!adaptiveRequestCurrent(capture)) return;
+                async function session() {
+                    const response = await fetch('/api/complaint-workspace/auth/session', {credentials: 'same-origin'});
+                    const value = await response.json();
+                    if (!response.ok || value.principal_id !== capture.actor) {
+                        throw Object.assign(new Error('resume_session_changed'), {resumeDenied: true});
+                    }
+                    return value;
+                }
+                const before = await session();
+                if (!current()) return;
+                const result = await client.runIntakeChatTurn(workspaceUserId, '', '', {interview_action: 'encrypted_resume'});
+                if (!current()) return;
+                const after = await session();
+                if (!current()) return;
+                if (before.principal_id !== after.principal_id || before.tenant_id !== after.tenant_id
+                        || before.generation !== after.generation) {
+                    throw Object.assign(new Error('resume_session_changed'), {resumeDenied: true});
+                }
+                const resume = result && result.encrypted_resume;
+                const caseId = client.caseContext && client.caseContext.case_id;
+                if (resume && (resume.resumed === true || resume.restored === true) && caseId && ((resume.case && resume.case.case_id) || (result.session && result.session.case_id)) !== caseId) {
+                    throw Object.assign(new Error('resume_case_changed'), {resumeDenied: true});
+                }
+                if (!current()) return;
+                if (resume && (resume.resumed === true || resume.restored === true)) workspaceSession = result;
+                renderEncryptedInterviewResume(result);
+                if (resume && (resume.resumed === true || resume.restored === true)) renderAdaptiveInquiry(result, capture);
+                setStatus((resume && (resume.resumed === true || resume.restored === true))
+                    ? 'Encrypted interview resumed. The pending inquiry matches the saved revision.'
+                    : 'Encrypted resume was refused. No case text was taken from this browser.');
             } catch (error) {
-                if (!adaptiveRequestCurrent(capture)) return;
-                const panel = document.getElementById('encrypted-interview-resume');
-                const statusNode = document.getElementById('encrypted-interview-resume-status');
-                const code = String((error && error.message) || 'refused');
-                if (panel) {
-                    panel.dataset.restored = 'false';
-                    panel.dataset.code = code;
-                    panel.dataset.browserCacheUsed = 'false';
-                    panel.dataset.hooksReplayed = 'false';
-                    panel.dataset.messagesReplayed = 'false';
-                }
-                if (statusNode) {
-                    statusNode.dataset.restored = 'false';
-                    statusNode.dataset.code = code;
-                    statusNode.dataset.browserCacheUsed = 'false';
-                    statusNode.textContent = `Encrypted resume did not restore the case: ${code}.`;
-                }
-                setStatus(`Encrypted resume was refused: ${code}`);
-                return;
+                if (!current()) return;
+                const denied = error && error.resumeDenied === true;
+                renderEncryptedInterviewResume({encrypted_resume: {status: denied ? 'denied' : 'unavailable',
+                    code: denied ? 'authorization_denied' : 'resume_unavailable', resumed: false,
+                    reconstructed_from_browser_cache: false}});
+                setStatus('Encrypted resume failed closed. The case was not rebuilt from this browser.');
             }
-            workspaceSession = result;
-            renderAdaptiveInquiry(result, capture);
-            renderEncryptedInterviewResume(result);
-            const receipt = result.encrypted_resume || {};
-            setStatus(receipt.restored === true
-                ? 'The interview resumed from encrypted state.'
-                : `Encrypted resume was explicit: ${receipt.code || 'refused'}.`);
         }
 
         async function enterAdaptiveNarrative() {
