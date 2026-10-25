@@ -160,7 +160,7 @@ Implementation instructions:
 
 ## CIMP-GUI-06 Secure actual app assembly and legacy transports
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
