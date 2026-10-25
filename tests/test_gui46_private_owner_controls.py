@@ -371,3 +371,27 @@ def test_actual_owner_wallet_lock_at_keystore_fsync_fences_until_exact_retry(tmp
         assert resumed.status_code==200 and resumed.json()['revoked'] is True,resumed.text
         assert world.owner_keys.provider().resolve(binding)[0]!=old_id
         assert len(resumed.json()['audit'])==1
+
+
+def test_other_pending_crypto_operation_cannot_prepare_a_new_member_change(tmp_path,monkeypatch):
+    from integrations.private_collaboration import CaseResourceKeyGrantStore
+    world=_world(tmp_path)
+    world.owner_keys.unlock_passphrase(PASSPHRASE)
+    original=CaseResourceKeyGrantStore._seal
+    def interrupt(store,grant,**kwargs):
+        if store is world.grants and grant.status=='revoked':
+            raise OSError('authored independent trusted rotation interruption')
+        return original(store,grant,**kwargs)
+    monkeypatch.setattr(CaseResourceKeyGrantStore,'_seal',interrupt)
+    with pytest.raises(OSError):
+        world.grants.revoke_and_rotate(actor_principal_id=world.owner.principal_id,
+            recipient_principal_id=world.lawyer.principal_id,case_id=world.case.case_id,
+            tenant_id=world.case.tenant_id,resource_id=world.case.resource_id,cutoff=1,
+            owner_session=world.owner_keys,idempotency_key='independent-trusted-rotation')
+    before=world.memberships.load(world.membership.grant_id)
+    assert before.owner_changes==()
+    with TestClient(world.review_app,base_url='https://testserver') as owner:
+        csrf=_composed_login(owner)
+        denied,_=_change(world,owner,csrf,revoke=True,key='fresh-change-during-independent-rotation')
+        assert denied.status_code==409,denied.text
+        assert world.memberships.load(before.grant_id)==before

@@ -278,6 +278,13 @@ class CaseAssignmentService:
                 plan = self._key_grants.review_recipient_revocation(actor_principal_id=actor,
                     recipient_principal_id=grant.member_principal_id, case_id=grant.case_id,
                     tenant_id=grant.tenant_id, resource_id=grant.resource_id) if revoke else None
+                if plan is not None and plan["rotation_pending"]:
+                    # A different trusted rotation must not acquire a fresh
+                    # membership intent that its crypto operation cannot resume.
+                    current = self._visible(actor, grant.grant_id)
+                    if not any(item["phase"] == "prepared" and item["idempotency_key"] == key
+                               for item in current.owner_changes):
+                        raise CaseAssignmentError("case_key_rotation_incomplete")
                 prepared = self._memberships.prepare_owner_change(owner_principal_id=actor,
                     grant_id=grant.grant_id, expected_version=expected, idempotency_key=key,
                     actions=scope, expires_at=expiry, revoke=revoke,
