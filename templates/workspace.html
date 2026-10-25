@@ -3404,7 +3404,7 @@
     </style>
     <link id="workspace-shell-style" rel="stylesheet" href="/static/complaint_app_shell.css">
 </head>
-<body data-workspace-hydrated="booting">
+<body data-workspace-hydrated="booting" data-complaint-shell="off">
     <a class="cg-skip-link" href="#workspace-main">Skip to workspace</a>
     <div id="workspace-case-context" class="cg-case-context" role="region" aria-label="Current case" data-state="empty" tabindex="-1">
         <span class="cg-case-context__label">Current case</span>
@@ -3922,6 +3922,13 @@
                             </div>
                             <div class="status" id="factual-graph-status" role="status" data-status="idle">The factual graph has not been loaded.</div>
                             <div id="factual-graph-mount" data-persisted="false"></div>
+                        </section>
+                        <section id="operation-error-rail" data-task="CIMP-GUI-54" aria-labelledby="operation-error-rail-title">
+                            <h3 id="operation-error-rail-title">Graph, research, and collaboration status</h3>
+                            <p class="muted">Authorization, conflict, unavailable, and pending stay separate. Retry stops after three attempts. Cancel applies only while work is pending. A failed call, missing proof, unusable source, or queued replica is not treated as confirmed.</p>
+                            <div id="operation-error-graph" data-surface="graph"></div>
+                            <div id="operation-error-research" data-surface="research"></div>
+                            <div id="operation-error-collaboration" data-surface="collaboration"></div>
                         </section>
                         <label for="adaptive-model-purpose">Model purpose</label>
                         <select id="adaptive-model-purpose">
@@ -6128,10 +6135,61 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         </section>
     </div>
 
+    <script src="/static/complaint_app_shell.js"></script>
     <script src="/static/complaint_mcp_sdk.js"></script>
     <script src="/static/complaint_graph_view.js"></script>
     <script>
         const { ComplaintMcpClient } = window.ComplaintMcpSdk;
+        const operationSurfaceAttempts = {graph: 0, research: 0, collaboration: 0};
+        function publishOperationSurface(surface, record) {
+            const api = window.ComplaintOperationSurfaces;
+            const mountId = surface === 'research'
+                ? 'operation-error-research'
+                : (surface === 'collaboration' ? 'operation-error-collaboration' : 'operation-error-graph');
+            if (!api || typeof api.apply !== 'function') {
+                return null;
+            }
+            const next = Object.assign({surface: surface, attempts: operationSurfaceAttempts[surface] || 0}, record || {});
+            return api.apply(mountId, next);
+        }
+        function bindOperationSurfaceActions() {
+            const rail = document.getElementById('operation-error-rail');
+            if (!rail || rail.dataset.bound === 'true') {
+                return;
+            }
+            rail.dataset.bound = 'true';
+            rail.addEventListener('click', (event) => {
+                const button = event.target.closest('[data-operation-action]');
+                if (!button || button.disabled) {
+                    return;
+                }
+                const mount = button.closest('[data-surface]');
+                if (!mount) {
+                    return;
+                }
+                const surface = mount.dataset.surface;
+                let stored = {};
+                try {
+                    stored = JSON.parse(mount.dataset.operationRecord || '{}');
+                } catch (error) {
+                    stored = {};
+                }
+                if (button.dataset.operationAction === 'cancel') {
+                    publishOperationSurface(surface, Object.assign({}, stored, {cancelled: true, pending: false, status: 'unavailable'}));
+                    return;
+                }
+                operationSurfaceAttempts[surface] = (operationSurfaceAttempts[surface] || 0) + 1;
+                publishOperationSurface(surface, Object.assign({}, stored, {
+                    attempts: operationSurfaceAttempts[surface],
+                    status: stored.status === 'pending' ? 'pending' : stored.status,
+                }));
+            });
+        }
+        bindOperationSurfaceActions();
+        publishOperationSurface('graph', {status: 'unavailable', graph_revision: '', session_revision: ''});
+        publishOperationSurface('research', {status: 'unavailable', research_revision: ''});
+        publishOperationSurface('collaboration', {status: 'unavailable', collaboration_revision: ''});
+        window.publishWorkspaceOperationSurface = publishOperationSurface;
         const client = new ComplaintMcpClient();
         window.workspaceClient = client;
         let workspaceUserId = new URLSearchParams(window.location.search).get('user_id') || null;
@@ -6787,6 +6845,15 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                 return (item.kind || 'research_gap') + ' ' + (item.version || item.reason || 'unversioned')
                     + ' admitted_law=false';
             }).join(' | ') || 'No source or version receipt yet. Nothing is admitted law.';
+            const researchStatus = String(payload.status || '').toLowerCase();
+            publishOperationSurface('research', {
+                status: researchStatus === 'conflict' ? 'conflict' : 'unavailable',
+                code: researchStatus === 'conflict' ? 'revision_conflict' : '',
+                research_revision: payload.research_revision || payload.revision || '',
+                unsupported_source: researchStatus !== 'conflict',
+                source_supported: false,
+                missing_proof: true,
+            });
         }
 
         function legalResearchUnavailable(message) {
@@ -6794,6 +6861,10 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             node.dataset.admittedLaw = 'false';
             node.dataset.status = 'unavailable';
             node.textContent = message || 'Legal-source acquisition was not run. Nothing was admitted as law.';
+            const denied = /refus|authoriz/i.test(String(message || ''));
+            publishOperationSurface('research', denied
+                ? {status: 'authorization', authorization_denied: true, code: 'authorization_denied', research_revision: ''}
+                : {status: 'unavailable', mcp_failed: true, research_revision: ''});
         }
 
         async function postLegalResearch(cancelled) {
@@ -16029,6 +16100,22 @@ function extractComplaintOutputSignals(result) {
                     ? 'Factual graph loaded from the authorized read.'
                     : 'The factual graph read was not authorized.';
             }
+            const graphRevision = result && (result.graph_revision || result.revision || (result.projection && result.projection.revision));
+            publishOperationSurface('graph', result && result.ok === true
+                ? {
+                    status: 'unavailable',
+                    graph_revision: graphRevision || '',
+                    session_revision: (client.caseContext && client.caseContext.expected_revision) || '',
+                    proof_present: false,
+                    missing_proof: true,
+                }
+                : {
+                    status: 'authorization',
+                    authorization_denied: true,
+                    code: 'authorization_denied',
+                    graph_revision: graphRevision || '',
+                    session_revision: (client.caseContext && client.caseContext.expected_revision) || '',
+                });
         }
         function setFactualGraphView(mode) {
             const panel = document.getElementById('factual-graph-inspector');
