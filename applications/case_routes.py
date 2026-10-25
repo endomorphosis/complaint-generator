@@ -184,7 +184,8 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
                         browser_sessions: Optional[BrowserSessionService] = None,
                         case_handlers: Optional[CaseHandlerRegistry] = None,
                         json_body_limits: Optional[CaseJSONBodyLimits] = None,
-                        case_catalog: Any = None) -> Any:
+                        case_catalog: Any = None,
+                        case_assignments: Any = None) -> Any:
     """Mount the same fail-closed boundary in every production app variant.
 
     Historical mediator/workspace arguments grant no ambient case access.
@@ -220,12 +221,17 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     extensions = tuple((kind, prefix) for kind, _mount, prefixes in modules for prefix in prefixes)
     for _kind, mount, _prefixes in modules:
         mount(app, authorizer)
+    from .case_assignment_api import CaseAssignmentService, mount_case_assignments
+    if case_assignments is not None and not isinstance(case_assignments, CaseAssignmentService):
+        raise CaseAccessError("case_assignments")
+    mount_case_assignments(app)
     from .case_api import mount_case_catalog
     mount_case_catalog(app)
     app.state.case_authorizer = authorizer
     app.state.browser_sessions = sessions
     app.state.case_handlers = case_handlers
     app.state.case_catalog = case_catalog
+    app.state.case_assignments = case_assignments
     app.state.case_json_body_limits = limits
     app.state.case_route_composition = COMPOSITION_NAME
     app.state.case_route_extension_kinds = tuple(kind for kind, _mount, _prefixes in modules)
