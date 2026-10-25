@@ -912,7 +912,7 @@ Implementation instructions:
 
 ## CIMP-GUI-31 Show proof traces and unavailable states in the GUI
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
