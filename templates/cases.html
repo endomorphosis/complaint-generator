@@ -67,6 +67,11 @@
         <label for="gap-input">Gap</label>
         <input id="gap-input" maxlength="200" autocomplete="off">
     </section>
+    <section id="notifications">
+        <h2>In-app notifications <span id="notification-badge" data-channel="in_app" data-external-delivery="false">0</span></h2>
+        <p id="notification-notice" class="notice">Badges count assignment, message, and review events for you only. They do not include complaint or evidence text. This campaign does not send email, SMS, or external chat.</p>
+        <ul id="notification-list"></ul>
+    </section>
     <p id="case-error" role="alert"></p>
 </main>
 <script>
@@ -192,6 +197,8 @@
         clearSelectionDisplay();
         document.getElementById("case-label").value = "";
         document.getElementById("assignment-list").replaceChildren();
+        document.getElementById("notification-list").replaceChildren();
+        document.getElementById("notification-badge").textContent = "0";
         document.getElementById("assignment-content").textContent = "";
         document.getElementById("lawyer-select").replaceChildren();
         document.getElementById("case-auth-status").textContent = "Signing in";
@@ -206,6 +213,7 @@
             document.getElementById("case-auth-status").textContent = "Signed in";
             await loadSession(ownGeneration);
             await loadAssignments(ownGeneration);
+            await loadNotifications(ownGeneration);
             if (ownGeneration === generation) showError("");
         } catch (error) {
             credential = "";
@@ -312,6 +320,59 @@
                 document.getElementById("assignment-content").textContent = result.plaintext_available ? (result.text || "") : "";
             }
             await loadAssignments(ownGeneration);
+            await loadNotifications(ownGeneration);
+            showError("");
+        } catch (error) {
+            if (ownGeneration === generation) showError(error.message);
+        }
+    }
+
+    function renderNotifications(payload) {
+        var badge = document.getElementById("notification-badge");
+        var count = payload && payload.badge ? payload.badge.unread_count : 0;
+        badge.textContent = String(count);
+        badge.dataset.channel = "in_app";
+        badge.dataset.externalDelivery = "false";
+        var list = document.getElementById("notification-list");
+        list.replaceChildren();
+        ((payload && payload.notifications) || []).forEach(function (item) {
+            var row = document.createElement("li");
+            row.dataset.notificationId = item.notification_id;
+            row.dataset.eventKind = item.event_kind;
+            row.dataset.read = item.read ? "true" : "false";
+            var label = document.createElement("span");
+            label.className = "notification-badge-label";
+            label.textContent = item.badge_label + " " + item.source_id;
+            row.appendChild(label);
+            var button = document.createElement("button");
+            button.type = "button";
+            button.textContent = item.read ? "Mark unread" : "Mark read";
+            button.addEventListener("click", function () {
+                notificationRead(item, !item.read);
+            });
+            row.appendChild(button);
+            list.appendChild(row);
+        });
+    }
+
+    async function loadNotifications(ownGeneration) {
+        try {
+            var listed = await api("/api/cases/notifications");
+            if (ownGeneration !== generation) return;
+            renderNotifications(listed);
+        } catch (error) {
+            if (error.message === "notification_unavailable") return;
+            if (ownGeneration === generation) showError(error.message);
+        }
+    }
+
+    async function notificationRead(item, read) {
+        var ownGeneration = generation;
+        var suffix = read ? "/read" : "/unread";
+        try {
+            await api("/api/cases/notifications/" + encodeURIComponent(item.notification_id) + suffix, {method: "POST", body: {}});
+            if (ownGeneration !== generation) return;
+            await loadNotifications(ownGeneration);
             showError("");
         } catch (error) {
             if (ownGeneration === generation) showError(error.message);
@@ -343,6 +404,7 @@
             });
             if (ownGeneration !== generation) return;
             await loadAssignments(ownGeneration);
+            await loadNotifications(ownGeneration);
             showError("");
         } catch (error) {
             if (ownGeneration === generation) showError(error.message);

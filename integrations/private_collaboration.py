@@ -238,6 +238,7 @@ class CaseResourceKeyGrantStore:
         owner_session: UserOwnedKeySession,
         recipient_session: UserOwnedKeySession,
         idempotency_key: str,
+        before_publish: Any = None,
     ) -> ResourceKeyGrant:
         """Owner wraps the case data key to the recipient session.
 
@@ -246,6 +247,8 @@ class CaseResourceKeyGrantStore:
         for ``case.read``.
         """
 
+        if before_publish is not None and not callable(before_publish):
+            raise CaseResourceKeyGrantError('admission_callback_required')
         owner = self._active(actor_principal_id)
         recipient = self._active(recipient_principal_id)
         self._reject_admin(owner)
@@ -299,6 +302,8 @@ class CaseResourceKeyGrantStore:
                     cutoff=int(state["cutoff"]),
                     generation=int(state["generation"]),
                 )
+                if before_publish is not None and before_publish() is False:
+                    raise CaseResourceKeyGrantError('publication_denied')
                 return existing
             generation = self._generation_state(case.tenant_id, case.case_id, case.resource_id)
             wrap_id = recipient_session.ensure_recipient_wrap_key()
@@ -344,7 +349,7 @@ class CaseResourceKeyGrantStore:
             if current_key_id and current_key_id != record.data_key_id:
                 raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
             generation["data_key_id"] = record.data_key_id
-            self._seal(record)
+            self._seal(record, **({'before_publish':before_publish} if before_publish is not None else {}))
             self._write_generation(generation)
             self._write_idem(key_name, record.key_grant_id)
             return record
@@ -693,9 +698,12 @@ class CaseResourceKeyGrantStore:
         artifact_revision: str,
         plaintext: bytes,
         recipient_session: UserOwnedKeySession,
+        action: str = WRITE_ACTION,
     ) -> dict[str, Any]:
         """Seal a collaborative write only while the grant generation is still active."""
 
+        if action not in {WRITE_ACTION, "case.review"}:
+            raise CaseResourceKeyGrantError("action_not_permitted")
         if not isinstance(plaintext, (bytes, bytearray)) or isinstance(plaintext, memoryview):
             raise CaseResourceKeyGrantError("plaintext_required")
         grant, decision, data_key = self._authorize_delegated(
@@ -709,7 +717,7 @@ class CaseResourceKeyGrantStore:
             artifact_kind=artifact_kind,
             artifact_revision=artifact_revision,
             recipient_session=recipient_session,
-            action=WRITE_ACTION,
+            action=action,
         )
         binding = PrivateArtifactBinding(
             tenant_id=grant.tenant_id,
@@ -743,7 +751,7 @@ class CaseResourceKeyGrantStore:
         receipt["data"] = None
         receipt["envelope"] = envelope
         receipt["generation"] = grant.generation
-        return self._admit_result(grant, decision, action=WRITE_ACTION, receipt=receipt)
+        return self._admit_result(grant, decision, action=action, receipt=receipt)
 
     def download_delegated(
         self,
@@ -802,7 +810,7 @@ class CaseResourceKeyGrantStore:
 
         if type(prepared_generation) is not int or prepared_generation < 1:
             raise CaseResourceKeyGrantError("cutoff_invalid")
-        if action not in {READ_ACTION, WRITE_ACTION, DOWNLOAD_ACTION}:
+        if action not in {READ_ACTION, WRITE_ACTION, DOWNLOAD_ACTION, "case.review"}:
             raise CaseResourceKeyGrantError("action_not_permitted")
         tenant = _label(tenant_id, "tenant_id")
         case = _label(case_id, "case_id")
@@ -1313,7 +1321,7 @@ class CaseResourceKeyGrantStore:
             raise CaseResourceKeyGrantError("canonical_owner_mismatch")
         return grant
 
-    def _seal(self, grant: ResourceKeyGrant) -> None:
+    def _seal(self, grant: ResourceKeyGrant, *, before_publish: Any = None) -> None:
         binding = PrivateArtifactBinding(
             tenant_id=grant.tenant_id,
             case_id=grant.case_id,
@@ -1330,7 +1338,24 @@ class CaseResourceKeyGrantStore:
         temporary = directory / f"{grant.key_grant_id}.envelope.tmp"
         temporary.write_bytes(envelope)
         os.chmod(temporary, 0o600)
-        os.replace(temporary, path)
+        try:
+            if before_publish is not None:
+                fd=os.open(temporary,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+                try: os.fsync(fd)
+                finally: os.close(fd)
+                directory_fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+                try:
+                    os.fsync(directory_fd)
+                    if before_publish() is False:
+                        raise CaseResourceKeyGrantError('publication_denied')
+                    os.replace(temporary,path)
+                    os.fsync(directory_fd)
+                finally: os.close(directory_fd)
+            else:
+                os.replace(temporary, path)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
         os.chmod(path, 0o600)
         self._write_text(directory / f"{grant.key_grant_id}.revision", str(grant.version))
         self._write_text(directory / f"{grant.key_grant_id}.tenant", grant.tenant_id)

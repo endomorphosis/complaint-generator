@@ -3769,6 +3769,82 @@ def read_private_revision(
     return opened
 
 
+@contextmanager
+def private_revision_source_scope(repository: str | Path):
+    """Hold an existing joined source against its normal CAS writers.
+
+    The yielded hash identifies opaque ciphertext only. It grants no read,
+    key, source, law or proof authority. Trusted provisioning must authenticate
+    the actual snapshot with ``read_private_revision`` while this hold lasts.
+    No repository or ownership marker is created by this observer.
+    """
+    root = Path(os.path.abspath(repository))
+    if root.resolve(strict=True) != root:
+        raise PrivateRevisionError("Source path is aliased.", code="source_unavailable")
+    info = root.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        raise PrivateRevisionError("Source is not privately owned.", code="source_unavailable")
+    lock = _process_lock(root)
+    lock.acquire()
+    descriptor = -1
+    try:
+        descriptor = os.open(root / _LOCK_NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid() or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) != 0o600:
+            raise PrivateRevisionError("Source lock changed.", code="source_unavailable")
+        import fcntl
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        def opaque_identity():
+            material = {}
+            for name in (_HEAD_NAME, "head.rev"):
+                try:
+                    fd = os.open(root / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+                except FileNotFoundError:
+                    if name == _HEAD_NAME:
+                        raise PrivateRevisionError("Source head is missing.", code="source_unavailable") from None
+                    continue
+                try:
+                    item = os.fstat(fd)
+                    if (not stat.S_ISREG(item.st_mode) or item.st_uid != os.getuid() or item.st_nlink != 1
+                            or stat.S_IMODE(item.st_mode) != 0o600 or not 0 < item.st_size <= 8 * 1024 * 1024):
+                        raise PrivateRevisionError("Source head is untrusted.", code="source_unavailable")
+                    raw = bytearray()
+                    while len(raw) <= item.st_size:
+                        chunk = os.read(fd, min(65536, item.st_size + 1 - len(raw)))
+                        if not chunk:
+                            break
+                        raw.extend(chunk)
+                    after = os.fstat(fd)
+                    signature = lambda x: (x.st_dev, x.st_ino, x.st_size, x.st_mtime_ns, x.st_ctime_ns)
+                    if len(raw) != item.st_size or signature(item) != signature(after):
+                        raise PrivateRevisionError("Source changed while read.", code="revision_conflict")
+                    material[name] = hashlib.sha256(raw).hexdigest()
+                finally:
+                    os.close(fd)
+            return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        identity = opaque_identity()
+        yield {"head_sha256": identity, "opaque_ciphertext_only": True, "authority": False}
+        current = (root / _LOCK_NAME).lstat()
+        current_root = root.lstat()
+        if (root.resolve(strict=True) != root
+                or (current_root.st_dev, current_root.st_ino) != (info.st_dev, info.st_ino)
+                or not stat.S_ISDIR(current_root.st_mode) or current_root.st_uid != os.getuid()
+                or stat.S_IMODE(current_root.st_mode) & 0o077
+                or (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino)
+                or not stat.S_ISREG(current.st_mode) or current.st_uid != os.getuid()
+                or current.st_nlink != 1 or stat.S_IMODE(current.st_mode) != 0o600
+                or opaque_identity() != identity):
+            raise PrivateRevisionError("Source changed during admission.", code="revision_conflict")
+    finally:
+        if descriptor >= 0:
+            try:
+                import fcntl
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+        lock.release()
+
+
 # --- Case manifest CAS (CIMP-DUR-004) --------------------------------------
 # One encrypted manifest binds answer, fact-graph, legal-rule-source,
 # evaluation, and proof revisions to an opaque parent generation. The public
@@ -7477,4 +7553,176 @@ __all__ = [
     "commit_legacy_hook_migration",
     "open_legacy_hook_artifact",
     "legacy_hook_migration_claim",
+    "DURABILITY_STATES",
+    "verify_ciphertext_durability",
+    "CiphertextDurabilityError",
 ]
+
+
+# Ciphertext durability is four observations. A local manifest commit, a queued
+# replication acknowledgement, and a pin are never a verified replica. Only a
+# Kit readback of the same ciphertext bytes can set durable. A CID string or a
+# public gateway URL is not evidence.
+
+DURABILITY_STATE_LOCAL_COMMIT = "local_commit"
+DURABILITY_STATE_QUEUED_REPLICATION = "queued_replication"
+DURABILITY_STATE_PIN = "pin"
+DURABILITY_STATE_VERIFIED_REPLICA = "verified_replica"
+DURABILITY_STATES = (
+    DURABILITY_STATE_LOCAL_COMMIT,
+    DURABILITY_STATE_QUEUED_REPLICATION,
+    DURABILITY_STATE_PIN,
+    DURABILITY_STATE_VERIFIED_REPLICA,
+)
+_GATEWAY_MARKERS = (
+    "ipfs.io",
+    "gateway.ipfs",
+    "dweb.link",
+    "cloudflare-ipfs.com",
+    "ipfs.tech/ipfs",
+    "https://",
+    "http://",
+)
+
+
+class CiphertextDurabilityError(PrivateStorageError):
+    """Kit durability could not be shown from ciphertext readback."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code, code=code)
+
+
+def _kit_replica_contract():
+    """Load the current Kit replica vocabulary. A missing contract is a failure."""
+
+    _prefer_vendored_kit()
+    try:
+        from ipfs_kit_py.core.replication.contracts import (
+            NON_DURABLE_REPLICA_STATES,
+            ReplicaState,
+        )
+    except Exception as exc:
+        raise CiphertextDurabilityError("kit_contracts_unavailable") from exc
+    if ReplicaState.QUEUED not in NON_DURABLE_REPLICA_STATES:
+        raise CiphertextDurabilityError("kit_contracts_unavailable")
+    if ReplicaState.VERIFIED in NON_DURABLE_REPLICA_STATES:
+        raise CiphertextDurabilityError("kit_contracts_unavailable")
+    return ReplicaState
+
+
+def _reject_public_gateway(value: Any) -> None:
+    if isinstance(value, str):
+        lowered = value.lower()
+        if any(marker in lowered for marker in _GATEWAY_MARKERS):
+            raise CiphertextDurabilityError("public_gateway_rejected")
+        return
+    if isinstance(value, Mapping):
+        for item in value.values():
+            _reject_public_gateway(item)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _reject_public_gateway(item)
+
+
+def _kit_call(kit: Any, name: str, *args: Any) -> Any:
+    method = getattr(kit, name, None)
+    if not callable(method):
+        raise CiphertextDurabilityError(f"kit_{name}_unavailable")
+    try:
+        result = method(*args)
+    except CiphertextDurabilityError:
+        raise
+    except Exception as exc:
+        raise CiphertextDurabilityError(f"kit_{name}_failed") from exc
+    _reject_public_gateway(result if not isinstance(result, (bytes, bytearray)) else "")
+    return result
+
+
+def _ciphertext_commit_reference(result: Mapping[str, Any]) -> str:
+    ref = result.get("ref") or result.get("locator")
+    if isinstance(ref, str) and ref.strip() and ref == ref.strip() and len(ref) <= 200:
+        if any(marker in ref.lower() for marker in _GATEWAY_MARKERS):
+            raise CiphertextDurabilityError("public_gateway_rejected")
+        return ref
+    cid = result.get("cid")
+    if isinstance(cid, str) and cid.strip() and "://" not in cid and len(cid) <= 200:
+        return cid
+    raise CiphertextDurabilityError("kit_ref_rejected")
+
+
+def verify_ciphertext_durability(kit: Any, envelope: bytes) -> dict[str, Any]:
+    """Commit, queue, pin, and read back one ciphertext through a Kit owner.
+
+    ``durable`` is true only when ``readback`` returns the same bytes that
+    ``manifest`` accepted. Queued replication and pin stay distinct and
+    non-durable. Public gateway URLs are rejected. A CID is not proof.
+    """
+
+    if not isinstance(envelope, (bytes, bytearray)) or not bytes(envelope).startswith(ENVELOPE_MAGIC):
+        raise CiphertextDurabilityError("ciphertext_required")
+    payload = bytes(envelope)
+    replica_state = _kit_replica_contract()
+    states: list[dict[str, Any]] = []
+
+    def _record(state: str, *, ref: str, kit_state: str) -> None:
+        if state not in DURABILITY_STATES or any(item["state"] == state for item in states):
+            raise CiphertextDurabilityError("durability_state_collision")
+        states.append({
+            "state": state,
+            "ref": ref,
+            "kit_replica_state": kit_state,
+            "durable": False,
+            "counts_as_verified_replica": False,
+        })
+
+    manifest = _kit_call(kit, "manifest", payload)
+    if not isinstance(manifest, Mapping):
+        raise CiphertextDurabilityError("kit_manifest_failed")
+    ref = _ciphertext_commit_reference(manifest)
+    _record(DURABILITY_STATE_LOCAL_COMMIT, ref=ref, kit_state="local_commit")
+
+    queued = _kit_call(kit, "queue_replication", ref)
+    if not isinstance(queued, Mapping):
+        raise CiphertextDurabilityError("kit_queue_replication_failed")
+    _record(
+        DURABILITY_STATE_QUEUED_REPLICATION,
+        ref=ref,
+        kit_state=replica_state.QUEUED.value,
+    )
+
+    pinned = _kit_call(kit, "pin", ref)
+    if not isinstance(pinned, Mapping) or pinned.get("pinned") is not True:
+        raise CiphertextDurabilityError("kit_pin_failed")
+    _record(DURABILITY_STATE_PIN, ref=ref, kit_state="pin")
+
+    loaded = _kit_call(kit, "readback", ref)
+    matched = isinstance(loaded, (bytes, bytearray)) and bytes(loaded) == payload
+    if matched:
+        _record(
+            DURABILITY_STATE_VERIFIED_REPLICA,
+            ref=ref,
+            kit_state=replica_state.VERIFIED.value,
+        )
+        states[-1]["counts_as_verified_replica"] = True
+        states[-1]["durable"] = True
+    observed = [item["state"] for item in states]
+    if observed[:3] != list(DURABILITY_STATES[:3]):
+        raise CiphertextDurabilityError("durability_state_collision")
+    if len(set(observed)) != len(observed):
+        raise CiphertextDurabilityError("durability_state_collision")
+    return {
+        "states": states,
+        "state_names": observed,
+        "durable": matched and observed[-1] == DURABILITY_STATE_VERIFIED_REPLICA,
+        "readback_matched": matched,
+        "ciphertext_sha256": hashlib.sha256(payload).hexdigest(),
+        "byte_length": len(payload),
+        "ref": ref,
+        "public_gateway_consulted": False,
+        "cid_inference": False,
+        "pin_is_durable": False,
+        "queued_replication_is_durable": False,
+        "local_commit_is_durable": False,
+        "code": "" if matched else "readback_mismatch",
+    }

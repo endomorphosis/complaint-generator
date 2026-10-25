@@ -1122,7 +1122,7 @@ Implementation instructions:
 
 ## CIMP-GUI-38 Verify ciphertext durability through Kit owners
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -1152,7 +1152,7 @@ Implementation instructions:
 
 ## CIMP-GUI-39 Show truthful durability and failure recovery states
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -1332,7 +1332,7 @@ Implementation instructions:
 
 ## CIMP-GUI-45 Build assigned-lawyer case review workspace
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -1422,7 +1422,7 @@ Implementation instructions:
 
 ## CIMP-GUI-48 Deliver minimal private in-app notifications
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -1513,7 +1513,7 @@ Implementation instructions:
 
 ## CIMP-GUI-51 Inspect assignment and campaign operations safely
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1

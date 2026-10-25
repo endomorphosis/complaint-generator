@@ -189,8 +189,8 @@ def _annotate(record: Mapping[str, Any], live: Mapping[str, Any]) -> Dict[str, A
     projected = dict(record)
     projected["applies_to_current_revisions"] = current
     projected["stale"] = not current
-    projected["accepted_for_bound_revision"] = bool(current and human_approval and record.get("operation") == "review")
-    projected["promoted_for_current_revisions"] = bool(current and promoted)
+    projected["accepted_for_bound_revision"] = bool(current and human_approval and record.get("operation") == "review" and live.get("source_bound", True))
+    projected["promoted_for_current_revisions"] = bool(current and promoted and live.get("source_bound", True))
     projected["promotes_changed_law"] = False
     projected["promotes_changed_facts"] = False
     projected["governing_legal_authority"] = False
@@ -200,8 +200,8 @@ def _annotate(record: Mapping[str, Any], live: Mapping[str, Any]) -> Dict[str, A
     return projected
 
 
-def project_lawyer_reviews(case_file: Mapping[str, Any], *, case_revision: int) -> Dict[str, Any]:
-    live = live_revisions(case_file, case_revision=case_revision)
+def project_lawyer_reviews(case_file: Mapping[str, Any], *, case_revision: int, live_context=None) -> Dict[str, Any]:
+    live = dict(live_context) if live_context is not None else live_revisions(case_file, case_revision=case_revision)
     stored = case_file.get("lawyer_review_ledger")
     rows = [_annotate(item, live) for item in stored if isinstance(item, dict)] if isinstance(stored, list) else []
     human = [item for item in rows if item.get("record_kind") == _HUMAN]
@@ -242,6 +242,8 @@ def _require_live(body: Mapping[str, Any], live: Mapping[str, Any]) -> None:
         "proof_revision": body.get("expected_proof_revision"),
     }
     for key, value in expected.items():
+        if (key=='case_revision' and type(value) is not int) or (key!='case_revision' and not isinstance(value,str)):
+            raise CaseReviewError('lawyer_review_field')
         if value != live[key]:
             raise CaseReviewError("stale_revision")
 
@@ -276,8 +278,8 @@ def _base_record(body: Mapping[str, Any], live: Mapping[str, Any], *, actor_prin
     }
 
 
-def submit_lawyer_review(mediator: Any, body: Mapping[str, Any], *, actor_principal_id: str,
-                         canonical_owner_principal_id: str, case_revision: int, membership: str) -> Dict[str, Any]:
+def submit_review_record(case_file: MutableMapping[str, Any], body: Mapping[str, Any], *, actor_principal_id: str,
+                         canonical_owner_principal_id: str, case_revision: int, membership: str, live_context=None) -> Dict[str, Any]:
     """Append one attributed review record. Stale revisions are not stored as current."""
 
     if membership != "assigned-lawyer":
@@ -287,8 +289,7 @@ def submit_lawyer_review(mediator: Any, body: Mapping[str, Any], *, actor_princi
     operation = _text(body.get("operation"), limit=40, required=True)
     if operation not in {"propose", "review", "promote", "record_model_suggestion", "record_machine_proof"}:
         raise CaseReviewError("lawyer_review_field")
-    case_file = _case_file(mediator)
-    live = live_revisions(case_file, case_revision=case_revision)
+    live = dict(live_context) if live_context is not None else live_revisions(case_file, case_revision=case_revision)
     _require_live(body, live)
     stored = case_file.get("lawyer_review_ledger")
     ledger = stored if isinstance(stored, list) else []
@@ -297,7 +298,7 @@ def submit_lawyer_review(mediator: Any, body: Mapping[str, Any], *, actor_princi
         if isinstance(existing, dict) and existing.get("request_id") == request_id:
             if existing.get("operation") != operation:
                 raise CaseReviewError("replay_mismatch")
-            projected = project_lawyer_reviews(case_file, case_revision=case_revision)
+            projected = project_lawyer_reviews(case_file, case_revision=case_revision, live_context=live)
             projected["record"] = _annotate(existing, live)
             projected["operation"] = operation
             return projected
@@ -369,7 +370,7 @@ def submit_lawyer_review(mediator: Any, body: Mapping[str, Any], *, actor_princi
     if case_file.get("lawyer_review_ledger") is not ledger:
         case_file["lawyer_review_ledger"] = ledger
     ledger.append(record)
-    projected = project_lawyer_reviews(case_file, case_revision=case_revision)
+    projected = project_lawyer_reviews(case_file, case_revision=case_revision, live_context=live)
     projected["record"] = _annotate(record, live)
     projected["operation"] = operation
     return projected
@@ -446,9 +447,9 @@ def _snapshot_targets(case_file: Mapping[str, Any]) -> str:
     return json.dumps(_state_view(case_file), sort_keys=True, default=str)
 
 
-def submit_collaborative_review(mediator: Any, body: Mapping[str, Any], *, actor_principal_id: str,
+def submit_collaborative_record(case_file: MutableMapping[str, Any], body: Mapping[str, Any], *, actor_principal_id: str,
                                 canonical_owner_principal_id: str, case_id: str, membership: str,
-                                authorized: bool) -> Dict[str, Any]:
+                                authorized: bool, workflow_owner=None) -> Dict[str, Any]:
     """Record a typed review item. This path does not change case state."""
 
     if membership not in {"assigned-lawyer", "owner"}:
@@ -458,7 +459,6 @@ def submit_collaborative_review(mediator: Any, body: Mapping[str, Any], *, actor
     operation = _text(body.get("operation"), limit=40, required=True)
     if operation not in set(_REVIEW_CREATE) | {"dissent", "bind_support"}:
         raise CaseReviewError("review_field")
-    case_file = _case_file(mediator)
     before = _snapshot_targets(case_file)
     items = _review_items(case_file)
     request_id = _text(body.get("request_id"), limit=80, required=True)
@@ -514,7 +514,9 @@ def submit_collaborative_review(mediator: Any, body: Mapping[str, Any], *, actor
         record["dissent"] = True
         record["status"] = "dissent"
     else:
-        service = _review_service(mediator)
+        if workflow_owner is None:
+            raise CaseReviewError("review_transition_owner_unavailable")
+        service = workflow_owner
         receipt = service.register_review_downstream_support(
             case_id=case_id,
             support_id=_text(body.get("support_id"), limit=80, required=True),
@@ -538,6 +540,12 @@ def submit_collaborative_review(mediator: Any, body: Mapping[str, Any], *, actor
     projected["record"] = dict(record)
     projected["replayed"] = False
     return projected
+
+
+
+def submit_collaborative_review(mediator: Any, body: Mapping[str, Any], **scope) -> Dict[str, Any]:
+    return submit_collaborative_record(_case_file(mediator), body,
+        workflow_owner=_review_service(mediator) if body.get('operation') == 'bind_support' else None, **scope)
 
 
 def accept_review_transition(mediator: Any, body: Mapping[str, Any], *, actor_principal_id: str,
@@ -626,162 +634,133 @@ def accept_review_transition(mediator: Any, body: Mapping[str, Any], *, actor_pr
             raise CaseReviewError("dissent_lost")
     return projected
 
+def submit_lawyer_review(mediator: Any, body: Mapping[str, Any], **scope) -> Dict[str, Any]:
+    """Legacy pure reported-record helper; mounted routes use the encrypted owner."""
+    return submit_review_record(_case_file(mediator), body, **scope)
+
 
 def render_lawyer_workspace(projection: Mapping[str, Any]) -> str:
     """Fill the lawyer workspace template. The page does not treat stale rows as current."""
 
     template = _TEMPLATE.read_text(encoding="utf-8")
     payload = json.dumps(projection, sort_keys=True)
-    safe = html.escape(payload, quote=True)
+    safe = payload.replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     if "__LAWYER_REVIEW_JSON__" not in template:
         raise CaseReviewError("lawyer_review_unavailable")
     return template.replace("__LAWYER_REVIEW_JSON__", safe)
 
 
 def mount_lawyer_review_routes(app: Any) -> None:
-    """Mount lawyer review beside legal analysis. Middleware still authorizes the prefix."""
-
+    """Only the explicitly configured encrypted review owner serves this prefix."""
     from fastapi.responses import HTMLResponse, JSONResponse
-
-    from applications.case_routes import _BOUND_HANDLERS
+    from starlette.concurrency import run_in_threadpool
+    from applications.case_review_store import CaseReviewService, CaseReviewStoreError
     from applications.workspace_case_authority import current_workspace_case_authority
 
-    def _fail(exc: CaseReviewError) -> JSONResponse:
-        return JSONResponse(
-            {
-                "error": exc.code,
-                "task_id": TASK_ID,
-                "promotes_changed_law": False,
-                "promotes_changed_facts": False,
-                "governing_legal_authority": False,
-                "legal_sufficiency": False,
-                "admitted_law": False,
-            },
-            status_code=case_review_http_status(exc.code),
-        )
+    def context(request, case_id):
+        service = getattr(request.app.state, 'case_reviews', None)
+        decision = getattr(request.state, 'case_authorization', None)
+        authority = current_workspace_case_authority()
+        if type(service) is not CaseReviewService:
+            raise CaseReviewStoreError('review_unavailable')
+        if decision is None or decision.case_id != case_id or authority is None:
+            raise CaseReviewStoreError('lawyer_review_ungranted')
+        return service, decision, authority
 
-    def _authorized(request: Request, case_id: str, *, write: bool):
-        decision = getattr(request.state, "case_authorization", None)
-        if decision is None or getattr(decision, "permits_case_content", False) is not True:
-            raise CaseReviewError("lawyer_review_ungranted")
-        expected = "case.review" if write else "case.read"
-        if getattr(decision, "action", "") != expected:
-            raise CaseReviewError("lawyer_review_ungranted")
-        if str(getattr(decision, "case_id", "") or "") != case_id:
-            raise CaseReviewError("cross_case_id")
-        query_case = str(request.query_params.get("case_id") or "")
-        if query_case and query_case != case_id:
-            raise CaseReviewError("cross_case_id")
-        resolver = _BOUND_HANDLERS.get()
-        if resolver is None:
-            raise CaseReviewError("lawyer_review_unavailable")
-        try:
-            mediator, _workspace, _root = resolver()
-            authority = current_workspace_case_authority()
-        except Exception as exc:
-            raise CaseReviewError("lawyer_review_unavailable") from exc
-        if authority is None or getattr(authority, "case_id", None) != case_id:
-            raise CaseReviewError("lawyer_review_ungranted")
-        revision = getattr(decision, "revision", None)
-        if type(revision) is not int:
-            raise CaseReviewError("lawyer_review_field")
-        return mediator, decision, revision
+    def failed(exc):
+        code = str(getattr(exc, 'code', '') or 'review_unavailable')
+        allowed = {'lawyer_assignment_required','lawyer_review_ungranted','cross_case_id','review_key_locked',
+            'review_source_changed','review_source_unbound','review_unavailable','review_integrity','review_key_grant_required',
+            'review_membership_required','lawyer_review_field','lawyer_review_bounds','stale_revision','stale_approval',
+            'replay_mismatch','proof_producer_unavailable','owner_share_required','recipient_review_grant_required',
+            'proposal_required','approval_required','model_cannot_approve','machine_proof_cannot_approve',
+            'review_transition_owner_unavailable','review_field','review_bounds','revision_conflict',
+            'review_target_capability_unavailable','proposal_already_accepted','unlock_needed'}
+        if code not in allowed:
+            code = 'lawyer_review_ungranted' if code in {'grant_revoked','key_grant_rejected','late_result_after_cutoff',
+                'membership_removed','membership_expired','workspace_authorization_denied'} else 'review_unavailable'
+        status = 409 if code in {'stale_revision','stale_approval','replay_mismatch','review_source_changed','revision_conflict','proposal_already_accepted'} else 422 if code in {
+            'lawyer_review_field','lawyer_review_bounds','review_field','review_bounds'} else 503 if code in {'review_unavailable','review_key_locked',
+            'review_source_unbound','proof_producer_unavailable','recipient_review_grant_required','review_transition_owner_unavailable',
+            'review_target_capability_unavailable','unlock_needed'} else 403
+        return JSONResponse({'task_id':TASK_ID,'error':code,'status':'unavailable' if status==503 else 'refused',
+            'human_legal_reviews':[],'model_suggestions':[],'machine_proofs':[],'proof':False,
+            'governing_legal_authority':False,'legal_sufficiency':False,'admitted_law':False,
+            'promotes_changed_law':False,'promotes_changed_facts':False,
+            'message':'Complaint changed; owner must share latest version.' if code=='review_source_changed' else 'Review access could not be verified.'},status_code=status)
+
+    async def projection(request,case_id):
+        service,decision,authority=context(request,case_id)
+        value=await run_in_threadpool(service.read,decision.actor_principal_id,case_id=case_id,authority=authority)
+        value.update(actor_principal_id=decision.actor_principal_id,
+            case_context={'tenant_id':decision.tenant_id,'case_id':case_id,'resource_id':decision.resource_id,
+                'revision':decision.revision,'membership_revision':decision.membership_revision},
+            session_generation=request.state.browser_principal.generation)
+        return value
 
     @app.get(LAWYER_WORKSPACE_ROUTE)
     async def read_lawyer_workspace(case_id: str, request: Request):
         try:
-            mediator, _decision, revision = _authorized(request, case_id, write=False)
-            projection = project_lawyer_reviews(_case_file(mediator), case_revision=revision)
-            projection["case_id"] = case_id
-            page = render_lawyer_workspace(projection)
-        except CaseReviewError as exc:
-            return _fail(exc)
-        return HTMLResponse(page)
+            return HTMLResponse(render_lawyer_workspace(await projection(request,case_id)))
+        except Exception as exc:
+            return failed(exc)
 
     @app.get(LAWYER_REVIEW_ROUTE)
     async def read_lawyer_reviews(case_id: str, request: Request):
         try:
-            mediator, _decision, revision = _authorized(request, case_id, write=False)
-            payload = project_lawyer_reviews(_case_file(mediator), case_revision=revision)
-        except CaseReviewError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        return JSONResponse(payload)
+            return JSONResponse(await projection(request,case_id))
+        except Exception as exc:
+            return failed(exc)
 
     @app.post(LAWYER_REVIEW_ROUTE)
     async def write_lawyer_review(case_id: str, request: Request):
         try:
-            mediator, decision, revision = _authorized(request, case_id, write=True)
-            body = await request.json()
-            if not isinstance(body, dict):
-                raise CaseReviewError("lawyer_review_field")
-            payload = submit_lawyer_review(
-                mediator,
-                body,
-                actor_principal_id=str(getattr(decision, "actor_principal_id", "") or ""),
-                canonical_owner_principal_id=str(getattr(decision, "canonical_owner_principal_id", "") or ""),
-                case_revision=revision,
-                membership=str(getattr(decision, "membership", "") or ""),
-            )
-        except CaseReviewError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        payload["promotes_changed_law"] = False
-        payload["promotes_changed_facts"] = False
-        return JSONResponse(payload)
+            service,decision,authority=context(request,case_id)
+            value=await run_in_threadpool(service.write,decision.actor_principal_id,case_id=case_id,
+                request=await request.json(),authority=authority)
+            return JSONResponse(value)
+        except Exception as exc:
+            return failed(exc)
 
-    def _review_actor(request: Request, case_id: str, *, write: bool):
-        mediator, decision, _revision = _authorized(request, case_id, write=write)
-        return mediator, decision
+    @app.get(LAWYER_REVIEW_ROUTE+'/sharing')
+    async def read_sharing(case_id: str, request: Request):
+        try:
+            service,decision,authority=context(request,case_id)
+            return JSONResponse(await run_in_threadpool(service.sharing_status,decision.actor_principal_id,
+                case_id=case_id,authority=authority))
+        except Exception as exc:
+            return failed(exc)
+
+    @app.post(LAWYER_REVIEW_ROUTE+'/share')
+    async def share_review_source(case_id: str, request: Request):
+        try:
+            service,decision,authority=context(request,case_id)
+            return JSONResponse(await run_in_threadpool(service.share_source,decision.actor_principal_id,
+                case_id=case_id,request=await request.json(),authority=authority))
+        except Exception as exc:
+            return failed(exc)
 
     @app.get(REVIEW_ITEMS_ROUTE)
     async def read_review_items(case_id: str, request: Request):
         try:
-            mediator, _decision = _review_actor(request, case_id, write=False)
-            payload = project_collaborative_reviews(_case_file(mediator))
-        except CaseReviewError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        return JSONResponse(payload)
+            service,decision,authority=context(request,case_id)
+            value=await run_in_threadpool(service.read,decision.actor_principal_id,case_id=case_id,authority=authority)
+            return JSONResponse({**value['collaborative_reviews'],'case_id':case_id,'review_revision':value['review_revision'],
+                'private_revision':value['private_revision'],'live_revisions':value['live_revisions'],'read_only':True})
+        except Exception as exc:return failed(exc)
 
     @app.post(REVIEW_ITEMS_ROUTE)
-    async def write_review_item(case_id: str, request: Request):
+    async def write_review_items(case_id: str, request: Request):
         try:
-            mediator, decision = _review_actor(request, case_id, write=True)
-            body = await request.json()
-            if not isinstance(body, dict):
-                raise CaseReviewError("review_field")
-            payload = submit_collaborative_review(
-                mediator,
-                body,
-                actor_principal_id=str(getattr(decision, "actor_principal_id", "") or ""),
-                canonical_owner_principal_id=str(getattr(decision, "canonical_owner_principal_id", "") or ""),
-                case_id=case_id,
-                membership=str(getattr(decision, "membership", "") or ""),
-                authorized=str(getattr(decision, "action", "") or "") == "case.review",
-            )
-        except CaseReviewError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        return JSONResponse(payload)
+            service,decision,authority=context(request,case_id)
+            return JSONResponse(await run_in_threadpool(service.write_item,decision.actor_principal_id,case_id=case_id,
+                request=await request.json(),authority=authority))
+        except Exception as exc:return failed(exc)
 
     @app.post(REVIEW_TRANSITIONS_ROUTE)
     async def write_review_transition(case_id: str, request: Request):
         try:
-            mediator, decision = _review_actor(request, case_id, write=True)
-            body = await request.json()
-            if not isinstance(body, dict):
-                raise CaseReviewError("review_field")
-            payload = accept_review_transition(
-                mediator,
-                body,
-                actor_principal_id=str(getattr(decision, "actor_principal_id", "") or ""),
-                canonical_owner_principal_id=str(getattr(decision, "canonical_owner_principal_id", "") or ""),
-                case_id=case_id,
-                membership=str(getattr(decision, "membership", "") or ""),
-                authorized=str(getattr(decision, "action", "") or "") == "case.review",
-            )
-        except CaseReviewError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        return JSONResponse(payload)
+            service,decision,authority=context(request,case_id)
+            return JSONResponse(await run_in_threadpool(service.accept_owner_transition,decision.actor_principal_id,
+                case_id=case_id,request=await request.json(),authority=authority))
+        except Exception as exc:return failed(exc)

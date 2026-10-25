@@ -3936,6 +3936,110 @@
                             </div>
                             <div class="status" id="bounded-inference-status" role="status" data-code="">Inference has not been requested.</div>
                         </section>
+                        <section id="storage-durability-recovery" data-task="CIMP-GUI-39" data-storage-readiness="unresolved" data-interview-readiness="not_evaluated" data-legal-readiness="not_evaluated" data-pending-replica="unknown" data-keys-displayed="false" data-loss-of-acknowledged-work="false" aria-labelledby="storage-durability-recovery-title">
+                            <h3 id="storage-durability-recovery-title">Storage durability and recovery</h3>
+                            <p class="muted">Storage readiness is separate from interview readiness and legal readiness. A pending replica, offline backend, unavailable store, corrupt ciphertext, or truncated ciphertext stays unresolved. Acknowledged local commit, queued replication, and pin remain visible. This panel does not show keys, passphrases, or plaintext.</p>
+                            <div class="field-row">
+                                <div><label for="storage-tenant-id">Tenant</label><input id="storage-tenant-id" type="text" autocomplete="off"></div>
+                                <div><label for="storage-case-id">Case</label><input id="storage-case-id" type="text" autocomplete="off"></div>
+                                <div><label for="storage-resource-id">Resource</label><input id="storage-resource-id" type="text" autocomplete="off"></div>
+                                <div><label for="storage-revision">Revision</label><input id="storage-revision" type="text" autocomplete="off"></div>
+                                <div><label for="storage-idempotency-key">Idempotency key</label><input id="storage-idempotency-key" type="text" autocomplete="off"></div>
+                            </div>
+                            <ul id="storage-durability-states">
+                                <li data-state="local_commit">Local commit: not acknowledged</li>
+                                <li data-state="queued_replication">Queued replication: pending replica, not durable</li>
+                                <li data-state="pin">Pin: not a verified replica</li>
+                                <li data-state="verified_replica">Verified replica: unresolved</li>
+                            </ul>
+                            <p id="storage-failure-status" data-failure="none">No storage, key, or backend failure is hidden as success.</p>
+                            <p id="storage-readiness-note">Storage readiness does not change interview readiness or legal readiness.</p>
+                            <div class="button-row">
+                                <button class="secondary" id="storage-durability-refresh" type="button">Refresh storage status</button>
+                            </div>
+                            <div class="status" id="storage-durability-status" role="status" data-durable="false" data-unresolved="true">Storage status has not been loaded. Unresolved work stays unresolved.</div>
+                        </section>
+                        <script>
+                        (function () {
+                            var panel = document.getElementById("storage-durability-recovery");
+                            if (!panel) return;
+                            var secretNames = {"key":1,"data_key":1,"passphrase":1,"secret":1,"content_base64":1,"ciphertext":1,"browser_key":1,"wrapped_key":1,"master_key":1,"private_key":1,"encryption_key":1,"password":1};
+                            function renderStorageDurabilityRecovery(payload) {
+                                var body = payload && typeof payload === "object" ? payload : {};
+                                var storage = body.storage_readiness || "unresolved";
+                                if (storage !== "ready" && storage !== "unresolved" && storage !== "unavailable") storage = "unresolved";
+                                panel.dataset.storageReadiness = storage;
+                                panel.dataset.interviewReadiness = body.interview_readiness || panel.dataset.interviewReadiness || "not_evaluated";
+                                panel.dataset.legalReadiness = body.legal_readiness || panel.dataset.legalReadiness || "not_evaluated";
+                                if (body.storage_sets_interview_readiness === true || body.storage_sets_legal_readiness === true) {
+                                    panel.dataset.storageReadiness = "unresolved";
+                                }
+                                panel.dataset.pendingReplica = body.pending_replica === true ? "true" : (body.pending_replica === false ? "false" : "unknown");
+                                panel.dataset.keysDisplayed = "false";
+                                panel.dataset.lossOfAcknowledgedWork = body.loss_of_acknowledged_work === true ? "true" : "false";
+                                var states = Array.isArray(body.state_names) ? body.state_names : null;
+                                var list = document.getElementById("storage-durability-states");
+                                if (list && states) {
+                                    var items = list.querySelectorAll("[data-state]");
+                                    for (var i = 0; i < items.length; i++) {
+                                        var name = items[i].getAttribute("data-state");
+                                        var acknowledged = states.indexOf(name) !== -1;
+                                        items[i].textContent = name + ": " + (acknowledged ? "acknowledged" : "not acknowledged");
+                                    }
+                                }
+                                var failure = document.getElementById("storage-failure-status");
+                                if (failure) {
+                                    var kind = body.failure_kind || "none";
+                                    var code = body.error || "";
+                                    failure.dataset.failure = kind;
+                                    failure.textContent = kind === "none" && body.durable === true
+                                        ? "Verified replica. Storage is ready. Interview and legal readiness were not changed."
+                                        : "Failure kind " + kind + (code ? " (" + code + ")" : "") + ". Replica status " + (body.replica_status || "unresolved") + ". Acknowledged states stay on the record.";
+                                }
+                                var status = document.getElementById("storage-durability-status");
+                                if (status) {
+                                    status.dataset.durable = body.durable === true ? "true" : "false";
+                                    status.dataset.unresolved = body.unresolved === false ? "false" : "true";
+                                    status.textContent = "Storage " + panel.dataset.storageReadiness + ". Interview " + panel.dataset.interviewReadiness + ". Legal " + panel.dataset.legalReadiness + ".";
+                                }
+                            }
+                            window.renderStorageDurabilityRecovery = renderStorageDurabilityRecovery;
+                            var button = document.getElementById("storage-durability-refresh");
+                            if (!button) return;
+                            button.addEventListener("click", function () {
+                                var params = new URLSearchParams();
+                                ["tenant_id", "case_id", "resource_id", "revision", "idempotency_key"].forEach(function (name) {
+                                    var field = document.getElementById("storage-" + name.replace(/_/g, "-"));
+                                    if (field && field.value) params.set(name, field.value.trim());
+                                });
+                                fetch("/api/cases/storage/durability?" + params.toString(), {credentials: "same-origin", headers: {"accept": "application/json"}})
+                                    .then(function (response) { return response.json(); })
+                                    .then(function (payload) {
+                                        var clean = {};
+                                        if (payload && typeof payload === "object") {
+                                            Object.keys(payload).forEach(function (name) {
+                                                if (!secretNames[name]) clean[name] = payload[name];
+                                            });
+                                        }
+                                        renderStorageDurabilityRecovery(clean);
+                                    })
+                                    .catch(function () {
+                                        renderStorageDurabilityRecovery({
+                                            storage_readiness: "unavailable",
+                                            interview_readiness: panel.dataset.interviewReadiness || "not_evaluated",
+                                            legal_readiness: panel.dataset.legalReadiness || "not_evaluated",
+                                            failure_kind: "backend",
+                                            error: "storage_unavailable",
+                                            unresolved: true,
+                                            pending_replica: panel.dataset.pendingReplica === "true",
+                                            replica_status: panel.dataset.pendingReplica === "true" ? "pending" : "unresolved",
+                                            durable: false,
+                                            loss_of_acknowledged_work: false
+                                        });
+                                    });
+                            });
+                        })();
+                        </script>
                     </section>
                     <div class="section-intro">
                         <strong>What to do here</strong>
@@ -5711,6 +5815,12 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                     </div>
                 </section>
 
+                <section id="owner-review-sharing-link">
+                    <h2>Share a version for lawyer review</h2>
+                    <p>Open this case's review page to share the current version with an accepted assignment. A reviewer uses their own key grant.</p>
+                    <button type="button" id="open-owner-review-sharing">Open review sharing</button>
+                    <p id="owner-review-sharing-status" role="status"></p>
+                </section>
                 <section id="definition-correspondence-panel" data-task="CIMP-GUI-30">
                     <h2>Definitions in a reviewed source</h2>
                     <p>Select a source already reviewed for this case. A definition correspondence is a candidate interpretation, not governing law or a proof. Checking cannot supply missing reviewed definition inputs.</p>
@@ -6340,6 +6450,17 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         });
         document.getElementById('legal-context-refresh').addEventListener('click', function () { refreshLegalContext(); });
         document.getElementById('legal-context-save').addEventListener('click', function () { saveLegalContext(); });
+
+        document.getElementById('open-owner-review-sharing').addEventListener('click', function () {
+            const selected=client.caseContext;
+            if(!selected || workspacePrivacyInactive) {
+                document.getElementById('owner-review-sharing-status').textContent='Select and authenticate an owned case first.';
+                return;
+            }
+            const query=new URLSearchParams({tenant_id:selected.tenant_id,case_id:selected.case_id,resource_id:selected.resource_id,
+                expected_revision:String(selected.expected_revision),expected_membership_revision:'0'});
+            window.location.assign('/api/legal-analysis/'+encodeURIComponent(selected.case_id)+'/lawyer-workspace?'+query.toString());
+        });
 
         let definitionRequestEpoch = 0;
 

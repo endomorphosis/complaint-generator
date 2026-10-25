@@ -185,6 +185,25 @@ def _is_admin_api_path(path: str) -> bool:
     return path == ADMIN_API_PREFIX or path.startswith(ADMIN_API_PREFIX + "/")
 
 
+def durability_readiness_boundary() -> dict[str, Any]:
+    """Storage readiness is a separate owner from interview and legal readiness.
+
+    A storage, key, or backend failure must not clear or satisfy interview or
+    legal readiness. Callers may read this boundary; storage routes publish
+    only ``storage_readiness``.
+    """
+
+    return {
+        "storage_readiness_owner": "case_storage",
+        "interview_readiness_owner": "interview",
+        "legal_readiness_owner": "legal",
+        "storage_sets_interview_readiness": False,
+        "storage_sets_legal_readiness": False,
+        "storage_failure_clears_interview_readiness": False,
+        "storage_failure_clears_legal_readiness": False,
+    }
+
+
 def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer], mediator: Any = None,
                         include_workspace: bool = True, include_review: bool = True,
                         include_document: bool = True, workspace_service: Any = None,
@@ -195,9 +214,11 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
                         case_assignments: Any = None,
                         case_messages: Any = None,
                         case_attachments: Any = None,
+                        case_storage: Any = None,
                         case_consent: Any = None, gui_inference_transport: Any = None,
                         gui_inference_route: Any = None,
-                        operational_admin: Any = None) -> Any:
+                        operational_admin: Any = None, case_reviews: Any = None,
+                        case_notifications: Any = None) -> Any:
     """Mount the same fail-closed boundary in every production app variant.
 
     Historical mediator/workspace arguments grant no ambient case access.
@@ -246,6 +267,10 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     if case_attachments is not None and not isinstance(case_attachments, CaseAttachmentService):
         raise CaseAccessError("case_attachments")
     mount_case_attachments(app)
+    from .case_storage_api import CaseStorageService, mount_case_storage
+    if case_storage is not None and not isinstance(case_storage, CaseStorageService):
+        raise CaseAccessError("case_storage")
+    mount_case_storage(app)
     if case_messages is not None and case_attachments is not None:
         case_attachments.bind_message_admission(case_messages.store)
         case_messages.bind_attachments(case_attachments)
@@ -258,8 +283,18 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     selected_inference_transport = resolve_gui_inference_route(gui_inference_route,
         synthetic_transport=gui_inference_transport)
     mount_case_consent(app)
+    from .case_notifications import CaseNotificationService, mount_case_notifications
+    if case_notifications is not None and not isinstance(case_notifications, CaseNotificationService):
+        raise CaseAccessError("case_notifications")
+    if isinstance(case_notifications, CaseNotificationService):
+        case_notifications.observe(case_assignments, case_messages)
+    mount_case_notifications(app)
+    from .lawyer_workspace_api import LAWYER_WORKSPACE_API, mount_lawyer_workspace
+    mount_lawyer_workspace(app)
     from .case_api import mount_case_catalog
     mount_case_catalog(app)
+    if not (LAWYER_WORKSPACE_API == CASE_CATALOG_PREFIX or LAWYER_WORKSPACE_API.startswith(CASE_CATALOG_PREFIX + "/")):
+        raise CaseAccessError("lawyer_workspace_route")
     from .graph_api import mount_factual_graph_routes, mount_law_dependency_graph_routes
     mount_factual_graph_routes(app)
     mount_law_dependency_graph_routes(app)
@@ -294,6 +329,9 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
         raise CaseAccessError("operational_admin")
     mount_operational_admin(app)
     app.state.operational_admin = operational_admin
+    from .case_directory import CaseDirectory
+    directory = getattr(case_catalog, "_cases", None)
+    app.state.case_directory = directory if isinstance(directory, CaseDirectory) else None
     app.state.case_authorizer = authorizer
     app.state.browser_sessions = sessions
     app.state.case_handlers = case_handlers
@@ -301,7 +339,14 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     app.state.case_assignments = case_assignments
     app.state.case_messages = case_messages
     app.state.case_attachments = case_attachments
+    app.state.case_storage = case_storage
+    app.state.durability_readiness_boundary = durability_readiness_boundary()
     app.state.case_consent = case_consent
+    from .case_review_store import CaseReviewService
+    if case_reviews is not None and (type(case_reviews) is not CaseReviewService or case_reviews.authorizer is not authorizer):
+        raise CaseAccessError('case_reviews')
+    app.state.case_reviews = case_reviews
+    app.state.case_notifications = case_notifications
     app.state.gui_inference_transport = selected_inference_transport
     app.state.gui_inference_route = gui_inference_route
     app.state.case_json_body_limits = limits
@@ -449,6 +494,8 @@ def _check_actor_claims(scope: Dict[str, Any], body: bytes, principal_id: str) -
 
 
 def _required_action(path: str, method: str, material: Mapping[str, Any], extensions) -> str:
+    if path.rstrip('/').endswith('/lawyer-reviews/share') or path.rstrip('/').endswith('/review-transitions'):
+        return 'case.update'
     if _within_prefix(path, "/api/legal-research") and path.rstrip("/").endswith("/admissions"):
         return "case.read" if method in {"GET", "HEAD"} else "case.review"
     # Assigned-lawyer review is case.review. It is not case.update and not an owner-key grant.
