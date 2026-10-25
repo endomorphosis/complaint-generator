@@ -1362,7 +1362,7 @@ Implementation instructions:
 
 ## CIMP-GUI-46 Expose owner control over collaborators and grants
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
