@@ -534,7 +534,7 @@ def create_complaint_workspace_router(
     @router.post("/api/complaint-workspace/intake-chat")
     async def intake_chat_turn(request: IntakeChatTurnRequest) -> Response:
         action = str(request.interview_action or "").strip().lower()
-        if action in {"correct", "edit", "pause", "cancel", "cap", "unavailable", "saturate"}:
+        if action in {"correct", "edit", "pause", "cancel", "cap", "unavailable", "saturate", "encrypted_resume"}:
             # Keep the actual event loop available for logout/revocation while
             # the guarded effect encrypts. Starlette preserves the issued scope.
             try:
@@ -1052,7 +1052,7 @@ def create_complaint_workspace_router(
     async def call_mcp_tool(request: McpCallRequest) -> Response:
         try:
             threaded_intake = request.tool_name == "complaint.run_intake_chat_turn" and str(
-                request.arguments.get("interview_action") or "").strip().lower() in {"correct", "edit", "pause", "cancel", "cap", "unavailable", "saturate"}
+                request.arguments.get("interview_action") or "").strip().lower() in {"correct", "edit", "pause", "cancel", "cap", "unavailable", "saturate", "encrypted_resume"}
             if threaded_intake or request.tool_name in {"complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}:
                 payload = await run_in_threadpool(workspace.call_mcp_tool, request.tool_name, request.arguments)
             else:
@@ -1082,7 +1082,7 @@ def create_complaint_workspace_router(
         params = request.params if isinstance(request.params, dict) else {}
         arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
         threaded_intake = params.get("name") == "complaint.run_intake_chat_turn" and str(
-            arguments.get("interview_action") or "").strip().lower() in {"correct", "edit", "pause", "cancel", "cap", "unavailable", "saturate"}
+            arguments.get("interview_action") or "").strip().lower() in {"correct", "edit", "pause", "cancel", "cap", "unavailable", "saturate", "encrypted_resume"}
         if request.method == "tools/call" and (threaded_intake or params.get("name") in {
                 "complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}):
             response = await run_in_threadpool(handle_jsonrpc_message, workspace, request.model_dump())
