@@ -1694,7 +1694,7 @@ Implementation instructions:
 
 ## CIMP-GUI-57 Prove offline and unavailable GUI outcomes
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
