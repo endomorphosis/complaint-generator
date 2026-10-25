@@ -72,8 +72,7 @@ def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
         "last_implementation_task_id":task.task_id,"last_implementation_task_cid":identity.canonical_task_cid,
         "last_implementation_task_key":identity.canonical_task_key,"last_implementation_started_at":started,
         "last_implementation_worktree_path":str(workspace),"last_implementation_log_path":str(log),
-        "heartbeat_at":started,"last_progress_at":started,
-        "owner_process_birth":runtime.read_process_birth(os.getpid()).to_dict()}.items():
+        "heartbeat_at":started,"last_progress_at":started}.items():
         setattr(state,key,value)
     state.implementation_attempts={task.task_id:1};state.implementation_attempts_by_cid={identity.canonical_task_cid:1}
     target,_ = catalog_path(runner,campaign);plane.bind_task_state_control_plane(daemon.state_path,str(target))

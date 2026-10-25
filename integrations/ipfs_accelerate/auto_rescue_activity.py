@@ -28,7 +28,7 @@ _REASONS = frozenset({"not_active_rescue", "rescue_held", "native_owner_unavaila
     "log_custody_invalid", "log_prefix_truncated", "log_prefix_changed", "log_custody_changed",
     "rescue_log_stale", "log_header_ambiguous", "log_header_unbound", "rescue_frame_incomplete",
     "rescue_marker_unbound", "rescue_terminal", "rescue_activity_unavailable", "native_binding_changed",
-    "bounded_native_rescue_activity", "rescue_observation_unavailable", "native_state_unbound"})
+    "bounded_native_rescue_activity", "rescue_observation_unavailable", "native_state_unbound", "native_state_changed"})
 
 
 def summary(value):
@@ -150,10 +150,18 @@ def observe(runner, repo_root, campaign, state, *, now_ts):
         binding = runner._validation_activity_binding(Path(state.get("active_worktree_path") or ""),
             {"id": context["task_id"]}, context, now_ts=now_ts, owner_pid=owner.pid)
         _require(binding is not None, "native_binding_unavailable")
+        snapshot = runner._validation_activity_snapshot(campaign)
+        current = snapshot.get("body") if isinstance(snapshot,dict) else None
+        state_keys = ("active_task_id","active_task_cid","active_task_key","active_attempt",
+            "active_task_started_at","active_phase","active_phase_started_at","active_log_path","active_worktree_path",
+            "last_implementation_task_id","last_implementation_task_cid","last_implementation_task_key",
+            "last_implementation_started_at","last_implementation_log_path","last_implementation_worktree_path",
+            "implementation_in_progress","manual_hold","manual_cancellation","capacity_quarantine","protected_incident")
+        _require(isinstance(current,dict) and all(state.get(key)==current.get(key) for key in state_keys),
+                 "native_state_unbound")
         _require(type(state.get("active_attempt")) is int and state["active_attempt"] == binding["attempt"]
                  and state.get("active_phase_started_at") == binding["phase_started_at"]
-                 and state.get("active_log_path") == state.get("last_implementation_log_path") == binding["log_path"]
-                 and native.ProcessBirthIdentity.from_dict(state.get("owner_process_birth")) == owner,
+                 and state.get("active_log_path") == state.get("last_implementation_log_path") == binding["log_path"],
                  "native_state_unbound")
         _require(native.read_process_command_argv(owner.pid) == identity.command
                  and native.supervised_child_identity_liveness(identity) is native.OwnerLiveness.ALIVE,
@@ -249,6 +257,10 @@ def observe(runner, repo_root, campaign, state, *, now_ts):
         fresh = runner._validation_activity_binding(workspace, {"id": context["task_id"]}, context,
                                                    now_ts=max(now_ts,time.time()), owner_pid=owner.pid)
         _require(fresh == binding, "native_binding_changed")
+        final_snapshot = runner._validation_activity_snapshot(campaign)
+        final_state = final_snapshot.get("body") if isinstance(final_snapshot,dict) else None
+        _require(isinstance(final_state,dict) and all(final_state.get(key)==current.get(key) for key in state_keys),
+                 "native_state_changed")
         _require(max(now_ts,time.time()) < deadline, "provider_deadline_expired")
         report.update(activity_verified=True, work_progress_verified=last in _WORK,
             frame_counts=dict(counts), last_frame_kind=last, reason="bounded_native_rescue_activity")

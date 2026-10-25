@@ -22,7 +22,7 @@ pytestmark=[pytest.mark.no_auto_llm,pytest.mark.no_auto_network,pytest.mark.no_a
 
 def test_actual_sdk_legacy_unverified_bytes_can_open_new_budget_after_activity(tmp_path,monkeypatch):
     from ipfs_accelerate_py.agent_supervisor.rescue import campaign_watchdog as sdk
-    from ipfs_accelerate_py.agent_supervisor.rescue.programmatic_recovery import RecoveryActionObservation
+    from ipfs_accelerate_py.agent_supervisor.rescue.supervisor_recovery import RecoveryActionObservation
     with _native_world(tmp_path/'native',monkeypatch) as world:
         evidence=activity.observe(runner,world['root'],world['campaign'],world['body'],now_ts=time.time())
         assert evidence['activity_verified'] and not evidence['work_progress_verified'],evidence
