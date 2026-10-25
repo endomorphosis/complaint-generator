@@ -492,7 +492,7 @@ Implementation instructions:
 
 ## CIMP-GUI-17 Show inquiry explanations and distinct graph sources
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
