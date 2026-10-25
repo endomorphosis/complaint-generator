@@ -310,3 +310,64 @@ def test_route_boundary_rewrites_stale_inquiry_to_conflict() -> None:
 
     healthy = _exchange("/api/complaint-workspace/mcp/rpc", ok_payload)
     assert healthy[0]["status"] == 200
+
+
+def _asgi_stale_inquiry_bytes() -> bytes:
+    return json.dumps({"interview": {"action": "answer", "status": "refused",
+        "error": {"code": "stale_question", "resumable": True}}}).encode()
+
+
+def _asgi_response_messages(path, status, chunks):
+    """Run a real ASGI exchange with a strict response-message consumer."""
+    import asyncio
+    headers = [(b"content-type", b"application/json"), (b"x-synthetic", b"preserved"),
+        (b"set-cookie", b"one=1"), (b"set-cookie", b"two=2"),
+        (b"content-length", str(sum(len(body) for body, _more in chunks)).encode())]
+    expected = [{"type": "http.response.start", "status": status, "headers": headers}]
+    expected.extend({"type": "http.response.body", "body": body, "more_body": more}
+        for body, more in chunks)
+    observed = []
+
+    async def app(scope, receive, send):
+        wrapped = _inquiry_conflict_send(scope["path"], send)
+        for message in expected:
+            await wrapped(message)
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            assert not any(item["type"] == "http.response.start" for item in observed), "duplicate ASGI response start"
+        if message["type"] == "http.response.body":
+            assert observed and observed[0]["type"] == "http.response.start"
+        observed.append(message)
+
+    asyncio.run(app({"type": "http", "path": path, "method": "POST"}, receive, send))
+    return observed, expected
+
+
+@pytest.mark.parametrize("path,status,chunks", [
+    ("/api/complaint-workspace/intake-chat", 200, [(b"stream-prefix", True), (_asgi_stale_inquiry_bytes(), False)]),
+    ("/api/complaint-workspace/mcp/rpc", 202, [(b"\x00\xff", True), (_asgi_stale_inquiry_bytes(), False)]),
+    ("/api/complaint-workspace/intake-chat", 409, [(b"stream-prefix", True), (_asgi_stale_inquiry_bytes(), False)]),
+    ("/api/complaint-workspace/intake-chat", 200, [(b"", True), (_asgi_stale_inquiry_bytes(), False)]),
+    ("/api/complaint-workspace/mcp/call", 200, [(b"\x00", True), (b"\xff\xfe", True), (b"", False)]),
+    ("/api/complaint-workspace/session", 200, [(b"stream-prefix", True), (_asgi_stale_inquiry_bytes(), False)]),
+])
+def test_asgi_stream_forwards_exactly_one_start_and_all_original_chunks(path, status, chunks):
+    assert shared_inquiry_conflict(json.loads(_asgi_stale_inquiry_bytes())) is True
+    observed, expected = _asgi_response_messages(path, status, chunks)
+    assert observed == expected
+    assert sum(message["type"] == "http.response.start" for message in observed) == 1
+
+
+@pytest.mark.parametrize("path,status,body", [
+    ("/api/complaint-workspace/intake-chat", 403, _asgi_stale_inquiry_bytes()),
+    ("/api/complaint-workspace/mcp/rpc", 422, _asgi_stale_inquiry_bytes()),
+    ("/api/complaint-workspace/session", 200, _asgi_stale_inquiry_bytes()),
+    ("/api/complaint-workspace/intake-chat", 200, b"\x00\xffnot-json\xfe"),
+])
+def test_asgi_single_body_preserves_non_success_unrelated_and_raw_responses(path, status, body):
+    observed, expected = _asgi_response_messages(path, status, [(body, False)])
+    assert observed == expected

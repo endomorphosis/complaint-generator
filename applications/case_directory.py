@@ -139,7 +139,7 @@ class CaseDirectory:
         self._key = bytes(key)
         self._key_id = _label(key_id, "key_id")
         self._root = Path(root)
-        self._root.mkdir(parents=True, exist_ok=True)
+        self._root.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     def create_case(
         self,

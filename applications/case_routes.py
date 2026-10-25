@@ -448,16 +448,25 @@ def _inquiry_conflict_send(path: str, send):
     """
     if path not in INQUIRY_CONTRACT_PATHS:
         return send
-    buffered = []
+    pending_start = None
+    forwarded = False
 
     async def wrapped(message):
+        nonlocal pending_start, forwarded
+        if forwarded:
+            await send(message)
+            return
         if message.get("type") == "http.response.start":
-            buffered.append(message)
+            pending_start = message
             return
         if message.get("type") != "http.response.body":
             await send(message)
             return
-        start = buffered.pop(0) if buffered else {"type": "http.response.start", "status": 200, "headers": []}
+        start = pending_start if pending_start is not None else {"type": "http.response.start", "status": 200, "headers": []}
+        pending_start = None
+        # The first body commits the response. If it is a stream, all later
+        # chunks pass through without re-parsing or sending another start.
+        forwarded = True
         status = int(start.get("status") or 200)
         body = message.get("body") or b""
         if status == 200 and not message.get("more_body", False) and body:
