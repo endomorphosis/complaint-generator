@@ -428,7 +428,7 @@
             ? [
                 '<div class="cg-app-shell__section-title">Session Sync</div>',
                 '<div class="cg-app-shell__readiness" id="cg-app-shell-session-sync">',
-                '<div class="cg-app-shell__readiness-header"><strong>' + safeText(state.did ? 'Shared session synced' : 'Session not loaded', 'Session not loaded') + '</strong><span>' + safeText(workflowState.phaseLabel, 'unknown') + '</span></div>',
+                '<div class="cg-app-shell__readiness-header"><strong>' + safeText(lastToolCall && (lastToolCall.status === 'error' || lastToolCall.is_error) ? 'Last shared call failed' : (state.did ? 'Shared session synced' : 'Session not loaded'), 'Session not loaded') + '</strong><span>' + safeText(workflowState.phaseLabel, 'unknown') + '</span></div>',
                 '<div class="cg-app-shell__readiness-copy">' + safeText(lastToolCall && lastToolCall.tool_name ? ('Last MCP tool: ' + lastToolCall.tool_name) : 'No MCP tool calls have been cached for this browser session yet.') + '</div>',
                 '<div class="cg-app-shell__phase-note">' + safeText(lastToolCall && lastToolCall.finished_at ? ('Updated: ' + lastToolCall.finished_at) : 'Updated: waiting for the next shared SDK action.') + '</div>',
                 (lastToolCall && lastToolCall.status ? '<div class="cg-app-shell__phase-note">Status: ' + safeText(lastToolCall.status, 'unknown') + (lastToolCall.error_message ? ' (' + safeText(lastToolCall.error_message, '') + ')' : '') + '</div>' : ''),
@@ -609,6 +609,172 @@
             status: status,
         });
     }
+
+    const operationRetryBound = 3;
+    const operationSurfaces = new Set(['graph', 'research', 'collaboration']);
+
+    function escapeOperationText(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, (character) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+        }[character]));
+    }
+
+    function operationRevision(value) {
+        if (value === null || value === undefined || value === '') {
+            return '';
+        }
+        const text = String(value).trim();
+        if (!text || /ready|supported|verified/i.test(text)) {
+            return '';
+        }
+        return text.slice(0, 80);
+    }
+
+    function classifyOperationRecord(record) {
+        const source = record && typeof record === 'object' ? record : {};
+        const surface = operationSurfaces.has(source.surface) ? source.surface : 'graph';
+        const code = String(source.code || source.error || source.conflict || '').trim().toLowerCase();
+        const status = String(source.status || '').trim().toLowerCase();
+        const mcpFailed = source.mcp_failed === true || source.mcp_ok === false || source.is_error === true
+            || status === 'error' || code === 'mcp_tool_error';
+        const missingProof = source.missing_proof === true || source.proof_present === false
+            || source.proof_status === 'missing' || source.proof_status === 'not_executed';
+        const unsupportedSource = source.unsupported_source === true || source.source_supported === false
+            || source.source_status === 'unsupported';
+        const queuedReplica = source.queued_replica === true || source.replica_status === 'queued'
+            || source.replica_status === 'pending';
+        const blocked = mcpFailed || missingProof || unsupportedSource || queuedReplica;
+        const authorization = source.authorization_denied === true || code === 'authorization_denied'
+            || status === 'denied' || status === 'authorization';
+        const conflict = !authorization && (code === 'revision_conflict' || code === 'stale_question'
+            || code === 'inquiry_mismatch' || status === 'conflict' || (source.conflict && code !== ''));
+        let state = 'unavailable';
+        if (authorization) {
+            state = 'authorization';
+        } else if (conflict) {
+            state = 'conflict';
+        } else if (source.cancelled === true) {
+            state = 'unavailable';
+        } else if (!blocked && (status === 'pending' || source.pending === true)) {
+            state = 'pending';
+        } else if (!blocked && status === 'ready' && source.verified === true && source.supported === true
+            && source.proof_present === true && source.source_supported === true
+            && source.replica_status === 'verified' && source.mcp_ok === true) {
+            state = 'ready';
+        }
+        const attempts = Number.isInteger(source.attempts) && source.attempts >= 0 ? source.attempts : 0;
+        const retryRemaining = state === 'ready' || state === 'authorization' || source.cancelled === true
+            ? 0
+            : Math.max(0, operationRetryBound - attempts);
+        const revisions = {
+            graph: operationRevision(source.graph_revision),
+            session: operationRevision(source.session_revision),
+            research: operationRevision(source.research_revision),
+            collaboration: operationRevision(source.collaboration_revision),
+        };
+        const reasons = [];
+        if (mcpFailed) {
+            reasons.push('The call failed.');
+        }
+        if (missingProof) {
+            reasons.push('Proof is missing.');
+        }
+        if (unsupportedSource) {
+            reasons.push('The source is not usable.');
+        }
+        if (queuedReplica) {
+            reasons.push('The replica is still queued.');
+        }
+        if (source.cancelled === true) {
+            reasons.push('Cancelled. The current revision is unchanged.');
+        }
+        const titles = {
+            authorization: 'Authorization required',
+            conflict: 'Revision conflict',
+            unavailable: 'Unavailable',
+            pending: 'Pending',
+            ready: 'Ready',
+        };
+        const defaults = {
+            authorization: 'This action is not authorized for the current actor.',
+            conflict: 'The record changed. Compare the current revision before another attempt.',
+            unavailable: 'This surface cannot be confirmed.',
+            pending: 'Work is still in progress.',
+            ready: 'The current revision is confirmed.',
+        };
+        return {
+            surface: surface,
+            state: state,
+            title: titles[state],
+            detail: reasons.length ? reasons.join(' ') : defaults[state],
+            revisions: revisions,
+            attempts: attempts,
+            retryRemaining: retryRemaining,
+            cancelEnabled: state === 'pending',
+            ready: state === 'ready',
+            supported: state === 'ready',
+            verified: state === 'ready',
+            fallbackBlocked: blocked,
+        };
+    }
+
+    function renderOperationSurface(target, model) {
+        const node = typeof target === 'string' ? document.getElementById(target) : target;
+        if (!node || !model) {
+            return null;
+        }
+        const revisions = model.revisions || {};
+        node.dataset.task = 'CIMP-GUI-54';
+        node.dataset.surface = model.surface;
+        node.dataset.state = model.state;
+        node.dataset.ready = model.ready ? 'true' : 'false';
+        node.dataset.supported = model.supported ? 'true' : 'false';
+        node.dataset.verified = model.verified ? 'true' : 'false';
+        node.dataset.retryRemaining = String(model.retryRemaining);
+        node.dataset.cancelEnabled = model.cancelEnabled ? 'true' : 'false';
+        node.dataset.graphRevision = revisions.graph || '';
+        node.dataset.sessionRevision = revisions.session || '';
+        node.dataset.researchRevision = revisions.research || '';
+        node.dataset.collaborationRevision = revisions.collaboration || '';
+        node.setAttribute('role', 'status');
+        const revisionLine = [
+            ['Graph revision', revisions.graph],
+            ['Session revision', revisions.session],
+            ['Research revision', revisions.research],
+            ['Collaboration revision', revisions.collaboration],
+        ].filter((pair) => pair[1]).map((pair) => pair[0] + ' ' + pair[1]).join('. ');
+        node.innerHTML = [
+            '<p class="operation-surface__title">' + escapeOperationText(model.title) + '</p>',
+            '<p class="operation-surface__detail">' + escapeOperationText(model.detail) + '</p>',
+            '<p class="operation-surface__revisions">' + escapeOperationText(revisionLine || 'Current revision unavailable.') + '</p>',
+            '<div class="button-row">',
+            '<button type="button" data-operation-action="retry"' + (model.retryRemaining > 0 ? '' : ' disabled') + '>Retry</button>',
+            '<button type="button" data-operation-action="cancel"' + (model.cancelEnabled ? '' : ' disabled') + '>Cancel</button>',
+            '</div>',
+        ].join('');
+        return model;
+    }
+
+    function applyOperationSurface(target, record) {
+        const model = classifyOperationRecord(record);
+        renderOperationSurface(target, model);
+        const node = typeof target === 'string' ? document.getElementById(target) : target;
+        if (node) {
+            node.dataset.operationRecord = JSON.stringify(record || {});
+        }
+        return model;
+    }
+
+    window.ComplaintOperationSurfaces = {
+        retryBound: operationRetryBound,
+        classify: classifyOperationRecord,
+        render: renderOperationSurface,
+        apply: applyOperationSurface,
+    };
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', bootShell);

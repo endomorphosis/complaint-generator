@@ -7239,6 +7239,16 @@ class ComplaintWorkspaceService:
         unresolved reasons and never records legal sufficiency.
         """
 
+        authority = self._owner_case_authority()
+        user = str(state.get("user_id") or "")
+        case_id = _state_case_id(state, user)
+        publication_guard = None
+        admitted_key = None
+        if authority is not None:
+            publication_guard = self._terminal_graph_edit_publication_guard(state,
+                actor_principal_id=authority.actor_principal_id, case_id=case_id)
+            _context, key_id, key = self._joined_key(user, case_id)
+            admitted_key = (key_id, key)
         normalized = str(control or "").strip().lower()
         if normalized == "pause":
             state["intentional_user_wait"] = {
@@ -7259,18 +7269,42 @@ class ComplaintWorkspaceService:
         stop["legal_sufficiency"] = False
         stop["worker_stalled"] = False
         state["interview_stop"] = stop
-        self._save_state(state)
-        payload = self._build_intake_chat_payload(state, accepted_answer=None, requested_question_id=None)
-        payload["stored_as_answer"] = False
-        payload["legal_sufficiency"] = False
-        payload["worker_stalled"] = False
-        payload["user_waiting_is_worker_stall"] = False
-        payload["finite_interview_outcome"] = finite_interview_outcome(state, active_question=active, stop=stop)
-        payload["message"] = (
-            f"Interview stop: {payload['finite_interview_outcome']['stop']}. "
-            "Unresolved reasons stay visible. This is not legal sufficiency."
-        )
-        return payload
+        if publication_guard is not None:
+            publication_guard()
+            state = self._save_state(state, before_publish=publication_guard)
+        else:
+            state = self._save_state(state)
+
+        def projection(current):
+            payload = self._build_intake_chat_payload(current, accepted_answer=None, requested_question_id=None)
+            payload["stored_as_answer"] = False
+            payload["legal_sufficiency"] = False
+            payload["worker_stalled"] = False
+            payload["user_waiting_is_worker_stall"] = False
+            payload["finite_interview_outcome"] = finite_interview_outcome(current, active_question=active, stop=stop)
+            payload["message"] = (
+                f"Interview stop: {payload['finite_interview_outcome']['stop']}. "
+                "Unresolved reasons stay visible. This is not legal sufficiency."
+            )
+            return payload
+
+        if authority is None:
+            return projection(state)
+        # Its own successful commit advances the head. Delivery authenticates
+        # the current committed revision instead of replaying the old guard.
+        from integrations.private_storage import private_revision_source_scope
+        with private_revision_source_scope(self.joined_revision_repository(user, case_id)):
+            current = self._load_state(user, case_id=case_id)
+            if current.get("private_revision") != state.get("private_revision"):
+                raise WorkspacePersistenceError("Finite-stop source changed before delivery.",
+                    code="revision_conflict", public_status="conflict")
+            payload = projection(current)
+            _context, key_id, key = self._joined_key(user, case_id)
+            if (key_id, key) != admitted_key:
+                raise WorkspacePersistenceError("Finite-stop key changed before delivery.",
+                    code="revision_conflict", public_status="conflict")
+            authority.revalidate(actor_principal_id=authority.actor_principal_id, workspace=self, require_owner=True)
+            return payload
 
     def _support_matrix(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
         answers = state.get("intake_answers") or {}

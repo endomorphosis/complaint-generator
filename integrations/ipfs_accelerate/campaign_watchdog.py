@@ -359,6 +359,9 @@ class ComplaintCampaignWatchdog:
             # Let the unchanged SDK map observation failures to its existing
             # typed error result, without retrying or authorizing an effect.
             first, initial_error = {}, exc
+        from .watchdog_failure_evidence import capture as capture_first_failure
+        failure_capture = capture_first_failure(self.directory, scope=self.scope, observation=first,
+            status=self.latest_status, preflight=getattr(self,"latest_preflight",{}), observed_at=self.clock())
         rescue = self.latest_status.get("auto_rescue_activity_evidence")
         rescue = rescue if type(rescue) is dict else {}
         passive_rescue = (first.get("owner_binding_verified") is True
@@ -425,7 +428,8 @@ class ComplaintCampaignWatchdog:
             "active_task_id": self.latest_observation.get("active_task_id"),
             "last_action": self.last_action, "completion": self.latest_completion,
             "preflight": getattr(self, "latest_preflight", {}),
-            "native_status": self.latest_status.get("status"), "activity_evidence":failure_evidence}
+            "native_status": self.latest_status.get("status"), "activity_evidence":failure_evidence,
+            "initial_failure_capture":failure_capture}
         import stat
         self.directory.mkdir(mode=0o700, exist_ok=True)
         info = self.directory.lstat()

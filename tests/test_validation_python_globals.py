@@ -190,13 +190,34 @@ def test_deleted_source_and_local_typing_shadow_have_explicit_outcomes(tmp_path)
 @pytest.mark.parametrize('source,policy', [
     ('def broken(:\n', {'require_python_syntax':False}),
     ('#' + 'x' * 1_048_576 + '\ndef f(): return 1\n', {'allow_large_files':True, 'max_file_bytes':2_000_000, 'max_patch_bytes':2_000_000}),
-    ('x=1\n' * 26_000 + 'def f(): return 1\n', {}),
+    ('x=1\n' * 64_000 + 'def f(): return 1\n', {}),
 ], ids=['invalid-syntax', 'file-limit', 'ast-limit'])
 def test_accepted_but_uninspectable_python_is_a_finite_refusal(tmp_path, source, policy):
     accepted = _accepted(tmp_path, None, source, policy_overrides=policy)
     result = _inspect(tmp_path, accepted)
     assert result['passed'] is False and result['reason'] == 'python_global_preflight_unavailable'
     assert result['detail'] in {'candidate_file_invalid', 'ast_bound', 'bounded_source_inspection_failed'}
+
+
+def test_existing_workspace_module_is_inspectable_and_duplicate_still_refuses(tmp_path):
+    """The production baseline must fit the static gate without importing it."""
+    import ast
+    from integrations.ipfs_accelerate import python_global_preflight
+    source = (Path(__file__).resolve().parents[1] / 'applications' / 'complaint_workspace.py').read_text()
+    count = sum(1 for _ in ast.walk(ast.parse(source)))
+    assert 100_000 < count < python_global_preflight._MAX_NODES
+    assert len(source.encode('utf8')) < python_global_preflight._MAX_FILE
+    marker = '\nraise AssertionError("static-only large-module control")\n'
+    root = tmp_path / 'valid'
+    accepted = _accepted(root, source, source + marker)
+    result = _inspect(root, accepted)
+    assert result['passed'] is True and result['candidate_executed'] is False
+    root = tmp_path / 'duplicate'
+    accepted = _accepted(root, source, source + marker + '\nclass ComplaintWorkspaceService: pass\n')
+    result = _inspect(root, accepted)
+    assert result['reason'] == 'new_duplicate_python_module_global'
+    assert result['candidate_executed'] is False
+    assert result['files'][0]['collisions'][0]['name'] == 'ComplaintWorkspaceService'
 
 
 def test_static_rejection_precedes_real_native_execution_and_rename_validates(tmp_path):

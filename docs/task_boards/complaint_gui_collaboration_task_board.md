@@ -492,7 +492,7 @@ Implementation instructions:
 
 ## CIMP-GUI-17 Show inquiry explanations and distinct graph sources
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -1182,7 +1182,7 @@ Implementation instructions:
 
 ## CIMP-GUI-40 Migrate explicitly selected legacy cases safely
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -1452,7 +1452,7 @@ Implementation instructions:
 
 ## CIMP-GUI-49 Coordinate workflow stages and draft review
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -1603,7 +1603,7 @@ Implementation instructions:
 
 ## CIMP-GUI-54 Render graph, research and collaboration errors consistently
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1

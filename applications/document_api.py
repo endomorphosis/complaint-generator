@@ -1610,6 +1610,68 @@ def create_document_router(mediator: Any) -> APIRouter:
             raise HTTPException(status_code=404, detail="Generated document not found")
         return FileResponse(path=str(file_path), filename=file_path.name)
 
+    def _workflow_case_file() -> Dict[str, Any]:
+        case_file = getattr(mediator, "intake_case_file", None)
+        if not isinstance(case_file, dict):
+            raise HTTPException(status_code=503, detail="workflow_record_unavailable")
+        return case_file
+
+    def _workflow_scope(case_id: str, request: Request) -> Dict[str, Any]:
+        decision = getattr(request.state, "case_authorization", None)
+        if decision is None or decision.case_id != case_id:
+            raise HTTPException(status_code=403, detail="cross_case_id")
+        return {
+            "actor_principal_id": decision.actor_principal_id,
+            "membership": decision.membership,
+            "action": decision.action,
+        }
+
+    def _workflow_error(exc: Exception) -> HTTPException:
+        from .case_review import CaseReviewError
+        code = exc.code if isinstance(exc, CaseReviewError) else "workflow_unavailable"
+        status = 409 if code in {"stale_domain", "stale_revision", "replay_mismatch"} else 403 if code in {
+            "actor_not_permitted", "export_authorization_required", "automatic_filing_refused", "legal_sufficiency_refused", "cross_case_id",
+        } else 422 if code in {
+            "draft_field", "draft_bounds", "stage_not_ready", "review_required", "draft_revision_required", "review_field", "review_bounds",
+        } else 503
+        return HTTPException(status_code=status, detail=code)
+
+    @router.get("/api/documents/{case_id}/workflow-stage")
+    async def read_workflow_stage(case_id: str, request: Request) -> Dict[str, Any]:
+        from .case_review import CaseReviewError, project_workflow_stage
+        _workflow_scope(case_id, request)
+        try:
+            return project_workflow_stage(_workflow_case_file())
+        except CaseReviewError as exc:
+            raise _workflow_error(exc) from None
+
+    @router.post("/api/documents/{case_id}/draft-versions")
+    async def write_draft_version(case_id: str, request: Request) -> Dict[str, Any]:
+        from .case_review import CaseReviewError, version_draft
+        scope = _workflow_scope(case_id, request)
+        try:
+            return version_draft(_workflow_case_file(), await request.json(), **scope)
+        except CaseReviewError as exc:
+            raise _workflow_error(exc) from None
+
+    @router.post("/api/documents/{case_id}/draft-reviews")
+    async def write_draft_review(case_id: str, request: Request) -> Dict[str, Any]:
+        from .case_review import CaseReviewError, review_draft_version
+        scope = _workflow_scope(case_id, request)
+        try:
+            return review_draft_version(_workflow_case_file(), await request.json(), **scope)
+        except CaseReviewError as exc:
+            raise _workflow_error(exc) from None
+
+    @router.post("/api/documents/{case_id}/draft-exports")
+    async def write_draft_export(case_id: str, request: Request) -> Dict[str, Any]:
+        from .case_review import CaseReviewError, export_draft_version
+        scope = _workflow_scope(case_id, request)
+        try:
+            return export_draft_version(_workflow_case_file(), await request.json(), **scope)
+        except CaseReviewError as exc:
+            raise _workflow_error(exc) from None
+
     @router.get("/api/documents/optimization-trace")
     async def retrieve_optimization_trace(cid: str = Query(...)) -> Dict[str, Any]:
         # A caller-selected CID has no per-case provenance. Later private
