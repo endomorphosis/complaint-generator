@@ -3902,6 +3902,17 @@
                             </div>
                             <div class="status" id="factual-correction-status" data-status="" data-actor="" data-error="" data-prior-retained="false" data-support-invalidated="false">No correction has been applied.</div>
                         </section>
+                        <section id="factual-graph-inspector" data-task="CIMP-GUI-23" aria-labelledby="factual-graph-inspector-title" data-view="list" data-authorized="false" data-unresolved-hidden="false" data-support-fabricated="false" data-private-boundary="true">
+                            <h3 id="factual-graph-inspector-title">Factual graph inspector</h3>
+                            <p class="muted">List and graph views render the authorized factual projection. Unresolved nodes stay visible. Source details, revision diffs, and contradiction links come from that read. This view does not write facts to browser storage or analytics.</p>
+                            <div class="button-row">
+                                <button class="secondary" id="factual-graph-refresh" type="button">Refresh factual graph</button>
+                                <button class="secondary" id="factual-graph-view-list" type="button" aria-pressed="true">List view</button>
+                                <button class="secondary" id="factual-graph-view-graph" type="button" aria-pressed="false">Graph view</button>
+                            </div>
+                            <div class="status" id="factual-graph-status" role="status" data-status="idle">The factual graph has not been loaded.</div>
+                            <div id="factual-graph-mount" data-persisted="false"></div>
+                        </section>
                         <label for="adaptive-model-purpose">Model purpose</label>
                         <select id="adaptive-model-purpose">
                             <option value="extract_facts">extract_facts</option>
@@ -5950,6 +5961,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
     </div>
 
     <script src="/static/complaint_mcp_sdk.js"></script>
+    <script src="/static/complaint_graph_view.js"></script>
     <script>
         const { ComplaintMcpClient } = window.ComplaintMcpSdk;
         const client = new ComplaintMcpClient();
@@ -15726,6 +15738,56 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('finite-interview-pause').addEventListener('click', () => controlFiniteInterview('pause'));
         document.getElementById('finite-interview-cancel').addEventListener('click', () => controlFiniteInterview('cancel'));
         document.getElementById('factual-correction-submit').addEventListener('click', applyFactualCorrection);
+        async function refreshFactualGraphInspector() {
+            const panel = document.getElementById('factual-graph-inspector');
+            const mount = document.getElementById('factual-graph-mount');
+            const statusNode = document.getElementById('factual-graph-status');
+            const view = window.complaintGraphView;
+            const caseId = adaptiveCaseId(workspaceSession) || (client.caseContext && client.caseContext.case_id) || '';
+            if (!view || !mount || !caseId) {
+                if (statusNode) {
+                    statusNode.dataset.status = 'unavailable';
+                    statusNode.textContent = 'The factual graph is not available for this session.';
+                }
+                return;
+            }
+            const headers = {};
+            if (client.csrfToken) headers['x-csrf-token'] = client.csrfToken;
+            if (client.caseContext && client.caseContext.case_id === caseId) {
+                headers['x-tenant-id'] = client.caseContext.tenant_id;
+                headers['x-case-id'] = client.caseContext.case_id;
+                headers['x-resource-id'] = client.caseContext.resource_id;
+                if (client.caseContext.expected_revision) headers['x-expected-revision'] = String(client.caseContext.expected_revision);
+            }
+            const result = await view.loadAuthorizedFactualGraph(mount, {caseId: caseId, headers: headers, fetchImpl: window.fetch.bind(window)});
+            if (panel) {
+                panel.dataset.authorized = result && result.ok === true ? 'true' : 'false';
+                panel.dataset.unresolvedHidden = 'false';
+                panel.dataset.supportFabricated = 'false';
+            }
+            if (statusNode) {
+                statusNode.dataset.status = result && result.ok === true ? 'projected' : 'denied';
+                statusNode.textContent = result && result.ok === true
+                    ? 'Factual graph loaded from the authorized read.'
+                    : 'The factual graph read was not authorized.';
+            }
+        }
+        function setFactualGraphView(mode) {
+            const panel = document.getElementById('factual-graph-inspector');
+            const mount = document.getElementById('factual-graph-mount');
+            if (panel) panel.dataset.view = mode;
+            if (mount) {
+                mount.querySelectorAll('[data-role="list-view"]').forEach((node) => { node.hidden = mode !== 'list'; });
+                mount.querySelectorAll('[data-role="graph-view"]').forEach((node) => { node.hidden = mode !== 'graph'; });
+            }
+            const listButton = document.getElementById('factual-graph-view-list');
+            const graphButton = document.getElementById('factual-graph-view-graph');
+            if (listButton) listButton.setAttribute('aria-pressed', mode === 'list' ? 'true' : 'false');
+            if (graphButton) graphButton.setAttribute('aria-pressed', mode === 'graph' ? 'true' : 'false');
+        }
+        document.getElementById('factual-graph-refresh').addEventListener('click', refreshFactualGraphInspector);
+        document.getElementById('factual-graph-view-list').addEventListener('click', () => setFactualGraphView('list'));
+        document.getElementById('factual-graph-view-graph').addEventListener('click', () => setFactualGraphView('graph'));
         document.getElementById('adaptive-unknown').addEventListener('click', () => answerAdaptiveInquiry('unknown'));
         document.getElementById('adaptive-defer').addEventListener('click', () => answerAdaptiveInquiry('deferred'));
         document.getElementById('adaptive-model-extract').addEventListener('click', askAdaptiveModel);
