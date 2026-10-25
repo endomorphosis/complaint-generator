@@ -636,6 +636,283 @@ _UNKNOWN_INTAKE_ANSWERS = {
 }
 
 
+_NON_SOURCE_LABELS = {
+    "",
+    "intake",
+    "assertion",
+    "user",
+    "user_assertion",
+    "fixed_form",
+    "narrative",
+    "interview",
+    "llm",
+    "model",
+    "unbound",
+}
+_FINITE_STOP_LABELS = {
+    "paused": "paused",
+    "cancelled": "cancelled",
+    "provider_unavailable": "unavailable",
+    "blocked_provider": "unavailable",
+    "limit_reached": "capped",
+    "saturated": "saturated",
+    "needs_answer": "awaiting_user",
+    "awaiting_user": "awaiting_user",
+    "deferred_unknown": "unresolved",
+    "deferred_needs_evidence": "unresolved",
+    "needs_review": "unresolved",
+    "no_progress": "capped",
+    "complete": "saturated",
+}
+
+
+def _source_bound_evidence(item: Any) -> bool:
+    """Support counts only when the item names a factual or legal source.
+
+    A fixed-form answer, a bare testimony row, and a finished interview do not.
+    """
+
+    if not isinstance(item, Mapping):
+        return False
+    if item.get("source_bound") is False:
+        return False
+    for key in ("source_references", "source_refs"):
+        refs = item.get(key)
+        if isinstance(refs, list) and any(str(ref or "").strip() for ref in refs):
+            return True
+    for key in ("source_id", "citation_id", "authority_id", "legal_source_id"):
+        if str(item.get(key) or "").strip():
+            return True
+    provenance = item.get("provenance") if isinstance(item.get("provenance"), Mapping) else {}
+    for key in ("source_id", "citation_id", "authority_id", "source_reference"):
+        if str(provenance.get(key) or "").strip():
+            return True
+    source = str(item.get("source") or "").strip()
+    if source.lower() in _NON_SOURCE_LABELS:
+        return False
+    return bool(source)
+
+
+def _pending_interview_question(state: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    pending = shared.get("pending_inquiry") if isinstance(shared.get("pending_inquiry"), Mapping) else None
+    return dict(pending) if pending else None
+
+
+def _user_is_waiting(state: Mapping[str, Any], active_question: Optional[Mapping[str, Any]] = None) -> bool:
+    wait = state.get("intentional_user_wait") if isinstance(state.get("intentional_user_wait"), Mapping) else {}
+    if bool(wait.get("paused")) and bool(wait.get("intentional", True)):
+        return True
+    if _pending_interview_question(state):
+        return True
+    return active_question is not None
+
+
+def _open_question_for_stop(item: Mapping[str, Any]) -> Dict[str, Any]:
+    target = str(item.get("target_id") or item.get("inquiry_id") or item.get("id") or "pending-user-question")
+    revision = str(item.get("target_revision") or item.get("revision") or "1")
+    return {
+        "target_id": target,
+        "question": str(item.get("question") or item.get("prompt") or ""),
+        "unresolved_target": {
+            "target_id": target,
+            "target_revision": revision,
+            "user_answerability": "user_observable",
+            "target_kind": "user_question",
+        },
+    }
+
+
+def _gap_dependencies(state: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    dependencies: List[Dict[str, Any]] = []
+    for gap in shared.get("preserved_gaps") or []:
+        if not isinstance(gap, Mapping):
+            continue
+        dependencies.append({
+            "lane": "review",
+            "target_id": str(gap.get("target_id") or gap.get("inquiry_id") or "preserved-gap"),
+            "target_kind": "review",
+            "reason": str(gap.get("disposition") or "preserved_gap"),
+        })
+    for reason in list(shared.get("unknown_reasons") or []) + list(shared.get("unavailable_reasons") or []):
+        text = str(reason or "").strip()
+        if not text:
+            continue
+        lane = "source_research" if "unavailable" in text or "source" in text else "review"
+        dependencies.append({
+            "lane": lane,
+            "target_id": text,
+            "target_kind": lane,
+            "reason": text,
+        })
+    if not dependencies:
+        dependencies.append({
+            "lane": "source_research",
+            "target_id": "unresolved-legal-source",
+            "target_kind": "legal_source",
+            "reason": "source_bound_support_missing",
+        })
+    return dependencies
+
+
+def _evaluate_finite_stop(state: Dict[str, Any], *, control: Optional[str] = None, active_question: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """Ask the interview denoiser for one finite stop. Waiting is not a worker stall."""
+
+    from complaint_phases.denoiser import ComplaintDenoiser
+
+    shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    pending = _pending_interview_question(state)
+    waiting = _user_is_waiting(state, active_question)
+    if control == "pause":
+        waiting = True
+    kwargs: Dict[str, Any] = {
+        "worker_stalled": False if waiting or control in {"pause", "cancel", "cap", "unavailable", "saturate"} else bool(state.get("worker_stalled")),
+        "paused": control == "pause",
+        "cancelled": control == "cancel",
+    }
+    if control == "cap":
+        kwargs["iteration_count"] = 1
+        kwargs["iteration_cap"] = 1
+        kwargs["budget_exhausted"] = False
+    elif control == "unavailable":
+        kwargs["provider_status"] = "unavailable"
+    elif control == "saturate":
+        kwargs["open_questions"] = []
+        kwargs["open_dependencies"] = _gap_dependencies(state)
+    elif control == "pause":
+        question = pending or active_question or {"id": "user-pause", "prompt": "paused"}
+        kwargs["open_questions"] = [_open_question_for_stop(question)]
+    elif control == "cancel":
+        question = pending or active_question
+        kwargs["open_questions"] = [_open_question_for_stop(question)] if question else []
+    elif pending or active_question is not None:
+        kwargs["open_questions"] = [_open_question_for_stop(pending or active_question or {})]
+    elif shared.get("capped_reasons") and not pending:
+        kwargs["iteration_count"] = 1
+        kwargs["iteration_cap"] = 1
+    elif shared.get("unavailable_reasons"):
+        kwargs["provider_status"] = "unavailable"
+    elif shared.get("schema_version") and not pending:
+        kwargs["open_questions"] = []
+        kwargs["open_dependencies"] = _gap_dependencies(state)
+    else:
+        kwargs["needs_review"] = True
+        kwargs["open_questions"] = []
+        kwargs["open_dependencies"] = [{
+            "lane": "review",
+            "target_id": "fixed-form-assertions",
+            "target_kind": "review",
+            "reason": "fixed_form_answers_are_not_source_bound_support",
+        }]
+    stop = ComplaintDenoiser().evaluate_interview_stop(**kwargs)
+    if control:
+        stop = dict(stop)
+        stop["control"] = control
+    return stop
+
+
+def _finite_reason_rows(stop: Mapping[str, Any]) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    seen = set()
+
+    def add(code: str, detail: str) -> None:
+        token = str(code or "").strip() or "unresolved"
+        if token in seen:
+            return
+        seen.add(token)
+        rows.append({"code": token, "detail": str(detail or token)})
+
+    summary = stop.get("unresolved_issue_summary") if isinstance(stop.get("unresolved_issue_summary"), Mapping) else {}
+    for item in list(summary.get("items") or []) + list(stop.get("remaining_issues") or []):
+        if not isinstance(item, Mapping):
+            continue
+        code = str(item.get("reason") or item.get("code") or item.get("dependency_lane") or item.get("disposition") or "unresolved")
+        detail = str(item.get("message") or item.get("detail") or item.get("target_id") or code)
+        add(code, detail)
+    for shortcut in summary.get("rejected_shortcuts") or []:
+        add(str(shortcut), f"Rejected shortcut: {shortcut}")
+    state_name = str(stop.get("state") or "")
+    outcome = str(stop.get("outcome") or "")
+    if state_name == "cancelled" or outcome == "cancelled":
+        add("cancellation", "The interview was cancelled. Unresolved issues stay open.")
+    if state_name == "provider_unavailable" or outcome == "blocked_provider":
+        add("capability_unavailable", "A required interview capability is unavailable.")
+    if state_name == "limit_reached" or "iteration_cap" in seen or "question_count_limit" in seen or "budget_exhausted" in seen:
+        add("cap", "A question, iteration, or budget cap stopped the interview.")
+    if outcome == "paused" or state_name == "paused":
+        add("user_pause", "The user paused the interview. This wait is not a development worker stall.")
+    if outcome in {"awaiting_user", "needs_answer"} or state_name == "needs_answer":
+        add("awaiting_user", "The interview is waiting for the user. That wait is not a development worker stall.")
+    add("interview_completion_is_not_legal_sufficiency", "Finishing the interview does not establish legal sufficiency.")
+    return rows
+
+
+def finite_interview_outcome(
+    state: Dict[str, Any],
+    *,
+    active_question: Optional[Mapping[str, Any]] = None,
+    stop: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Public finite-stop view. Support and sufficiency stay false until evidence says otherwise."""
+
+    from complaint_phases.denoiser import project_stopping_policy
+
+    wait = state.get("intentional_user_wait") if isinstance(state.get("intentional_user_wait"), Mapping) else {}
+    paused = bool(wait.get("paused")) and bool(wait.get("intentional", True))
+    waiting = _user_is_waiting(state, active_question) or paused
+    if stop is None:
+        stored = state.get("interview_stop") if isinstance(state.get("interview_stop"), dict) else None
+        shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+        if stored is None and isinstance(shared.get("interview_stop"), dict):
+            stored = shared.get("interview_stop")
+        control = str((stored or {}).get("control") or "")
+        if isinstance(stored, dict) and stored.get("state") and control in {"pause", "cancel", "cap", "unavailable", "saturate"}:
+            stop = stored
+        else:
+            stop = _evaluate_finite_stop(state, active_question=active_question)
+    if waiting and str(stop.get("control") or "") not in {"cancel", "cap", "unavailable", "saturate"}:
+        stop = dict(stop)
+        stop["worker_stalled"] = False
+    policy = project_stopping_policy(dict(stop), paused=paused or str(stop.get("control") or "") == "pause")
+    if waiting and policy.get("outcome") == "no_progress" and str(stop.get("control") or "") not in {"cap", "cancel", "unavailable"}:
+        policy = project_stopping_policy({**dict(stop), "state": "needs_answer", "worker_stalled": False}, paused=paused)
+    outcome = str(policy.get("outcome") or stop.get("state") or "awaiting_user")
+    label = _FINITE_STOP_LABELS.get(outcome, _FINITE_STOP_LABELS.get(str(stop.get("state") or ""), "unresolved"))
+    if str(stop.get("control") or "") == "saturate":
+        label = "saturated"
+    elif str(stop.get("control") or "") == "cap":
+        label = "capped"
+    elif str(stop.get("control") or "") == "unavailable":
+        label = "unavailable"
+    elif str(stop.get("control") or "") == "cancel":
+        label = "cancelled"
+    elif str(stop.get("control") or "") == "pause":
+        label = "paused"
+    reasons = _finite_reason_rows({**dict(stop), "outcome": outcome})
+    interview_complete = bool(stop.get("intake_complete")) or (
+        isinstance(state.get("shared_interview"), Mapping) and _pending_interview_question(state) is None and bool(state.get("shared_interview"))
+    )
+    return {
+        "schema": "finite-interview-outcome-v1",
+        "stop": label,
+        "outcome": outcome,
+        "state": stop.get("state"),
+        "unresolved_reasons": reasons,
+        "reasons_visible": True,
+        "user_waiting": bool(waiting or label in {"awaiting_user", "paused"}),
+        "worker_stalled": False if waiting or label in {"awaiting_user", "paused", "saturated", "capped", "cancelled", "unavailable"} else bool(stop.get("worker_stalled")),
+        "user_waiting_is_worker_stall": False,
+        "legal_sufficiency": False,
+        "interview_complete": bool(interview_complete) and label == "saturated",
+        "interview_completion_means_legal_sufficiency": False,
+        "filing_ready": False,
+        "core_facts_complete": False,
+        "proof_requirements_satisfied": False,
+        "support_requires_source_bound_evidence": True,
+    }
+
+
 def _workspace_stopping_policy(
     state: Dict[str, Any],
     *,
@@ -645,41 +922,57 @@ def _workspace_stopping_policy(
     """Workspace view of the same stopping outcomes the interview denoiser returns."""
     from complaint_phases.denoiser import project_stopping_policy
 
-    wait = state.get("intentional_user_wait") if isinstance(state.get("intentional_user_wait"), dict) else {}
-    paused = bool(wait.get("paused")) and bool(wait.get("intentional", True))
+    view = finite_interview_outcome(state, active_question=active_question)
     stored = state.get("interview_stop") if isinstance(state.get("interview_stop"), dict) else None
-    shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
-    if stored is None and isinstance(shared.get("interview_stop"), dict):
-        stored = shared.get("interview_stop")
     if isinstance(stored, dict) and stored.get("state"):
-        return project_stopping_policy(stored, paused=paused)
+        waiting = _user_is_waiting(state, active_question)
+        payload = dict(stored)
+        if waiting:
+            payload["worker_stalled"] = False
+        wait = state.get("intentional_user_wait") if isinstance(state.get("intentional_user_wait"), dict) else {}
+        paused = bool(wait.get("paused")) and bool(wait.get("intentional", True))
+        policy = project_stopping_policy(payload, paused=paused or view.get("stop") == "paused")
+        if waiting and policy.get("outcome") == "no_progress" and view.get("stop") not in {"capped", "cancelled", "unavailable"}:
+            policy = project_stopping_policy({**payload, "state": "needs_answer", "worker_stalled": False}, paused=paused)
+        return policy
 
     values = [str(value or "").strip().lower() for value in (answers or {}).values() if str(value or "").strip()]
     unknown_only = bool(values) and all(value in _UNKNOWN_INTAKE_ANSWERS for value in values)
-    if paused:
+    if view.get("stop") == "paused":
         state_name = "paused"
-    elif active_question is not None:
+    elif active_question is not None or view.get("user_waiting"):
         state_name = "needs_answer"
     elif unknown_only:
         state_name = "deferred_unknown"
-    else:
+    elif view.get("stop") == "saturated":
         state_name = "saturated"
+    elif view.get("stop") == "capped":
+        state_name = "limit_reached"
+    elif view.get("stop") == "cancelled":
+        state_name = "cancelled"
+    elif view.get("stop") == "unavailable":
+        state_name = "provider_unavailable"
+    else:
+        state_name = "needs_review"
     stop = {
         "state": state_name,
+        "worker_stalled": False,
         "intake_complete": False,
         "filing_ready": False,
         "legal_sufficiency": False,
         "core_facts_complete": False,
         "unresolved_issue_summary": {
-            "items": [{"reason": "unknown_only_session" if unknown_only else "structured_questions_are_not_legal_sufficiency"}],
+            "items": [{"reason": item["code"], "detail": item["detail"]} for item in view.get("unresolved_reasons") or []],
             "open_answerable_count": 1 if active_question is not None else 0,
             "legal_sufficiency": False,
             "core_facts_complete": False,
             "proof_requirements_satisfied": False,
-            "rejected_shortcuts": ["empty_question_list"] if active_question is None else [],
+            "rejected_shortcuts": ["empty_question_list", "fixed_form_completion"] if active_question is None else [],
         },
     }
-    return project_stopping_policy(stop, paused=paused)
+    if unknown_only:
+        stop["unresolved_issue_summary"]["items"].append({"reason": "unknown_only_session"})
+    return project_stopping_policy(stop, paused=state_name == "paused")
 
 
 def publish_workspace_dependency_action(state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -715,7 +1008,14 @@ def publish_workspace_dependency_action(state: Optional[Dict[str, Any]] = None) 
             },
         }
     policy = project_stopping_policy(stored or {"state": "needs_answer"}, paused=paused)
-    if session.get("worker_stalled") and policy.get("outcome") in {"awaiting_user", "paused"}:
+    pending_question = _pending_interview_question(session)
+    user_waiting = paused or pending_question is not None
+    if user_waiting:
+        policy = project_stopping_policy(
+            {**(stored or {"state": "needs_answer"}), "worker_stalled": False},
+            paused=paused,
+        )
+    elif session.get("worker_stalled") and policy.get("outcome") in {"awaiting_user", "paused"}:
         policy = project_stopping_policy({**(stored or {}), "state": "no_progress", "worker_stalled": True}, paused=False)
     context = session.get("dependency_action_context") if isinstance(session.get("dependency_action_context"), dict) else {}
     if dependencies and not context.get("target_id"):
@@ -3397,6 +3697,11 @@ class ComplaintWorkspaceRequestHandlers:
             "review": self.workspace._build_review(state),
             "case_synopsis": self.workspace._build_case_synopsis(state),
             "adaptive_inquiry": _adaptive_inquiry_view(state),
+            "finite_interview_outcome": finite_interview_outcome(
+                state,
+                active_question=self.workspace._next_question(answers),
+            ),
+            "legal_sufficiency": False,
         }
 
     def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
@@ -3464,6 +3769,8 @@ class ComplaintWorkspaceRequestHandlers:
             payload["message"] = str(research.get("display") or format_legal_research_result(research))
             return payload
         normalized_action = str(interview_action or "").strip().lower()
+        if normalized_action in {"pause", "cancel", "cap", "unavailable", "saturate"}:
+            return workspace.record_finite_interview_stop(state, normalized_action)
         if normalized_action == "correct" or normalized_message.lower().startswith("/edit"):
             return self._apply_gui_factual_correction(
                 state,
@@ -6806,30 +7113,86 @@ class ComplaintWorkspaceService:
         payload["filing_ready"] = False
         payload["adaptive_inquiry"] = _adaptive_inquiry_view(state)
         payload["gap_preserved"] = bool(payload["adaptive_inquiry"]["preserved_gaps"])
+        payload["finite_interview_outcome"] = finite_interview_outcome(state, active_question=active_question)
+        payload["worker_stalled"] = False if payload["finite_interview_outcome"].get("user_waiting") else bool(payload["finite_interview_outcome"].get("worker_stalled"))
+        payload["user_waiting_is_worker_stall"] = False
+        return payload
+
+    def record_finite_interview_stop(self, state: Dict[str, Any], control: str) -> Dict[str, Any]:
+        """Persist one denoiser stop for pause, cancel, cap, unavailable capability, or saturation.
+
+        The user is not a stalled development worker. The saved stop keeps its
+        unresolved reasons and never records legal sufficiency.
+        """
+
+        normalized = str(control or "").strip().lower()
+        if normalized == "pause":
+            state["intentional_user_wait"] = {
+                "paused": True,
+                "intentional": True,
+                "reason": "user_pause",
+            }
+        else:
+            state["intentional_user_wait"] = {
+                "paused": False,
+                "intentional": False,
+                "reason": normalized,
+            }
+        state["worker_stalled"] = False
+        answers = state.get("intake_answers") or {}
+        active = None if normalized in {"saturate", "cap", "cancel", "unavailable"} else self._next_question(answers)
+        stop = _evaluate_finite_stop(state, control=normalized, active_question=active)
+        stop["legal_sufficiency"] = False
+        stop["worker_stalled"] = False
+        state["interview_stop"] = stop
+        self._save_state(state)
+        payload = self._build_intake_chat_payload(state, accepted_answer=None, requested_question_id=None)
+        payload["stored_as_answer"] = False
+        payload["legal_sufficiency"] = False
+        payload["worker_stalled"] = False
+        payload["user_waiting_is_worker_stall"] = False
+        payload["finite_interview_outcome"] = finite_interview_outcome(state, active_question=active, stop=stop)
+        payload["message"] = (
+            f"Interview stop: {payload['finite_interview_outcome']['stop']}. "
+            "Unresolved reasons stay visible. This is not legal sufficiency."
+        )
         return payload
 
     def _support_matrix(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
         answers = state.get("intake_answers") or {}
         testimony = state.get("evidence", {}).get("testimony") or []
         documents = state.get("evidence", {}).get("documents") or []
+        interview_complete = False
+        shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+        if shared.get("schema_version") and not (shared.get("pending_inquiry") or {}):
+            interview_complete = shared.get("pending_inquiry") is None and bool(shared.get("answered_inquiries") or shared.get("session_revision"))
         matrix: List[Dict[str, Any]] = []
         for element in _CLAIM_ELEMENTS:
-            intake_supported = bool(answers.get(element["id"])) or (
-                element["id"] == "employer_knowledge" and bool(answers.get("protected_activity"))
-            ) or (element["id"] == "causation" and bool(answers.get("timeline")))
+            intake_asserted = bool(str(answers.get(element["id"]) or "").strip()) or (
+                element["id"] == "employer_knowledge" and bool(str(answers.get("protected_activity") or "").strip())
+            ) or (element["id"] == "causation" and bool(str(answers.get("timeline") or "").strip()))
             matching_testimony = [item for item in testimony if item.get("claim_element_id") == element["id"]]
             matching_documents = [item for item in documents if item.get("claim_element_id") == element["id"]]
-            support_count = len(matching_testimony) + len(matching_documents) + (1 if intake_supported else 0)
+            source_bound = [
+                item for item in [*matching_testimony, *matching_documents]
+                if _source_bound_evidence(item)
+            ]
             matrix.append(
                 {
                     "id": element["id"],
                     "label": element["label"],
-                    "supported": support_count > 0,
-                    "intake_supported": intake_supported,
+                    "supported": bool(source_bound),
+                    "intake_supported": False,
+                    "intake_asserted": intake_asserted,
+                    "interview_complete": bool(interview_complete),
+                    "interview_completion_means_legal_sufficiency": False,
+                    "legal_sufficiency": False,
+                    "support_requires_source_bound_evidence": True,
                     "testimony_count": len(matching_testimony),
                     "document_count": len(matching_documents),
-                    "support_count": support_count,
-                    "status": "supported" if support_count > 0 else "needs_support",
+                    "source_bound_count": len(source_bound),
+                    "support_count": len(source_bound),
+                    "status": "supported" if source_bound else "needs_source_bound_evidence",
                 }
             )
         return matrix
@@ -6843,19 +7206,22 @@ class ComplaintWorkspaceService:
         return {
             "claim_type": state.get("claim_type", "retaliation"),
             "case_synopsis": case_synopsis,
+            "legal_sufficiency": False,
+            "interview_completion_means_legal_sufficiency": False,
             "support_matrix": matrix,
             "overview": {
                 "supported_elements": len(supported),
                 "missing_elements": len(missing),
                 "testimony_items": len(evidence.get("testimony") or []),
                 "document_items": len(evidence.get("documents") or []),
+                "legal_sufficiency": False,
             },
             "recommended_actions": [
                 {
-                    "title": "Collect more corroboration",
-                    "detail": "Add testimony or documents to any unsupported claim element."
+                    "title": "Collect source-bound evidence",
+                    "detail": "Add testimony or documents that name a factual or legal source. Intake answers and a finished interview are not support."
                     if missing
-                    else "All core elements have at least one support source.",
+                    else "Source-bound evidence is recorded. That record is still not a finding of legal sufficiency.",
                 },
                 {
                     "title": "Check the timeline",

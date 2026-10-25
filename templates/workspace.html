@@ -3872,6 +3872,18 @@
                             <button class="secondary" id="adaptive-defer" type="button">Defer</button>
                         </div>
                         <div class="status" id="adaptive-gap-status" data-gap-preserved="unknown">Unknown and deferred answers keep the graph gap open.</div>
+                        <section id="finite-interview-outcome" data-task="CIMP-GUI-19" data-stop="" data-legal-sufficiency="false" data-user-waiting-is-worker-stall="false" data-reasons-visible="true">
+                            <h3>Finite interview outcome</h3>
+                            <p id="finite-interview-summary">The interview stops on saturation, a cap, a pause, cancellation, or an unavailable capability. Waiting for the user is not a development worker stall.</p>
+                            <ul id="finite-interview-reasons">
+                                <li data-code="interview_completion_is_not_legal_sufficiency">Interview completion is not legal sufficiency. Support requires source-bound factual or legal evidence.</li>
+                            </ul>
+                            <p id="finite-interview-sufficiency">Interview completion is not legal sufficiency. A finished question list does not mark claim elements supported.</p>
+                            <div class="button-row">
+                                <button class="secondary" id="finite-interview-pause" type="button">Pause interview</button>
+                                <button class="secondary" id="finite-interview-cancel" type="button">Cancel interview</button>
+                            </div>
+                        </section>
                         <section id="factual-correction" data-task="CIMP-GUI-18" data-status="">
                             <h3>Correct a recorded answer</h3>
                             <p class="muted">A correction uses the shared mediator supersession path. The previous assertion stays in the record. Support and proof that depended on it are invalidated. The expected graph and session revisions must match. Another participant's answer is refused.</p>
@@ -8523,28 +8535,26 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         }
 
         function describeSupportStrength(item) {
-            const testimonyCount = Number((item || {}).testimony_count || 0);
             const documentCount = Number((item || {}).document_count || 0);
-            const intakeSupported = Boolean((item || {}).intake_supported);
-            const totalProofItems = testimonyCount + documentCount;
-            if ((item || {}).supported && documentCount > 0 && (testimonyCount > 0 || intakeSupported)) {
+            const sourceBound = Number((item || {}).source_bound_count || 0);
+            if ((item || {}).supported && sourceBound > 0 && documentCount > 0) {
                 return {
                     label: 'grounded',
                     chipClass: 'good',
-                    detail: 'Has documentary or mixed proof behind the element.',
+                    detail: 'Source-bound documentary evidence is recorded. That is not legal sufficiency.',
                 };
             }
-            if ((item || {}).supported && (totalProofItems > 0 || intakeSupported)) {
+            if ((item || {}).supported && sourceBound > 0) {
                 return {
                     label: 'thin',
                     chipClass: 'warn',
-                    detail: 'Some support exists, but corroboration is still light.',
+                    detail: 'Source-bound evidence is present. Intake answers and a finished interview are not support.',
                 };
             }
             return {
                 label: 'unsupported',
                 chipClass: 'warn',
-                detail: 'Needs targeted proof before the complaint feels reliable on this point.',
+                detail: 'Assertions and interview completion are not source-bound factual or legal evidence and are not legal sufficiency.',
             };
         }
 
@@ -8598,7 +8608,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                                 <strong>${escapeHtml(item.label)}</strong>
                                 <div class="chip-row">
                                     <span class="chip ${escapeHtml(strength.chipClass)}">${escapeHtml(strength.label)}</span>
-                                    <span class="chip">intake: ${escapeHtml(item.intake_supported ? 'yes' : 'no')}</span>
+                                    <span class="chip">intake assertion: ${escapeHtml(item.intake_asserted ? 'yes' : 'no')}</span>
+                                    <span class="chip">source-bound: ${escapeHtml(String(item.source_bound_count || 0))}</span>
                                     <span class="chip">testimony: ${escapeHtml(String(item.testimony_count || 0))}</span>
                                     <span class="chip">documents: ${escapeHtml(String(item.document_count || 0))}</span>
                                 </div>
@@ -8619,7 +8630,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                             <span class="chip ${escapeHtml(strength.chipClass)}">${escapeHtml(strength.label)}</span>
                         </div>
                         <div class="chip-row" style="margin-top: 10px;">
-                            <span class="chip">Intake ${item.intake_supported ? 'yes' : 'no'}</span>
+                            <span class="chip">Intake assertion ${item.intake_asserted ? 'yes' : 'no'}</span>
+                            <span class="chip">${item.source_bound_count || 0} source-bound</span>
                             <span class="chip">${item.testimony_count} testimony</span>
                             <span class="chip">${item.document_count} documents</span>
                         </div>
@@ -14378,6 +14390,49 @@ function extractComplaintOutputSignals(result) {
                     : 'Unknown and deferred answers keep the graph gap open.';
             }
             renderFactualCorrectionOffer(payload);
+            renderFiniteInterviewOutcome(payload);
+        }
+
+        function renderFiniteInterviewOutcome(payload) {
+            const panel = document.getElementById('finite-interview-outcome');
+            const summary = document.getElementById('finite-interview-summary');
+            const reasons = document.getElementById('finite-interview-reasons');
+            const sufficiency = document.getElementById('finite-interview-sufficiency');
+            if (!panel || !summary || !reasons || !sufficiency) return;
+            const outcome = (payload && payload.finite_interview_outcome) || {};
+            const stop = String(outcome.stop || 'unresolved');
+            const rows = Array.isArray(outcome.unresolved_reasons) ? outcome.unresolved_reasons : [];
+            panel.dataset.stop = stop;
+            panel.dataset.legalSufficiency = 'false';
+            panel.dataset.userWaitingIsWorkerStall = 'false';
+            panel.dataset.reasonsVisible = rows.length ? 'true' : 'false';
+            panel.dataset.userWaiting = outcome.user_waiting ? 'true' : 'false';
+            panel.dataset.workerStalled = 'false';
+            summary.textContent = `Interview stop: ${stop}. Waiting for the user is not a development worker stall. Unresolved reasons stay visible.`;
+            reasons.innerHTML = (rows.length ? rows : [{code: 'interview_completion_is_not_legal_sufficiency', detail: 'Interview completion is not legal sufficiency.'}]).map((item) => {
+                const code = String((item && item.code) || 'unresolved');
+                const detail = String((item && item.detail) || code);
+                return `<li data-code="${escapeHtml(code)}">${escapeHtml(detail)}</li>`;
+            }).join('');
+            sufficiency.textContent = 'Interview completion is not legal sufficiency. Support requires source-bound factual or legal evidence.';
+        }
+
+        async function controlFiniteInterview(action) {
+            const capture = adaptiveRequestCapture();
+            if (!adaptiveRequestCurrent(capture)) return;
+            setBusyStatus(action === 'pause' ? 'Pausing the interview…' : 'Cancelling the interview…');
+            try {
+                const result = await client.runIntakeChatTurn(workspaceUserId, '', '', {interview_action: action});
+                if (!adaptiveRequestCurrent(capture)) return;
+                workspaceSession = result;
+                renderAdaptiveInquiry(result, capture);
+                renderFiniteInterviewOutcome(result);
+                const outcome = result.finite_interview_outcome || {};
+                setStatus(`Interview ${outcome.stop || action}. Unresolved reasons remain visible. This is not legal sufficiency.`);
+            } catch (error) {
+                if (!adaptiveRequestCurrent(capture)) return;
+                setStatus(`The interview did not stop: ${String((error && error.message) || error)}`);
+            }
         }
 
         async function applyFactualCorrection() {
@@ -15668,6 +15723,8 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('save-intake-button').addEventListener('click', saveIntake);
         document.getElementById('adaptive-enter-narrative').addEventListener('click', enterAdaptiveNarrative);
         document.getElementById('adaptive-submit-answer').addEventListener('click', () => answerAdaptiveInquiry('answer'));
+        document.getElementById('finite-interview-pause').addEventListener('click', () => controlFiniteInterview('pause'));
+        document.getElementById('finite-interview-cancel').addEventListener('click', () => controlFiniteInterview('cancel'));
         document.getElementById('factual-correction-submit').addEventListener('click', applyFactualCorrection);
         document.getElementById('adaptive-unknown').addEventListener('click', () => answerAdaptiveInquiry('unknown'));
         document.getElementById('adaptive-defer').addEventListener('click', () => answerAdaptiveInquiry('deferred'));
