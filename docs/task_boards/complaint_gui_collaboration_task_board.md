@@ -1392,7 +1392,7 @@ Implementation instructions:
 
 ## CIMP-GUI-47 Separate review comments from case-state transitions
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1

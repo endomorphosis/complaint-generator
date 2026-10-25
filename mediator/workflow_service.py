@@ -2399,6 +2399,270 @@ class WorkflowActionService:
 		}
 
 
+	REVIEW_TRANSITION_CONTRACT_VERSION = "review-state-transition-v1"
+	_REVIEW_TARGET_BUCKETS = {
+		"fact": "facts",
+		"answer": "answers",
+		"legal_admission": "legal_admissions",
+		"draft_revision": "draft_revisions",
+	}
+
+	def apply_authorized_review_transition(
+		self,
+		*,
+		case_id: str,
+		actor_principal_id: str,
+		canonical_owner_principal_id: str,
+		authorized: bool,
+		item_type: str,
+		item_id: str,
+		target_kind: str,
+		target_id: str,
+		replacement: str,
+		expected_review_revision: int,
+		expected_target_revision: int,
+		request_id: str,
+	) -> Dict[str, Any]:
+		"""Apply one accepted review proposal to a case-state target.
+
+		Comments, tasks, and unauthorized callers never reach a successful
+		write. The review revision and the target revision are both compared
+		before the write. A stale caller leaves facts, answers, legal
+		admissions, draft revisions, dissent, and history unchanged. Support
+		bound to the previous target revision is marked invalidated and kept.
+		"""
+		case_file = self._review_case_file()
+		state = self._review_state(case_file, case_id)
+		fingerprint = self._review_fingerprint(
+			item_type=item_type,
+			item_id=item_id,
+			target_kind=target_kind,
+			target_id=target_id,
+			replacement=replacement,
+			expected_review_revision=expected_review_revision,
+			expected_target_revision=expected_target_revision,
+		)
+		stored = state["operations"].get(request_id)
+		if isinstance(stored, dict):
+			if stored.get("fingerprint") != fingerprint:
+				return self._review_receipt(state, status="refused", error_code="replay_mismatch", applied=False, request_id=request_id)
+			replay = dict(stored["receipt"])
+			replay["replayed"] = True
+			replay["applied"] = False
+			return replay
+		bucket_name = self._REVIEW_TARGET_BUCKETS.get(target_kind)
+		refusal = None
+		if not authorized or not str(actor_principal_id or "").strip():
+			refusal = "actor_not_permitted"
+		elif str(actor_principal_id) == str(canonical_owner_principal_id or ""):
+			refusal = "actor_is_not_canonical_owner"
+		elif item_type != "review_proposal":
+			refusal = "not_an_accepted_transition"
+		elif bucket_name is None or not str(target_id or "").strip() or not str(replacement or "").strip():
+			refusal = "review_field"
+		elif not str(item_id or "").strip() or not str(request_id or "").strip():
+			refusal = "review_field"
+		elif type(expected_review_revision) is not int or isinstance(expected_review_revision, bool):
+			refusal = "review_field"
+		elif type(expected_target_revision) is not int or isinstance(expected_target_revision, bool):
+			refusal = "review_field"
+		elif int(expected_review_revision) != int(state["review_revision"]):
+			refusal = "stale_review_revision"
+		if refusal is not None:
+			return self._review_receipt(state, status="refused", error_code=refusal, applied=False, request_id=request_id)
+		bucket = state[bucket_name]
+		current = bucket.get(target_id) if isinstance(bucket.get(target_id), dict) else None
+		current_revision = int(current["revision"]) if current else 0
+		if int(expected_target_revision) != current_revision:
+			return self._review_receipt(state, status="refused", error_code="stale_target_revision", applied=False, request_id=request_id)
+		history = list(current.get("history") or []) if current else []
+		if current is not None:
+			history.append({
+				"revision": current_revision,
+				"text": current.get("text") or "",
+				"superseded_by": request_id,
+				"item_id": item_id,
+			})
+		new_revision = current_revision + 1
+		bucket[target_id] = {
+			"target_kind": target_kind,
+			"target_id": target_id,
+			"text": replacement,
+			"revision": new_revision,
+			"history": history,
+			"updated_by_actor_principal_id": actor_principal_id,
+			"item_id": item_id,
+			"item_type": "review_proposal",
+		}
+		invalidated = []
+		for support in state["downstream_support"]:
+			if not isinstance(support, dict):
+				continue
+			same_target = support.get("depends_on_kind") == target_kind and support.get("depends_on_id") == target_id
+			if same_target and int(support.get("depends_on_revision") or 0) != new_revision and support.get("status") != "invalidated":
+				support["status"] = "invalidated"
+				support["stale"] = True
+				support["invalidated_by"] = request_id
+				support["invalidated_at_review_revision"] = int(state["review_revision"]) + 1
+				invalidated.append(support.get("support_id"))
+		state["review_revision"] = int(state["review_revision"]) + 1
+		acceptance = {
+			"request_id": request_id,
+			"item_id": item_id,
+			"item_type": "review_proposal",
+			"target_kind": target_kind,
+			"target_id": target_id,
+			"target_revision": new_revision,
+			"prior_target_revision": current_revision,
+			"actor_principal_id": actor_principal_id,
+			"review_revision": state["review_revision"],
+			"invalidated_support_ids": list(invalidated),
+		}
+		state["acceptance_history"].append(acceptance)
+		receipt = self._review_receipt(
+			state,
+			status="applied",
+			error_code=None,
+			applied=True,
+			request_id=request_id,
+			acceptance=acceptance,
+			invalidated_support_ids=invalidated,
+		)
+		state["operations"][request_id] = {"fingerprint": fingerprint, "receipt": dict(receipt)}
+		case_file["review_case_state"] = state
+		return receipt
+
+	def register_review_downstream_support(
+		self,
+		*,
+		case_id: str,
+		support_id: str,
+		depends_on_kind: str,
+		depends_on_id: str,
+		depends_on_revision: int,
+		request_id: str,
+	) -> Dict[str, Any]:
+		"""Bind support to one current target revision without changing that target."""
+		case_file = self._review_case_file()
+		state = self._review_state(case_file, case_id)
+		fingerprint = self._review_fingerprint(
+			item_type="downstream_support",
+			item_id=support_id,
+			target_kind=depends_on_kind,
+			target_id=depends_on_id,
+			replacement=str(depends_on_revision),
+			expected_review_revision=int(state["review_revision"]),
+			expected_target_revision=depends_on_revision if type(depends_on_revision) is int else -1,
+		)
+		stored = state["operations"].get(request_id)
+		if isinstance(stored, dict):
+			if stored.get("fingerprint") != fingerprint:
+				return self._review_receipt(state, status="refused", error_code="replay_mismatch", applied=False, request_id=request_id)
+			replay = dict(stored["receipt"])
+			replay["replayed"] = True
+			replay["applied"] = False
+			return replay
+		bucket_name = self._REVIEW_TARGET_BUCKETS.get(depends_on_kind)
+		current = None
+		if bucket_name is not None:
+			candidate = state[bucket_name].get(depends_on_id)
+			current = candidate if isinstance(candidate, dict) else None
+		if (
+			bucket_name is None
+			or not str(support_id or "").strip()
+			or not str(request_id or "").strip()
+			or type(depends_on_revision) is not int
+			or isinstance(depends_on_revision, bool)
+			or current is None
+			or int(current.get("revision") or 0) != int(depends_on_revision)
+		):
+			code = "support_target_missing" if current is None else "stale_target_revision"
+			if bucket_name is None or not str(support_id or "").strip() or type(depends_on_revision) is not int or isinstance(depends_on_revision, bool):
+				code = "review_field"
+			return self._review_receipt(state, status="refused", error_code=code, applied=False, request_id=request_id)
+		before = json.dumps(state["facts"], sort_keys=True, default=str)
+		row = {
+			"support_id": support_id,
+			"depends_on_kind": depends_on_kind,
+			"depends_on_id": depends_on_id,
+			"depends_on_revision": int(depends_on_revision),
+			"status": "current",
+			"stale": False,
+			"invalidated_by": None,
+		}
+		state["downstream_support"].append(row)
+		if json.dumps(state["facts"], sort_keys=True, default=str) != before:
+			raise RuntimeError("support registration mutated facts")
+		receipt = self._review_receipt(state, status="bound", error_code=None, applied=False, request_id=request_id, support=row)
+		state["operations"][request_id] = {"fingerprint": fingerprint, "receipt": dict(receipt)}
+		case_file["review_case_state"] = state
+		return receipt
+
+	def _review_case_file(self) -> Dict[str, Any]:
+		return self._refresh_case_file()
+
+	def _review_state(self, case_file: Dict[str, Any], case_id: str) -> Dict[str, Any]:
+		state = case_file.get("review_case_state")
+		if not isinstance(state, dict) or state.get("case_id") not in {None, "", case_id}:
+			state = {
+				"contract_version": self.REVIEW_TRANSITION_CONTRACT_VERSION,
+				"case_id": case_id,
+				"review_revision": 0,
+				"facts": {},
+				"answers": {},
+				"legal_admissions": {},
+				"draft_revisions": {},
+				"downstream_support": [],
+				"acceptance_history": [],
+				"operations": {},
+			}
+		for name in ("facts", "answers", "legal_admissions", "draft_revisions", "operations"):
+			if not isinstance(state.get(name), dict):
+				state[name] = {}
+		for name in ("downstream_support", "acceptance_history"):
+			if not isinstance(state.get(name), list):
+				state[name] = []
+		if type(state.get("review_revision")) is not int:
+			state["review_revision"] = 0
+		state["case_id"] = case_id
+		return state
+
+	def _review_fingerprint(self, **parts: Any) -> str:
+		payload = json.dumps(parts, sort_keys=True, default=str)
+		return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+	def _review_receipt(self, state: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+		return {
+			"task_id": "CIMP-GUI-47",
+			"contract_version": self.REVIEW_TRANSITION_CONTRACT_VERSION,
+			"status": kwargs["status"],
+			"applied": bool(kwargs["applied"]),
+			"replayed": False,
+			"request_id": kwargs.get("request_id") or "",
+			"review_revision": int(state.get("review_revision") or 0),
+			"facts": json.loads(json.dumps(state.get("facts") or {})),
+			"answers": json.loads(json.dumps(state.get("answers") or {})),
+			"legal_admissions": json.loads(json.dumps(state.get("legal_admissions") or {})),
+			"draft_revisions": json.loads(json.dumps(state.get("draft_revisions") or {})),
+			"downstream_support": json.loads(json.dumps(state.get("downstream_support") or [])),
+			"acceptance_history": json.loads(json.dumps(state.get("acceptance_history") or [])),
+			"acceptance": json.loads(json.dumps(kwargs.get("acceptance"))) if kwargs.get("acceptance") else None,
+			"support": json.loads(json.dumps(kwargs.get("support"))) if kwargs.get("support") else None,
+			"invalidated_support_ids": list(kwargs.get("invalidated_support_ids") or []),
+			"governing_legal_authority": False,
+			"legal_sufficiency": False,
+			"error": None if not kwargs.get("error_code") else {"code": kwargs["error_code"], "resumable": kwargs["error_code"] != "replay_mismatch"},
+			"limitations": [
+				"Only an authorized accepted review_proposal updates facts, answers, legal admissions, or draft revisions.",
+				"Review tasks and comments are not case-state transitions.",
+				"Concurrent acceptance must present the current review revision and target revision.",
+				"Dissent and prior target text stay in history.",
+				"Downstream support bound to a replaced revision is invalidated and kept.",
+				"This receipt is not governing law or legal sufficiency.",
+			],
+		}
+
+
 def _json_ready(value: Any) -> Any:
 	"""Drop values that cannot be stored in the versioned session projection."""
 	try:
