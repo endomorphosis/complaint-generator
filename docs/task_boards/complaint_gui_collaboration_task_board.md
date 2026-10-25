@@ -1754,7 +1754,7 @@ Implementation instructions:
 
 ## CIMP-GUI-59 Run bounded current-source GUI acceptance groups
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
