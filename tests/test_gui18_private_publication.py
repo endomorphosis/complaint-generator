@@ -81,8 +81,9 @@ def test_revoked_actual_correction_never_publishes_or_recovers(tmp_path, monkeyp
     service = world.services[world.case.case_id]
     entered, release = Event(), Event()
     original_seal, original_fsync = private_storage._seal_role, private_storage._fsync_file
-    with TestClient(world.app, base_url="https://testserver") as client:
+    with TestClient(world.app, base_url="https://testserver") as client, TestClient(world.app, base_url="https://testserver") as other:
         csrf, offer = _prepare(client, world)
+        other.cookies.update(client.cookies)
         repository = service.joined_revision_repository(world.case.tenant_id, world.case.case_id)
         before = (repository / "head.cgpe").read_bytes()
 
@@ -116,9 +117,10 @@ def test_revoked_actual_correction_never_publishes_or_recovers(tmp_path, monkeyp
             assert entered.wait(20), "The actual correction did not reach encrypted publication."
             assert (repository / "head.cgpe").read_bytes() == before
             if boundary == "logout":
-                assert client.post("/api/complaint-workspace/auth/logout", headers={"x-csrf-token": csrf}).status_code == 200
+                assert other.post("/api/complaint-workspace/auth/logout", headers={"x-csrf-token": csrf}).status_code == 200
             else:
                 service.lock_private_keys()
+            assert worker.is_alive(), "The boundary must occur while the real writer is still paused."
         finally:
             release.set()
             worker.join(20)
