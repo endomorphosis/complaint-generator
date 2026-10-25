@@ -959,6 +959,100 @@ def _recovery_aad(tenant_id: str, case_id: str, key_id: str) -> bytes:
     return RECOVERY_WRAP_DOMAIN + _data_aad(tenant_id, case_id, key_id)
 
 
+RESOURCE_GRANT_SCHEMA = "complaint-generator/resource-key-grant"
+RESOURCE_GRANT_VERSION = 1
+RESOURCE_GRANT_WRAP_DOMAIN = b"complaint-generator/private-key/resource-grant@1\x00"
+RECIPIENT_WRAP_DOMAIN = b"complaint-generator/private-key/recipient-wrap@1\x00"
+
+
+def _recipient_wrap_aad(wrap_key_id: str) -> bytes:
+    _require_key_id(wrap_key_id)
+    return RECIPIENT_WRAP_DOMAIN + wrap_key_id.encode("utf-8")
+
+
+def resource_grant_associated_data(
+    *,
+    tenant_id: str,
+    case_id: str,
+    canonical_principal_id: str,
+    revision: str,
+    recipient_principal_id: str,
+    artifact_kind: str,
+    resource_id: str,
+    membership_grant_id: str,
+    membership_version: int,
+    data_key_id: str,
+    recipient_wrap_key_id: str,
+) -> bytes:
+    """AAD for a recipient-wrapped case key.
+
+    The authenticated actor is not a field. The principal is the canonical
+    artifact owner, which is the case tenant, plus the recipient who may unwrap.
+    """
+
+    if type(membership_version) is not int or membership_version < 1:
+        raise PrivateArtifactBindingError("revision")
+    if canonical_principal_id != tenant_id:
+        raise PrivateArtifactBindingError("canonical_owner")
+    fields = (
+        RESOURCE_GRANT_SCHEMA,
+        str(RESOURCE_GRANT_VERSION),
+        tenant_id,
+        case_id,
+        canonical_principal_id,
+        revision,
+        recipient_principal_id,
+        artifact_kind,
+        resource_id,
+        membership_grant_id,
+        str(membership_version),
+        data_key_id,
+        recipient_wrap_key_id,
+    )
+    chunks = [RESOURCE_GRANT_WRAP_DOMAIN]
+    for field in fields:
+        if field in {data_key_id, recipient_wrap_key_id}:
+            raw = _require_key_id(field)
+        else:
+            _require_label(field)
+            raw = field.encode("utf-8")
+        chunks.append(len(raw).to_bytes(4, "big"))
+        chunks.append(raw)
+    return b"".join(chunks)
+
+
+def wrap_resource_key_for_recipient(
+    data_key: bytes,
+    recipient_wrap_key: bytes,
+    associated_data: bytes,
+) -> dict[str, str]:
+    """Wrap a case data key to a recipient wrap key. The data key is not returned."""
+
+    key_bytes = _require_data_key(data_key)
+    wrap_key = _require_data_key(recipient_wrap_key)
+    if wrap_key == key_bytes:
+        raise PrivateKeyMaterialError("owner_key_not_a_grant")
+    if not isinstance(associated_data, (bytes, bytearray)) or len(associated_data) < len(RESOURCE_GRANT_WRAP_DOMAIN):
+        raise PrivateArtifactBindingError("grant_aad")
+    if not bytes(associated_data).startswith(RESOURCE_GRANT_WRAP_DOMAIN):
+        raise PrivateArtifactBindingError("grant_aad")
+    wrapped = _wrap_secret(wrap_key, key_bytes, bytes(associated_data))
+    return {"nonce": wrapped["nonce"], "ciphertext": wrapped["ciphertext"]}
+
+
+def unwrap_resource_key_for_recipient(
+    wrapped: Mapping[str, Any],
+    recipient_wrap_key: bytes,
+    associated_data: bytes,
+) -> bytes:
+    """Open a recipient-bound wrap. A master key or browser key is not accepted here."""
+
+    wrap_key = _require_data_key(recipient_wrap_key)
+    if not isinstance(associated_data, (bytes, bytearray)) or not bytes(associated_data).startswith(RESOURCE_GRANT_WRAP_DOMAIN):
+        raise PrivateArtifactBindingError("grant_aad")
+    return _unwrap_secret(wrap_key, wrapped, bytes(associated_data))
+
+
 def _kdf_metadata(salt: bytes) -> dict[str, Any]:
     return {
         "name": "scrypt",
@@ -1035,6 +1129,7 @@ class UserOwnedKeySession:
         self._data_keys: dict[tuple[str, str], tuple[str, bytes]] = {}
         self._retained_data_keys: dict[tuple[str, str], list[tuple[str, bytes]]] = {}
         self._pending_data_keys: dict[tuple[str, str], tuple[str, bytes]] = {}
+        self._recipient_wrap: tuple[str, bytes] | None = None
         if self.path.exists():
             self._document = self._load_document()
 
@@ -1206,6 +1301,7 @@ class UserOwnedKeySession:
         self._data_keys.clear()
         self._retained_data_keys.clear()
         self._pending_data_keys.clear()
+        self._recipient_wrap = None
         self._master_id = None
         return self.public_state()
 
@@ -1238,6 +1334,134 @@ class UserOwnedKeySession:
         self._document = updated
         self._data_keys[(tenant_id, case_id)] = (key_id, data_key)
         return key_id
+
+    def ensure_recipient_wrap_key(self) -> str:
+        """Create the session wrap key used only to receive case key grants.
+
+        The wrap key stays inside this unlocked session. Callers cannot submit
+        a browser key, a raw ``.key`` file, or the master key in its place.
+        """
+
+        if not self.unlocked or self._master is None or self._document is None:
+            raise PrivateKeyLockedError(
+                "The recipient wrap key is locked, so no key grant was written.",
+                actions=self.public_state()["actions"],
+                protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
+            )
+        if self._recipient_wrap is not None:
+            return self._recipient_wrap[0]
+        key_id = _opaque_key_id("r-")
+        material = _random_secret()
+        if material == self._master:
+            raise PrivateKeyMaterialError("owner_key_not_a_grant")
+        document = dict(self._document)
+        document["recipient_wrap"] = {
+            "wrap_key_id": key_id,
+            "wrapped_wrap_key": _wrap_secret(self._master, material, _recipient_wrap_aad(key_id)),
+        }
+        document["raw_key_persisted"] = False
+        self._write_document(document)
+        self._document = document
+        self._recipient_wrap = (key_id, material)
+        return key_id
+
+    def recipient_wrap_key(self) -> tuple[str, bytes]:
+        """Return the in-process wrap key. Locked sessions and raw files fail."""
+
+        if not self.unlocked or self._recipient_wrap is None:
+            raise PrivateKeyLockedError(
+                "The recipient wrap key is unavailable. Unlock the session and create it there.",
+                actions=self.public_state()["actions"],
+                protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
+            )
+        self.assert_no_raw_key_files()
+        return self._recipient_wrap
+
+    def wrap_case_key_for_recipient(
+        self,
+        *,
+        tenant_id: str,
+        case_id: str,
+        recipient_wrap_key: bytes,
+        recipient_wrap_key_id: str,
+        canonical_principal_id: str,
+        revision: str,
+        recipient_principal_id: str,
+        artifact_kind: str,
+        resource_id: str,
+        membership_grant_id: str,
+        membership_version: int,
+    ) -> dict[str, str]:
+        """Wrap this session's case data key. The master key is not a grant key."""
+
+        if not self.unlocked or self._master is None:
+            raise PrivateKeyLockedError(
+                "The case key is locked, so it was not wrapped for a recipient.",
+                actions=self.public_state()["actions"],
+                protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
+            )
+        found = self._data_keys.get((tenant_id, case_id))
+        if found is None:
+            raise PrivateKeyMaterialError("key_unavailable")
+        data_key_id, data_key = found
+        wrap_key = _require_data_key(recipient_wrap_key)
+        if wrap_key == self._master or wrap_key == data_key:
+            raise PrivateKeyMaterialError("owner_key_not_a_grant")
+        associated = resource_grant_associated_data(
+            tenant_id=tenant_id,
+            case_id=case_id,
+            canonical_principal_id=canonical_principal_id,
+            revision=revision,
+            recipient_principal_id=recipient_principal_id,
+            artifact_kind=artifact_kind,
+            resource_id=resource_id,
+            membership_grant_id=membership_grant_id,
+            membership_version=membership_version,
+            data_key_id=data_key_id,
+            recipient_wrap_key_id=recipient_wrap_key_id,
+        )
+        wrapped = wrap_resource_key_for_recipient(data_key, wrap_key, associated)
+        wrapped["data_key_id"] = data_key_id
+        wrapped["recipient_wrap_key_id"] = recipient_wrap_key_id
+        return wrapped
+
+    def unwrap_granted_resource_key(
+        self,
+        wrapped: Mapping[str, Any],
+        *,
+        tenant_id: str,
+        case_id: str,
+        canonical_principal_id: str,
+        revision: str,
+        recipient_principal_id: str,
+        artifact_kind: str,
+        resource_id: str,
+        membership_grant_id: str,
+        membership_version: int,
+        data_key_id: str,
+        recipient_wrap_key_id: str,
+    ) -> bytes:
+        """Unwrap with this session's recipient wrap key, never the master key."""
+
+        wrap_id, wrap_key = self.recipient_wrap_key()
+        if wrap_id != recipient_wrap_key_id:
+            raise PrivateKeyMaterialError("recipient_mismatch")
+        if self._master is not None and wrap_key == self._master:
+            raise PrivateKeyMaterialError("admin_master_rejected")
+        associated = resource_grant_associated_data(
+            tenant_id=tenant_id,
+            case_id=case_id,
+            canonical_principal_id=canonical_principal_id,
+            revision=revision,
+            recipient_principal_id=recipient_principal_id,
+            artifact_kind=artifact_kind,
+            resource_id=resource_id,
+            membership_grant_id=membership_grant_id,
+            membership_version=membership_version,
+            data_key_id=data_key_id,
+            recipient_wrap_key_id=recipient_wrap_key_id,
+        )
+        return unwrap_resource_key_for_recipient(wrapped, wrap_key, associated)
 
     def provider(self) -> InjectedCaseKeyProvider:
         if not self.unlocked:
@@ -1847,11 +2071,24 @@ class UserOwnedKeySession:
                     pending_id,
                     _unwrap_secret(master, pending_doc.get("wrapped_data_key") or {}, _data_aad(tenant, case, pending_id)),
                 )
+        recipient_wrap: tuple[str, bytes] | None = None
+        wrap_document = document.get("recipient_wrap")
+        if wrap_document is not None:
+            if not isinstance(wrap_document, Mapping):
+                raise PrivateArtifactIntegrityError("malformed")
+            wrap_id = str(wrap_document.get("wrap_key_id") or "")
+            opened_wrap = _unwrap_secret(
+                master,
+                wrap_document.get("wrapped_wrap_key") or {},
+                _recipient_wrap_aad(wrap_id),
+            )
+            recipient_wrap = (wrap_id, opened_wrap)
         self._master = master
         self._master_id = str(document.get("master_key_id") or "")
         self._data_keys = loaded
         self._retained_data_keys = retained
         self._pending_data_keys = pending
+        self._recipient_wrap = recipient_wrap
 
     def _new_document(
         self,
@@ -6833,6 +7070,11 @@ __all__ = [
     "retrieve_private_artifact",
     "seal_private_artifact",
     "store_private_artifact",
+    "RESOURCE_GRANT_SCHEMA",
+    "RESOURCE_GRANT_VERSION",
+    "resource_grant_associated_data",
+    "wrap_resource_key_for_recipient",
+    "unwrap_resource_key_for_recipient",
     "KEY_STORE_SCHEMA",
     "KEY_RECOVERY_SCHEMA",
     "PrivateKeyLockedError",
