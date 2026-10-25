@@ -5626,6 +5626,38 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                     </div>
                 </section>
 
+                <section id="case-processing-consent" data-task="CIMP-GUI-33">
+                    <h2>Case processing consent</h2>
+                    <p id="consent-implication-notice">Local private is the default. Grok processing is authorized only for one case and one purpose. Lawyer membership, an admin role, development Grok authorization, and message receipt do not authorize case egress.</p>
+                    <div class="field-row">
+                        <div>
+                            <label for="consent-case-id">Case</label>
+                            <input id="consent-case-id" type="text" autocomplete="off">
+                        </div>
+                        <div>
+                            <label for="consent-purpose">Purpose</label>
+                            <select id="consent-purpose">
+                                <option value="extract_facts">extract_facts</option>
+                                <option value="propose_questions">propose_questions</option>
+                                <option value="explain_candidate">explain_candidate</option>
+                                <option value="citation_acquisition">citation_acquisition</option>
+                                <option value="public_law_citation">public_law_citation</option>
+                            </select>
+                        </div>
+                    </div>
+                    <p id="consent-choice-local">Local private: this purpose never calls a remote provider.</p>
+                    <p id="consent-choice-grok">Explicitly authorized Grok processing: grok_cli / grok-4.7 for this case and purpose.</p>
+                    <p id="consent-choice-revoked">Revoked: Grok processing for this purpose is not authorized. Processing is local private.</p>
+                    <div class="status" id="consent-decision-display">Local private. No remote processing is authorized.</div>
+                    <input id="consent-csrf-token" type="hidden" value="">
+                    <div class="button-row">
+                        <button type="button" id="consent-refresh">Show persisted decision</button>
+                        <button type="button" id="consent-choose-local">Keep local private</button>
+                        <button type="button" id="consent-authorize-grok">Authorize Grok for this purpose</button>
+                        <button type="button" id="consent-revoke">Revoke Grok authorization</button>
+                    </div>
+                </section>
+
                 <div class="button-row" id="workspace-privacy-actions">
                     <button type="button" id="workspace-clear-private-state">Clear private browser state</button>
                     <label for="workspace-switch-user-id">Switch to user</label>
@@ -5755,6 +5787,61 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         }
 
         applyWorkspaceShellMode();
+
+        function consentCasePath(suffix) {
+            const caseId = document.getElementById('consent-case-id').value.trim();
+            return '/api/cases/' + encodeURIComponent(caseId) + '/processing-consent' + (suffix || '');
+        }
+
+        function renderConsentDecision(payload) {
+            const purpose = document.getElementById('consent-purpose').value;
+            const node = document.getElementById('consent-decision-display');
+            const match = (payload.decisions || []).find(function (item) { return item.purpose === purpose; });
+            node.textContent = match ? match.display : 'Local private: this purpose never calls a remote provider.';
+            node.dataset.egressAuthorized = match && match.egress_authorized ? 'true' : 'false';
+            node.dataset.generation = String(payload.generation || 0);
+        }
+
+        async function refreshCaseProcessingConsent() {
+            const node = document.getElementById('consent-decision-display');
+            if (!document.getElementById('consent-case-id').value.trim()) {
+                node.textContent = 'Local private. No remote processing is authorized.';
+                node.dataset.egressAuthorized = 'false';
+                return;
+            }
+            const response = await fetch(consentCasePath(''), {credentials: 'same-origin'});
+            if (!response.ok) {
+                node.textContent = 'Local private: this purpose never calls a remote provider.';
+                node.dataset.egressAuthorized = 'false';
+                return;
+            }
+            renderConsentDecision(await response.json());
+        }
+
+        async function submitCaseProcessingConsent(mode) {
+            const node = document.getElementById('consent-decision-display');
+            const generation = Number(node.dataset.generation || '0');
+            const headers = {'content-type': 'application/json'};
+            const csrf = document.getElementById('consent-csrf-token').value;
+            if (csrf) headers['x-csrf-token'] = csrf;
+            const path = mode === 'revoke' ? consentCasePath('/revoke') : consentCasePath('');
+            const body = {
+                purpose: document.getElementById('consent-purpose').value,
+                expected_generation: generation
+            };
+            if (mode !== 'revoke') {
+                body.mode = mode;
+                if (mode === 'grok_cloud') body.explicit_case_purpose = true;
+            }
+            const response = await fetch(path, {method: 'POST', credentials: 'same-origin', headers: headers, body: JSON.stringify(body)});
+            if (response.ok) renderConsentDecision(await response.json());
+            else node.textContent = 'Local private: this purpose never calls a remote provider.';
+        }
+
+        document.getElementById('consent-refresh').addEventListener('click', function () { refreshCaseProcessingConsent(); });
+        document.getElementById('consent-choose-local').addEventListener('click', function () { submitCaseProcessingConsent('local_private'); });
+        document.getElementById('consent-authorize-grok').addEventListener('click', function () { submitCaseProcessingConsent('grok_cloud'); });
+        document.getElementById('consent-revoke').addEventListener('click', function () { submitCaseProcessingConsent('revoke'); });
 
         function loadLastSdkToolActivity() {
             if (typeof localStorage === 'undefined') {
