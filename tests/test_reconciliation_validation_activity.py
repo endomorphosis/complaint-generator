@@ -269,7 +269,15 @@ def test_synthetic_ordinary_observer_cannot_borrow_another_owner_or_renew_deadli
         path=runner._validation_activity_path(b);value=runner._read_validation_activity(path);value['observed_at']=now-100;_write(path,value)
     else:c.body['active_task_started_at']=datetime.fromtimestamp(now-901,timezone.utc).isoformat()
     value=runner.status(c.target,c.target/'spec.json',c.campaign)
-    assert value['status']!='active' and value['healthy'] is False
+    if damage=='overall_deadline':
+        # Provider time does not consume the separate existing validation
+        # window. The exact pulse retains its original deadline unchanged.
+        assert value['status']=='active' and value['healthy'] is True
+        assert value['scope_liveness']['claim']=='held'
+        assert value['validation_activity_evidence']['deadline_at']==runner._read_validation_activity(
+            runner._validation_activity_path(b))['deadline_at']
+    else:
+        assert value['status']!='active' and value['healthy'] is False
 
 
 @pytest.mark.parametrize('flag',['manual_hold','manual_cancellation'])
