@@ -17,7 +17,8 @@ from .browser_sessions import (
     BrowserSessionService,
     browser_session_http_status,
 )
-from .complaint_mcp_protocol import handle_jsonrpc_message, tool_list_payload
+from .case_routes import INQUIRY_CONFLICT_STATUS, shared_inquiry_conflict
+from .complaint_mcp_protocol import handle_jsonrpc_message, project_shared_inquiry_contract, tool_list_payload
 from .complaint_workspace import (
     ComplaintWorkspaceService,
     PrincipalRegistry,
@@ -505,14 +506,17 @@ def create_complaint_workspace_router(
         return workspace.submit_intake_answers(request.user_id, request.answers)
 
     @router.post("/api/complaint-workspace/intake-chat")
-    async def intake_chat_turn(request: IntakeChatTurnRequest) -> Dict[str, Any]:
-        return workspace.run_intake_chat_turn(
+    async def intake_chat_turn(request: IntakeChatTurnRequest) -> Response:
+        payload = project_shared_inquiry_contract(workspace.run_intake_chat_turn(
             request.user_id,
             message=request.message,
             question_id=request.question_id,
             expected_question_revision=request.expected_question_revision,
             interview_action=request.interview_action,
-        )
+        ))
+        if shared_inquiry_conflict(payload):
+            return JSONResponse(status_code=INQUIRY_CONFLICT_STATUS, content=payload)
+        return JSONResponse(status_code=200, content=payload)
 
     @router.post("/api/complaint-workspace/evidence")
     async def save_evidence(request: EvidenceRequest) -> Dict[str, Any]:
@@ -990,13 +994,21 @@ def create_complaint_workspace_router(
         )
 
     @router.post("/api/complaint-workspace/mcp/call")
-    async def call_mcp_tool(request: McpCallRequest) -> Dict[str, Any]:
+    async def call_mcp_tool(request: McpCallRequest) -> Response:
         try:
-            return workspace.call_mcp_tool(request.tool_name, request.arguments)
+            payload = workspace.call_mcp_tool(request.tool_name, request.arguments)
         except WorkspaceAuthorizationDenied:
-            return {"ok": False, "error": "authorization_denied", "isError": True}
+            return JSONResponse(status_code=200, content={"ok": False, "error": "authorization_denied", "isError": True})
         except Exception:
-            return {"ok": False, "error": "workspace_operation_failed", "isError": True}
+            return JSONResponse(status_code=200, content={"ok": False, "error": "workspace_operation_failed", "isError": True})
+        if request.tool_name == "complaint.run_intake_chat_turn":
+            payload = project_shared_inquiry_contract(payload)
+            if shared_inquiry_conflict(payload):
+                payload = dict(payload)
+                payload["isError"] = True
+                payload["ok"] = False
+                return JSONResponse(status_code=INQUIRY_CONFLICT_STATUS, content=payload)
+        return JSONResponse(status_code=200, content=payload)
 
     @router.post("/api/complaint-workspace/mcp/rpc")
     async def call_jsonrpc(request: JsonRpcRequest, http_request: Request) -> Response:
