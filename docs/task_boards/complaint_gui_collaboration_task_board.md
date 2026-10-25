@@ -822,7 +822,7 @@ Implementation instructions:
 
 ## CIMP-GUI-28 Refresh graphs when facts or legal context changes
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
