@@ -5815,6 +5815,12 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                     </div>
                 </section>
 
+                <section id="owner-review-sharing-link">
+                    <h2>Share a version for lawyer review</h2>
+                    <p>Open this case's review page to share the current version with an accepted assignment. A reviewer uses their own key grant.</p>
+                    <button type="button" id="open-owner-review-sharing">Open review sharing</button>
+                    <p id="owner-review-sharing-status" role="status"></p>
+                </section>
                 <section id="definition-correspondence-panel" data-task="CIMP-GUI-30">
                     <h2>Definitions in a reviewed source</h2>
                     <p>Select a source already reviewed for this case. A definition correspondence is a candidate interpretation, not governing law or a proof. Checking cannot supply missing reviewed definition inputs.</p>
@@ -6444,6 +6450,17 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         });
         document.getElementById('legal-context-refresh').addEventListener('click', function () { refreshLegalContext(); });
         document.getElementById('legal-context-save').addEventListener('click', function () { saveLegalContext(); });
+
+        document.getElementById('open-owner-review-sharing').addEventListener('click', function () {
+            const selected=client.caseContext;
+            if(!selected || workspacePrivacyInactive) {
+                document.getElementById('owner-review-sharing-status').textContent='Select and authenticate an owned case first.';
+                return;
+            }
+            const query=new URLSearchParams({tenant_id:selected.tenant_id,case_id:selected.case_id,resource_id:selected.resource_id,
+                expected_revision:String(selected.expected_revision),expected_membership_revision:'0'});
+            window.location.assign('/api/legal-analysis/'+encodeURIComponent(selected.case_id)+'/lawyer-workspace?'+query.toString());
+        });
 
         let definitionRequestEpoch = 0;
 

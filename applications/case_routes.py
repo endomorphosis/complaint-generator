@@ -217,7 +217,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
                         case_storage: Any = None,
                         case_consent: Any = None, gui_inference_transport: Any = None,
                         gui_inference_route: Any = None,
-                        operational_admin: Any = None,
+                        operational_admin: Any = None, case_reviews: Any = None,
                         case_notifications: Any = None) -> Any:
     """Mount the same fail-closed boundary in every production app variant.
 
@@ -342,6 +342,10 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     app.state.case_storage = case_storage
     app.state.durability_readiness_boundary = durability_readiness_boundary()
     app.state.case_consent = case_consent
+    from .case_review_store import CaseReviewService
+    if case_reviews is not None and (type(case_reviews) is not CaseReviewService or case_reviews.authorizer is not authorizer):
+        raise CaseAccessError('case_reviews')
+    app.state.case_reviews = case_reviews
     app.state.case_notifications = case_notifications
     app.state.gui_inference_transport = selected_inference_transport
     app.state.gui_inference_route = gui_inference_route
@@ -490,6 +494,8 @@ def _check_actor_claims(scope: Dict[str, Any], body: bytes, principal_id: str) -
 
 
 def _required_action(path: str, method: str, material: Mapping[str, Any], extensions) -> str:
+    if path.rstrip('/').endswith('/lawyer-reviews/share') or path.rstrip('/').endswith('/review-transitions'):
+        return 'case.update'
     if _within_prefix(path, "/api/legal-research") and path.rstrip("/").endswith("/admissions"):
         return "case.read" if method in {"GET", "HEAD"} else "case.review"
     # Assigned-lawyer review is case.review. It is not case.update and not an owner-key grant.
