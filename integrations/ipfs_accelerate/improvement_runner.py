@@ -1821,6 +1821,10 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "heartbeat_identity_mismatch"
     elif heartbeat_age is not None and heartbeat_age > 120:
         health = "stalled"
+    elif (canonical_activity_evidence is not None
+            and canonical_activity_evidence.get("type") in {
+                "canonical_native_validation_finalizing", "canonical_reconciled_validation_finalizing"}):
+        health = "active"  # Returned executor only; no additional execution budget.
     elif active and attempt_age is not None and attempt_age > TIMEOUT_SECONDS:
         health = "stalled"
     elif canonical_activity_evidence is not None:
@@ -2771,8 +2775,21 @@ def _call_validation_with_activity(*, executor, spec, workspace_path, timeout_se
         with activity_lock:
             stopped.set()
         worker.join(timeout=1.0)
-        _clear_validation_activity(binding, activity_id)
-        os.close(inode_guard)
+        try:
+            # Keep the returned executor's exact current owner observable
+            # while Native writes its terminal receipt. Never renew a task or
+            # executor deadline, and never mint this for another dispatch.
+            now_ts = time.time()
+            fresh = _validation_activity_binding(workspace_path, task, context, now_ts=now_ts)
+            if fresh == binding:
+                from .validation_handoff import publish
+                publish(sys.modules[__name__], binding, activity_id=activity_id,
+                    started_at=started_at, settled_at=now_ts, deadline_at=deadline_at)
+        except Exception:
+            pass  # Observation failure cannot replace the canonical result.
+        finally:
+            _clear_validation_activity(binding, activity_id)
+            os.close(inode_guard)
 
 
 def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
@@ -2834,8 +2851,10 @@ def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
                 or not native.checkout_lock_repository_matches(claim, supervisor.config.repo_root)
                 or claim.get("dispatch_authority_cid") != native.PortalImplementationDaemon._implementation_dispatch_authority_cid(claim)):
             return False
+        from .validation_handoff import owned as owned_handoff
         return bool(supervisor._active_validation_subprocess_exists()
-                    or _owned_validation_activity(supervisor, state, now_ts=now_ts, owner_pid=birth.pid))
+                    or _owned_validation_activity(supervisor, state, now_ts=now_ts, owner_pid=birth.pid)
+                    or owned_handoff(sys.modules[__name__], supervisor, state, now_ts=now_ts, owner_pid=birth.pid))
     except (OSError, TypeError, ValueError, AttributeError, KeyError):
         return False
 

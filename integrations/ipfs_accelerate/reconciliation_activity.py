@@ -242,14 +242,23 @@ def evidence(runner, repo_root, state_dir, record, state, *, now_ts):
             {"id": state["active_task_id"]}, context, now_ts=now_ts, owner_pid=owner_pid)
         if value is None or (phase == PHASE and value.get("execution_mode") != PHASE):
             return None
-        pulse = runner._read_validation_activity(runner._validation_activity_path(value))
+        try:
+            pulse = runner._read_validation_activity(runner._validation_activity_path(value))
+        except (OSError, ValueError, TypeError):
+            pulse = None
+        finalizing = False
         if not runner._validation_activity_record_valid(pulse, value, now_ts=now_ts):
-            return None
-        return {"type": "canonical_reconciled_validation_in_flight" if phase == PHASE else "canonical_native_validation_in_flight",
+            from .validation_handoff import read
+            pulse = read(runner, value, now_ts=now_ts)
+            if pulse is None:
+                return None
+            finalizing = True
+        kind = "canonical_reconciled_validation" if phase == PHASE else "canonical_native_validation"
+        return {"type": kind + ("_finalizing" if finalizing else "_in_flight"),
                 "source": "owned_canonical_executor_activity",
                 "activity_id": pulse["activity_id"], "binding_sha256": pulse["binding_sha256"],
                 "attempt": value["attempt"], **({"validation_ordinal": 1} if phase == PHASE else {}), "task_id": value["task_id"],
                 "task_cid": value["canonical_task_cid"], "owner_birth": value["owner_birth"],
-                "deadline_at": value["phase_deadline"], "completion_authority": False}
+                "deadline_at": pulse["deadline_at"], "completion_authority": False}
     except Exception:
         return None
