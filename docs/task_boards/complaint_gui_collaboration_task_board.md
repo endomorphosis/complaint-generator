@@ -221,7 +221,7 @@ Implementation instructions:
 
 ## CIMP-GUI-08 Expose authorized case creation and selection
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
