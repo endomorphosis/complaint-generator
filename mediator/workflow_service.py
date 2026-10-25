@@ -1589,6 +1589,489 @@ class WorkflowActionService:
 		return result
 
 
+	def refresh_legal_dependency_graph(
+		self,
+		*,
+		case_id: str,
+		actor_principal_id: str,
+		correction_kind: str,
+		case_revision: int,
+		consent_generation: int,
+		consent_revoked: bool,
+		grant_revision: int,
+		granted_actions: Any,
+		legal_source_hashes: Any,
+		operation_id: str,
+		expected_case_revision: int,
+		expected_consent_generation: int,
+		expected_grant_revision: int,
+		expected_dependency_generation: int,
+		links: Optional[List[Dict[str, Any]]] = None,
+		questions: Optional[List[Dict[str, Any]]] = None,
+		proof_obligations: Optional[List[Dict[str, Any]]] = None,
+		successors: Optional[Dict[str, Any]] = None,
+	) -> Dict[str, Any]:
+		"""Version one legal refresh and invalidate dependencies from the prior generation.
+
+		A source, context, or factual correction bumps the dependency generation.
+		Links, questions, and proof obligations bound to the previous generation
+		become stale. The same operation id replays the stored receipt and does
+		not bump the generation again. A mismatched case revision, consent
+		generation, actor grant, or dependency generation is refused without a write.
+		"""
+		case_file = self._refresh_case_file()
+		ledger = self._refresh_ledger(case_file, case_id)
+		operation_key = str(operation_id or "").strip()
+		stored = ledger["operations"].get(operation_key)
+		if operation_key and isinstance(stored, dict) and stored.get("action") == "legal_dependency_refresh":
+			replay = dict(stored)
+			replay["replayed"] = True
+			replay["applied"] = False
+			replay["graph_mutated"] = False
+			return replay
+		refusal = self._refresh_binding_refusal(
+			case_id=case_id,
+			actor_principal_id=actor_principal_id,
+			case_revision=case_revision,
+			consent_generation=consent_generation,
+			consent_revoked=consent_revoked,
+			grant_revision=grant_revision,
+			granted_actions=granted_actions,
+			expected_case_revision=expected_case_revision,
+			expected_consent_generation=expected_consent_generation,
+			expected_grant_revision=expected_grant_revision,
+			expected_dependency_generation=expected_dependency_generation,
+			ledger=ledger,
+			legal_source_hashes=legal_source_hashes,
+		)
+		kind = str(correction_kind or "").strip()
+		if refusal is None and kind not in {"source", "context", "factual"}:
+			refusal = "correction_kind_required"
+		hashes = self._refresh_hashes(legal_source_hashes) if refusal is None else ()
+		if refusal is None and kind == "source" and hashes == tuple(ledger.get("legal_source_hashes") or ()):
+			refusal = "source_unchanged"
+		if refusal is not None:
+			return self._refresh_receipt(
+				status="refused",
+				case_id=case_id,
+				actor_principal_id=actor_principal_id,
+				operation_id=operation_key,
+				correction_kind=kind,
+				ledger=ledger,
+				error_code=refusal,
+				applied=False,
+			)
+		if int(ledger.get("dependency_generation") or 0) > 0 and any(rows for rows in (links, questions, proof_obligations)):
+			return self._refresh_receipt(
+				status="refused",
+				case_id=case_id,
+				actor_principal_id=actor_principal_id,
+				operation_id=operation_key,
+				correction_kind=kind,
+				ledger=ledger,
+				error_code="refresh_field",
+				applied=False,
+			)
+		try:
+			prior = {
+				"links": self._refresh_rows(links, "link") if int(ledger.get("dependency_generation") or 0) == 0 else [],
+				"questions": self._refresh_rows(questions, "question") if int(ledger.get("dependency_generation") or 0) == 0 else [],
+				"proof_obligations": self._refresh_rows(proof_obligations, "proof_obligation") if int(ledger.get("dependency_generation") or 0) == 0 else [],
+			}
+			successor_rows = successors if isinstance(successors, dict) else {}
+			installed = {
+				"links": self._refresh_rows(successor_rows.get("links"), "link"),
+				"questions": self._refresh_rows(successor_rows.get("questions"), "question"),
+				"proof_obligations": self._refresh_rows(successor_rows.get("proof_obligations"), "proof_obligation"),
+			}
+		except ValueError:
+			return self._refresh_receipt(
+				status="refused",
+				case_id=case_id,
+				actor_principal_id=actor_principal_id,
+				operation_id=operation_key,
+				correction_kind=kind,
+				ledger=ledger,
+				error_code="refresh_field",
+				applied=False,
+			)
+		known = {item["id"] for bucket in ledger["records"].values() for item in bucket}
+		for bucket in prior.values():
+			for item in bucket:
+				if item["id"] in known:
+					return self._refresh_receipt(
+						status="refused", case_id=case_id, actor_principal_id=actor_principal_id,
+						operation_id=operation_key, correction_kind=kind, ledger=ledger,
+						error_code="refresh_field", applied=False,
+					)
+		successor_ids = [item["id"] for bucket in installed.values() for item in bucket]
+		if len(successor_ids) != len(set(successor_ids)) or any(item_id in known for item_id in successor_ids):
+			return self._refresh_receipt(
+				status="refused", case_id=case_id, actor_principal_id=actor_principal_id,
+				operation_id=operation_key, correction_kind=kind, ledger=ledger,
+				error_code="refresh_field", applied=False,
+			)
+		if any(item["content_hash"] and item["content_hash"] not in hashes for bucket in installed.values() for item in bucket):
+			return self._refresh_receipt(
+				status="refused", case_id=case_id, actor_principal_id=actor_principal_id,
+				operation_id=operation_key, correction_kind=kind, ledger=ledger,
+				error_code="stale_legal_source_hash", applied=False,
+			)
+		for name, bucket in prior.items():
+			for item in bucket:
+				item["status"] = "current"
+				item["dependency_generation"] = int(ledger.get("dependency_generation") or 0)
+				item["legal_source_hashes"] = list(ledger.get("legal_source_hashes") or [])
+				ledger["records"][name].append(item)
+		invalidated = self._invalidate_refresh_records(ledger, operation_key, kind)
+		generation = int(ledger.get("dependency_generation") or 0) + 1
+		ledger["dependency_generation"] = generation
+		ledger["operation_version"] = int(ledger.get("operation_version") or 0) + 1
+		ledger["legal_source_hashes"] = list(hashes)
+		ledger["case_revision"] = int(case_revision)
+		ledger["consent_generation"] = int(consent_generation)
+		ledger["consent_revoked"] = bool(consent_revoked)
+		ledger["grant_revision"] = int(grant_revision)
+		ledger["actor_principal_id"] = str(actor_principal_id)
+		ledger["case_id"] = str(case_id)
+		for name, bucket in installed.items():
+			for item in bucket:
+				item["status"] = "current"
+				item["dependency_generation"] = generation
+				item["legal_source_hashes"] = list(hashes)
+				item["installed_by"] = operation_key
+				ledger["records"][name].append(item)
+		receipt = self._refresh_receipt(
+			status="applied",
+			case_id=case_id,
+			actor_principal_id=actor_principal_id,
+			operation_id=operation_key,
+			correction_kind=kind,
+			ledger=ledger,
+			error_code=None,
+			applied=True,
+			invalidated=invalidated,
+		)
+		if operation_key:
+			ledger["operations"][operation_key] = dict(receipt)
+		case_file["legal_graph_refresh"] = ledger
+		return receipt
+
+	def accept_legal_refresh_late_result(
+		self,
+		*,
+		case_id: str,
+		actor_principal_id: str,
+		case_revision: int,
+		consent_generation: int,
+		consent_revoked: bool,
+		grant_revision: int,
+		granted_actions: Any,
+		legal_source_hashes: Any,
+		dependency_generation: int,
+		operation_id: str,
+		claimed: Optional[Dict[str, Any]] = None,
+	) -> Dict[str, Any]:
+		"""Apply a late refresh result only when every current binding still matches.
+
+		Actor grant, case revision, consent, legal source hashes, and dependency
+		generation are compared to the live binding and to the ledger written by
+		the latest refresh. A stale or revoked result does not restore invalidated
+		links, questions, or proof obligations.
+		"""
+		case_file = self._refresh_case_file()
+		ledger = self._refresh_ledger(case_file, case_id)
+		operation_key = str(operation_id or "").strip()
+		stored = ledger["operations"].get(operation_key)
+		if operation_key and isinstance(stored, dict) and stored.get("action") == "legal_refresh_late_result":
+			replay = dict(stored)
+			replay["replayed"] = True
+			replay["applied"] = False
+			replay["graph_mutated"] = False
+			return replay
+		claim = claimed if isinstance(claimed, dict) else {}
+		refusal = self._late_result_refusal(
+			ledger=ledger,
+			case_id=case_id,
+			actor_principal_id=actor_principal_id,
+			case_revision=case_revision,
+			consent_generation=consent_generation,
+			consent_revoked=consent_revoked,
+			grant_revision=grant_revision,
+			granted_actions=granted_actions,
+			legal_source_hashes=legal_source_hashes,
+			dependency_generation=dependency_generation,
+			claimed=claim,
+		)
+		if refusal is not None:
+			return self._late_receipt(
+				status="refused", case_id=case_id, actor_principal_id=actor_principal_id,
+				operation_id=operation_key, ledger=ledger, error_code=refusal, applied=False,
+			)
+		try:
+			installed = {
+				"links": self._refresh_rows(claim.get("links"), "link"),
+				"questions": self._refresh_rows(claim.get("questions"), "question"),
+				"proof_obligations": self._refresh_rows(claim.get("proof_obligations"), "proof_obligation"),
+			}
+		except ValueError:
+			return self._late_receipt(
+				status="refused", case_id=case_id, actor_principal_id=actor_principal_id,
+				operation_id=operation_key, ledger=ledger, error_code="refresh_field", applied=False,
+			)
+		known = {item["id"] for bucket in ledger["records"].values() for item in bucket}
+		hashes = tuple(ledger.get("legal_source_hashes") or ())
+		for bucket in installed.values():
+			for item in bucket:
+				if item["id"] in known or (item["content_hash"] and item["content_hash"] not in hashes):
+					return self._late_receipt(
+						status="refused", case_id=case_id, actor_principal_id=actor_principal_id,
+						operation_id=operation_key, ledger=ledger, error_code="stale_late_result", applied=False,
+					)
+		generation = int(ledger.get("dependency_generation") or 0)
+		for name, bucket in installed.items():
+			for item in bucket:
+				item["status"] = "current"
+				item["dependency_generation"] = generation
+				item["legal_source_hashes"] = list(hashes)
+				item["installed_by"] = operation_key
+				ledger["records"][name].append(item)
+		receipt = self._late_receipt(
+			status="applied", case_id=case_id, actor_principal_id=actor_principal_id,
+			operation_id=operation_key, ledger=ledger, error_code=None, applied=True,
+		)
+		if operation_key:
+			ledger["operations"][operation_key] = dict(receipt)
+		case_file["legal_graph_refresh"] = ledger
+		return receipt
+
+	def _refresh_case_file(self) -> Dict[str, Any]:
+		mediator = self._mediator
+		phase_manager = getattr(mediator, "phase_manager", None)
+		if phase_manager is not None and hasattr(phase_manager, "get_phase_data"):
+			stored = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file")
+			if isinstance(stored, dict):
+				return stored
+		stored = getattr(mediator, "intake_case_file", None)
+		if not isinstance(stored, dict):
+			stored = {}
+			setattr(mediator, "intake_case_file", stored)
+		return stored
+
+	def _refresh_ledger(self, case_file: Dict[str, Any], case_id: str) -> Dict[str, Any]:
+		ledger = case_file.get("legal_graph_refresh")
+		if not isinstance(ledger, dict) or ledger.get("case_id") not in {None, "", case_id}:
+			ledger = {
+				"case_id": case_id,
+				"dependency_generation": 0,
+				"operation_version": 0,
+				"legal_source_hashes": [],
+				"records": {"links": [], "questions": [], "proof_obligations": []},
+				"operations": {},
+			}
+		records = ledger.get("records")
+		if not isinstance(records, dict):
+			records = {}
+			ledger["records"] = records
+		for name in ("links", "questions", "proof_obligations"):
+			if not isinstance(records.get(name), list):
+				records[name] = []
+		if not isinstance(ledger.get("operations"), dict):
+			ledger["operations"] = {}
+		return ledger
+
+	def _refresh_binding_refusal(self, **kwargs: Any) -> Optional[str]:
+		ledger = kwargs["ledger"]
+		if kwargs["consent_revoked"] is True:
+			return "consent_revoked"
+		actions = kwargs["granted_actions"]
+		if not isinstance(actions, (list, tuple, set, frozenset)) or "case.update" not in set(actions):
+			return "actor_not_permitted"
+		if not str(kwargs["actor_principal_id"] or "").strip() or not str(kwargs["case_id"] or "").strip():
+			return "actor_not_permitted"
+		if int(kwargs["expected_case_revision"]) != int(kwargs["case_revision"]):
+			return "stale_case_revision"
+		if int(kwargs["expected_consent_generation"]) != int(kwargs["consent_generation"]):
+			return "stale_consent"
+		if int(kwargs["expected_grant_revision"]) != int(kwargs["grant_revision"]):
+			return "stale_actor_grant"
+		if int(kwargs["expected_dependency_generation"]) != int(ledger.get("dependency_generation") or 0):
+			return "stale_dependency_generation"
+		try:
+			self._refresh_hashes(kwargs["legal_source_hashes"])
+		except ValueError:
+			return "stale_legal_source_hash"
+		bound_case = str(ledger.get("case_id") or "")
+		if bound_case and bound_case != str(kwargs["case_id"]):
+			return "cross_case"
+		return None
+
+	def _late_result_refusal(self, **kwargs: Any) -> Optional[str]:
+		ledger = kwargs["ledger"]
+		if int(ledger.get("dependency_generation") or 0) < 1:
+			return "stale_dependency_generation"
+		if kwargs["consent_revoked"] is True or ledger.get("consent_revoked") is True:
+			return "consent_revoked"
+		actions = kwargs["granted_actions"]
+		if not isinstance(actions, (list, tuple, set, frozenset)) or "case.update" not in set(actions):
+			return "actor_not_permitted"
+		claim = kwargs["claimed"]
+		try:
+			hashes = self._refresh_hashes(kwargs["legal_source_hashes"])
+		except ValueError:
+			return "stale_legal_source_hash"
+		if hashes != tuple(ledger.get("legal_source_hashes") or ()):
+			return "stale_legal_source_hash"
+		comparisons = (
+			("actor_principal_id", str(kwargs["actor_principal_id"]), str(ledger.get("actor_principal_id") or ""), "stale_actor_grant"),
+			("case_revision", int(kwargs["case_revision"]), int(ledger.get("case_revision") or 0), "stale_case_revision"),
+			("consent_generation", int(kwargs["consent_generation"]), int(ledger.get("consent_generation") or 0), "stale_consent"),
+			("grant_revision", int(kwargs["grant_revision"]), int(ledger.get("grant_revision") or 0), "stale_actor_grant"),
+			("dependency_generation", int(kwargs["dependency_generation"]), int(ledger.get("dependency_generation") or 0), "stale_dependency_generation"),
+			("case_id", str(kwargs["case_id"]), str(ledger.get("case_id") or ""), "cross_case"),
+		)
+		for key, live, recorded, code in comparisons:
+			if live != recorded:
+				return code
+			if key in claim and claim.get(key) != live and not (key == "case_id" and claim.get(key) in {None, ""}):
+				return code
+		claimed_hashes = claim.get("legal_source_hashes")
+		if isinstance(claimed_hashes, list):
+			try:
+				if self._refresh_hashes(claimed_hashes) != hashes:
+					return "stale_legal_source_hash"
+			except ValueError:
+				return "stale_legal_source_hash"
+		if claim.get("consent_revoked") is True:
+			return "consent_revoked"
+		if claim.get("actor_principal_id") not in {None, "", str(kwargs["actor_principal_id"])}:
+			return "stale_actor_grant"
+		return None
+
+	def _refresh_hashes(self, values: Any) -> tuple:
+		if not isinstance(values, list) or not values:
+			raise ValueError("hashes")
+		cleaned = []
+		for item in values:
+			if not isinstance(item, str) or not item or item != item.strip() or len(item) > 128:
+				raise ValueError("hashes")
+			cleaned.append(item)
+		return tuple(sorted(set(cleaned)))
+
+	def _refresh_rows(self, rows: Any, record_kind: str) -> List[Dict[str, Any]]:
+		if rows is None:
+			return []
+		if not isinstance(rows, list):
+			raise ValueError("rows")
+		cleaned = []
+		seen = set()
+		for item in rows:
+			if not isinstance(item, dict):
+				raise ValueError("rows")
+			ident = item.get("id")
+			if not isinstance(ident, str) or not ident or ident != ident.strip() or ident in seen:
+				raise ValueError("rows")
+			seen.add(ident)
+			content_hash = item.get("content_hash", "")
+			if not isinstance(content_hash, str):
+				raise ValueError("rows")
+			text = item.get("text", "")
+			if not isinstance(text, str):
+				raise ValueError("rows")
+			cleaned.append({
+				"id": ident,
+				"record_kind": record_kind,
+				"text": text[:500],
+				"content_hash": content_hash,
+				"status": "current",
+				"proof": False,
+				"legal_sufficiency": False,
+			})
+		return cleaned
+
+	def _invalidate_refresh_records(self, ledger: Dict[str, Any], operation_id: str, kind: str) -> Dict[str, int]:
+		counts = {}
+		reason = "stale_after_%s_correction" % kind
+		for name, bucket in ledger["records"].items():
+			count = 0
+			for item in bucket:
+				if item.get("status") == "current":
+					item["status"] = "invalidated"
+					item["invalidated_reason"] = reason
+					item["invalidated_by"] = operation_id
+					item["invalidated_generation"] = int(ledger.get("dependency_generation") or 0)
+					count += 1
+			counts[name] = count
+		return counts
+
+	def _refresh_receipt(self, **kwargs: Any) -> Dict[str, Any]:
+		ledger = kwargs["ledger"]
+		records = ledger.get("records") if isinstance(ledger.get("records"), dict) else {}
+		return {
+			"task_id": "CIMP-GUI-28",
+			"action": "legal_dependency_refresh",
+			"status": kwargs["status"],
+			"applied": bool(kwargs["applied"]),
+			"replayed": False,
+			"graph_mutated": bool(kwargs["applied"]),
+			"operation_id": kwargs["operation_id"],
+			"operation_version": int(ledger.get("operation_version") or 0),
+			"dependency_generation": int(ledger.get("dependency_generation") or 0),
+			"correction_kind": kwargs["correction_kind"],
+			"case_id": kwargs["case_id"],
+			"actor_principal_id": kwargs["actor_principal_id"],
+			"case_revision": int(ledger.get("case_revision") or 0) if kwargs["applied"] else int(ledger.get("case_revision") or 0),
+			"consent_generation": int(ledger.get("consent_generation") or 0),
+			"grant_revision": int(ledger.get("grant_revision") or 0),
+			"legal_source_hashes": list(ledger.get("legal_source_hashes") or []),
+			"invalidated": kwargs.get("invalidated") or {"links": 0, "questions": 0, "proof_obligations": 0},
+			"links": [dict(item) for item in records.get("links") or []],
+			"questions": [dict(item) for item in records.get("questions") or []],
+			"proof_obligations": [dict(item) for item in records.get("proof_obligations") or []],
+			"proof": False,
+			"legal_sufficiency": False,
+			"error": None if not kwargs.get("error_code") else {"code": kwargs["error_code"], "resumable": True},
+			"limitations": [
+				"A refresh versions the dependency generation and invalidates prior links, questions, and proof obligations.",
+				"User narratives and model text do not become legal rules.",
+				"This receipt is not a proof of legal sufficiency.",
+				"WebSocket and SSE transports are not supported.",
+			],
+		}
+
+	def _late_receipt(self, **kwargs: Any) -> Dict[str, Any]:
+		ledger = kwargs["ledger"]
+		records = ledger.get("records") if isinstance(ledger.get("records"), dict) else {}
+		return {
+			"task_id": "CIMP-GUI-28",
+			"action": "legal_refresh_late_result",
+			"status": kwargs["status"],
+			"applied": bool(kwargs["applied"]),
+			"replayed": False,
+			"graph_mutated": bool(kwargs["applied"]),
+			"operation_id": kwargs["operation_id"],
+			"operation_version": int(ledger.get("operation_version") or 0),
+			"dependency_generation": int(ledger.get("dependency_generation") or 0),
+			"case_id": kwargs["case_id"],
+			"actor_principal_id": str(ledger.get("actor_principal_id") or kwargs["actor_principal_id"]),
+			"case_revision": int(ledger.get("case_revision") or 0),
+			"consent_generation": int(ledger.get("consent_generation") or 0),
+			"grant_revision": int(ledger.get("grant_revision") or 0),
+			"legal_source_hashes": list(ledger.get("legal_source_hashes") or []),
+			"links": [dict(item) for item in records.get("links") or []],
+			"questions": [dict(item) for item in records.get("questions") or []],
+			"proof_obligations": [dict(item) for item in records.get("proof_obligations") or []],
+			"proof": False,
+			"legal_sufficiency": False,
+			"error": None if not kwargs.get("error_code") else {"code": kwargs["error_code"], "resumable": True},
+			"limitations": [
+				"A late result is applied only when actor grant, case revision, consent, legal source hashes, and dependency generation still match.",
+				"Invalidated links, questions, and proof obligations stay invalidated.",
+				"This receipt is not a proof of legal sufficiency.",
+				"WebSocket and SSE transports are not supported.",
+			],
+		}
+
 	def _bound_case_ids(self, knowledge_graph) -> Dict[str, str]:
 		meta = getattr(self, "_interview_meta", None) or {}
 		privacy = getattr(self._mediator, "_interview_privacy_context", None)
