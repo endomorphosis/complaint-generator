@@ -21,7 +21,7 @@ from urllib.parse import parse_qs
 
 from starlette.requests import Request
 
-from .browser_sessions import BrowserSessionError, BrowserSessionService, browser_session_http_status
+from .browser_sessions import BrowserSessionError, BrowserSessionService, SESSION_COOKIE, browser_session_http_status
 from .case_access import BOUNDARIES, CaseAccessError, CaseActionAuthorizer
 from .case_directory import CaseNamespace
 
@@ -512,6 +512,8 @@ class CaseRouteAuthorizationMiddleware:
         self.prefixes = PROTECTED_PREFIXES + tuple(prefix for _kind, prefix in extensions) + (CASE_CATALOG_PREFIX, CASE_PAGE_PATH)
 
     async def __call__(self, scope, receive, send):
+        from .workspace_case_authority import (WorkspaceCaseAuthorityError,
+            issue_workspace_case_authority, workspace_case_authority_scope)
         if scope.get("type") not in {"http", "websocket"}:
             await self.app(scope, receive, send)
             return
@@ -567,11 +569,15 @@ class CaseRouteAuthorizationMiddleware:
             material["actor_principal_id"], material["action"] = bound.principal_id, action
             decision = self.authorizer.authorize_request(boundary_for_path(path), material)
             handlers = None
+            workspace_authority = None
             if decision.permits_case_content:
                 if self.case_handlers is None:
                     raise CaseAccessError("case_handler_unavailable")
                 self.case_handlers.resolve(decision)
                 handlers = lambda: self.case_handlers.resolve(decision)
+                workspace_authority = issue_workspace_case_authority(authorizer=self.authorizer,
+                    sessions=self.sessions, token=str(_credential_request(scope).cookies.get(SESSION_COOKIE) or ""),
+                    decision=decision, registry=self.case_handlers)
         except BrowserSessionError as exc:
             status, code = browser_session_http_status(exc)
             await self._deny(scope, send, status, code)
@@ -582,13 +588,17 @@ class CaseRouteAuthorizationMiddleware:
         except CaseAccessError as exc:
             await self._deny(scope, send, _status_for_denial(exc.code), exc.code)
             return
+        except WorkspaceCaseAuthorityError:
+            await self._deny(scope, send, 403, "workspace_case_authorization_denied")
+            return
         forwarded = dict(scope)
         state = dict(scope.get("state") or {})
         state.update(case_authorization=decision, browser_principal=bound)
         forwarded["state"] = state
         token = _BOUND_HANDLERS.set(handlers)
         try:
-            await self.app(forwarded, inbound, _inquiry_conflict_send(path, send))
+            with workspace_case_authority_scope(workspace_authority):
+                await self.app(forwarded, inbound, _inquiry_conflict_send(path, send))
         finally:
             _BOUND_HANDLERS.reset(token)
 

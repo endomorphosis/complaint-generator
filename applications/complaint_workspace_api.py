@@ -401,7 +401,16 @@ def create_complaint_workspace_router(
             if bound is None:
                 access = WorkspaceAccess.unauthenticated()
             else:
-                access = WorkspaceAccess.authenticated(bound.principal_id)
+                from .workspace_case_authority import (WorkspaceCaseAuthorityError,
+                    current_workspace_case_authority)
+                try:
+                    authority = current_workspace_case_authority()
+                    if authority is not None:
+                        authority.revalidate(actor_principal_id=bound.principal_id)
+                except WorkspaceCaseAuthorityError:
+                    raise HTTPException(status_code=403, detail="authorization_denied") from None
+                access = WorkspaceAccess.authenticated(bound.principal_id,
+                    case_id=authority.case_id if authority is not None else None)
                 http_request.state.browser_principal = bound
         else:
             access = access_from_http_headers(

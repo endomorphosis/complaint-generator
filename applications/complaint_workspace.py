@@ -3069,6 +3069,15 @@ class ComplaintWorkspaceRequestHandlers:
 
     @staticmethod
     def _normalize_user_id(user_id: Optional[str]) -> str:
+        if user_id is None:
+            from .workspace_case_authority import (WorkspaceCaseAuthorityError,
+                current_workspace_case_authority)
+            try:
+                authority = current_workspace_case_authority()
+            except WorkspaceCaseAuthorityError:
+                raise WorkspaceAuthorizationDenied() from None
+            if authority is not None:
+                return authority.actor_principal_id
         return str(user_id or DEFAULT_USER_ID)
 
     def _load_state(self, user_id: Optional[str]) -> Dict[str, Any]:
@@ -3090,7 +3099,10 @@ class ComplaintWorkspaceRequestHandlers:
         }
 
     def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
-        state = self.workspace._save_state(self._load_state(user_id))
+        state = self._load_state(user_id)
+        authority = self.workspace._owner_case_authority()
+        if authority is None or authority.action in {"case.update", "case.message.send", "case.processing.choose"}:
+            state = self.workspace._save_state(state)
         return self._build_session_payload(state)
 
     def submit_intake_answers(self, user_id: Optional[str], answers: Dict[str, Any]) -> Dict[str, Any]:
@@ -3711,14 +3723,21 @@ class _WorkspaceCaseKeyProvider:
     requests or an operator lock does not retain either capability.
     """
 
-    def __init__(self, workspace: "ComplaintWorkspaceService") -> None:
+    def __init__(self, workspace: "ComplaintWorkspaceService", *, request_authority: Any = None) -> None:
         self._workspace = workspace
+        self._request_binding = (request_authority.canonical_owner_principal_id,
+            request_authority.case_id, request_authority.resource_id) if request_authority is not None else None
 
     def resolve(self, binding):
         from integrations.private_storage import PrivateArtifactBinding, canonical_associated_data
 
         if not isinstance(binding, PrivateArtifactBinding):
             raise WorkspaceAuthorizationDenied()
+        if self._request_binding is not None:
+            current = self._workspace._owner_case_authority()
+            if current is None or (current.canonical_owner_principal_id,
+                    current.case_id, current.resource_id) != self._request_binding:
+                raise WorkspaceAuthorizationDenied()
         self._workspace._require_private_case_key_access(
             binding.tenant_id, binding.case_id, principal_id=binding.principal_id
         )
@@ -5475,9 +5494,32 @@ class ComplaintWorkspaceService:
             return current
         return self._default_access
 
+    def _owner_case_authority(self):
+        from .workspace_case_authority import (WorkspaceCaseAuthorityError,
+            current_workspace_case_authority)
+        try:
+            authority = current_workspace_case_authority()
+            if authority is None:
+                return None
+            access = self._effective_access()
+            if access.trust != "authenticated" or access.case_id != authority.case_id:
+                raise WorkspaceCaseAuthorityError("workspace_case_access_mismatch")
+            authority.revalidate(actor_principal_id=access.principal_id,
+                workspace=self, require_owner=True)
+            return authority
+        except WorkspaceCaseAuthorityError:
+            raise WorkspaceAuthorizationDenied() from None
+
     def _resolve_user_id(self, user_id: Optional[str]) -> str:
         access = self._effective_access()
         supplied = str(user_id).strip() if user_id is not None and str(user_id).strip() else ""
+        authority = self._owner_case_authority()
+        if authority is not None:
+            # The browser principal remains the actor. Only this issued,
+            # re-proved owner capability selects the encrypted storage owner.
+            if supplied and supplied not in {authority.actor_principal_id, authority.canonical_owner_principal_id}:
+                raise WorkspaceAuthorizationDenied()
+            return authority.canonical_owner_principal_id
         if access.trust == "authenticated":
             if not supplied:
                 return str(access.principal_id or "")
@@ -5497,6 +5539,16 @@ class ComplaintWorkspaceService:
         record_case_id: Optional[str] = None,
     ) -> str:
         access = self._effective_access()
+        authority = self._owner_case_authority()
+        if authority is not None:
+            if ability not in {"read", "write", "private_key"}:
+                raise WorkspaceAuthorizationDenied()
+            if ability == "write" and authority.action not in {"case.update", "case.message.send", "case.processing.choose"}:
+                raise WorkspaceAuthorizationDenied()
+            for selected in (case_id, record_case_id, _REQUEST_CASE.get(), access.case_id):
+                if selected is not None and str(selected) != authority.case_id:
+                    raise WorkspaceAuthorizationDenied()
+            return self._resolve_user_id(user_id)
         resolved_user = self._resolve_user_id(user_id)
         explicit_case = _REQUEST_CASE.get()
         selected_case = case_id if case_id is not None else explicit_case
@@ -14570,6 +14622,14 @@ class ComplaintWorkspaceService:
                 or (principal_id is not None and principal_id != tenant_id)):
             raise WorkspaceAuthorizationDenied()
         access = self._effective_access()
+        authority = self._owner_case_authority()
+        if authority is not None:
+            if tenant_id != authority.canonical_owner_principal_id or case_id != authority.case_id:
+                raise WorkspaceAuthorizationDenied()
+            if _REQUEST_CASE.get() is not None and _REQUEST_CASE.get() != case_id:
+                raise WorkspaceAuthorizationDenied()
+            self._check_access(tenant_id, ability="private_key", case_id=case_id)
+            return
         operator = access.trust == "trusted_local" and not access.principal_id and not access.case_id
         if not operator:
             if (access.trust not in {"authenticated", "trusted_local"}
@@ -14786,7 +14846,10 @@ class ComplaintWorkspaceService:
         """Request-checked lazy case provider; a handle retains no raw key map."""
 
         access = self._effective_access()
-        if access.trust == "trusted_local" and not access.principal_id and not access.case_id:
+        authority = self._owner_case_authority()
+        if authority is not None:
+            self._require_private_case_key_access(authority.canonical_owner_principal_id, authority.case_id)
+        elif access.trust == "trusted_local" and not access.principal_id and not access.case_id:
             self._require_local_filesystem_access()
         else:
             self._require_private_case_key_access(access.principal_id, access.case_id)
@@ -14795,7 +14858,7 @@ class ComplaintWorkspaceService:
             # Preserve the native typed construction failure without copying any
             # unlocked case keys into the returned, long-lived handle.
             session.provider()
-        return _WorkspaceCaseKeyProvider(self)
+        return _WorkspaceCaseKeyProvider(self, request_authority=authority)
 
     def continue_without_private_keys(self) -> Dict[str, Any]:
         """Let a coding supervisor proceed without user keys or a privacy bypass."""
