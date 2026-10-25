@@ -26,6 +26,7 @@ from .complaint_workspace import (
     PrincipalRegistry,
     WorkspaceAccess,
     WorkspaceAuthorizationDenied,
+    WorkspacePersistenceError,
     access_from_http_headers,
     generate_decentralized_id,
     workspace_access_scope,
@@ -532,15 +533,25 @@ def create_complaint_workspace_router(
 
     @router.post("/api/complaint-workspace/intake-chat")
     async def intake_chat_turn(request: IntakeChatTurnRequest) -> Response:
-        if str(request.interview_action or "").strip().lower() in {"correct", "edit"}:
+        action = str(request.interview_action or "").strip().lower()
+        if action in {"correct", "edit", "pause", "cancel", "cap", "unavailable", "saturate"}:
             # Keep the actual event loop available for logout/revocation while
-            # the correction encrypts. Starlette preserves the issued scope.
-            result = await run_in_threadpool(workspace.run_intake_chat_turn,
-                request.user_id, message=request.message, question_id=request.question_id,
-                expected_question_revision=request.expected_question_revision,
-                interview_action=request.interview_action,
-                expected_graph_revision=request.expected_graph_revision,
-                expected_session_revision=request.expected_session_revision)
+            # the guarded effect encrypts. Starlette preserves the issued scope.
+            try:
+                result = await run_in_threadpool(workspace.run_intake_chat_turn,
+                    request.user_id, message=request.message, question_id=request.question_id,
+                    expected_question_revision=request.expected_question_revision,
+                    interview_action=request.interview_action,
+                    expected_graph_revision=request.expected_graph_revision,
+                    expected_session_revision=request.expected_session_revision)
+            except WorkspacePersistenceError as error:
+                if action not in {"pause", "cancel", "cap", "unavailable", "saturate"}:
+                    raise
+                code = error.code if error.code in {"revision_conflict", "unlock_needed", "durability_unproven",
+                    "overwrite_blocked", "wal_unavailable"} else "finite_stop_unavailable"
+                return JSONResponse(status_code=409 if code == "revision_conflict" else 503,
+                    content={"status":"unavailable", "error":code, "outcome_unknown":True,
+                        "legal_sufficiency":False, "worker_stalled":False})
         else:
             result = workspace.run_intake_chat_turn(request.user_id,
                 message=request.message, question_id=request.question_id,
@@ -1040,7 +1051,9 @@ def create_complaint_workspace_router(
     @router.post("/api/complaint-workspace/mcp/call")
     async def call_mcp_tool(request: McpCallRequest) -> Response:
         try:
-            if request.tool_name in {"complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}:
+            threaded_intake = request.tool_name == "complaint.run_intake_chat_turn" and str(
+                request.arguments.get("interview_action") or "").strip().lower() in {"correct", "edit", "pause", "cancel", "cap", "unavailable", "saturate"}
+            if threaded_intake or request.tool_name in {"complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}:
                 payload = await run_in_threadpool(workspace.call_mcp_tool, request.tool_name, request.arguments)
             else:
                 payload = workspace.call_mcp_tool(request.tool_name, request.arguments)
@@ -1067,8 +1080,11 @@ def create_complaint_workspace_router(
             if authorization != f"Bearer {token}":
                 raise HTTPException(status_code=401, detail="MCP bearer token required")
         params = request.params if isinstance(request.params, dict) else {}
-        if request.method == "tools/call" and params.get("name") in {
-                "complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}:
+        arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        threaded_intake = params.get("name") == "complaint.run_intake_chat_turn" and str(
+            arguments.get("interview_action") or "").strip().lower() in {"correct", "edit", "pause", "cancel", "cap", "unavailable", "saturate"}
+        if request.method == "tools/call" and (threaded_intake or params.get("name") in {
+                "complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}):
             response = await run_in_threadpool(handle_jsonrpc_message, workspace, request.model_dump())
         else:
             response = handle_jsonrpc_message(workspace, request.model_dump())

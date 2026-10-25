@@ -14661,7 +14661,7 @@ function extractComplaintOutputSignals(result) {
                 setStatus(`Interview ${outcome.stop || action}. Unresolved reasons remain visible. This is not legal sufficiency.`);
             } catch (error) {
                 if (!adaptiveRequestCurrent(capture)) return;
-                setStatus(`The interview did not stop: ${String((error && error.message) || error)}`);
+                setStatus('The interview stop could not be verified; it may have completed. Reload the current case before retrying.');
             }
         }
 
@@ -15996,13 +15996,20 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('finite-interview-pause').addEventListener('click', () => controlFiniteInterview('pause'));
         document.getElementById('finite-interview-cancel').addEventListener('click', () => controlFiniteInterview('cancel'));
         document.getElementById('factual-correction-submit').addEventListener('click', applyFactualCorrection);
+        let factualGraphRequestEpoch = 0;
         async function refreshFactualGraphInspector() {
             const panel = document.getElementById('factual-graph-inspector');
             const mount = document.getElementById('factual-graph-mount');
             const statusNode = document.getElementById('factual-graph-status');
             const view = window.complaintGraphView;
-            const caseId = adaptiveCaseId(workspaceSession) || (client.caseContext && client.caseContext.case_id) || '';
+            const capture = adaptiveRequestCapture();
+            const requestEpoch = ++factualGraphRequestEpoch;
+            const caseId = (client.caseContext && client.caseContext.case_id) || adaptiveCaseId(workspaceSession) || '';
+            const current = () => requestEpoch === factualGraphRequestEpoch && adaptiveRequestCurrent(capture);
+            if (!current()) return;
             if (!view || !mount || !caseId) {
+                if (mount) mount.replaceChildren();
+                if (panel) panel.dataset.authorized = 'false';
                 if (statusNode) {
                     statusNode.dataset.status = 'unavailable';
                     statusNode.textContent = 'The factual graph is not available for this session.';
@@ -16017,7 +16024,36 @@ function extractComplaintOutputSignals(result) {
                 headers['x-resource-id'] = client.caseContext.resource_id;
                 if (client.caseContext.expected_revision) headers['x-expected-revision'] = String(client.caseContext.expected_revision);
             }
-            const result = await view.loadAuthorizedFactualGraph(mount, {caseId: caseId, headers: headers, fetchImpl: window.fetch.bind(window)});
+            // The existing renderer writes only to a detached node until this
+            // page, actor, cookie generation and case are still admitted.
+            const staged = document.createElement('div');
+            let result;
+            try {
+                async function session() {
+                    const response = await fetch('/api/complaint-workspace/auth/session', {credentials:'same-origin'});
+                    const value = await response.json();
+                    if (!response.ok || value.principal_id !== capture.actor) throw new Error('graph_session_changed');
+                    return value;
+                }
+                const before = await session();
+                if (!current()) return;
+                result = await view.loadAuthorizedFactualGraph(staged, {caseId: caseId, headers: headers, fetchImpl: window.fetch.bind(window)});
+                if (!current()) return;
+                const after = await session();
+                if (!current()) return;
+                if (before.principal_id !== after.principal_id || before.generation !== after.generation) throw new Error('graph_session_changed');
+            } catch (error) {
+                if (!current()) return;
+                mount.replaceChildren();
+                if (panel) panel.dataset.authorized = 'false';
+                if (statusNode) {
+                    statusNode.dataset.status = 'unavailable';
+                    statusNode.textContent = 'The current factual graph read could not be verified.';
+                }
+                return;
+            }
+            if (!current()) return;
+            mount.replaceChildren(...Array.from(staged.childNodes));
             if (panel) {
                 panel.dataset.authorized = result && result.ok === true ? 'true' : 'false';
                 panel.dataset.unresolvedHidden = 'false';
