@@ -500,3 +500,293 @@ class GraphAwareRetrievalReranker:
             candidate["metadata"] = metadata
 
         return augmented
+
+
+class FactualGraphProjectionError(Exception):
+    """Fail-closed factual projection error. ``code`` is a stable machine reason."""
+
+    def __init__(self, code: str) -> None:
+        self.code = str(code)
+        super().__init__(self.code)
+
+
+_PROJECTION_LIMITATIONS = (
+    "projection_is_read_only",
+    "source_ids_are_immutable",
+    "hypothesis_is_not_a_user_fact",
+    "legal_text_is_not_a_user_fact",
+    "retrieval_confidence_is_not_authority",
+    "evidence_revision_is_not_a_user_statement",
+    "no_websocket_or_sse",
+)
+
+
+def pinned_data_graph_owner() -> Dict[str, Any]:
+    """Identity of the pinned ipfs_datasets_py knowledge-graph owner.
+
+    Availability is the imported owner module. Opening a graph client or
+    writing a catalog is not required to name the owner, and a missing module
+    stays unavailable instead of a local substitute owner.
+    """
+    from integrations.ipfs_datasets.graphs import GRAPHS_ERROR, _knowledge_graphs_module
+
+    module = _knowledge_graphs_module
+    available = module is not None
+    return {
+        "owner_id": "ipfs_datasets_py",
+        "module": "ipfs_datasets_py.knowledge_graphs",
+        "available": available,
+        "client_api_version": str(getattr(module, "CLIENT_API_VERSION", "") or "") if available else "",
+        "contract_version": str(getattr(module, "CONTRACT_VERSION", "") or "") if available else "",
+        "unavailable_reason": "" if available else str(GRAPHS_ERROR or "knowledge_graphs_unavailable"),
+    }
+
+
+def _text_of(record: Dict[str, Any]) -> str:
+    assertion = record.get("assertion") if isinstance(record.get("assertion"), dict) else {}
+    attributes = record.get("attributes") if isinstance(record.get("attributes"), dict) else {}
+    for value in (
+        assertion.get("source_span_text"),
+        attributes.get("description"),
+        record.get("name"),
+        assertion.get("statement"),
+    ):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _immutable_source_id(record: Dict[str, Any]) -> str:
+    assertion = record.get("assertion") if isinstance(record.get("assertion"), dict) else {}
+    provenance = record.get("provenance") if isinstance(record.get("provenance"), dict) else {}
+    attributes = record.get("attributes") if isinstance(record.get("attributes"), dict) else {}
+    for container in (assertion, provenance, attributes):
+        for key in ("immutable_source_id", "source_id"):
+            value = container.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    source_hash = assertion.get("source_hash") or provenance.get("source_hash") or attributes.get("source_hash")
+    if isinstance(source_hash, str) and source_hash.strip():
+        return "src:" + source_hash.strip()
+    return ""
+
+
+def _record_case_id(record: Dict[str, Any]) -> str:
+    provenance = record.get("provenance") if isinstance(record.get("provenance"), dict) else {}
+    attributes = record.get("attributes") if isinstance(record.get("attributes"), dict) else {}
+    assertion = record.get("assertion") if isinstance(record.get("assertion"), dict) else {}
+    for container in (provenance, attributes, assertion):
+        value = container.get("case_id")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _classify_projection(record: Dict[str, Any]) -> str:
+    """Separate user statements, allegations, evidence, hypotheses, and legal text."""
+    from integrations.ipfs_datasets.graphs import (
+        CORROBORATING_EVIDENCE_CLASS,
+        INFERRED_HYPOTHESIS_CLASS,
+        LEGAL_AUTHORITY_CLASS,
+        USER_ALLEGATION_CLASS,
+        classify_epistemic_class,
+    )
+
+    assertion = record.get("assertion") if isinstance(record.get("assertion"), dict) else {}
+    attributes = record.get("attributes") if isinstance(record.get("attributes"), dict) else {}
+    provenance = record.get("provenance") if isinstance(record.get("provenance"), dict) else {}
+    factual_class = str(
+        attributes.get("factual_record_class")
+        or assertion.get("factual_record_class")
+        or ""
+    )
+    record_type = str(assertion.get("record_type") or record.get("type") or "")
+    origin = str(provenance.get("origin") or attributes.get("origin") or record.get("source") or "").lower()
+    if factual_class == "legal_text" or record_type == "legal_text" or origin in {"legal", "authority"}:
+        return "legal_text"
+    if factual_class == "extraction_hypothesis" or record_type in {"model_suggestion", "inferred_claim_label"}:
+        return "hypothesis"
+    if factual_class == "supporting_evidence" or record_type in {"evidence", "supporting_evidence"}:
+        return "evidence_revision"
+    explicit = str(attributes.get("epistemic_class") or assertion.get("epistemic_class") or "")
+    epistemic = classify_epistemic_class(_text_of(record), explicit=explicit or None, legal=False)
+    if epistemic == LEGAL_AUTHORITY_CLASS:
+        return "legal_text"
+    if epistemic == INFERRED_HYPOTHESIS_CLASS or origin in {"model", "llm", "inference"}:
+        return "hypothesis"
+    if epistemic == CORROBORATING_EVIDENCE_CLASS:
+        return "evidence_revision"
+    if record.get("type") == "allegation" or epistemic == USER_ALLEGATION_CLASS and explicit == USER_ALLEGATION_CLASS:
+        return "allegation"
+    if factual_class == "user_fact" or assertion.get("is_asserted_user_fact") is True or record.get("type") == "fact":
+        if record.get("type") == "allegation":
+            return "allegation"
+        return "user_statement"
+    if epistemic == USER_ALLEGATION_CLASS and record.get("type") == "allegation":
+        return "allegation"
+    return "unresolved"
+
+
+_AUTHORITY = {
+    "user_statement": ("user", "user_assertion", True),
+    "allegation": ("allegation", "allegation", False),
+    "evidence_revision": ("evidence", "evidence_revision", False),
+    "hypothesis": ("hypothesis", "hypothesis", False),
+}
+
+
+def _projection_item(kind: str, record: Dict[str, Any], *, case_id: str) -> Dict[str, Any]:
+    authority, confidence_role, user_fact = _AUTHORITY[kind]
+    assertion = record.get("assertion") if isinstance(record.get("assertion"), dict) else {}
+    confidence = record.get("confidence")
+    try:
+        parsed = None if confidence is None else float(confidence)
+    except (TypeError, ValueError):
+        parsed = None
+    source_id = _immutable_source_id(record)
+    return {
+        "kind": kind,
+        "immutable_source_id": source_id,
+        "source_id_mutable": False,
+        "text": _text_of(record),
+        "confidence": parsed,
+        "confidence_role": confidence_role,
+        "authority": authority,
+        "authority_is_user_fact": user_fact,
+        "admitted_user_fact": bool(user_fact and source_id and assertion.get("is_asserted_user_fact") is True) or (
+            kind == "user_statement" and bool(source_id)
+        ),
+        "case_id": case_id,
+        "graph_entity_id": str(record.get("id") or ""),
+        "owner_id": "ipfs_datasets_py",
+    }
+
+
+def _entity_records(knowledge_graph: Any) -> List[Dict[str, Any]]:
+    from complaint_phases.knowledge_graph import entity_to_graph_entity
+
+    entities = getattr(knowledge_graph, "entities", {}) or {}
+    records: List[Dict[str, Any]] = []
+    for entity in entities.values():
+        projected = entity_to_graph_entity(entity).as_dict()
+        records.append(projected)
+    return records
+
+
+def _revision_record(revision: Dict[str, Any]) -> Dict[str, Any]:
+    source_id = str(revision.get("immutable_source_id") or revision.get("source_id") or "")
+    return {
+        "id": str(revision.get("revision_id") or revision.get("id") or ""),
+        "type": "evidence",
+        "name": str(revision.get("text") or revision.get("statement") or ""),
+        "confidence": revision.get("confidence"),
+        "attributes": {
+            "description": str(revision.get("text") or revision.get("statement") or ""),
+            "factual_record_class": "supporting_evidence",
+            "case_id": revision.get("case_id") or "",
+            "immutable_source_id": source_id,
+        },
+        "provenance": {
+            "source_id": source_id,
+            "case_id": revision.get("case_id") or "",
+            "origin": "evidence_revision",
+        },
+        "assertion": {},
+        "source": "evidence",
+    }
+
+
+def project_authorized_factual_kg(
+    mediator: Any,
+    *,
+    case_id: str,
+    graph_read_granted: bool,
+    requested_case_id: str = "",
+) -> Dict[str, Any]:
+    """Project one authorized case graph through the mediator phase hook.
+
+    User statements, allegations, evidence revisions, and hypotheses stay in
+    separate authority classes. A missing grant, a foreign case id, or a
+    missing pinned Data owner fails closed. Legal text is withheld.
+    """
+    if graph_read_granted is not True:
+        raise FactualGraphProjectionError("graph_read_ungranted")
+    bound_case = str(case_id or "").strip()
+    requested = str(requested_case_id or bound_case).strip()
+    if not bound_case or requested != bound_case:
+        raise FactualGraphProjectionError("cross_case_id")
+    owner = pinned_data_graph_owner()
+    if owner["available"] is not True:
+        raise FactualGraphProjectionError("data_graph_owner_unavailable")
+    phase_manager = getattr(mediator, "phase_manager", None)
+    if phase_manager is None or not hasattr(phase_manager, "get_phase_data"):
+        raise FactualGraphProjectionError("mediator_graph_hook_unavailable")
+    try:
+        from complaint_phases import ComplaintPhase
+
+        knowledge_graph = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "knowledge_graph")
+    except Exception as exc:
+        raise FactualGraphProjectionError("mediator_graph_hook_unavailable") from exc
+    if knowledge_graph is None or not hasattr(knowledge_graph, "entities"):
+        raise FactualGraphProjectionError("knowledge_graph_unavailable")
+    metadata = getattr(knowledge_graph, "metadata", {}) or {}
+    graph_case = str(metadata.get("case_id") or "")
+    if graph_case and graph_case != bound_case:
+        raise FactualGraphProjectionError("cross_case_id")
+
+    buckets: Dict[str, List[Dict[str, Any]]] = {
+        "user_statements": [],
+        "evidence_revisions": [],
+        "allegations": [],
+        "hypotheses": [],
+    }
+    withheld_legal = []
+    unresolved = []
+    denied_cross_case = []
+    seen_sources: Dict[str, str] = {}
+
+    records = _entity_records(knowledge_graph)
+    ledger = knowledge_graph.factual_ledger() if hasattr(knowledge_graph, "factual_ledger") else {}
+    for revision in ledger.get("revisions") or []:
+        if isinstance(revision, dict):
+            records.append(_revision_record(revision))
+
+    for record in records:
+        record_case = _record_case_id(record)
+        if record_case and record_case != bound_case:
+            denied_cross_case.append(record_case)
+            continue
+        kind = _classify_projection(record)
+        source_id = _immutable_source_id(record)
+        if kind == "legal_text":
+            withheld_legal.append({"immutable_source_id": source_id, "authority": "legal_text"})
+            continue
+        if kind not in _AUTHORITY or not source_id:
+            unresolved.append({"kind": kind, "reason": "missing_immutable_source_id" if not source_id else "unclassified"})
+            continue
+        previous = seen_sources.get(source_id)
+        if previous is not None and previous != kind:
+            unresolved.append({"kind": kind, "immutable_source_id": source_id, "reason": "source_id_authority_conflict"})
+            continue
+        seen_sources[source_id] = kind
+        field = {
+            "user_statement": "user_statements",
+            "allegation": "allegations",
+            "evidence_revision": "evidence_revisions",
+            "hypothesis": "hypotheses",
+        }[kind]
+        buckets[field].append(_projection_item(kind, record, case_id=bound_case))
+
+    return {
+        "status": "projected",
+        "case_id": bound_case,
+        "graph_id": str(metadata.get("graph_id") or ""),
+        "graph_version": str(metadata.get("graph_version") or ""),
+        "data_graph_owner": owner,
+        "read_only": True,
+        **buckets,
+        "withheld_legal_text": withheld_legal,
+        "unresolved": unresolved,
+        "denied_cross_case_ids": sorted(set(denied_cross_case)),
+        "limitations": list(_PROJECTION_LIMITATIONS),
+    }

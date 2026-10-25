@@ -27,7 +27,7 @@ from .case_directory import CaseNamespace
 
 CASE_ROUTE_KINDS = ("case", "graph", "message", "admin")
 COMPOSITION_NAME = "compose_case_routes"
-PROTECTED_PREFIXES = ("/api/complaint-workspace", "/api/claim-support", "/api/documents", "/api/chat")
+PROTECTED_PREFIXES = ("/api/complaint-workspace", "/api/claim-support", "/api/documents", "/api/chat", "/api/graphs")
 CASE_CATALOG_PREFIX = "/api/cases"
 CASE_PAGE_PATH = "/cases"
 RETIRED_EXACT_PATHS = frozenset({"/cookies", "/load_profile", "/create_profile", "/api/chat", "/api/chat/fallback"})
@@ -238,6 +238,8 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     mount_case_consent(app)
     from .case_api import mount_case_catalog
     mount_case_catalog(app)
+    from .graph_api import mount_factual_graph_routes
+    mount_factual_graph_routes(app)
     app.state.case_authorizer = authorizer
     app.state.browser_sessions = sessions
     app.state.case_handlers = case_handlers
