@@ -612,7 +612,7 @@ Implementation instructions:
 
 ## CIMP-GUI-21 Expose an authorized factual KG projection
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
