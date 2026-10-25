@@ -180,7 +180,12 @@ def test_actual_bounded_native_executor_is_observable_under_synthetic_reconcilia
     assert observed[0]["provider_progress_verified"] is False and observed[0]["provider_execution_verified"] is False
     assert observed[0]["validation_activity_evidence"]["attempt"]==0
     assert c.body==before and not runner._validation_activity_path(_binding(c)).exists()
-    assert reconciliation_activity.evidence(runner,c.target,c.campaign,c.launcher,c.body,now_ts=time.time()) is None
+    settled=reconciliation_activity.evidence(runner,c.target,c.campaign,c.launcher,c.body,now_ts=time.time())
+    assert settled["type"]=="canonical_reconciled_validation_finalizing"
+    assert settled["attempt"]==0 and settled["completion_authority"] is False
+    assert reconciliation_activity.evidence(runner,c.target,c.campaign,c.launcher,c.body,
+        now_ts=settled["deadline_at"]) is None
+    assert c.body==before
 
 
 def _native_catalog(campaign, body):
