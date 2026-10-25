@@ -43,7 +43,7 @@ def actual_security_world(tmp_path):
     world.assignments = CaseAssignmentService(principals=world.principals, cases=world.cases,
         memberships=world.memberships, key_grants=world.grants,
         sessions={world.owner.principal_id: world.owner_keys,
-                  world.lawyer.principal_id: world.recipient})
+                  world.lawyer.principal_id: world.recipient}, clock=lambda: int(world.clock['now']))
     admin = OperationalAdminService(principals=world.principals, sessions=world.sessions)
     app = FastAPI()
     compose_case_routes(app, authorizer=world.authorizer, browser_sessions=world.sessions,
