@@ -229,47 +229,58 @@ def _headers(case, csrf=None):
 
 
 def test_http_attaches_for_owner_and_refuses_cross_case_and_anonymous(tmp_path):
-    world = _world(tmp_path)
+    # Migrate the old cache-only fixture to the actual encrypted owner. Source
+    # text/context/facts are no longer client authority at the HTTP boundary.
+    from tests.test_gui25_26_private_owner_http import _world as encrypted_world
+    from tests.test_gui29_private_legal_analysis import _reviewed_source, _analysis_request
+    world = encrypted_world(tmp_path)
     case = world.case
+    second = world.cases.create_case(actor_principal_id=world.owner.principal_id)
     path = f"/api/legal-analysis/{case.case_id}"
     with TestClient(world.app, base_url="https://testserver") as client:
         assert client.get(path, headers=_headers(case)).status_code == 401
         login = client.post("/api/complaint-workspace/auth/login", json={"credential": "synthetic-owner-credential"})
         assert login.status_code == 200, login.text
         csrf = login.json()["csrf_token"]
-        empty = client.get(path, headers=_headers(case, csrf))
+        source = _reviewed_source(client, world, csrf)
+        empty = client.get(path, headers=_headers(case))
         assert empty.status_code == 200, empty.text
         assert empty.json()["status"] == "empty"
         assert empty.json()["executed_proof"] is False
-        attached = client.post(path, headers=_headers(case, csrf), json=_body())
+        request = _analysis_request(client, world, source)
+        attached = client.post(path, headers=_headers(case, csrf), json=request)
         assert attached.status_code == 200, attached.text
         body = attached.json()
         assert body["status"] == "attached"
         assert body["case_id"] == case.case_id
-        _assert_non_authority(body)
-        again = client.get(path, headers=_headers(case, csrf))
+        assert body["receipt_verification"]["execution_origin_verified"] is True
+        assert body["source_binding"]["content_hash"] == source["content_hash"]
+        assert body["applicability_context"]["applicability"] == "unknown"
+        assert body["proof"] is False and body["admitted_law"] is False
+        assert body["governing_legal_authority"] is False and body["lean_text_is_proof"] is False
+        assert all(item["discharged"] is False and item["executed_proof"] is False
+            for item in body["typed_obligations"])
+        again = client.get(path, headers=_headers(case))
         assert again.status_code == 200
         assert again.json()["receipt_id"] == body["receipt_id"]
         assert again.json()["lean_text_is_proof"] is False
-        crossed = client.get(path, headers=_headers(case, csrf), params={"case_id": world.second.case_id})
+        crossed = client.get(path, headers=_headers(case), params={"case_id": second.case_id})
         assert crossed.status_code == 403
         assert crossed.json()["error"] == "cross_case_id"
         assert crossed.json()["governing_legal_authority"] is False
-        other = client.post(
-            f"/api/legal-analysis/{world.second.case_id}",
-            headers=_headers(case, csrf),
-            json=_body(request_id="cimp-gui-29-other"),
-        )
+        other = client.post(f"/api/legal-analysis/{second.case_id}",
+            headers=_headers(case, csrf), json=request)
         assert other.status_code == 403
-        stale = client.post(path, headers=_headers(case, csrf), json=_body(
-            request_id="cimp-gui-29-stale",
-            current_source="A different statute that was not compiled.",
-        ))
-        assert stale.status_code == 200, stale.text
-        assert stale.json()["status"] == "source_unverified"
-        assert stale.json()["typed_obligations"] == []
+        current = _analysis_request(client, world, source)
+        forged = client.post(path, headers=_headers(case, csrf), json={**current,
+            "current_source":"A different statute that was not selected from this case."})
+        assert forged.status_code == 422
+        assert forged.json()["error"] == "client_case_authority"
+        stale = client.post(path, headers=_headers(case, csrf), json={**current,
+            "source_content_hash":"sha256:" + "0" * 64})
+        assert stale.status_code == 409
+        assert stale.json()["error"] == "legal_source_unavailable"
         assert stale.json()["executed_proof"] is False
-        assert stale.json()["ir_parse_is_proof"] is False
         stranger = client.post("/api/complaint-workspace/auth/login", json={"credential": "synthetic-stranger-credential"})
         assert stranger.status_code == 200
         denied = client.get(path, headers=_headers(case, stranger.json()["csrf_token"]))

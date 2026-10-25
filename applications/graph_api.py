@@ -2,8 +2,11 @@
 
 A mediator cache is not a private-read capability. The bound workspace decrypts
 the current session twice around the pure projection. Changed source, locked
-keys, or expired request authority refuse publication. This owner-key path does
-not issue delegated decryption authority or claim WebSocket/SSE support.
+keys, or expired request authority refuse publication. Graph refresh uses the
+actual owner's current citation_acquisition decision and encrypted source
+manifest; it performs local revalidation and grants no remote-egress authority.
+This owner-key path does not issue delegated decryption authority or claim
+WebSocket/SSE support.
 """
 
 from __future__ import annotations
@@ -221,19 +224,23 @@ class LegalDependencyGraphError(Exception):
 
 
 def legal_dependency_http_status(code: str) -> int:
-    if code in {"narrative_not_law", "legal_dependency_field", "refresh_field", "correction_kind_required"}:
+    if code in {"narrative_not_law", "legal_dependency_field", "refresh_field", "correction_kind_required",
+                "caller_graph_rows_not_accepted", "client_case_authority"}:
         return 400
     if code in {
         "stale_case_revision", "stale_consent", "stale_actor_grant", "stale_legal_source_hash",
         "stale_dependency_generation", "stale_late_result", "consent_revision_conflict", "source_unchanged",
-        "graph_revision_changed",
+        "graph_revision_changed", "operation_conflict", "stale_operation_scope",
+        "server_refresh_receipt_required", "current_source_scope_mismatch", "current_legal_context_changed",
     }:
         return 409
     if code in {"graph_read_ungranted", "cross_case_id", "cross_case", "actor_authority_required",
                 "actor_not_permitted", "consent_revoked", "purpose_consent_required"}:
         return 403
     if code in {"legal_dependency_unavailable", "mediator_graph_hook_unavailable", "unlock_needed",
-                "workspace_graph_read_unavailable"}:
+                "workspace_graph_read_unavailable", "workspace_graph_refresh_unavailable",
+                "actual_workflow_unavailable", "canonical_source_scope_invalid", "actual_refresh_unavailable",
+                "late_result_capability_unavailable"}:
         return 503
     return 403
 
@@ -591,31 +598,15 @@ def _materials_from_mediator(mediator: Any) -> tuple[dict, Any]:
 
 
 LEGAL_REFRESH_TASK_ID = "CIMP-GUI-28"
-_REFRESH_PURPOSE = "public_law_citation"
+_REFRESH_PURPOSE = "citation_acquisition"
 
 
-def current_admitted_source_hashes(case_file: Mapping[str, Any] | None) -> list[str]:
-    """Hashes of admitted passages currently stored on the case. Client text is not a source."""
-    if not isinstance(case_file, Mapping):
+def current_admitted_source_hashes(case_file: Mapping[str, Any] | None, *, dependency_graph=None) -> list[str]:
+    """Re-derive actual current DG admissions; serialized labels grant nothing."""
+    if not isinstance(case_file, Mapping) or dependency_graph is None:
         return []
-    index = _passage_index(case_file)
-    rows = case_file.get("legal_authority_admissions")
-    admitted = set()
-    if isinstance(rows, list):
-        for item in rows:
-            if _admitted_authority(item):
-                admitted.add(_clean_text(item.get("content_hash")))
-    hashes = []
-    for key, stored in index.items():
-        content_hash = _clean_text(key)
-        if content_hash not in admitted or not isinstance(stored, dict):
-            continue
-        if _clean_text(stored.get("content_hash") or content_hash) != content_hash:
-            continue
-        if not _clean_text(stored.get("source_passage")):
-            continue
-        hashes.append(content_hash)
-    return sorted(set(hashes))
+    projected = project_law_derived_dependency_graph(case_file, dependency_graph=dependency_graph)
+    return sorted({row["content_hash"] for row in projected["requirements"]})
 
 
 def _workflow_service(mediator: Any) -> Any:
@@ -640,7 +631,8 @@ def _refresh_error(receipt: Mapping[str, Any]) -> None:
         raise LegalDependencyGraphError(code, {"task_id": LEGAL_REFRESH_TASK_ID, "applied": False, "proof": False})
 
 
-def refresh_versioned_law_graph(mediator: Any, *, live: Mapping[str, Any], body: Mapping[str, Any]) -> dict:
+def refresh_versioned_law_graph(mediator: Any, *, live: Mapping[str, Any], body: Mapping[str, Any],
+                                canonical_source_records=None) -> dict:
     """Refresh the law graph after a source, context, or factual correction.
 
     ``live`` is the server binding: actor, grant, case revision, and consent.
@@ -649,9 +641,14 @@ def refresh_versioned_law_graph(mediator: Any, *, live: Mapping[str, Any], body:
     if not isinstance(live, Mapping) or not isinstance(body, Mapping):
         raise LegalDependencyGraphError("refresh_field")
     case_file, _graph = _materials_from_mediator(mediator)
-    hashes = current_admitted_source_hashes(case_file)
-    if not hashes:
-        raise LegalDependencyGraphError("legal_dependency_unavailable")
+    workflow = _workflow_service(mediator)
+    if canonical_source_records is None:
+        hashes = current_admitted_source_hashes(case_file, dependency_graph=_graph)
+    else:
+        try:
+            hashes = list(workflow._refresh_manifest_hashes(mediator, canonical_source_records))
+        except (TypeError, ValueError):
+            raise LegalDependencyGraphError("canonical_source_scope_invalid") from None
     supplied = body.get("legal_source_hashes")
     if supplied != hashes:
         raise LegalDependencyGraphError("stale_legal_source_hash")
@@ -680,6 +677,7 @@ def refresh_versioned_law_graph(mediator: Any, *, live: Mapping[str, Any], body:
         questions=body.get("questions"),
         proof_obligations=body.get("proof_obligations"),
         successors=body.get("successors") if isinstance(body.get("successors"), dict) else {},
+        canonical_source_records=canonical_source_records,
     )
     _refresh_error(receipt)
     receipt["task_id"] = LEGAL_REFRESH_TASK_ID
@@ -687,14 +685,20 @@ def refresh_versioned_law_graph(mediator: Any, *, live: Mapping[str, Any], body:
     return receipt
 
 
-def accept_versioned_law_late_result(mediator: Any, *, live: Mapping[str, Any], body: Mapping[str, Any]) -> dict:
-    """Accept one late graph result only when it still matches the current binding."""
+def accept_versioned_law_late_result(mediator: Any, *, live: Mapping[str, Any], body: Mapping[str, Any],
+                                    canonical_source_records=None) -> dict:
+    """Revalidate a server-computed receipt; no caller/model rows are installed."""
     if not isinstance(live, Mapping) or not isinstance(body, Mapping):
         raise LegalDependencyGraphError("refresh_field")
     case_file, _graph = _materials_from_mediator(mediator)
-    hashes = current_admitted_source_hashes(case_file)
-    if not hashes:
-        raise LegalDependencyGraphError("legal_dependency_unavailable")
+    workflow = _workflow_service(mediator)
+    if canonical_source_records is None:
+        hashes = current_admitted_source_hashes(case_file, dependency_graph=_graph)
+    else:
+        try:
+            hashes = list(workflow._refresh_manifest_hashes(mediator, canonical_source_records))
+        except (TypeError, ValueError):
+            raise LegalDependencyGraphError("canonical_source_scope_invalid") from None
     case_id = _clean_text(live.get("case_id"))
     if _clean_text(body.get("case_id")) not in {"", case_id}:
         raise LegalDependencyGraphError("cross_case_id")
@@ -758,6 +762,51 @@ def _project_current_law_graph(workspace, authority, actor, case_id):
         return payload
 
 
+def _refresh_current_law_graph(workspace, authority, actor, case_id, updates, *, late=False):
+    """Delegate the encrypted transition to its actual current owner only."""
+    if not isinstance(workspace, ComplaintWorkspaceService) or not isinstance(updates, dict):
+        raise LegalDependencyGraphError("workspace_graph_refresh_unavailable")
+    if {"canonical_source_records", "source_records", "reviewed_source_record", "source_admission",
+            "legal_authority_admissions", "legal_source_passage_index", "live"}.intersection(updates):
+        raise LegalDependencyGraphError("client_case_authority")
+    common = {"operation_id", "case_id", "legal_source_hashes", "expected_private_revision",
+              "expected_session_revision", "expected_source_scope_sha256"}
+    permitted = common | ({"refresh_operation_id", "actor_principal_id", "case_revision", "consent_generation",
+        "consent_revoked", "grant_revision", "dependency_generation"} if late else
+        {"correction_kind", "expected_case_revision", "expected_consent_generation", "expected_grant_revision",
+         "expected_dependency_generation"})
+    if set(updates) - permitted:
+        raise LegalDependencyGraphError("caller_graph_rows_not_accepted")
+    if updates.get("case_id", case_id) != case_id:
+        raise LegalDependencyGraphError("cross_case_id")
+    if not isinstance(updates.get("legal_source_hashes"), list):
+        raise LegalDependencyGraphError("refresh_field")
+    if any(not isinstance(value, str) or len(value) != 64
+           or any(char not in "0123456789abcdef" for char in value) for value in updates["legal_source_hashes"]):
+        raise LegalDependencyGraphError("stale_legal_source_hash")
+    if len(updates["legal_source_hashes"]) > 128:
+        raise LegalDependencyGraphError("refresh_field")
+    if "expected_private_revision" in updates:
+        value = updates["expected_private_revision"]
+        if (not isinstance(value, str) or not value.isascii() or not value.isdecimal()
+                or len(value) > 32 or str(int(value)) != value):
+            raise LegalDependencyGraphError("refresh_field")
+    for key in permitted.intersection(updates):
+        if key != "expected_private_revision" and key.endswith(("_revision", "_generation")):
+            _exact_int(updates[key], "refresh_field")
+    method_name = "revalidate_case_legal_dependency_refresh" if late else "refresh_case_legal_dependency_graph"
+    method = getattr(workspace, method_name, None)
+    if not callable(method):
+        raise LegalDependencyGraphError("workspace_graph_refresh_unavailable")
+    with workspace_access_scope(WorkspaceAccess.authenticated(actor, case_id)):
+        authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+        if authority.action != "case.update" or authority.case_id != case_id:
+            raise LegalDependencyGraphError("actor_not_permitted")
+        result = method(actor, case_id=case_id, updates=updates)
+        authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+        return result
+
+
 def mount_law_dependency_graph_routes(app: Any) -> None:
     """Mount the read-only law-derived dependency graph beside the factual graph."""
 
@@ -781,56 +830,6 @@ def mount_law_dependency_graph_routes(app: Any) -> None:
         payload["error"] = exc.code
         payload["proof"] = False
         return JSONResponse(payload, status_code=legal_dependency_http_status(exc.code))
-
-    def _purpose_consent(authority: Any, workspace: Any) -> dict:
-        try:
-            view = authority.processing_consent(
-                purpose=_REFRESH_PURPOSE,
-                actor_principal_id=authority.actor_principal_id,
-                workspace=workspace,
-            )
-        except LegalDependencyGraphError:
-            raise
-        except Exception as exc:
-            code = str(getattr(exc, "code", "") or "")
-            if code in {"workspace_owner_key_required", "actor_not_permitted"}:
-                raise LegalDependencyGraphError("actor_not_permitted") from exc
-            raise LegalDependencyGraphError("purpose_consent_required") from exc
-        rows = view.get("decisions") if isinstance(view, dict) else None
-        matches = [item for item in rows if isinstance(item, dict) and item.get("purpose") == _REFRESH_PURPOSE] if isinstance(rows, list) else []
-        if len(matches) != 1:
-            raise LegalDependencyGraphError("purpose_consent_required")
-        choice = matches[0]
-        generation = choice.get("generation")
-        if type(generation) is not int or isinstance(generation, bool) or generation < 1:
-            raise LegalDependencyGraphError("purpose_consent_required")
-        if choice.get("revoked") is True:
-            raise LegalDependencyGraphError("consent_revoked")
-        return {"generation": generation, "revoked": False}
-
-    def _live_binding(request: Request, case_id: str, mediator_bundle: tuple) -> dict:
-        decision = getattr(request.state, "case_authorization", None)
-        if decision is None or getattr(decision, "permits_case_content", False) is not True:
-            raise LegalDependencyGraphError("graph_read_ungranted")
-        if getattr(decision, "action", "") != "case.update" or getattr(decision, "membership", "") != "owner":
-            raise LegalDependencyGraphError("actor_not_permitted")
-        authorized_case = str(getattr(decision, "case_id", "") or "")
-        if authorized_case != case_id:
-            raise LegalDependencyGraphError("cross_case_id")
-        _mediator, workspace, _root = mediator_bundle
-        authority = current_workspace_case_authority()
-        if authority is None or getattr(authority, "case_id", None) != case_id:
-            raise LegalDependencyGraphError("graph_read_ungranted")
-        consent = _purpose_consent(authority, workspace)
-        return {
-            "case_id": case_id,
-            "actor_principal_id": str(getattr(decision, "actor_principal_id", "") or ""),
-            "case_revision": int(getattr(decision, "revision", 0) or 0),
-            "grant_revision": int(getattr(decision, "membership_revision", 0) or 0),
-            "granted_actions": ["case.update"],
-            "consent_generation": consent["generation"],
-            "consent_revoked": consent["revoked"],
-        }
 
     async def _refresh_body(request: Request) -> dict:
         raw = await request.body()
@@ -924,24 +923,53 @@ def mount_law_dependency_graph_routes(app: Any) -> None:
             status_code=400,
         )
 
-    @app.post(FACTUAL_GRAPH_PREFIX + "/{case_id}/legal-dependency/refresh")
-    async def refresh_law_dependency_graph(case_id: str, request: Request):
+    def _current_owner(request, case_id):
+        decision = getattr(request.state, "case_authorization", None)
+        actor = getattr(getattr(request.state, "browser_principal", None), "principal_id", None)
+        if (decision is None or getattr(decision, "permits_case_content", False) is not True
+                or getattr(decision, "action", "") != "case.update" or not actor):
+            raise LegalDependencyGraphError("actor_not_permitted")
+        if decision.case_id != case_id:
+            raise LegalDependencyGraphError("cross_case_id")
+        resolver = _BOUND_HANDLERS.get()
+        if resolver is None:
+            raise LegalDependencyGraphError("workspace_graph_refresh_unavailable")
+        _mediator, workspace, _root = resolver()
+        authority = current_workspace_case_authority()
+        if not isinstance(workspace, ComplaintWorkspaceService) or authority is None:
+            raise LegalDependencyGraphError("workspace_graph_refresh_unavailable")
+        return workspace, authority, actor
+
+    async def _apply_refresh(request, case_id, *, late=False):
+        from applications.legal_research_api import LegalResearchError
+
         try:
-            mediator = _authorized(request, case_id)
-            bundle = _BOUND_HANDLERS.get()()
+            workspace, authority, actor = _current_owner(request, case_id)
             body = await _refresh_body(request)
-            payload = refresh_versioned_law_graph(mediator, live=_live_binding(request, case_id, bundle), body=body)
+            payload = await run_in_threadpool(_refresh_current_law_graph, workspace, authority,
+                                              actor, case_id, body, late=late)
+            _refresh_error(payload)
+        except (WorkspaceAuthorizationDenied, WorkspaceCaseAuthorityError):
+            return _fail(LegalDependencyGraphError("actor_not_permitted"))
+        except WorkspacePersistenceError as exc:
+            code = str(getattr(exc, "code", "") or "")
+            public = ("unlock_needed" if code == "unlock_needed" else "graph_revision_changed"
+                      if code == "revision_conflict" else "legal_dependency_unavailable")
+            return _fail(LegalDependencyGraphError(public))
+        except LegalResearchError as exc:
+            public = {"purpose_consent_required": "purpose_consent_required", "consent_revoked": "consent_revoked",
+                "consent_revision_conflict": "stale_consent", "caller_graph_rows_not_accepted": "caller_graph_rows_not_accepted",
+                "legal_research_revision_conflict": "stale_legal_source_hash", "cross_case_id": "cross_case_id"}.get(
+                    str(getattr(exc, "code", "") or ""), "legal_dependency_unavailable")
+            return _fail(LegalDependencyGraphError(public))
         except LegalDependencyGraphError as exc:
             return _fail(exc)
         return JSONResponse(payload)
 
+    @app.post(FACTUAL_GRAPH_PREFIX + "/{case_id}/legal-dependency/refresh")
+    async def refresh_law_dependency_graph(case_id: str, request: Request):
+        return await _apply_refresh(request, case_id)
+
     @app.post(FACTUAL_GRAPH_PREFIX + "/{case_id}/legal-dependency/late-result")
     async def accept_law_dependency_late_result(case_id: str, request: Request):
-        try:
-            mediator = _authorized(request, case_id)
-            bundle = _BOUND_HANDLERS.get()()
-            body = await _refresh_body(request)
-            payload = accept_versioned_law_late_result(mediator, live=_live_binding(request, case_id, bundle), body=body)
-        except LegalDependencyGraphError as exc:
-            return _fail(exc)
-        return JSONResponse(payload)
+        return await _apply_refresh(request, case_id, late=True)

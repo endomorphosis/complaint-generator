@@ -14191,11 +14191,13 @@ class Mediator:
 			return failed
 		return revealed
 
-	def _collect_verified_legal_requirements(self, claims, intake_case_file):
+	def _collect_verified_legal_requirements(self, claims, intake_case_file, *, source_records=None):
 		"""Promote current locally owned authority text, never caller verification flags.
 
-		This reads stored/configured source records only. It does not start legal
-		search, embedding, or a remote corpus request.
+		This reads stored/configured source records only. A server-owned current
+		manifest can supply an exact claim-to-record source_records scope; no database union is
+		performed for that scope. None retains the legacy storage lookup.
+		It does not start legal search, embedding, or a remote corpus request.
 		"""
 		from copy import deepcopy
 		from complaint_phases.intake_claim_registry import normalize_claim_type
@@ -14211,11 +14213,23 @@ class Mediator:
 		date = context.get('applicable_law_date') or {}
 		query_date = date.get('precise_date') if isinstance(date, dict) and not date.get('is_uncertain') else ''
 		sources = []
-		available = jurisdiction != 'unknown' and bool(query_date)
+		available = (jurisdiction != 'unknown' and bool(query_date)
+			and ('legal_context_applicability' not in case or case['legal_context_applicability'] == 'explicit'))
 		if available:
 			try:
 				for claim_type in claim_types:
-					local = self.get_legal_authorities(claim_type=claim_type)
+					if source_records is None:
+						local = self.get_legal_authorities(claim_type=claim_type)
+					elif isinstance(source_records, dict):
+						local = [row for key, rows in source_records.items()
+							if normalize_claim_type(key) == normalize_claim_type(claim_type) for row in rows]
+					else:
+						# Flat local records require their own explicit claim join.
+						# Prepared acquisition records have no such field; the private
+						# owner instead supplies its authenticated claim->record scope.
+						local = [row for row in source_records if isinstance(row, dict)
+							and isinstance(row.get('claim_type'), str) and row['claim_type'].strip()
+							and normalize_claim_type(row.get('claim_type')) == normalize_claim_type(claim_type)]
 					if not isinstance(local, list) or len(local) > 128:
 						raise ValueError('source_record_bound')
 					for record in local:
@@ -14420,12 +14434,20 @@ class Mediator:
 		)
 		return handoff
 
-	def refresh_verified_legal_dependencies(self, change):
+	def refresh_verified_legal_dependencies(self, change, *, source_records=None):
 		"""Re-read local sources and reconcile admission before invalidating support."""
 		dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
 		if dg is None:
 			return {'affected_node_ids': [], 'preserved_node_ids': [], 'recomputed_dependencies': [],
 				'graph_replaced': False, 'empty_success': False, 'case_revision': None}
+		# A cold restored graph may outlive its builder. Reserve all existing
+		# native edge IDs before source reconciliation allocates new ones, so a
+		# new legal edge cannot overwrite an unrelated factual dependency.
+		if isinstance(self.dg_builder, DependencyGraphBuilder):
+			occupied = [int(key[4:]) for key in dg.dependencies
+				if isinstance(key, str) and key.startswith('dep_')
+				and key[4:].isdigit() and len(key[4:]) <= 32]
+			self.dg_builder.dependency_counter = max([self.dg_builder.dependency_counter, *occupied])
 		payload = dict(change) if isinstance(change, dict) else {}
 		prior_available = [
 			node.id for node in dg.nodes.values()
@@ -14438,7 +14460,7 @@ class Mediator:
 			return self._commit_legal_dependency_refresh(dg, report, payload)
 		claims = [{'type': node.attributes.get('claim_type'), 'name': node.name} for node in dg.get_nodes_by_type(NodeType.CLAIM)]
 		case = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intake_case_file') or {}
-		grouped = self._collect_verified_legal_requirements(claims, case)
+		grouped = self._collect_verified_legal_requirements(claims, case, source_records=source_records)
 		source_status = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'legal_source_status')
 		admitted_now = any(bool(items) for items in grouped.values()) if isinstance(grouped, dict) else False
 		if prior_available and not admitted_now and (payload.get('source_outage') or source_status == 'unavailable'):

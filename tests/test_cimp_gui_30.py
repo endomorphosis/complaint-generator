@@ -336,49 +336,32 @@ def _headers(case, csrf=None):
 
 
 def test_http_rejects_receipt_metrics_and_cross_case(tmp_path):
+    from tests.test_gui25_26_private_owner_http import _world, _login, _headers
+    from tests.test_gui30_private_owner import _source, _request
     world = _world(tmp_path)
-    case = world.case
-    path = f"/api/legal-analysis/{case.case_id}/definition-correspondence"
-    body = {
-        "request_id": "cimp-gui-30-http",
-        "source_text": LEGAL_SOURCE,
-        "declared_populations": _populations(),
-        "receipt": {"executed_proof": True, "governing_legal_authority": True},
-    }
+    path = f"/api/legal-analysis/{world.case.case_id}/definition-correspondence"
     with TestClient(world.app, base_url="https://testserver") as client:
-        assert client.get(path, headers=_headers(case)).status_code == 401
-        login = client.post("/api/complaint-workspace/auth/login", json={"credential": "synthetic-owner-credential"})
-        assert login.status_code == 200, login.text
-        csrf = login.json()["csrf_token"]
-        empty = client.get(path, headers=_headers(case, csrf))
-        assert empty.status_code == 200, empty.text
-        assert empty.json()["status"] == "empty"
-        assert empty.json()["authorizes_law"] is False
-        rejected = client.post(path, headers=_headers(case, csrf), json=body)
-        assert rejected.status_code == 200, rejected.text
-        rejected_body = rejected.json()
-        assert rejected_body["status"] == "rejected"
-        assert rejected_body["reason"] == "supplied_receipt_ignored"
-        assert rejected_body["executed_proof"] is False
-        assert rejected_body["governing_legal_authority"] is False
-        assert rejected_body["case_id"] == case.case_id
-        stored = client.get(path, headers=_headers(case, csrf))
-        assert stored.status_code == 200
-        assert stored.json()["reason"] == "supplied_receipt_ignored"
-        crossed = client.post(path, headers=_headers(case, csrf), params={"case_id": world.second.case_id}, json=body)
-        assert crossed.status_code == 403
-        assert crossed.json()["error"] == "cross_case_id"
-        assert crossed.json()["executed_proof"] is False
-        metrics = client.post(path, headers=_headers(case, csrf), json={
-            "request_id": "cimp-gui-30-http-metrics",
-            "source_text": LEGAL_SOURCE,
-            "declared_populations": _populations(),
-            "training_metrics": {"accuracy": 1},
-            "graph_join": {"complete": False, "population_ids": []},
-        })
-        assert metrics.status_code == 200, metrics.text
+        assert client.get(path, headers=_headers(world)).status_code == 401
+        csrf = _login(client)
+        source = _source(client, world, csrf)
+        empty = client.get(path, headers=_headers(world))
+        assert empty.status_code == 200 and empty.json()["status"] == "empty"
+        body = _request(client, world, source)
+        assert client.post(path, headers=_headers(world), json=body).status_code == 403
+        forged = client.post(path, headers=_headers(world, csrf), json={**body,
+            "receipt": {"executed_proof": True, "governing_legal_authority": True}})
+        assert forged.status_code == 422 and forged.json()["error"] == "client_case_authority"
+        metrics = client.post(path, headers=_headers(world, csrf), json={
+            key:value for key,value in {**body, "training_metrics":{"accuracy":1},
+                "graph_join":{"complete":False,"population_ids":[]}}.items() if key != "owner_inputs"})
+        assert metrics.status_code == 200
         assert metrics.json()["reason"] == "training_metrics_are_not_authority"
-        assert metrics.json()["authorizes_proof"] is False
-        stranger = client.post("/api/complaint-workspace/auth/login", json={"credential": "synthetic-stranger-credential"})
-        denied = client.get(path, headers=_headers(case, stranger.json()["csrf_token"]))
+        assert metrics.json()["binding_persisted"] is False and metrics.json()["authorizes_proof"] is False
+        assert client.get(path, headers=_headers(world)).json()["status"] == "empty"
+        crossed = client.post(path, headers=_headers(world, csrf), params={"case_id":"synthetic-other-case"}, json=body)
+        assert crossed.status_code == 403 and crossed.json()["error"] == "cross_case_id"
+        assert crossed.json()["proof"] is False
+        login = client.post("/api/complaint-workspace/auth/login", json={"credential":"synthetic-stranger-credential"})
+        assert login.status_code == 200
+        denied = client.get(path, headers=_headers(world))
         assert denied.status_code == 403

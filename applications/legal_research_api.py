@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from typing import Any, Dict, Mapping, MutableMapping
 
 from starlette.requests import Request
@@ -46,13 +47,13 @@ class LegalResearchError(Exception):
 
 
 def legal_research_http_status(code: str) -> int:
-    if code in {"unauthenticated", "legal_research_unavailable"}:
+    if code == "unauthenticated":
         return 401
     if code in {"consent_revision_conflict", "legal_research_revision_conflict"}:
         return 409
     if code in {"legal_research_bounds", "legal_research_field", "purpose_not_allowed"}:
         return 422
-    if code in {"acquisition_unavailable", "research_hook_unavailable"}:
+    if code in {"acquisition_unavailable", "research_hook_unavailable", "legal_corpus_unavailable", "legal_research_unavailable", "unlock_needed"}:
         return 503
     return 403
 
@@ -254,13 +255,14 @@ def _passage_index_record(item: Mapping[str, Any], *, source_text: str, version:
     identity = str(item.get("authority_identity") or item.get("authority_id") or locator or "")
     exceptions = _string_list(item.get("exceptions"))
     applicability = item.get("applicability") if isinstance(item.get("applicability"), str) else ""
-    treatment = item.get("treatment_state") if isinstance(item.get("treatment_state"), str) else ""
+    treatment = item.get("treatment_state") if isinstance(item.get("treatment_state"), str) else "unknown"
+    retrieval = item.get("retrieval") if isinstance(item.get("retrieval"), Mapping) else {}
     passage = source_text if len(source_text) <= PASSAGE_MAX_CHARS else ""
     return {
         "source_passage": passage,
         "authority_identity": identity,
         "jurisdiction": str(item.get("jurisdiction") or ""),
-        "effective_date": str(item.get("effective_date") or ""),
+        "effective_date": str(item.get("effective_date") or retrieval.get("effective_date") or ""),
         "applicability": applicability,
         "exceptions": exceptions,
         "treatment_state": treatment,
@@ -273,7 +275,7 @@ def _passage_index_record(item: Mapping[str, Any], *, source_text: str, version:
     }
 
 
-def _index_acquired_passages(case_file: MutableMapping[str, Any], acquisition: Mapping[str, Any]) -> None:
+def _index_acquired_passages(case_file: MutableMapping[str, Any], acquisition: Mapping[str, Any], *, acquisition_context=None) -> None:
     index = case_file.get("legal_source_passage_index")
     if not isinstance(index, dict):
         index = {}
@@ -288,7 +290,10 @@ def _index_acquired_passages(case_file: MutableMapping[str, Any], acquisition: M
         content_hash = str(receipt.get("content_hash") or "")
         if not content_hash or not receipt.get("source_passage"):
             continue
+        if content_hash not in index and len(index) >= 256:
+            raise LegalResearchError("legal_research_bounds")
         index[content_hash] = {
+            **deepcopy(item),
             "source_passage": receipt["source_passage"],
             "authority_identity": receipt["authority_identity"],
             "jurisdiction": receipt["jurisdiction"],
@@ -302,6 +307,9 @@ def _index_acquired_passages(case_file: MutableMapping[str, Any], acquisition: M
             "content_hash": content_hash,
             "source_id": receipt["source_id"],
             "locator": receipt["locator"],
+            # Presentation fields never replace the owned admission record.
+            "canonical_source": deepcopy(item),
+            "acquisition_context": deepcopy(acquisition_context),
         }
 
 
@@ -362,7 +370,7 @@ def _project_acquisition(acquisition: Mapping[str, Any], *, bounds: Mapping[str,
     }
 
 
-def acquire_bounded_legal_sources(mediator: Any, workspace: Any, authority: Any, body: Mapping[str, Any]) -> Dict[str, Any]:
+def acquire_bounded_legal_sources(mediator: Any, workspace: Any, authority: Any, body: Mapping[str, Any], *, source_scope_sha256="") -> Dict[str, Any]:
     """Invoke the bound research hook once. Results are never admitted law."""
     if not isinstance(body, Mapping):
         raise LegalResearchError("legal_research_field")
@@ -375,17 +383,29 @@ def acquire_bounded_legal_sources(mediator: Any, workspace: Any, authority: Any,
         bounds["retrieval_mode"],
     )
     case_file = _case_file_from_mediator(mediator)
-    seen = getattr(mediator, "_gui_legal_research_operations", None)
+    seen = case_file.get("legal_source_operations")
     if not isinstance(seen, dict):
+        if seen is not None:
+            raise LegalResearchError("legal_research_revision_conflict")
         seen = {}
-        mediator._gui_legal_research_operations = seen
+        case_file["legal_source_operations"] = seen
     operation_id = bounds["operation_id"]
+    fingerprint = _operation_fingerprint({
+        "request": bounds, "actor": authority.actor_principal_id,
+        "case_id": authority.case_id, "legal_context": None if source_scope_sha256 else case_file.get("legal_context"),
+        "source_scope_sha256": source_scope_sha256,
+    })
     if operation_id and operation_id in seen:
-        replay = dict(seen[operation_id])
+        prior = seen[operation_id]
+        if prior.get("fingerprint") != fingerprint:
+            raise LegalResearchError("legal_research_revision_conflict")
+        replay = deepcopy(prior["receipt"])
         replay["replayed"] = True
         replay["dispatched"] = False
         replay["admitted_law"] = False
         return replay
+    if operation_id and len(seen) >= 256:
+        raise LegalResearchError("legal_research_bounds")
     builder = getattr(mediator, "build_legal_acquisition_request", None)
     search = getattr(mediator, "legal_authority_search", None)
     acquire = getattr(search, "acquire_bounded_canonical_sources", None)
@@ -415,12 +435,20 @@ def acquire_bounded_legal_sources(mediator: Any, workspace: Any, authority: Any,
     if not isinstance(acquisition, dict):
         raise LegalResearchError("acquisition_unavailable")
     receipt = _project_acquisition(acquisition, bounds=bounds, consent=consent, replayed=False)
+    if isinstance(binding, Mapping) and binding.get("ready") is False:
+        receipt["context_required"] = {
+            "selection_status": str(binding.get("selection_status") or "unknown"),
+            "reason_codes": [str(item) for item in binding.get("unresolved_reasons", [])][:16],
+        }
     receipt["operation_id"] = operation_id
     if not bounds["cancelled"]:
-        _index_acquired_passages(case_file, acquisition)
+        _index_acquired_passages(case_file, acquisition, acquisition_context={
+            "purpose": consent["purpose"], "consent_generation": consent["generation"],
+            "source_scope_sha256": source_scope_sha256})
     case_file["legal_source_candidate_receipt"] = receipt
     if operation_id:
-        seen[operation_id] = dict(receipt)
+        seen[operation_id] = {"fingerprint": fingerprint, "request": deepcopy(bounds),
+            "source_scope_sha256": source_scope_sha256, "receipt": deepcopy(receipt)}
     return receipt
 
 
@@ -430,6 +458,14 @@ def _admission_ledger(case_file: MutableMapping[str, Any]) -> list:
         ledger = []
         case_file["legal_authority_admissions"] = ledger
     return ledger
+
+
+def _operation_fingerprint(value: Mapping[str, Any]) -> str:
+    try:
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    except (TypeError, ValueError):
+        raise LegalResearchError("legal_research_field") from None
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _review_fields(body: Mapping[str, Any]) -> Dict[str, Any]:
@@ -450,7 +486,7 @@ def _review_fields(body: Mapping[str, Any]) -> Dict[str, Any]:
         if not isinstance(value, str) or len(value) > 256:
             raise LegalResearchError("legal_research_field")
     exceptions = _string_list(body.get("exceptions"))
-    if exceptions is None:
+    if exceptions is None and body.get("exceptions") is not None:
         raise LegalResearchError("legal_research_field")
     operation_id = body.get("operation_id", "")
     if not isinstance(operation_id, str) or len(operation_id) > 64:
@@ -490,7 +526,7 @@ def _admission_record(fields: Mapping[str, Any], *, status: str, reason: str, ad
         "jurisdiction": fields["jurisdiction"],
         "effective_date": fields["effective_date"],
         "applicability": fields["applicability"],
-        "exceptions": list(fields["exceptions"]),
+        "exceptions": list(fields["exceptions"]) if fields["exceptions"] is not None else None,
         "treatment_state": fields["treatment_state"],
         "version": fields["version"],
         "content_hash": fields["content_hash"],
@@ -528,6 +564,8 @@ def _compare_passage(fields: Mapping[str, Any], stored: Mapping[str, Any] | None
     )
     if not same:
         return "source_mismatch"
+    if fields["applicability"] in {"", "unknown", "disputed"} or fields["treatment_state"] in {"", "unknown"} or fields["exceptions"] is None:
+        return "source_metadata_unresolved"
     if fields["applicability"] not in APPLICABILITY_VALUES or fields["treatment_state"] not in TREATMENT_STATES:
         return "source_mismatch"
     return ""
@@ -542,6 +580,7 @@ def review_versioned_authority(
     membership: str,
     actor_is_encrypted_owner: bool = False,
     canonical_owner_principal_id: str = "",
+    source_scope_sha256: str = "",
 ) -> Dict[str, Any]:
     """Admit one stored passage only for an owner or assigned lawyer.
 
@@ -563,52 +602,110 @@ def review_versioned_authority(
     if fields["reviewer_principal_id"] and fields["reviewer_principal_id"] != actor_id:
         attribution["claimed_reviewer_principal_id"] = fields["reviewer_principal_id"]
     case_file = _case_file_from_mediator(mediator)
-    seen = getattr(mediator, "_gui_authority_admission_operations", None)
+    seen = case_file.get("legal_authority_review_operations")
     if not isinstance(seen, dict):
+        if seen is not None:
+            raise LegalResearchError("legal_research_revision_conflict")
         seen = {}
-        mediator._gui_authority_admission_operations = seen
+        case_file["legal_authority_review_operations"] = seen
     operation_id = fields["operation_id"]
+    index = case_file.get("legal_source_passage_index") if isinstance(case_file.get("legal_source_passage_index"), dict) else {}
+    stored = index.get(fields["content_hash"]) if isinstance(index.get(fields["content_hash"]), dict) else None
+    fingerprint = _operation_fingerprint({
+        "request": fields, "attribution": attribution,
+        "case_id": getattr(authority, "case_id", ""),
+        "legal_context": None if source_scope_sha256 else case_file.get("legal_context"),
+        "source": {key: value for key, value in stored.items() if key not in {"reviewed_source_record", "source_admission"}} if isinstance(stored, dict) else None,
+        "source_scope_sha256": source_scope_sha256,
+    })
     if operation_id and operation_id in seen:
         prior = seen[operation_id]
-        if prior.get("content_hash") != fields["content_hash"] or prior.get("decision") != fields["decision"]:
+        if prior.get("fingerprint") != fingerprint:
             raise LegalResearchError("legal_research_revision_conflict")
-        replay = dict(prior)
+        replay = deepcopy(prior["receipt"])
         replay["replayed"] = True
-        replay["admitted_law"] = prior.get("admitted_law") is True
+        replay["admitted_law"] = replay.get("admitted_law") is True
         replay["proof"] = False
         return replay
+    if operation_id and len(seen) >= 256:
+        raise LegalResearchError("legal_research_bounds")
     reason = ""
     if membership not in AUTHORIZED_ADMISSION_MEMBERSHIPS or not actor_id:
         reason = "unauthorized_reviewer"
     elif attribution.get("claimed_reviewer_principal_id"):
         reason = "unauthorized_reviewer"
-    index = case_file.get("legal_source_passage_index") if isinstance(case_file.get("legal_source_passage_index"), dict) else {}
-    stored = index.get(fields["content_hash"]) if isinstance(index.get(fields["content_hash"]), dict) else None
     if not reason and fields["decision"] == "reject":
         reason = "rejected"
     if not reason:
         reason = _compare_passage(fields, stored)
     admitted = reason == "" and fields["decision"] == "admit"
-    if admitted:
+    source_review = fields["decision"] == "admit" and reason in {"", "source_metadata_unresolved"}
+    source_admission = None
+    if source_review:
         owner = getattr(mediator, "admit_acquired_authorities", None)
         if not callable(owner):
             reason = "admission_owner_unavailable"
             admitted = False
         else:
             try:
+                source = stored.get("canonical_source") if isinstance(stored, dict) else None
+                if not isinstance(source, dict):
+                    raise LegalResearchError("canonical_source_missing")
+                canonical_owner = str(canonical_owner_principal_id or getattr(authority, "canonical_owner_principal_id", "") or "")
+                if not canonical_owner:
+                    raise LegalResearchError("canonical_owner_unavailable")
+                claims = case_file.get("candidate_claims")
+                claims = [dict(item) for item in claims if isinstance(item, dict)] if isinstance(claims, list) else []
                 outcome = owner(
-                    {"status": "candidates", "candidates": [dict(stored or {})], "explicit_review": True, "proof": False},
-                    [],
+                    {"status": "candidates", "candidates": [deepcopy(source)], "explicit_review": True, "proof": False},
+                    claims,
                     case_file,
-                    user_id=actor_id,
+                    user_id=canonical_owner,
                 )
             except Exception:
-                outcome = {"status": "unavailable"}
-            owner_status = outcome.get("status") if isinstance(outcome, dict) else ""
-            if owner_status != "admitted":
+                outcome = {}
+            admission = outcome.get("admission") if isinstance(outcome, dict) else None
+            owner_status = admission.get("status") if isinstance(admission, dict) else ""
+            stored_ids = admission.get("stored_record_ids") if isinstance(admission, dict) else None
+            if (owner_status != "admitted" or admission.get("proof") is not False
+                    or not isinstance(stored_ids, list) or not stored_ids
+                    or any(type(item) is not int or item < 0 for item in stored_ids)):
                 reason = "admission_owner_unresolved"
                 admitted = False
                 attribution["owner_status"] = str(owner_status or "unavailable")
+            else:
+                from integrations.ipfs_datasets.logic import prepare_acquired_authority_record
+                decisions = admission.get("decisions") or []
+                accepted_source = next((row for row in decisions if isinstance(row, dict)
+                    and row.get("status") == "admitted"), None)
+                prepared = prepare_acquired_authority_record(source,
+                    jurisdiction=str((accepted_source or {}).get("jurisdiction") or ""),
+                    as_of_date=str((accepted_source or {}).get("as_of_date") or ""))
+                if (prepared.get("status") != "admitted" or not accepted_source
+                        or prepared.get("hashes") != accepted_source.get("hashes")):
+                    reason, admitted = "admission_source_unverified", False
+                else:
+                    source_record = deepcopy(prepared["record"])
+                    claim_record_ids = {}
+                    for claim in claims:
+                        claim_type = str(claim.get("type") or claim.get("claim_type") or "").strip()
+                        if not claim_type or claim_type in claim_record_ids:
+                            continue
+                        rows = mediator.get_legal_authorities(user_id=canonical_owner, claim_type=claim_type)
+                        joined_ids = sorted({row["id"] for row in rows if isinstance(row, dict)
+                            and type(row.get("id")) is int and row["id"] in stored_ids})
+                        if joined_ids:
+                            claim_record_ids[claim_type] = joined_ids
+                    if not claim_record_ids:
+                        reason, admitted = "admission_claim_binding_unverified", False
+                    else:
+                        source_admission = {"status": "admitted", "stored_record_ids": list(stored_ids),
+                            "claim_record_ids": claim_record_ids,
+                            "source_record_sha256": _operation_fingerprint(source_record),
+                            "source_scope_sha256": source_scope_sha256, "hashes": deepcopy(prepared["hashes"]),
+                            "record": source_record, "proof": False}
+                        stored["reviewed_source_record"] = source_record
+                        stored["source_admission"] = deepcopy(source_admission)
     record = _admission_record(
         fields,
         status="admitted" if admitted else "unresolved",
@@ -619,10 +716,78 @@ def review_versioned_authority(
     record["replayed"] = False
     record["case_id"] = str(getattr(authority, "case_id", "") or "")
     record["workspace_bound"] = workspace is not None
+    record["source_status"] = "source_admitted" if source_admission is not None else "not_admitted"
+    record["source_admission"] = source_admission
+    record["governing_applicability"] = fields["applicability"]
     _admission_ledger(case_file).append(record)
     if operation_id:
-        seen[operation_id] = dict(record)
+        seen[operation_id] = {"fingerprint": fingerprint, "receipt": deepcopy(record)}
     return record
+
+
+def verified_reviewed_source_records(
+    case_file: Mapping[str, Any], *, source_scope_sha256: str,
+) -> Dict[str, list[dict]]:
+    """Copy current owned source records grouped by their actual storage join.
+
+    This verifies custody, not governing applicability or a legal proof. The
+    caller supplies the current server-derived case/source scope. Empty scope
+    and absent reviewed sources yield no records; there is no database union.
+    """
+    from integrations.ipfs_datasets.logic import prepare_acquired_authority_record
+
+    index = case_file.get("legal_source_passage_index")
+    ledger = case_file.get("legal_authority_admissions", [])
+    if not isinstance(source_scope_sha256, str) or len(source_scope_sha256) != 64:
+        raise LegalResearchError("legal_research_revision_conflict")
+    if index is None:
+        return {}
+    if not isinstance(index, dict) or len(index) > 256 or not isinstance(ledger, list):
+        raise LegalResearchError("legal_research_revision_conflict")
+    grouped: Dict[str, list[dict]] = {}
+    for content_hash, entry in index.items():
+        if not isinstance(entry, dict):
+            raise LegalResearchError("legal_research_revision_conflict")
+        admission = entry.get("source_admission")
+        if admission is None:
+            continue
+        # A later rejection or changed case source invalidates the old join.
+        latest = next((row for row in reversed(ledger) if isinstance(row, dict)
+            and row.get("content_hash") == content_hash), None)
+        if (not isinstance(admission, dict) or not latest
+                or latest.get("source_status") != "source_admitted"
+                or latest.get("source_admission") != admission
+                or admission.get("source_scope_sha256") != source_scope_sha256
+                or admission.get("proof") is not False):
+            raise LegalResearchError("legal_research_revision_conflict")
+        record = entry.get("reviewed_source_record")
+        metadata = record.get("metadata") if isinstance(record, dict) else None
+        if not isinstance(metadata, dict):
+            raise LegalResearchError("legal_research_revision_conflict")
+        prepared = prepare_acquired_authority_record(entry.get("canonical_source"),
+            jurisdiction=str(metadata.get("jurisdiction") or ""),
+            as_of_date=str(metadata.get("as_of_date") or ""))
+        if (prepared.get("status") != "admitted" or prepared.get("record") != record
+                or admission.get("record") != record
+                or admission.get("source_record_sha256") != _operation_fingerprint(record)
+                or admission.get("hashes") != prepared.get("hashes")
+                or not isinstance(content_hash, str)
+                or prepared.get("hashes", {}).get("source_hash") != content_hash.removeprefix("sha256:")):
+            raise LegalResearchError("legal_research_revision_conflict")
+        stored_ids, joins = admission.get("stored_record_ids"), admission.get("claim_record_ids")
+        if (not isinstance(stored_ids, list) or not stored_ids
+                or any(type(value) is not int or value < 0 for value in stored_ids)
+                or not isinstance(joins, dict) or not joins or len(joins) > 64):
+            raise LegalResearchError("legal_research_revision_conflict")
+        for claim_type, ids in joins.items():
+            if (not isinstance(claim_type, str) or not claim_type.strip() or len(claim_type) > 256
+                    or not isinstance(ids, list) or not ids
+                    or any(type(value) is not int or value not in stored_ids for value in ids)):
+                raise LegalResearchError("legal_research_revision_conflict")
+            records = grouped.setdefault(claim_type, [])
+            if record not in records:
+                records.append(deepcopy(record))
+    return grouped
 
 
 def project_authority_admissions(case_file: Mapping[str, Any]) -> Dict[str, Any]:
@@ -638,6 +803,7 @@ def project_authority_admissions(case_file: Mapping[str, Any]) -> Dict[str, Any]
         "action": "review_versioned_authority",
         "admissions": admissions,
         "admitted_count": sum(1 for item in admissions if item.get("admitted_law") is True),
+        "source_admitted_count": sum(1 for item in admissions if item.get("source_status") == "source_admitted"),
         "unresolved_count": sum(1 for item in admissions if item.get("status") != "admitted"),
         "proof": False,
         "legal_sufficiency": False,
@@ -679,96 +845,79 @@ def project_legal_research(case_file: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def mount_legal_research_routes(app: Any) -> None:
-    """Mount bounded legal-research routes. Authorization middleware protects the prefix."""
-
+    """Expose only the actual encrypted Workspace owner under issued authority."""
     from fastapi.responses import JSONResponse
-
+    from starlette.concurrency import run_in_threadpool
     from applications.case_routes import _BOUND_HANDLERS
-    from applications.workspace_case_authority import current_workspace_case_authority
+    from applications.complaint_workspace import (ComplaintWorkspaceService, WorkspaceAccess,
+        WorkspaceAuthorizationDenied, WorkspacePersistenceError, workspace_access_scope)
+    from applications.workspace_case_authority import (WorkspaceCaseAuthorityError,
+        current_workspace_case_authority)
 
-    def _fail(exc: LegalResearchError) -> JSONResponse:
-        return JSONResponse({"error": exc.code, "status": "denied", "admitted_law": False}, status_code=legal_research_http_status(exc.code))
+    def fail(code):
+        return JSONResponse({"error": code, "status": "denied", "admitted_law": False,
+            "proof": False}, status_code=legal_research_http_status(code))
 
-    def _authorized(request: Request, case_id: str, *, write_action: str = "case.update"):
+    def authorized(request, case_id, action):
         decision = getattr(request.state, "case_authorization", None)
-        if decision is None or getattr(decision, "permits_case_content", False) is not True:
+        actor = getattr(getattr(request.state, "browser_principal", None), "principal_id", None)
+        authority = current_workspace_case_authority()
+        if (decision is None or decision.permits_case_content is not True or decision.action != action
+                or decision.case_id != case_id or not actor or authority is None):
             raise LegalResearchError("legal_research_ungranted")
-        action = getattr(decision, "action", "")
-        method = request.method.upper()
-        expected = "case.read" if method in {"GET", "HEAD"} else write_action
-        if action != expected:
-            raise LegalResearchError("legal_research_ungranted")
-        authorized_case = str(getattr(decision, "case_id", "") or "")
-        query_case = str(request.query_params.get("case_id") or "")
-        if authorized_case != case_id or (query_case and query_case != authorized_case):
+        query_case = request.query_params.get("case_id")
+        if query_case and query_case != case_id:
             raise LegalResearchError("cross_case_id")
         resolver = _BOUND_HANDLERS.get()
         if resolver is None:
             raise LegalResearchError("legal_research_unavailable")
+        _mediator, workspace, _root = resolver()
+        if not isinstance(workspace, ComplaintWorkspaceService):
+            raise LegalResearchError("legal_research_unavailable")
+        authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+        return workspace, authority, actor
+
+    def operation(workspace, actor, case_id, kind, body):
+        with workspace_access_scope(WorkspaceAccess.authenticated(actor, case_id)):
+            if kind in {"read", "admissions"}:
+                return workspace.read_case_legal_research(actor, case_id=case_id, admissions=kind == "admissions")
+            if kind == "acquire":
+                return workspace.acquire_case_legal_research(actor, case_id=case_id, request=body)
+            return workspace.review_case_legal_authority(actor, case_id=case_id, request=body)
+
+    async def dispatch(request, case_id, kind):
+        action = "case.read" if kind in {"read", "admissions"} else ("case.update" if kind == "acquire" else "case.review")
         try:
-            mediator, workspace, _root = resolver()
-            authority = current_workspace_case_authority()
-        except Exception as exc:
-            raise LegalResearchError("legal_research_unavailable") from exc
-        if authority is None or getattr(authority, "case_id", None) != case_id:
-            raise LegalResearchError("legal_research_ungranted")
-        return mediator, workspace, authority
+            workspace, authority, actor = authorized(request, case_id, action)
+            try:
+                body = await request.json() if kind in {"acquire", "review"} else None
+            except (ValueError, UnicodeError):
+                raise LegalResearchError("legal_research_field") from None
+            if body is not None and not isinstance(body, dict):
+                raise LegalResearchError("legal_research_field")
+            payload = await run_in_threadpool(operation, workspace, actor, case_id, kind, body)
+            authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+            return JSONResponse(payload)
+        except (WorkspaceAuthorizationDenied, WorkspaceCaseAuthorityError):
+            return fail("legal_research_ungranted")
+        except WorkspacePersistenceError as exc:
+            return fail("legal_research_revision_conflict" if exc.code == "revision_conflict" else (
+                "unlock_needed" if exc.code == "unlock_needed" else "legal_research_unavailable"))
+        except LegalResearchError as exc:
+            return fail(exc.code)
 
     @app.get(LEGAL_RESEARCH_PREFIX + "/{case_id}")
     async def read_legal_research(case_id: str, request: Request):
-        try:
-            mediator, _workspace, _authority = _authorized(request, case_id)
-            payload = project_legal_research(_case_file_from_mediator(mediator))
-        except LegalResearchError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        payload["admitted_law"] = False
-        return JSONResponse(payload)
+        return await dispatch(request, case_id, "read")
 
     @app.post(LEGAL_RESEARCH_PREFIX + "/{case_id}")
-    async def update_legal_research(case_id: str, request: Request):
-        try:
-            mediator, workspace, authority = _authorized(request, case_id)
-            body = await request.json()
-            if not isinstance(body, dict):
-                raise LegalResearchError("legal_research_field")
-            payload = acquire_bounded_legal_sources(mediator, workspace, authority, body)
-        except LegalResearchError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        payload["admitted_law"] = False
-        return JSONResponse(payload)
+    async def acquire_legal_research(case_id: str, request: Request):
+        return await dispatch(request, case_id, "acquire")
 
     @app.get(LEGAL_RESEARCH_PREFIX + "/{case_id}/admissions")
     async def read_authority_admissions(case_id: str, request: Request):
-        try:
-            mediator, _workspace, _authority = _authorized(request, case_id)
-            payload = project_authority_admissions(_case_file_from_mediator(mediator))
-        except LegalResearchError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        payload["proof"] = False
-        return JSONResponse(payload)
+        return await dispatch(request, case_id, "admissions")
 
     @app.post(LEGAL_RESEARCH_PREFIX + "/{case_id}/admissions")
     async def review_authority_admission(case_id: str, request: Request):
-        try:
-            mediator, workspace, authority = _authorized(request, case_id, write_action="case.review")
-            decision = request.state.case_authorization
-            body = await request.json()
-            if not isinstance(body, dict):
-                raise LegalResearchError("legal_research_field")
-            payload = review_versioned_authority(
-                mediator,
-                workspace,
-                authority,
-                body,
-                membership=str(getattr(decision, "membership", "") or ""),
-                actor_is_encrypted_owner=bool(getattr(decision, "actor_is_encrypted_owner", False)),
-                canonical_owner_principal_id=str(getattr(decision, "canonical_owner_principal_id", "") or ""),
-            )
-        except LegalResearchError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        payload["proof"] = False
-        return JSONResponse(payload)
+        return await dispatch(request, case_id, "review")
