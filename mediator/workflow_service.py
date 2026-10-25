@@ -1746,6 +1746,20 @@ class WorkflowActionService:
 				raise ValueError("current_source_scope_mismatch")
 			if report.get("user_facts_modified") is True:
 				raise ValueError("factual_state_changed")
+			if "legal_context_applicability" in before_case:
+				# Source lookup re-derives temporary question/change metadata. It
+				# must not rewrite the separate explicit-selection owner's snapshot.
+				old_context = before_case.get("legal_context")
+				new_context = case_file.get("legal_context")
+				transient = {"changed_fields", "questions", "status"}
+				if (not isinstance(old_context, dict) or not isinstance(new_context, dict)
+					or {k: v for k, v in old_context.items() if k not in transient}
+					!= {k: v for k, v in new_context.items() if k not in transient}):
+					raise ValueError("current_legal_context_changed")
+				for field in list(case_file):
+					if field.startswith("legal_context"):
+						case_file.pop(field)
+				case_file.update({k: deepcopy(v) for k, v in before_case.items() if k.startswith("legal_context")})
 		except Exception as exc:
 			restored = DependencyGraph.from_dict(deepcopy(before_graph))
 			graph.__dict__.clear()
@@ -1754,7 +1768,8 @@ class WorkflowActionService:
 			case_file.update(before_case)
 			mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, "dependency_graph", graph)
 			mediator.phase_manager.update_phase_data(ComplaintPhase.INTAKE, "intake_case_file", case_file)
-			return refuse("current_source_scope_mismatch" if str(exc) == "current_source_scope_mismatch" else "actual_refresh_unavailable")
+			return refuse(str(exc) if str(exc) in {"current_source_scope_mismatch", "current_legal_context_changed"}
+				else "actual_refresh_unavailable")
 		generation = ledger["dependency_generation"] + 1
 		invalidated = self._invalidate_refresh_records(ledger, key, kind)
 		current_records = self._refresh_records_from_actual_graph(graph)
@@ -1877,6 +1892,10 @@ class WorkflowActionService:
 				ledger=ledger, error_code=code, applied=False)
 		if not isinstance(self._mediator, Mediator) or not isinstance(claimed, dict):
 			return refuse("actual_workflow_unavailable")
+		if (not isinstance(operation_id, str) or not operation_id or operation_id != operation_id.strip()
+			or len(operation_id) > 128 or any(key in claimed and (type(claimed[key]) is not int or claimed[key] < 0)
+				for key in ("case_revision", "consent_generation", "grant_revision", "dependency_generation"))):
+			return refuse("refresh_field")
 		if any(claimed.get(key) for key in ("links", "questions", "proof_obligations", "successors", "result", "model_output")):
 			return refuse("late_result_capability_unavailable")
 		if consent_revoked is True:
