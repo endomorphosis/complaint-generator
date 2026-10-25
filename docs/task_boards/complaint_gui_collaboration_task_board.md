@@ -1724,7 +1724,7 @@ Implementation instructions:
 
 ## CIMP-GUI-58 Qualify Native GUI task monitoring and recovery
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
