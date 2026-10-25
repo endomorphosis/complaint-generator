@@ -360,3 +360,196 @@ def test_active_grant_is_rechecked_then_revoked_under_cutoff(tmp_path: Path) -> 
     )
     assert still_unwraps == retained_key
     assert downloaded["data"] == payload
+
+
+
+def _binding(world):
+    case = world["case"]
+    return PrivateArtifactBinding(tenant_id=case.tenant_id, case_id=case.case_id,
+        artifact_kind=ARTIFACT_KIND, revision=REVISION, principal_id=case.tenant_id)
+
+
+def _revoke_arguments(world):
+    case = world["case"]
+    return dict(actor_principal_id=world["owner"].principal_id,
+        recipient_principal_id=world["lawyer"].principal_id, case_id=case.case_id,
+        tenant_id=case.tenant_id, resource_id=case.resource_id, cutoff=1,
+        owner_session=world["owner_session"],
+        recipient_sessions={world["counsel"].principal_id: world["counsel_session"]},
+        idempotency_key="exact-resource-cutoff-operation")
+
+
+def _retained_key(world, grant):
+    return world["lawyer_session"].unwrap_granted_resource_key(
+        {"nonce": grant.wrapped_nonce, "ciphertext": grant.wrapped_ciphertext},
+        tenant_id=grant.tenant_id, case_id=grant.case_id,
+        canonical_principal_id=grant.canonical_owner_principal_id, revision=grant.artifact_revision,
+        recipient_principal_id=grant.recipient_principal_id, artifact_kind=grant.artifact_kind,
+        resource_id=grant.resource_id, membership_grant_id=grant.membership_grant_id,
+        membership_version=grant.membership_version, data_key_id=grant.data_key_id,
+        recipient_wrap_key_id=grant.recipient_wrap_key_id)
+
+
+def test_fresh_dek_protects_future_owner_and_survivor_writes_but_preserves_history(tmp_path):
+    from integrations.private_storage import (open_private_artifact, parse_private_envelope,
+                                               seal_private_artifact, PrivateArtifactIntegrityError)
+    world = _world(tmp_path)
+    historical = _seal(world, b"historical-note")
+    member, revoked = _accept(world, world["lawyer"], "lawyer_session", "revoked")
+    survivor_member, survivor = _accept(world, world["counsel"], "counsel_session", "survivor")
+    old_key = _retained_key(world, revoked)
+    # Keep an unlocked owner session/provider from before the cutoff.
+    stale_owner = UserOwnedKeySession(tmp_path / "owner-keys")
+    stale_owner.unlock_passphrase("owner-passphrase")
+    retained_provider = stale_owner.provider()
+    summary = world["grants"].revoke_and_rotate(**_revoke_arguments(world))
+    assert summary["data_key_rotated"] is True
+    assert summary["previous_data_key_id"] == revoked.data_key_id
+    assert summary["data_key_id"] != revoked.data_key_id
+    current = world["grants"].load(survivor.key_grant_id)
+    assert current.data_key_id == summary["data_key_id"]
+    assert current.generation == 2
+    args = _delegated(world, world["counsel"], survivor_member, survivor, "counsel_session")
+    binding = _binding(world)
+    owner_key_id, owner_key = retained_provider.resolve(binding)
+    assert owner_key_id == summary["data_key_id"]
+    assert owner_key != old_key
+    owner_future = seal_private_artifact(b"future-owner-note", binding=binding, key=owner_key, key_id=owner_key_id)
+    delegated_future = world["grants"].write_delegated(plaintext=b"future-survivor-note", **args)["envelope"]
+    for envelope in (owner_future, delegated_future):
+        key_id = parse_private_envelope(envelope)["key_id"]
+        assert key_id == owner_key_id
+        # Match the authenticated new key-id deliberately: this must fail AES
+        # authentication with old key bytes, rather than only a header check.
+        with pytest.raises(PrivateArtifactIntegrityError, match="authentication_failed"):
+            open_private_artifact(envelope, binding=binding, key=old_key, expected_key_id=key_id)
+    assert world["grants"].read_delegated(envelope=owner_future, **args)["data"] == b"future-owner-note"
+    assert world["grants"].download_delegated(envelope=delegated_future, **args)["data"] == b"future-survivor-note"
+    assert world["grants"].read_delegated(envelope=historical, **args)["data"] == b"historical-note"
+    assert world["grants"].read_as_owner(actor_principal_id=world["owner"].principal_id,
+        case_id=world["case"].case_id, tenant_id=world["case"].tenant_id,
+        resource_id=world["case"].resource_id, artifact_kind=ARTIFACT_KIND,
+        artifact_revision=REVISION, envelope=historical, owner_session=stale_owner)["data"] == b"historical-note"
+    assert open_private_artifact(historical, binding=binding, key=old_key) == b"historical-note"
+    assert summary["downloaded_plaintext_erased"] is summary["downloaded_keys_erased"] is False
+    # A cold store/session still has the same new epoch and authenticated history.
+    resumed = _resume(world)
+    fresh_counsel = UserOwnedKeySession(tmp_path / "counsel-keys")
+    fresh_counsel.unlock_passphrase("counsel-passphrase")
+    args["recipient_session"] = fresh_counsel
+    assert resumed.read_delegated(envelope=historical, **args)["data"] == b"historical-note"
+    assert resumed.read_delegated(envelope=owner_future, **args)["data"] == b"future-owner-note"
+
+
+@pytest.mark.parametrize("operation", ["read", "write", "download", "late_result"])
+@pytest.mark.parametrize("change", ["key_cutoff", "membership_remove", "membership_renew"])
+def test_completed_crypto_must_recheck_actual_cutoff_and_membership_before_admission(tmp_path, monkeypatch, operation, change):
+    import threading
+    from integrations import private_collaboration as module
+    world = _world(tmp_path)
+    envelope = _seal(world, b"prepared-private-result")
+    membership, grant = _accept(world, world["lawyer"], "lawyer_session", "lawyer")
+    args = _delegated(world, world["lawyer"], membership, grant, "lawyer_session")
+    entered, release = threading.Event(), threading.Event()
+    outcome = []
+    actual_name = "seal_private_artifact" if operation == "write" else "open_private_artifact"
+    actual = getattr(module, actual_name)
+    worker = None
+    def pause_after_actual_crypto(*values, **options):
+        result = actual(*values, **options)
+        if threading.current_thread() is worker and options["binding"].artifact_kind == ARTIFACT_KIND:
+            entered.set()
+            if not release.wait(10):
+                raise AssertionError("bounded crypto interleaving expired")
+        return result
+    monkeypatch.setattr(module, actual_name, pause_after_actual_crypto)
+    def run():
+        try:
+            store = _resume(world)
+            if operation == "write":
+                value = store.write_delegated(plaintext=b"prepared-write", **args)
+            elif operation == "late_result":
+                value = store.admit_late_result(envelope=envelope, prepared_generation=1, **args)
+            elif operation == "download":
+                value = store.download_delegated(envelope=envelope, **args)
+            else:
+                value = store.read_delegated(envelope=envelope, **args)
+            outcome.append(value)
+        except BaseException as exc:
+            outcome.append(exc)
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    try:
+        assert entered.wait(10), "the actual crypto operation never reached the admission barrier"
+        if change == "key_cutoff":
+            summary = world["grants"].revoke_and_rotate(**_revoke_arguments(world))
+            assert summary["generation"] == 2
+        elif change == "membership_remove":
+            removed = world["memberships"].remove(owner_principal_id=world["owner"].principal_id,
+                grant_id=membership.grant_id, expected_version=membership.version)
+            assert removed.status == "removed"
+        else:
+            renewed = world["memberships"].update_scope(owner_principal_id=world["owner"].principal_id,
+                grant_id=membership.grant_id, expected_version=membership.version,
+                expires_at=1_700_007_200)
+            assert renewed.version == membership.version + 1
+    finally:
+        release.set()
+        worker.join(12)
+    assert not worker.is_alive(), "owned admission worker did not terminate"
+    assert len(outcome) == 1 and isinstance(outcome[0], CaseResourceKeyGrantError), "stale prepared data was admitted"
+    if change == "key_cutoff":
+        expected = "late_result_after_cutoff" if operation == "late_result" else "grant_revoked"
+    else:
+        expected = "membership_removed" if change == "membership_remove" else "revision_conflict"
+    assert outcome[0].code == expected
+
+
+@pytest.mark.parametrize("failure_point", ["after_keystore", "after_first_grant", "before_replay_sidecar"])
+def test_interrupted_cross_store_rotation_reopens_and_resumes_same_dek(tmp_path, monkeypatch, failure_point):
+    world = _world(tmp_path)
+    membership, grant = _accept(world, world["lawyer"], "lawyer_session", "lawyer")
+    survivor_membership, survivor = _accept(world, world["counsel"], "counsel_session", "counsel")
+    envelope = _seal(world, b"historical-before-cutoff")
+    request = _revoke_arguments(world)
+    actual = world["owner_session"].rotate_case_grant_data_key
+    committed = []
+    def fail_after_keystore(*args, **kwargs):
+        value = actual(*args, **kwargs)
+        committed.append(value)
+        if failure_point == "after_keystore":
+            raise OSError("injected_rotation_interruption")
+        return value
+    monkeypatch.setattr(world["owner_session"], "rotate_case_grant_data_key", fail_after_keystore)
+    actual_seal = world["grants"]._seal
+    def fail_after_first_grant(value):
+        actual_seal(value)
+        raise OSError("injected_rotation_interruption")
+    if failure_point == "after_first_grant":
+        monkeypatch.setattr(world["grants"], "_seal", fail_after_first_grant)
+    if failure_point == "before_replay_sidecar":
+        def fail_replay(*args):
+            raise OSError("injected_rotation_interruption")
+        monkeypatch.setattr(world["grants"], "_write_revoke_replay", fail_replay)
+    with pytest.raises(OSError, match="injected_rotation_interruption"):
+        world["grants"].revoke_and_rotate(**request)
+    assert len(committed) == 1 and committed[0]["new_data_key_id"] != grant.data_key_id
+    resumed = _resume(world)
+    revoked_args = _delegated(world, world["lawyer"], membership, grant, "lawyer_session")
+    for call in (lambda: resumed.read_delegated(envelope=envelope, **revoked_args),
+                 lambda: resumed.write_delegated(plaintext=b"blocked", **revoked_args)):
+        expected = "grant_revoked" if failure_point == "before_replay_sidecar" else "case_key_rotation_incomplete"
+        with pytest.raises(CaseResourceKeyGrantError, match=expected):
+            call()
+    reopened_owner = UserOwnedKeySession(tmp_path / "owner-keys")
+    reopened_owner.unlock_passphrase("owner-passphrase")
+    request["owner_session"] = reopened_owner
+    completed = resumed.revoke_and_rotate(**request)
+    assert completed["data_key_id"] == committed[0]["new_data_key_id"]
+    assert completed["previous_data_key_id"] == grant.data_key_id
+    assert completed["generation"] == 2
+    assert resumed.revoke_and_rotate(**request)["data_key_id"] == completed["data_key_id"]
+    args = _delegated(world, world["counsel"], survivor_membership, survivor, "counsel_session")
+    assert resumed.read_delegated(envelope=envelope, **args)["data"] == b"historical-before-cutoff"
+    with pytest.raises(CaseResourceKeyGrantError, match="grant_revoked"):
+        resumed.download_delegated(envelope=envelope, **revoked_args)

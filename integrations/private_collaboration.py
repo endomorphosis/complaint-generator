@@ -1,6 +1,7 @@
 """Recipient-bound encrypted case resource key grants.
 
-The authenticated actor stays distinct from the canonical artifact owner.
+The authenticated actor is verified separately from the canonical artifact
+owner. They may coincide for a verified adopted owner-only case.
 Associated data for a sealed case artifact is the tenant, case, canonical
 principal (the case tenant), and revision. A delegated read does not rewrite
 that binding and does not impersonate the owner.
@@ -22,9 +23,11 @@ the recipient already copied.
 from __future__ import annotations
 
 import fcntl
+import base64
 import hashlib
 import json
 import os
+import stat
 import uuid
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -40,6 +43,7 @@ from integrations.private_storage import (
     UserOwnedKeySession,
     assert_access_matches_binding,
     open_private_artifact,
+    parse_private_envelope,
     seal_private_artifact,
 )
 
@@ -122,6 +126,7 @@ class ResourceKeyGrant:
     idempotency_key: str
     status: str = "active"
     generation: int = 1
+    historical_wrapped_keys: tuple[tuple[str, str, str], ...] = ()
 
     def public_view(self) -> dict[str, Any]:
         return {
@@ -135,13 +140,14 @@ class ResourceKeyGrant:
             "case_id": self.case_id,
             "resource_id": self.resource_id,
             "canonical_owner_principal_id": self.canonical_owner_principal_id,
-            "actor_is_encrypted_owner": False,
+            "actor_is_encrypted_owner": self.owner_principal_id == self.canonical_owner_principal_id,
             "artifact_kind": self.artifact_kind,
             "artifact_revision": self.artifact_revision,
             "data_key_id": self.data_key_id,
             "recipient_wrap_key_id": self.recipient_wrap_key_id,
             "status": self.status,
             "generation": self.generation,
+            "historical_data_key_ids": [entry[0] for entry in self.historical_wrapped_keys],
             "schema_version": SCHEMA_VERSION,
             "envelope_schema_version": 2,
             "limitations": list(LIMITATIONS),
@@ -158,6 +164,14 @@ def _label(value: str, code: str) -> str:
     if any(char in value for char in ("\x00", "\n", "\r", "/", "\\")):
         raise CaseResourceKeyGrantError(code)
     return value
+
+
+def _artifact_key_id(envelope: bytes) -> str:
+    """Read an untrusted routing hint; authenticated open still verifies it."""
+    try:
+        return str(parse_private_envelope(envelope)["key_id"])
+    except PrivateArtifactIntegrityError as exc:
+        raise CaseResourceKeyGrantError(exc.reason) from exc
 
 
 def _identity(grant: ResourceKeyGrant) -> dict[str, Any]:
@@ -247,7 +261,7 @@ class CaseResourceKeyGrantStore:
             raise CaseResourceKeyGrantError("tenant_mismatch")
         if resource_id != case.resource_id:
             raise CaseResourceKeyGrantError("resource_mismatch")
-        if owner.principal_id == case.tenant_id or recipient.principal_id == case.tenant_id:
+        if recipient.principal_id == case.tenant_id:
             raise CaseResourceKeyGrantError("owner_impersonation")
         self._require_membership(
             actor_principal_id=recipient.principal_id,
@@ -273,8 +287,6 @@ class CaseResourceKeyGrantStore:
             "artifact_kind": kind,
             "artifact_revision": revision,
         }
-        if identity["owner_principal_id"] == identity["canonical_owner_principal_id"]:
-            raise CaseResourceKeyGrantError("owner_impersonation")
         with self._locked():
             existing_id = self._idem_grant(key_name)
             if existing_id is not None:
@@ -328,6 +340,10 @@ class CaseResourceKeyGrantStore:
                 status="active",
                 generation=int(generation["generation"]),
             )
+            current_key_id = generation.get("data_key_id")
+            if current_key_id and current_key_id != record.data_key_id:
+                raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
+            generation["data_key_id"] = record.data_key_id
             self._seal(record)
             self._write_generation(generation)
             self._write_idem(key_name, record.key_grant_id)
@@ -388,101 +404,100 @@ class CaseResourceKeyGrantStore:
         if resource_id != case.resource_id:
             raise CaseResourceKeyGrantError("resource_mismatch")
         key_name = _label(idempotency_key, "idempotency_key")
+        operation_identity = {"actor_principal_id": owner.principal_id,
+            "recipient_principal_id": recipient.principal_id, "tenant_id": case.tenant_id,
+            "case_id": case.case_id, "resource_id": case.resource_id, "cutoff": cutoff,
+            "idempotency_sha256": hashlib.sha256(key_name.encode()).hexdigest()}
+        operation_id = hashlib.sha256(json.dumps(operation_identity, sort_keys=True,
+                                                 separators=(",", ":")).encode()).hexdigest()
         owner_session.ensure_data_key(case.tenant_id, case.case_id)
         with self._locked():
+            state = self._generation_state(case.tenant_id, case.case_id, case.resource_id, allow_pending=True)
             replay = self._revoke_replay(key_name)
+            pending = state.get("pending_revoke")
             if replay is not None:
-                if replay.get("recipient_principal_id") != recipient.principal_id or replay.get("cutoff") != cutoff:
+                if any(replay.get(k) != v for k, v in operation_identity.items() if k != "idempotency_sha256"):
                     raise CaseResourceKeyGrantError("replay_mismatch")
-                if replay.get("case_id") != case.case_id or replay.get("tenant_id") != case.tenant_id:
-                    raise CaseResourceKeyGrantError("replay_mismatch")
-                return _revoke_view(replay, retained_plaintext, retained_key)
-            state = self._generation_state(case.tenant_id, case.case_id, case.resource_id)
-            if int(state["generation"]) != cutoff or int(state["cutoff"]) >= cutoff:
-                raise CaseResourceKeyGrantError("cutoff_mismatch")
-            grants = self._grants_for_case(case.tenant_id, case.case_id)
-            targets = [
-                grant for grant in grants
-                if grant.recipient_principal_id == recipient.principal_id and grant.status == "active"
-            ]
+                if pending is None:
+                    return _revoke_view(replay, retained_plaintext, retained_key)
+            if pending is None and state.get("last_revoke", {}).get("operation_id") == operation_id:
+                summary = state["last_revoke"]["summary"]
+                self._write_revoke_replay(key_name, summary)
+                return _revoke_view(summary, retained_plaintext, retained_key)
+            if pending is not None:
+                if pending.get("operation_id") != operation_id or pending.get("identity") != operation_identity:
+                    raise CaseResourceKeyGrantError("case_key_rotation_incomplete")
+                grants = [_grant_from_document(doc) for doc in pending["grants"]]
+            else:
+                if int(state["generation"]) != cutoff or int(state["cutoff"]) >= cutoff:
+                    raise CaseResourceKeyGrantError("cutoff_mismatch")
+                grants = [grant for grant in self._grants_for_case(case.tenant_id, case.case_id)
+                          if grant.status == "active"]
+            targets = [grant for grant in grants if grant.recipient_principal_id == recipient.principal_id]
             if not targets:
                 raise CaseResourceKeyGrantError("grant_not_active")
-            if any(grant.generation != cutoff for grant in targets):
+            if any(grant.generation != cutoff for grant in grants):
                 raise CaseResourceKeyGrantError("stale_grant_generation")
-            survivors = [grant for grant in grants if grant.status == "active" and grant not in targets]
-            missing = sorted({grant.recipient_principal_id for grant in survivors if grant.recipient_principal_id not in sessions})
+            survivors = [grant for grant in grants if grant not in targets]
+            missing = sorted({grant.recipient_principal_id for grant in survivors
+                              if grant.recipient_principal_id not in sessions})
             if missing:
                 raise CaseResourceKeyGrantError("recipient_session_required")
-            rewrapped: list[ResourceKeyGrant] = []
+            # Validate every recipient before changing any key epoch.
             for grant in survivors:
-                session = sessions[grant.recipient_principal_id]
-                wrap_id, wrap_key = session.recipient_wrap_key()
+                wrap_id, _wrap_key = sessions[grant.recipient_principal_id].recipient_wrap_key()
                 if wrap_id != grant.recipient_wrap_key_id:
                     raise CaseResourceKeyGrantError("recipient_mismatch")
-                wrapped = owner_session.wrap_case_key_for_recipient(
-                    tenant_id=case.tenant_id,
-                    case_id=case.case_id,
-                    recipient_wrap_key=wrap_key,
-                    recipient_wrap_key_id=wrap_id,
-                    canonical_principal_id=case.tenant_id,
-                    revision=grant.artifact_revision,
-                    recipient_principal_id=grant.recipient_principal_id,
-                    artifact_kind=grant.artifact_kind,
-                    resource_id=case.resource_id,
-                    membership_grant_id=grant.membership_grant_id,
-                    membership_version=grant.membership_version,
-                )
-                rewrapped.append(replace(
-                    grant,
-                    version=grant.version + 1,
-                    generation=cutoff + 1,
-                    status="active",
-                    data_key_id=str(wrapped["data_key_id"]),
-                    wrapped_nonce=str(wrapped["nonce"]),
+            old_key_id = str(state.get("data_key_id") or targets[0].data_key_id)
+            if any(grant.data_key_id != old_key_id for grant in grants):
+                raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
+            if pending is None:
+                state["data_key_id"] = old_key_id
+                state["pending_revoke"] = {"operation_id": operation_id, "identity": operation_identity,
+                                           "grants": [_grant_document(grant) for grant in grants]}
+                # A crash from this point fences delegated access. Cold retry
+                # uses the same authenticated snapshots and keystore operation.
+                self._write_generation(state)
+            rotation = owner_session.rotate_case_grant_data_key(case.tenant_id, case.case_id,
+                resource_id=case.resource_id, expected_data_key_id=old_key_id, operation_id=operation_id)
+            new_key_id = str(rotation["new_data_key_id"])
+            if new_key_id == old_key_id or rotation.get("old_data_key_id") != old_key_id:
+                raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
+            rewrapped = []
+            for grant in survivors:
+                wrap_id, wrap_key = sessions[grant.recipient_principal_id].recipient_wrap_key()
+                wrapped = owner_session.wrap_case_key_for_recipient(tenant_id=case.tenant_id,
+                    case_id=case.case_id, recipient_wrap_key=wrap_key, recipient_wrap_key_id=wrap_id,
+                    canonical_principal_id=case.tenant_id, revision=grant.artifact_revision,
+                    recipient_principal_id=grant.recipient_principal_id, artifact_kind=grant.artifact_kind,
+                    resource_id=case.resource_id, membership_grant_id=grant.membership_grant_id,
+                    membership_version=grant.membership_version)
+                if str(wrapped["data_key_id"]) != new_key_id:
+                    raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
+                rewrapped.append(replace(grant, version=grant.version + 1, generation=cutoff + 1,
+                    status="active", data_key_id=new_key_id, wrapped_nonce=str(wrapped["nonce"]),
                     wrapped_ciphertext=str(wrapped["ciphertext"]),
-                ))
-            revoked_ids = []
+                    historical_wrapped_keys=grant.historical_wrapped_keys + (
+                        (grant.data_key_id, grant.wrapped_nonce, grant.wrapped_ciphertext),)))
             for grant in targets:
-                revoked_ids.append(grant.key_grant_id)
-                self._seal(replace(
-                    grant,
-                    version=grant.version + 1,
-                    status="revoked",
-                    wrapped_nonce="",
-                    wrapped_ciphertext="",
-                ))
-            rewrapped_ids = []
+                self._seal(replace(grant, version=grant.version + 1, status="revoked",
+                                   wrapped_nonce="", wrapped_ciphertext="", historical_wrapped_keys=()))
             for grant in rewrapped:
-                rewrapped_ids.append(grant.key_grant_id)
                 self._seal(grant)
-            updated = {
-                "schema_version": SCHEMA_VERSION,
-                "tenant_id": case.tenant_id,
-                "case_id": case.case_id,
-                "resource_id": case.resource_id,
-                "generation": cutoff + 1,
-                "cutoff": cutoff,
-            }
-            self._write_generation(updated)
-            summary = {
-                "schema_version": SCHEMA_VERSION,
-                "operation": "revoke_and_rewrap",
-                "actor_principal_id": owner.principal_id,
-                "recipient_principal_id": recipient.principal_id,
-                "tenant_id": case.tenant_id,
-                "case_id": case.case_id,
-                "resource_id": case.resource_id,
-                "cutoff": cutoff,
-                "generation": cutoff + 1,
-                "revoked_key_grant_ids": revoked_ids,
-                "rewrapped_key_grant_ids": rewrapped_ids,
-                "data_key_id": targets[0].data_key_id,
-                "grant_wrap_rotated": True,
-                "future_access_revoked": True,
-                "downloaded_plaintext_erased": False,
-                "downloaded_keys_erased": False,
-                "limitation": LIMITATIONS[0],
-            }
+            summary = {"schema_version": SCHEMA_VERSION, "operation": "revoke_and_rewrap",
+                **{k: v for k, v in operation_identity.items() if k != "idempotency_sha256"},
+                "generation": cutoff + 1, "revoked_key_grant_ids": [g.key_grant_id for g in targets],
+                "rewrapped_key_grant_ids": [g.key_grant_id for g in rewrapped],
+                "previous_data_key_id": old_key_id, "data_key_id": new_key_id,
+                "data_key_rotated": True, "grant_wrap_rotated": True, "future_access_revoked": True,
+                "downloaded_plaintext_erased": False, "downloaded_keys_erased": False,
+                "limitation": LIMITATIONS[0]}
+            # Publish the complete cutoff in one authenticated atomic record.
+            # Its embedded receipt covers the gap before the replay sidecar.
+            self._write_generation({"schema_version": SCHEMA_VERSION, "tenant_id": case.tenant_id,
+                "case_id": case.case_id, "resource_id": case.resource_id, "generation": cutoff + 1,
+                "cutoff": cutoff, "data_key_id": new_key_id,
+                "last_revoke": {"operation_id": operation_id, "summary": summary}})
             self._write_revoke_replay(key_name, summary)
             return _revoke_view(summary, retained_plaintext, retained_key)
 
@@ -515,10 +530,8 @@ class CaseResourceKeyGrantStore:
             raise CaseResourceKeyGrantError("actor_not_owner")
         if tenant_id != case.tenant_id or resource_id != case.resource_id:
             raise CaseResourceKeyGrantError("tenant_mismatch" if tenant_id != case.tenant_id else "resource_mismatch")
-        if actor.principal_id == case.tenant_id:
-            raise CaseResourceKeyGrantError("owner_impersonation")
         claimed = case.tenant_id if aad_principal_id is None else aad_principal_id
-        if claimed != case.tenant_id or claimed == actor.principal_id:
+        if claimed != case.tenant_id:
             raise CaseResourceKeyGrantError("owner_impersonation")
         kind = _label(artifact_kind, "artifact_kind")
         revision = _label(artifact_revision, "artifact_revision")
@@ -531,7 +544,10 @@ class CaseResourceKeyGrantStore:
         )
         access = _CanonicalAccess("authenticated", case.tenant_id, case.case_id)
         assert_access_matches_binding(access, binding)
-        key_id, key = owner_session.provider().resolve(binding)
+        key_id = _artifact_key_id(envelope)
+        key = owner_session.lookup_data_key(case.tenant_id, case.case_id, key_id)
+        if key is None:
+            raise CaseResourceKeyGrantError("key_unavailable")
         try:
             plaintext = open_private_artifact(envelope, binding=binding, key=key, expected_key_id=key_id)
         except PrivateArtifactIntegrityError as exc:
@@ -606,12 +622,13 @@ class CaseResourceKeyGrantStore:
         revision = _label(artifact_revision, "artifact_revision")
         if grant.artifact_kind != kind or grant.artifact_revision != revision:
             raise CaseResourceKeyGrantError("revision_mismatch")
-        if grant.owner_principal_id == grant.canonical_owner_principal_id:
-            raise CaseResourceKeyGrantError("owner_impersonation")
+        self._require_grant_owner(grant)
         self._reject_inactive_grant(grant)
+        key_id = _artifact_key_id(envelope)
+        wrapped = self._wrapped_key(grant, key_id)
         try:
             data_key = recipient_session.unwrap_granted_resource_key(
-                {"nonce": grant.wrapped_nonce, "ciphertext": grant.wrapped_ciphertext},
+                wrapped,
                 tenant_id=grant.tenant_id,
                 case_id=grant.case_id,
                 canonical_principal_id=grant.canonical_owner_principal_id,
@@ -621,7 +638,7 @@ class CaseResourceKeyGrantStore:
                 resource_id=grant.resource_id,
                 membership_grant_id=grant.membership_grant_id,
                 membership_version=grant.membership_version,
-                data_key_id=grant.data_key_id,
+                data_key_id=key_id,
                 recipient_wrap_key_id=grant.recipient_wrap_key_id,
             )
         except (PrivateArtifactIntegrityError, PrivateKeyMaterialError) as exc:
@@ -640,7 +657,7 @@ class CaseResourceKeyGrantStore:
                 envelope,
                 binding=binding,
                 key=data_key,
-                expected_key_id=grant.data_key_id,
+                expected_key_id=key_id,
             )
         except PrivateArtifactIntegrityError as exc:
             raise CaseResourceKeyGrantError(exc.reason) from exc
@@ -660,7 +677,7 @@ class CaseResourceKeyGrantStore:
             operation="read",
         )
         receipt["generation"] = grant.generation
-        return receipt
+        return self._admit_result(grant, decision, action=READ_ACTION, receipt=receipt)
 
     def write_delegated(
         self,
@@ -726,7 +743,7 @@ class CaseResourceKeyGrantStore:
         receipt["data"] = None
         receipt["envelope"] = envelope
         receipt["generation"] = grant.generation
-        return receipt
+        return self._admit_result(grant, decision, action=WRITE_ACTION, receipt=receipt)
 
     def download_delegated(
         self,
@@ -807,6 +824,7 @@ class CaseResourceKeyGrantStore:
             recipient_session=recipient_session,
             action=action,
             operation="late_result",
+            prepared_generation=prepared_generation,
         )
         if int(opened["generation"]) != prepared_generation:
             raise CaseResourceKeyGrantError("stale_session")
@@ -815,7 +833,9 @@ class CaseResourceKeyGrantStore:
 
     def load(self, key_grant_id: str) -> ResourceKeyGrant:
         with self._locked():
-            return self._load(_label(key_grant_id, "key_grant_id"))
+            grant = self._load(_label(key_grant_id, "key_grant_id"))
+            self._read_generation(grant.tenant_id, grant.case_id)
+            return grant
 
     def _open_delegated(
         self,
@@ -833,7 +853,9 @@ class CaseResourceKeyGrantStore:
         recipient_session: UserOwnedKeySession,
         action: str,
         operation: str,
+        prepared_generation: int | None = None,
     ) -> dict[str, Any]:
+        key_id = _artifact_key_id(envelope)
         grant, decision, data_key = self._authorize_delegated(
             actor_principal_id=actor_principal_id,
             membership_grant_id=membership_grant_id,
@@ -846,6 +868,7 @@ class CaseResourceKeyGrantStore:
             artifact_revision=artifact_revision,
             recipient_session=recipient_session,
             action=action,
+            artifact_key_id=key_id,
         )
         binding = PrivateArtifactBinding(
             tenant_id=grant.tenant_id,
@@ -859,7 +882,7 @@ class CaseResourceKeyGrantStore:
                 envelope,
                 binding=binding,
                 key=data_key,
-                expected_key_id=grant.data_key_id,
+                expected_key_id=key_id,
             )
         except PrivateArtifactIntegrityError as exc:
             raise CaseResourceKeyGrantError(exc.reason) from exc
@@ -879,7 +902,8 @@ class CaseResourceKeyGrantStore:
             operation=operation,
         )
         receipt["generation"] = grant.generation
-        return receipt
+        return self._admit_result(grant, decision, action=action, receipt=receipt,
+                                  prepared_generation=prepared_generation)
 
     def _authorize_delegated(
         self,
@@ -895,6 +919,7 @@ class CaseResourceKeyGrantStore:
         artifact_revision: str,
         recipient_session: UserOwnedKeySession,
         action: str,
+        artifact_key_id: str | None = None,
     ):
         actor = self._active(actor_principal_id)
         self._reject_admin(actor)
@@ -933,11 +958,12 @@ class CaseResourceKeyGrantStore:
         revision = _label(artifact_revision, "artifact_revision")
         if grant.artifact_kind != kind or grant.artifact_revision != revision:
             raise CaseResourceKeyGrantError("revision_mismatch")
-        if grant.owner_principal_id == grant.canonical_owner_principal_id:
-            raise CaseResourceKeyGrantError("owner_impersonation")
+        self._require_grant_owner(grant)
+        key_id = grant.data_key_id if artifact_key_id is None else artifact_key_id
+        wrapped = self._wrapped_key(grant, key_id)
         try:
             data_key = recipient_session.unwrap_granted_resource_key(
-                {"nonce": grant.wrapped_nonce, "ciphertext": grant.wrapped_ciphertext},
+                wrapped,
                 tenant_id=grant.tenant_id,
                 case_id=grant.case_id,
                 canonical_principal_id=grant.canonical_owner_principal_id,
@@ -947,12 +973,56 @@ class CaseResourceKeyGrantStore:
                 resource_id=grant.resource_id,
                 membership_grant_id=grant.membership_grant_id,
                 membership_version=grant.membership_version,
-                data_key_id=grant.data_key_id,
+                data_key_id=key_id,
                 recipient_wrap_key_id=grant.recipient_wrap_key_id,
             )
         except (PrivateArtifactIntegrityError, PrivateKeyMaterialError) as exc:
             raise CaseResourceKeyGrantError("key_grant_rejected") from exc
         return grant, decision, data_key
+
+    @staticmethod
+    def _wrapped_key(grant: ResourceKeyGrant, key_id: str) -> dict[str, str]:
+        if key_id == grant.data_key_id:
+            return {"nonce": grant.wrapped_nonce, "ciphertext": grant.wrapped_ciphertext}
+        for historical_id, nonce, ciphertext in grant.historical_wrapped_keys:
+            if key_id == historical_id:
+                return {"nonce": nonce, "ciphertext": ciphertext}
+        raise CaseResourceKeyGrantError("key_grant_rejected")
+
+    def _admit_result(self, grant: ResourceKeyGrant, decision: Any, *, action: str,
+                      receipt: dict[str, Any], prepared_generation: int | None = None) -> dict[str, Any]:
+        """Linearize emission against revocation, after crypto has completed.
+
+        Plaintext already emitted before this cutoff cannot be recalled. A
+        result still being prepared when revocation finishes must reauthorize.
+        No caller-supplied receipt is accepted by a public access entry point.
+        """
+        with self._locked():
+            state = self._read_generation(grant.tenant_id, grant.case_id)
+            if prepared_generation is not None and prepared_generation <= int(state["cutoff"]):
+                raise CaseResourceKeyGrantError("late_result_after_cutoff")
+            current = self._load(grant.key_grant_id)
+            self._reject_inactive_grant(current, cutoff=int(state["cutoff"]), generation=int(state["generation"]))
+            if (current.version != grant.version or current.generation != grant.generation
+                    or current.data_key_id != grant.data_key_id or _identity(current) != _identity(grant)):
+                raise CaseResourceKeyGrantError("stale_grant_generation")
+            expected_key_id = state.get("data_key_id")
+            if expected_key_id and current.data_key_id != expected_key_id:
+                raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
+            if prepared_generation is not None and prepared_generation != current.generation:
+                raise CaseResourceKeyGrantError("stale_session")
+            actor = self._active(grant.recipient_principal_id)
+            self._reject_admin(actor)
+            try:
+                with self._memberships.authorization_scope(actor_principal_id=actor.principal_id,
+                        grant_id=grant.membership_grant_id, tenant_id=grant.tenant_id,
+                        case_id=grant.case_id, resource_id=grant.resource_id,
+                        expected_version=grant.membership_version, action=action) as fresh:
+                    if fresh.grant_id != decision.grant_id or fresh.version != decision.version:
+                        raise CaseResourceKeyGrantError("membership_required")
+                    return receipt
+            except CaseMembershipError as exc:
+                raise CaseResourceKeyGrantError(exc.code) from exc
 
     def _reject_inactive_grant(
         self,
@@ -961,18 +1031,18 @@ class CaseResourceKeyGrantStore:
         cutoff: int | None = None,
         generation: int | None = None,
     ) -> None:
-        if grant.status != "active" or grant.wrapped_ciphertext == "" or grant.wrapped_nonce == "":
-            raise CaseResourceKeyGrantError("grant_revoked")
         if cutoff is None or generation is None:
             with self._locked():
                 state = self._read_generation(grant.tenant_id, grant.case_id)
             cutoff = int(state["cutoff"])
             generation = int(state["generation"])
+        if grant.status != "active" or grant.wrapped_ciphertext == "" or grant.wrapped_nonce == "":
+            raise CaseResourceKeyGrantError("grant_revoked")
         if grant.generation <= cutoff or grant.generation != generation:
             raise CaseResourceKeyGrantError("grant_revoked")
 
-    def _generation_state(self, tenant_id: str, case_id: str, resource_id: str) -> dict[str, Any]:
-        state = self._read_generation(tenant_id, case_id)
+    def _generation_state(self, tenant_id: str, case_id: str, resource_id: str, *, allow_pending=False) -> dict[str, Any]:
+        state = self._read_generation(tenant_id, case_id, allow_pending=allow_pending)
         if state.get("resource_id") not in {"", resource_id}:
             raise CaseResourceKeyGrantError("resource_mismatch")
         state["resource_id"] = resource_id
@@ -980,72 +1050,108 @@ class CaseResourceKeyGrantStore:
         state["case_id"] = case_id
         return state
 
-    def _read_generation(self, tenant_id: str, case_id: str) -> dict[str, Any]:
+    def _read_generation(self, tenant_id: str, case_id: str, *, allow_pending=False) -> dict[str, Any]:
         digest = hashlib.sha256(f"{tenant_id}\n{case_id}".encode("utf-8")).hexdigest()
-        path = self._root / "generations" / f"{digest}.envelope"
-        if not path.is_file():
-            return {
-                "schema_version": SCHEMA_VERSION,
-                "tenant_id": tenant_id,
-                "case_id": case_id,
-                "resource_id": "",
-                "generation": 1,
-                "cutoff": 0,
-            }
-        pointer = self._root / "generations" / f"{digest}.revision"
-        revision_text = pointer.read_text(encoding="utf-8").strip()
-        if not revision_text.isdigit():
-            raise CaseResourceKeyGrantError("revision_pointer")
-        revision = int(revision_text)
-        binding = PrivateArtifactBinding(
-            tenant_id=tenant_id,
-            case_id=case_id,
-            artifact_kind=GENERATION_KIND,
-            revision=str(revision),
-            principal_id=tenant_id,
-        )
-        access = _CanonicalAccess("authenticated", tenant_id, case_id)
-        assert_access_matches_binding(access, binding)
+        directory = self._root / "generations"
+        record = directory / f"{digest}.record"
         try:
-            plaintext = open_private_artifact(
-                path.read_bytes(),
-                binding=binding,
-                key=self._key,
-                expected_key_id=self._key_id,
-            )
-        except PrivateArtifactIntegrityError as exc:
+            descriptor = os.open(record, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        except FileNotFoundError:
+            descriptor = None
+        except OSError as exc:
             raise CaseResourceKeyGrantError("integrity") from exc
-        document = json.loads(plaintext.decode("utf-8"))
-        if not isinstance(document, dict) or document.get("schema_version") != SCHEMA_VERSION:
-            raise CaseResourceKeyGrantError("unsupported_version")
-        if document.get("tenant_id") != tenant_id or document.get("case_id") != case_id:
+        if descriptor is not None:
+            try:
+                before = os.fstat(descriptor)
+                if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                        or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) != 0o600
+                        or not 0 < before.st_size <= 8 * 1024 * 1024):
+                    raise CaseResourceKeyGrantError("integrity")
+                raw = os.read(descriptor, before.st_size + 1)
+                after = os.fstat(descriptor)
+                identity = lambda x: (x.st_dev, x.st_ino, x.st_size, x.st_mtime_ns, x.st_ctime_ns)
+                if len(raw) != before.st_size or identity(before) != identity(after):
+                    raise CaseResourceKeyGrantError("integrity")
+            finally:
+                os.close(descriptor)
+            try:
+                wrapper = json.loads(raw)
+                if (not isinstance(wrapper, dict) or set(wrapper) != {"revision", "envelope"}
+                        or type(wrapper["revision"]) is not int or wrapper["revision"] < 1
+                        or not isinstance(wrapper["envelope"], str)):
+                    raise ValueError("record")
+                revision = wrapper["revision"]
+                envelope = base64.b64decode(wrapper["envelope"], validate=True)
+            except (ValueError, TypeError, KeyError) as exc:
+                raise CaseResourceKeyGrantError("integrity") from exc
+        else:
+            # Read the original committed format without silently replacing it.
+            path = directory / f"{digest}.envelope"
+            if not path.is_file():
+                return {"schema_version": SCHEMA_VERSION, "tenant_id": tenant_id,
+                    "case_id": case_id, "resource_id": "", "generation": 1, "cutoff": 0}
+            revision_text = (directory / f"{digest}.revision").read_text(encoding="utf-8").strip()
+            if not revision_text.isdigit():
+                raise CaseResourceKeyGrantError("revision_pointer")
+            revision, envelope = int(revision_text), path.read_bytes()
+        binding = PrivateArtifactBinding(tenant_id=tenant_id, case_id=case_id,
+            artifact_kind=GENERATION_KIND, revision=str(revision), principal_id=tenant_id)
+        assert_access_matches_binding(_CanonicalAccess("authenticated", tenant_id, case_id), binding)
+        try:
+            document = json.loads(open_private_artifact(envelope, binding=binding,
+                key=self._key, expected_key_id=self._key_id).decode("utf-8"))
+        except (PrivateArtifactIntegrityError, ValueError, UnicodeDecodeError) as exc:
+            raise CaseResourceKeyGrantError("integrity") from exc
+        if (not isinstance(document, dict) or document.get("schema_version") != SCHEMA_VERSION
+                or document.get("tenant_id") != tenant_id or document.get("case_id") != case_id
+                or type(document.get("generation")) is not int or document["generation"] != revision
+                or type(document.get("cutoff")) is not int or not 0 <= document["cutoff"] < revision):
             raise CaseResourceKeyGrantError("binding_mismatch")
-        if int(document["generation"]) != revision:
-            raise CaseResourceKeyGrantError("revision_mismatch")
+        if document.get("pending_revoke") is not None and not allow_pending:
+            raise CaseResourceKeyGrantError("case_key_rotation_incomplete")
+        if (not allow_pending and revision > 1
+                and (not isinstance(document.get("data_key_id"), str) or not document["data_key_id"])):
+            raise CaseResourceKeyGrantError("case_key_epoch_unavailable")
         return document
 
     def _write_generation(self, state: Mapping[str, Any]) -> None:
         generation = int(state["generation"])
-        binding = PrivateArtifactBinding(
-            tenant_id=str(state["tenant_id"]),
-            case_id=str(state["case_id"]),
-            artifact_kind=GENERATION_KIND,
-            revision=str(generation),
-            principal_id=str(state["tenant_id"]),
-        )
-        access = _CanonicalAccess("authenticated", binding.tenant_id, binding.case_id)
-        assert_access_matches_binding(access, binding)
+        binding = PrivateArtifactBinding(tenant_id=str(state["tenant_id"]), case_id=str(state["case_id"]),
+            artifact_kind=GENERATION_KIND, revision=str(generation), principal_id=str(state["tenant_id"]))
+        assert_access_matches_binding(_CanonicalAccess("authenticated", binding.tenant_id, binding.case_id), binding)
         payload = json.dumps(dict(state), sort_keys=True, separators=(",", ":")).encode("utf-8")
         envelope = seal_private_artifact(payload, binding=binding, key=self._key, key_id=self._key_id)
+        raw = json.dumps({"revision": generation, "envelope": base64.b64encode(envelope).decode("ascii")},
+                         sort_keys=True, separators=(",", ":")).encode()
+        if len(raw) > 8 * 1024 * 1024:
+            raise CaseResourceKeyGrantError("generation_size_limit")
         digest = hashlib.sha256(f"{binding.tenant_id}\n{binding.case_id}".encode("utf-8")).hexdigest()
         directory = self._root / "generations"
-        path = directory / f"{digest}.envelope"
-        temporary = directory / f"{digest}.envelope.tmp"
-        temporary.write_bytes(envelope)
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, path)
-        os.chmod(path, 0o600)
-        self._write_text(directory / f"{digest}.revision", str(generation))
+        path = directory / f"{digest}.record"
+        temporary = directory / (".generation-" + uuid.uuid4().hex + ".tmp")
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        try:
+            try:
+                remaining = memoryview(raw)
+                while remaining:
+                    written = os.write(descriptor, remaining)
+                    if written <= 0:
+                        raise OSError("generation_write_failed")
+                    remaining = remaining[written:]
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            os.replace(temporary, path)
+            parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            try:
+                os.fsync(parent)
+            finally:
+                os.close(parent)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
     def _grants_for_case(self, tenant_id: str, case_id: str) -> list[ResourceKeyGrant]:
         found: list[ResourceKeyGrant] = []
@@ -1095,6 +1201,15 @@ class CaseResourceKeyGrantStore:
         except CaseMembershipError as exc:
             raise CaseResourceKeyGrantError(exc.code) from exc
 
+    def _require_grant_owner(self, grant: ResourceKeyGrant) -> None:
+        case = self._select(grant.owner_principal_id, grant.case_id)
+        if (case.owner_principal_id != grant.owner_principal_id
+                or case.tenant_id != grant.tenant_id
+                or case.resource_id != grant.resource_id
+                or case.tenant_id != grant.canonical_owner_principal_id):
+            raise CaseResourceKeyGrantError("owner_impersonation")
+
+
     def _receipt(
         self,
         *,
@@ -1110,12 +1225,18 @@ class CaseResourceKeyGrantStore:
         membership: str,
         operation: str = "read",
     ) -> dict[str, Any]:
-        if actor_principal_id == canonical_owner_principal_id:
-            raise CaseResourceKeyGrantError("owner_impersonation")
+        actor_is_encrypted_owner = actor_principal_id == canonical_owner_principal_id
+        if actor_is_encrypted_owner:
+            if membership != "owner" or key_grant_id is not None:
+                raise CaseResourceKeyGrantError("owner_impersonation")
+            case = self._select(actor_principal_id, case_id)
+            if (case.owner_principal_id != actor_principal_id or case.tenant_id != tenant_id
+                    or canonical_owner_principal_id != case.tenant_id or case.resource_id != resource_id):
+                raise CaseResourceKeyGrantError("owner_impersonation")
         return {
             "actor_principal_id": actor_principal_id,
             "canonical_owner_principal_id": canonical_owner_principal_id,
-            "actor_is_encrypted_owner": False,
+            "actor_is_encrypted_owner": actor_is_encrypted_owner,
             "tenant_id": tenant_id,
             "case_id": case_id,
             "resource_id": resource_id,
@@ -1260,6 +1381,7 @@ def _grant_document(grant: ResourceKeyGrant) -> dict[str, Any]:
         "idempotency_key": grant.idempotency_key,
         "status": grant.status,
         "generation": grant.generation,
+        "historical_wrapped_keys": [list(entry) for entry in grant.historical_wrapped_keys],
         "schema_version": SCHEMA_VERSION,
     }
 
@@ -1288,9 +1410,21 @@ def _grant_from_document(document: Mapping[str, Any]) -> ResourceKeyGrant:
             idempotency_key=str(document["idempotency_key"]),
             status=str(document.get("status") or "active"),
             generation=int(document.get("generation") or 1),
+            historical_wrapped_keys=_history_from_document(document),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise CaseResourceKeyGrantError("integrity") from exc
+
+
+def _history_from_document(document: Mapping[str, Any]) -> tuple[tuple[str, str, str], ...]:
+    entries = document.get("historical_wrapped_keys", [])
+    if not isinstance(entries, list) or any(not isinstance(entry, (list, tuple)) or len(entry) != 3
+            or any(not isinstance(value, str) or not value for value in entry) for entry in entries):
+        raise CaseResourceKeyGrantError("integrity")
+    history = tuple(tuple(entry) for entry in entries)
+    if len({entry[0] for entry in history}) != len(history):
+        raise CaseResourceKeyGrantError("integrity")
+    return history
 
 
 def _revoke_view(

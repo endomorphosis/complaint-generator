@@ -46,6 +46,8 @@ nothing. There is no XOR, plaintext tempfile, or fake encrypted-success path.
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
+from functools import wraps
 import hashlib
 import hmac
 import json
@@ -1111,6 +1113,17 @@ def _read_private_bytes(path: Path) -> bytes:
     return path.read_bytes()
 
 
+def _key_session_operation(*, authenticate: bool = True):
+    """Serialize a session operation and refresh its authenticated disk state."""
+    def decorate(function):
+        @wraps(function)
+        def invoke(self, *args, **kwargs):
+            with self._key_operation(authenticate=authenticate):
+                return function(self, *args, **kwargs)
+        return invoke
+    return decorate
+
+
 class UserOwnedKeySession:
     """Passphrase- or keyring-wrapped master key with per-case data keys.
 
@@ -1130,6 +1143,11 @@ class UserOwnedKeySession:
         self._retained_data_keys: dict[tuple[str, str], list[tuple[str, bytes]]] = {}
         self._pending_data_keys: dict[tuple[str, str], tuple[str, bytes]] = {}
         self._recipient_wrap: tuple[str, bytes] | None = None
+        self._case_grant_state = {"schema": "case-grant-key-state@1", "resources": {}, "rotations": {}}
+        self._operation_lock = threading.RLock()
+        self._operation_depth = 0
+        self._store_lock_fd: int | None = None
+        self._store_directory_fd: int | None = None
         if self.path.exists():
             self._document = self._load_document()
 
@@ -1179,6 +1197,7 @@ class UserOwnedKeySession:
             case_count=case_count,
         )
 
+    @_key_session_operation(authenticate=False)
     def create(
         self,
         *,
@@ -1232,6 +1251,7 @@ class UserOwnedKeySession:
         self._master_id = master_id
         return self.public_state()
 
+    @_key_session_operation(authenticate=False)
     def unlock_passphrase(self, passphrase: str) -> dict[str, Any]:
         document = self._require_document()
         if document.get("protection") != "passphrase":
@@ -1254,6 +1274,7 @@ class UserOwnedKeySession:
         self._install_master(document, master)
         return self.public_state()
 
+    @_key_session_operation(authenticate=False)
     def unlock_keyring(self, keyring: Any = None) -> dict[str, Any]:
         document = self._require_document()
         if document.get("protection") != "keyring":
@@ -1295,16 +1316,19 @@ class UserOwnedKeySession:
         return self.public_state()
 
     def lock(self) -> dict[str, Any]:
-        if self._master is not None:
-            self._master = bytes(DATA_KEY_BYTES)
-            self._master = None
-        self._data_keys.clear()
-        self._retained_data_keys.clear()
-        self._pending_data_keys.clear()
-        self._recipient_wrap = None
-        self._master_id = None
-        return self.public_state()
+        with self._operation_lock:
+            if self._master is not None:
+                self._master = bytes(DATA_KEY_BYTES)
+                self._master = None
+            self._data_keys.clear()
+            self._retained_data_keys.clear()
+            self._pending_data_keys.clear()
+            self._recipient_wrap = None
+            self._case_grant_state = {"schema": "case-grant-key-state@1", "resources": {}, "rotations": {}}
+            self._master_id = None
+            return self.public_state()
 
+    @_key_session_operation()
     def ensure_data_key(self, tenant_id: str, case_id: str) -> str:
         _require_label(tenant_id)
         _require_label(case_id)
@@ -1335,6 +1359,7 @@ class UserOwnedKeySession:
         self._data_keys[(tenant_id, case_id)] = (key_id, data_key)
         return key_id
 
+    @_key_session_operation()
     def ensure_recipient_wrap_key(self) -> str:
         """Create the session wrap key used only to receive case key grants.
 
@@ -1365,6 +1390,103 @@ class UserOwnedKeySession:
         self._recipient_wrap = (key_id, material)
         return key_id
 
+    @_key_session_operation()
+    def rotate_case_grant_data_key(self, tenant_id: str, case_id: str, *,
+                                   resource_id: str, expected_data_key_id: str,
+                                   operation_id: str) -> dict[str, Any]:
+        """Rotate the active case DEK under a verified canonical resource scope.
+
+        CaseDirectory currently has one canonical resource per case. This is
+        the same DEK selected by provider().resolve for ordinary owner writes;
+        it is not a grant-only key or a workspace ciphertext migration.
+        """
+        self._require_unlocked("Case key rotation requires an unlocked session. Nothing was changed.")
+        _require_label(tenant_id)
+        _require_label(case_id)
+        _require_label(resource_id)
+        _require_label(operation_id)
+        operation_hash = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        current = self._data_keys.get((tenant_id, case_id))
+        if current is None:
+            raise PrivateKeyMaterialError("key_unavailable")
+        current_id, current_key = current
+        prior_rotation = self._case_grant_state["rotations"].get(operation_hash)
+        if prior_rotation is not None:
+            if (prior_rotation.get("tenant_id"), prior_rotation.get("case_id"), prior_rotation.get("resource_id"),
+                    prior_rotation.get("old_data_key_id")) != (tenant_id, case_id, resource_id, expected_data_key_id):
+                raise PrivateKeyMaterialError("key_rotation_replay_mismatch")
+            if current_id != prior_rotation.get("new_data_key_id"):
+                raise PrivateKeyMaterialError("key_rotation_superseded")
+            return {**prior_rotation, "rotated": False, "replayed": True,
+                    "workspace_ciphertext_migrated": False}
+        if current_id != expected_data_key_id:
+            raise PrivateKeyMaterialError("key_revision_conflict")
+        assert self._document is not None
+        associations = dict(self._case_grant_state["resources"])
+        slot = f"{tenant_id}\n{case_id}"
+        if associations.get(slot) not in {None, resource_id}:
+            raise PrivateArtifactBindingError("resource_mismatch")
+        slot, record = self._case_record(tenant_id, case_id)
+        if record.get("pending_data_key") is not None:
+            raise PrivateKeyMaterialError("key_rotation_in_progress")
+        assert self._master is not None
+        new_id, new_key = _opaque_key_id("d-"), _random_secret()
+        retained = [dict(item) for item in record.get("retained_data_keys") or []]
+        retained.append({"data_key_id": current_id,
+                         "wrapped_data_key": dict(record["wrapped_data_key"]), "status": "retained"})
+        record.update(data_key_id=new_id,
+            wrapped_data_key=_wrap_secret(self._master, new_key, _data_aad(tenant_id, case_id, new_id)),
+            retained_data_keys=retained)
+        document = dict(self._document)
+        cases = dict(document.get("cases") or {})
+        cases[slot] = record
+        associations[slot] = resource_id
+        receipt = {"old_data_key_id": current_id, "new_data_key_id": new_id,
+                   "tenant_id": tenant_id, "case_id": case_id, "resource_id": resource_id,
+                   "operation_id_sha256": operation_hash}
+        rotations = dict(self._case_grant_state["rotations"])
+        rotations[operation_hash] = receipt
+        state = {"schema": "case-grant-key-state@1", "resources": associations, "rotations": rotations}
+        document["cases"] = cases
+        self._seal_case_grant_state(document, state)
+        self._write_document(document)
+        self._document = document
+        self._case_grant_state = state
+        self._data_keys[(tenant_id, case_id)] = (new_id, new_key)
+        self._retained_data_keys.setdefault((tenant_id, case_id), []).append((current_id, current_key))
+        return {**receipt, "rotated": True, "replayed": False, "workspace_ciphertext_migrated": False}
+
+    def _bind_case_grant_resource(self, tenant_id: str, case_id: str, resource_id: str) -> None:
+        _require_label(tenant_id)
+        _require_label(case_id)
+        _require_label(resource_id)
+        self._require_unlocked("Resource key binding requires an unlocked session.")
+        assert self._document is not None
+        associations = dict(self._case_grant_state["resources"])
+        slot = f"{tenant_id}\n{case_id}"
+        prior = associations.get(slot)
+        if prior is not None and prior != resource_id:
+            raise PrivateArtifactBindingError("resource_mismatch")
+        if prior is None:
+            associations[slot] = resource_id
+            document = dict(self._document)
+            state = {**self._case_grant_state, "resources": associations}
+            self._seal_case_grant_state(document, state)
+            self._write_document(document)
+            self._document = document
+            self._case_grant_state = state
+
+    def _case_grant_state_binding(self, master_id: str) -> PrivateArtifactBinding:
+        return PrivateArtifactBinding(tenant_id=master_id, case_id="key-store-grants",
+            principal_id=master_id, artifact_kind="case-grant-key-state", revision="1")
+
+    def _seal_case_grant_state(self, document: dict[str, Any], state: Mapping[str, Any]) -> None:
+        assert self._master is not None and self._master_id is not None
+        envelope = seal_private_artifact(json.dumps(state, sort_keys=True, separators=(",", ":")).encode(),
+            binding=self._case_grant_state_binding(self._master_id), key=self._master, key_id=self._master_id)
+        document["case_grant_state"] = _b64e(envelope)
+
+    @_key_session_operation()
     def recipient_wrap_key(self) -> tuple[str, bytes]:
         """Return the in-process wrap key. Locked sessions and raw files fail."""
 
@@ -1377,6 +1499,7 @@ class UserOwnedKeySession:
         self.assert_no_raw_key_files()
         return self._recipient_wrap
 
+    @_key_session_operation()
     def wrap_case_key_for_recipient(
         self,
         *,
@@ -1400,6 +1523,7 @@ class UserOwnedKeySession:
                 actions=self.public_state()["actions"],
                 protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
             )
+        self._bind_case_grant_resource(tenant_id, case_id, resource_id)
         found = self._data_keys.get((tenant_id, case_id))
         if found is None:
             raise PrivateKeyMaterialError("key_unavailable")
@@ -1425,6 +1549,7 @@ class UserOwnedKeySession:
         wrapped["recipient_wrap_key_id"] = recipient_wrap_key_id
         return wrapped
 
+    @_key_session_operation()
     def unwrap_granted_resource_key(
         self,
         wrapped: Mapping[str, Any],
@@ -1480,16 +1605,18 @@ class UserOwnedKeySession:
                 super().__init__({})
 
             def resolve(self, binding: PrivateArtifactBinding) -> tuple[str, bytes]:
-                if not session.unlocked:
-                    raise PrivateKeyLockedError(
-                        "The key session is locked. Unlock it before resolving a case key.",
-                        actions=session.public_state()["actions"],
-                        protection=(session._document or {}).get("protection"),
-                    )
-                return InjectedCaseKeyProvider(session._data_keys).resolve(binding)
+                with session._key_operation():
+                    if not session.unlocked:
+                        raise PrivateKeyLockedError(
+                            "The key session is locked. Unlock it before resolving a case key.",
+                            actions=session.public_state()["actions"],
+                            protection=(session._document or {}).get("protection"),
+                        )
+                    return InjectedCaseKeyProvider(session._data_keys).resolve(binding)
 
         return SessionKeyProvider()
 
+    @_key_session_operation()
     def export_recovery(self, tenant_id: str, case_id: str, recovery_passphrase: str, destination: str | Path | None = None) -> dict[str, Any]:
         if not self.unlocked:
             raise PrivateKeyLockedError(
@@ -1533,6 +1660,7 @@ class UserOwnedKeySession:
             "unlock_is_remote_consent": False,
         }
 
+    @_key_session_operation()
     def import_recovery(
         self,
         payload: bytes | str | Mapping[str, Any],
@@ -1600,6 +1728,7 @@ class UserOwnedKeySession:
         state["data_reset"] = False
         return state
 
+    @_key_session_operation()
     def lookup_data_key(self, tenant_id: str, case_id: str, key_id: str) -> bytes | None:
         """Return an unlocked active, pending, or retained data key."""
 
@@ -1614,6 +1743,7 @@ class UserOwnedKeySession:
                 return retained_key
         return None
 
+    @_key_session_operation()
     def rotate_wrapping_key(
         self,
         new_passphrase: str,
@@ -1708,6 +1838,7 @@ class UserOwnedKeySession:
         _PORTABILITY_LOG.info("wrapping key rewrapped; data keys were not reencrypted")
         return state
 
+    @_key_session_operation()
     def rotate_data_key(
         self,
         tenant_id: str,
@@ -1848,6 +1979,7 @@ class UserOwnedKeySession:
         _PORTABILITY_LOG.info("data key reencrypted; previous generation retained")
         return state
 
+    @_key_session_operation()
     def revoke_retained_keys(
         self,
         tenant_id: str,
@@ -1964,6 +2096,7 @@ class UserOwnedKeySession:
         item = destroyed.get(f"{tenant_id}\n{case_id}")
         return isinstance(item, Mapping) and item.get("status") == "destroyed"
 
+    @_key_session_operation()
     def destroy_case_keys(self, tenant_id: str, case_id: str) -> dict[str, Any]:
         """Destroy one case's data keys. The master key and other cases stay."""
 
@@ -2083,12 +2216,26 @@ class UserOwnedKeySession:
                 _recipient_wrap_aad(wrap_id),
             )
             recipient_wrap = (wrap_id, opened_wrap)
+        grant_state = {"schema": "case-grant-key-state@1", "resources": {}, "rotations": {}}
+        if document.get("case_grant_state") is not None:
+            master_id = str(document.get("master_key_id") or "")
+            opened_state = open_private_artifact(_b64d(document["case_grant_state"]),
+                binding=self._case_grant_state_binding(master_id), key=master, expected_key_id=master_id)
+            try:
+                grant_state = json.loads(opened_state)
+                if (not isinstance(grant_state, dict) or set(grant_state) != {"schema", "resources", "rotations"}
+                        or grant_state["schema"] != "case-grant-key-state@1"
+                        or not isinstance(grant_state["resources"], dict) or not isinstance(grant_state["rotations"], dict)):
+                    raise ValueError("invalid grant state")
+            except (ValueError, TypeError):
+                raise PrivateArtifactIntegrityError("malformed") from None
         self._master = master
         self._master_id = str(document.get("master_key_id") or "")
         self._data_keys = loaded
         self._retained_data_keys = retained
         self._pending_data_keys = pending
         self._recipient_wrap = recipient_wrap
+        self._case_grant_state = grant_state
 
     def _new_document(
         self,
@@ -2116,7 +2263,76 @@ class UserOwnedKeySession:
             document["keyring_account"] = keyring_account
         return document
 
+    @contextmanager
+    def _key_operation(self, *, authenticate: bool = True):
+        with self._operation_lock:
+            outer = self._operation_depth == 0
+            self._operation_depth += 1
+            try:
+                if outer:
+                    if self.path.exists():
+                        self._acquire_store_lock()
+                        try:
+                            document = self._load_document()
+                            if authenticate and self._master is not None:
+                                if document.get("master_key_id") != self._master_id:
+                                    raise PrivateKeyMaterialError("key_store_changed")
+                                self._install_master(document, self._master)
+                            self._document = document
+                        except Exception:
+                            self.lock()
+                            raise
+                    elif self._document is not None:
+                        self.lock()
+                        raise PrivateKeyMaterialError("key_store_missing")
+                yield
+            finally:
+                self._operation_depth -= 1
+                if outer:
+                    if self._store_lock_fd is not None:
+                        os.close(self._store_lock_fd)
+                        self._store_lock_fd = None
+                    if self._store_directory_fd is not None:
+                        os.close(self._store_directory_fd)
+                        self._store_directory_fd = None
+
+    def _acquire_store_lock(self) -> None:
+        if self._store_lock_fd is not None:
+            return
+        import fcntl
+        root = self.directory.absolute()
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if root.resolve() != root:
+            raise PrivateKeyMaterialError("permissions")
+        directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        descriptor = None
+        try:
+            info = os.fstat(directory)
+            if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+                raise PrivateKeyMaterialError("permissions")
+            descriptor = os.open(".keystore.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                 0o600, dir_fd=directory)
+            before = os.fstat(descriptor)
+            if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                    or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) != 0o600):
+                raise PrivateKeyMaterialError("permissions")
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            named = os.stat(".keystore.lock", dir_fd=directory, follow_symlinks=False)
+            if (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino):
+                raise PrivateKeyMaterialError("permissions")
+            self._store_lock_fd, self._store_directory_fd = descriptor, directory
+        except BaseException:
+            if descriptor is not None:
+                os.close(descriptor)
+            os.close(directory)
+            raise
+
     def _write_document(self, document: Mapping[str, Any]) -> None:
+        if self._operation_depth < 1:
+            raise PrivateKeyMaterialError("key_store_transaction_required")
+        self._acquire_store_lock()
+        if self._document is None and self.path.exists():
+            raise PrivateKeyMaterialError("key_store_changed")
         encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
         self.directory.mkdir(parents=True, exist_ok=True)
         os.chmod(self.directory, 0o700)
@@ -2125,6 +2341,8 @@ class UserOwnedKeySession:
         os.replace(temporary, self.path)
         os.chmod(self.path, 0o600)
         _assert_owner_mode(self.path, 0o600)
+        assert self._store_directory_fd is not None
+        os.fsync(self._store_directory_fd)
 
     def _load_document(self) -> dict[str, Any]:
         raw = _read_private_bytes(self.path)
