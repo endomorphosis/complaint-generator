@@ -16,11 +16,15 @@ import hashlib
 import json
 import os
 import fcntl
+import stat
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from starlette.requests import Request
 
+from applications.case_access import CaseActionAuthorizer, CaseAccessError
+from applications.browser_sessions import BrowserSessionError, BrowserSessionService, SESSION_COOKIE
 from applications.case_directory import CaseDirectory, CaseDirectoryError
 from integrations.ipfs_datasets.llm import (
     OPERATION_CONSENT_CONTRACT,
@@ -43,6 +47,7 @@ CONSENT_KIND = "case_processing_consent"
 CONSENT_REVISION = "current"
 CONSENT_CONTRACT = "case_processing_consent"
 CONSENT_VERSION = "1"
+MAX_CONSENT_BYTES = 64 * 1024
 MODES = (PRIVACY_PROCESSING_LOCAL, PRIVACY_PROCESSING_GROK)
 PURPOSE_DATA_CLASS = {
     "extract_facts": "raw_intake",
@@ -174,15 +179,25 @@ class CaseConsentService:
         self._key = bytes(key)
         self._key_id = _label(key_id, "key_id")
         self._clock = clock
-        self._root = Path(root)
+        self._root = Path(root).absolute()
+        if self._root.resolve() != self._root:
+            raise CaseConsentError("consent_unavailable")
         self._root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._check_root()
 
-    def read(self, actor_principal_id: str, case_id: str) -> dict[str, Any]:
-        record = self._owned(actor_principal_id, case_id)
-        stored = self._load(record)
+    def read(self, actor_principal_id: str, case_id: str, *,
+             authorizer: CaseActionAuthorizer | None = None, verify_session: Callable[[], None] | None = None) -> dict[str, Any]:
+        with self._lock():
+            if verify_session is not None:
+                verify_session()
+            record = self._owned(actor_principal_id, case_id)
+            self._authorize(authorizer, actor_principal_id, record, "case.read", {}, verify_session)
+            stored = self._load(record)
+            self._authorize(authorizer, actor_principal_id, record, "case.read", {}, verify_session)
         return self._view(record, stored)
 
-    def choose(self, actor_principal_id: str, case_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
+    def choose(self, actor_principal_id: str, case_id: str, body: Mapping[str, Any], *,
+               authorizer: CaseActionAuthorizer | None = None, verify_session: Callable[[], None] | None = None) -> dict[str, Any]:
         material = self._body(body)
         self._reject_implications(material)
         purpose = _label(material.get("purpose"), "missing_purpose")
@@ -197,8 +212,12 @@ class CaseConsentService:
             raise CaseConsentError("explicit_case_purpose_required")
         if mode == PRIVACY_PROCESSING_LOCAL and explicit:
             raise CaseConsentError("explicit_case_purpose_required")
-        record = self._owned(actor_principal_id, case_id)
         with self._lock():
+            if verify_session is not None:
+                verify_session()
+            record = self._owned(actor_principal_id, case_id)
+            admit = lambda: self._authorize(authorizer, actor_principal_id, record, "case.processing.choose", material, verify_session)
+            admit()
             stored = self._load(record)
             current = int(stored["generation"])
             if expected != current:
@@ -220,7 +239,7 @@ class CaseConsentService:
                 decision.update({
                     "mode": PRIVACY_PROCESSING_LOCAL,
                     "explicit": False,
-                    "revoked": current > 0 and decisions[purpose].get("mode") == PRIVACY_PROCESSING_GROK,
+                    "revoked": decisions[purpose].get("mode") == PRIVACY_PROCESSING_GROK or decisions[purpose].get("revoked") is True,
                     "provider": "",
                     "model": "",
                 })
@@ -235,10 +254,11 @@ class CaseConsentService:
                 "decided_at": self._now(),
                 "decisions": decisions,
             }
-            self._write(record, stored)
+            self._write(record, stored, admit=admit)
         return self._view(record, stored)
 
-    def revoke(self, actor_principal_id: str, case_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
+    def revoke(self, actor_principal_id: str, case_id: str, body: Mapping[str, Any], *,
+               authorizer: CaseActionAuthorizer | None = None, verify_session: Callable[[], None] | None = None) -> dict[str, Any]:
         material = self._body(body)
         self._reject_implications(material)
         purpose = _label(material.get("purpose"), "missing_purpose")
@@ -247,7 +267,39 @@ class CaseConsentService:
         material = dict(material)
         material["mode"] = PRIVACY_PROCESSING_LOCAL
         material.pop("explicit_case_purpose", None)
-        return self.choose(actor_principal_id, case_id, material)
+        return self.choose(actor_principal_id, case_id, material, authorizer=authorizer, verify_session=verify_session)
+
+    @staticmethod
+    def _authorize(authorizer, actor, record, action, material, verify_session=None) -> None:
+        # Direct service calls retain the original owner-directory API. HTTP
+        # always supplies the configured canonical authorizer below; requests
+        # cannot provide or replace this server-owned object.
+        if verify_session is not None:
+            verify_session()
+        if authorizer is None:
+            return
+        if not isinstance(authorizer, CaseActionAuthorizer):
+            raise CaseConsentError("consent_unavailable")
+        claims = {"actor_principal_id": actor, "user_id": actor,
+                  "tenant_id": record.tenant_id, "case_id": record.case_id,
+                  "resource_id": record.resource_id, "owner_principal_id": record.owner_principal_id}
+        if any(name in material and material[name] != value for name, value in claims.items()):
+            raise CaseConsentError("case_scope_mismatch")
+        if "expected_revision" in material and (
+                type(material["expected_revision"]) is not int or material["expected_revision"] != record.revision):
+            raise CaseConsentError("revision_conflict")
+        if "action" in material and material["action"] != action:
+            raise CaseConsentError("action_not_permitted")
+        try:
+            decision = authorizer.authorize(boundary="http", actor_principal_id=actor,
+                tenant_id=record.tenant_id, case_id=record.case_id, resource_id=record.resource_id,
+                expected_revision=record.revision, action=action)
+        except CaseAccessError as exc:
+            raise CaseConsentError(exc.code) from exc
+        if decision.membership != "owner" or decision.actor_principal_id != actor:
+            raise CaseConsentError("missing_case")
+        if verify_session is not None:
+            verify_session()
 
     def _owned(self, actor_principal_id: str, case_id: str):
         actor = _label(actor_principal_id, "unauthenticated")
@@ -302,11 +354,27 @@ class CaseConsentService:
 
     def _load(self, record) -> dict[str, Any]:
         path = self._path(record)
-        if not path.is_file():
-            return self._empty(record)
         try:
+            self._check_root()
+            try:
+                descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            except FileNotFoundError:
+                return self._empty(record)
+            try:
+                info = os.fstat(descriptor)
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1
+                        or stat.S_IMODE(info.st_mode) != 0o600 or not 0 < info.st_size <= MAX_CONSENT_BYTES):
+                    raise CaseConsentError("consent_unavailable")
+                with os.fdopen(os.dup(descriptor), "rb") as stream:
+                    envelope = stream.read(MAX_CONSENT_BYTES + 1)
+                after = os.fstat(descriptor)
+                if len(envelope) != info.st_size or any(getattr(info, key) != getattr(after, key)
+                        for key in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")):
+                    raise CaseConsentError("consent_unavailable")
+            finally:
+                os.close(descriptor)
             plaintext = open_private_artifact(
-                path.read_bytes(),
+                envelope,
                 binding=self._binding(record),
                 key=self._key,
                 expected_key_id=self._key_id,
@@ -314,28 +382,75 @@ class CaseConsentService:
             document = json.loads(plaintext.decode("utf-8"))
         except (PrivateArtifactIntegrityError, PrivateStorageError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise CaseConsentError("consent_unavailable") from exc
-        if not isinstance(document, dict) or document.get("case_id") != record.case_id:
+        if (not isinstance(document, dict) or document.get("case_id") != record.case_id
+                or document.get("contract") != CONSENT_CONTRACT or document.get("version") != CONSENT_VERSION):
             raise CaseConsentError("consent_unavailable")
         if document.get("tenant_id") != record.tenant_id or document.get("owner_principal_id") != record.owner_principal_id:
             raise CaseConsentError("consent_unavailable")
         decisions = document.get("decisions")
         if not isinstance(decisions, dict) or set(decisions) != set(PURPOSE_DATA_CLASS):
             raise CaseConsentError("consent_unavailable")
-        document["generation"] = _generation(document.get("generation"))
+        try:
+            document["generation"] = _generation(document.get("generation"))
+            for purpose, decision in decisions.items():
+                if (not isinstance(decision, dict) or decision.get("purpose") != purpose
+                        or decision.get("data_class") != PURPOSE_DATA_CLASS[purpose]
+                        or decision.get("mode") not in MODES
+                        or type(decision.get("explicit")) is not bool or type(decision.get("revoked")) is not bool
+                        or _generation(decision.get("generation")) > document["generation"]):
+                    raise CaseConsentError("consent_unavailable")
+        except CaseConsentError as exc:
+            raise CaseConsentError("consent_unavailable") from exc
         return document
 
-    def _write(self, record, document: dict[str, Any]) -> None:
+    def _write(self, record, document: dict[str, Any], *, admit: Callable[[], None]) -> None:
         payload = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        envelope = seal_private_artifact(payload, binding=self._binding(record), key=self._key, key_id=self._key_id)
-        path = self._path(record)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_bytes(envelope)
-        os.replace(temporary, path)
+        temporary = None
+        try:
+            self._check_root()
+            envelope = seal_private_artifact(payload, binding=self._binding(record), key=self._key, key_id=self._key_id)
+            descriptor, name = tempfile.mkstemp(prefix=".consent-", dir=self._root)
+            temporary = Path(name)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(envelope)
+                stream.flush()
+                os.fsync(stream.fileno())
+            self._check_root()
+            admit()
+            os.replace(temporary, self._path(record))
+            directory = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except (PrivateStorageError, OSError) as exc:
+            raise CaseConsentError("consent_unavailable") from exc
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def _check_root(self) -> None:
+        try:
+            info = self._root.lstat()
+            if (self._root.resolve() != self._root or not stat.S_ISDIR(info.st_mode)
+                    or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700):
+                raise CaseConsentError("consent_unavailable")
+        except OSError as exc:
+            raise CaseConsentError("consent_unavailable") from exc
 
     def _lock(self):
+        self._check_root()
         class _Guard:
             def __init__(self, root: Path) -> None:
-                self._fd = os.open(root / ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+                try:
+                    self._fd = os.open(root / ".lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+                    info = os.fstat(self._fd)
+                    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                            or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+                        os.close(self._fd)
+                        raise CaseConsentError("consent_unavailable")
+                except OSError as exc:
+                    raise CaseConsentError("consent_unavailable") from exc
 
             def __enter__(self):
                 fcntl.flock(self._fd, fcntl.LOCK_EX)
@@ -409,12 +524,34 @@ def mount_case_consent(app: Any) -> None:
             raise CaseConsentError("consent_unavailable")
         return service
 
+    def _authorizer(request: Any) -> CaseActionAuthorizer:
+        authority = getattr(request.app.state, "case_authorizer", None)
+        if not isinstance(authority, CaseActionAuthorizer):
+            raise CaseConsentError("consent_unavailable")
+        return authority
+
     def _actor(request: Any) -> str:
         principal = getattr(request.state, "browser_principal", None)
         actor = getattr(principal, "principal_id", None)
         if not isinstance(actor, str) or actor == "":
             raise CaseConsentError("unauthenticated")
         return actor
+
+    def _session_verifier(request: Any) -> Callable[[], None]:
+        sessions = getattr(request.app.state, "browser_sessions", None)
+        bound = getattr(request.state, "browser_principal", None)
+        if not isinstance(sessions, BrowserSessionService) or bound is None:
+            raise CaseConsentError("consent_unavailable")
+        token = request.cookies.get(SESSION_COOKIE)
+        def verify() -> None:
+            try:
+                current = sessions.authenticate_token(token)
+            except BrowserSessionError as exc:
+                raise CaseConsentError("unauthenticated") from exc
+            if (current.principal_id != bound.principal_id or current.tenant_id != bound.tenant_id
+                    or current.generation != bound.generation):
+                raise CaseConsentError("unauthenticated")
+        return verify
 
     def _material(request: Any) -> Mapping[str, Any]:
         material = getattr(request.state, "case_catalog_material", None)
@@ -426,20 +563,23 @@ def mount_case_consent(app: Any) -> None:
     @app.get("/api/cases/{case_id}/processing-consent")
     async def consent_read(case_id: str, request: Request):
         try:
-            return JSONResponse(_service(request).read(_actor(request), case_id))
+            return JSONResponse(_service(request).read(_actor(request), case_id, authorizer=_authorizer(request),
+                verify_session=_session_verifier(request)))
         except CaseConsentError as exc:
             return _fail(exc)
 
     @app.post("/api/cases/{case_id}/processing-consent")
     async def consent_choose(case_id: str, request: Request):
         try:
-            return JSONResponse(_service(request).choose(_actor(request), case_id, _material(request)))
+            return JSONResponse(_service(request).choose(_actor(request), case_id, _material(request), authorizer=_authorizer(request),
+                verify_session=_session_verifier(request)))
         except CaseConsentError as exc:
             return _fail(exc)
 
     @app.post("/api/cases/{case_id}/processing-consent/revoke")
     async def consent_revoke(case_id: str, request: Request):
         try:
-            return JSONResponse(_service(request).revoke(_actor(request), case_id, _material(request)))
+            return JSONResponse(_service(request).revoke(_actor(request), case_id, _material(request), authorizer=_authorizer(request),
+                verify_session=_session_verifier(request)))
         except CaseConsentError as exc:
             return _fail(exc)
