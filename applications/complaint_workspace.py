@@ -9547,6 +9547,10 @@ class ComplaintWorkspaceService:
         else:
             receipt = acquire_bounded_legal_sources(mediator, self, authority, request,
                 source_scope_sha256=snapshot["source_scope_sha256"])
+        # Research stores source custody and review. The mediator's legacy
+        # admission-time graph may include unrelated source-owner DB rows;
+        # only the separate current-manifest refresh may promote dependencies.
+        receipt = {**receipt, "graph_mutated": False, "dependency_refresh_status": "not_requested"}
         produced = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file")
         if not isinstance(produced, dict):
             raise WorkspacePersistenceError("Research source unavailable.", code="legal_research_unavailable", public_status="unavailable")
@@ -9559,9 +9563,7 @@ class ComplaintWorkspaceService:
         if case_file == shared["intake_case_file"]:
             return {**receipt, "case_id": case_id, "private_revision": snapshot["private_revision"],
                 "session_revision": snapshot["session_revision"]}
-        graph = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
-        if not isinstance(graph, DependencyGraph):
-            raise WorkspacePersistenceError("Research graph unavailable.", code="legal_research_unavailable", public_status="unavailable")
+        graph = DependencyGraph.from_dict(deepcopy(shared["dependency_graph"]))
         projection = WorkflowActionService.project_legal_context_selection(shared, case_file=case_file, dependency_graph=graph)
         draft = deepcopy(state)
         draft["shared_interview"] = projection
