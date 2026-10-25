@@ -38,7 +38,7 @@ Implementation instructions:
 
 ## CIMP-GUI-02 Qualify real browser execution under Native validation
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
