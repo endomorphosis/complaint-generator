@@ -732,7 +732,7 @@ Implementation instructions:
 
 ## CIMP-GUI-25 Acquire bounded legal source candidates from the GUI
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
