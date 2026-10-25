@@ -372,7 +372,7 @@ Implementation instructions:
 
 ## CIMP-GUI-13 Persist encrypted actor-attributed case audit events
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
