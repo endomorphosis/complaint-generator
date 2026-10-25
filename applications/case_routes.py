@@ -185,6 +185,25 @@ def _is_admin_api_path(path: str) -> bool:
     return path == ADMIN_API_PREFIX or path.startswith(ADMIN_API_PREFIX + "/")
 
 
+def durability_readiness_boundary() -> dict[str, Any]:
+    """Storage readiness is a separate owner from interview and legal readiness.
+
+    A storage, key, or backend failure must not clear or satisfy interview or
+    legal readiness. Callers may read this boundary; storage routes publish
+    only ``storage_readiness``.
+    """
+
+    return {
+        "storage_readiness_owner": "case_storage",
+        "interview_readiness_owner": "interview",
+        "legal_readiness_owner": "legal",
+        "storage_sets_interview_readiness": False,
+        "storage_sets_legal_readiness": False,
+        "storage_failure_clears_interview_readiness": False,
+        "storage_failure_clears_legal_readiness": False,
+    }
+
+
 def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer], mediator: Any = None,
                         include_workspace: bool = True, include_review: bool = True,
                         include_document: bool = True, workspace_service: Any = None,
@@ -318,6 +337,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     app.state.case_messages = case_messages
     app.state.case_attachments = case_attachments
     app.state.case_storage = case_storage
+    app.state.durability_readiness_boundary = durability_readiness_boundary()
     app.state.case_consent = case_consent
     app.state.case_notifications = case_notifications
     app.state.gui_inference_transport = selected_inference_transport
