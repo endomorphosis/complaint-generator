@@ -950,6 +950,14 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
                 native = any("ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_" in argument for argument in argv)
                 if ("_run" in argv or native) and "--state-dir" in argv and str(state_dir) in argv:
                     raise RuntimeError("campaign runner exists without a valid owner receipt; inspect its ownership before restarting")
+        initializing_cleanup = []
+        if full_launch:
+            from .startup_initializing_cleanup import cleanup_stopped_initializing_checkouts
+            try:
+                initializing_cleanup = cleanup_stopped_initializing_checkouts(sys.modules[__name__], repo_root, state_dir, previous)
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
+                return {"status": "not_ready", "reason": "initializing_checkout_cleanup_unverified",
+                        "error_type": type(error).__name__, "execution_started": False, "paid_calls": 0}
         prepared = prepare(repo_root, spec_path, state_dir)
         check = (doctor(repo_root, spec_path, state_dir, worktree_root=selected_root) if root_binding is not None
                  else doctor(repo_root, spec_path, state_dir))
@@ -996,6 +1004,7 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
             raise RuntimeError("spawned process did not establish exact launcher ownership")
         _atomic_json(owner_path, record)
         return {"status": "starting", "pid": process.pid, "state_dir": str(state_dir),
+                "initializing_checkouts_reclaimed": initializing_cleanup,
                 "log_path": str(log_path), "provider": "grok_cli", "model": MODEL,
                 "progress_verified": False,
                 "next_check": "status must show native heartbeat and task/provider progress"}
