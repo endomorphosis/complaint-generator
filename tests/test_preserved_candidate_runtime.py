@@ -46,7 +46,7 @@ def publish(w):
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
+def world(tmp_path):
     from tests.test_improvement_recovery import _spec_text
     root, state = tmp_path / "root", tmp_path / "state"
     root.mkdir(); state.mkdir(mode=0o700); (state / "worktrees").mkdir(mode=0o700)
@@ -101,7 +101,6 @@ def world(tmp_path, monkeypatch):
     w = SimpleNamespace(root=root, state=state, spec=spec, daemon=daemon, candidate=candidate,
         receipt=receipt, proof=proof, base=baseline, baseline=baseline, preserved=preserved, pins=pins, record={})
     publish(w)
-    monkeypatch.setattr(runner, "_require_resource_capacity", lambda *a, **k: None)
     return w
 
 
@@ -238,3 +237,16 @@ def test_partial_sparse_clone_does_not_overwrite_a_present_skipped_foreign_runti
     monkeypatch.setattr(engine, "run_command", actual)
     with pytest.raises(ValueError, match="dependency"): run(w)
     assert target.read_text() == "FOREIGN_SKIPPED = 1\n"
+
+
+
+def test_real_resource_admission_blocks_before_materialization_with_its_stage(world, monkeypatch):
+    monkeypatch.setattr(runner, "_resource_capacity", lambda *_args: {
+        "ready": False, "reason": "synthetic_capacity_denial", "capacity_reserved": False})
+    with pytest.raises(runner.CampaignResourceHold) as caught:
+        run(world)
+    assert caught.value.observation["stage"] == "preserved_candidate_materialization"
+    branch, path = expected(world)
+    assert not path.exists()
+    assert git(world.root, "branch", "--list", branch) == ""
+    assert world.daemon.state_path.read_text() == '{"implementation_attempts":{"CIMP-OPS-03":1}}\n'

@@ -317,6 +317,16 @@ def reconcile_pending_claim(repo_root, spec_path, state_dir, record, native, dae
     after, source = _read_native_state(repo_root, daemon.state_path)
     _need(after == before and source.get("source") != "unavailable",
           "pending_claim_runtime_native_state_changed")
+    # Preserve a closed SDK refusal reason after re-proving its source and
+    # unchanged Native payload. Free-form provider or exception text is never
+    # promoted to an operator diagnostic or recovery instruction.
+    refusal = (result.get("reason") if isinstance(result, dict) else None)
+    closed_refusal = (isinstance(result, dict) and result.get("reconciled") is False
+        and result.get("blocked") is True and type(refusal) is str
+        and re.fullmatch(r"[a-z][a-z0-9_]{0,119}", refusal) is not None
+        and all(result.get(key) is False for key in ("completion_authority", "attempt_refunded",
+            "provider_callback_settled", "new_attempt_authority")))
+    _need(not closed_refusal, "pending_claim_sdk_blocked_" + (refusal if closed_refusal else ""))
     _need(isinstance(result, dict) and result.get("reconciled") is True
           and result.get("blocked") is False and result.get("counters_preserved") is True
           and result.get("task_status_unchanged") is True
