@@ -173,6 +173,8 @@ class IntakeChatTurnRequest(BaseModel):
     question_id: Optional[str] = None
     expected_question_revision: Optional[int] = Field(default=None, ge=0)
     interview_action: Optional[str] = None
+    expected_graph_revision: Optional[str] = Field(default=None, strict=True)
+    expected_session_revision: Optional[int] = Field(default=None, ge=0, strict=True)
 
 
 class EvidenceRequest(BaseModel):
@@ -536,6 +538,8 @@ def create_complaint_workspace_router(
             question_id=request.question_id,
             expected_question_revision=request.expected_question_revision,
             interview_action=request.interview_action,
+            expected_graph_revision=request.expected_graph_revision,
+            expected_session_revision=request.expected_session_revision,
         ))
         if shared_inquiry_conflict(payload):
             return JSONResponse(status_code=INQUIRY_CONFLICT_STATUS, content=payload)

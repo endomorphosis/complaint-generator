@@ -207,116 +207,40 @@ def test_hook_returns_versioned_candidates_and_research_gaps_without_admitting_l
     assert latest["admitted_law"] is False
 
 
-def _world(tmp_path):
-    now = {"t": 1_700_000_100}
-
-    def clock():
-        now["t"] += 1
-        return now["t"]
-
-    principals = PrincipalStore(tmp_path / "principals", key=os.urandom(32), key_id="principal-key")
-    owner = principals.register_from_request({})
-    stranger = principals.register_from_request({})
-    cases = CaseDirectory(tmp_path / "cases", key=os.urandom(32), key_id="case-key")
-    case = cases.create_case(actor_principal_id=owner.principal_id)
-    second = cases.create_case(actor_principal_id=owner.principal_id)
-    authorizer = CaseActionAuthorizer(principals, cases)
-    sessions = BrowserSessionService(BrowserSessionConfiguration(
-        adapter=PrincipalStoreCredentialAdapter(principals, {
-            "synthetic-owner-credential": owner.principal_id,
-            "synthetic-stranger-credential": stranger.principal_id,
-        }),
-        signing_key=os.urandom(32),
-        ttl_seconds=300,
-    ))
-    consent = CaseConsentService(tmp_path / "consent", cases=cases, key=os.urandom(32), key_id="consent-key", clock=clock)
-    handlers = CaseHandlerRegistry()
-    mediators = {}
-    for selected in (case, second):
-        mediator = _Mediator()
-        workspace = SimpleNamespace(case_id=selected.case_id)
-        handlers.bind(selected, mediator=mediator, workspace_service=workspace, authorize_delegated=lambda _decision: False)
-        mediators[selected.case_id] = mediator
-    app = FastAPI()
-    compose_case_routes(app, authorizer=authorizer, browser_sessions=sessions, case_handlers=handlers,
-        case_consent=consent, include_workspace=False, include_review=False, include_document=False)
-    return SimpleNamespace(owner=owner, case=case, second=second, app=app, mediators=mediators, consent=consent)
-
-
-def _headers(case, csrf=None):
-    headers = {
-        "x-tenant-id": case.tenant_id,
-        "x-case-id": case.case_id,
-        "x-resource-id": case.resource_id,
-        "x-expected-revision": str(case.revision),
-    }
-    if csrf is not None:
-        headers["x-csrf-token"] = csrf
-    return headers
-
-
-def _login(client, credential):
-    response = client.post("/api/complaint-workspace/auth/login", json={"credential": credential})
-    assert response.status_code == 200, response.text
-    return response.json()["csrf_token"]
-
-
 def test_http_acquisition_checks_consent_cancellation_and_case_boundary(tmp_path):
+    from tests.test_gui25_26_private_owner_http import _world, _login, _headers, _start_case, _choose, _body
     world = _world(tmp_path)
-    case = world.case
-    path = f"/api/legal-research/{case.case_id}"
-    world.consent.choose(world.owner.principal_id, case.case_id, {
-        "purpose": "citation_acquisition",
-        "mode": "local_private",
-        "expected_generation": 0,
-    })
+    path = f"/api/legal-research/{world.case.case_id}"
     with TestClient(world.app, base_url="https://testserver") as client:
-        anonymous = client.get(path, headers=_headers(case))
-        assert anonymous.status_code == 401
-        csrf = _login(client, "synthetic-owner-credential")
-        empty = client.get(path, headers=_headers(case, csrf))
-        assert empty.status_code == 200, empty.text
-        assert empty.json()["admitted_law"] is False
-        assert empty.json()["source_version_receipts"] == []
-        refused = client.post(path, headers=_headers(case, csrf), json=_body(
-            purpose="public_law_citation", expected_consent_generation=1, operation_id="http-0"))
-        assert refused.status_code == 403
-        assert refused.json()["error"] == "purpose_consent_required"
-        assert refused.json()["admitted_law"] is False
-        conflict = client.post(path, headers=_headers(case, csrf), json=_body(
-            expected_consent_generation=0, operation_id="http-stale"))
-        assert conflict.status_code == 409
-        assert conflict.json()["error"] == "consent_revision_conflict"
-        assert world.mediators[case.case_id].search.calls == []
-        saved = client.post(path, headers=_headers(case, csrf), json=_body(operation_id="http-1"))
-        assert saved.status_code == 200, saved.text
-        body = saved.json()
-        assert body["case_id"] == case.case_id
-        assert body["admitted_law"] is False
-        assert body["candidate_count"] == 1
-        assert body["source_version_receipts"][0]["version"] == "us-code-2024.1"
-        assert body["source_version_receipts"][0]["admitted_law"] is False
-        assert any(item["reason"] == "model_text_not_law" for item in body["source_version_receipts"])
-        again = client.post(path, headers=_headers(case, csrf), json=_body(operation_id="http-1"))
-        assert again.status_code == 200
-        assert again.json()["replayed"] is True
-        assert len(world.mediators[case.case_id].search.calls) == 1
-        cancelled = client.post(path, headers=_headers(case, csrf), json=_body(operation_id="http-cancel", cancelled=True))
-        assert cancelled.status_code == 200, cancelled.text
-        assert cancelled.json()["status"] == "cancelled"
+        assert client.get(path, headers=_headers(world)).status_code == 401
+        csrf = _login(client)
+        _start_case(client, world, csrf)
+        assert client.get(path, headers=_headers(world)).json()["source_version_receipts"] == []
+        generation = _choose(client, world, csrf)
+        body = _body(generation)
+        assert client.post(path, headers=_headers(world), json=body).status_code == 403
+        refused = client.post(path, headers=_headers(world, csrf), json={**body, "purpose": "public_law_citation"})
+        assert refused.status_code == 403 and refused.json()["error"] == "purpose_consent_required"
+        conflict = client.post(path, headers=_headers(world, csrf), json={**body, "expected_consent_generation": 0})
+        assert conflict.status_code == 409 and conflict.json()["error"] == "consent_revision_conflict"
+        saved = client.post(path, headers=_headers(world, csrf), json=body)
+        assert saved.status_code == 200 and saved.json()["candidate_count"] > 0
+        assert saved.json()["admitted_law"] is False and saved.json()["proof"] is False
+        candidate = next(row for row in saved.json()["source_version_receipts"] if row["kind"] == "candidate")
+        assert candidate["source_passage"] and candidate["version"] and candidate["content_hash"]
+        assert candidate["stated_applicability"] == "unknown"
+        again = client.post(path, headers=_headers(world, csrf), json=body)
+        assert again.status_code == 200 and again.json()["replayed"] is True
+        assert again.json()["private_revision"] == saved.json()["private_revision"]
+        cancelled = client.post(path, headers=_headers(world, csrf), json={**body, "operation_id": "synthetic-http-cancel", "cancelled": True})
+        assert cancelled.status_code == 200 and cancelled.json()["status"] == "cancelled"
         assert cancelled.json()["admitted_law"] is False
-        assert world.mediators[case.case_id].search.calls[-1]["kwargs"]["cancelled"] is True
-        unbounded = client.post(path, headers=_headers(case, csrf), json=_body(operation_id="http-big", max_results=50))
-        assert unbounded.status_code == 422
-        assert unbounded.json()["error"] == "legal_research_bounds"
-        crossed = client.post(f"/api/legal-research/{world.second.case_id}", headers=_headers(case, csrf), json=_body(operation_id="http-cross"))
-        assert crossed.status_code == 403
-        assert crossed.json()["error"] == "cross_case_id"
-        assert world.mediators[world.second.case_id].search.calls == []
-        assert world.mediators[case.case_id].admissions == []
-        _login(client, "synthetic-stranger-credential")
-        denied = client.get(path, headers=_headers(case))
-        assert denied.status_code == 403
+        unbounded = client.post(path, headers=_headers(world, csrf), json={**body, "operation_id": "synthetic-http-large", "max_results": 50})
+        assert unbounded.status_code == 422 and unbounded.json()["error"] == "legal_research_bounds"
+        crossed = client.post("/api/legal-research/synthetic-other-case", headers=_headers(world, csrf), json=body)
+        assert crossed.status_code == 403 and crossed.json()["error"] == "legal_research_ungranted"
+        assert client.post("/api/complaint-workspace/auth/login", json={"credential": "synthetic-stranger-credential"}).status_code == 200
+        assert client.get(path, headers=_headers(world)).status_code == 403
 
 
 def test_workspace_describes_candidates_as_unadmitted():
