@@ -117,7 +117,11 @@ def _world(tmp_path):
     campaign = tmp_path / 'campaign'; campaign.mkdir(mode=0o700)
     worker = tmp_path / 'inert_native_owner.py'
     root = Path(runner.__file__).resolve().parents[2]
-    paths = [root, *(root / 'external' / name for name in ('ipfs_accelerate_py','ipfs_datasets_py','ipfs_kit_py'))]
+    native_root = Path(native.__file__).resolve().parents[3]
+    assert subprocess.check_output(['git','rev-parse','HEAD'],cwd=native_root,text=True).strip() == subprocess.check_output(
+        ['git','rev-parse','HEAD:external/ipfs_accelerate_py'],cwd=root,text=True).strip()
+    assert Path(native.__file__).resolve() == native_root/'ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py'
+    paths = [root, native_root, *(native_root.parent / name for name in ('ipfs_datasets_py','ipfs_kit_py'))]
     worker.write_text('import sys\nfrom pathlib import Path\nsys.path[:0]=' + repr(list(map(str, paths)))
         + '\nfrom tests.test_owned_validation_child import _worker\n_worker(Path(' + repr(str(campaign))
         + '),Path(__file__).resolve())\n')
