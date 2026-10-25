@@ -7563,7 +7563,7 @@ def _kit_call(kit: Any, name: str, *args: Any) -> Any:
     return result
 
 
-def _opaque_ref(result: Mapping[str, Any]) -> str:
+def _ciphertext_commit_reference(result: Mapping[str, Any]) -> str:
     ref = result.get("ref") or result.get("locator")
     if isinstance(ref, str) and ref.strip() and ref == ref.strip() and len(ref) <= 200:
         if any(marker in ref.lower() for marker in _GATEWAY_MARKERS):
@@ -7603,7 +7603,7 @@ def verify_ciphertext_durability(kit: Any, envelope: bytes) -> dict[str, Any]:
     manifest = _kit_call(kit, "manifest", payload)
     if not isinstance(manifest, Mapping):
         raise CiphertextDurabilityError("kit_manifest_failed")
-    ref = _opaque_ref(manifest)
+    ref = _ciphertext_commit_reference(manifest)
     _record(DURABILITY_STATE_LOCAL_COMMIT, ref=ref, kit_state="local_commit")
 
     queued = _kit_call(kit, "queue_replication", ref)
