@@ -149,3 +149,91 @@ def test_cli_report_matches_public_runner(tmp_path: Path) -> None:
     assert body["bounded_acceptance_ok"] is True
     assert body["local_synthetic_acceptance_passed"] is True
     assert body["optional_future_live_passed"] is False
+
+
+def test_current_registry_is_mandatory_and_legacy_json_is_never_qualification():
+    groups=acceptance.required_current_groups()
+    assert len(groups)==12 and sum(len(v['selectors']) for v in groups.values())==49
+    assert groups['root20_resume']['exact_cases']==17
+    assert groups['root55_real_security']['exact_cases']==10
+    assert groups['root57_unavailable']['exact_cases']==11
+    assert groups['root58_monitoring']['exact_cases']==18
+    assert groups['root56_owner_lawyer_journey']['exact_cases']==2
+    assert all(v['selectors'] and 0<v['timeout_seconds']<=900 for v in groups.values())
+    with pytest.raises(TypeError):
+        acceptance._CURRENT_GROUPS['root20_resume']['selectors']=()
+    with pytest.raises(acceptance.CurrentAcceptanceError,match='host_measurement_required'):
+        acceptance.aggregate_current_groups([{'schema':acceptance.CURRENT_SCHEMA,'passed':True,'executed':True}])
+    with pytest.raises(acceptance.CurrentAcceptanceError,match='unknown_required_group'):
+        acceptance.run_current_group('unknown_group',Path('/never-created-for-unknown-group'))
+
+
+def test_current_host_group_measures_real_owner_dom_and_refuses_counterfeit_partial_and_stale(tmp_path):
+    # One real registered Host group, not the entire matrix in Native59's900s.
+    # This executes actual56 owner-lawyer DOM/encryption and negative behavior.
+    run=acceptance.run_current_group('root56_owner_lawyer_journey',tmp_path/'actual-host-group')
+    body=run.to_dict()
+    assert body['passed'] is True,body['reason']
+    assert len(body['required_nodeids'])==2 and all(row['outcome']=='passed' for row in body['cases'])
+    assert body['source_before']==body['source_after'] and body['source_unchanged'] is True
+    assert body['host_metadata']['id']=='HOST-GUI-CURRENT:root56_owner_lawyer_journey'
+    assert body['current_acceptance_passed'] is False and len(body['missing_groups'])==11
+    assert body['measurement_record'] and Path(body['measurement_record']['path']).is_file()
+    partial=acceptance.aggregate_current_groups([run])
+    assert partial['current_acceptance_passed'] is False and len(partial['missing_groups'])==11
+    assert acceptance.aggregate_current_groups([])['current_acceptance_passed'] is False
+    with pytest.raises(acceptance.CurrentAcceptanceError,match='host_measurement_required'):
+        acceptance.aggregate_current_groups([json.loads(Path(body['report_path']).read_text())])
+    with pytest.raises(acceptance.CurrentAcceptanceError,match='duplicate_group'):
+        acceptance.aggregate_current_groups([run,run])
+    # A genuine observation cannot be relabeled as another registry group.
+    relabeled=dict(body,group='root20_resume')
+    wrapped=acceptance._CurrentGroupRun(acceptance._CURRENT_RUN_TOKEN,relabeled,body['source_before'],run._observation,run._metadata)
+    with pytest.raises(acceptance.CurrentAcceptanceError,match='host_measurement_required'):
+        acceptance.aggregate_current_groups([wrapped])
+    acceptance._CURRENT_RUNS.add(wrapped)
+    try:
+        with pytest.raises(acceptance.CurrentAcceptanceError,match='group_contract_mismatch'):
+            acceptance.aggregate_current_groups([wrapped])
+    finally:
+        acceptance._CURRENT_RUNS.discard(wrapped)
+    # An observed real Host record's material is re-proved, never just its JSON
+    # passed/admitted flags. Mutating that actual file invalidates the live run.
+    record=Path(body['measurement_record']['path'])
+    original=record.read_bytes()
+    try:
+        record.write_bytes(original+b' ')
+        with pytest.raises(acceptance.CurrentAcceptanceError,match='stale_or_refused_host_evidence'):
+            acceptance.aggregate_current_groups([run])
+    finally:
+        record.write_bytes(original)
+    assert acceptance.aggregate_current_groups([run])['current_acceptance_passed'] is False
+
+
+def test_current_output_refuses_source_control_state_aliases_and_parent_replacement(tmp_path):
+    import os
+    root=acceptance._repo_root()
+    with pytest.raises(acceptance.CurrentAcceptanceError,match='overlaps_source'):
+        acceptance._private_current_directory(root/'never-created-current-report')
+    assert not (root/'never-created-current-report').exists()
+    state=tmp_path/'campaign';state.mkdir(mode=0o700)
+    with pytest.raises(acceptance.CurrentAcceptanceError,match='overlaps_control_state'):
+        acceptance._private_current_directory(state/'never-created')
+    assert not (state/'never-created').exists()
+    parent=tmp_path/'private-parent';parent.mkdir(mode=0o700)
+    alias=tmp_path/'alias';alias.symlink_to(parent,target_is_directory=True)
+    with pytest.raises(acceptance.CurrentAcceptanceError,match='private_output_path'):
+        acceptance._private_current_directory(alias/'never-created')
+    assert not (parent/'never-created').exists()
+    with acceptance._private_current_directory(parent/'owned') as held:
+        receipt=acceptance._write_current_report(held,{'passed':False,'completion_authority':False})
+        assert receipt.stat().st_mode & 0o777 == 0o600
+    with acceptance._private_current_directory(parent/'moving') as held:
+        moved=tmp_path/'original-parent';parent.rename(moved)
+        parent.mkdir(mode=0o700);(parent/'moving').mkdir(mode=0o700)
+        with pytest.raises(acceptance.CurrentAcceptanceError,match='private_output_custody'):
+            acceptance._write_current_report(held,{'passed':True})
+        assert not (parent/'moving'/'report.json').exists()
+        assert not (moved/'moving'/'report.json').exists()
+    with pytest.raises(acceptance.AcceptanceSeparationError):
+        acceptance.optional_live_case('live_model',{'passed':True,'executed':True,'capability_checked':True,'observed':True})
