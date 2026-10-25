@@ -1406,7 +1406,7 @@ def _campaign_scope_liveness(native_state: Mapping[str, Any], *, phase: str, int
                              worker_liveness: str, active: bool, attempt_age: float | None,
                              active_age: float | None, heartbeat_fresh: bool,
                              provider_fresh: bool, provider_terminal: bool,
-                             validation_fresh: bool, now: float) -> dict[str, Any]:
+                             validation_fresh: bool, now: float, provider_repair: bool = False) -> dict[str, Any]:
     """Project five execution scopes without folding in an application interview.
 
     Typed stall classification comes from the existing native progress and
@@ -1425,8 +1425,8 @@ def _campaign_scope_liveness(native_state: Mapping[str, Any], *, phase: str, int
         claim = "held"
     else:
         claim = "unknown"
-    provider_phase = active and not interview_hold and phase in {"", "implementing", "implementation", "provider"}
-    validation_phase = active and not interview_hold and phase.startswith("valid")
+    provider_phase = active and not interview_hold and (provider_repair or phase in {"", "implementing", "implementation", "provider"})
+    validation_phase = active and not interview_hold and phase.startswith("valid") and not provider_repair
     merge_phase = active and not interview_hold and "merge" in phase
     monitors: dict[str, Any] = {"completion_authority": False, "progress": {}, "worktree_worker": None,
                                 "dependency_error": None}
@@ -1787,6 +1787,22 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         log_evidence = _owned_attempt_log_evidence(events_path, state_dir, binding, started_at=invocation_start, now=now)
         provider_evidence = log_evidence or provider_evidence
     provider_progress = bool(provider_evidence and provider_evidence.get("progress_fresh", True))
+    rescue_activity = None
+    rescue_active = False
+    if owned and current_state and claim_verified and phase == "validating":
+        from .auto_rescue_activity import observe as observe_rescue_activity
+        rescue_activity = observe_rescue_activity(sys.modules[__name__], repo_root, state_dir, native_state, now_ts=now)
+        rescue_active = rescue_activity.get("activity_verified") is True
+        # Native's original terminal log and an integer repair PID alone do
+        # not prove a current repair. Thought/text are liveness only: they
+        # never become verified work or reset a recovery incident budget.
+        provider_progress = rescue_active and rescue_activity.get("work_progress_verified") is True
+        if rescue_active:
+            provider_evidence = {**rescue_activity, "type": "grok_frame",
+                "provider_repair_in_flight": True, "provider_terminal_observed": False,
+                "progress_fresh": provider_progress}
+        elif provider_evidence:
+            provider_evidence = {**provider_evidence, "provider_repair_in_flight": False, "progress_fresh": False}
     validation_evidence = _validation_event_evidence(events_path, binding, started_at=invocation_start) if claim_verified else None
     from .reconciliation_activity import evidence as owned_executor_activity_evidence
     canonical_activity_evidence = (owned_executor_activity_evidence(sys.modules[__name__], repo_root, state_dir,
@@ -1829,6 +1845,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "stalled"
     elif canonical_activity_evidence is not None:
         health = "active"
+    elif rescue_active:
+        health = "active"  # Exact live repair inside the original provider cap.
     elif heartbeat_age is not None and startup_maintenance:
         health = "starting"
     elif heartbeat_age is not None and maintenance_ready:
@@ -1858,8 +1876,7 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         log_stale = active_age is not None and active_age > STALL_SECONDS
         silent_window = attempt_age is not None and attempt_age > STALL_SECONDS
         in_validation = phase.startswith("valid")
-        provider_repair = bool(provider_progress and provider_evidence
-                               and provider_evidence.get("provider_repair_in_flight"))
+        provider_repair = rescue_active
         # Fresh generic log lines and a live PID are not provider or validation progress.
         silent = silent_window and (not (validation_evidence or provider_repair) if in_validation else not provider_progress)
         post_provider = bool(not in_validation and provider_evidence and provider_evidence.get("provider_terminal_observed"))
@@ -1902,11 +1919,11 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     scope_liveness = _campaign_scope_liveness(
         native_state, phase=phase, interview_state=interview_state, worker_liveness=worker_liveness,
         active=active, attempt_age=attempt_age, active_age=active_age, heartbeat_fresh=heartbeat_fresh,
-        provider_fresh=provider_progress, provider_terminal=provider_terminal,
-        validation_fresh=bool(validation_evidence), now=now,
+        provider_fresh=bool(provider_progress or rescue_active), provider_terminal=provider_terminal,
+        validation_fresh=bool(validation_evidence), now=now, provider_repair=rescue_active,
     )
     identity_ok = worker_liveness == "alive" and health not in {"identity_mismatch", "heartbeat_identity_mismatch", "state_error"}
-    activity_ok = (not active) or bool(provider_progress or validation_evidence
+    activity_ok = (not active) or bool(provider_progress or validation_evidence or rescue_active
         or (not phase.startswith("valid") and provider_evidence and provider_evidence.get("provider_terminal_observed"))) or not (
         attempt_age is not None and attempt_age > STALL_SECONDS
     )
@@ -1939,6 +1956,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
             "provider_execution_verified": bool(owned and provider_evidence),
             "provider_progress_verified": bool(owned and provider_progress),
             "provider_execution_evidence": provider_evidence,
+            "auto_rescue_activity_verified": rescue_active,
+            "auto_rescue_activity_evidence": rescue_activity,
             "validation_activity_verified": bool(owned and validation_evidence),
             "validation_activity_evidence": validation_evidence,
             "progress_verified": bool(owned and (provider_progress or canonical_activity_evidence)),
@@ -2792,6 +2811,51 @@ def _call_validation_with_activity(*, executor, spec, workspace_path, timeout_se
             os.close(inode_guard)
 
 
+def _owned_validation_child_exists(native, owner_birth) -> bool:
+    """Read an exact owned descendant during the first executor pulse gap.
+
+    Native 6af's legacy marker detector joins its scalar command text as
+    characters. Use actual procfs argv, retaining its existing marker scope,
+    only after the caller has proved the full current Native dispatch owner.
+    """
+    markers = ("playwright", "run_playwright_test.mjs", "pytest", "vitest", "npm run test",
+        "npm run evidence", "release-readiness-gate", "audit-release-evidence-freshness",
+        "build-virtual-desktop-release-evidence", "tsc --noemit", "run_legal_ir_10m_smoke.sh",
+        "run_legal_ir_8h_canary.sh", "run_hammer_leanstral_smoke.sh", "run_hammer_leanstral_hparam.sh",
+        "uscode_modal_daemon_runner")
+    try:
+        if native.read_process_birth(owner_birth.pid) != owner_birth:
+            return False
+        for row in native.descendant_processes(owner_birth.pid):
+            pid = row.get("pid")
+            if type(pid) is not int or pid <= 1:
+                continue
+            birth = native.read_process_birth(pid)
+            if (birth is None or birth.start_time_ticks != row.get("start_ticks")
+                    or birth.start_time_ticks < owner_birth.start_time_ticks
+                    or birth.boot_id != owner_birth.boot_id
+                    or os.stat(f"/proc/{pid}").st_uid != os.getuid()):
+                continue
+            argv = native.read_process_command_argv(pid)
+            if not argv or not any(marker in " ".join(argv).lower() for marker in markers):
+                continue
+            current, seen = birth, set()
+            for _ in range(64):
+                if current == owner_birth:
+                    return (native.read_process_birth(pid) == birth
+                            and native.read_process_birth(owner_birth.pid) == owner_birth
+                            and native.read_process_command_argv(pid) == argv)
+                if current.pid in seen or current.parent_pid <= 1:
+                    break
+                seen.add(current.pid)
+                current = native.read_process_birth(current.parent_pid)
+                if current is None:
+                    break
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+    return False
+
+
 def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
     """Observe a fixed validation deadline without refreshing any task clock.
 
@@ -2853,6 +2917,7 @@ def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
             return False
         from .validation_handoff import owned as owned_handoff
         return bool(supervisor._active_validation_subprocess_exists()
+                    or _owned_validation_child_exists(native, birth)
                     or _owned_validation_activity(supervisor, state, now_ts=now_ts, owner_pid=birth.pid)
                     or owned_handoff(sys.modules[__name__], supervisor, state, now_ts=now_ts, owner_pid=birth.pid))
     except (OSError, TypeError, ValueError, AttributeError, KeyError):
