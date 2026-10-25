@@ -1092,7 +1092,7 @@ Implementation instructions:
 
 ## CIMP-GUI-37 Encrypt shared attachments and derived artifacts
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
