@@ -480,9 +480,121 @@ def _historical_execution(state: Path, row: Mapping[str, Any], task: Any, journa
                             "Historical case counts, AST seals, and skip outcomes are unavailable; current semantic coverage requires fresh mandatory measurements."]}
 
 
+def _compact_queue_host_measurements(state: Path, validation: Mapping[str, Any], task: Any,
+                                     binding: Mapping[str, Any]) -> dict[str, Any]:
+    """Observe owned Host seals omitted by Native's bounded queue projection.
+
+    Native's queue producer retains proposal/result identities but deliberately
+    omits behavioral_evidence. The fixed admitted Host receipt is usable only
+    when its proposal, task, command and measured candidate bytes all join that
+    authenticated completed queue/callback. This mints no new admission.
+    """
+    root = Path(str(binding.get("repo_root", "")))
+    candidate, baseline = binding.get("implementation_commit"), binding.get("baseline_ref")
+    gate, results = validation.get("proposal_gate"), validation.get("results")
+    expected = [_legacy_command_digest(command) for command in task.validation]
+    if (not _COMMIT.fullmatch(str(candidate or "")) or not _COMMIT.fullmatch(str(baseline or ""))
+            or validation.get("attempted") is not True or validation.get("passed") is not True
+            or type(validation.get("returncode")) is not int or validation["returncode"] != 0
+            or validation.get("target_commit") != candidate
+            or not isinstance(gate, dict) or gate.get("accepted") is not True
+            or gate.get("proposal_id") != binding.get("proposal_id")
+            or gate.get("repository_tree_id") != baseline
+            or _HEX.fullmatch(str(gate.get("proposal_id", ""))) is None
+            or _HEX.fullmatch(str(gate.get("receipt_id", ""))) is None
+            or not isinstance(results, list) or not 0 < len(results) == len(expected) <= 32):
+        raise ReleaseEvidenceError("compact_queue_validation_invalid")
+    tree = _git(root, "rev-parse", candidate + "^{tree}")
+    if validation.get("target_tree") != tree or validation.get("repository_tree_id") != "git-tree:" + tree:
+        raise ReleaseEvidenceError("compact_queue_candidate_mismatch")
+    changed = gate.get("changed_paths")
+    if (not isinstance(changed, list) or not changed or len(changed) > 256
+            or any(not isinstance(path, str) for path in changed)
+            or sorted(set(changed)) != sorted(changed)
+            or _git(root, "diff", "--name-only", baseline, candidate).splitlines() != sorted(changed)):
+        raise ReleaseEvidenceError("compact_queue_changed_paths_mismatch")
+    for ordinal, (result, command) in enumerate(zip(results, expected)):
+        if (not isinstance(result, dict) or type(result.get("ordinal")) is not int
+                or result["ordinal"] != ordinal or type(result.get("returncode")) is not int
+                or result["returncode"] != 0 or result.get("timed_out") is not False
+                or result.get("cache_hit") is not False
+                or result.get("infrastructure_failure") not in (None, False)
+                or _HEX.fullmatch(str(result.get("validation_result_digest", ""))) is None
+                or _legacy_command_digest(result.get("command")) != command):
+            raise ReleaseEvidenceError("compact_queue_result_invalid")
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", task.task_id) is None:
+        raise ReleaseEvidenceError("compact_queue_task_locator_invalid")
+    path = state / "evidence" / task.task_id / "completion.json"
+    raw = _read(path, source=True)
+    receipt = _object(raw)
+    contract = receipt.get("host_task_contract")
+    context = contract.get("context") if isinstance(contract, dict) else None
+    declared = contract.get("task") if isinstance(contract, dict) else None
+    if (receipt.get("schema_version") != "complaint-generator/improvement-evidence@1"
+            or receipt.get("task_id") != task.task_id or receipt.get("admitted") is not True
+            or receipt.get("completion") is not True or receipt.get("completion_authority") is not False
+            or receipt.get("lane") != compiler.COMPLETING_LANE
+            or type(receipt.get("exit_status")) is not int or receipt["exit_status"] != 0
+            or receipt.get("timed_out") is not False or not isinstance(context, dict)
+            or not isinstance(declared, dict) or declared.get("id") != task.task_id
+            or declared.get("targets") != list(task.outputs)
+            or [_legacy_command_digest(command) for command in declared.get("validation_commands", [])] != expected
+            or context.get("task_id") != task.task_id
+            or context.get("task_cid") != binding.get("canonical_task_cid")
+            or context.get("task_key") != binding.get("canonical_task_key")
+            or context.get("proposal_context_id") != binding.get("canonical_task_cid")
+            or context.get("proposal_id") != gate["proposal_id"]
+            or context.get("repository_tree_id") != baseline
+            or context.get("campaign_state_dir") != str(state)
+            or sorted(context.get("changed_paths", [])) != changed
+            or receipt.get("task_contract_digest") != compiler._digest(contract)):
+        raise ReleaseEvidenceError("compact_queue_host_contract_mismatch")
+    # The fixed receipt only retains one completing command. Multiple-command
+    # compact queues need a future immutable per-command Host index; do not
+    # infer missing authority from the final command's receipt.
+    if len(expected) != 1 or _legacy_command_digest(contract.get("declared_command")) != expected[0]:
+        raise ReleaseEvidenceError("compact_queue_host_population_unavailable")
+    history = _historical_measurements(state, [receipt])
+    record = receipt["measurement_record"]
+    measured = _object(_read(Path(record["path"]), source=True))
+    observed = measured.get("observation_binding")
+    source = receipt.get("source_binding")
+    if (receipt.get("host_measurement") != measured
+            or measured.get("task_contract_digest") != receipt["task_contract_digest"]
+            or not isinstance(observed, dict) or observed.get("source_binding") != source
+            or observed.get("exit_status") != 0 or observed.get("timed_out") is not False
+            or not isinstance(source, dict) or source.get("missing") != [] or source.get("empty") != []
+            or source.get("unbounded") is not False
+            or set(source.get("files", {})) != set(task.outputs)
+            or measured.get("output_paths") != list(task.outputs)):
+        raise ReleaseEvidenceError("compact_queue_host_measurement_mismatch")
+    files = measured["source_after"].get("files", {})
+    for relative, item in source["files"].items():
+        name = Path(relative)
+        if (name.is_absolute() or ".." in name.parts or name.as_posix() != relative
+                or not isinstance(item, dict) or item.get("present") is not True
+                or item.get("kind") != "file" or item.get("empty") is not False
+                or _HEX.fullmatch(str(item.get("sha256", ""))) is None
+                or not isinstance(files.get(relative), dict)
+                or files[relative].get("sha256") != item["sha256"]):
+            raise ReleaseEvidenceError("compact_queue_source_binding_invalid")
+        # Git bytes, not current mutable worktree files, bind the old source
+        # seal to the immutable candidate Native actually integrated.
+        result = subprocess.run(["git", "--no-replace-objects", "--no-optional-locks", "-c", "core.hooksPath=/dev/null", "show", candidate + ":" + relative],
+            cwd=root, env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "GIT_CONFIG_GLOBAL": "/dev/null",
+                           "GIT_CONFIG_SYSTEM": "/dev/null"}, capture_output=True, timeout=30, check=False)
+        if result.returncode or len(result.stdout) > MAX_METADATA or hashlib.sha256(result.stdout).hexdigest() != item["sha256"]:
+            raise ReleaseEvidenceError("compact_queue_candidate_source_mismatch")
+    return {**history, "evidence_kind": "compact_native_queue_and_owned_host_measurement",
+        "host_receipt": _pin(path, raw), "proposal_id": gate["proposal_id"],
+        "implementation_commit": candidate, "native_result_digests": [row["validation_result_digest"] for row in results],
+        "limitations": ["This is historical execution, not current semantic coverage or a new completion admission."]}
+
+
 def historical_queue_validation(state: Path, validation: Mapping[str, Any], task: Any,
                                 journal_pin: Mapping[str, Any], *, callback_sequence: int,
-                                callback_event_id: str) -> dict[str, Any]:
+                                callback_event_id: str,
+                                callback_binding: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Read the same historical seals from an actual completed queue proof.
 
     This is a distinct queue/callback observation, never a synthesized Native
@@ -494,6 +606,11 @@ def historical_queue_validation(state: Path, validation: Mapping[str, Any], task
                      if isinstance(item, dict) else None for item in raw]
                     if isinstance(raw, list) else None)
         history = _historical_measurements(state, selected)
+    elif ("schema" not in validation and "validation_dag_receipt" not in validation
+          and "target_tree" in validation and "proposal_gate" in validation):
+        if not isinstance(callback_binding, Mapping):
+            raise ReleaseEvidenceError("compact_queue_callback_binding_missing")
+        history = _compact_queue_host_measurements(state, validation, task, callback_binding)
     else:
         # Reuse the exact existing Native DAG/command/launcher checks. This
         # projection labels the genuine callback event as its provenance.
