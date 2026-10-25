@@ -415,7 +415,7 @@ def systemd_units(repo_root, spec_path, state_dir, *, interpreter, plan_id, spec
         "Environment=" + path_assignment,
         "SyslogIdentifier=" + name, ""])
     timer = "\n".join(["[Unit]", "Description=Check complaint agent campaign progress every minute", "",
-        "[Timer]", "OnCalendar=*-*-* *:*:00", "Persistent=true", "AccuracySec=1s",
+        "[Timer]", "OnCalendar=*-*-* *:*:00", "OnUnitInactiveSec=60s", "Persistent=true", "AccuracySec=1s",
         "Unit=" + name + ".service", "", "[Install]", "WantedBy=timers.target", ""])
     return {"name": name, "service": service, "timer": timer}
 
@@ -440,6 +440,10 @@ def install_user_timer(repo_root, spec_path, state_dir, *, interpreter=None, uni
     # managed bytes; any operator customization or foreign binding still fails.
     legacy_service = "\n".join(line for line in units["service"].splitlines()
                                if not line.startswith('Environment="PATH=')) + "\n"
+    legacy_timer = "\n".join(line for line in units["timer"].splitlines()
+                             if line != "OnUnitInactiveSec=60s") + "\n"
+    legacy_units = {folder / (units["name"] + ".service"): legacy_service,
+                    folder / (units["name"] + ".timer"): legacy_timer}
     upgrades = {}
     for path, content in files.items():
         if os.path.lexists(path):
@@ -449,7 +453,7 @@ def install_user_timer(repo_root, spec_path, state_dir, *, interpreter=None, uni
             existing = path.read_text()
             if existing == content:
                 continue
-            if path.suffix != ".service" or existing != legacy_service:
+            if existing != legacy_units.get(path):
                 raise ValueError("watchdog_existing_unit_conflict")
             upgrades[path] = (existing, info)
     for path, content in files.items():

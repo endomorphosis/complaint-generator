@@ -647,3 +647,106 @@ def test_missing_grok_hold_clears_without_resetting_persistent_recovery_budget_o
     exhausted = watcher.run_once()
     assert exhausted["status"] == "exhausted" and exhausted["reason"] == "incident_recovery_budget_exhausted"
     assert effects == ["stop", "recover", "start"] * 2 and paid == paid_before
+
+
+def test_timer_keeps_calendar_and_persistence_with_parsed_monotonic_fallback(tmp_path):
+    import shutil
+    import subprocess
+    assert shutil.which("systemd-analyze"), "systemd parser required for timer validation"
+    spec = tmp_path / "spec.json"
+    spec.write_text('{}')
+    units = module.systemd_units(tmp_path, spec, tmp_path, interpreter="/usr/bin/python3",
+        plan_id="plan", spec_sha256="ab" * 32)
+    timer = units["timer"]
+    assert timer.count("OnUnitInactiveSec=60s\n") == 1
+    assert "OnCalendar=*-*-* *:*:00\n" in timer
+    assert "Persistent=true\n" in timer and "AccuracySec=1s\n" in timer
+    paths = []
+    for kind in ("service", "timer"):
+        path = tmp_path / (units["name"] + "." + kind)
+        path.write_text(units[kind])
+        paths.append(str(path))
+    result = subprocess.run(["systemd-analyze", "--user", "verify", *paths],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+
+
+def _legacy_timer_with_current_service(watcher, folder):
+    units = module.systemd_units(watcher.root, watcher.spec_path, watcher.state,
+        interpreter="/usr/bin/python3", plan_id=watcher.plan_id, spec_sha256=watcher.spec_sha)
+    folder.mkdir()
+    service = folder / (units["name"] + ".service")
+    timer = folder / (units["name"] + ".timer")
+    service.write_text(units["service"])
+    timer.write_text("\n".join(line for line in units["timer"].splitlines()
+                               if line != "OnUnitInactiveSec=60s") + "\n")
+    return units, service, timer
+
+
+def test_installer_upgrades_exact_old_timer_without_touching_service_dropins_or_holds(tmp_path, monkeypatch):
+    watcher, folder = _install_fixture(tmp_path, monkeypatch)
+    units, service, timer = _legacy_timer_with_current_service(watcher, folder)
+    preserved = [service]
+    for kind in ("service", "timer"):
+        directory = folder / (units["name"] + "." + kind + ".d")
+        directory.mkdir()
+        path = directory / "operator.conf"
+        path.write_text('# existing operator settings\n')
+        preserved.append(path)
+    watcher.directory.mkdir()
+    hold = watcher.directory / "HOLD"
+    hold.write_text('operator maintenance remains held')
+    preserved.append(hold)
+    before = {path: (path.read_bytes(), path.stat().st_ino) for path in preserved}
+    calls = []
+    result = module.install_user_timer(watcher.root, watcher.spec_path, watcher.state,
+        interpreter="/usr/bin/python3", unit_directory=folder,
+        command_runner=lambda *a, **kw: calls.append(a))
+    assert result["updated_units"] == [timer.name]
+    assert timer.read_text() == units["timer"]
+    assert {path: (path.read_bytes(), path.stat().st_ino) for path in preserved} == before
+    timer_inode = timer.stat().st_ino
+    repeated = module.install_user_timer(watcher.root, watcher.spec_path, watcher.state,
+        interpreter="/usr/bin/python3", unit_directory=folder,
+        command_runner=lambda *a, **kw: calls.append(a))
+    assert repeated["updated_units"] == [] and timer.stat().st_ino == timer_inode
+    assert {path: (path.read_bytes(), path.stat().st_ino) for path in preserved} == before
+    assert len(calls) == 8
+
+
+@pytest.mark.parametrize("damage", ["customized", "foreign_service", "hardlink"])
+def test_timer_upgrade_refuses_custom_foreign_or_aliased_timer(tmp_path, monkeypatch, damage):
+    watcher, folder = _install_fixture(tmp_path, monkeypatch)
+    units, service, timer = _legacy_timer_with_current_service(watcher, folder)
+    if damage == "customized":
+        timer.write_text(timer.read_text() + '# operator customization\n')
+    elif damage == "foreign_service":
+        timer.write_text(timer.read_text().replace("Unit=" + units["name"] + ".service", "Unit=foreign.service"))
+    else:
+        os.link(timer, tmp_path / "alias.timer")
+    before = {path: path.read_bytes() for path in (service, timer)}
+    with pytest.raises(ValueError, match="watchdog_existing_unit_conflict"):
+        module.install_user_timer(watcher.root, watcher.spec_path, watcher.state,
+            interpreter="/usr/bin/python3", unit_directory=folder,
+            command_runner=lambda *a, **kw: pytest.fail("conflicting timer enabled"))
+    assert {path: path.read_bytes() for path in (service, timer)} == before
+
+
+def test_timer_upgrade_rechecks_bytes_before_atomic_replacement(tmp_path, monkeypatch):
+    import tempfile
+    watcher, folder = _install_fixture(tmp_path, monkeypatch)
+    _, service, timer = _legacy_timer_with_current_service(watcher, folder)
+    service_before = (service.read_bytes(), service.stat().st_ino)
+    mkstemp = tempfile.mkstemp
+    replacement = '# operator replaced the timer during preflight\n'
+    def race(*a, **kw):
+        result = mkstemp(*a, **kw)
+        timer.write_text(replacement)
+        return result
+    monkeypatch.setattr(tempfile, "mkstemp", race)
+    with pytest.raises(ValueError, match="watchdog_existing_unit_conflict"):
+        module.install_user_timer(watcher.root, watcher.spec_path, watcher.state,
+            interpreter="/usr/bin/python3", unit_directory=folder,
+            command_runner=lambda *a, **kw: pytest.fail("raced timer enabled"))
+    assert timer.read_text() == replacement
+    assert (service.read_bytes(), service.stat().st_ino) == service_before
