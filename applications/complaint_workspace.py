@@ -9575,6 +9575,104 @@ class ComplaintWorkspaceService:
         return {**receipt, "case_id": case_id, "private_revision": committed.get("private_revision"),
             "session_revision": projection["session_revision"]}
 
+    def refresh_case_legal_dependency_graph(self, user_id, *, case_id, updates):
+        return self._run_case_legal_dependency_refresh(user_id, case_id=case_id, updates=updates, late=False)
+
+    def revalidate_case_legal_dependency_refresh(self, user_id, *, case_id, updates):
+        return self._run_case_legal_dependency_refresh(user_id, case_id=case_id, updates=updates, late=True)
+
+    def _run_case_legal_dependency_refresh(self, user_id, *, case_id, updates, late):
+        """Run the canonical source/DG owner on a copied, current private DTO."""
+        from applications.legal_research_api import (LegalResearchError, _purpose_decision,
+            _require_purpose_consent, verified_reviewed_source_records)
+        from complaint_phases.phase_manager import ComplaintPhase
+        from complaint_phases.dependency_graph import DependencyGraph
+        from integrations.private_storage import PrivateStorageError
+        from mediator.workflow_service import WorkflowActionService
+
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.update" or not isinstance(updates, Mapping):
+            raise WorkspaceAuthorizationDenied()
+        # The server owns the source manifest and all graph-producing inputs.
+        if any(name in updates for name in ("canonical_source_records", "source_records", "links", "questions",
+                "proof_obligations", "successors", "model_output", "result")):
+            raise LegalResearchError("caller_graph_rows_not_accepted")
+        snapshot = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        actor, canonical = snapshot["actor_principal_id"], snapshot["canonical_owner_principal_id"]
+        decision = authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        for field, actual in (("expected_private_revision", snapshot["private_revision"]),
+                ("expected_session_revision", snapshot["session_revision"]),
+                ("expected_source_scope_sha256", snapshot["source_scope_sha256"])):
+            if field in updates and updates[field] != actual:
+                raise WorkspacePersistenceError("Dependency source changed.", code="revision_conflict", public_status="conflict")
+        records = verified_reviewed_source_records(snapshot["case_file"], source_scope_sha256=snapshot["source_scope_sha256"])
+        hashes = sorted({record["metadata"]["source_hash"] for group in records.values() for record in group})
+        if "legal_source_hashes" in updates and updates["legal_source_hashes"] != hashes:
+            raise LegalResearchError("legal_research_revision_conflict")
+        purpose = "citation_acquisition"
+        view = authority.processing_consent(purpose=purpose, actor_principal_id=actor, workspace=self)
+        generation = _purpose_decision(view, purpose).get("generation")
+        _require_purpose_consent(authority, self, purpose, generation, "cache")
+        _ctx, admitted_key_id, admitted_key = self._joined_key(canonical, case_id)
+        if admitted_key_id != snapshot["key_id"]:
+            raise WorkspacePersistenceError("Dependency key changed.", code="revision_conflict", public_status="conflict")
+
+        def revalidate_publication():
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Dependency key changed.", code="revision_conflict", public_status="conflict")
+            _require_purpose_consent(authority, self, purpose, generation, "cache")
+            current = self._load_state(canonical, case_id=case_id)
+            if self._case_legal_context_identity(current) != snapshot["source_identity"]:
+                raise WorkspacePersistenceError("Dependency source changed.", code="revision_conflict", public_status="conflict")
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Dependency key changed.", code="revision_conflict", public_status="conflict")
+
+        revalidate_publication()
+        shared = snapshot["state"]["shared_interview"]
+        mediator = self._mediator_for_shared_interview(canonical, case_id, cache=False)
+        mediator.workflow_actions.restore_session_projection(deepcopy(shared))
+        workflow = mediator.workflow_actions
+        common = {"case_id": case_id, "actor_principal_id": actor, "case_revision": decision.revision,
+            "consent_generation": generation, "consent_revoked": False,
+            "grant_revision": decision.membership_revision, "granted_actions": ["case.update"],
+            "legal_source_hashes": hashes, "operation_id": updates.get("operation_id")}
+        if late:
+            receipt = workflow.accept_legal_refresh_late_result(**common,
+                dependency_generation=(snapshot["case_file"].get("legal_graph_refresh") or {}).get("dependency_generation", 0),
+                claimed=deepcopy(dict(updates)))
+            revalidate_publication()
+            return {**receipt, "read_only": True, "private_revision": snapshot["private_revision"],
+                "session_revision": snapshot["session_revision"]}
+        receipt = workflow.refresh_legal_dependency_graph(**common,
+            correction_kind=updates.get("correction_kind"),
+            expected_case_revision=updates.get("expected_case_revision"),
+            expected_consent_generation=updates.get("expected_consent_generation"),
+            expected_grant_revision=updates.get("expected_grant_revision"),
+            expected_dependency_generation=updates.get("expected_dependency_generation"),
+            canonical_source_records=records)
+        revalidate_publication()
+        if receipt.get("status") != "applied" or receipt.get("replayed") is True:
+            return {**receipt, "private_revision": snapshot["private_revision"], "session_revision": snapshot["session_revision"]}
+        case_file = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file")
+        graph = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
+        if not isinstance(case_file, dict) or not isinstance(graph, DependencyGraph):
+            raise WorkspacePersistenceError("Dependency refresh unavailable.", code="legal_research_unavailable", public_status="unavailable")
+        projection = WorkflowActionService.project_legal_context_selection(shared, case_file=case_file, dependency_graph=graph)
+        draft = deepcopy(snapshot["state"])
+        draft["shared_interview"] = projection
+        draft["updated_at"] = _utc_now()
+        try:
+            committed = self._commit_joined_snapshot(draft, before_publish=revalidate_publication)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Dependency refresh did not commit.", code=str(getattr(exc, "code", "") or "durability_unproven"), public_status="recoverable") from None
+        self._interview_mediators.pop((canonical, case_id), None)
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return {**receipt, "private_revision": committed.get("private_revision"), "session_revision": projection["session_revision"]}
+
     def run_legal_research(
         self,
         user_id: Optional[str],
