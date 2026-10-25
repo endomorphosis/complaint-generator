@@ -672,7 +672,7 @@ Implementation instructions:
 
 ## CIMP-GUI-23 Build the factual graph inspector
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
