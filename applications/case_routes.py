@@ -30,6 +30,7 @@ COMPOSITION_NAME = "compose_case_routes"
 PROTECTED_PREFIXES = ("/api/complaint-workspace", "/api/claim-support", "/api/documents", "/api/chat", "/api/graphs", "/api/legal-context", "/api/legal-research", "/api/legal-analysis")
 CASE_CATALOG_PREFIX = "/api/cases"
 CASE_PAGE_PATH = "/cases"
+ADMIN_API_PREFIX = "/api/admin"
 MESSAGE_INBOX_PATH = "/case-messages"
 MESSAGE_INBOX_SCRIPT_PATH = "/static/complaint_case_messages.js"
 RETIRED_EXACT_PATHS = frozenset({"/cookies", "/load_profile", "/create_profile", "/api/chat", "/api/chat/fallback"})
@@ -180,6 +181,10 @@ def _is_case_catalog_path(path: str) -> bool:
     return path == CASE_PAGE_PATH or path == CASE_CATALOG_PREFIX or path.startswith(CASE_CATALOG_PREFIX + "/")
 
 
+def _is_admin_api_path(path: str) -> bool:
+    return path == ADMIN_API_PREFIX or path.startswith(ADMIN_API_PREFIX + "/")
+
+
 def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer], mediator: Any = None,
                         include_workspace: bool = True, include_review: bool = True,
                         include_document: bool = True, workspace_service: Any = None,
@@ -191,7 +196,8 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
                         case_messages: Any = None,
                         case_attachments: Any = None,
                         case_consent: Any = None, gui_inference_transport: Any = None,
-                        gui_inference_route: Any = None) -> Any:
+                        gui_inference_route: Any = None,
+                        operational_admin: Any = None) -> Any:
     """Mount the same fail-closed boundary in every production app variant.
 
     Historical mediator/workspace arguments grant no ambient case access.
@@ -283,6 +289,11 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     if not any(REVIEW_TRANSITIONS_ROUTE.startswith(prefix + "/") or REVIEW_TRANSITIONS_ROUTE.startswith(prefix) for prefix in PROTECTED_PREFIXES):
         raise CaseAccessError("review_transitions_route")
     mount_lawyer_review_routes(app)
+    from .admin_api import OperationalAdminService, mount_operational_admin
+    if operational_admin is not None and not isinstance(operational_admin, OperationalAdminService):
+        raise CaseAccessError("operational_admin")
+    mount_operational_admin(app)
+    app.state.operational_admin = operational_admin
     app.state.case_authorizer = authorizer
     app.state.browser_sessions = sessions
     app.state.case_handlers = case_handlers
@@ -601,7 +612,7 @@ class CaseRouteAuthorizationMiddleware:
         self.app, self.authorizer, self.sessions = app, authorizer, sessions
         self.case_handlers, self.extensions = case_handlers, extensions
         self.json_body_limits = json_body_limits
-        self.prefixes = PROTECTED_PREFIXES + tuple(prefix for _kind, prefix in extensions) + (CASE_CATALOG_PREFIX, CASE_PAGE_PATH)
+        self.prefixes = PROTECTED_PREFIXES + tuple(prefix for _kind, prefix in extensions) + (CASE_CATALOG_PREFIX, CASE_PAGE_PATH, ADMIN_API_PREFIX)
 
     async def __call__(self, scope, receive, send):
         from .workspace_case_authority import (WorkspaceCaseAuthorityError,
@@ -638,6 +649,9 @@ class CaseRouteAuthorizationMiddleware:
             return
         if _is_case_catalog_path(path):
             await self._catalog(scope, receive, send)
+            return
+        if _is_admin_api_path(path):
+            await self._admin(scope, receive, send)
             return
         if not isinstance(self.authorizer, CaseActionAuthorizer):
             await self._deny(scope, send, 401, "authorizer_required")
@@ -734,6 +748,45 @@ class CaseRouteAuthorizationMiddleware:
         if bound is not None:
             state["browser_principal"] = bound
         state["case_catalog_material"] = material
+        forwarded["state"] = state
+        await self.app(forwarded, inbound, send)
+
+    async def _admin(self, scope, receive, send):
+        """Authenticate the actor. Account authority is re-read from the roster.
+
+        Admin routes do not authorize a case and do not open case handlers.
+        A disabled or demoted principal fails on the next request because the
+        directory drops the live session and the roster no longer matches it.
+        """
+
+        from .case_access import PRIVILEGE_BODY_FIELDS
+
+        body, inbound = b"", receive
+        try:
+            await self.sessions.bind_http(_credential_request(scope), allow_anonymous=False)
+            if scope.get("method") not in {"GET", "HEAD", "OPTIONS"}:
+                body, inbound = await _read_json_body(scope, receive, self.json_body_limits)
+            bound = await self.sessions.bind_http(_credential_request(scope), allow_anonymous=False)
+            _check_actor_claims(scope, body, bound.principal_id)
+            material = _material_from_scope(scope, body)
+            if material.get("trusted_local") is True or material.get("trust") == "trusted_local" or "trusted_local" in material:
+                raise CaseAccessError("trusted_local_not_production")
+            if any(name in material for name in PRIVILEGE_BODY_FIELDS):
+                raise CaseAccessError("request_cannot_mint_authority")
+        except BrowserSessionError as exc:
+            status, code = browser_session_http_status(exc)
+            await self._deny(scope, send, status, code)
+            return
+        except _BodyAdmissionError as exc:
+            await self._deny(scope, send, exc.status, exc.code)
+            return
+        except CaseAccessError as exc:
+            await self._deny(scope, send, _status_for_denial(exc.code), exc.code)
+            return
+        forwarded = dict(scope)
+        state = dict(scope.get("state") or {})
+        state["browser_principal"] = bound
+        state["admin_material"] = material
         forwarded["state"] = state
         await self.app(forwarded, inbound, send)
 
