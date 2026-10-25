@@ -1455,6 +1455,467 @@ def _zero(material: bytes) -> None:
         buffer[:] = b"\x00" * len(buffer)
 
 
+ATTACHMENT_KIND = "shared-attachment"
+MAX_ATTACHMENT_BYTES = 256 * 1024
+PREVIEW_BYTES = 32
+ATTACHMENT_MEDIA_TYPES = frozenset({"application/pdf", "image/png", "image/jpeg", "text/plain"})
+ATTACHMENT_LIMITATIONS = (
+    "filenames_previews_and_derived_indexes_stay_inside_ciphertext",
+    "revocation_is_rechecked_before_delivery_and_cannot_erase_bytes_already_delivered",
+    "json_base64_admission_is_not_a_multipart_or_streaming_upload",
+    "kit_replication_receives_ciphertext_only",
+)
+_MEDIA_MAGIC = {
+    "application/pdf": b"%PDF-",
+    "image/png": b"\x89PNG\r\n\x1a\n",
+    "image/jpeg": b"\xff\xd8\xff",
+}
+_REJECTED_MAGIC = (b"MZ", b"\x7fELF", b"<!DOCTYPE", b"<html", b"<svg", b"<?php", b"PK\x03\x04")
+
+
+class SharedAttachmentError(Exception):
+    def __init__(self, code: str) -> None:
+        self.code = str(code)
+        super().__init__(self.code)
+
+
+def attachment_http_status(code: str) -> int:
+    if code in {"missing_attachment", "missing_case", "missing_grant", "missing_principal"}:
+        return 404
+    if code in {"revision_conflict", "replay_mismatch", "cutoff_mismatch"}:
+        return 409
+    if code in {"unauthenticated", "request_body"}:
+        return 401
+    if code in {"attachment_unavailable", "kit_unavailable"}:
+        return 503
+    if code in {"attachment_too_large", "request_body_too_large"}:
+        return 413
+    if code in {"media_type_rejected", "content_rejected", "filename_rejected"}:
+        return 415
+    return 403
+
+
+def assess_attachment_content(*, filename: str, media_type: str, content: bytes) -> None:
+    """Reject disallowed names, types, and bytes before any seal or Kit call."""
+
+    if not isinstance(filename, str) or not 1 <= len(filename) <= 128 or filename != filename.strip():
+        raise SharedAttachmentError("filename_rejected")
+    if filename in {".", ".."} or ".." in filename.split("."):
+        raise SharedAttachmentError("filename_rejected")
+    if any(ord(char) < 32 or char in "/\\" for char in filename):
+        raise SharedAttachmentError("filename_rejected")
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ._-")
+    if any(char not in allowed for char in filename):
+        raise SharedAttachmentError("filename_rejected")
+    if media_type not in ATTACHMENT_MEDIA_TYPES:
+        raise SharedAttachmentError("media_type_rejected")
+    if not isinstance(content, (bytes, bytearray)) or isinstance(content, memoryview):
+        raise SharedAttachmentError("content_rejected")
+    blob = bytes(content)
+    if not blob or len(blob) > MAX_ATTACHMENT_BYTES:
+        raise SharedAttachmentError("attachment_too_large" if blob else "content_rejected")
+    head = blob[:16]
+    if any(head.startswith(magic) for magic in _REJECTED_MAGIC):
+        raise SharedAttachmentError("content_rejected")
+    expected = _MEDIA_MAGIC.get(media_type)
+    if expected is not None:
+        if not blob.startswith(expected):
+            raise SharedAttachmentError("content_rejected")
+        return
+    try:
+        text = blob.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SharedAttachmentError("content_rejected") from exc
+    if any(ord(char) < 32 and char not in "\n\r\t" for char in text):
+        raise SharedAttachmentError("content_rejected")
+
+
+class SharedAttachmentStore:
+    """Seal attachment bytes, previews, and indexes before Kit sees them.
+
+    Associated data uses the canonical case tenant, not the actor. The actor
+    is recorded beside that owner. A download loads ciphertext only after a
+    fresh grant or owner check, and again inside the grant owner before the
+    plaintext is returned.
+    """
+
+    def __init__(self, root: str | Path, grants: CaseResourceKeyGrantStore, *, backend: Any) -> None:
+        if not isinstance(grants, CaseResourceKeyGrantStore) or backend is None:
+            raise SharedAttachmentError("authority_owners")
+        if not callable(getattr(backend, "add_bytes", None)) or not callable(getattr(backend, "cat", None)):
+            raise SharedAttachmentError("kit_backend_required")
+        self._grants = grants
+        self._backend = backend
+        self._root = Path(root)
+        self._root.mkdir(parents=True, exist_ok=True)
+        os.chmod(self._root, 0o700)
+        self._lock_path = self._root / ".lock"
+        self._lock_path.touch(mode=0o600)
+        (self._root / "records").mkdir(mode=0o700, exist_ok=True)
+        (self._root / "idem").mkdir(mode=0o700, exist_ok=True)
+
+    def store(
+        self,
+        *,
+        actor_principal_id: str,
+        tenant_id: str,
+        case_id: str,
+        resource_id: str,
+        artifact_revision: str,
+        filename: str,
+        media_type: str,
+        content: bytes,
+        idempotency_key: str,
+        owner_session: UserOwnedKeySession | None = None,
+        recipient_session: UserOwnedKeySession | None = None,
+        membership_grant_id: str | None = None,
+        membership_version: int | None = None,
+        key_grant_id: str | None = None,
+    ) -> dict[str, Any]:
+        assess_attachment_content(filename=filename, media_type=media_type, content=content)
+        blob = bytes(content)
+        revision = _label(artifact_revision, "artifact_revision")
+        key_name = _label(idempotency_key, "idempotency_key")
+        digest = hashlib.sha256(blob).hexdigest()
+        identity = {
+            "actor_principal_id": _label(actor_principal_id, "actor_principal_id"),
+            "tenant_id": _label(tenant_id, "tenant_id"),
+            "case_id": _label(case_id, "case_id"),
+            "resource_id": _label(resource_id, "resource_id"),
+            "artifact_revision": revision,
+            "filename_sha256": hashlib.sha256(filename.encode("utf-8")).hexdigest(),
+            "media_type_sha256": hashlib.sha256(media_type.encode("utf-8")).hexdigest(),
+            "content_sha256": digest,
+        }
+        with self._locked():
+            existing = self._idem(key_name)
+            if existing is not None:
+                if existing.get("identity") != identity:
+                    raise SharedAttachmentError("replay_mismatch")
+                return self._public_view(existing["record"])
+        owner_case = self._owner_case(identity["actor_principal_id"], identity["case_id"])
+        data_key: bytes | None = None
+        try:
+            if owner_case is not None:
+                if any(value is not None for value in (recipient_session, membership_grant_id, membership_version, key_grant_id)):
+                    raise SharedAttachmentError("owner_impersonation")
+                if not isinstance(owner_session, UserOwnedKeySession):
+                    raise SharedAttachmentError("key_owner_required")
+                if owner_case.tenant_id != identity["tenant_id"] or owner_case.resource_id != identity["resource_id"]:
+                    raise SharedAttachmentError("resource_mismatch" if owner_case.resource_id != identity["resource_id"] else "tenant_mismatch")
+                key_id = owner_session.ensure_data_key(owner_case.tenant_id, owner_case.case_id)
+                data_key = owner_session.lookup_data_key(owner_case.tenant_id, owner_case.case_id, key_id)
+                if data_key is None:
+                    raise SharedAttachmentError("key_unavailable")
+                canonical = owner_case.tenant_id
+                grant_id = None
+            else:
+                if not isinstance(recipient_session, UserOwnedKeySession) or owner_session is not None:
+                    raise SharedAttachmentError("key_owner_required")
+                if not isinstance(membership_grant_id, str) or type(membership_version) is not int or not isinstance(key_grant_id, str):
+                    raise SharedAttachmentError("missing_grant")
+                grant, _decision, data_key = self._grants._authorize_delegated(
+                    actor_principal_id=identity["actor_principal_id"],
+                    membership_grant_id=membership_grant_id,
+                    membership_version=membership_version,
+                    key_grant_id=key_grant_id,
+                    case_id=identity["case_id"],
+                    tenant_id=identity["tenant_id"],
+                    resource_id=identity["resource_id"],
+                    artifact_kind=ATTACHMENT_KIND,
+                    artifact_revision=revision,
+                    recipient_session=recipient_session,
+                    action=WRITE_ACTION,
+                )
+                key_id = grant.data_key_id
+                canonical = grant.canonical_owner_principal_id
+                grant_id = grant.key_grant_id
+            attachment_id = _opaque_id()
+            bodies = {
+                "content": blob,
+                "preview": blob[:PREVIEW_BYTES],
+                "derived-index": json.dumps({
+                    "filename": filename,
+                    "media_type": media_type,
+                    "content_sha256": digest,
+                    "byte_length": len(blob),
+                    "tokens": [part for part in filename.replace(".", " ").replace("_", " ").split(" ") if part],
+                }, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+            }
+            envelopes: dict[str, bytes] = {}
+            for role, body in bodies.items():
+                payload = json.dumps({
+                    "schema": 1,
+                    "role": role,
+                    "attachment_id": attachment_id,
+                    "tenant_id": identity["tenant_id"],
+                    "case_id": identity["case_id"],
+                    "resource_id": identity["resource_id"],
+                    "revision": revision,
+                    "canonical_owner_principal_id": canonical,
+                    "actor_principal_id": identity["actor_principal_id"],
+                    "filename": filename,
+                    "media_type": media_type,
+                    "body_b64": base64.b64encode(body).decode("ascii"),
+                }, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                envelopes[role] = self._seal(payload, tenant_id=identity["tenant_id"], case_id=identity["case_id"],
+                                              revision=revision, canonical=canonical, key=data_key, key_id=key_id)
+            cids = {role: self._commit_ciphertext(envelope) for role, envelope in envelopes.items()}
+            record = {
+                "attachment_id": attachment_id,
+                "tenant_id": identity["tenant_id"],
+                "case_id": identity["case_id"],
+                "resource_id": identity["resource_id"],
+                "revision": revision,
+                "canonical_owner_principal_id": canonical,
+                "actor_principal_id": identity["actor_principal_id"],
+                "actor_is_encrypted_owner": False,
+                "byte_length": len(blob),
+                "content_cid": cids["content"],
+                "preview_cid": cids["preview"],
+                "index_cid": cids["derived-index"],
+                "key_grant_id": grant_id,
+                "encrypted_before_kit": True,
+                "replicated_ciphertext_only": True,
+            }
+            with self._locked():
+                again = self._idem(key_name)
+                if again is not None:
+                    if again.get("identity") != identity:
+                        raise SharedAttachmentError("replay_mismatch")
+                    return self._public_view(again["record"])
+                self._write_record(record)
+                self._write_idem(key_name, {"identity": identity, "record": record})
+            return self._public_view(record)
+        except CaseResourceKeyGrantError as exc:
+            raise SharedAttachmentError(exc.code) from exc
+        finally:
+            if data_key is not None:
+                _zero(data_key)
+
+    def list_public(self, *, actor_principal_id: str, tenant_id: str, case_id: str, resource_id: str,
+                    membership_grant_id: str | None = None, membership_version: int | None = None) -> dict[str, Any]:
+        actor = _label(actor_principal_id, "actor_principal_id")
+        tenant = _label(tenant_id, "tenant_id")
+        case = _label(case_id, "case_id")
+        resource = _label(resource_id, "resource_id")
+        self._require_reader(actor, tenant, case, resource, membership_grant_id, membership_version)
+        with self._locked():
+            records = [self._public_view(item) for item in self._records()
+                       if item["tenant_id"] == tenant and item["case_id"] == case and item["resource_id"] == resource]
+        return {"attachments": records, "private_filename": True, "private_preview": True, "private_derived_index": True,
+                "limitations": list(ATTACHMENT_LIMITATIONS)}
+
+    def download(self, *, actor_principal_id: str, tenant_id: str, case_id: str, resource_id: str,
+                 attachment_id: str, owner_session: UserOwnedKeySession | None = None,
+                 recipient_session: UserOwnedKeySession | None = None, membership_grant_id: str | None = None,
+                 membership_version: int | None = None, key_grant_id: str | None = None,
+                 role: str = "content") -> dict[str, Any]:
+        if role not in {"content", "preview", "derived-index"}:
+            raise SharedAttachmentError("attachment_role_mismatch")
+        record = self._load_bound(actor_principal_id, tenant_id, case_id, resource_id, attachment_id)
+        cid = {"content": record["content_cid"], "preview": record["preview_cid"], "derived-index": record["index_cid"]}[role]
+        envelope = self._read_ciphertext(cid)
+        actor = _label(actor_principal_id, "actor_principal_id")
+        try:
+            if self._owner_case(actor, record["case_id"]) is not None:
+                opened = self._open_owner(actor, record, envelope, owner_session)
+            else:
+                opened = self._open_delegated(actor, record, envelope, recipient_session,
+                                               membership_grant_id, membership_version, key_grant_id)
+        except CaseResourceKeyGrantError as exc:
+            raise SharedAttachmentError(exc.code) from exc
+        payload = self._payload(opened["data"], record, role)
+        view = self._public_view(record)
+        view["role"] = role
+        view["filename"] = payload["filename"]
+        view["media_type"] = payload["media_type"]
+        view["content_base64"] = payload["body_b64"]
+        view["delivered_after_grant_recheck"] = True
+        view["actor_is_encrypted_owner"] = opened["actor_is_encrypted_owner"]
+        view["canonical_owner_principal_id"] = opened["canonical_owner_principal_id"]
+        return view
+
+    def _open_owner(self, actor: str, record: Mapping[str, Any], envelope: bytes, session: UserOwnedKeySession | None) -> dict[str, Any]:
+        if not isinstance(session, UserOwnedKeySession):
+            raise SharedAttachmentError("key_owner_required")
+        return self._grants.read_as_owner(
+            actor_principal_id=actor, case_id=record["case_id"], tenant_id=record["tenant_id"],
+            resource_id=record["resource_id"], artifact_kind=ATTACHMENT_KIND, artifact_revision=record["revision"],
+            envelope=envelope, owner_session=session,
+        )
+
+    def _open_delegated(self, actor: str, record: Mapping[str, Any], envelope: bytes, session: UserOwnedKeySession | None,
+                        membership_grant_id: str | None, membership_version: int | None, key_grant_id: str | None) -> dict[str, Any]:
+        if not isinstance(session, UserOwnedKeySession) or not isinstance(membership_grant_id, str) or type(membership_version) is not int or not isinstance(key_grant_id, str):
+            raise SharedAttachmentError("missing_grant")
+        return self._grants.download_delegated(
+            actor_principal_id=actor, membership_grant_id=membership_grant_id, membership_version=membership_version,
+            key_grant_id=key_grant_id, case_id=record["case_id"], tenant_id=record["tenant_id"],
+            resource_id=record["resource_id"], artifact_kind=ATTACHMENT_KIND, artifact_revision=record["revision"],
+            envelope=envelope, recipient_session=session,
+        )
+
+    def _require_reader(self, actor: str, tenant: str, case: str, resource: str,
+                        membership_grant_id: str | None, membership_version: int | None) -> None:
+        owner = self._owner_case(actor, case)
+        if owner is not None:
+            if owner.tenant_id != tenant or owner.resource_id != resource:
+                raise SharedAttachmentError("resource_mismatch" if owner.resource_id != resource else "tenant_mismatch")
+            return
+        if not isinstance(membership_grant_id, str) or type(membership_version) is not int:
+            raise SharedAttachmentError("missing_grant")
+        try:
+            self._grants._require_membership(
+                actor_principal_id=actor, grant_id=membership_grant_id, tenant_id=tenant, case_id=case,
+                resource_id=resource, expected_version=membership_version, action=READ_ACTION,
+            )
+        except CaseResourceKeyGrantError as exc:
+            raise SharedAttachmentError(exc.code) from exc
+
+    def _load_bound(self, actor: str, tenant: str, case: str, resource: str, attachment_id: str) -> dict[str, Any]:
+        actor_id = _label(actor, "actor_principal_id")
+        with self._locked():
+            try:
+                record = self._read_record(_label(attachment_id, "attachment_id"))
+            except SharedAttachmentError:
+                raise
+        if record["tenant_id"] != _label(tenant, "tenant_id") or record["case_id"] != _label(case, "case_id"):
+            raise SharedAttachmentError("case_mismatch")
+        if record["resource_id"] != _label(resource, "resource_id"):
+            raise SharedAttachmentError("resource_mismatch")
+        if record["canonical_owner_principal_id"] == actor_id:
+            raise SharedAttachmentError("owner_impersonation")
+        return record
+
+    def _payload(self, plaintext: bytes, record: Mapping[str, Any], role: str) -> dict[str, Any]:
+        try:
+            payload = json.loads(plaintext.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SharedAttachmentError("malformed") from exc
+        if not isinstance(payload, dict) or payload.get("role") != role:
+            raise SharedAttachmentError("attachment_role_mismatch")
+        for field, expected in (
+            ("attachment_id", record["attachment_id"]),
+            ("tenant_id", record["tenant_id"]),
+            ("case_id", record["case_id"]),
+            ("resource_id", record["resource_id"]),
+            ("revision", record["revision"]),
+            ("canonical_owner_principal_id", record["canonical_owner_principal_id"]),
+        ):
+            if payload.get(field) != expected:
+                raise SharedAttachmentError("binding_mismatch")
+        if payload.get("actor_principal_id") == payload.get("canonical_owner_principal_id"):
+            raise SharedAttachmentError("owner_impersonation")
+        if not isinstance(payload.get("filename"), str) or not isinstance(payload.get("body_b64"), str):
+            raise SharedAttachmentError("malformed")
+        return payload
+
+    def _seal(self, payload: bytes, *, tenant_id: str, case_id: str, revision: str, canonical: str, key: bytes, key_id: str) -> bytes:
+        binding = PrivateArtifactBinding(tenant_id=tenant_id, case_id=case_id, artifact_kind=ATTACHMENT_KIND,
+                                         revision=revision, principal_id=canonical)
+        access = _CanonicalAccess("authenticated", canonical, case_id)
+        assert_access_matches_binding(access, binding)
+        return seal_private_artifact(payload, binding=binding, key=key, key_id=key_id)
+
+    def _commit_ciphertext(self, envelope: bytes) -> str:
+        from integrations.ipfs_datasets.storage import store_bytes
+        from integrations.private_storage import ENVELOPE_MAGIC
+
+        if not isinstance(envelope, bytes) or not envelope.startswith(ENVELOPE_MAGIC):
+            raise SharedAttachmentError("ciphertext_required")
+        stored = store_bytes(envelope, pin_content=True, backend=self._backend, backend_name="kit")
+        status = str(stored.get("status") or "error")
+        cid = str(stored.get("cid") or "")
+        if status not in {"available", "degraded"} or not cid or stored.get("verified") is not True:
+            raise SharedAttachmentError("kit_unavailable")
+        if callable(getattr(self._backend, "replicate", None)):
+            self._backend.replicate(envelope)
+        return cid
+
+    def _read_ciphertext(self, cid: str) -> bytes:
+        from integrations.ipfs_datasets.storage import retrieve_bytes
+        from integrations.private_storage import ENVELOPE_MAGIC
+
+        loaded = retrieve_bytes(cid, backend=self._backend, backend_name="kit")
+        blob = loaded.get("data")
+        if loaded.get("status") not in {"available", "degraded"} or not isinstance(blob, (bytes, bytearray)):
+            raise SharedAttachmentError("kit_unavailable")
+        envelope = bytes(blob)
+        if not envelope.startswith(ENVELOPE_MAGIC):
+            raise SharedAttachmentError("ciphertext_required")
+        return envelope
+
+    def _owner_case(self, actor: str, case_id: str):
+        try:
+            return self._grants._select(actor, case_id)
+        except CaseResourceKeyGrantError:
+            return None
+
+    def _public_view(self, record: Mapping[str, Any]) -> dict[str, Any]:
+        private = ("filename", "media_type", "content_sha256", "tokens", "preview", "body_b64", "content_base64")
+        if any(name in record for name in private):
+            raise SharedAttachmentError("private_field_leaked")
+        return {
+            "attachment_id": record["attachment_id"],
+            "tenant_id": record["tenant_id"],
+            "case_id": record["case_id"],
+            "resource_id": record["resource_id"],
+            "revision": record["revision"],
+            "canonical_owner_principal_id": record["canonical_owner_principal_id"],
+            "actor_principal_id": record["actor_principal_id"],
+            "actor_is_encrypted_owner": False,
+            "byte_length": record["byte_length"],
+            "content_cid": record["content_cid"],
+            "preview_cid": record["preview_cid"],
+            "index_cid": record["index_cid"],
+            "key_grant_id": record["key_grant_id"],
+            "encrypted_before_kit": True,
+            "replicated_ciphertext_only": True,
+            "private_filename": True,
+            "private_preview": True,
+            "private_derived_index": True,
+            "artifact_kind": ATTACHMENT_KIND,
+            "limitations": list(ATTACHMENT_LIMITATIONS),
+        }
+
+    def _records(self) -> list[dict[str, Any]]:
+        found = []
+        for path in sorted((self._root / "records").glob("*.json")):
+            found.append(json.loads(path.read_text(encoding="utf-8")))
+        return found
+
+    def _read_record(self, attachment_id: str) -> dict[str, Any]:
+        path = self._root / "records" / f"{attachment_id}.json"
+        if not path.is_file():
+            raise SharedAttachmentError("missing_attachment")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _write_record(self, record: Mapping[str, Any]) -> None:
+        path = self._root / "records" / f"{record['attachment_id']}.json"
+        self._write_text(path, json.dumps(record, sort_keys=True, separators=(",", ":")))
+
+    def _idem(self, key: str) -> dict[str, Any] | None:
+        path = self._root / "idem" / hashlib.sha256(key.encode()).hexdigest()
+        if not path.is_file():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _write_idem(self, key: str, document: Mapping[str, Any]) -> None:
+        path = self._root / "idem" / hashlib.sha256(key.encode()).hexdigest()
+        self._write_text(path, json.dumps(document, sort_keys=True, separators=(",", ":")))
+
+    def _write_text(self, path: Path, text: str) -> None:
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(text, encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+        os.chmod(path, 0o600)
+
+    def _locked(self):
+        return _FileLock(self._lock_path)
+
+
 class _FileLock:
     def __init__(self, path: Path) -> None:
         self._path = path
