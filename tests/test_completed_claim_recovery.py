@@ -21,14 +21,18 @@ def git(root, *args):
     return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
 
 
+def _cli_config(root, state):
+    from integrations.ipfs_accelerate import improvement_runner as runner
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as supervisor
+    argv = runner.native_argv(root / "board.md", state, "main", worktree_root=root.parent / "worktrees",
+        board_namespace="synthetic-supervisor-runtime", protected_paths=("board.md",))
+    return supervisor.supervisor_config_from_args(supervisor.parse_args(argv), repo_root=root)
+
+
 def daemon_for(root, state):
-    return native.PortalImplementationDaemon(
-        todo_path=root / "board.md", state_path=state / "task_state.json",
-        strategy_path=state / "strategy.json", events_path=state / "complaint_intake_events.jsonl",
-        repo_root=root, task_header_prefix="## CIMP-SYN-", implement=False, max_task_attempts=3,
-        use_ephemeral_worktree=True, worktree_root=root.parent / "worktrees",
-        worktree_submodule_paths=[], merge_target_branch="main", implementation_protected_paths=["board.md"],
-        merge_queue_dir=state / "merge-queue", llm_merge_resolver_command="")
+    from ipfs_accelerate_py.agent_supervisor.merge.merge_queue import MergeQueue
+    config = _cli_config(root, state)
+    return repair.completed_claim_daemon(config, merge_queue=MergeQueue(config.merge_queue_dir))
 
 
 @pytest.fixture(scope="module")
@@ -357,6 +361,37 @@ def test_readonly_native_view_cannot_be_used_for_mutation(unchanged_world):
     with pytest.raises(ValueError, match="read_only_view"):
         repair.reconcile_completed_claim(_readonly_view(w), reprove_closure=lambda: pytest.fail("no closure effect"))
     assert w["claim_path"].exists()
+
+
+def test_real_cli_explicit_legacy_config_reads_genuine_callback_without_initializing_state(unchanged_world):
+    w = unchanged_world
+    config = _cli_config(w["root"], w["state"])
+    assert config.database_program is not None
+    assert config.database_program.explicit_legacy is True
+    before = {p: p.read_bytes() for p in w["state"].rglob("*") if p.is_file()}
+    view = repair.read_only_completion_view(config)
+    proof = repair.completed_callback_proof(view, task_id=w["task"].task_id,
+        canonical_task_cid=w["identity"].canonical_task_cid, attempt=1,
+        workspace=str(w["workspace"]), branch=w["branch"])
+    assert proof["source_status"] == "completed"
+    assert before == {p: p.read_bytes() for p in w["state"].rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("mode", ["quack", "embedded", "embedded_exclusive"])
+def test_database_authority_configs_remain_refused(unchanged_world, mode):
+    from dataclasses import replace
+    from ipfs_accelerate_py.agent_supervisor.runtime.multi_supervisor_runner import DatabaseProgramConfig
+    w = unchanged_world
+    quack = ({"endpoint_secret_handle": "handle:synthetic-test-only",
+        "quack_endpoint": "quack://127.0.0.1:19091", "store_id": "synthetic-store",
+        "store_generation": "synthetic-generation", "schema_revision": "synthetic-schema"}
+        if mode == "quack" else {})
+    config = replace(_cli_config(w["root"], w["state"]),
+        database_program=DatabaseProgramConfig(authority_mode=mode, task_source_kind="duckdb", **quack))
+    with pytest.raises(ValueError, match="legacy_config_required"):
+        repair.read_only_completion_view(config)
+    with pytest.raises(ValueError, match="config_required"):
+        repair.completed_claim_daemon(config, merge_queue=w["daemon"].merge_queue)
 
 
 def test_real_successful_finish_allows_cleanup_without_missing_finish_fallback(unchanged_world):

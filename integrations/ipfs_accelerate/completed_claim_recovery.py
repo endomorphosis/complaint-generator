@@ -19,6 +19,25 @@ from . import release_evidence as evidence
 SCHEMA = "complaint-completed-claim-retirement@1"
 
 
+def _legacy_config(config):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor import PortalSupervisorConfig
+    from ipfs_accelerate_py.agent_supervisor.runtime.multi_supervisor_runner import (
+        DatabaseProgramConfig, AUTHORITY_MODE_LEGACY_MARKDOWN,
+        TASK_SOURCE_LEGACY_MARKDOWN, TASK_SOURCE_MARKDOWN)
+    if type(config) is not PortalSupervisorConfig:
+        return False
+    program = config.database_program
+    if program is None:
+        return True
+    return (type(program) is DatabaseProgramConfig
+        and program.authority_mode == AUTHORITY_MODE_LEGACY_MARKDOWN
+        and program.task_source_kind in {TASK_SOURCE_LEGACY_MARKDOWN, TASK_SOURCE_MARKDOWN}
+        and program.explicit_legacy is True
+        and not native.is_database_authority_mode(authority_mode=program.authority_mode,
+                                                 task_source_kind=program.task_source_kind))
+
+
 def completed_claim_daemon(config, *, merge_queue):
     """Use Native's actual reconciliation constructor and existing queue.
 
@@ -26,9 +45,8 @@ def completed_claim_daemon(config, *, merge_queue):
     canonical identity therefore retains the source filename namespace.
     """
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
-    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor import PortalSupervisorConfig
     from ipfs_accelerate_py.agent_supervisor.merge.merge_queue import MergeQueue
-    _require(type(config) is PortalSupervisorConfig and isinstance(merge_queue, MergeQueue)
+    _require(_legacy_config(config) and isinstance(merge_queue, MergeQueue)
         and Path(merge_queue.queue_dir) == Path(config.merge_queue_dir), "completed_claim_config_required")
     return native.PortalImplementationDaemon(
         todo_path=config.todo_path, state_path=config.state_path, strategy_path=config.strategy_path,
@@ -57,9 +75,8 @@ def read_only_completion_view(config):
     No instance methods, source classes, guards or queues are replaced.
     """
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
-    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor import PortalSupervisorConfig
     from ipfs_accelerate_py.agent_supervisor.merge.checkout_lock import checkout_repository_id
-    _require(type(config) is PortalSupervisorConfig and config.database_program is None,
+    _require(_legacy_config(config),
              "completed_claim_legacy_config_required")
     view = object.__new__(native.PortalImplementationDaemon)
     view.repo_root, view.todo_path = Path(config.repo_root), Path(config.todo_path)
