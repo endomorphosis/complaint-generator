@@ -94,6 +94,36 @@ held. Temporary preflight unavailability waits without consuming another repair.
 Unknown or interrupted effects remain recorded as uncertain rather than being
 repeated blindly.
 
+A stopped ordinary attempt can retain a dead repo-wide claim while its task
+is still pending. After the existing launcher, recovery, checkout and settled
+merge-queue guards have proved closure, `recover` may use Native's public
+`review_quiesced_pending_task_claim` / `reconcile_quiesced_pending_task_claim`
+facades. Native independently checks the current task/CID/ordinal, unchanged
+workspace, lifecycle, shutdown and claims. This releases only the exact dead
+claim. Provider outcome stays unknown: it does not complete a task, settle a
+provider callback, refund attempts or grant a new attempt. Normal Native
+reconciliation then clears its stale implementation lock. All paid limits,
+holds and ordinary selection rules remain in force. The consumer also requires
+the full Native task-state payload to remain unchanged across claim release.
+
+An upgraded pinned SDK uses its own public facades automatically. While an
+older frozen SDK lacks them, an operator may provision the optional UID-owned
+0600 `CAMPAIGN_STATE/pending-task-claim-runtime.json` inside the owned 0700 state
+directory. Schema `complaint.pending-task-claim-runtime.v1` binds the exact
+repository/state, specification digest, plan ID and plan-file digest, active
+SDK root/commit, and approved first-party companion Git root/commit/blob ID and
+SHA256. Keep that companion in an immutable proper Git checkout; a sparse
+checkout containing its source is sufficient. The consumer verifies actual
+Native support-module origins and Git bytes, executes verified companion bytes
+under their real canonical module identity, and rechecks the source binding
+before and after the public operation. It never adds the companion checkout to
+import paths or changes Native package paths or core guards. Native's own Grok
+runner import can apply its existing accepted-SDK import bootstrap. A different
+already-loaded companion is refused rather than replaced
+in-process. Missing runtime preserves the original blocked claim result;
+unsafe configuration, changed source or unproved custody fails closed. No
+companion is installed or enabled merely by updating this repository.
+
 An unexpected startup exit can leave public status at `stop_incomplete` before
 a new shutdown proof exists. Recovery requires the saved launch birth to be
 independently proved dead, a launch that was expected to run, and the current

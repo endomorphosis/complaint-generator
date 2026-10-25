@@ -2009,11 +2009,13 @@ def _open_recovery_daemon(repo_root: Path, state_dir: Path, record: Mapping[str,
 
 
 @contextmanager
-def _recovery_checkout_lease(repo_root: Path):
+def _recovery_checkout_lease(repo_root: Path, *, board_namespace: str = "complaint-intake-improvement"):
     # Exclude merges/checkout mutation, while leaving the protected-path
     # reconciler free to acquire and revalidate its own crash-fence lease.
     from ipfs_accelerate_py.agent_supervisor.merge import checkout_lock as locks
-    path = locks.board_scoped_checkout_mutation_lock_path(repo_root, "complaint-intake-improvement")
+    if re.fullmatch(r"[a-z][a-z0-9-]{0,63}", board_namespace) is None:
+        raise ValueError("recovery board namespace is not canonical")
+    path = locks.board_scoped_checkout_mutation_lock_path(repo_root, board_namespace)
     metadata = locks.checkout_lock_metadata(kind="merge", repo_root=repo_root,
         owner_script="", extra={"lease_id": secrets.token_hex(16), "operation": "quiesced_stalled_worker_reconciliation"})
     lease, _, _, _ = locks.acquire_checkout_mutation_lease(path, metadata, owner_active=lambda _: True)
@@ -2143,7 +2145,8 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             if _recovery_preimage(repo_root, state_dir, record) != preimage:
                 return _refusal("recovery_preimage_changed", observed)
             _parent_closed(state_dir, record, context, False)
-            stack.enter_context(_recovery_checkout_lease(repo_root))
+            _, recovery_artifacts = _campaign_spec(repo_root, spec_path)
+            stack.enter_context(_recovery_checkout_lease(repo_root, board_namespace=recovery_artifacts.board_namespace))
             # Even preparing an existing queue can touch its schema/import
             # projection. Prove current process/container closure first.
             _parent_closed(state_dir, record, context, False)
@@ -2196,6 +2199,7 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             daemon = _open_recovery_daemon(repo_root, state_dir, record, merge_queue=queue_instance)
             attempt_result = daemon.reconcile_quiesced_active_attempt()
             claim_result = None
+            pending_claim_result = None
             blocked = bool(attempt_result.get("blocked"))
             reason = str(attempt_result.get("reason") or "")
             terminal_claim_ok = (not blocked) or reason == "task_claim_reconciliation_blocked"
@@ -2206,6 +2210,18 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             }
             if terminal_claim_ok and not unsafe:
                 claim_result = daemon.reconcile_quiesced_implementation_task_claim()
+            if (isinstance(claim_result, dict) and claim_result.get("blocked") is True
+                    and claim_result.get("reason") == "canonical_task_not_terminal"):
+                from .pending_claim_runtime import reconcile_pending_claim
+                _, native = _native_modules(repo_root)
+                pending_claim_result = reconcile_pending_claim(repo_root, spec_path, state_dir,
+                    record, native, daemon, str(claim_result.get("task_id") or ""))
+                if pending_claim_result.get("reconciled") is True and not pending_claim_result.get("blocked"):
+                    # The companion releases only the exact claim. Let the
+                    # unchanged Native API finish its ordinary stale-lock cleanup.
+                    attempt_result = daemon.reconcile_quiesced_active_attempt()
+                    claim_result = daemon.reconcile_quiesced_implementation_task_claim()
+                    reason = str(attempt_result.get("reason") or "")
             after_state, _ = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
             count_keys = ("implementation_attempts", "implementation_attempts_by_cid")
             before_state = preimage["native_payload"]
@@ -2214,14 +2230,17 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
                 return _refusal("native_accounting_or_completion_changed", observed,
                     counters_preserved=False, progress_preserved=False,
                     attempt_refunded=None, diagnostics=["native invariant observation changed; no rollback attempted"],
-                    attempt_reconciliation=attempt_result, claim_reconciliation=claim_result)
-            reconciled = bool(attempt_result.get("reconciled")) or (
+                    attempt_reconciliation=attempt_result, claim_reconciliation=claim_result,
+                    pending_claim_reconciliation=pending_claim_result)
+            reconciled = (not attempt_result.get("blocked") and
+                not (isinstance(claim_result, dict) and claim_result.get("blocked"))) and (bool(attempt_result.get("reconciled")) or (
                 isinstance(claim_result, dict) and bool(claim_result.get("reconciled")) and not claim_result.get("blocked")
-            )
+            ))
             if not reconciled:
                 return _refusal(reason or "native_reconciliation_blocked", observed,
                                 diagnostics=[reason or "native_reconciliation_blocked"],
                                 attempt_reconciliation=attempt_result, claim_reconciliation=claim_result,
+                                pending_claim_reconciliation=pending_claim_result,
                                 fence=fence, container_shutdown=containers)
             return {"recovery": "reconciled", "eligible": True, "reconciled": True,
                     "reason": reason or "quiesced_active_attempt_reconciled", "status": observed.get("status"),
@@ -2229,6 +2248,7 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
                     "application_interview_state": None,
                     "diagnostics": [reason or "quiesced_active_attempt_reconciled"],
                     "attempt_reconciliation": attempt_result, "claim_reconciliation": claim_result,
+                    "pending_claim_reconciliation": pending_claim_result,
                     "fence": fence, "container_shutdown": containers,
                     "selection_performed": False, "paid_dispatch": False, "attempt_refunded": False,
                     "completion_authority": False, "counters_preserved": True, "progress_preserved": True,
