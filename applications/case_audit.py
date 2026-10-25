@@ -11,21 +11,29 @@ logs, in-app notifications, and error payloads carry only those references.
 Complaint text and key material are rejected and are not copied into those
 surfaces.
 
-This store does not export audit bundles, does not rewrite history after
-revocation, and does not erase plaintext a caller already holds.
+Scoped export is a separate operation from append. It releases only an
+explicit field and artifact allowlist for one case, one actor, one purpose,
+and the current grant. The stored bundle stays sealed. Plaintext is returned
+only when the caller sets user decryption explicitly. Path reads, forged
+roles, mixed-tenant batches, stale grants, and direct downloads are denied.
+History is not rewritten after revocation, and plaintext a caller already
+holds is not erased.
 """
 
 from __future__ import annotations
 
+import base64
 import fcntl
 import hashlib
 import json
 import os
 import re
+import tempfile
 import uuid
+from urllib.parse import unquote
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from applications.case_access import OWNER_ACTIONS
 from applications.case_directory import CaseDirectory, CaseDirectoryError, CaseNamespace
@@ -51,7 +59,49 @@ LIMITATIONS = (
     "revocation_does_not_rewrite_recorded_events",
     "operational_surfaces_omit_complaint_text_and_key_material",
     "actor_is_distinct_from_canonical_encrypted_owner",
-    "export_controls_are_not_this_store",
+    "exports_require_current_grant_purpose_and_explicit_fields",
+)
+EXPORT_TASK_ID = "CIMP-GUI-52"
+EXPORT_ARTIFACT_KIND = "case-audit-export"
+OPERATIONAL_EXPORT_CASE_ID = "operational-audit"
+OPERATIONAL_EXPORT_TENANT_ID = "operational"
+USER_DECRYPT_CONFIRMATION = "user-decrypted"
+AUTHORIZED_EXPORT_FIELDS = frozenset({
+    "event_id",
+    "sequence",
+    "action",
+    "actor_principal_id",
+    "resource_id",
+    "revision",
+    "grant_id",
+    "grant_kind",
+    "grant_version",
+    "purpose_ref",
+    "tenant_id",
+    "case_id",
+})
+OPERATIONAL_EXPORT_FIELDS = frozenset({
+    "at",
+    "actor_principal_id",
+    "action",
+    "subject_principal_id",
+    "detail",
+    "revision",
+})
+ROLE_CLAIM_FIELDS = frozenset({
+    "role",
+    "roles",
+    "staff_role",
+    "is_admin",
+    "is_staff",
+    "is_lawyer",
+})
+EXPORT_LIMITATIONS = (
+    "private_export_stays_encrypted_until_explicit_user_decryption",
+    "only_named_fields_and_artifacts_are_released",
+    "export_requires_case_actor_purpose_and_current_grant",
+    "direct_download_is_denied",
+    "actor_is_distinct_from_canonical_encrypted_owner",
 )
 SENSITIVE_FIELDS = frozenset({
     "complaint",
@@ -106,6 +156,26 @@ class CaseAuditError(Exception):
     def __init__(self, code: str) -> None:
         self.code = str(code)
         super().__init__(self.code)
+
+
+def audit_export_session_verifier(request: Any) -> Callable[[], None]:
+    """Reprove the actual received browser cookie; never accept body authority."""
+    from applications.browser_sessions import (
+        BoundBrowserSession, BrowserSessionError, BrowserSessionService, SESSION_COOKIE,
+    )
+    sessions = getattr(request.app.state, "browser_sessions", None)
+    bound = getattr(request.state, "browser_principal", None)
+    if not isinstance(sessions, BrowserSessionService) or not isinstance(bound, BoundBrowserSession):
+        raise CaseAuditError("unauthenticated")
+    token = request.cookies.get(SESSION_COOKIE)
+    def verify() -> None:
+        try:
+            current = sessions.authenticate_token(token)
+        except BrowserSessionError as exc:
+            raise CaseAuditError("unauthenticated") from exc
+        if current != bound:
+            raise CaseAuditError("unauthenticated")
+    return verify
 
 
 @dataclass(frozen=True)
@@ -204,6 +274,25 @@ def notification_payload(event: CaseAuditEvent) -> dict[str, Any]:
         "grant_id": event.grant_id,
         "purpose_ref": event.purpose_ref,
     }
+
+
+def refuse_direct_audit_download(path: str = "") -> None:
+    """Every direct-download entry point fails closed. The path is not opened."""
+
+    del path
+    raise CaseAuditError("direct_download_denied")
+
+
+def path_targets_audit_download(path: str, query: str = "") -> bool:
+    """True when a URL or query asks to read an audit export as a file."""
+
+    normalized = str(path or "").replace("\\", "/").rstrip("/")
+    if normalized.startswith("/api/cases/audit-exports/") or normalized.startswith("/api/admin/audit/exports"):
+        return True
+    if normalized != "/api/documents/download":
+        return False
+    raw = unquote(str(query or "")).replace("\\", "/")
+    return ".." in raw or "audit-export" in raw or "/exports/" in raw
 
 
 def error_payload(error: BaseException) -> dict[str, str]:
@@ -323,6 +412,7 @@ class CaseAuditStore:
         self._lock_path.touch(mode=0o600)
         (self._root / "events").mkdir(mode=0o700, exist_ok=True)
         (self._root / "idem").mkdir(mode=0o700, exist_ok=True)
+        (self._root / "exports").mkdir(mode=0o700, exist_ok=True)
         self._logs: list[dict[str, Any]] = []
         self._notifications: list[dict[str, Any]] = []
         self._errors: list[dict[str, str]] = []
@@ -437,6 +527,290 @@ class CaseAuditStore:
 
     def error_payloads(self) -> tuple[dict[str, str], ...]:
         return tuple(self._errors)
+
+    def direct_download(self, path: str = "") -> None:
+        """No filesystem path, query path, or export id is a download."""
+
+        raise CaseAuditError("direct_download_denied")
+
+    def export_from_request(
+        self,
+        body: Mapping[str, Any],
+        *,
+        session_roles: Sequence[str] | None = None,
+        verify_access: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        """Export one case's audit references, or reopen that sealed bundle.
+
+        ``session_roles`` is the server session, not a role the body may mint.
+        """
+
+        try:
+            return self._export_case(body, session_roles=session_roles, verify_access=verify_access)
+        except CaseAuditError as exc:
+            self._errors.append(error_payload(exc))
+            raise
+
+    def export_operational_from_request(
+        self,
+        body: Mapping[str, Any],
+        *,
+        session_roles: Sequence[str],
+        events: Sequence[Mapping[str, Any]],
+        audit_reader: bool,
+        verify_access: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        """Export operational audit rows. Case envelopes are not opened."""
+
+        try:
+            if audit_reader is not True:
+                raise CaseAuditError("audit_right_required")
+            return self._export_operational(body, session_roles=session_roles, events=events, verify_access=verify_access)
+        except CaseAuditError as exc:
+            self._errors.append(error_payload(exc))
+            raise
+
+    def _export_case(self, body: Mapping[str, Any], *, session_roles: Sequence[str] | None,
+                     verify_access: Callable[[], None] | None = None) -> dict[str, Any]:
+        parsed = _parse_export_body(body)
+        actor = self._active(parsed["actor_principal_id"])
+        _reject_forged_role(actor, parsed["role_claims"], session_roles)
+        kind = self._grant_kind(parsed["grant_kind"])
+        try:
+            bound = self._resolve_grant(
+                actor_id=actor.principal_id,
+                case_id=parsed["case_id"],
+                tenant_id=parsed["tenant_id"],
+                resource_id=parsed["resource_id"],
+                action="case.read",
+                expected_revision=parsed["expected_revision"],
+                grant_id=parsed["grant_id"],
+                grant_kind=kind,
+                membership_version=parsed["membership_version"],
+                require_action=True,
+            )
+        except CaseAuditError as exc:
+            if exc.code == "revision_conflict" and kind != "owner":
+                raise CaseAuditError("stale_grant") from exc
+            raise
+        if parsed["grant_version"] != bound["grant_version"]:
+            raise CaseAuditError("stale_grant")
+        def admit() -> None:
+            if verify_access is not None:
+                if verify_access() is False:
+                    raise CaseAuditError("unauthenticated")
+            current = self._active(actor.principal_id)
+            _reject_forged_role(current, parsed["role_claims"], session_roles)
+            fresh = self._resolve_grant(
+                actor_id=current.principal_id, case_id=parsed["case_id"],
+                tenant_id=parsed["tenant_id"], resource_id=parsed["resource_id"], action="case.read",
+                expected_revision=parsed["expected_revision"], grant_id=parsed["grant_id"],
+                grant_kind=kind, membership_version=parsed["membership_version"], require_action=True)
+            if fresh != bound:
+                raise CaseAuditError("stale_grant")
+        _reject_mixed_tenant(parsed["cases"], bound["tenant_id"], bound["case_id"])
+        if parsed["export_id"] is not None:
+            return self._reopen_export(
+                parsed,
+                actor_id=actor.principal_id,
+                tenant_id=bound["tenant_id"],
+                case_id=bound["case_id"],
+                verify_access=admit,
+            )
+        with self._locked():
+            chain = self._chain(bound["case_id"])
+        selected = _select_case_artifacts(
+            chain,
+            tenant_id=bound["tenant_id"],
+            case_id=bound["case_id"],
+            purpose_ref=parsed["purpose_ref"],
+            artifact_ids=parsed["artifact_ids"],
+        )
+        records = [{name: record[name] for name in parsed["fields"]} for record in selected]
+        return self._seal_export(
+            parsed,
+            kind="case",
+            actor_id=actor.principal_id,
+            tenant_id=bound["tenant_id"],
+            case_id=bound["case_id"],
+            resource_id=bound["resource_id"],
+            grant_kind=kind,
+            grant_version=bound["grant_version"],
+            records=records,
+            artifact_ids=tuple(record["event_id"] for record in selected),
+            verify_access=admit,
+        )
+
+    def _export_operational(
+        self,
+        body: Mapping[str, Any],
+        *,
+        session_roles: Sequence[str],
+        events: Sequence[Mapping[str, Any]],
+        verify_access: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        parsed = _parse_export_body(body, operational=True)
+        actor = self._active(parsed["actor_principal_id"])
+        _reject_forged_role(actor, parsed["role_claims"], session_roles)
+        if "operational_admin" not in actor.roles:
+            raise CaseAuditError("forged_role")
+        expected_grant = "audit-right:" + actor.principal_id
+        if parsed["grant_id"] != expected_grant or parsed["grant_kind"] != "audit_right":
+            raise CaseAuditError("grant_mismatch")
+        if parsed["grant_version"] != actor.revision:
+            raise CaseAuditError("stale_grant")
+        def admit() -> None:
+            if verify_access is not None:
+                if verify_access() is False:
+                    raise CaseAuditError("unauthenticated")
+            current = self._active(actor.principal_id)
+            _reject_forged_role(current, parsed["role_claims"], session_roles)
+            if current.revision != actor.revision or "operational_admin" not in current.roles:
+                raise CaseAuditError("stale_grant")
+        if parsed["tenant_id"] != OPERATIONAL_EXPORT_TENANT_ID:
+            raise CaseAuditError("mixed_tenant_batch")
+        _reject_mixed_tenant(parsed["cases"], OPERATIONAL_EXPORT_TENANT_ID, OPERATIONAL_EXPORT_CASE_ID)
+        if parsed["export_id"] is not None:
+            return self._reopen_export(
+                parsed,
+                actor_id=actor.principal_id,
+                tenant_id=OPERATIONAL_EXPORT_TENANT_ID,
+                case_id=OPERATIONAL_EXPORT_CASE_ID,
+                verify_access=admit,
+            )
+        rows = []
+        for event in events:
+            if not isinstance(event, Mapping):
+                raise CaseAuditError("audit_event")
+            if any(name in event for name in SENSITIVE_FIELDS):
+                raise CaseAuditError("sensitive_field")
+            rows.append({name: event[name] for name in parsed["fields"] if name in event})
+        return self._seal_export(
+            parsed,
+            kind="operational",
+            actor_id=actor.principal_id,
+            tenant_id=OPERATIONAL_EXPORT_TENANT_ID,
+            case_id=OPERATIONAL_EXPORT_CASE_ID,
+            resource_id="operational-audit",
+            grant_kind="audit_right",
+            grant_version=actor.revision,
+            records=rows,
+            artifact_ids=tuple(parsed["artifact_ids"]),
+            verify_access=admit,
+        )
+
+    def _seal_export(
+        self,
+        parsed: Mapping[str, Any],
+        *,
+        kind: str,
+        actor_id: str,
+        tenant_id: str,
+        case_id: str,
+        resource_id: str,
+        grant_kind: str,
+        grant_version: int,
+        records: list[dict[str, Any]],
+        artifact_ids: tuple[str, ...],
+        verify_access: Callable[[], None],
+    ) -> dict[str, Any]:
+        export_id = _opaque_id()
+        document = {
+            "schema_version": SCHEMA_VERSION,
+            "task_id": EXPORT_TASK_ID,
+            "kind": kind,
+            "export_id": export_id,
+            "purpose_ref": parsed["purpose_ref"],
+            "fields": list(parsed["fields"]),
+            "artifact_ids": list(artifact_ids),
+            "records": records,
+            "grant_id": parsed["grant_id"],
+            "grant_kind": grant_kind,
+            "grant_version": grant_version,
+            "actor_principal_id": actor_id,
+            "tenant_id": tenant_id,
+            "case_id": case_id,
+            "resource_id": resource_id,
+            "expected_revision": parsed["expected_revision"],
+            "membership_version": parsed["membership_version"],
+            "actor_is_encrypted_owner": False,
+        }
+        if actor_id == tenant_id:
+            raise CaseAuditError("owner_impersonation")
+        payload = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        binding = _export_binding(tenant_id, case_id, export_id)
+        access = _CanonicalAccess("authenticated", tenant_id, case_id)
+        assert_access_matches_binding(access, binding)
+        envelope = seal_private_artifact(payload, binding=binding, key=self._key, key_id=self._key_id)
+        path = self._export_path(export_id)
+        if path.exists() or path.is_symlink():
+            raise CaseAuditError("audit_append_conflict")
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".export-", dir=path.parent)
+        temporary = Path(temporary_name)
+        try:
+            view = envelope
+            while view:
+                wrote = os.write(descriptor, view)
+                if wrote <= 0:
+                    raise CaseAuditError("audit_write")
+                view = view[wrote:]
+            os.fsync(descriptor)
+            # No ciphertext bundle becomes visible after a completed cutoff
+            # during encryption or staging. Linking also refuses replacement.
+            verify_access()
+            os.link(temporary, path, follow_symlinks=False)
+        finally:
+            os.close(descriptor)
+            temporary.unlink(missing_ok=True)
+        payload = _export_view(document, envelope, user_decrypted=parsed["user_decrypt"])
+        verify_access()
+        return payload
+
+    def _reopen_export(
+        self,
+        parsed: Mapping[str, Any],
+        *,
+        actor_id: str,
+        tenant_id: str,
+        case_id: str,
+        verify_access: Callable[[], None],
+    ) -> dict[str, Any]:
+        export_id = parsed["export_id"]
+        path = self._export_path(export_id)
+        if not path.is_file() or path.is_symlink():
+            raise CaseAuditError("missing_export")
+        binding = _export_binding(tenant_id, case_id, export_id)
+        access = _CanonicalAccess("authenticated", tenant_id, case_id)
+        try:
+            assert_access_matches_binding(access, binding)
+            envelope = path.read_bytes()
+            plaintext = open_private_artifact(
+                envelope,
+                binding=binding,
+                key=self._key,
+                expected_key_id=self._key_id,
+            )
+        except (PrivateArtifactIntegrityError, PrivateArtifactBindingError) as exc:
+            raise CaseAuditError("integrity") from exc
+        document = json.loads(plaintext.decode("utf-8"))
+        if document.get("actor_principal_id") != actor_id or document.get("tenant_id") != tenant_id:
+            raise CaseAuditError("binding_mismatch")
+        if document.get("case_id") != case_id or document.get("actor_is_encrypted_owner") is not False:
+            raise CaseAuditError("binding_mismatch")
+        if document.get("purpose_ref") != parsed["purpose_ref"] or document.get("grant_id") != parsed["grant_id"]:
+            raise CaseAuditError("grant_mismatch")
+        payload = _export_view(document, envelope, user_decrypted=parsed["user_decrypt"])
+        verify_access()
+        return payload
+
+    def _export_path(self, export_id: str) -> Path:
+        label = _label(export_id, "traversal")
+        if label != export_id or ".." in label or "/" in label or "\\" in label:
+            raise CaseAuditError("traversal")
+        path = self._root / "exports" / (label + ".envelope")
+        if path.is_symlink():
+            raise CaseAuditError("traversal")
+        return path
 
     def _record(
         self,
@@ -974,6 +1348,175 @@ class _FileLock:
             fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
             self._handle.close()
             self._handle = None
+
+
+def _reject_forged_role(actor: Any, role_claims: Mapping[str, Any], session_roles: Sequence[str] | None) -> None:
+    if role_claims:
+        raise CaseAuditError("forged_role")
+    if session_roles is None:
+        return
+    if isinstance(session_roles, (str, bytes)) or not isinstance(session_roles, Sequence):
+        raise CaseAuditError("forged_role")
+    if tuple(session_roles) != tuple(actor.roles):
+        raise CaseAuditError("forged_role")
+
+
+def _reject_mixed_tenant(cases: list[dict[str, str]] | None, tenant_id: str, case_id: str) -> None:
+    if cases is None:
+        return
+    tenants = {item["tenant_id"] for item in cases}
+    if tenants != {tenant_id}:
+        raise CaseAuditError("mixed_tenant_batch")
+    if any(item["case_id"] != case_id for item in cases) and tenant_id != OPERATIONAL_EXPORT_TENANT_ID:
+        if len({item["case_id"] for item in cases}) > 1 and any(item["case_id"] != case_id for item in cases):
+            raise CaseAuditError("mixed_tenant_batch")
+
+
+def _select_case_artifacts(
+    chain: Sequence[CaseAuditEvent],
+    *,
+    tenant_id: str,
+    case_id: str,
+    purpose_ref: str,
+    artifact_ids: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    by_id = {event.event_id: event for event in chain}
+    chosen = chain
+    if artifact_ids:
+        missing = [item for item in artifact_ids if item not in by_id]
+        if missing:
+            raise CaseAuditError("artifact_not_authorized")
+        chosen = tuple(by_id[item] for item in artifact_ids)
+    selected: list[dict[str, Any]] = []
+    for event in chosen:
+        if event.tenant_id != tenant_id or event.case_id != case_id:
+            raise CaseAuditError("mixed_tenant_batch")
+        if event.purpose_ref != purpose_ref:
+            raise CaseAuditError("purpose_mismatch")
+        view = event.public_view()
+        selected.append({name: view[name] for name in AUTHORIZED_EXPORT_FIELDS if name in view})
+    return selected
+
+
+def _parse_export_body(body: Mapping[str, Any], *, operational: bool = False) -> dict[str, Any]:
+    if not isinstance(body, Mapping):
+        raise CaseAuditError("request_body")
+    if "path" in body or any(isinstance(key, str) and (".." in key or "/" in key or "\\" in key) for key in body):
+        raise CaseAuditError("traversal")
+    role_claims = {name: body[name] for name in ROLE_CLAIM_FIELDS if name in body}
+    for name, value in body.items():
+        if not isinstance(name, str) or name.lower() in SENSITIVE_FIELDS:
+            raise CaseAuditError("sensitive_field")
+        if isinstance(value, (bytes, bytearray)):
+            raise CaseAuditError("sensitive_field")
+        if isinstance(value, str) and (len(value) > 200 or "\n" in value or "\x00" in value or ".." in value):
+            raise CaseAuditError("traversal" if ".." in value or "/" in value or "\\" in value else "sensitive_field")
+    fields = body.get("fields")
+    allowed = OPERATIONAL_EXPORT_FIELDS if operational else AUTHORIZED_EXPORT_FIELDS
+    if not isinstance(fields, list) or not fields or any(not isinstance(item, str) or item not in allowed for item in fields):
+        raise CaseAuditError("unauthorized_field")
+    if len(set(fields)) != len(fields):
+        raise CaseAuditError("unauthorized_field")
+    artifact_ids = body.get("artifact_ids", [])
+    if not isinstance(artifact_ids, list) or any(not isinstance(item, str) for item in artifact_ids):
+        raise CaseAuditError("artifact_not_authorized")
+    for item in artifact_ids:
+        _label(item, "traversal")
+        if ".." in item:
+            raise CaseAuditError("traversal")
+    cases = body.get("cases")
+    parsed_cases: list[dict[str, str]] | None = None
+    if cases is not None:
+        if not isinstance(cases, list) or not cases:
+            raise CaseAuditError("mixed_tenant_batch")
+        parsed_cases = []
+        for item in cases:
+            if not isinstance(item, Mapping) or set(item) - {"case_id", "tenant_id"}:
+                raise CaseAuditError("mixed_tenant_batch")
+            parsed_cases.append({
+                "case_id": _label(str(item.get("case_id") or ""), "traversal"),
+                "tenant_id": _label(str(item.get("tenant_id") or ""), "traversal"),
+            })
+    grant_version = body.get("grant_version")
+    if type(grant_version) is not int:
+        raise CaseAuditError("stale_grant")
+    membership_version = body.get("membership_version")
+    if membership_version is not None and type(membership_version) is not int:
+        raise CaseAuditError("stale_grant")
+    expected_revision = body.get("expected_revision", 1 if operational else None)
+    if operational:
+        expected_revision = 1
+    elif type(expected_revision) is not int:
+        raise CaseAuditError("revision_conflict")
+    user_decrypt = body.get("user_decrypt") is True and body.get("decryption") == USER_DECRYPT_CONFIRMATION
+    if body.get("user_decrypt") not in (None, False, True):
+        raise CaseAuditError("user_decrypt")
+    export_id = body.get("export_id")
+    if export_id is not None:
+        export_id = _label(str(export_id), "traversal")
+        if ".." in export_id:
+            raise CaseAuditError("traversal")
+    purpose = _label(str(body.get("purpose_ref") or ""), "purpose_ref")
+    if PURPOSE_RE.fullmatch(purpose) is None:
+        raise CaseAuditError("purpose_ref")
+    tenant_id = _label(str(body.get("tenant_id") or ""), "tenant_id")
+    case_id = OPERATIONAL_EXPORT_CASE_ID if operational else _label(str(body.get("case_id") or ""), "case_id")
+    resource_id = "operational-audit" if operational else _label(str(body.get("resource_id") or ""), "resource_id")
+    return {
+        "actor_principal_id": _label(str(body.get("actor_principal_id") or ""), "actor"),
+        "case_id": case_id,
+        "tenant_id": tenant_id,
+        "resource_id": resource_id,
+        "grant_id": _label(str(body.get("grant_id") or ""), "grant_id"),
+        "grant_kind": _label(str(body.get("grant_kind") or ""), "grant_kind"),
+        "grant_version": grant_version,
+        "purpose_ref": purpose,
+        "expected_revision": expected_revision,
+        "membership_version": membership_version,
+        "fields": tuple(fields),
+        "artifact_ids": tuple(artifact_ids),
+        "cases": parsed_cases,
+        "user_decrypt": user_decrypt,
+        "export_id": export_id,
+        "role_claims": role_claims,
+    }
+
+
+def _export_binding(tenant_id: str, case_id: str, export_id: str) -> PrivateArtifactBinding:
+    return PrivateArtifactBinding(
+        tenant_id=tenant_id,
+        case_id=case_id,
+        artifact_kind=EXPORT_ARTIFACT_KIND,
+        revision=export_id,
+        principal_id=tenant_id,
+    )
+
+
+def _export_view(document: Mapping[str, Any], envelope: bytes, *, user_decrypted: bool) -> dict[str, Any]:
+    released = user_decrypted is True
+    records = document.get("records") if released else None
+    if released and not isinstance(records, list):
+        raise CaseAuditError("integrity")
+    return {
+        "task_id": EXPORT_TASK_ID,
+        "export_id": document["export_id"],
+        "kind": document["kind"],
+        "encrypted": released is False,
+        "user_decrypted": released,
+        "purpose_ref": document["purpose_ref"],
+        "grant_id": document["grant_id"],
+        "grant_kind": document["grant_kind"],
+        "grant_version": document["grant_version"],
+        "actor_principal_id": document["actor_principal_id"],
+        "tenant_id": document["tenant_id"],
+        "case_id": document["case_id"],
+        "fields": list(document["fields"]),
+        "artifact_ids": list(document["artifact_ids"]),
+        "envelope": None if released else base64.b64encode(envelope).decode("ascii"),
+        "records": records,
+        "actor_is_encrypted_owner": False,
+        "limitations": list(EXPORT_LIMITATIONS),
+    }
 
 
 def _event_document(event: CaseAuditEvent) -> dict[str, Any]:
