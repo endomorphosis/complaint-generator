@@ -30,6 +30,56 @@ class CaseMessageService:
         if not isinstance(store, CaseMessageStore):
             raise CaseMessageError("authority_owners")
         self._store = store
+        self._attachments: Any = None
+
+    def bind_attachments(self, attachments: Any) -> None:
+        """Share files through the attachment owner. This service does not seal bytes itself."""
+
+        from applications.case_attachment_api import CaseAttachmentService
+
+        if not isinstance(attachments, CaseAttachmentService):
+            raise CaseMessageError("authority_owners")
+        self._attachments = attachments
+
+    def share_attachment(self, actor_principal_id: str, thread_id: str, body: Mapping[str, Any], *, verify_access=None) -> dict[str, Any]:
+        return self._attachment_call("store_attachment", actor_principal_id, thread_id, body, verify_access=verify_access)
+
+    def list_attachments(self, actor_principal_id: str, thread_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
+        return self._attachment_call("list_attachments", actor_principal_id, thread_id, body)
+
+    def read_attachment(self, actor_principal_id: str, thread_id: str, attachment_id: str, body: Mapping[str, Any], *, verify_access=None) -> dict[str, Any]:
+        return self._attachment_call("download_attachment", actor_principal_id, thread_id, body, attachment_id=attachment_id, verify_access=verify_access)
+
+    def preview_attachment(self, actor_principal_id: str, thread_id: str, attachment_id: str, body: Mapping[str, Any], *, verify_access=None) -> dict[str, Any]:
+        return self._attachment_call("preview_attachment", actor_principal_id, thread_id, body, attachment_id=attachment_id, verify_access=verify_access)
+
+    def attachment_notices(self, actor_principal_id: str, thread_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
+        return self._attachment_call("list_notices", actor_principal_id, thread_id, body)
+
+    def _attachment_call(self, method: str, actor_principal_id: str, thread_id: str, body: Mapping[str, Any], *, attachment_id: str | None = None, verify_access=None) -> dict[str, Any]:
+        from applications.case_attachment_api import CaseAttachmentService, SharedAttachmentError
+
+        service = self._attachments
+        if not isinstance(service, CaseAttachmentService):
+            raise CaseMessageError("attachment_unavailable")
+        if not isinstance(body, Mapping):
+            raise CaseMessageError("request_body")
+        material = dict(body)
+        supplied = material.get("thread_id", thread_id)
+        if supplied != thread_id:
+            raise CaseMessageError("thread_mismatch")
+        material["thread_id"] = thread_id
+        try:
+            target = getattr(service, method)
+            if attachment_id is None:
+                if verify_access is None or method == "list_attachments" or method == "list_notices":
+                    if method in {"list_attachments", "list_notices"}:
+                        return target(actor_principal_id, material)
+                    return target(actor_principal_id, material, verify_access=verify_access)
+                return target(actor_principal_id, material, verify_access=verify_access)
+            return target(actor_principal_id, attachment_id, material, verify_access=verify_access)
+        except SharedAttachmentError as exc:
+            raise CaseMessageError(exc.code) from exc
 
     @property
     def store(self) -> CaseMessageStore:

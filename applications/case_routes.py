@@ -237,6 +237,9 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     if case_attachments is not None and not isinstance(case_attachments, CaseAttachmentService):
         raise CaseAccessError("case_attachments")
     mount_case_attachments(app)
+    if case_messages is not None and case_attachments is not None:
+        case_attachments.bind_message_admission(case_messages.store)
+        case_messages.bind_attachments(case_attachments)
     from .case_consent_api import CaseConsentService, mount_case_consent
     if case_consent is not None and not isinstance(case_consent, CaseConsentService):
         raise CaseAccessError("case_consent")
