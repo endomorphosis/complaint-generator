@@ -250,7 +250,9 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     mount_legal_context_routes(app)
     from .legal_research_api import mount_legal_research_routes
     mount_legal_research_routes(app)
-    from .legal_analysis_api import mount_legal_analysis_routes
+    from .legal_analysis_api import DEFINITION_CORRESPONDENCE_ROUTE, mount_legal_analysis_routes
+    if not any(DEFINITION_CORRESPONDENCE_ROUTE.startswith(prefix + "/") or DEFINITION_CORRESPONDENCE_ROUTE.startswith(prefix) for prefix in PROTECTED_PREFIXES):
+        raise CaseAccessError("definition_correspondence_route")
     mount_legal_analysis_routes(app)
     app.state.case_authorizer = authorizer
     app.state.browser_sessions = sessions

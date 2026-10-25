@@ -15,7 +15,9 @@ from typing import Any, Dict, Mapping, MutableMapping
 from starlette.requests import Request
 
 TASK_ID = "CIMP-GUI-29"
+DEFINITION_CORRESPONDENCE_TASK_ID = "CIMP-GUI-30"
 LEGAL_ANALYSIS_PREFIX = "/api/legal-analysis"
+DEFINITION_CORRESPONDENCE_ROUTE = LEGAL_ANALYSIS_PREFIX + "/{case_id}/definition-correspondence"
 _BODY_CAP = 65536
 _VOCABULARY_KEYS = ("actors", "actions", "objects", "qualifiers")
 
@@ -31,7 +33,7 @@ def legal_analysis_http_status(code: str) -> int:
         return 401
     if code in {"legal_analysis_field", "legal_analysis_bounds"}:
         return 422
-    if code == "canonical_compiler_unavailable":
+    if code in {"canonical_compiler_unavailable", "definition_owner_unavailable"}:
         return 503
     return 403
 
@@ -165,6 +167,89 @@ def project_canonical_legal_ir(case_file: Mapping[str, Any]) -> Dict[str, Any]:
     return projected
 
 
+def _population_ids(value: Any) -> Dict[str, list[str]]:
+    if not isinstance(value, dict):
+        raise LegalAnalysisError("legal_analysis_field")
+    cleaned: Dict[str, list[str]] = {}
+    for key, items in value.items():
+        if not isinstance(key, str) or not isinstance(items, list) or len(items) > 32:
+            raise LegalAnalysisError("legal_analysis_bounds")
+        rows = []
+        for item in items:
+            if not isinstance(item, str) or not item.strip() or len(item) > 256:
+                raise LegalAnalysisError("legal_analysis_field")
+            rows.append(item)
+        cleaned[key] = rows
+    return cleaned
+
+
+def _owner_bundle(value: Any) -> Dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise LegalAnalysisError("legal_analysis_field")
+    return value
+
+
+def bind_case_definition_correspondence(mediator: Any, body: Mapping[str, Any]) -> Dict[str, Any]:
+    """Public case entry for current definition and correspondence owners."""
+
+    from integrations.ipfs_datasets.logic import bind_current_definition_correspondence_owners
+
+    source_text = body.get("source_text")
+    request_id = body.get("request_id")
+    if not isinstance(source_text, str) or not isinstance(request_id, str):
+        raise LegalAnalysisError("legal_analysis_field")
+    case_file = _case_file_from_mediator(mediator)
+    payload = bind_current_definition_correspondence_owners(
+        source_text,
+        request_id=request_id,
+        declared_populations=_population_ids(body.get("declared_populations") or {}),
+        scope_correspondence=_owner_bundle(body.get("scope_correspondence")),
+        correspondence_requests=_owner_bundle(body.get("correspondence_requests")),
+        applicability=_owner_bundle(body.get("applicability")),
+        contextual_review=_owner_bundle(body.get("contextual_review")),
+        supplied_receipt=body.get("receipt") if isinstance(body.get("receipt"), dict) else None,
+        training_metrics=body.get("training_metrics"),
+        graph_join=body.get("graph_join"),
+    )
+    payload["task_id"] = DEFINITION_CORRESPONDENCE_TASK_ID
+    payload["authorizes_law"] = False
+    payload["authorizes_proof"] = False
+    payload["executed_proof"] = False
+    payload["governing_legal_authority"] = False
+    payload["proof"] = False
+    if payload.get("status") == "unavailable":
+        raise LegalAnalysisError("definition_owner_unavailable")
+    case_file["definition_correspondence_binding"] = payload
+    return payload
+
+
+def project_definition_correspondence(case_file: Mapping[str, Any]) -> Dict[str, Any]:
+    stored = case_file.get("definition_correspondence_binding") if isinstance(case_file, Mapping) else None
+    if not isinstance(stored, dict):
+        return {
+            "task_id": DEFINITION_CORRESPONDENCE_TASK_ID,
+            "operation": "bind_current_definition_correspondence_owners",
+            "status": "empty",
+            "owners": {},
+            "authorizes_law": False,
+            "authorizes_proof": False,
+            "executed_proof": False,
+            "governing_legal_authority": False,
+            "proof": False,
+            "limitations": ["No definition correspondence binding has been recorded."],
+        }
+    projected = dict(stored)
+    projected["task_id"] = DEFINITION_CORRESPONDENCE_TASK_ID
+    projected["authorizes_law"] = False
+    projected["authorizes_proof"] = False
+    projected["executed_proof"] = False
+    projected["governing_legal_authority"] = False
+    projected["proof"] = False
+    return projected
+
+
 def mount_legal_analysis_routes(app: Any) -> None:
     """Mount canonical IR attachment routes. Authorization middleware protects the prefix."""
 
@@ -231,6 +316,37 @@ def mount_legal_analysis_routes(app: Any) -> None:
         except LegalAnalysisError as exc:
             return _fail(exc)
         payload["case_id"] = case_id
+        payload["executed_proof"] = False
+        payload["governing_legal_authority"] = False
+        return JSONResponse(payload)
+
+    @app.get(LEGAL_ANALYSIS_PREFIX + "/{case_id}/definition-correspondence")
+    async def read_definition_correspondence(case_id: str, request: Request):
+        try:
+            mediator = _authorized(request, case_id)
+            payload = project_definition_correspondence(_case_file_from_mediator(mediator))
+        except LegalAnalysisError as exc:
+            return _fail(exc)
+        payload["case_id"] = case_id
+        payload["authorizes_law"] = False
+        payload["authorizes_proof"] = False
+        return JSONResponse(payload)
+
+    @app.post(LEGAL_ANALYSIS_PREFIX + "/{case_id}/definition-correspondence")
+    async def bind_definition_correspondence(case_id: str, request: Request):
+        try:
+            mediator = _authorized(request, case_id)
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise LegalAnalysisError("legal_analysis_field")
+            if len(json.dumps(body, default=str)) > _BODY_CAP:
+                raise LegalAnalysisError("legal_analysis_bounds")
+            payload = bind_case_definition_correspondence(mediator, body)
+        except LegalAnalysisError as exc:
+            return _fail(exc)
+        payload["case_id"] = case_id
+        payload["authorizes_law"] = False
+        payload["authorizes_proof"] = False
         payload["executed_proof"] = False
         payload["governing_legal_authority"] = False
         return JSONResponse(payload)
