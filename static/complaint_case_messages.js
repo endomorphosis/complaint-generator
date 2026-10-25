@@ -2,6 +2,9 @@
     "use strict";
 
     var csrf = "";
+    var actor = "";
+    var authGeneration = 0;
+    var privacyEpoch = 0;
     var currentCursor = 0;
     var nextCursor = null;
     var pollTimer = 0;
@@ -21,13 +24,62 @@
     function setStatus(text) { $("inbox-status").textContent = text || ""; }
     function setError(text) { $("inbox-error").textContent = text || ""; }
 
+    function capture() {
+        return { view: viewToken, privacy: privacyEpoch, actor: actor, generation: authGeneration,
+            csrf: csrf, caseId: caseId(), threadId: threadId(),
+            membership: $("membership-grant-id").value.trim(), version: $("membership-version").value.trim() };
+    }
+
+    function current(value) {
+        return Boolean(value && csrf && actor && value.view === viewToken && value.privacy === privacyEpoch
+            && value.actor === actor && value.generation === authGeneration && value.csrf === csrf
+            && value.caseId === caseId() && value.threadId === threadId()
+            && value.membership === $("membership-grant-id").value.trim()
+            && value.version === $("membership-version").value.trim());
+    }
+
+    function clearView(clearThreads) {
+        viewToken += 1;
+        pollGeneration += 1;
+        if (pollTimer) window.clearInterval(pollTimer);
+        pollTimer = 0;
+        currentCursor = 0;
+        nextCursor = null;
+        $("message-list").replaceChildren();
+        if (clearThreads) $("thread-list").replaceChildren();
+        $("unread-count").textContent = "Unread 0";
+        $("page-meta").textContent = "";
+        $("inbox-limitations").textContent = "";
+        $("message-text").value = "";
+        $("next-page").disabled = true;
+        setStatus("");
+    }
+
+    function clearIdentity() {
+        privacyEpoch += 1;
+        actor = "";
+        authGeneration = 0;
+        csrf = "";
+        clearView(true);
+        ["case-id", "thread-id", "membership-grant-id", "membership-version"].forEach(function (id) { $(id).value = ""; });
+        $("case-select").replaceChildren();
+        $("inbox-auth-status").textContent = "Sign in required";
+    }
+
+    function failed(value, error) {
+        if (!current(value)) return;
+        if (error && error.status === 401) clearIdentity();
+        else clearView(true);
+        setError(error && error.message || "request_failed");
+    }
+
     function caseId() { return $("case-id").value.trim(); }
     function threadId() { return $("thread-id").value.trim(); }
 
-    function membershipFields() {
+    function membershipFields(value) {
         var fields = {};
-        var grant = $("membership-grant-id").value.trim();
-        var version = $("membership-version").value.trim();
+        var grant = value ? value.membership : $("membership-grant-id").value.trim();
+        var version = value ? value.version : $("membership-version").value.trim();
         if (grant) fields.membership_grant_id = grant;
         if (version) fields.expected_membership_version = Number(version);
         return fields;
@@ -46,21 +98,22 @@
     }
 
     function readCursor(id) {
-        var raw = sessionStorage.getItem(READ_PREFIX + id);
+        var raw = sessionStorage.getItem(READ_PREFIX + encodeURIComponent(actor) + ":" + id);
         if (raw === null || !/^[0-9]+$/.test(raw)) return 0;
         return Number(raw);
     }
 
     function rememberRead(id, sequence) {
-        sessionStorage.setItem(READ_PREFIX + id, String(sequence));
+        sessionStorage.setItem(READ_PREFIX + encodeURIComponent(actor) + ":" + id, String(sequence));
     }
 
-    async function api(path, options) {
+    async function api(path, options, value) {
+        if (value && !current(value)) throw new Error("view_changed");
         var headers = { "accept": "application/json" };
         var method = (options && options.method) || "GET";
         if (method !== "GET") {
             headers["content-type"] = "application/json";
-            headers["x-csrf-token"] = csrf;
+            headers["x-csrf-token"] = value ? value.csrf : csrf;
         }
         var response = await fetch(path, {
             method: method,
@@ -70,14 +123,15 @@
             cache: "no-store"
         });
         var payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || "request_failed");
+        if (value && !current(value)) throw new Error("view_changed");
+        if (!response.ok) { var error = new Error(payload.error || "request_failed"); error.status = response.status; throw error; }
         return payload;
     }
 
-    function query(path, extra) {
+    function query(path, extra, value) {
         var params = new URLSearchParams();
-        params.set("case_id", caseId());
-        var fields = membershipFields();
+        params.set("case_id", value ? value.caseId : caseId());
+        var fields = membershipFields(value);
         Object.keys(fields).forEach(function (key) { params.set(key, String(fields[key])); });
         Object.keys(extra || {}).forEach(function (key) {
             if (extra[key] !== undefined && extra[key] !== null) params.set(key, String(extra[key]));
@@ -141,13 +195,15 @@
         return max;
     }
 
-    async function loadPage(cursor, mode) {
-        var token = viewToken;
-        var payload = await api(query("/api/cases/messages/threads/" + encodeURIComponent(threadId()) + "/messages", {
+    async function loadPage(cursor, mode, value) {
+        value = value || capture();
+        if (!current(value)) return null;
+        var payload = await api(query("/api/cases/messages/threads/" + encodeURIComponent(value.threadId) + "/messages", {
             cursor: cursor,
             limit: pageLimit()
-        }));
-        if (token !== viewToken) return null;
+        }, value), undefined, value);
+        if (!current(value)) return null;
+        if (payload.case_id !== value.caseId || payload.thread_id !== value.threadId || payload.actor_principal_id !== value.actor) throw new Error("view_changed");
         showLimitations(payload);
         currentCursor = cursor;
         nextCursor = payload.next_cursor === undefined ? null : payload.next_cursor;
@@ -157,27 +213,31 @@
         return payload;
     }
 
-    async function poll() {
-        if (!csrf || !threadId() || !caseId()) return;
+    async function poll(value) {
+        value = value || capture();
+        if (!current(value) || !value.threadId || !value.caseId) return;
         var generation = pollGeneration;
         try {
-            if (nextCursor === null && highestSequence() > 0) await loadPage(highestSequence(), "append");
-            else await loadPage(currentCursor, "replace");
-            if (generation === pollGeneration) setStatus("Polled messages over HTTP");
-            setError("");
+            if (nextCursor === null && highestSequence() > 0) await loadPage(highestSequence(), "append", value);
+            else await loadPage(currentCursor, "replace", value);
+            if (current(value) && generation === pollGeneration) setStatus("Polled messages over HTTP");
+            if (current(value)) setError("");
         } catch (error) {
-            if (generation === pollGeneration) setError(error.message || "poll_failed");
+            failed(value, error);
         }
     }
 
-    function startPolling() {
+    function startPolling(value) {
         pollGeneration += 1;
         if (pollTimer) window.clearInterval(pollTimer);
-        pollTimer = window.setInterval(function () { enqueue(poll); }, pollMs());
+        pollTimer = window.setInterval(function () { enqueue(function () { return poll(value); }); }, pollMs());
     }
 
-    async function loadThreads() {
-        var payload = await api(query("/api/cases/messages/threads"));
+    async function loadThreads(value) {
+        value = value || capture();
+        var payload = await api(query("/api/cases/messages/threads", {}, value), undefined, value);
+        if (!current(value)) return;
+        if (payload.case_id !== value.caseId || payload.actor_principal_id !== value.actor) throw new Error("view_changed");
         showLimitations(payload);
         var list = $("thread-list");
         list.replaceChildren();
@@ -187,6 +247,8 @@
             button.type = "button";
             button.textContent = thread.thread_id + " (" + thread.message_count + ")";
             button.addEventListener("click", function () {
+                if (value.actor !== actor || value.privacy !== privacyEpoch || value.caseId !== caseId()) return;
+                clearView(false);
                 $("thread-id").value = thread.thread_id;
             });
             item.appendChild(button);
@@ -195,8 +257,9 @@
         setStatus("Loaded " + (payload.threads || []).length + " threads");
     }
 
-    async function refreshCases() {
-        var payload = await api("/api/cases");
+    async function refreshCases(value) {
+        var payload = await api("/api/cases", undefined, value);
+        if (!current(value)) return;
         var select = $("case-select");
         select.replaceChildren();
         var blank = document.createElement("option");
@@ -212,79 +275,99 @@
     }
 
     $("case-select").addEventListener("change", function () {
-        if ($("case-select").value) $("case-id").value = $("case-select").value;
+        var selected = $("case-select").value;
+        clearView(true);
+        $("case-id").value = selected;
+        $("thread-id").value = "";
+        $("membership-grant-id").value = "";
+        $("membership-version").value = "";
     });
 
     $("inbox-login").addEventListener("submit", async function (event) {
         event.preventDefault();
+        var credential = $("inbox-credential").value;
+        clearIdentity();
+        var attempt = privacyEpoch;
+        $("inbox-credential").value = "";
         setError("");
         try {
             var response = await fetch("/api/complaint-workspace/auth/login", {
                 method: "POST",
                 credentials: "same-origin",
                 headers: { "content-type": "application/json", "accept": "application/json" },
-                body: JSON.stringify({ credential: $("inbox-credential").value })
+                body: JSON.stringify({ credential: credential })
             });
             var payload = await response.json();
-            if (!response.ok) throw new Error(payload.error || "login_failed");
-            csrf = payload.csrf_token || "";
+            if (attempt !== privacyEpoch) return;
+            if (!response.ok || payload.authenticated !== true || typeof payload.principal_id !== "string" || !Number.isSafeInteger(payload.generation) || !payload.csrf_token) throw new Error(payload.error || "login_failed");
+            actor = payload.principal_id;
+            authGeneration = payload.generation;
+            csrf = payload.csrf_token;
             $("inbox-credential").value = "";
             $("inbox-auth-status").textContent = "Signed in";
-            await refreshCases();
-            setStatus("Signed in");
+            var signedIn = capture();
+            await refreshCases(signedIn);
+            if (current(signedIn)) setStatus("Signed in");
         } catch (error) {
-            csrf = "";
+            if (attempt !== privacyEpoch) return;
+            if (error.message === "view_changed") return;
+            clearIdentity();
             $("inbox-auth-status").textContent = "Sign in required";
             setError(error.message || "login_failed");
         }
     });
 
     $("load-threads").addEventListener("click", function () {
-        enqueue(loadThreads).catch(function (error) { setError(error.message || "request_failed"); });
+        var value = capture();
+        enqueue(function () { return loadThreads(value); }).catch(function (error) { failed(value, error); });
     });
 
     $("create-thread").addEventListener("click", function () {
+        clearView(false);
+        var value = capture();
         enqueue(async function () {
+            if (!current(value)) return;
             setError("");
-            var payload = await api("/api/cases/messages/threads", {
-                method: "POST",
-                body: Object.assign({
-                    case_id: caseId(),
-                    idempotency_key: "thread-" + Date.now()
-                }, membershipFields())
-            });
+            var payload = await api("/api/cases/messages/threads", {method: "POST", body: Object.assign({
+                case_id: value.caseId, idempotency_key: "thread-" + Date.now()
+            }, membershipFields(value))}, value);
+            if (!current(value) || payload.case_id !== value.caseId) return;
             $("thread-id").value = payload.thread_id;
-            await loadThreads();
-            setStatus("Created thread");
-        }).catch(function (error) { setError(error.message || "request_failed"); });
+            var created = capture();
+            await loadThreads(created);
+            if (current(created)) setStatus("Created thread");
+        }).catch(function (error) { failed(value, error); });
     });
 
     $("open-thread").addEventListener("click", function () {
+        clearView(false);
+        var value = capture();
         enqueue(async function () {
+            if (!current(value)) return;
             setError("");
-            pollGeneration += 1;
-            viewToken += 1;
-            currentCursor = 0;
-            await loadPage(0, "replace");
-            startPolling();
+            await loadPage(0, "replace", value);
+            if (!current(value)) return;
+            startPolling(value);
             setStatus("Opened thread");
-        }).catch(function (error) {
-            $("message-list").replaceChildren();
-            setError(error.message || "request_failed");
-        });
+        }).catch(function (error) { failed(value, error); });
     });
 
     $("next-page").addEventListener("click", function () {
+        var cursor = nextCursor;
+        viewToken += 1;
+        var value = capture();
         enqueue(async function () {
-            if (nextCursor === null) return;
+            if (!current(value) || cursor === null) return;
             setError("");
-            viewToken += 1;
-            await loadPage(nextCursor, "replace");
-            setStatus("Loaded next page");
-        }).catch(function (error) { setError(error.message || "request_failed"); });
+            await loadPage(cursor, "replace", value);
+            if (current(value)) { startPolling(value); setStatus("Loaded next page"); }
+        }).catch(function (error) { failed(value, error); });
     });
 
-    $("refresh-messages").addEventListener("click", function () { enqueue(poll); });
+    $("refresh-messages").addEventListener("click", function () {
+        var value = capture();
+        enqueue(function () { return poll(value); });
+    });
 
     $("mark-read").addEventListener("click", function () {
         if (!threadId()) return;
@@ -296,24 +379,28 @@
     $("send-message").addEventListener("submit", function (event) {
         event.preventDefault();
         var text = $("message-text").value;
+        var value = capture();
         enqueue(async function () {
+            if (!current(value)) return;
             setError("");
-            await api("/api/cases/messages/threads/" + encodeURIComponent(threadId()) + "/messages", {
-                method: "POST",
-                body: Object.assign({
-                    case_id: caseId(),
-                    text: text,
-                    idempotency_key: "send-" + Date.now()
-                }, membershipFields())
-            });
+            await api("/api/cases/messages/threads/" + encodeURIComponent(value.threadId) + "/messages", {
+                method: "POST", body: Object.assign({case_id: value.caseId,
+                    text: text, idempotency_key: "send-" + Date.now()}, membershipFields(value))}, value);
+            if (!current(value)) return;
             $("message-text").value = "";
-            if (nextCursor === null) await loadPage(highestSequence(), "append");
-            else await loadPage(currentCursor, "replace");
-            setStatus("Sent message");
-        }).catch(function (error) { setError(error.message || "request_failed"); });
+            if (nextCursor === null) await loadPage(highestSequence(), "append", value);
+            else await loadPage(currentCursor, "replace", value);
+            if (current(value)) setStatus("Sent message");
+        }).catch(function (error) { failed(value, error); });
     });
 
+    ["case-id", "thread-id", "membership-grant-id", "membership-version"].forEach(function (id) {
+        $(id).addEventListener("input", function () {
+            clearView(id !== "thread-id");
+            if (id === "case-id") { $("thread-id").value = ""; $("membership-grant-id").value = ""; $("membership-version").value = ""; }
+        });
+    });
     window.addEventListener("pagehide", function () {
-        if (pollTimer) window.clearInterval(pollTimer);
+        clearIdentity();
     });
 })();

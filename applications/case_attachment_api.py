@@ -21,6 +21,9 @@ from applications.case_membership import CaseMembershipError
 from applications.case_messages import CaseMessageError, CaseMessageStore
 
 from integrations.private_collaboration import (
+    ATTACHMENT_KIND,
+    WRITE_ACTION,
+    CaseResourceKeyGrantError,
     BROWSER_KEY_FIELDS,
     SharedAttachmentError,
     SharedAttachmentStore,
@@ -120,6 +123,8 @@ class CaseAttachmentService:
         content = self._content(material)
         session = self._session(actor_principal_id)
         admission = self._admit(actor_principal_id, material) if self._messages is not None else None
+        binding_verify = (self._binding_verifier(actor_principal_id, material, session, verify_access)
+            if admission is not None else None)
 
         def _verify() -> None:
             if verify_access is not None:
@@ -163,7 +168,7 @@ class CaseAttachmentService:
             )
         if admission is not None:
             _verify()
-            self._bind(created, admission)
+            self._bind(created, admission, material, verify_access=binding_verify)
             _verify()
             return self._present(created, admission)
         return created
@@ -191,7 +196,7 @@ class CaseAttachmentService:
             if not isinstance(attachment_id, str):
                 continue
             try:
-                self._matches(attachment_id, admission)
+                self._matches(attachment_id, admission, material)
             except SharedAttachmentError:
                 continue
             rows.append(self._present(item, admission))
@@ -222,14 +227,14 @@ class CaseAttachmentService:
         role = material.get("artifact_role") if isinstance(material.get("artifact_role"), str) else "content"
         admission = self._admit(actor_principal_id, material) if self._messages is not None else None
         if admission is not None:
-            self._matches(_label(attachment_id, "attachment_id"), admission)
+            self._matches(_label(attachment_id, "attachment_id"), admission, material)
 
         def _verify() -> None:
             if verify_access is not None:
                 verify_access()
             if admission is not None:
                 current = self._admit(actor_principal_id, material)
-                self._matches(_label(attachment_id, "attachment_id"), current)
+                self._matches(_label(attachment_id, "attachment_id"), current, material)
 
         if admission is not None:
             _verify()
@@ -267,6 +272,46 @@ class CaseAttachmentService:
             raise SharedAttachmentError("key_owner_required")
         return session
 
+    def _binding_verifier(self, actor, material, session, verify_access):
+        """Keep the actual attachment owner's key/grant live through metadata publication.
+
+        Reuse the existing key owner, including its real recipient unwrap and
+        cutoff checks; a membership flag or stored grant ID is not key proof.
+        No message-store lock is acquired by this callback.
+        """
+        from integrations.private_storage import PrivateArtifactBinding, PrivateKeyMaterialError
+        from integrations.private_collaboration import _zero
+        def key():
+            try:
+                owned = self._store._owner_case(actor, str(material.get("case_id") or ""))
+                if owned is not None:
+                    binding = PrivateArtifactBinding(tenant_id=owned.tenant_id, case_id=owned.case_id,
+                        artifact_kind=ATTACHMENT_KIND, revision=str(material.get("artifact_revision") or ""),
+                        principal_id=owned.tenant_id)
+                    key_id, data = session.provider().resolve(binding)
+                    return key_id, bytes(data), (owned.revision, owned.resource_id)
+                grant, decision, data = self._store._grants._authorize_delegated(
+                    actor_principal_id=actor, membership_grant_id=material.get("membership_grant_id"),
+                    membership_version=material.get("membership_version"), key_grant_id=material.get("key_grant_id"),
+                    case_id=str(material.get("case_id") or ""), tenant_id=str(material.get("tenant_id") or ""),
+                    resource_id=str(material.get("resource_id") or ""), artifact_kind=ATTACHMENT_KIND,
+                    artifact_revision=str(material.get("artifact_revision") or ""), recipient_session=session, action=WRITE_ACTION)
+                try:
+                    return grant.data_key_id, bytes(data), (grant.generation, decision.version)
+                finally:
+                    _zero(data)
+            except (CaseResourceKeyGrantError, PrivateKeyMaterialError) as exc:
+                raise SharedAttachmentError(getattr(exc, "code", "key_unavailable")) from None
+        admitted = key()
+        def verify():
+            if verify_access is not None:
+                verify_access()
+            if key() != admitted:
+                raise SharedAttachmentError("key_changed")
+            if verify_access is not None:
+                verify_access()
+        return verify
+
     def recheck_message_admission(self, actor_principal_id: str, body: Mapping[str, Any]) -> dict[str, Any] | None:
         """Repeat thread, membership, and resource-revision admission for this request."""
 
@@ -277,8 +322,10 @@ class CaseAttachmentService:
     def list_notices(self, actor_principal_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
         admission = self._require_admission(actor_principal_id, body)
         self._require_admission(actor_principal_id, body)
+        records = self._messages.thread_attachment_bindings(actor_principal_id, body)
         notices = [
-            dict(item) for item in self._notices
+            {key: item[key] for key in ("tenant_id", "case_id", "thread_id", "resource_id", "resource_revision", "attachment_id", "actor_principal_id")}
+            for item in records
             if item["tenant_id"] == admission["tenant_id"]
             and item["case_id"] == admission["case_id"]
             and item["thread_id"] == admission["thread_id"]
@@ -373,7 +420,7 @@ class CaseAttachmentService:
             "actor_principal_id": actor_principal_id,
         }
 
-    def _bind(self, view: Mapping[str, Any], admission: Mapping[str, Any]) -> None:
+    def _bind(self, view: Mapping[str, Any], admission: Mapping[str, Any], material, *, verify_access=None) -> None:
         attachment_id = _label(view.get("attachment_id"), "attachment_id")
         if view.get("tenant_id") != admission["tenant_id"] or view.get("case_id") != admission["case_id"]:
             raise SharedAttachmentError("tenant_mismatch")
@@ -387,24 +434,21 @@ class CaseAttachmentService:
             "resource_id": admission["resource_id"],
             "resource_revision": admission["resource_revision"],
             "artifact_revision": admission["artifact_revision"],
+            "actor_principal_id": admission["actor_principal_id"],
         }
-        prior = self._bindings.get(attachment_id)
-        if prior is not None and prior != record:
-            raise SharedAttachmentError("replay_mismatch")
-        self._bindings[attachment_id] = record
-        if prior is None:
-            self._notices.append({
-                "tenant_id": admission["tenant_id"],
-                "case_id": admission["case_id"],
-                "thread_id": admission["thread_id"],
-                "resource_id": admission["resource_id"],
-                "resource_revision": admission["resource_revision"],
-                "attachment_id": attachment_id,
-                "actor_principal_id": admission["actor_principal_id"],
-            })
+        try:
+            self._messages.record_thread_attachment(admission["actor_principal_id"], material, record,
+                verify_access=verify_access)
+        except CaseMessageError as exc:
+            raise SharedAttachmentError(exc.code) from exc
 
-    def _matches(self, attachment_id: str, admission: Mapping[str, Any]) -> None:
-        record = self._bindings.get(attachment_id)
+    def _matches(self, attachment_id: str, admission: Mapping[str, Any], material) -> None:
+        try:
+            rows = self._messages.thread_attachment_bindings(admission["actor_principal_id"], material,
+                attachment_id=attachment_id)
+        except CaseMessageError as exc:
+            raise SharedAttachmentError(exc.code) from exc
+        record = rows[0] if len(rows) == 1 else None
         if record is None or record["thread_id"] != admission["thread_id"] or record["case_id"] != admission["case_id"]:
             raise SharedAttachmentError("missing_attachment")
         if record["tenant_id"] != admission["tenant_id"]:
