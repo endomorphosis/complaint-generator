@@ -2723,7 +2723,10 @@ class _ComplaintWorkspaceHandlerBackend(Protocol):
 
     def _load_state(self, user_id: str) -> Dict[str, Any]: ...
 
-    def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]: ...
+    def _save_state(self, state: Dict[str, Any], *, before_publish: Optional[Callable[[], Any]] = None) -> Dict[str, Any]: ...
+
+    def _terminal_graph_edit_publication_guard(self, state: Mapping[str, Any], *, actor_principal_id: str,
+                                             case_id: str) -> Optional[Callable[[], Any]]: ...
 
     def _build_question_status(self, answers: Dict[str, Any]) -> List[Dict[str, Any]]: ...
 
@@ -3655,6 +3658,11 @@ class ComplaintWorkspaceRequestHandlers:
         try:
             fresh = self._load_state(str(state.get("user_id") or ""))
         except WorkspacePersistenceError:
+            # An issued browser request cannot publish the old private DTO
+            # after its live key/read boundary failed. Local legacy behavior
+            # remains available only without an issued owner capability.
+            if self.workspace._owner_case_authority() is not None:
+                raise
             fresh = state
         payload = self.workspace._build_intake_chat_payload(fresh)
         payload["factual_correction"] = receipt
@@ -3734,7 +3742,20 @@ class ComplaintWorkspaceRequestHandlers:
                 pending_inquiry=_pending_inquiry_copy(state),
             )
         try:
+            publication_guard = self.workspace._terminal_graph_edit_publication_guard(
+                state, actor_principal_id=actor_id, case_id=case_id)
+        except WorkspacePersistenceError as exc:
+            return finish(_terminal_edit_receipt(status="unavailable",
+                message="Edit is unavailable. The pending question is unchanged.",
+                error_code=str(exc.code or "unavailable"), pending_inquiry=_pending_inquiry_copy(state)))
+        if publication_guard is not None:
+            # A live owner correction works on a fresh, request-local mediator.
+            # Its uncommitted supersession must never appear through a cache.
+            self.workspace._interview_mediators.pop((user, case_id), None)
+        try:
             mediator = self.workspace._mediator_for_shared_interview(user, case_id)
+            if publication_guard is not None:
+                self.workspace._interview_mediators.pop((user, case_id), None)
             actions = mediator.workflow_actions
             if not actions.interview_started:
                 restored = actions.restore_session_projection(projection)
@@ -3886,7 +3907,11 @@ class ComplaintWorkspaceRequestHandlers:
             session_revision=int(exported.get("session_revision") or 0),
         )
         try:
-            self.workspace._save_state(state)
+            if publication_guard is not None:
+                publication_guard()
+                self.workspace._save_state(state, before_publish=publication_guard)
+            else:
+                self.workspace._save_state(state)
         except WorkspacePersistenceError as exc:
             return finish(_terminal_edit_receipt(
                 status="unavailable",
@@ -3895,6 +3920,9 @@ class ComplaintWorkspaceRequestHandlers:
                 pending_inquiry=pending_before,
                 correction=receipt,
             ))
+        finally:
+            if publication_guard is not None:
+                self.workspace._interview_mediators.pop((user, case_id), None)
         if reselected:
             message = "Edited the last recorded answer. The pending question was reopened because its target changed."
         else:
@@ -6475,7 +6503,61 @@ class ComplaintWorkspaceService:
             payload["mike_integration"].setdefault("audit_trail", [])
         return payload
 
-    def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    def _terminal_graph_edit_publication_guard(self, state: Mapping[str, Any], *, actor_principal_id: str,
+                                             case_id: str) -> Optional[Callable[[], Any]]:
+        """Capture current issued owner, private source and key before editing.
+
+        This trusted callback is constructed inside the service, never from a
+        request field. The joined writer invokes it at the final head replace.
+        It grants no authority to callers without the current issued scope.
+        """
+        from .workspace_case_authority import WorkspaceCaseAuthorityError
+        from integrations.private_storage import PrivateStorageError
+        authority = self._owner_case_authority()
+        if authority is None:
+            return None
+        actor, user = str(actor_principal_id), str(state.get("user_id") or "")
+
+        def owner():
+            try:
+                decision = authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            except WorkspaceCaseAuthorityError:
+                raise WorkspaceAuthorizationDenied() from None
+            if (authority.action != "case.update" or authority.actor_principal_id != actor
+                    or authority.case_id != case_id or user != decision.canonical_owner_principal_id
+                    or state.get("case_id") != case_id):
+                raise WorkspaceAuthorizationDenied()
+            return decision
+
+        def key():
+            try:
+                _context, key_id, material = self._joined_key(user, case_id)
+            except PrivateStorageError:
+                raise WorkspacePersistenceError("Private correction key is unavailable.",
+                    code="unlock_needed", public_status="unavailable") from None
+            return key_id, material
+
+        owner()
+        before = self._case_legal_context_identity(state)
+        admitted_key = key()
+
+        def revalidate_publication():
+            owner()
+            if key() != admitted_key:
+                raise WorkspacePersistenceError("Correction key changed before publication.",
+                    code="revision_conflict", public_status="conflict")
+            current = self._load_state(user, case_id=case_id)
+            if before != self._case_legal_context_identity(current):
+                raise WorkspacePersistenceError("Correction source changed before publication.",
+                    code="revision_conflict", public_status="conflict")
+            owner()
+            if key() != admitted_key:
+                raise WorkspacePersistenceError("Correction key changed before publication.",
+                    code="revision_conflict", public_status="conflict")
+
+        return revalidate_publication
+
+    def _save_state(self, state: Dict[str, Any], *, before_publish: Optional[Callable[[], Any]] = None) -> Dict[str, Any]:
         if state.get("session_readable") is False or state.get("existing_unreadable"):
             raise WorkspacePersistenceError(
                 "refusing to replace an unreadable session",
@@ -6499,7 +6581,11 @@ class ComplaintWorkspaceService:
             raise WorkspacePersistenceError("Joined state requires authenticated recovery; original bytes were preserved.",
                 code=exc.code, public_status="recoverable") from None
         if readiness == "committed":
-            return self._commit_joined_snapshot(state)
+            return self._commit_joined_snapshot(state,
+                **({"before_publish": before_publish} if before_publish is not None else {}))
+        if before_publish is not None:
+            raise WorkspacePersistenceError("Guarded publication requires a committed joined revision.",
+                code="joined_revision_required", public_status="recoverable")
         filename = self._private_session_filename(user_id)
         try:
             existing_raw = self._read_bytes_nofollow(filename)
