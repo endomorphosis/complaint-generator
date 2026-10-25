@@ -1784,7 +1784,7 @@ Implementation instructions:
 
 ## CIMP-GUI-60 Document operations and authenticate new campaign completion
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
