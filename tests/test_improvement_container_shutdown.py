@@ -492,7 +492,8 @@ def test_stopped_legacy_launch_can_choose_new_root_without_changing_old_epoch_hi
     assert campaign.workspace.is_dir()
 
 
-def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heartbeat(campaign, monkeypatch):
+@pytest.mark.parametrize("independent_campaign", [False, True])
+def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heartbeat(campaign, monkeypatch, independent_campaign):
     """One real sealed daemon/fence; reused or unknown custody stays refused."""
     import ctypes
     from dataclasses import replace
@@ -502,6 +503,23 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
 
     monkeypatch.setattr(runner, 'process_identity', _REAL_PROCESS_IDENTITY)
     root, state, repo = campaign.state.parent, campaign.state, campaign.repo
+    if independent_campaign:
+        from integrations.ipfs_accelerate.improvement_plan import build_improvement_work_plan, load_spec
+        relative = 'docs/task_boards/synthetic_shutdown_campaign.json'
+        material = json.loads(campaign.spec.read_text())
+        material['campaign'] = {'spec_relative': relative,
+            'plan_relative': 'docs/task_boards/synthetic_shutdown_plan.json',
+            'board_relative': 'docs/task_boards/synthetic_shutdown_board.md',
+            'board_namespace': 'synthetic-independent-shutdown'}
+        campaign.spec = repo / relative
+        campaign.spec.write_text(json.dumps(material))
+        campaign.record['spec_path'] = str(campaign.spec)
+        campaign.record['board_path'] = str(repo / material['campaign']['board_relative'])
+        campaign.record['plan_id'] = build_improvement_work_plan(load_spec(campaign.spec)).plan_id
+        index = campaign.record['argv'].index('--spec')
+        campaign.record['argv'][index + 1] = str(campaign.spec)
+        campaign.record['identity']['argv'] = campaign.record['argv'][:]
+        runner._atomic_json(state / 'launcher.json', campaign.record)
     for name in ('scripts', 'integrations/ipfs_accelerate'):
         (repo / name).mkdir(parents=True, exist_ok=True)
     repo.chmod(0o700)
@@ -509,18 +527,22 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
     wrapper = repo / 'scripts/run_complaint_improvement_supervisor.py'
     worker.write_text(SEALED_ORPHAN_WORKER); worker.chmod(0o600)
     wrapper.write_text(SEALED_ORPHAN_WRAPPER); wrapper.chmod(0o600)
-    command = [sys.executable, str(worker), '--interval', '10.0',
-        '--todo-path', campaign.record['board_path'], '--state-dir', str(state),
-        '--task-prefix', runner.TASK_PREFIX, '--board-namespace', 'complaint-intake-improvement',
-        '--state-prefix', runner.STATE_PREFIX, '--max-task-attempts', '3',
-        '--task-source-kind', 'legacy-markdown', '--authority-mode', 'legacy_markdown',
-        '--validation-max-workers', '1', '--merge-target-branch', campaign.record['merge_target'],
-        '--merge-queue-dir', str(state / 'merge-queue'), '--implement',
-        '--implementation-timeout', str(float(runner.TIMEOUT_SECONDS)),
-        '--worktree-root', str(state / 'worktrees'),
-        '--worktree-submodule-path', 'external/ipfs_datasets_py',
-        '--worktree-submodule-path', 'external/ipfs_kit_py',
-        '--task-shard-count', '1', '--task-shard-index', '0']
+    # Compare with the real Native producer, not a hand-written command or
+    # a permissive fake identity/guard. No run/start/provider API is invoked.
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as producer
+    from integrations.ipfs_accelerate.campaign import campaign_artifacts
+    from integrations.ipfs_accelerate.improvement_plan import load_spec
+    artifacts = campaign_artifacts(load_spec(campaign.spec))
+    monkeypatch.setenv('IPFS_ACCELERATE_AGENT_ORCHESTRATION_DIR', str(state / 'control-plane'))
+    native_config = producer.supervisor_config_from_args(producer.parse_args(
+        runner.native_argv(Path(campaign.record['board_path']), state, campaign.record['merge_target'],
+            board_namespace=artifacts.board_namespace, protected_paths=artifacts.protected_paths)),
+        repo_root=repo, daemon_script_path=worker)
+    owner = producer.PortalImplementationSupervisor(native_config)
+    command = owner._build_daemon_command()
+    del owner
+    assert tuple(command) == shutdown._managed_native_command(campaign.record,
+        shutdown._context(state, campaign.record))
     config = root / 'sealed-orphan-config.json'
     config.write_text(json.dumps({'repo': str(repo), 'record': campaign.record,
         'command': command, 'roots': [str(Path(__file__).resolve().parents[1]),
@@ -593,7 +615,22 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
             pid_path.write_text(f'{value.process_birth.pid}\n'); pid_path.chmod(0o600)
 
         kit_index = identity.command.index('external/ipfs_kit_py')
-        mutations = [
+        namespace_index = identity.command.index('--board-namespace') + 1
+        protected_mutations = []
+        if independent_campaign:
+            protected_index = identity.command.index('--implementation-protected-path')
+            protected_mutations = [
+                replace(identity, command=identity.command[:protected_index]
+                    + identity.command[protected_index + 2:], record_id=''),
+                replace(identity, command=identity.command[:protected_index + 1]
+                    + ('docs/task_boards/unrelated.json',)
+                    + identity.command[protected_index + 2:], record_id=''),
+                replace(identity, command=(*identity.command, '--implementation-protected-path',
+                    'docs/task_boards/unrelated.json'), record_id=''),
+            ]
+        mutations = [*protected_mutations,
+            replace(identity, command=identity.command[:namespace_index] + ('unrelated-namespace',)
+                + identity.command[namespace_index + 1:], record_id=''),
             replace(identity, command=identity.command[:kit_index - 1] + identity.command[kit_index + 1:], record_id=''),
             replace(identity, command=(*identity.command, '--worktree-submodule-path', 'external/unrelated'), record_id=''),
             replace(identity, owner_scope={**identity.owner_scope, 'state_dir': str(root / 'foreign')}, record_id=''),

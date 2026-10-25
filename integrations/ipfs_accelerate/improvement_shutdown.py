@@ -119,6 +119,7 @@ def _context(state_dir: Path, record: Mapping[str, Any]) -> dict[str, Any] | Non
         raise ValueError('launcher start time is in the future')
     return {'repo_root': str(repo), 'plan_id': plan, 'state_dir': str(state_dir),
             'worktree_root': str(worktree_root), 'worktree_root_binding': root_binding,
+            'board_namespace': artifacts.board_namespace, 'protected_paths': artifacts.protected_paths,
             'started_at': started, 'owner_token_sha256': hashlib.sha256(token.encode()).hexdigest(),
             'launcher_sha256': hashlib.sha256(raw).hexdigest()}
 
@@ -179,15 +180,19 @@ def _managed_native_command(record: Mapping[str, Any], context: Mapping[str, Any
     entrypoint = Path(context['repo_root']) / 'integrations/ipfs_accelerate/improvement_runner.py'
     prefix = (record['argv'][0], str(entrypoint), '--interval', '10.0',
         '--todo-path', record['board_path'], '--state-dir', str(state_dir),
-        '--task-prefix', runner.TASK_PREFIX, '--board-namespace', 'complaint-intake-improvement',
+        '--task-prefix', runner.TASK_PREFIX, '--board-namespace', context['board_namespace'],
         '--state-prefix', runner.STATE_PREFIX, '--max-task-attempts', '3',
         '--task-source-kind', 'legacy-markdown', '--authority-mode', 'legacy_markdown',
-        '--validation-max-workers', '1', '--merge-target-branch', record['merge_target'],
+        '--validation-max-workers', '1',
+        )
+    protected = tuple(part for relative in context['protected_paths']
+                      for part in ('--implementation-protected-path', relative))
+    execution = ('--merge-target-branch', record['merge_target'],
         '--merge-queue-dir', str(state_dir / 'merge-queue'), '--implement',
         '--implementation-timeout', str(float(runner.TIMEOUT_SECONDS)),
         '--worktree-root', context['worktree_root'],
         )
-    return prefix + tuple(part for relative in submodules for part in ('--worktree-submodule-path', relative)) + (
+    return prefix + protected + execution + tuple(part for relative in submodules for part in ('--worktree-submodule-path', relative)) + (
         '--task-shard-count', '1', '--task-shard-index', '0')
 
 

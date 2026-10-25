@@ -5658,6 +5658,24 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                     </div>
                 </section>
 
+                <section id="proof-trace-panel" data-task="CIMP-GUI-31">
+                    <h2>Proof traces and unavailable states</h2>
+                    <p id="proof-trace-notice">Source-bound obligations, counterexamples, and engine versions stay visible. Executed, degraded, and not-executed are separate. A missing prover, a timeout, and source drift are not green checkmarks and are not legal sufficiency.</p>
+                    <div class="field-row">
+                        <div>
+                            <label for="proof-trace-case-id">Case</label>
+                            <input id="proof-trace-case-id" type="text" autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="status" id="proof-trace-summary" data-legal-sufficiency="false" data-proof="false" data-verification="unknown">No proof trace has been loaded. Absence is not a successful proof.</div>
+                    <div class="list" id="proof-trace-list"></div>
+                    <div class="list" id="proof-trace-counterexamples"></div>
+                    <div class="list" id="proof-trace-engines"></div>
+                    <div class="button-row">
+                        <button type="button" id="proof-trace-refresh">Show proof traces</button>
+                    </div>
+                </section>
+
                 <section id="legal-effective-context" data-task="CIMP-GUI-24">
                     <h2>Jurisdiction and legal effective context</h2>
                     <p id="legal-context-notice">Name the jurisdiction, forum, and relevant dates. Unknown and disputed applicability stay unknown or disputed. This form does not default to governing law, Oregon, or federal court.</p>
@@ -6254,6 +6272,109 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         });
         document.getElementById('legal-context-refresh').addEventListener('click', function () { refreshLegalContext(); });
         document.getElementById('legal-context-save').addEventListener('click', function () { saveLegalContext(); });
+
+        let proofTraceRequestEpoch = 0;
+        const proofTraceUnavailable = ['missing_prover', 'timeout', 'source_drift', 'degraded', 'not_executed'];
+
+        function clearProofTraceView() {
+            proofTraceRequestEpoch += 1;
+            const summary = document.getElementById('proof-trace-summary');
+            summary.textContent = 'No proof trace has been verified for this case. Absence is not a successful proof.';
+            summary.dataset.legalSufficiency = 'false';
+            summary.dataset.proof = 'false';
+            summary.dataset.verification = 'unknown';
+            delete summary.dataset.sourceDrift;
+            ['proof-trace-list', 'proof-trace-counterexamples', 'proof-trace-engines'].forEach(id => {
+                document.getElementById(id).replaceChildren();
+            });
+        }
+
+        function proofTraceCapture() {
+            return {caseId: document.getElementById('proof-trace-case-id').value.trim(),
+                requestEpoch: ++proofTraceRequestEpoch, privacyEpoch: workspacePrivacyEpoch,
+                clientEpoch: client._privacyEpoch, actor: client.activePrincipalId,
+                caseContext: JSON.stringify(client.caseContext)};
+        }
+
+        function proofTraceCurrent(capture) {
+            return !workspacePrivacyInactive && capture.requestEpoch === proofTraceRequestEpoch
+                && capture.privacyEpoch === workspacePrivacyEpoch && capture.clientEpoch === client._privacyEpoch
+                && capture.actor === client.activePrincipalId
+                && capture.caseId === document.getElementById('proof-trace-case-id').value.trim()
+                && capture.caseContext === JSON.stringify(client.caseContext)
+                && client.caseContext && client.caseContext.case_id === capture.caseId;
+        }
+
+        function renderProofTraces(payload, capture) {
+            if (!proofTraceCurrent(capture) || payload.case_id !== capture.caseId || payload.legal_sufficiency !== false) return;
+            const summary = document.getElementById('proof-trace-summary');
+            const rows = Array.isArray(payload.obligations) ? payload.obligations : [];
+            const unavailable = rows.filter(row => proofTraceUnavailable.includes(row.proof_status));
+            summary.dataset.legalSufficiency = 'false';
+            summary.dataset.proof = 'false';
+            summary.dataset.verification = 'visible';
+            summary.dataset.sourceDrift = payload.source_drift === true ? 'true' : 'false';
+            summary.textContent = 'Proof traces are visible and are not legal sufficiency. '
+                + rows.length + ' source-bound obligation' + (rows.length === 1 ? '' : 's') + '. Unavailable: '
+                + (unavailable.map(row => (row.obligation_id || 'obligation') + ' ' + row.proof_status).join(', ') || 'none') + '.';
+            const list = document.getElementById('proof-trace-list');
+            list.replaceChildren();
+            rows.forEach(row => {
+                const status = typeof row.proof_status === 'string' ? row.proof_status : 'not_executed';
+                const article = document.createElement('article');
+                article.className = 'proof-trace-row';
+                article.dataset.obligationId = row.obligation_id || '';
+                article.dataset.proofStatus = status;
+                article.dataset.sourceBound = row.source_bound === true ? 'true' : 'false';
+                const blocked = proofTraceUnavailable.includes(status) || Boolean(row.counterexample);
+                article.dataset.greenCheckmark = (!blocked && status === 'executed' && row.green_checkmark === true) ? 'true' : 'false';
+                article.dataset.legalSufficiency = 'false';
+                const engineName = row.engine_name || 'engine unavailable';
+                const engineVersion = row.engine_version || 'version unavailable';
+                article.textContent = (row.obligation_id || 'obligation') + ': ' + (row.statement || '')
+                    + ' source ' + (row.source_span || 'unspecified')
+                    + ' status ' + status
+                    + ' engine ' + engineName + ' ' + engineVersion
+                    + (row.counterexample ? ' counterexample ' + row.counterexample : '');
+                list.appendChild(article);
+            });
+            const counters = document.getElementById('proof-trace-counterexamples');
+            counters.replaceChildren();
+            (Array.isArray(payload.counterexamples) ? payload.counterexamples : []).forEach(item => {
+                const node = document.createElement('p');
+                node.className = 'proof-trace-counterexample';
+                node.dataset.legalSufficiency = 'false';
+                node.dataset.greenCheckmark = 'false';
+                node.textContent = (item.obligation_id || 'obligation') + ' counterexample: ' + (item.trace || '');
+                counters.appendChild(node);
+            });
+            const engines = Array.isArray(payload.engine_versions) ? payload.engine_versions : [];
+            document.getElementById('proof-trace-engines').textContent = engines.length
+                ? engines.map(item => (item.name || 'engine') + ' ' + (item.version || 'unknown')).join(', ')
+                : 'No engine version recorded.';
+        }
+
+        function proofTraceUnavailableView(capture) {
+            if (!proofTraceCurrent(capture)) return;
+            const summary = document.getElementById('proof-trace-summary');
+            summary.dataset.verification = 'unavailable';
+            summary.dataset.legalSufficiency = 'false';
+            summary.dataset.proof = 'false';
+            summary.textContent = 'Proof traces could not be loaded. That gap is visible and is not legal sufficiency.';
+        }
+
+        async function refreshProofTraces() {
+            const capture = proofTraceCapture();
+            if (!proofTraceCurrent(capture)) return;
+            try {
+                const payload = await client._request('/api/legal-analysis/' + encodeURIComponent(capture.caseId) + '/proof-traces', {method: 'GET'});
+                renderProofTraces(payload, capture);
+            } catch (_error) { proofTraceUnavailableView(capture); }
+        }
+
+        document.getElementById('proof-trace-case-id').addEventListener('input', clearProofTraceView);
+        document.getElementById('proof-trace-case-id').addEventListener('change', clearProofTraceView);
+        document.getElementById('proof-trace-refresh').addEventListener('click', function () { refreshProofTraces(); });
 
         function legalResearchFields() {
             return {
@@ -13946,6 +14067,7 @@ function extractComplaintOutputSignals(result) {
             workspacePrivacyInactive = true;
             clearCaseProcessingConsentView();
             clearLegalContextView();
+            clearProofTraceView();
             removePrivateWorkspaceStorage();
             workspaceSession = null;
             adaptiveInquiryState = null;
