@@ -186,6 +186,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
                         json_body_limits: Optional[CaseJSONBodyLimits] = None,
                         case_catalog: Any = None,
                         case_assignments: Any = None,
+                        case_messages: Any = None,
                         case_consent: Any = None, gui_inference_transport: Any = None,
                         gui_inference_route: Any = None) -> Any:
     """Mount the same fail-closed boundary in every production app variant.
@@ -227,6 +228,10 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     if case_assignments is not None and not isinstance(case_assignments, CaseAssignmentService):
         raise CaseAccessError("case_assignments")
     mount_case_assignments(app)
+    from .case_message_api import CaseMessageService, mount_case_messages
+    if case_messages is not None and not isinstance(case_messages, CaseMessageService):
+        raise CaseAccessError("case_messages")
+    mount_case_messages(app)
     from .case_consent_api import CaseConsentService, mount_case_consent
     if case_consent is not None and not isinstance(case_consent, CaseConsentService):
         raise CaseAccessError("case_consent")
@@ -252,6 +257,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     app.state.case_handlers = case_handlers
     app.state.case_catalog = case_catalog
     app.state.case_assignments = case_assignments
+    app.state.case_messages = case_messages
     app.state.case_consent = case_consent
     app.state.gui_inference_transport = selected_inference_transport
     app.state.gui_inference_route = gui_inference_route
