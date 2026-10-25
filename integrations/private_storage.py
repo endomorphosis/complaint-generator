@@ -2760,6 +2760,7 @@ def _atomic_write(
     *,
     fsync_file: Callable[[int], None] | None,
     fsync_directory: Callable[[int], None] | None,
+    before_replace: Callable[[], Any] | None = None,
 ) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     os.chmod(directory, 0o700)
@@ -2783,7 +2784,15 @@ def _atomic_write(
         raise
     os.close(descriptor)
     _fsync_directory(directory, fsync_directory)
-    os.replace(temporary, directory / name)
+    try:
+        if before_replace is not None and before_replace() is False:
+            raise PrivateRevisionError("Publication admission refused.",
+                code="publication_denied", state="aborted")
+        os.replace(temporary, directory / name)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        _fsync_directory(directory, fsync_directory)
+        raise
     _fsync_directory(directory, fsync_directory)
 
 
@@ -3072,12 +3081,14 @@ def _publish_head(
     root: Path, envelope: bytes, revision: str, *,
     fsync_file: Callable[[int], None] | None,
     fsync_directory: Callable[[int], None] | None,
+    before_publish: Callable[[], Any] | None = None,
 ) -> None:
     encoded = str(revision).encode("ascii")
     if not 0 < len(encoded) <= 128 or not str(revision).isdigit():
         raise PrivateRevisionError("head revision is invalid", code="bad_revision")
     record = _HEAD_RECORD_MAGIC + len(encoded).to_bytes(2, "big") + encoded + envelope
-    _atomic_write(root, _HEAD_NAME, record, fsync_file=fsync_file, fsync_directory=fsync_directory)
+    _atomic_write(root, _HEAD_NAME, record, fsync_file=fsync_file, fsync_directory=fsync_directory,
+        **({"before_replace": before_publish} if before_publish is not None else {}))
 
 
 def _authenticate_revision_owner(
@@ -3211,7 +3222,8 @@ def _intent_document(
 
 
 def _apply_intent(root: Path, intent: Mapping[str, Any], *, install: bool, fsync_file, fsync_directory,
-                  lineage: Mapping[str, Any] | None = None) -> bool:
+                  lineage: Mapping[str, Any] | None = None,
+                  before_publish: Callable[[], Any] | None = None) -> bool:
     revision = str(intent.get("revision") or "")
     effect_id = str(intent.get("effect_id") or "")
     current_envelope, current_revision = _head_record(root)
@@ -3242,7 +3254,8 @@ def _apply_intent(root: Path, intent: Mapping[str, Any], *, install: bool, fsync
         if current_ref != str(intent.get("previous_head_ref") or ""):
             return False
         envelope = _object_bytes(root, str(intent["manifest_ref"]))
-        _publish_head(root, envelope, revision, fsync_file=fsync_file, fsync_directory=fsync_directory)
+        _publish_head(root, envelope, revision, fsync_file=fsync_file, fsync_directory=fsync_directory,
+            **({"before_publish": before_publish} if before_publish is not None else {}))
         return True
     if current != revision:
         return True
@@ -3400,13 +3413,23 @@ def commit_private_revision(
     writer: Any | None = None,
     fsync_file: Callable[[int], None] | None = None,
     fsync_directory: Callable[[int], None] | None = None,
+    before_publish: Callable[[], Any] | None = None,
 ) -> RevisionPublication:
     """Publish one answer revision across session, fact graph, and proof.
 
     Objects are sealed first. The visible head changes only inside the effect,
     after the intent is durable. ``network_pinned`` stays false.
+
+    ``before_publish`` is a trusted in-process late admission check. It runs
+    after authenticated encryption and head staging/fsync, inside the revision
+    CAS effect immediately before replacing the visible head. A refusal raises through the normal terminal
+    WAL abort path; recovery cannot replay that refused transaction. Readers
+    and key/session reproofs may be used by the callback, but it must not start
+    another revision write under this same lock.
     """
 
+    if before_publish is not None and not callable(before_publish):
+        raise TypeError("before_publish must be a trusted callable")
     wal = _load_wal()
     root = Path(repository)
     transaction_id, effect_id = _identity_args(transaction_id, effect_id)
@@ -3531,6 +3554,7 @@ def commit_private_revision(
                                  principal_id=principal_id, key=key, key_id=key_id)
             return _apply_intent(
                 root, intent, install=True, fsync_file=fsync_file, fsync_directory=fsync_directory,
+                **({"before_publish": before_publish} if before_publish is not None else {}),
             )
 
         def compensate() -> bool:

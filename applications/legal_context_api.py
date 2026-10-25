@@ -2,9 +2,9 @@
 
 The route is mounted by ``compose_case_routes``. Session and case-action checks
 run before these handlers. A path or query case id that does not match the
-authorized decision is refused. Selection goes through the bound case mediator
-when that mediator exposes ``apply_explicit_legal_context``; otherwise the
-shared intake owner is used. Neither path invents governing law.
+authorized decision is refused. HTTP uses the bound encrypted workspace, never
+a mediator cache. Selection uses the same pure intake-context owner as the
+encrypted workspace transaction. It never invents governing law.
 
 Unknown and disputed applicability stay unknown or disputed. A context change
 invalidates affected legal dependencies and proofs, keeps factual provenance,
@@ -48,13 +48,13 @@ class LegalContextError(Exception):
 
 
 def legal_context_http_status(code: str) -> int:
-    if code in {"unauthenticated", "legal_context_unavailable"}:
+    if code == "unauthenticated":
         return 401
     if code == "legal_context_revision_conflict":
         return 409
     if code in {"governing_law_not_admitted", "applicability_not_admitted", "legal_context_field"}:
         return 422
-    if code == "legal_dependency_refresh_unavailable":
+    if code in {"legal_dependency_refresh_unavailable", "legal_context_unavailable", "unlock_needed"}:
         return 503
     return 403
 
@@ -175,159 +175,43 @@ def _refresh_dependencies(mediator: Any, change: Dict[str, Any]) -> None:
 
 
 def select_explicit_legal_context(mediator: Any, updates: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
-    """Record an explicit legal context on the bound case file.
+    """Compatibility owner using the same pure selection as encrypted workspaces.
 
-    ``governing_law`` is never copied into jurisdiction or forum. Omitted
-    applicability stays unknown. Disputed stays disputed.
+    No side-effecting Mediator.apply_explicit_legal_context call is made: that
+    method already refreshes dependencies and formerly caused a second refresh.
     """
+    from applications.legal_context_selection import apply_legal_context_selection
+    from complaint_phases.dependency_graph import DependencyGraph
+    from complaint_phases.phase_manager import ComplaintPhase
+
     if mediator is None:
         raise LegalContextError("legal_context_unavailable")
-    body = dict(updates or {})
-    rejected = [key for key in body if str(key) in _REJECTED_DEFAULTS or str(key).startswith("governing_")]
-    if rejected or any(str(value).strip().lower() in _REJECTED_DEFAULTS for value in body.values() if not isinstance(value, (dict, list))):
-        if any(str(key) in _REJECTED_DEFAULTS or str(key).startswith("governing_") for key in body):
-            raise LegalContextError("governing_law_not_admitted")
-    for key, value in list(body.items()):
-        if isinstance(value, str) and value.strip().lower() in _REJECTED_DEFAULTS and key in {"jurisdiction", "forum", "applicability"}:
-            raise LegalContextError("governing_law_not_admitted")
     case_file = _case_file_from_mediator(mediator)
-    context = _current_context(case_file)
-    current_revision = int(context.get("context_revision") or 0)
-    if "expected_context_revision" not in body:
-        raise LegalContextError("legal_context_revision_conflict")
+    manager = getattr(mediator, "phase_manager", None)
+    graph = manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph") if (
+        manager is not None and callable(getattr(manager, "get_phase_data", None))) else None
+    if graph is not None and not isinstance(graph, DependencyGraph):
+        raise LegalContextError("legal_dependency_refresh_unavailable")
+    selected = apply_legal_context_selection(case_file, updates or {}, dependency_graph=graph)
+    if not selected["changed"]:
+        return selected["projection"]
+    before = deepcopy(case_file)
+    case_file.clear()
+    case_file.update(selected["case_file"])
     try:
-        expected = int(body.get("expected_context_revision"))
-    except (TypeError, ValueError):
-        raise LegalContextError("legal_context_revision_conflict") from None
-    if expected != current_revision:
-        raise LegalContextError("legal_context_revision_conflict")
-
-    applicability_requested = body.get("applicability") if "applicability" in body else None
-    if applicability_requested is not None and _token(applicability_requested).lower() not in set(APPLICABILITY_VALUES) | _UNKNOWN_TOKENS | _DISPUTED_TOKENS:
-        if _token(applicability_requested).lower() in _REJECTED_DEFAULTS:
-            raise LegalContextError("governing_law_not_admitted")
-        raise LegalContextError("applicability_not_admitted")
-    overall = _applicability_token(applicability_requested) if applicability_requested is not None else str(case_file.get("legal_context_applicability") or "unknown")
-    if overall not in APPLICABILITY_VALUES:
-        overall = "unknown"
-
-    jurisdiction_mode = "unchanged"
-    if "jurisdiction" in body:
-        jurisdiction_mode = _applicability_token(body.get("jurisdiction"))
-    forum_mode = "unchanged"
-    if "forum" in body:
-        forum_mode = _applicability_token(body.get("forum"))
-    if overall == "disputed":
-        if jurisdiction_mode == "explicit":
-            jurisdiction_mode = "disputed"
-        if forum_mode == "explicit":
-            forum_mode = "disputed"
-    if overall == "unknown" and "applicability" in body:
-        if jurisdiction_mode == "explicit":
-            jurisdiction_mode = "unknown"
-        if forum_mode == "explicit":
-            forum_mode = "unknown"
-
-    law_updates: Dict[str, Any] = {}
-    current_jurisdiction = str(context.get("jurisdiction") or "unknown")
-    if jurisdiction_mode == "explicit":
-        law_updates["jurisdiction"] = _token(body.get("jurisdiction"))
-    elif jurisdiction_mode in {"unknown", "disputed"} and current_jurisdiction not in {"", "unknown"}:
-        law_updates["jurisdiction"] = ""
-    for field in _DATE_FIELDS:
-        if field in body:
-            law_updates[field] = body.get(field)
-
-    prior_forum = case_file.get("legal_context_forum") if isinstance(case_file.get("legal_context_forum"), dict) else {
-        "value": "unknown", "applicability": "unknown",
-    }
-    next_forum = dict(prior_forum)
-    if forum_mode == "explicit":
-        next_forum = {"value": _token(body.get("forum")), "applicability": "explicit"}
-    elif forum_mode == "disputed":
-        next_forum = {"value": "disputed", "applicability": "disputed", "candidate": _token(body.get("forum"))}
-    elif forum_mode == "unknown":
-        next_forum = {"value": "unknown", "applicability": "unknown"}
-    forum_changed = next_forum != prior_forum
-
-    candidate_jurisdiction = None
-    if jurisdiction_mode == "disputed":
-        candidate_jurisdiction = _token(body.get("jurisdiction")) or "disputed"
-    elif jurisdiction_mode == "unknown" and "jurisdiction" in body:
-        candidate_jurisdiction = _token(body.get("jurisdiction")) or "unknown"
-
-    prior_overall = str(case_file.get("legal_context_applicability") or "unknown")
-    applicability_changed = "applicability" in body and overall != prior_overall
-    jurisdiction_overlay = jurisdiction_mode == "disputed" or (
-        jurisdiction_mode == "unknown" and str(context.get("jurisdiction_applicability") or "unknown") != "unknown"
-    )
-    if not law_updates and not forum_changed and not applicability_changed and not jurisdiction_overlay:
-        return project_legal_context(case_file)
-
-    provenance_before = deepcopy(case_file.get("factual_provenance"))
-    facts_before = deepcopy(case_file.get("canonical_facts"))
-    _snapshot_version(case_file)
-    revision_before = current_revision
-    if law_updates:
-        case_file = _apply_law_fields(mediator, case_file, law_updates)
-    context = _current_context(case_file)
-    revision_after_law = int(context.get("context_revision") or 0)
-    law_invalidated = revision_after_law != revision_before
-
-    if jurisdiction_mode == "disputed":
-        context["jurisdiction"] = "unknown"
-        context["jurisdiction_explicit"] = False
-        context["jurisdiction_applicability"] = "disputed"
-        context["candidate_jurisdiction"] = candidate_jurisdiction
-        context["status"] = "disputed"
-    elif jurisdiction_mode == "unknown":
-        context["jurisdiction_applicability"] = "unknown"
-        context["candidate_jurisdiction"] = candidate_jurisdiction
-        if str(context.get("jurisdiction") or "unknown") == "unknown":
-            context["status"] = "unknown"
-    elif jurisdiction_mode == "explicit":
-        resolved = str(context.get("jurisdiction") or "unknown")
-        context["jurisdiction_applicability"] = "explicit" if resolved not in {"", "unknown"} else "unknown"
-        context.pop("candidate_jurisdiction", None)
-        if context["jurisdiction_applicability"] != "explicit" and overall == "explicit":
-            overall = "unknown"
-    case_file["legal_context"] = context
-    case_file["legal_context_forum"] = next_forum
-    if next_forum.get("applicability") == "disputed" or context.get("jurisdiction_applicability") == "disputed":
-        if overall == "explicit":
-            overall = "disputed"
-    applicability_changed = overall != prior_overall
-    case_file["legal_context_applicability"] = overall
-
-    dependency_reason = None
-    if law_invalidated:
-        dependency_reason = "legal_context_change"
-        _mark_dependencies_invalid(case_file, bump=False, reason=dependency_reason)
-    elif forum_changed or applicability_changed or jurisdiction_overlay:
-        dependency_reason = "forum" if forum_changed else ("applicability" if applicability_changed else "jurisdiction")
-        _mark_dependencies_invalid(case_file, bump=True, reason=dependency_reason)
-    if dependency_reason is None and not law_invalidated:
-        versions = case_file.get("legal_context_versions")
-        if isinstance(versions, list) and versions:
-            versions.pop()
-        if case_file.get("factual_provenance") != provenance_before:
-            case_file["factual_provenance"] = provenance_before
-        return project_legal_context(case_file)
-
-    if case_file.get("factual_provenance") != provenance_before or case_file.get("canonical_facts") != facts_before:
-        case_file["factual_provenance"] = provenance_before
-        case_file["canonical_facts"] = facts_before
-
-    change = {}
-    if jurisdiction_mode != "unchanged":
-        change["jurisdiction_changed"] = True
-    if any(field in law_updates for field in _DATE_FIELDS):
-        change["date_changed"] = True
-    if forum_changed:
-        change["forum_changed"] = True
-    if change and (law_invalidated or forum_changed or dependency_reason):
-        _refresh_dependencies(mediator, change)
-    return project_legal_context(case_file)
+        if graph is not None:
+            update = getattr(manager, "update_phase_data", None)
+            if not callable(update):
+                raise LegalContextError("legal_dependency_refresh_unavailable")
+            update(ComplaintPhase.INTAKE, "dependency_graph", selected["dependency_graph"])
+            update(ComplaintPhase.INTAKE, "intake_case_file", case_file)
+        else:
+            _refresh_dependencies(mediator, selected["change"])
+    except Exception:
+        case_file.clear()
+        case_file.update(before)
+        raise
+    return selected["projection"]
 
 
 def project_legal_context(case_file: Mapping[str, Any]) -> Dict[str, Any]:
@@ -390,8 +274,13 @@ def mount_legal_context_routes(app: Any) -> None:
     """Mount explicit legal-context routes. Authorization middleware protects the prefix."""
 
     from fastapi.responses import JSONResponse
+    from starlette.concurrency import run_in_threadpool
 
     from applications.case_routes import _BOUND_HANDLERS
+    from applications.complaint_workspace import (ComplaintWorkspaceService, WorkspaceAccess,
+        WorkspaceAuthorizationDenied, WorkspacePersistenceError, workspace_access_scope)
+    from applications.workspace_case_authority import (WorkspaceCaseAuthorityError,
+        current_workspace_case_authority)
 
     def _fail(exc: LegalContextError) -> JSONResponse:
         return JSONResponse({"error": exc.code, "status": "denied"}, status_code=legal_context_http_status(exc.code))
@@ -413,16 +302,39 @@ def mount_legal_context_routes(app: Any) -> None:
         if resolver is None:
             raise LegalContextError("legal_context_unavailable")
         try:
-            mediator, _workspace, _root = resolver()
+            _mediator, workspace, _root = resolver()
         except Exception as exc:
             raise LegalContextError("legal_context_unavailable") from exc
-        return mediator
+        if not isinstance(workspace, ComplaintWorkspaceService):
+            raise LegalContextError("legal_context_unavailable")
+        authority = current_workspace_case_authority()
+        actor = getattr(getattr(request.state, "browser_principal", None), "principal_id", None)
+        if authority is None or not actor:
+            raise LegalContextError("legal_context_ungranted")
+        authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+        return workspace, authority, actor
+
+    def _operation(workspace, actor, case_id, body=None):
+        with workspace_access_scope(WorkspaceAccess.authenticated(actor, case_id)):
+            if body is None:
+                return workspace.read_case_legal_context(actor, case_id=case_id)
+            return workspace.update_case_legal_context(actor, case_id=case_id, updates=body)
+
+    def _storage_failure(exc):
+        code = "legal_context_revision_conflict" if exc.code == "revision_conflict" else (
+            "unlock_needed" if exc.code == "unlock_needed" else "legal_context_unavailable")
+        return _fail(LegalContextError(code))
 
     @app.get(LEGAL_CONTEXT_PREFIX + "/{case_id}")
     async def read_legal_context(case_id: str, request: Request):
         try:
-            mediator = _authorized(request, case_id)
-            payload = project_legal_context(_case_file_from_mediator(mediator))
+            workspace, authority, actor = _authorized(request, case_id)
+            payload = await run_in_threadpool(_operation, workspace, actor, case_id)
+            authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+        except (WorkspaceAuthorizationDenied, WorkspaceCaseAuthorityError):
+            return _fail(LegalContextError("legal_context_ungranted"))
+        except WorkspacePersistenceError as exc:
+            return _storage_failure(exc)
         except LegalContextError as exc:
             return _fail(exc)
         payload["case_id"] = case_id
@@ -431,11 +343,16 @@ def mount_legal_context_routes(app: Any) -> None:
     @app.post(LEGAL_CONTEXT_PREFIX + "/{case_id}")
     async def update_legal_context(case_id: str, request: Request):
         try:
-            mediator = _authorized(request, case_id)
+            workspace, authority, actor = _authorized(request, case_id)
             body = await request.json()
             if not isinstance(body, dict):
                 raise LegalContextError("legal_context_field")
-            payload = select_explicit_legal_context(mediator, body)
+            payload = await run_in_threadpool(_operation, workspace, actor, case_id, body)
+            authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+        except (WorkspaceAuthorizationDenied, WorkspaceCaseAuthorityError):
+            return _fail(LegalContextError("legal_context_ungranted"))
+        except WorkspacePersistenceError as exc:
+            return _storage_failure(exc)
         except LegalContextError as exc:
             return _fail(exc)
         payload["case_id"] = case_id
