@@ -381,7 +381,7 @@
         var ownGeneration = generation;
         var body = Object.assign({
             expected_version: item.version,
-            idempotency_key: item.grant_id + suffix
+            idempotency_key: item.grant_id + "-" + suffix.slice(1)
         }, extra || {});
         try {
             var result = await api("/api/cases/assignments/" + encodeURIComponent(item.grant_id) + suffix, {method: "POST", body: body});
