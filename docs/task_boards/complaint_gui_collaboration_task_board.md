@@ -582,7 +582,7 @@ Implementation instructions:
 
 ## CIMP-GUI-20 Resume the browser interview from encrypted revisions
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
