@@ -898,6 +898,15 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
             if full_launch and not _campaign_tuple_matches(previous, repo_root, spec_path, state_dir):
                 return _stop_incomplete(state_dir, "live_campaign_mismatch")
             return {"status": "already_running", "pid": previous["identity"]["pid"], "state_dir": str(state_dir)}
+        from .pending_claim_runtime import unfinished_handoff_task
+        try:
+            unfinished = unfinished_handoff_task(state_dir)
+        except (OSError, ValueError, TypeError):
+            return {"status": "not_ready", "reason": "pending_candidate_handoff_unverified",
+                    "execution_started": False, "paid_calls": 0}
+        if unfinished:
+            return {"status": "not_ready", "reason": "pending_candidate_materialization_required",
+                    "task_id": unfinished, "execution_started": False, "paid_calls": 0}
         shutdown_path = state_dir / "container_shutdown.json"
         shutdown = {}
         shutdown_raw = None
@@ -2219,12 +2228,16 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             }
             if terminal_claim_ok and not unsafe:
                 claim_result = daemon.reconcile_quiesced_implementation_task_claim()
-            if (isinstance(claim_result, dict) and claim_result.get("blocked") is True
-                    and claim_result.get("reason") == "canonical_task_not_terminal"):
-                from .pending_claim_runtime import reconcile_pending_claim
+            from .pending_claim_runtime import reconcile_pending_claim, unfinished_handoff_task
+            unfinished = unfinished_handoff_task(state_dir)
+            nonterminal_claim = (isinstance(claim_result, dict) and claim_result.get("blocked") is True
+                and claim_result.get("reason") == "canonical_task_not_terminal")
+            if terminal_claim_ok and not unsafe and (nonterminal_claim or unfinished):
+                if unfinished and nonterminal_claim and unfinished != claim_result.get("task_id"):
+                    raise ValueError("pending_candidate_handoff_conflicts_with_current_claim")
                 _, native = _native_modules(repo_root)
                 pending_claim_result = reconcile_pending_claim(repo_root, spec_path, state_dir,
-                    record, native, daemon, str(claim_result.get("task_id") or ""))
+                    record, native, daemon, unfinished or str(claim_result.get("task_id") or ""))
                 if pending_claim_result.get("reconciled") is True and not pending_claim_result.get("blocked"):
                     # The companion releases only the exact claim. Let the
                     # unchanged Native API finish its ordinary stale-lock cleanup.
