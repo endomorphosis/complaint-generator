@@ -3736,7 +3736,7 @@
                     <div class="shortcut-grid">
                         <div class="shortcut-card">
                             <strong>Shared session consistency</strong>
-                            <span id="session-sync-summary">The workspace will confirm when the current DID, phase, and draft state are synchronized.</span>
+                            <span id="session-sync-summary">The workspace will confirm the current DID, phase, and draft state after bootstrap succeeds.</span>
                             <div class="chip-row">
                                 <span class="chip good" id="session-sync-did-chip">did: loading</span>
                                 <span class="chip" id="session-sync-phase-chip">phase: loading</span>
@@ -5626,6 +5626,13 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                     </div>
                 </section>
 
+                <div class="button-row" id="workspace-privacy-actions">
+                    <button type="button" id="workspace-clear-private-state">Clear private browser state</button>
+                    <label for="workspace-switch-user-id">Switch to user</label>
+                    <input id="workspace-switch-user-id" type="text" autocomplete="off">
+                    <button type="button" id="workspace-switch-user">Switch workspace user</button>
+                    <button type="button" id="workspace-logout">Log out</button>
+                </div>
                 <div class="status" id="workspace-status">Workspace booting…</div>
             </main>
         </section>
@@ -5635,6 +5642,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
     <script>
         const { ComplaintMcpClient } = window.ComplaintMcpSdk;
         const client = new ComplaintMcpClient();
+        window.workspaceClient = client;
         let workspaceUserId = new URLSearchParams(window.location.search).get('user_id') || null;
         let workspaceSession = null;
         let activeWorkspaceTab = 'intake';
@@ -5677,20 +5685,39 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let sdkPrimitiveSnapshot = null;
         let latestSdkToolActivity = null;
         let gmailImportDetectedAddresses = [];
+        let workspacePrivacyEpoch = 0;
+        let workspacePrivacyInactive = false;
+        let privacyBoundaryUpdating = false;
+        // Keep the original public DOM nodes (and their listeners), not a
+        // copy of hydrated case data. A privacy boundary restores this view.
+        const workspacePublicDom = [];
+        (function rememberPublicDom(node) {
+            const children = Array.from(node.childNodes);
+            workspacePublicDom.push({node, children,
+                attributes: node.nodeType === 1 ? Array.from(node.attributes).map(a => [a.name, a.value]) : null,
+                text: node.nodeType === 3 ? node.data : null,
+                value: typeof node.value === 'string' ? node.value : null,
+                checked: typeof node.checked === 'boolean' ? node.checked : null});
+            children.forEach(rememberPublicDom);
+        })(document.body);
+
         const readinessStorageKey = 'complaintGenerator.uiReadiness';
         const lastToolCallStorageKey = 'complaintGenerator.sdkLastToolCall';
 
         function setWorkspaceHydrationState(state) {
+            if (workspacePrivacyInactive && !privacyBoundaryUpdating) return;
             document.body.dataset.workspaceHydrated = state;
         }
 
         function setStatus(message) {
+            if (workspacePrivacyInactive && !privacyBoundaryUpdating) return;
             const statusNode = document.getElementById('workspace-status');
             statusNode.textContent = message;
             statusNode.classList.remove('is-busy');
         }
 
         function setBusyStatus(message) {
+            if (workspacePrivacyInactive && !privacyBoundaryUpdating) return;
             const statusNode = document.getElementById('workspace-status');
             statusNode.textContent = message;
             statusNode.classList.add('is-busy');
@@ -6348,11 +6375,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             if (!userNode || !rememberNode) {
                 return;
             }
-            const stored = window.sessionStorage.getItem(gmailImportUserStorageKey());
-            if (stored && !userNode.value.trim()) {
-                userNode.value = stored;
-            }
-            rememberNode.checked = Boolean(stored) || rememberNode.checked;
+            rememberNode.checked = false;
         }
 
         function persistGmailImportUserPreference() {
@@ -6362,11 +6385,6 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             const userNode = document.getElementById('gmail-import-user');
             const rememberNode = document.getElementById('gmail-import-remember-user');
             if (!userNode || !rememberNode) {
-                return;
-            }
-            const nextValue = userNode.value.trim();
-            if (rememberNode.checked && nextValue) {
-                window.sessionStorage.setItem(gmailImportUserStorageKey(), nextValue);
                 return;
             }
             window.sessionStorage.removeItem(gmailImportUserStorageKey());
@@ -6624,14 +6642,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         function refreshSynopsisEditor(sessionPayload, forceDefault = false) {
             const synopsisNode = document.getElementById('case-synopsis');
             const sessionSynopsis = String((sessionPayload && sessionPayload.case_synopsis) || ((sessionPayload && sessionPayload.session) || {}).case_synopsis || '').trim();
-            const stored = window.localStorage.getItem(synopsisStorageKey());
             const nextValue = forceDefault
                 ? buildDefaultSynopsis(sessionPayload)
-                : (sessionSynopsis || stored || buildDefaultSynopsis(sessionPayload));
+                : (sessionSynopsis || buildDefaultSynopsis(sessionPayload));
             synopsisNode.value = nextValue;
-            if (nextValue) {
-                window.localStorage.setItem(synopsisStorageKey(), nextValue);
-            }
             syncSynopsisMirrors(nextValue);
         }
 
@@ -7384,8 +7398,6 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 const payload = {
                     source: String(params.get('source') || '').trim(),
                     userId: String(params.get('user_id') || '').trim(),
-                    caseSynopsis: String(params.get('case_synopsis') || '').trim(),
-                    prefillMessage: String(params.get('prefill_message') || '').trim(),
                     returnTo: String(params.get('return_to') || '').trim(),
                     savedAt: new Date().toISOString(),
                 };
@@ -12064,6 +12076,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         }
 
         function renderWorkspace(sessionPayload) {
+            if (workspacePrivacyInactive) return;
             hydratePersistedWorkflowArtifacts(sessionPayload);
             hydrateResolvedDraftState(sessionPayload);
             renderIntake(sessionPayload);
@@ -12378,12 +12391,6 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 localStorage.setItem(readinessStorageKey, JSON.stringify({
                     verdict: assessment.verdict,
                     score: assessment.score,
-                    critic_verdict: assessment.criticVerdict,
-                    release_blockers: assessment.releaseBlockers,
-                    acceptance_checks: assessment.acceptanceChecks,
-                    tested_stages: assessment.testedStages,
-                    sdk_invocations: assessment.sdkInvocations,
-                    exposed_tools: assessment.exposedTools,
                     updated_at: new Date().toISOString(),
                     workflow_type: String((result && result.workflow_type) || (result && result.backend && result.backend.strategy) || 'review'),
                 }));
@@ -13233,15 +13240,109 @@ function extractComplaintOutputSignals(result) {
             `;
         }
 
+        function bootstrapFailureStatus(error) {
+            if (error && error.authorizationDenied) {
+                return 'Workspace access denied.';
+            }
+            return 'Workspace bootstrap failed.';
+        }
+
+        function removePrivateWorkspaceStorage() {
+            if (client && typeof client.clearPrivateBrowserState === 'function') {
+                client.clearPrivateBrowserState();
+            }
+            [window.localStorage, window.sessionStorage].forEach((bucket) => {
+                if (!bucket || typeof bucket.key !== 'function') {
+                    return;
+                }
+                const keys = [];
+                for (let index = 0; index < bucket.length; index += 1) {
+                    const key = bucket.key(index);
+                    if (key) {
+                        keys.push(key);
+                    }
+                }
+                keys.forEach((key) => {
+                    if (/synopsis|handoff|narrative|evidence|summary|token|secret|password|passphrase|api[_-]?key|private[_-]?key|raw[_-]?key|uiReadiness|sdkSyncEvent|sdkLastToolCall|sdkToolLedger|gmail-user|authorization|credential|bearer/i.test(key)) {
+                        bucket.removeItem(key);
+                    }
+                });
+            });
+        }
+
+        function resetPrivateWorkspaceView(state, message) {
+            workspacePrivacyEpoch += 1;
+            workspacePrivacyInactive = true;
+            removePrivateWorkspaceStorage();
+            workspaceSession = null;
+            workspaceCapabilities = null;
+            workspaceToolingContract = null;
+            workspaceMediatorPrompt = null;
+            workspaceComplaintReadiness = null;
+            workspaceUiReadiness = null;
+            workspaceClientReleaseGate = null;
+            workspaceFormalDiagnostics = null;
+            workspaceFilingProvenance = null;
+            workspaceProviderDiagnostics = null;
+            workspaceDataSchema = null;
+            latestWorkspaceDataMigration = null;
+            latestWorkspaceDatasetSearch = null;
+            latestWorkspaceDatasetView = null;
+            latestDocketDatasetView = null;
+            latestDocketDatasetSearch = null;
+            latestDocketDatasetMetadata = null;
+            latestDocketDatasetGraph = null;
+            latestPackagedDocketOperatorDashboard = null;
+            latestPackagedDocketOperatorDashboardReport = null;
+            latestPackagedDocketRevalidationExecution = null;
+            latestPackagedDocketRevalidationPersist = null;
+            latestPacketExport = null;
+            latestComplaintOutputAnalysis = null;
+            latestAttorneyHandoffPacket = null;
+            latestUiReviewResult = null;
+            latestGmailImportResult = null;
+            latestGmailDuckdbPipelineResult = null;
+            latestEmailDuckdbSearchResult = null;
+            workspaceMikeIntegrationStatus = null;
+            workspaceMikeStatusUpdatedAt = null;
+            sdkPrimitiveSnapshot = null;
+            latestSdkToolActivity = null;
+
+            workspaceSessionTools = [];
+            gmailImportDetectedAddresses = [];
+            selectedDocketItemId = '';
+            for (const item of workspacePublicDom) {
+                if (item.attributes) {
+                    Array.from(item.node.attributes).forEach(a => item.node.removeAttribute(a.name));
+                    item.attributes.forEach(([name, value]) => item.node.setAttribute(name, value));
+                    item.node.replaceChildren(...item.children);
+                } else if (item.text !== null) item.node.data = item.text;
+                if (item.value !== null) item.node.value = item.value;
+                if (item.checked !== null) item.node.checked = item.checked;
+            }
+            privacyBoundaryUpdating = true;
+            try {
+                setWorkspaceHydrationState(state);
+                setStatus(message);
+                document.getElementById('session-sync-summary').textContent = 'Private browser state cleared.';
+            } finally { privacyBoundaryUpdating = false; }
+        }
+
         async function refreshWorkspace() {
             setWorkspaceHydrationState('loading');
             setBusyStatus('Refreshing shared complaint session…');
-            const sessionPayload = await client.startSession(workspaceUserId);
-            workspaceSession = sessionPayload;
-            await loadSharedCapabilities();
-            renderWorkspace(sessionPayload);
-            setWorkspaceHydrationState('ready');
-            setStatus(`Workspace synchronized for ${workspaceUserId}.`);
+            try {
+                const sessionPayload = await client.startSession(workspaceUserId);
+                workspaceSession = sessionPayload;
+                await loadSharedCapabilities();
+                renderWorkspace(sessionPayload);
+                setWorkspaceHydrationState('ready');
+                setStatus(`Workspace synchronized for ${workspaceUserId}.`);
+            } catch (error) {
+                setWorkspaceHydrationState(error && (error.authorizationDenied || error.isError) ? 'denied' : 'error');
+                setStatus(bootstrapFailureStatus(error));
+                throw error;
+            }
         }
 
         async function saveIntake() {
@@ -14192,7 +14293,7 @@ function extractComplaintOutputSignals(result) {
             latestGmailDuckdbPipelineResult = null;
             latestEmailDuckdbSearchResult = null;
             workspaceSession = await client.resetSession(workspaceUserId);
-            window.localStorage.removeItem(synopsisStorageKey());
+            removePrivateWorkspaceStorage();
             await refreshWorkspace();
             activateTab('intake');
             setStatus('Workspace reset to a clean state.');
@@ -14749,9 +14850,27 @@ function extractComplaintOutputSignals(result) {
             setStatus('Case synopsis refreshed from the current complaint facts.');
         });
         document.getElementById('case-synopsis').addEventListener('input', (event) => {
-            const value = event.target.value;
-            window.localStorage.setItem(synopsisStorageKey(), value);
-            syncSynopsisMirrors(value);
+            syncSynopsisMirrors(event.target.value);
+        });
+        document.getElementById('workspace-clear-private-state').addEventListener('click', () => {
+            resetPrivateWorkspaceView('cleared', 'Private browser state cleared. Reload to reconnect.');
+        });
+        document.getElementById('workspace-switch-user').addEventListener('click', () => {
+            const nextUserId = document.getElementById('workspace-switch-user-id').value.trim();
+            client.switchWorkspaceUser(nextUserId);
+            workspaceUserId = nextUserId || null;
+            resetPrivateWorkspaceView('switched', 'Workspace selection changed. Private browser state cleared.');
+        });
+        document.getElementById('workspace-logout').addEventListener('click', async () => {
+            resetPrivateWorkspaceView('logging-out', 'Signing out. Private browser state cleared.');
+            workspaceUserId = null;
+            try {
+                const result = await client.logout();
+                if (!result || result.logged_out !== true) throw new Error('session_required');
+                resetPrivateWorkspaceView('logged-out', 'Logged out. Private browser state cleared.');
+            } catch (error) {
+                resetPrivateWorkspaceView('logout-failed', 'Private browser state cleared. Server sign-out could not be verified.');
+            }
         });
         document.getElementById('gmail-import-user').addEventListener('input', persistGmailImportUserPreference);
         document.getElementById('gmail-import-user').addEventListener('input', renderGmailImportCommandExamples);
@@ -14780,6 +14899,7 @@ function extractComplaintOutputSignals(result) {
         const workspaceSyncEventName = (window.ComplaintMcpSdk && window.ComplaintMcpSdk.SYNC_EVENT_NAME) || 'complaint-mcp-sync';
         const workspaceSyncStorageKey = (window.ComplaintMcpSdk && window.ComplaintMcpSdk.DEFAULT_SYNC_EVENT_STORAGE_KEY) || 'complaintGenerator.sdkSyncEvent';
         async function handleWorkspaceSharedSyncEvent(detail) {
+            if (workspacePrivacyInactive) return;
             const syncDetail = detail && typeof detail === 'object' ? detail : {};
             const eventType = String(syncDetail.event_type || '').trim();
             const incomingUserId = String(syncDetail.user_id || (((syncDetail.payload || {}).session || {}).user_id) || '').trim();
@@ -14796,6 +14916,7 @@ function extractComplaintOutputSignals(result) {
             handleWorkspaceSharedSyncEvent(event && event.detail);
         });
         window.addEventListener('storage', (event) => {
+            if (workspacePrivacyInactive) return;
             if (!event || event.key !== workspaceSyncStorageKey || !event.newValue) {
                 return;
             }
@@ -14816,7 +14937,9 @@ function extractComplaintOutputSignals(result) {
             }
         }
 
+        const bootstrapPrivacyEpoch = workspacePrivacyEpoch;
         client.bootstrapWorkspace(workspaceUserId).then(async (bootstrap) => {
+            if (bootstrapPrivacyEpoch !== workspacePrivacyEpoch || workspacePrivacyInactive) return;
             setWorkspaceHydrationState('loading');
             workspaceUserId = bootstrap.did;
             workspaceSession = bootstrap.session;
@@ -14848,6 +14971,7 @@ function extractComplaintOutputSignals(result) {
                 loadSdkPrimitives(),
                 refreshMikeIntegrationStatus(true),
             ]);
+            if (bootstrapPrivacyEpoch !== workspacePrivacyEpoch || workspacePrivacyInactive) return;
             if (workspaceSession) {
                 renderWorkspace(workspaceSession);
             }
@@ -14860,8 +14984,11 @@ function extractComplaintOutputSignals(result) {
             }
             setWorkspaceHydrationState('ready');
         }).catch((error) => {
-            setWorkspaceHydrationState('error');
-            setStatus(`Workspace failed to load: ${error.message}`);
+            if (bootstrapPrivacyEpoch !== workspacePrivacyEpoch || workspacePrivacyInactive) return;
+            console.error(error && error.stack ? error.stack : error);
+            const denied = Boolean(error && error.authorizationDenied);
+            setWorkspaceHydrationState(denied ? 'denied' : 'error');
+            setStatus(bootstrapFailureStatus(error));
         });
     </script>
 </body>

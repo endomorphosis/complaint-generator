@@ -2,10 +2,158 @@
 const SYNC_EVENT_NAME = 'complaint-mcp-sync';
 const DEFAULT_SYNC_EVENT_STORAGE_KEY = 'complaintGenerator.sdkSyncEvent';
 
+const SYNC_PUBLIC_FIELDS = [
+    'event_type',
+    'tool_name',
+    'status',
+    'user_id',
+    'manifest_path',
+    'source',
+    'emitted_at',
+    'revision',
+    'session_revision',
+    'expected_question_revision',
+    'interview_action',
+    'pending_inquiry_id',
+    'question_id',
+    'conflict',
+    'graph_version',
+    'action',
+];
+const PRIVATE_STORAGE_KEY = /(synopsis|handoff|narrative|evidence|summary|token|secret|password|passphrase|api[_-]?key|private[_-]?key|raw[_-]?key|uiReadiness|sdkSyncEvent|sdkLastToolCall|sdkToolLedger|gmail-user|authorization|credential|bearer)/i;
+const PUBLIC_ERROR_CODES = /^(authorization_denied|authentication_failed|session_required|workspace_operation_failed|stale_question|mcp_tool_error|JSON-RPC request failed|pin refused|http_\d{3})$/;
+
+const PUBLIC_TOOL_NAMES = new Set(["complaint.analyze_complaint_output", "complaint.build_mediator_prompt", "complaint.build_mike_handoff", "complaint.execute_packaged_docket_proof_revalidation_queue", "complaint.export_complaint_docx", "complaint.export_complaint_markdown", "complaint.export_complaint_packet", "complaint.export_complaint_pdf", "complaint.generate_complaint", "complaint.get_client_release_gate", "complaint.get_complaint_readiness", "complaint.get_docket_dataset_graph", "complaint.get_docket_dataset_metadata", "complaint.get_draft_proof_report", "complaint.get_filing_provenance", "complaint.get_formal_diagnostics", "complaint.get_mike_integration_status", "complaint.get_packaged_docket_operator_dashboard", "complaint.get_proof_history", "complaint.get_provider_diagnostics", "complaint.get_tooling_contract", "complaint.get_ui_readiness", "complaint.get_workflow_capabilities", "complaint.get_workspace_data_schema", "complaint.import_gmail_evidence", "complaint.import_local_evidence", "complaint.improve_draft", "complaint.list_claim_elements", "complaint.list_intake_questions", "complaint.load_packaged_docket_operator_dashboard_report", "complaint.migrate_legacy_workspace_data", "complaint.optimize_ui", "complaint.persist_packaged_docket_proof_revalidation_queue", "complaint.pin_draft_proof_report", "complaint.render_draft_proof_report", "complaint.reset_session", "complaint.review_case", "complaint.review_generated_exports", "complaint.review_ui", "complaint.run_browser_audit", "complaint.run_gmail_duckdb_pipeline", "complaint.run_intake_chat_turn", "complaint.save_evidence", "complaint.score_draft_quality", "complaint.search_docket_dataset", "complaint.search_email_duckdb_corpus", "complaint.search_workspace_dataset", "complaint.start_session", "complaint.submit_intake", "complaint.sync_mike_final_draft", "complaint.update_case_synopsis", "complaint.update_claim_type", "complaint.update_draft", "complaint.view_docket_dataset", "complaint.view_workspace_dataset"]);
+const PUBLIC_EVENT_TYPES = new Set(['workspace.updated', 'workspace.reset', 'docket.updated', 'docket.persisted']);
+const PUBLIC_ACTIONS = new Set(['start', 'answer', 'status', 'resume', 'defer', 'revise', 'continue']);
+function publicRevision(value) { return Number.isSafeInteger(value) && value >= 0 ? value : null; }
+function publicAction(value) { return PUBLIC_ACTIONS.has(value) ? value : ''; }
+function publicTimestamp(value) {
+    return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value) ? value : '';
+}
+function publicToolName(value) { return PUBLIC_TOOL_NAMES.has(value) ? value : 'mcp_tool'; }
+function stateChangedError() { const e = new Error('workspace_state_changed'); e.isError = true; return e; }
+
+function publicErrorMessage(value) {
+    const text = typeof value === 'string' ? value : '';
+    return PUBLIC_ERROR_CODES.test(text) || text === 'workspace_state_changed' || text === 'csrf_required' ? text : 'mcp_tool_error';
+}
+
+function authorizationDeniedText(value) {
+    return /authorization_denied|authentication_failed|session_required|bearer token required/i.test(String(value || ''));
+}
+
+function publicToolErrorCode(result) {
+    if (result && typeof result.error === 'string' && PUBLIC_ERROR_CODES.test(result.error)) return result.error;
+    const content = result && Array.isArray(result.content) ? result.content[0] : null;
+    const text = content && content.text ? String(content.text) : '';
+    if (text === 'authorization_denied' || text === 'workspace_operation_failed' || text === 'stale_question') {
+        return text;
+    }
+    if (result && typeof result.conflict === 'string' && result.conflict) {
+        return publicErrorMessage(result.conflict);
+    }
+    const structured = result && result.structuredContent;
+    if (structured && typeof structured === 'object') {
+        if (structured.conflict) {
+            return publicErrorMessage(structured.conflict);
+        }
+        if (structured.error === 'authorization_denied' || structured.error === 'workspace_operation_failed') {
+            return String(structured.error);
+        }
+    }
+    if (authorizationDeniedText(text)) {
+        return 'authorization_denied';
+    }
+    return 'mcp_tool_error';
+}
+
+function containsPrivateText(value) {
+    return /narrative|evidence|summary|synopsis|token|secret|password|passphrase|api[_-]?key|private[_-]?key|raw[_-]?key|bearer\s+/i.test(String(value || ''));
+}
+
+function projectSyncDetail(detail) {
+    const source = detail && typeof detail === 'object' ? detail : {};
+    const projected = { emitted_at: new Date().toISOString() };
+    if (PUBLIC_EVENT_TYPES.has(source.event_type)) projected.event_type = source.event_type;
+    if (PUBLIC_TOOL_NAMES.has(source.tool_name)) projected.tool_name = source.tool_name;
+    if (['success', 'error', 'started', 'denied', 'conflict'].includes(source.status)) projected.status = source.status;
+    for (const field of ['revision', 'session_revision', 'expected_question_revision', 'graph_version']) {
+        const value = publicRevision(source[field]);
+        if (value !== null) projected[field] = value;
+    }
+    for (const field of ['interview_action', 'action']) {
+        if (publicAction(source[field])) projected[field] = source[field];
+    }
+    if (typeof source.user_id === 'string' && /^(?:[a-f0-9]{32}|did:key:(?:[A-Za-z0-9]+|fallback-[a-f0-9]{32}))$/.test(source.user_id)) projected.user_id = source.user_id;
+    for (const field of ['pending_inquiry_id', 'question_id']) {
+        if (typeof source[field] === 'string' && (/^inq-[a-z0-9-]{1,128}$/.test(source[field]) || source[field] === 'original_complaint')) projected[field] = source[field];
+    }
+    if (['stale_question', 'revision_conflict', 'inquiry_mismatch'].includes(source.conflict)) projected.conflict = source.conflict;
+    return projected;
+}
+
+function publicDiagnosticSummary(summary) {
+    if (!summary || typeof summary !== 'object') return undefined;
+    return { warning_count: Array.isArray(summary.warnings) ? summary.warnings.length : 0,
+        warnings: [], primary_warning: null, summary_text: '' };
+}
+
+function publicToolActivity(detail) {
+    const source = detail && typeof detail === 'object' ? detail : {};
+    return { tool_name: publicToolName(source.tool_name),
+        status: ['success', 'error', 'started'].includes(source.status) ? source.status : 'error',
+        started_at: publicTimestamp(source.started_at), finished_at: publicTimestamp(source.finished_at),
+        error_message: source.error_message ? publicErrorMessage(source.error_message) : '',
+        authorization_denied: source.authorization_denied === true, is_error: source.is_error === true,
+        expected_question_revision: publicRevision(source.expected_question_revision),
+        interview_action: publicAction(source.interview_action), revision: publicRevision(source.revision),
+        diagnostic_summary: publicDiagnosticSummary(source.diagnostic_summary) };
+}
+
+function storageBuckets() {
+    const buckets = [];
+    if (typeof localStorage !== 'undefined') {
+        buckets.push(localStorage);
+    }
+    if (typeof sessionStorage !== 'undefined') {
+        buckets.push(sessionStorage);
+    }
+    return buckets;
+}
+
+function storageKeys(bucket) {
+    if (!bucket || typeof bucket.key !== 'function' || typeof bucket.length !== 'number') {
+        return [];
+    }
+    const keys = [];
+    for (let index = 0; index < bucket.length; index += 1) {
+        const key = bucket.key(index);
+        if (key) {
+            keys.push(key);
+        }
+    }
+    return keys;
+}
+
+function clearPrivateBrowserStorage(extraKeys) {
+    const explicit = new Set(extraKeys || []);
+    storageBuckets().forEach((bucket) => {
+        storageKeys(bucket).forEach((key) => {
+            if (explicit.has(key) || PRIVATE_STORAGE_KEY.test(key)) {
+                try {
+                    bucket.removeItem(key);
+                } catch (error) {
+                    // Keep clearing the remaining private keys.
+                }
+            }
+        });
+    });
+    return { cleared: true };
+}
+
 function dispatchSharedSyncEvent(detail, storageKey) {
-    const normalizedDetail = Object.assign({
-        emitted_at: new Date().toISOString(),
-    }, detail || {});
+    const normalizedDetail = projectSyncDetail(detail);
     if (typeof localStorage !== 'undefined') {
         try {
             localStorage.setItem(storageKey || DEFAULT_SYNC_EVENT_STORAGE_KEY, JSON.stringify(normalizedDetail));
@@ -31,6 +179,35 @@ class ComplaintMcpClient {
         this.toolCallLedgerStorageKey = options.toolCallLedgerStorageKey || 'complaintGenerator.sdkToolLedger';
         this.syncEventStorageKey = options.syncEventStorageKey || DEFAULT_SYNC_EVENT_STORAGE_KEY;
         this.maxToolLedgerEntries = Number(options.maxToolLedgerEntries || 8);
+        this.csrfToken = typeof options.csrfToken === 'string' ? options.csrfToken : '';
+        this.activePrincipalId = '';
+        this.caseContext = null;
+        if (options.caseContext) this.setCaseContext(options.caseContext);
+        this._privacyEpoch = 0;
+        this._privacyActive = true;
+        this._pendingRequests = new Set();
+        clearPrivateBrowserStorage([this.lastToolCallStorageKey, this.toolCallLedgerStorageKey, this.syncEventStorageKey]);
+        // A legacy cache accepted arbitrary text; retain only opaque IDs.
+        try { this.getCachedDid(); } catch (error) { /* Storage may be unavailable. */ }
+    }
+
+    setCaseContext(context) {
+        if (!context || !['tenant_id', 'case_id', 'resource_id'].every(field => typeof context[field] === 'string' && context[field])) throw new Error('mcp_tool_error');
+        if (this._pendingRequests) this.clearPrivateBrowserState();
+        this.caseContext = {tenant_id: context.tenant_id, case_id: context.case_id, resource_id: context.resource_id};
+        const revision = context.expected_revision === undefined ? context.revision : context.expected_revision;
+        if (Number.isSafeInteger(revision) && revision >= 1) this.caseContext.expected_revision = revision;
+        if (Number.isSafeInteger(context.expected_membership_revision) && context.expected_membership_revision >= 1) this.caseContext.expected_membership_revision = context.expected_membership_revision;
+        this._privacyActive = true;
+        return {configured: true};
+    }
+
+    _caseArguments(argumentsPayload) {
+        const args = Object.assign({}, argumentsPayload || {});
+        // Canonical storage owner is not an actor claim. Other explicit
+        // claims stay visible to the server's ordinary mismatch denial.
+        if (this.caseContext && args.user_id === this.caseContext.tenant_id) delete args.user_id;
+        return args;
     }
 
     initialize() {
@@ -42,21 +219,72 @@ class ComplaintMcpClient {
         });
     }
 
-    async _request(path, options = {}) {
-        if (typeof this.fetchImpl !== 'function') {
-            throw new Error('ComplaintMcpClient requires a fetch implementation.');
+    async _request(path, options = {}, lifecycle = false) {
+        if (typeof this.fetchImpl !== 'function') throw new Error('mcp_tool_error');
+        if (!lifecycle && !this._privacyActive) throw stateChangedError();
+        const epoch = this._privacyEpoch;
+        const controller = new AbortController();
+        this._pendingRequests.add(controller);
+        const target = new URL(path, this.origin);
+        const sameOrigin = target.origin === new URL(this.origin).origin;
+        const caseRequest = this.caseContext && sameOrigin && !target.pathname.includes('/auth/');
+        let requestTarget = path;
+        if (caseRequest && target.searchParams.get('user_id') === this.caseContext.tenant_id) {
+            target.searchParams.delete('user_id');
+            requestTarget = target.toString();
         }
-        const response = await this.fetchImpl(path, Object.assign({
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            credentials: 'same-origin',
-        }, options));
-        if (!response.ok) {
-            const text = await response.text();
-            throw new Error(text || (`Request failed with status ${response.status}`));
+        const headers = new Headers(options.headers || {});
+        if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+        if (caseRequest) {
+            headers.set('x-tenant-id', this.caseContext.tenant_id);
+            headers.set('x-case-id', this.caseContext.case_id);
+            headers.set('x-resource-id', this.caseContext.resource_id);
+            if (this.caseContext.expected_revision) headers.set('x-expected-revision', String(this.caseContext.expected_revision));
+            if (this.caseContext.expected_membership_revision) headers.set('x-expected-membership-revision', String(this.caseContext.expected_membership_revision));
         }
-        return response.json();
+        if (this.csrfToken && new URL(path, this.origin).origin === new URL(this.origin).origin) headers.set('x-csrf-token', this.csrfToken);
+        try {
+            const response = await this.fetchImpl(requestTarget, Object.assign({}, options, {headers, credentials: 'same-origin', signal: controller.signal}));
+            if (!lifecycle && epoch !== this._privacyEpoch) throw stateChangedError();
+            if (!response.ok) {
+                const denied = response.status === 401 || response.status === 403;
+                let code = denied ? 'authorization_denied' : `http_${response.status}`;
+                let contract;
+                if (response.status === 409) {
+                    try {
+                        const conflictBody = await response.json();
+                        const body = conflictBody && conflictBody.result ? conflictBody.result : conflictBody;
+                        const publicCode = publicToolErrorCode(body);
+                        if (['stale_question', 'revision_conflict', 'inquiry_mismatch'].includes(publicCode)) code = publicCode;
+                        const structured = body && body.structuredContent ? body.structuredContent : body;
+                        const interview = structured && structured.interview ? structured.interview : {};
+                        contract = projectSyncDetail(Object.assign({}, structured, {session_revision: interview.session_revision}));
+                    } catch (readError) { /* The fixed HTTP code remains truthful. */ }
+                }
+                if (!lifecycle && epoch !== this._privacyEpoch) throw stateChangedError();
+                const error = new Error(code);
+                error.status = response.status; error.authorizationDenied = denied; error.isError = true;
+                if (contract) error.contract = contract;
+                throw error;
+            }
+            const payload = await response.json();
+            if (!lifecycle && epoch !== this._privacyEpoch) throw stateChangedError();
+            if (payload && payload.isError === true && !payload.jsonrpc) {
+                const code = publicToolErrorCode(payload);
+                const error = new Error(code); error.status = response.status; error.authorizationDenied = code === 'authorization_denied'; error.isError = true;
+                throw error;
+            }
+            return payload;
+        } finally { this._pendingRequests.delete(controller); }
+    }
+
+    setBrowserSession(issued) {
+        this.clearPrivateBrowserState();
+        this.csrfToken = issued && typeof issued.csrf_token === 'string' ? issued.csrf_token : '';
+        this.activePrincipalId = issued && typeof issued.principal_id === 'string' ? issued.principal_id : '';
+        this.caseContext = null;
+        this._privacyActive = true;
+        return {principal_id: this.activePrincipalId, configured: Boolean(this.csrfToken)};
     }
 
     async _rpc(method, params) {
@@ -66,12 +294,22 @@ class ComplaintMcpClient {
                 jsonrpc: '2.0',
                 id: this._requestId++,
                 method,
-                params: params || {},
+                params: method === 'tools/call' && params ? Object.assign({}, params, {arguments: this._caseArguments(params.arguments)}) : (params || {}),
             }),
         });
+        if (!payload || typeof payload !== 'object') throw new Error('mcp_tool_error');
         if (payload.error) {
-            throw new Error(payload.error.message || 'JSON-RPC request failed');
+            const error = new Error(publicErrorMessage(payload.error.message || 'JSON-RPC request failed'));
+            error.isError = true;
+            error.authorizationDenied = authorizationDeniedText(payload.error.message || '');
+            throw error;
         }
+        if (payload.result && payload.result.isError === true) {
+            const code = publicToolErrorCode(payload.result);
+            const error = new Error(code); error.isError = true; error.authorizationDenied = code === 'authorization_denied';
+            throw error;
+        }
+        if (!Object.prototype.hasOwnProperty.call(payload, 'result')) throw new Error('mcp_tool_error');
         return payload.result;
     }
 
@@ -80,26 +318,27 @@ class ComplaintMcpClient {
     }
 
     _cacheLastToolCall(detail) {
+        const published = publicToolActivity(detail);
         if (typeof localStorage === 'undefined') {
-            return detail;
+            return published;
         }
         try {
-            localStorage.setItem(this.lastToolCallStorageKey, JSON.stringify(detail));
+            localStorage.setItem(this.lastToolCallStorageKey, JSON.stringify(published));
             const existing = this.getToolCallLedger();
-            const ledger = [detail].concat(existing).slice(0, this.maxToolLedgerEntries);
+            const ledger = [published].concat(existing).slice(0, this.maxToolLedgerEntries);
             localStorage.setItem(this.toolCallLedgerStorageKey, JSON.stringify(ledger));
         } catch (error) {
-            return detail;
+            return published;
         }
-        return detail;
+        return published;
     }
 
     _publishLastToolCall(detail) {
-        this._cacheLastToolCall(detail);
+        const published = this._cacheLastToolCall(detail);
         if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
-            window.dispatchEvent(new CustomEvent('complaint-mcp-sdk-call', { detail }));
+            window.dispatchEvent(new CustomEvent('complaint-mcp-sdk-call', { detail: published }));
         }
-        return detail;
+        return published;
     }
 
     _publishSyncEvent(detail) {
@@ -153,21 +392,32 @@ class ComplaintMcpClient {
             'complaint.get_docket_dataset_graph',
         ]);
 
+        const interview = payload.interview && typeof payload.interview === 'object' ? payload.interview : {};
+        const graph = interview.graph && typeof interview.graph === 'object' ? interview.graph : {};
+        const revision = interview.session_revision !== undefined ? interview.session_revision : (payload.session_revision !== undefined ? payload.session_revision : null);
+        const contract = {
+            tool_name: normalizedToolName,
+            status: 'success',
+            user_id: userId,
+            revision: revision,
+            session_revision: revision,
+            expected_question_revision: args.expected_question_revision !== undefined ? args.expected_question_revision : (payload.expected_question_revision !== undefined ? payload.expected_question_revision : interview.expected_question_revision),
+            interview_action: args.interview_action || payload.interview_action || interview.action || '',
+            pending_inquiry_id: payload.pending_inquiry_id || '',
+            question_id: args.question_id || '',
+            conflict: payload.conflict || '',
+            graph_version: graph.graph_version !== undefined ? graph.graph_version : '',
+        };
         if (workspaceMutationTools.has(normalizedToolName)) {
-            events.push(this._publishSyncEvent({
+            events.push(this._publishSyncEvent(Object.assign({
                 event_type: normalizedToolName === 'complaint.reset_session' ? 'workspace.reset' : 'workspace.updated',
-                tool_name: normalizedToolName,
-                user_id: userId,
-                payload: payload,
-            }));
+            }, contract)));
         }
         if (docketTools.has(normalizedToolName)) {
-            events.push(this._publishSyncEvent({
+            events.push(this._publishSyncEvent(Object.assign({
                 event_type: normalizedToolName === 'complaint.persist_packaged_docket_proof_revalidation_queue' ? 'docket.persisted' : 'docket.updated',
-                tool_name: normalizedToolName,
                 manifest_path: manifestPath,
-                payload: payload,
-            }));
+            }, contract)));
         }
         return events;
     }
@@ -178,7 +428,7 @@ class ComplaintMcpClient {
         }
         try {
             const raw = localStorage.getItem(this.lastToolCallStorageKey);
-            return raw ? JSON.parse(raw) : null;
+            return raw ? publicToolActivity(JSON.parse(raw)) : null;
         } catch (error) {
             return null;
         }
@@ -191,7 +441,7 @@ class ComplaintMcpClient {
         try {
             const raw = localStorage.getItem(this.toolCallLedgerStorageKey);
             const parsed = raw ? JSON.parse(raw) : [];
-            return Array.isArray(parsed) ? parsed : [];
+            return Array.isArray(parsed) ? parsed.map(publicToolActivity) : [];
         } catch (error) {
             return [];
         }
@@ -296,19 +546,32 @@ class ComplaintMcpClient {
 
     async callTool(toolName, argumentsPayload) {
         const startedAt = new Date().toISOString();
+        const epoch = this._privacyEpoch;
         try {
             const result = await this._rpc('tools/call', {
                 name: toolName,
                 arguments: argumentsPayload || {},
             });
+            if (result && result.isError === true) {
+                const code = publicToolErrorCode(result);
+                const failure = new Error(code);
+                failure.isError = true;
+                failure.authorizationDenied = code === 'authorization_denied';
+                    throw failure;
+            }
+            if (epoch !== this._privacyEpoch || !this._privacyActive) throw stateChangedError();
             const structuredContent = result && result.structuredContent ? result.structuredContent : result;
             const diagnosticSummary = this._buildToolDiagnosticSummary(structuredContent);
+            const args = argumentsPayload && typeof argumentsPayload === 'object' ? argumentsPayload : {};
             this._publishLastToolCall({
                 tool_name: toolName,
                 status: 'success',
                 started_at: startedAt,
                 finished_at: new Date().toISOString(),
                 diagnostic_summary: diagnosticSummary,
+                expected_question_revision: args.expected_question_revision,
+                interview_action: args.interview_action,
+                revision: structuredContent && structuredContent.interview ? structuredContent.interview.session_revision : null,
             });
             this._publishDerivedSyncEvents(toolName, argumentsPayload, structuredContent, 'success');
             if (result && result.structuredContent) {
@@ -316,12 +579,18 @@ class ComplaintMcpClient {
             }
             return result;
         } catch (error) {
+            if (epoch !== this._privacyEpoch || !this._privacyActive) throw stateChangedError();
+            const args = argumentsPayload && typeof argumentsPayload === 'object' ? argumentsPayload : {};
             this._publishLastToolCall({
                 tool_name: toolName,
                 status: 'error',
                 started_at: startedAt,
                 finished_at: new Date().toISOString(),
                 error_message: error && error.message ? error.message : String(error),
+                authorization_denied: Boolean(error && error.authorizationDenied),
+                is_error: true,
+                expected_question_revision: args.expected_question_revision,
+                interview_action: args.interview_action,
             });
             throw error;
         }
@@ -352,10 +621,14 @@ class ComplaintMcpClient {
         if (typeof localStorage === 'undefined') {
             return null;
         }
-        return localStorage.getItem(this.didStorageKey);
+        const value = localStorage.getItem(this.didStorageKey);
+        if (typeof value === 'string' && /^(?:[a-f0-9]{32}|did:key:(?:[A-Za-z0-9]+|fallback-[a-f0-9]{32}))$/.test(value)) return value;
+        localStorage.removeItem(this.didStorageKey);
+        return null;
     }
 
     cacheDid(did) {
+        if (typeof did !== 'string' || !/^(?:[a-f0-9]{32}|did:key:(?:[A-Za-z0-9]+|fallback-[a-f0-9]{32}))$/.test(did)) throw new Error('mcp_tool_error');
         if (typeof localStorage !== 'undefined') {
             localStorage.setItem(this.didStorageKey, did);
         }
@@ -375,7 +648,13 @@ class ComplaintMcpClient {
     }
 
     async bootstrapWorkspace(userId) {
-        const did = userId || await this.getOrCreateDid();
+        this._privacyActive = true;
+        if (this.caseContext) {
+            const current = await this._request(`${this.baseUrl}/auth/session`, {method: 'GET'});
+            if (!current || current.authenticated !== true || typeof current.principal_id !== 'string') throw new Error('session_required');
+            this.activePrincipalId = current.principal_id;
+        }
+        const did = this.caseContext ? this.activePrincipalId : (userId || await this.getOrCreateDid());
         const [initialization, tools, session] = await Promise.all([
             this.initialize(),
             this.listTools(),
@@ -404,12 +683,66 @@ class ComplaintMcpClient {
         });
     }
 
-    runIntakeChatTurn(userId, message, questionId) {
-        return this.callTool('complaint.run_intake_chat_turn', {
+    runIntakeChatTurn(userId, message, questionId, options = {}) {
+        const extra = options && typeof options === 'object' ? options : {};
+        const args = {
             user_id: userId,
             message: message || undefined,
-            question_id: questionId || undefined,
+            question_id: questionId || extra.question_id || undefined,
+        };
+        if (extra.expected_question_revision !== undefined && extra.expected_question_revision !== null && extra.expected_question_revision !== '') {
+            args.expected_question_revision = extra.expected_question_revision;
+        }
+        if (extra.interview_action) {
+            args.interview_action = extra.interview_action;
+        }
+        return this.callTool('complaint.run_intake_chat_turn', args);
+    }
+
+    clearPrivateBrowserState() {
+        this._privacyEpoch += 1;
+        this._privacyActive = false;
+        this._pendingRequests.forEach((controller) => controller.abort());
+        this._pendingRequests.clear();
+        try { this.getCachedDid(); } catch (error) { /* Storage may be unavailable. */ }
+        return clearPrivateBrowserStorage([
+            this.lastToolCallStorageKey,
+            this.toolCallLedgerStorageKey,
+            this.syncEventStorageKey,
+        ]);
+    }
+
+    switchWorkspaceUser(nextUserId) {
+        this.clearPrivateBrowserState();
+        storageBuckets().forEach((bucket) => {
+            try {
+                bucket.removeItem(this.didStorageKey);
+            } catch (error) {
+                // Identity removal is best-effort during a user switch.
+            }
         });
+        this.activeUserId = nextUserId ? String(nextUserId) : '';
+        this.caseContext = null;
+        return { user_id: this.activeUserId, switched: true, cleared: true };
+    }
+
+    async logout() {
+        this.switchWorkspaceUser('');
+        let loggedOut = false;
+        try {
+            if (this.csrfToken) {
+                await this._request(`${this.baseUrl}/auth/logout`, {method: 'POST', body: '{}'}, true);
+                loggedOut = true;
+            } else {
+                try { await this._request(`${this.baseUrl}/auth/session`, {method: 'GET'}, true); }
+                catch (error) { if (error.status === 401) loggedOut = true; else throw error; }
+                if (!loggedOut) throw new Error('csrf_required');
+            }
+            return {logged_out: true, cleared: true};
+        } finally {
+            this.csrfToken = '';
+            this.activePrincipalId = '';
+        }
     }
 
     saveEvidence(userId, payload) {
@@ -780,6 +1113,8 @@ const ComplaintMcpSdk = {
     SYNC_EVENT_NAME,
     DEFAULT_SYNC_EVENT_STORAGE_KEY,
     publishSyncEvent: dispatchSharedSyncEvent,
+    projectSyncDetail: projectSyncDetail,
+    clearPrivateBrowserStorage: clearPrivateBrowserStorage,
 };
 
   if (globalScope) {
