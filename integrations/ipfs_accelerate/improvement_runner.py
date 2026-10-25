@@ -3023,6 +3023,9 @@ def _startup_candidate_is_completed(supervisor, candidate):
     if not isinstance(candidate, Mapping):
         return False
     merge = candidate.get("merge_result")
+    if isinstance(merge, Mapping) and merge.get("reason") == "preflight_merge_conflict":
+        from .startup_terminal_candidate import completed_preflight_conflict
+        return completed_preflight_conflict(supervisor, candidate)
     context = getattr(supervisor, "_complaint_startup_reconciliation_context", None)
     if (candidate.get("merged") is not False or not isinstance(merge, Mapping)
             or merge.get("attempted") is not False or merge.get("merged") is not False
