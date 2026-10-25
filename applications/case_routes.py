@@ -27,7 +27,7 @@ from .case_directory import CaseNamespace
 
 CASE_ROUTE_KINDS = ("case", "graph", "message", "admin")
 COMPOSITION_NAME = "compose_case_routes"
-PROTECTED_PREFIXES = ("/api/complaint-workspace", "/api/claim-support", "/api/documents", "/api/chat", "/api/graphs", "/api/legal-context", "/api/legal-research")
+PROTECTED_PREFIXES = ("/api/complaint-workspace", "/api/claim-support", "/api/documents", "/api/chat", "/api/graphs", "/api/legal-context", "/api/legal-research", "/api/legal-analysis")
 CASE_CATALOG_PREFIX = "/api/cases"
 CASE_PAGE_PATH = "/cases"
 RETIRED_EXACT_PATHS = frozenset({"/cookies", "/load_profile", "/create_profile", "/api/chat", "/api/chat/fallback"})
@@ -245,6 +245,8 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     mount_legal_context_routes(app)
     from .legal_research_api import mount_legal_research_routes
     mount_legal_research_routes(app)
+    from .legal_analysis_api import mount_legal_analysis_routes
+    mount_legal_analysis_routes(app)
     app.state.case_authorizer = authorizer
     app.state.browser_sessions = sessions
     app.state.case_handlers = case_handlers

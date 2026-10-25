@@ -5267,6 +5267,285 @@ def audit_canonical_formalization_payload(payload: Mapping[str, Any]) -> Dict[st
     }
 
 
+CANONICAL_IR_ATTACHMENT_SCHEMA = "canonical-legal-ir-source-obligations/v1"
+TYPED_SOURCE_OBLIGATION_KINDS = frozenset({
+    "obligation", "prohibition", "permission", "exception", "condition", "definition", "source_span",
+})
+_APPLICABILITY_VALUES = frozenset({"applicable", "inapplicable", "limited", "unknown"})
+_APPLICABILITY_FIELDS = ("jurisdiction", "authority_version", "effective_date", "forum", "applicability")
+
+
+def _normalize_applicability_context(raw: Mapping[str, Any] | None) -> Tuple[Dict[str, Any], str]:
+    """Copy declared applicability. A caller cannot appoint governing law."""
+
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, Mapping):
+        return {}, "applicability_context_invalid"
+    context: Dict[str, Any] = {}
+    for key in _APPLICABILITY_FIELDS:
+        if key not in raw:
+            continue
+        value = raw[key]
+        if not isinstance(value, str) or value != value.strip() or not value or len(value) > 160:
+            return {}, "applicability_context_invalid"
+        context[key] = value
+    applicability = context.get("applicability", "unknown")
+    if applicability not in _APPLICABILITY_VALUES:
+        return {}, "applicability_context_invalid"
+    context["applicability"] = applicability
+    context["governing_legal_authority"] = False
+    context["selects_governing_law"] = False
+    return context, ""
+
+
+def _exact_character_span(source_text: str, start: Any, end: Any, claimed: Any) -> Dict[str, Any] | None:
+    if type(start) is not int or type(end) is not int or isinstance(start, bool) or isinstance(end, bool):
+        return None
+    if not 0 <= start < end <= len(source_text):
+        return None
+    text = source_text[start:end]
+    if not isinstance(claimed, str) or claimed != text or not text.strip():
+        return None
+    return {"unit": "character", "start": start, "end": end, "text": text}
+
+
+def _typed_obligation_record(
+    *,
+    obligation_id: str,
+    kind: str,
+    span: Mapping[str, Any],
+    applicability: Mapping[str, Any],
+    origin: str,
+) -> Dict[str, Any]:
+    return {
+        "obligation_id": obligation_id,
+        "kind": kind,
+        "statement": span["text"],
+        "source_span": dict(span),
+        "applicability_context": dict(applicability),
+        "typed": True,
+        "origin": origin,
+        "executed_proof": False,
+        "governing_legal_authority": False,
+        "discharged": False,
+        "ir_parse_is_proof": False,
+        "consistency_is_proof": False,
+        "lean_text_is_proof": False,
+    }
+
+
+def attach_canonical_legal_ir_source_obligations(
+    source_text: str,
+    *,
+    request_id: str,
+    vocabulary: Mapping[str, Sequence[str]],
+    applicability_context: Mapping[str, Any] | None = None,
+    legal_context: Mapping[str, Any] | None = None,
+    admitted_law: Mapping[str, Any] | None = None,
+    factual_premises: Sequence[Any] | None = None,
+    user_facts: Sequence[str] | None = None,
+    unresolved_assumptions: Sequence[Any] | None = None,
+    typed_obligations: Sequence[Any] | None = None,
+    current_source: str | None = None,
+    emitted_lean: str | None = None,
+    supplied_receipt: Mapping[str, Any] | None = None,
+    allow_explicit_partial: bool = False,
+) -> Dict[str, Any]:
+    """Compile current legal source and attach only span-checked typed obligations.
+
+    ``compile_canonical_legal_ir`` and ``verify_canonical_formalization_receipt``
+    are the only formalization path. A parsed IR, an internally consistent map,
+    or emitted Lean text is recorded as non-authority. A caller-supplied receipt
+    mapping is ignored and is not verified as if this process stored it.
+    """
+
+    context, context_error = _normalize_applicability_context(applicability_context)
+    limitations = [
+        "IR parsing is not executed proof.",
+        "Internal consistency is not governing legal authority.",
+        "Emitted Lean text is not executed proof.",
+        "A caller-supplied receipt JSON is not a current-source verification.",
+    ]
+    rejected: List[Dict[str, Any]] = []
+    if supplied_receipt is not None:
+        rejected.append({
+            "reason": "supplied_receipt_ignored",
+            "governing_legal_authority": False,
+            "executed_proof": False,
+        })
+    lean_text = emitted_lean if isinstance(emitted_lean, str) else ""
+    if emitted_lean is not None and not isinstance(emitted_lean, str):
+        rejected.append({"reason": "emitted_lean_not_text", "lean_text_is_proof": False})
+    base: Dict[str, Any] = {
+        "schema": CANONICAL_IR_ATTACHMENT_SCHEMA,
+        "operation": "attach_canonical_legal_ir_source_obligations",
+        "request_id": str(request_id or ""),
+        "applicability_context": context,
+        "typed_obligations": [],
+        "rejected_obligations": rejected,
+        "source_spans": [],
+        "receipt_id": "",
+        "receipt_verification": None,
+        "compile_status": "",
+        "status": "failed",
+        "reason": "",
+        "executed_proof": False,
+        "governing_legal_authority": False,
+        "ir_parse_is_proof": False,
+        "consistency_is_proof": False,
+        "lean_text_is_proof": False,
+        "emitted_lean_character_length": len(lean_text),
+        "emitted_lean_sha256": hashlib.sha256(lean_text.encode("utf-8")).hexdigest() if lean_text else "",
+        "supplied_receipt_ignored": supplied_receipt is not None,
+        "user_facts_are_not_law": True,
+        "limitations": limitations,
+    }
+    if context_error:
+        base["status"] = "failed"
+        base["reason"] = context_error
+        return base
+    if not isinstance(source_text, str) or not source_text.strip():
+        base["reason"] = "legal_source_required"
+        return base
+    if not isinstance(vocabulary, Mapping):
+        base["reason"] = "vocabulary_required"
+        return base
+    merged_context = dict(legal_context or {})
+    for key in ("jurisdiction", "authority_version", "effective_date", "forum"):
+        if key in context and key not in merged_context:
+            merged_context[key] = context[key]
+    compiled = compile_canonical_legal_ir(
+        source_text,
+        request_id=str(request_id or ""),
+        vocabulary=vocabulary,
+        legal_context=merged_context or None,
+        admitted_law=admitted_law,
+        factual_premises=factual_premises,
+        user_facts=user_facts,
+        unresolved_assumptions=unresolved_assumptions,
+        allow_explicit_partial=allow_explicit_partial,
+    )
+    base["compile_status"] = str(compiled.get("status") or "")
+    base["receipt_id"] = str(compiled.get("receipt_id") or "")
+    base["reason"] = str(compiled.get("reason") or "")
+    base["establishes_governing_law_meaning"] = False
+    base["proves_claim"] = False
+    if compiled.get("status") in {"unavailable", "schema_mismatch"} or not base["receipt_id"]:
+        base["status"] = str(compiled.get("status") or "unavailable")
+        base["reason"] = base["reason"] or "canonical_compiler_unavailable"
+        return base
+    observed_source = compiled.get("source_text") if isinstance(compiled.get("source_text"), str) else source_text
+    checked_source = observed_source if current_source is None else current_source
+    if not isinstance(checked_source, str):
+        base["status"] = "failed"
+        base["reason"] = "current_source_invalid"
+        return base
+    verification = verify_canonical_formalization_receipt(base["receipt_id"], source_text=checked_source)
+    base["receipt_verification"] = {
+        "status": verification.get("status"),
+        "tampered": verification.get("tampered") is True,
+        "traceable": verification.get("traceable") is True,
+        "execution_origin_verified": verification.get("execution_origin_verified") is True,
+        "reason": verification.get("reason") or "",
+        "issue_codes": [
+            str(item.get("code"))
+            for item in (verification.get("issues") or [])
+            if isinstance(item, Mapping) and item.get("code")
+        ],
+    }
+    verified = (
+        verification.get("status") == "verified"
+        and verification.get("tampered") is not True
+        and verification.get("execution_origin_verified") is True
+        and checked_source == observed_source
+    )
+    spans: List[Dict[str, Any]] = []
+    if verified:
+        for index, passage in enumerate(compiled.get("passages") or []):
+            if not isinstance(passage, Mapping):
+                rejected.append({"reason": "passage_invalid", "index": index})
+                continue
+            span = _exact_character_span(checked_source, passage.get("start"), passage.get("end"), passage.get("passage"))
+            if span is None:
+                rejected.append({"reason": "source_span_mismatch", "index": index, "executed_proof": False})
+                continue
+            span["source_cid"] = str(passage.get("source_cid") or compiled.get("source_cid") or "")
+            span["formula_id"] = str(passage.get("rule_cid") or passage.get("field_path") or f"passage-{index}")
+            spans.append(span)
+            base["typed_obligations"].append(_typed_obligation_record(
+                obligation_id=f"source-span-{index}",
+                kind="source_span",
+                span=span,
+                applicability=context,
+                origin="current_source_receipt",
+            ))
+    else:
+        rejected.append({
+            "reason": "current_source_receipt_unverified",
+            "verification_status": verification.get("status"),
+            "executed_proof": False,
+            "governing_legal_authority": False,
+        })
+    for index, item in enumerate(typed_obligations or ()):
+        if not isinstance(item, Mapping):
+            rejected.append({"reason": "typed_obligation_invalid", "index": index})
+            continue
+        if item.get("executed_proof") is True or item.get("governing_legal_authority") is True or item.get("discharged") is True:
+            rejected.append({
+                "reason": "typed_obligation_authority_claim_rejected",
+                "index": index,
+                "executed_proof": False,
+                "governing_legal_authority": False,
+            })
+            continue
+        kind = item.get("kind")
+        if kind not in TYPED_SOURCE_OBLIGATION_KINDS or kind == "source_span":
+            rejected.append({"reason": "typed_obligation_kind", "index": index})
+            continue
+        span_in = item.get("source_span") if isinstance(item.get("source_span"), Mapping) else {}
+        span = _exact_character_span(
+            checked_source if verified else "",
+            span_in.get("start"),
+            span_in.get("end"),
+            span_in.get("text"),
+        ) if verified else None
+        statement = item.get("statement")
+        if span is None or not isinstance(statement, str) or statement != span["text"]:
+            rejected.append({
+                "reason": "typed_obligation_span_mismatch" if verified else "current_source_receipt_unverified",
+                "index": index,
+                "executed_proof": False,
+            })
+            continue
+        obligation_id = item.get("obligation_id")
+        if not isinstance(obligation_id, str) or not obligation_id.strip() or len(obligation_id) > 80:
+            obligation_id = f"typed-{index}"
+        base["typed_obligations"].append(_typed_obligation_record(
+            obligation_id=obligation_id,
+            kind=str(kind),
+            span=span,
+            applicability=context,
+            origin="caller_typed",
+        ))
+    base["source_spans"] = spans
+    base["source_character_length"] = len(checked_source)
+    base["source_text_sha256"] = hashlib.sha256(checked_source.encode("utf-8")).hexdigest()
+    base["span_unit"] = "character"
+    if verified and spans and base["typed_obligations"]:
+        base["status"] = "attached"
+        base["reason"] = ""
+    elif verified:
+        base["status"] = "failed"
+        base["reason"] = base["reason"] or "no_exact_source_spans"
+    else:
+        base["status"] = "source_unverified"
+        base["reason"] = base["reason"] or "current_source_receipt_unverified"
+        base["typed_obligations"] = []
+        base["source_spans"] = []
+    return base
+
+
 def reset_bound_proof_obligation_cache() -> None:
     """Drop the obligation reuse index. Stored receipts stay until this reset."""
 
@@ -7539,6 +7818,9 @@ __all__ = [
     "inspect_canonical_formalization_receipt",
     "reset_canonical_formalization_cache",
     "verify_canonical_formalization_receipt",
+    "attach_canonical_legal_ir_source_obligations",
+    "CANONICAL_IR_ATTACHMENT_SCHEMA",
+    "TYPED_SOURCE_OBLIGATION_KINDS",
     "route_bound_legal_ir_proof",
     "PROOF_ROUTING_SCHEMA",
     "PROOF_ROUTING_OUTCOMES",
