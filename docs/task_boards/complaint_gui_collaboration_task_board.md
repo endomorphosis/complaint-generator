@@ -1664,7 +1664,7 @@ Implementation instructions:
 
 ## CIMP-GUI-56 Exercise the complete owner-lawyer GUI journey
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
