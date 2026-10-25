@@ -32,6 +32,8 @@ class WorkspaceCaseAuthority:
     _generation: int = field(repr=False)
     _registry: Any = field(repr=False)
     _workspace: Any = field(repr=False)
+    _case_consent: Any = field(default=None, repr=False)
+    _inference_transport: Any = field(default=None, repr=False)
 
     @property
     def case_id(self):
@@ -52,6 +54,32 @@ class WorkspaceCaseAuthority:
     @property
     def action(self):
         return self._decision.action
+
+    def processing_consent(self, *, purpose, actor_principal_id, workspace):
+        """Read the configured case owner, never a request-supplied policy."""
+        from .case_consent_api import CaseConsentService, PURPOSE_DATA_CLASS
+        self.revalidate(actor_principal_id=actor_principal_id, workspace=workspace, require_owner=True)
+        if purpose not in PURPOSE_DATA_CLASS or not isinstance(self._case_consent, CaseConsentService):
+            raise WorkspaceCaseAuthorityError("case_processing_consent_unavailable")
+        def verify():
+            self.revalidate(actor_principal_id=actor_principal_id, workspace=workspace, require_owner=True)
+        view = self._case_consent.read(actor_principal_id, self.case_id,
+            authorizer=self._authorizer, verify_session=verify)
+        verify()
+        if (view.get("case_id") != self.case_id or view.get("tenant_id") != self._decision.tenant_id
+                or view.get("owner_principal_id") != actor_principal_id):
+            raise WorkspaceCaseAuthorityError("case_processing_consent_mismatch")
+        return view
+
+    def inference_transport(self, *, actor_principal_id, workspace):
+        self.revalidate(actor_principal_id=actor_principal_id, workspace=workspace, require_owner=True)
+        return self._inference_transport
+
+    def inference_session_binding(self, *, actor_principal_id, workspace):
+        """Opaque binding; the received browser credential is never returned."""
+        import hashlib
+        self.revalidate(actor_principal_id=actor_principal_id, workspace=workspace, require_owner=True)
+        return hashlib.sha256(self._token.encode()).hexdigest()
 
     def revalidate(self, *, actor_principal_id, workspace=None, require_owner=False):
         if type(self) is not WorkspaceCaseAuthority or self not in _ISSUED:
@@ -84,7 +112,8 @@ class WorkspaceCaseAuthority:
             raise WorkspaceCaseAuthorityError("workspace_case_authorization_unavailable") from None
 
 
-def issue_workspace_case_authority(*, authorizer, sessions, token, decision, registry):
+def issue_workspace_case_authority(*, authorizer, sessions, token, decision, registry,
+                                   case_consent=None, inference_transport=None):
     from .case_routes import CaseHandlerRegistry
     if (not isinstance(authorizer, CaseActionAuthorizer)
             or not isinstance(sessions, BrowserSessionService)
@@ -95,7 +124,7 @@ def issue_workspace_case_authority(*, authorizer, sessions, token, decision, reg
         bound = sessions.authenticate_token(token)
         workspace = registry.resolve(decision)[1]
         authority = WorkspaceCaseAuthority(decision, authorizer, sessions, token,
-            bound.generation, registry, workspace)
+            bound.generation, registry, workspace, case_consent, inference_transport)
         _ISSUED.add(authority)
         authority.revalidate(actor_principal_id=bound.principal_id, workspace=workspace)
         return authority

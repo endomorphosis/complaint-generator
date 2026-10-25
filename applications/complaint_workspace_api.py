@@ -153,6 +153,18 @@ class IntakeRequest(BaseModel):
     answers: Dict[str, Any] = Field(default_factory=dict)
 
 
+class GuiInferenceRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    purpose: str
+    inputs: Dict[str, Any]
+    timeout_seconds: float = Field(default=30.0, gt=0, le=60)
+
+
+class GuiInferenceAdmissionRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    invocation_id: str
+
+
 class IntakeChatTurnRequest(BaseModel):
     user_id: Optional[str] = None
     message: Optional[str] = None
@@ -1001,6 +1013,15 @@ def create_complaint_workspace_router(
             execution_top_k=request.execution_top_k,
             chain_until_satisfied=request.chain_until_satisfied,
         )
+
+    @router.post("/api/complaint-workspace/inference/dispatch")
+    async def dispatch_gui_inference(request: GuiInferenceRequest) -> Dict[str, Any]:
+        return workspace.dispatch_bounded_gui_inference(None, purpose=request.purpose,
+            inputs=request.inputs, timeout_seconds=request.timeout_seconds)
+
+    @router.post("/api/complaint-workspace/inference/admit")
+    async def admit_gui_inference(request: GuiInferenceAdmissionRequest) -> Dict[str, Any]:
+        return workspace.admit_bounded_gui_inference(None, invocation_id=request.invocation_id)
 
     @router.post("/api/complaint-workspace/mcp/call")
     async def call_mcp_tool(request: McpCallRequest) -> Response:
