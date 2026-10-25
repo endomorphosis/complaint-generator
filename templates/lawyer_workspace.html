@@ -103,8 +103,14 @@
             <tbody id="machine-proof-rows"></tbody>
         </table>
     </section>
+    <section id="assigned-lawyer-review" data-task-id="CIMP-GUI-45">
+        <h2>Assigned case review</h2>
+        <p class="limit" id="assigned-review-limitations">This view lists only accepted assigned-lawyer grants. An operational-admin role is not a case-content bypass. Expired and revoked grants are omitted or denied. Factual assertions and legal source rules stay in separate graphs. Unresolved work stays unresolved. Private messages stay conversations. This page does not use WebSocket or SSE and is not governing law.</p>
+        <div id="rendered-assigned-review">__ASSIGNED_REVIEW_HTML__</div>
+    </section>
 </main>
 <script id="lawyer-review-state" type="application/json">__LAWYER_REVIEW_JSON__</script>
+<script id="lawyer-case-review-state" type="application/json">__LAWYER_CASE_REVIEW_JSON__</script>
 <script>
 (function () {
     var node = document.getElementById("lawyer-review-state");
@@ -184,6 +190,24 @@
         result.textContent = "Recording " + operation + " against the live case, source, fact, and proof revisions.";
         form.dataset.pendingBody = JSON.stringify(body);
     });
+}());
+</script>
+<script>
+(function () {
+    var node = document.getElementById("lawyer-case-review-state");
+    if (!node || node.textContent.indexOf("__LAWYER_CASE_REVIEW") === 0) {
+        return;
+    }
+    var review = JSON.parse(node.textContent);
+    var root = document.getElementById("assigned-lawyer-review");
+    if (!root || !review || review.task_id !== "CIMP-GUI-45") {
+        return;
+    }
+    root.dataset.adminBypass = "false";
+    root.dataset.membership = review.membership || "";
+    var transport = review.transport || {};
+    root.dataset.websocket = transport.websocket === true ? "true" : "false";
+    root.dataset.sse = transport.sse === true ? "true" : "false";
 }());
 </script>
 </body>
