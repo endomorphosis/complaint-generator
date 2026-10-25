@@ -1,4 +1,8 @@
-"""Chromium Linux titles retain exact pinned-process and CDP-pipe admission."""
+"""Legacy parser/in-memory custody units retain their refusal intent.
+
+Their synthetic process tables do not qualify real browser ownership. Actual
+kernel/Chromium authority is exercised separately by the maintenance and02 cases.
+"""
 from pathlib import Path
 import shlex
 
@@ -89,7 +93,7 @@ def test_unrelated_driver_is_not_inspected_or_used_as_browser_owner(monkeypatch)
     monkeypatch.setattr(browser, '_pinned_process', pin)
     monkeypatch.setattr(browser, '_process_birth', identities.__getitem__)
     browser._assert_process_custody(NODE, CHROME, PROFILE)
-    assert checked == [10, 20]
+    assert set(checked) == {10, 20}  # Each owned process is pinned; reproof may repeat.
     table[20] = (30, table[20][1], CHROME.path)
     identities[20] = (30, 200, (1000,) * 4, CHROME.path)
     identities[30] = (90, 300, (1000,) * 4, NODE.path)
