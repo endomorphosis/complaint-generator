@@ -315,6 +315,10 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
         LAWYER_WORKSPACE_ROUTE,
         REVIEW_ITEMS_ROUTE,
         REVIEW_TRANSITIONS_ROUTE,
+        WORKFLOW_STAGE_ROUTE,
+        DRAFT_VERSIONS_ROUTE,
+        DRAFT_REVIEWS_ROUTE,
+        DRAFT_EXPORTS_ROUTE,
         mount_lawyer_review_routes,
     )
     if not any(LAWYER_REVIEW_ROUTE.startswith(prefix + "/") or LAWYER_REVIEW_ROUTE.startswith(prefix) for prefix in PROTECTED_PREFIXES):
@@ -325,6 +329,14 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
         raise CaseAccessError("review_items_route")
     if not any(REVIEW_TRANSITIONS_ROUTE.startswith(prefix + "/") or REVIEW_TRANSITIONS_ROUTE.startswith(prefix) for prefix in PROTECTED_PREFIXES):
         raise CaseAccessError("review_transitions_route")
+    for route_template, code in (
+        (WORKFLOW_STAGE_ROUTE, "workflow_stage_route"),
+        (DRAFT_VERSIONS_ROUTE, "draft_versions_route"),
+        (DRAFT_REVIEWS_ROUTE, "draft_reviews_route"),
+        (DRAFT_EXPORTS_ROUTE, "draft_exports_route"),
+    ):
+        if not any(route_template.startswith(prefix + "/") or route_template.startswith(prefix) for prefix in PROTECTED_PREFIXES):
+            raise CaseAccessError(code)
     mount_lawyer_review_routes(app)
     from .admin_api import OperationalAdminService, mount_operational_admin
     if operational_admin is not None and not isinstance(operational_admin, OperationalAdminService):
@@ -531,6 +543,14 @@ def _required_action(path: str, method: str, material: Mapping[str, Any], extens
     if _within_prefix(path, "/api/graphs"):
         return "case.read" if method in {"GET", "HEAD"} else "case.update"
     if path.startswith("/api/documents"):
+        if path.endswith("/workflow-stage"):
+            return "case.read"
+        if path.endswith("/draft-versions"):
+            return "case.read" if method in {"GET", "HEAD"} else "case.update"
+        if path.endswith("/draft-reviews"):
+            return "case.read" if method in {"GET", "HEAD"} else "case.review"
+        if path.endswith("/draft-exports"):
+            return "case.download"
         return "case.download" if method in {"GET", "HEAD"} else "case.update"
     if path.startswith("/api/claim-support"):
         return "case.review" if method in {"GET", "HEAD"} else "case.update"
