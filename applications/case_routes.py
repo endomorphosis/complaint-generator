@@ -30,6 +30,8 @@ COMPOSITION_NAME = "compose_case_routes"
 PROTECTED_PREFIXES = ("/api/complaint-workspace", "/api/claim-support", "/api/documents", "/api/chat", "/api/graphs", "/api/legal-context", "/api/legal-research", "/api/legal-analysis")
 CASE_CATALOG_PREFIX = "/api/cases"
 CASE_PAGE_PATH = "/cases"
+MESSAGE_INBOX_PATH = "/case-messages"
+MESSAGE_INBOX_SCRIPT_PATH = "/static/complaint_case_messages.js"
 RETIRED_EXACT_PATHS = frozenset({"/cookies", "/load_profile", "/create_profile", "/api/chat", "/api/chat/fallback"})
 AUTH_PATHS = frozenset("/api/complaint-workspace/auth/" + name for name in ("login", "logout", "rotate", "session"))
 INQUIRY_CONTRACT_PATHS = frozenset({
@@ -233,6 +235,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     if case_messages is not None and not isinstance(case_messages, CaseMessageService):
         raise CaseAccessError("case_messages")
     mount_case_messages(app)
+    _mount_case_message_inbox(app)
     from .case_attachment_api import CaseAttachmentService, mount_case_attachments
     if case_attachments is not None and not isinstance(case_attachments, CaseAttachmentService):
         raise CaseAccessError("case_attachments")
@@ -287,6 +290,28 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     app.add_middleware(CaseRouteAuthorizationMiddleware, authorizer=authorizer, sessions=sessions,
                        case_handlers=case_handlers, extensions=extensions, json_body_limits=limits)
     return app
+
+
+def _mount_case_message_inbox(app: Any) -> None:
+    """Serve the conversation inbox shell. Message APIs stay on the catalog boundary.
+
+    The page is a static document. It does not authenticate by itself and does
+    not open a WebSocket or event stream. Polling uses the existing HTTP routes.
+    """
+
+    from fastapi.responses import HTMLResponse, Response
+
+    root = Path(__file__).resolve().parent.parent
+
+    @app.get(MESSAGE_INBOX_PATH)
+    async def case_message_inbox():
+        html = (root / "templates" / "case_messages.html").read_text(encoding="utf-8")
+        return HTMLResponse(html, headers={"cache-control": "no-store"})
+
+    @app.get(MESSAGE_INBOX_SCRIPT_PATH)
+    async def case_message_inbox_script():
+        script = (root / "static" / "complaint_case_messages.js").read_bytes()
+        return Response(script, media_type="text/javascript; charset=utf-8", headers={"cache-control": "no-store"})
 
 
 def _path_of(scope: Dict[str, Any]) -> str:
