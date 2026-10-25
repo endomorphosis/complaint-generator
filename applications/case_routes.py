@@ -270,8 +270,12 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     if isinstance(case_notifications, CaseNotificationService):
         case_notifications.observe(case_assignments, case_messages)
     mount_case_notifications(app)
+    from .lawyer_workspace_api import LAWYER_WORKSPACE_API, mount_lawyer_workspace
+    mount_lawyer_workspace(app)
     from .case_api import mount_case_catalog
     mount_case_catalog(app)
+    if not (LAWYER_WORKSPACE_API == CASE_CATALOG_PREFIX or LAWYER_WORKSPACE_API.startswith(CASE_CATALOG_PREFIX + "/")):
+        raise CaseAccessError("lawyer_workspace_route")
     from .graph_api import mount_factual_graph_routes, mount_law_dependency_graph_routes
     mount_factual_graph_routes(app)
     mount_law_dependency_graph_routes(app)
