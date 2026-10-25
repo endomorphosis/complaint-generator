@@ -1603,7 +1603,7 @@ Implementation instructions:
 
 ## CIMP-GUI-54 Render graph, research and collaboration errors consistently
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
