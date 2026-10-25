@@ -5626,6 +5626,63 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                     </div>
                 </section>
 
+                <section id="legal-effective-context" data-task="CIMP-GUI-24">
+                    <h2>Jurisdiction and legal effective context</h2>
+                    <p id="legal-context-notice">Name the jurisdiction, forum, and relevant dates. Unknown and disputed applicability stay unknown or disputed. This form does not default to governing law, Oregon, or federal court.</p>
+                    <div class="field-row">
+                        <div>
+                            <label for="legal-context-case-id">Case</label>
+                            <input id="legal-context-case-id" type="text" autocomplete="off">
+                        </div>
+                        <div>
+                            <label for="legal-context-applicability">Applicability</label>
+                            <select id="legal-context-applicability">
+                                <option value="unknown">unknown</option>
+                                <option value="disputed">disputed</option>
+                                <option value="explicit">explicit</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div>
+                            <label for="legal-context-jurisdiction">Jurisdiction</label>
+                            <input id="legal-context-jurisdiction" type="text" autocomplete="off" placeholder="State, federal, unknown, or disputed">
+                        </div>
+                        <div>
+                            <label for="legal-context-forum">Forum</label>
+                            <input id="legal-context-forum" type="text" autocomplete="off" placeholder="Court or tribunal, unknown, or disputed">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div>
+                            <label for="legal-context-event-date">Event date</label>
+                            <input id="legal-context-event-date" type="text" autocomplete="off" placeholder="YYYY-MM-DD or a stated range">
+                        </div>
+                        <div>
+                            <label for="legal-context-applicable-law-date">Applicable-law date</label>
+                            <input id="legal-context-applicable-law-date" type="text" autocomplete="off" placeholder="Date used to choose a law version">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div>
+                            <label for="legal-context-filing-reference-date">Filing reference date</label>
+                            <input id="legal-context-filing-reference-date" type="text" autocomplete="off">
+                        </div>
+                        <div>
+                            <label for="legal-context-corpus-retrieval-date">Corpus retrieval date</label>
+                            <input id="legal-context-corpus-retrieval-date" type="text" autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="status" id="legal-context-display" data-applicability="unknown" data-governing-law-defaulted="false">No legal context has been loaded. Applicability is unknown.</div>
+                    <div class="list" id="legal-context-proofs"></div>
+                    <div class="list" id="legal-context-versions"></div>
+                    <div class="list" id="legal-context-provenance"></div>
+                    <div class="button-row">
+                        <button type="button" id="legal-context-refresh">Show legal context</button>
+                        <button type="button" id="legal-context-save">Save explicit legal context</button>
+                    </div>
+                </section>
+
                 <section id="case-processing-consent" data-task="CIMP-GUI-33">
                     <h2>Case processing consent</h2>
                     <p id="consent-implication-notice">Local private is the default. Grok processing is authorized only for one case and one purpose. Lawyer membership, an admin role, development Grok authorization, and message receipt do not authorize case egress.</p>
@@ -5894,6 +5951,105 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         document.getElementById('consent-case-id').addEventListener('change', clearCaseProcessingConsentView);
         document.getElementById('consent-case-id').addEventListener('input', clearCaseProcessingConsentView);
         document.getElementById('consent-purpose').addEventListener('change', clearCaseProcessingConsentView);
+        let legalContextRevision = 0;
+
+        function legalContextFields() {
+            return {
+                caseId: document.getElementById('legal-context-case-id').value.trim(),
+                applicability: document.getElementById('legal-context-applicability').value,
+                jurisdiction: document.getElementById('legal-context-jurisdiction').value.trim(),
+                forum: document.getElementById('legal-context-forum').value.trim(),
+                event_date: document.getElementById('legal-context-event-date').value.trim(),
+                applicable_law_date: document.getElementById('legal-context-applicable-law-date').value.trim(),
+                filing_reference_date: document.getElementById('legal-context-filing-reference-date').value.trim(),
+                corpus_retrieval_date: document.getElementById('legal-context-corpus-retrieval-date').value.trim()
+            };
+        }
+
+        function renderLegalContext(payload) {
+            const node = document.getElementById('legal-context-display');
+            const applicability = payload.applicability || 'unknown';
+            node.dataset.applicability = applicability;
+            node.dataset.governingLawDefaulted = 'false';
+            node.dataset.contextRevision = String(payload.context_revision);
+            legalContextRevision = Number(payload.context_revision || 0);
+            node.textContent = 'Jurisdiction ' + (payload.jurisdiction || 'unknown')
+                + ' (' + (payload.jurisdiction_applicability || 'unknown') + '). Forum '
+                + (payload.forum || 'unknown') + ' (' + (payload.forum_applicability || 'unknown')
+                + '). Applicability ' + applicability + '. Governing law was not defaulted.';
+            document.getElementById('legal-context-applicability').value = ['unknown', 'disputed', 'explicit'].indexOf(applicability) >= 0 ? applicability : 'unknown';
+            if (payload.jurisdiction && payload.jurisdiction !== 'unknown') {
+                document.getElementById('legal-context-jurisdiction').value = payload.candidate_jurisdiction || payload.jurisdiction;
+            }
+            if (payload.forum && payload.forum !== 'unknown') {
+                document.getElementById('legal-context-forum').value = payload.forum_candidate || payload.forum;
+            }
+            const proofs = document.getElementById('legal-context-proofs');
+            const dependencies = Array.isArray(payload.legal_dependencies) ? payload.legal_dependencies : [];
+            proofs.textContent = dependencies.map(function (item) {
+                return (item.dependency_id || 'dependency') + ': ' + (item.proof_state || 'unknown');
+            }).join(' | ') || 'No legal dependencies are recorded.';
+            const versions = document.getElementById('legal-context-versions');
+            const prior = Array.isArray(payload.prior_versions) ? payload.prior_versions : [];
+            versions.textContent = prior.length
+                ? prior.map(function (item) { return 'revision ' + item.context_revision; }).join(', ')
+                : 'No prior legal context version.';
+            const provenance = document.getElementById('legal-context-provenance');
+            const facts = Array.isArray(payload.factual_provenance) ? payload.factual_provenance : [];
+            provenance.textContent = facts.map(function (item) {
+                return item.source_id || item.immutable_source_id || '';
+            }).filter(Boolean).join(', ') || 'No factual provenance on this context.';
+        }
+
+        function legalContextUnavailable(message) {
+            const node = document.getElementById('legal-context-display');
+            node.dataset.applicability = 'unknown';
+            node.dataset.governingLawDefaulted = 'false';
+            node.textContent = message || 'Legal context could not be verified. Applicability stays unknown.';
+        }
+
+        async function refreshLegalContext() {
+            const fields = legalContextFields();
+            if (!fields.caseId) {
+                legalContextUnavailable('Enter a case id. Applicability stays unknown.');
+                return;
+            }
+            try {
+                const payload = await client._request('/api/legal-context/' + encodeURIComponent(fields.caseId), {method: 'GET'});
+                renderLegalContext(payload);
+            } catch (_error) {
+                legalContextUnavailable('Legal context could not be verified. Applicability stays unknown.');
+            }
+        }
+
+        async function saveLegalContext() {
+            const fields = legalContextFields();
+            if (!fields.caseId) {
+                legalContextUnavailable('Enter a case id. Applicability stays unknown.');
+                return;
+            }
+            const body = {
+                expected_context_revision: legalContextRevision,
+                applicability: fields.applicability,
+                jurisdiction: fields.jurisdiction,
+                forum: fields.forum,
+                event_date: fields.event_date,
+                applicable_law_date: fields.applicable_law_date,
+                filing_reference_date: fields.filing_reference_date,
+                corpus_retrieval_date: fields.corpus_retrieval_date
+            };
+            try {
+                const payload = await client._request('/api/legal-context/' + encodeURIComponent(fields.caseId),
+                    {method: 'POST', body: JSON.stringify(body)});
+                renderLegalContext(payload);
+            } catch (_error) {
+                legalContextUnavailable('Legal context was not saved. Prior applicability was not replaced with governing law.');
+            }
+        }
+
+        document.getElementById('legal-context-refresh').addEventListener('click', function () { refreshLegalContext(); });
+        document.getElementById('legal-context-save').addEventListener('click', function () { saveLegalContext(); });
+
         document.getElementById('consent-refresh').addEventListener('click', function () { refreshCaseProcessingConsent(); });
         document.getElementById('consent-choose-local').addEventListener('click', function () { submitCaseProcessingConsent('local_private'); });
         document.getElementById('consent-authorize-grok').addEventListener('click', function () { submitCaseProcessingConsent('grok_cloud'); });
