@@ -28,6 +28,8 @@ from .case_directory import CaseNamespace
 CASE_ROUTE_KINDS = ("case", "graph", "message", "admin")
 COMPOSITION_NAME = "compose_case_routes"
 PROTECTED_PREFIXES = ("/api/complaint-workspace", "/api/claim-support", "/api/documents", "/api/chat")
+CASE_CATALOG_PREFIX = "/api/cases"
+CASE_PAGE_PATH = "/cases"
 RETIRED_EXACT_PATHS = frozenset({"/cookies", "/load_profile", "/create_profile", "/api/chat", "/api/chat/fallback"})
 AUTH_PATHS = frozenset("/api/complaint-workspace/auth/" + name for name in ("login", "logout", "rotate", "session"))
 _MODULES: List[Tuple[str, Callable[..., None], Tuple[str, ...]]] = []
@@ -165,12 +167,17 @@ def unregister_case_route_module(mount: RouteMount) -> None:
     _MODULES[:] = [item for item in _MODULES if item[1] is not mount]
 
 
+def _is_case_catalog_path(path: str) -> bool:
+    return path == CASE_PAGE_PATH or path == CASE_CATALOG_PREFIX or path.startswith(CASE_CATALOG_PREFIX + "/")
+
+
 def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer], mediator: Any = None,
                         include_workspace: bool = True, include_review: bool = True,
                         include_document: bool = True, workspace_service: Any = None,
                         browser_sessions: Optional[BrowserSessionService] = None,
                         case_handlers: Optional[CaseHandlerRegistry] = None,
-                        json_body_limits: Optional[CaseJSONBodyLimits] = None) -> Any:
+                        json_body_limits: Optional[CaseJSONBodyLimits] = None,
+                        case_catalog: Any = None) -> Any:
     """Mount the same fail-closed boundary in every production app variant.
 
     Historical mediator/workspace arguments grant no ambient case access.
@@ -183,6 +190,9 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
         raise CaseAccessError("authentication_configuration")
     if case_handlers is not None and not isinstance(case_handlers, CaseHandlerRegistry):
         raise CaseAccessError("case_handler_binding")
+    from .case_api import CaseCatalog
+    if case_catalog is not None and not isinstance(case_catalog, CaseCatalog):
+        raise CaseAccessError("case_catalog")
     if json_body_limits is not None and not isinstance(json_body_limits, CaseJSONBodyLimits):
         raise ValueError("invalid_case_json_body_limits")
     limits = json_body_limits if json_body_limits is not None else CaseJSONBodyLimits()
@@ -203,9 +213,12 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     extensions = tuple((kind, prefix) for kind, _mount, prefixes in modules for prefix in prefixes)
     for _kind, mount, _prefixes in modules:
         mount(app, authorizer)
+    from .case_api import mount_case_catalog
+    mount_case_catalog(app)
     app.state.case_authorizer = authorizer
     app.state.browser_sessions = sessions
     app.state.case_handlers = case_handlers
+    app.state.case_catalog = case_catalog
     app.state.case_json_body_limits = limits
     app.state.case_route_composition = COMPOSITION_NAME
     app.state.case_route_extension_kinds = tuple(kind for kind, _mount, _prefixes in modules)
@@ -404,7 +417,7 @@ class CaseRouteAuthorizationMiddleware:
         self.app, self.authorizer, self.sessions = app, authorizer, sessions
         self.case_handlers, self.extensions = case_handlers, extensions
         self.json_body_limits = json_body_limits
-        self.prefixes = PROTECTED_PREFIXES + tuple(prefix for _kind, prefix in extensions)
+        self.prefixes = PROTECTED_PREFIXES + tuple(prefix for _kind, prefix in extensions) + (CASE_CATALOG_PREFIX, CASE_PAGE_PATH)
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") not in {"http", "websocket"}:
@@ -436,6 +449,9 @@ class CaseRouteAuthorizationMiddleware:
                 await self._deny(scope, send, exc.status, exc.code)
                 return
             await self.app(scope, inbound, send)
+            return
+        if _is_case_catalog_path(path):
+            await self._catalog(scope, receive, send)
             return
         if not isinstance(self.authorizer, CaseActionAuthorizer):
             await self._deny(scope, send, 401, "authorizer_required")
@@ -483,6 +499,47 @@ class CaseRouteAuthorizationMiddleware:
             await self.app(forwarded, inbound, send)
         finally:
             _BOUND_HANDLERS.reset(token)
+
+    async def _catalog(self, scope, receive, send):
+        """Authenticate the actor. Case identity is checked by the catalog, not a global mediator."""
+
+        from .case_access import PRIVILEGE_BODY_FIELDS
+
+        path = _path_of(scope)
+        body, inbound = b"", receive
+        try:
+            if path != CASE_PAGE_PATH:
+                await self.sessions.bind_http(_credential_request(scope), allow_anonymous=False)
+            if path != CASE_PAGE_PATH and scope.get("method") not in {"GET", "HEAD", "OPTIONS"}:
+                body, inbound = await _read_json_body(scope, receive, self.json_body_limits)
+            bound = None
+            if path != CASE_PAGE_PATH:
+                bound = await self.sessions.bind_http(_credential_request(scope), allow_anonymous=False)
+                _check_actor_claims(scope, body, bound.principal_id)
+                material = _material_from_scope(scope, body)
+                if material.get("trusted_local") is True or material.get("trust") == "trusted_local" or "trusted_local" in material:
+                    raise CaseAccessError("trusted_local_not_production")
+                if any(name in material for name in PRIVILEGE_BODY_FIELDS):
+                    raise CaseAccessError("request_cannot_mint_authority")
+            else:
+                material = {}
+        except BrowserSessionError as exc:
+            status, code = browser_session_http_status(exc)
+            await self._deny(scope, send, status, code)
+            return
+        except _BodyAdmissionError as exc:
+            await self._deny(scope, send, exc.status, exc.code)
+            return
+        except CaseAccessError as exc:
+            await self._deny(scope, send, _status_for_denial(exc.code), exc.code)
+            return
+        forwarded = dict(scope)
+        state = dict(scope.get("state") or {})
+        if bound is not None:
+            state["browser_principal"] = bound
+        state["case_catalog_material"] = material
+        forwarded["state"] = state
+        await self.app(forwarded, inbound, send)
 
     async def _deny(self, scope, send, status, code):
         if scope.get("type") == "websocket":
