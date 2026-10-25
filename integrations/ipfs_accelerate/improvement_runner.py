@@ -3181,7 +3181,9 @@ def _validation_aware_supervisor_class(native_class):
             if getattr(self, "_complaint_startup_preflight_pending", False):
                 if result.get("maintenance_blocked") is True:
                     raise RuntimeError("Native startup preflight blocked: " + str(result.get("reason") or "maintenance unavailable"))
-                if any(item.get("merged") is not True and not _startup_candidate_is_completed(self, item) for item in
+                from .startup_rejected_candidate import retained_replay_rejection
+                if any(item.get("merged") is not True and not _startup_candidate_is_completed(self, item)
+                        and not retained_replay_rejection(self, item, maintenance_result=result) for item in
                         result.get("worktree_reconciliation", {}).get("processed", ())):
                     raise RuntimeError("Native startup candidate recovery remains unresolved")
                 self._complaint_startup_preflight_pending = False
