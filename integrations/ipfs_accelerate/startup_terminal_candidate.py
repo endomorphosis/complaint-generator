@@ -123,6 +123,9 @@ def _integrated_winner(supervisor, event, task_id, binding):
 
 def completed_preflight_conflict(supervisor, candidate) -> bool:
     """Reprove current Native completion; never use a branch-name task parser."""
+    if str(candidate.get("branch") or "").startswith("implementation/"):
+        from .startup_completed_replay_candidate import completed_replay_conflict
+        return completed_replay_conflict(supervisor, candidate)
     from . import improvement_runner as runner
     from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
     try:
