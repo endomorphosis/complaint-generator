@@ -241,10 +241,35 @@ def test_cases_keyboard_error_summary_and_narrow_case_context(tmp_path, monkeypa
 def test_workspace_dom_reports_real_error_without_replacing_assets(tmp_path, monkeypatch):
     with _page(tmp_path, monkeypatch) as opened:
         page = opened.page
+        # Hold delivery of the real bootstrap HTTP response. DOMContentLoaded
+        # alone does not promise that fast ASGI failure has not already painted
+        # the final error state. No API body, status or server is replaced.
+        page.add_init_script("""(() => {
+            const actualFetch = window.fetch.bind(window);
+            let release;
+            const gate = new Promise(resolve => { release = resolve; });
+            window.__task53ReleaseBootstrap = release;
+            window.__task53BootstrapHeld = false;
+            window.fetch = async (...args) => {
+                const response = await actualFetch(...args);
+                const input = args[0] && args[0].url ? args[0].url : args[0];
+                const target = new URL(input, window.location.href);
+                if (!window.__task53BootstrapHeld && target.origin === window.location.origin
+                        && target.pathname.startsWith('/api/complaint-workspace/')) {
+                    window.__task53BootstrapHeld = true;
+                    window.__task53BootstrapStatus = response.status;
+                    await gate;
+                }
+                return response;
+            };
+        })();""")
         page.goto(browser.SAME_ORIGIN + "/workspace", wait_until="domcontentloaded")
+        page.wait_for_function("window.__task53BootstrapHeld === true")
+        assert page.evaluate("window.__task53BootstrapStatus") >= 400
         assert page.locator("#workspace-case-context-value").text_content() == "No case selected"
         assert page.locator("#workspace-case-context").get_attribute("data-state") == "empty"
         assert "Workspace booting" in page.locator("#workspace-status").text_content()
+        page.evaluate("window.__task53ReleaseBootstrap()")
         page.wait_for_function("['error', 'denied', 'ready', 'partial'].includes(document.body.dataset.workspaceHydrated)")
         state = page.locator("body").get_attribute("data-workspace-hydrated")
         assert state in {"error", "denied"}
