@@ -193,7 +193,8 @@ def test_projection_separates_authority_and_keeps_source_ids(tmp_path):
     assert hypothesis["confidence"] == 0.2
     assert hypothesis["authority_is_user_fact"] is False
     assert hypothesis["admitted_user_fact"] is False
-    assert statement["admitted_user_fact"] is True
+    # A raw imported graph fact has no verified UserAssertionEnvelope.
+    assert statement["admitted_user_fact"] is False
     texts = " ".join(item["text"] for bucket in (
         payload["user_statements"], payload["allegations"], payload["evidence_revisions"], payload["hypotheses"],
     ) for item in bucket)
@@ -219,21 +220,44 @@ def test_projection_separates_authority_and_keeps_source_ids(tmp_path):
 
 
 def test_http_projection_allows_owner_and_denies_ungranted_and_cross_case(tmp_path):
-    world = _world(tmp_path)
+    from tests.test_cimp_gui_14 import NARRATIVE, _composed_case_world
+
+    # Read the same encrypted service used by the real composed intake route.
+    # The earlier phase-hook/SimpleNamespace fixture could pass while a real
+    # browser actor could neither read its graph nor enforce key locking.
+    world = _composed_case_world(tmp_path)
+    handlers = CaseHandlerRegistry()
+    for selected in (world.case, world.second, world.foreign):
+        service = world.services[selected.case_id]
+        handlers.bind(selected, mediator=service, workspace_service=service,
+            authorize_delegated=lambda _decision: False)
+    app = FastAPI()
+    compose_case_routes(app, authorizer=world.authorizer, browser_sessions=world.sessions,
+        case_handlers=handlers, include_review=False, include_document=False)
     case = world.case
+    assert case.tenant_id != world.owner.principal_id
     path = f"/api/graphs/{case.case_id}/factual"
-    with TestClient(world.app, base_url="https://testserver") as client:
+    with TestClient(app, base_url="https://testserver") as client:
         anonymous = client.get(path, headers=_headers(case))
         assert anonymous.status_code == 401
         csrf = _login(client, "synthetic-owner-credential")
+        for selected, text in ((case, NARRATIVE), (world.second, "Foreign case secret: a synthetic separate workplace account.")):
+            started = client.post("/api/complaint-workspace/intake-chat", headers=_headers(selected, csrf),
+                json={"message": text, "interview_action": "start"})
+            assert started.status_code == 200, started.text
         allowed = client.get(path, headers=_headers(case, csrf))
         assert allowed.status_code == 200, allowed.text
         body = allowed.json()
         assert body["case_id"] == case.case_id
         assert body["read_only"] is True
-        assert {item["immutable_source_id"] for item in body["user_statements"]} == {"src-statement-immutable"}
-        assert body["hypotheses"][0]["authority"] == "hypothesis"
-        assert body["evidence_revisions"][0]["confidence_role"] == "evidence_revision"
+        rows = [item for field in ("user_statements", "allegations", "evidence_revisions", "hypotheses")
+            for item in body[field]]
+        assert rows
+        assert all(item["immutable_source_id"] for item in rows)
+        assert all(not item["admitted_user_fact"] for field in ("allegations", "evidence_revisions", "hypotheses")
+            for item in body[field])
+        assert all(item["assertion_id"] and item["provenance_status"] == "verified"
+            for item in rows if item["admitted_user_fact"])
         assert "Foreign case secret" not in allowed.text
         crossed = client.get(f"/api/graphs/{world.second.case_id}/factual", headers=_headers(case, csrf))
         assert crossed.status_code == 403
