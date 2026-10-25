@@ -136,7 +136,8 @@ def test_warm_legal_source_cache_cannot_bypass_actual_private_key_lock(tmp_path)
         assert denied.status_code in {401, 403, 409, 503}, "locked_case_cached_source_returned"
 
 
-def test_real_acquisition_cannot_publish_after_actual_http_purpose_revision_changes(tmp_path, monkeypatch):
+@pytest.mark.parametrize("changed_owner", ["purpose", "context"])
+def test_real_acquisition_cannot_publish_after_actual_http_purpose_revision_changes(tmp_path, monkeypatch, changed_owner):
     world = _world(tmp_path)
     reached, resume = threading.Event(), threading.Event()
     from mediator.legal_authority_hooks import LegalAuthoritySearchHook
@@ -159,10 +160,16 @@ def test_real_acquisition_cannot_publish_after_actual_http_purpose_revision_chan
                 headers=_headers(world, csrf), json=_body(generation))
             try:
                 assert reached.wait(20), "actual_acquisition_did_not_reach_delivery"
-                changed = revoker.post(f"/api/cases/{world.case.case_id}/processing-consent/revoke",
-                    headers={"x-csrf-token": other_csrf}, json={"purpose": "citation_acquisition", "expected_generation": generation})
-                assert changed.status_code == 200
-                assert changed.json()["generation"] > generation
+                if changed_owner == "purpose":
+                    changed = revoker.post(f"/api/cases/{world.case.case_id}/processing-consent/revoke",
+                        headers={"x-csrf-token": other_csrf}, json={"purpose": "citation_acquisition", "expected_generation": generation})
+                    assert changed.status_code == 200
+                    assert changed.json()["generation"] > generation
+                else:
+                    context = revoker.get(f"/api/legal-context/{world.case.case_id}", headers=_headers(world)).json()
+                    changed = revoker.post(f"/api/legal-context/{world.case.case_id}", headers=_headers(world, other_csrf),
+                        json={"expected_context_revision": context["context_revision"], "forum": "changed-owned-source-forum"})
+                    assert changed.status_code == 200
             finally:
                 resume.set()
             response = result.result(timeout=20)
@@ -228,3 +235,156 @@ def test_exact_review_admits_real_source_without_inventing_applicability_and_col
         assert response.json()["source_admitted_count"] == 1
         assert response.json()["admitted_count"] == 0
         assert response.json()["admissions"][0]["source_admission"] == record["source_admission"]
+
+
+def test_legacy_research_command_replays_owned_canonical_sources_and_honors_stale_revision(tmp_path):
+    world = _world(tmp_path)
+    with TestClient(world.app, base_url="https://testserver") as client:
+        csrf = _login(client)
+        _start_case(client, world, csrf)
+        generation = _choose(client, world, csrf)
+        acquired = _acquire(client, world, csrf, generation)
+        session = client.get("/api/complaint-workspace/session", headers=_headers(world)).json()["session"]
+        shared = session["shared_interview"]
+        result = client.post("/api/complaint-workspace/intake-chat", headers=_headers(world, csrf), json={"message": "/research"})
+        assert result.status_code == 200
+        research = result.json()["legal_research"]
+        assert research["candidate_count"] == acquired["candidate_count"]
+        assert research["source_version_receipts"] == acquired["source_version_receipts"]
+        assert research["replayed"] is True and research["admitted_law"] is False
+        assert result.json()["stored_as_answer"] is False
+        assert result.json()["session"]["shared_interview"]["answered_inquiries"] == shared["answered_inquiries"]
+        head = (world.service.joined_revision_repository(world.case.tenant_id, world.case.case_id) / "head.cgpe").read_bytes()
+        stale = client.post("/api/complaint-workspace/intake-chat", headers=_headers(world, csrf),
+            json={"message": "/research", "expected_session_revision": 0})
+        assert stale.status_code in {200, 409}
+        assert stale.json()["legal_research"]["error_code"] == "stale_research"
+        assert (world.service.joined_revision_repository(world.case.tenant_id, world.case.case_id) / "head.cgpe").read_bytes() == head
+        for value in (True, "0", 0.0):
+            invalid = client.post("/api/complaint-workspace/intake-chat", headers=_headers(world, csrf),
+                json={"message": "/research", "expected_session_revision": value})
+            assert invalid.status_code == 422
+        revoked = client.post(f"/api/cases/{world.case.case_id}/processing-consent/revoke",
+            headers={"x-csrf-token": csrf}, json={"purpose": "citation_acquisition", "expected_generation": generation})
+        assert revoked.status_code == 200
+        denied = client.post("/api/complaint-workspace/intake-chat", headers=_headers(world, csrf), json={"message": "/research"})
+        assert denied.status_code == 200
+        assert denied.json()["legal_research"].get("candidate_count", 0) == 0
+
+
+@pytest.mark.parametrize("boundary", ["logout", "key_lock", "consent"])
+def test_real_source_publication_rechecks_authority_after_head_temp_fsync(tmp_path, monkeypatch, boundary):
+    from integrations import private_storage
+    world = _world(tmp_path)
+    reached, resume = threading.Event(), threading.Event()
+    original = private_storage._fsync_file
+    with TestClient(world.app, base_url="https://testserver") as client, TestClient(world.app, base_url="https://testserver") as other:
+        csrf = _login(client)
+        other.cookies.update(client.cookies)
+        _start_case(client, world, csrf)
+        generation = _choose(client, world, csrf)
+        repository = world.service.joined_revision_repository(world.case.tenant_id, world.case.case_id)
+        before = (repository / "head.cgpe").read_bytes()
+        def pause_actual_head(fd, operation):
+            original(fd, operation)
+            staged = Path(os.readlink(f"/proc/self/fd/{fd}"))
+            if (staged.parent == repository and staged.read_bytes().startswith(private_storage._HEAD_RECORD_MAGIC)
+                    and not reached.is_set()):
+                reached.set()
+                assert resume.wait(20), "publication_barrier_expired"
+        monkeypatch.setattr(private_storage, "_fsync_file", pause_actual_head)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            result = executor.submit(client.post, f"/api/legal-research/{world.case.case_id}", headers=_headers(world, csrf), json=_body(generation))
+            try:
+                assert reached.wait(25), "actual_head_temp_not_produced"
+                if boundary == "logout":
+                    assert other.post("/api/complaint-workspace/auth/logout", headers={"x-csrf-token": csrf}).status_code == 200
+                elif boundary == "key_lock":
+                    world.service.lock_private_keys()
+                elif boundary == "consent":
+                    assert other.post(f"/api/cases/{world.case.case_id}/processing-consent/revoke", headers={"x-csrf-token": csrf},
+                        json={"purpose": "citation_acquisition", "expected_generation": generation}).status_code == 200
+                else:
+                    context = other.get(f"/api/legal-context/{world.case.case_id}", headers=_headers(world)).json()
+                    changed = other.post(f"/api/legal-context/{world.case.case_id}", headers=_headers(world, csrf),
+                        json={"expected_context_revision": context["context_revision"], "forum": "changed-synthetic-forum"})
+                    assert changed.status_code == 200
+                    before = (repository / "head.cgpe").read_bytes()
+            finally:
+                resume.set()
+            response = result.result(timeout=25)
+        assert response.status_code in {401, 403, 409, 503}
+        assert (repository / "head.cgpe").read_bytes() == before
+        decisions = [json.loads(line) for line in (repository / "wal" / "transaction-decisions.jsonl").read_text().splitlines()]
+        assert any(row["kind"] == "abort" for row in decisions)
+        assert list(repository.glob(".*.tmp")) == []
+        if boundary == "key_lock":
+            world.service.unlock_private_keys(passphrase="synthetic-password")
+        world.service.recover_joined_intake_revision(world.case.tenant_id, case_id=world.case.case_id)
+        assert (repository / "head.cgpe").read_bytes() == before
+
+
+def test_automatic_private_artifact_facade_uses_live_exact_owner_not_actor_as_aad(tmp_path):
+    from applications.complaint_workspace import WorkspaceAccess, WorkspaceAuthorizationDenied, workspace_access_scope
+    from applications.workspace_case_authority import issue_workspace_case_authority, workspace_case_authority_scope
+    from integrations.private_storage import PrivateArtifactBinding, ENVELOPE_MAGIC
+    from tests.test_cimp_gui_14 import _composed_case_world
+    world = _composed_case_world(tmp_path)
+    case, service = world.case, world.services[world.case.case_id]
+    issued = world.sessions.login({"credential": "synthetic-owner-credential"})
+    decision = world.authorizer.authorize(boundary="http", actor_principal_id=world.owner.principal_id,
+        tenant_id=case.tenant_id, case_id=case.case_id, resource_id=case.resource_id, action="case.update", expected_revision=case.revision)
+    authority = issue_workspace_case_authority(authorizer=world.authorizer, sessions=world.sessions,
+        token=issued.token, decision=decision, registry=world.handlers)
+    binding = PrivateArtifactBinding(tenant_id=case.tenant_id, case_id=case.case_id, principal_id=case.tenant_id,
+        artifact_kind="annotation", revision="annotation-1")
+    with workspace_case_authority_scope(authority), workspace_access_scope(WorkspaceAccess.authenticated(world.owner.principal_id, case.case_id)):
+        assert world.owner.principal_id != case.tenant_id
+        result = service.persist_private_case_materials(world.owner.principal_id, {"annotation": b"synthetic-private-source-association"}, case_id=case.case_id)
+        assert result["written"] is True and result["plaintext_disk"] is False
+        blob = service._private_local_backend().cat(result["artifacts"]["annotation"]["cid"])
+        assert blob.startswith(ENVELOPE_MAGIC) and b"synthetic-private-source-association" not in blob
+        provider = service.private_key_provider()
+        assert len(provider.resolve(binding)[1]) == 32
+        with workspace_access_scope(WorkspaceAccess.authenticated(world.owner.principal_id, world.second.case_id)):
+            with pytest.raises(WorkspaceAuthorizationDenied):
+                provider.resolve(binding)
+        with workspace_access_scope(WorkspaceAccess.authenticated(world.stranger.principal_id, case.case_id)):
+            with pytest.raises(WorkspaceAuthorizationDenied):
+                service.persist_private_case_materials(world.stranger.principal_id, {"annotation": b"denied"}, case_id=case.case_id)
+        with workspace_access_scope(WorkspaceAccess.authenticated(world.lawyer.principal_id, case.case_id)):
+            with pytest.raises(WorkspaceAuthorizationDenied):
+                provider.resolve(binding)
+        with ThreadPoolExecutor(max_workers=1) as operator:
+            operator.submit(service.lock_private_keys).result(timeout=10)
+        with pytest.raises(Exception) as locked:
+            provider.resolve(binding)
+        assert getattr(locked.value, "code", "") == "unlock_needed"
+        with ThreadPoolExecutor(max_workers=1) as operator:
+            operator.submit(service.unlock_private_keys, passphrase="synthetic-gui-14-passphrase").result(timeout=10)
+        world.sessions.logout(issued.token, csrf_token=issued.csrf_token)
+        with pytest.raises(WorkspaceAuthorizationDenied):
+            provider.resolve(binding)
+    with pytest.raises(WorkspaceAuthorizationDenied):
+        provider.resolve(binding)
+
+
+def test_actual_owner_refuses_stale_caller_preconditions_and_unavailable_live_corpus(tmp_path):
+    world = _world(tmp_path)
+    with TestClient(world.app, base_url="https://testserver") as client:
+        csrf = _login(client)
+        _start_case(client, world, csrf)
+        generation = _choose(client, world, csrf)
+        repository = world.service.joined_revision_repository(world.case.tenant_id, world.case.case_id)
+        before = (repository / "head.cgpe").read_bytes()
+        for changed in ({"expected_private_revision": "0"}, {"expected_session_revision": 0},
+                        {"expected_source_scope_sha256": "0" * 64}):
+            result = client.post(f"/api/legal-research/{world.case.case_id}", headers=_headers(world, csrf),
+                json={**_body(generation), **changed})
+            assert result.status_code == 409
+            assert (repository / "head.cgpe").read_bytes() == before
+        live = client.post(f"/api/legal-research/{world.case.case_id}", headers=_headers(world, csrf),
+            json={**_body(generation), "retrieval_mode": "live"})
+        assert live.status_code == 503 and live.json()["error"] == "legal_corpus_unavailable"
+        assert (repository / "head.cgpe").read_bytes() == before
+        assert client.get(f"/api/legal-research/{world.case.case_id}", headers=_headers(world)).json()["candidate_count"] == 0
