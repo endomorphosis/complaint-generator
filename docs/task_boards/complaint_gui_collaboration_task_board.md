@@ -972,7 +972,7 @@ Implementation instructions:
 
 ## CIMP-GUI-33 Expose persisted case-specific processing consent
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
