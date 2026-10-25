@@ -702,7 +702,7 @@ Implementation instructions:
 
 ## CIMP-GUI-24 Select explicit jurisdiction and legal effective context
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
