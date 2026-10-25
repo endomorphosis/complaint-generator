@@ -5546,6 +5546,458 @@ def attach_canonical_legal_ir_source_obligations(
     return base
 
 
+DEFINITION_CORRESPONDENCE_SCHEMA = "current-data-definition-correspondence-binding/v1"
+_SOURCE_CORRESPONDENCE_OWNER = "ipfs_datasets_py.logic.autoformal.legal_norm_scope_correspondence_v1"
+_CORRESPONDENCE_REQUESTS_OWNER = "ipfs_datasets_py.logic.autoformal.legal_source_correspondence_requests_v1"
+_APPLICABILITY_OWNER = "ipfs_datasets_py.logic.autoformal.legal_norm_definition_applicability_v1"
+_CONTEXTUAL_REVIEW_OWNER = "ipfs_datasets_py.logic.autoformal.legal_source_sampling_context_definition_review_v2"
+_REQUIRED_CORRESPONDENCE_FAMILIES = (
+    "source_correspondence",
+    "definition_applicability",
+    "contextual_review",
+)
+_CONTEXTUAL_REVIEW_FIELDS = (
+    "expected_binding_sha256",
+    "expected_subject_sha256",
+    "contextual_replay_inputs",
+    "candidate_inputs",
+    "expected_candidate_pin",
+    "context_inputs",
+    "expected_context_population",
+    "dependency_manifest",
+    "expected_manifest_sha256",
+    "required_dependency_ids",
+)
+
+
+def _json_blob(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)
+
+
+def _walk_contains_source(value: Any, source: str) -> bool:
+    if isinstance(value, str):
+        return source in value
+    if isinstance(value, bytes):
+        encoded = source.encode("utf-8")
+        if encoded in value:
+            return True
+        try:
+            return source in value.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+    if isinstance(value, Mapping):
+        return any(_walk_contains_source(item, source) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_walk_contains_source(item, source) for item in value)
+    return False
+
+
+def _missing_population(result: Any, required: Sequence[str]) -> List[str]:
+    if result is None:
+        return list(required)
+    blob = _json_blob(result)
+    missing = [item for item in required if item not in blob]
+    if isinstance(result, Mapping):
+        companion = result.get("contextual_correspondence")
+        if isinstance(companion, Mapping) and companion.get("contextual_population_complete") is False:
+            if "contextual_population_complete" not in missing:
+                missing.append("contextual_population_complete")
+    return missing
+
+
+def _selected_applicability(result: Mapping[str, Any]) -> bool:
+    decisions = result.get("decisions")
+    if not isinstance(decisions, list):
+        declaration = result.get("declaration")
+        if isinstance(declaration, Mapping):
+            decisions = declaration.get("decisions")
+    if not isinstance(decisions, list) or not decisions:
+        return False
+    selected = 0
+    for choice in decisions:
+        if not isinstance(choice, Mapping):
+            return False
+        decision = choice.get("decision")
+        if decision in (None, "", "unresolved"):
+            continue
+        if decision != "declare_one_supplied_alternative_applicable":
+            return False
+        selected += 1
+    return selected > 0 and selected == len(decisions)
+
+
+def _family_record(
+    *,
+    owner: str,
+    genuine: bool,
+    source_bound: bool,
+    missing: Sequence[str],
+    receipt_sha256: str,
+    schema: str,
+    reason: str,
+    definition_unbound: bool = False,
+) -> Dict[str, Any]:
+    return {
+        "owner": owner,
+        "genuine_current_owner_receipt": genuine,
+        "source_bound": source_bound,
+        "population_complete": not missing,
+        "population_missing": list(missing),
+        "receipt_sha256": receipt_sha256,
+        "schema": schema,
+        "reason": reason,
+        "definition_unbound": definition_unbound,
+        "authorizes_law": False,
+        "authorizes_proof": False,
+        "user_receipt_accepted": False,
+    }
+
+
+def _failed_family(owner: str, reason: str, *, source_bound: bool = False) -> Dict[str, Any]:
+    return _family_record(
+        owner=owner,
+        genuine=False,
+        source_bound=source_bound,
+        missing=["owner_result"],
+        receipt_sha256="",
+        schema="",
+        reason=reason,
+        definition_unbound=True,
+    )
+
+
+def _replay_scope(bundle: Mapping[str, Any], source_text: str, population: Sequence[str]) -> Dict[str, Any]:
+    from .definition_evidence import (
+        prepare_norm_scope_correspondence_v1,
+        validate_norm_scope_correspondence_v1,
+    )
+
+    args = list(bundle.get("args") or [])
+    kwargs = dict(bundle.get("kwargs") or {})
+    kwargs.pop("expected_report_sha256", None)
+    kwargs.pop("supplied_receipt", None)
+    source_bound = _walk_contains_source((args, kwargs), source_text)
+    prepared = prepare_norm_scope_correspondence_v1(*args, **kwargs)
+    if prepared.get("status") != "replayed" or not isinstance(prepared.get("result"), Mapping):
+        return _failed_family(_SOURCE_CORRESPONDENCE_OWNER, str(prepared.get("reason") or prepared.get("status") or "scope_correspondence_failed"), source_bound=source_bound)
+    report = prepared["result"]
+    from ipfs_datasets_py.logic.autoformal import legal_norm_scope_correspondence_v1 as scope_owner
+
+    receipt_sha = scope_owner.norm_scope_correspondence_sha256(report)
+    checked = validate_norm_scope_correspondence_v1(
+        report, *args, expected_report_sha256=receipt_sha, **kwargs,
+    )
+    genuine = (
+        checked.get("status") == "replayed"
+        and isinstance(checked.get("result"), Mapping)
+        and checked["result"] == report
+    )
+    missing = _missing_population(report, population)
+    reason = "" if genuine and source_bound and not missing else (
+        "source_unbound" if genuine and not source_bound else
+        "incomplete_declared_population" if genuine and missing else
+        str(checked.get("reason") or "scope_correspondence_not_genuine")
+    )
+    return _family_record(
+        owner=_SOURCE_CORRESPONDENCE_OWNER,
+        genuine=genuine and source_bound and not missing,
+        source_bound=source_bound,
+        missing=missing,
+        receipt_sha256=receipt_sha if genuine else "",
+        schema=str(report.get("schema") or ""),
+        reason=reason,
+    )
+
+
+def _replay_contextual(bundle: Mapping[str, Any], source_text: str, population: Sequence[str]) -> Dict[str, Any]:
+    from .definition_evidence import (
+        prepare_contextual_definition_review,
+        validate_contextual_definition_review,
+    )
+
+    binding_result = bundle.get("binding_result")
+    review_subject = bundle.get("review_subject")
+    raw_kwargs = dict(bundle.get("kwargs") or {})
+    kwargs = {key: raw_kwargs[key] for key in _CONTEXTUAL_REVIEW_FIELDS if key in raw_kwargs}
+    source_bound = _walk_contains_source((binding_result, review_subject, kwargs), source_text)
+    prepared = prepare_contextual_definition_review(binding_result, review_subject, **kwargs)
+    if prepared.get("status") != "replayed" or not isinstance(prepared.get("result"), Mapping):
+        return _failed_family(
+            _CONTEXTUAL_REVIEW_OWNER,
+            str(prepared.get("reason") or prepared.get("status") or "contextual_review_failed"),
+            source_bound=source_bound,
+        )
+    report = prepared["result"]
+    from ipfs_datasets_py.logic.autoformal import legal_source_sampling_context_definition_review_v2 as review_owner
+
+    receipt_sha = review_owner.correspondence_sha256(report)
+    checked = validate_contextual_definition_review(
+        report,
+        binding_result,
+        review_subject,
+        expected_correspondence_sha256=receipt_sha,
+        **kwargs,
+    )
+    genuine = (
+        checked.get("status") == "replayed"
+        and isinstance(checked.get("result"), Mapping)
+        and checked["result"] == report
+    )
+    missing = _missing_population(report, population)
+    reason = "" if genuine and source_bound and not missing else (
+        "source_unbound" if genuine and not source_bound else
+        "incomplete_declared_population" if genuine and missing else
+        str(checked.get("reason") or "contextual_review_not_genuine")
+    )
+    return _family_record(
+        owner=_CONTEXTUAL_REVIEW_OWNER,
+        genuine=genuine and source_bound and not missing,
+        source_bound=source_bound,
+        missing=missing,
+        receipt_sha256=receipt_sha if genuine else "",
+        schema=str(report.get("schema") or ""),
+        reason=reason,
+    )
+
+
+def _replay_applicability(bundle: Mapping[str, Any], source_text: str, population: Sequence[str]) -> Dict[str, Any]:
+    from ipfs_datasets_py.logic.autoformal import legal_norm_definition_applicability_v1 as applicability
+
+    operation = str(bundle.get("operation") or "declaration")
+    args = list(bundle.get("args") or [])
+    kwargs = dict(bundle.get("kwargs") or {})
+    kwargs.pop("supplied_receipt", None)
+    kwargs.pop("expected_report_sha256", None)
+    source_bound = _walk_contains_source((args, kwargs), source_text)
+    builders = {
+        "template": applicability.build_norm_definition_applicability_template_v1,
+        "declaration": applicability.build_norm_definition_applicability_declaration_v1,
+        "assessment": applicability.assess_norm_definition_applicability_v1,
+    }
+    builder = builders.get(operation)
+    if builder is None:
+        return _failed_family(_APPLICABILITY_OWNER, "applicability_operation_rejected", source_bound=source_bound)
+    try:
+        report = builder(*args, **kwargs)
+        regenerated = builder(*args, **kwargs)
+    except Exception as exc:
+        return _failed_family(_APPLICABILITY_OWNER, str(exc) or type(exc).__name__, source_bound=source_bound)
+    if not isinstance(report, Mapping) or not isinstance(regenerated, Mapping):
+        return _failed_family(_APPLICABILITY_OWNER, "applicability_report_invalid", source_bound=source_bound)
+    receipt_sha = applicability.norm_definition_applicability_sha256(report)
+    regenerated_sha = applicability.norm_definition_applicability_sha256(regenerated)
+    genuine = receipt_sha == regenerated_sha and _json_blob(report) == _json_blob(regenerated)
+    declared = operation == "declaration" and _selected_applicability(report)
+    unbound = not declared
+    missing = _missing_population(report, population)
+    reason = ""
+    if not genuine:
+        reason = "applicability_not_regenerated"
+    elif not source_bound:
+        reason = "source_unbound"
+    elif missing:
+        reason = "incomplete_declared_population"
+    elif unbound:
+        reason = "unbound_definition"
+    return _family_record(
+        owner=_APPLICABILITY_OWNER,
+        genuine=genuine and source_bound and not missing and not unbound,
+        source_bound=source_bound,
+        missing=missing,
+        receipt_sha256=receipt_sha if genuine else "",
+        schema=str(report.get("schema") or ""),
+        reason=reason,
+        definition_unbound=unbound,
+    )
+
+
+def _replay_correspondence_requests(bundle: Mapping[str, Any], source_text: str, population: Sequence[str]) -> Dict[str, Any]:
+    from ipfs_datasets_py.logic.autoformal import legal_source_correspondence_requests_v1 as requests_owner
+
+    args = list(bundle.get("args") or [])
+    kwargs = dict(bundle.get("kwargs") or {})
+    kwargs.pop("supplied_receipt", None)
+    source_bound = _walk_contains_source((args, kwargs), source_text)
+    try:
+        report = requests_owner.prepare_source_correspondence_requests_v3(*args, **kwargs)
+        receipt_sha = requests_owner.source_correspondence_requests_v3_sha256(report)
+        regenerated = requests_owner.validate_source_correspondence_requests_v3(
+            report,
+            *args,
+            expected_report_sha256=receipt_sha,
+            **kwargs,
+        )
+    except Exception as exc:
+        return _failed_family(
+            _CORRESPONDENCE_REQUESTS_OWNER,
+            str(exc) or type(exc).__name__,
+            source_bound=source_bound,
+        )
+    genuine = isinstance(report, Mapping) and isinstance(regenerated, Mapping) and _json_blob(report) == _json_blob(regenerated)
+    missing = _missing_population(report if isinstance(report, Mapping) else None, population)
+    reason = "" if genuine and source_bound and not missing else (
+        "source_unbound" if genuine and not source_bound else
+        "incomplete_declared_population" if genuine else
+        "correspondence_requests_not_genuine"
+    )
+    return _family_record(
+        owner=_CORRESPONDENCE_REQUESTS_OWNER + ":prepare_source_correspondence_requests_v3",
+        genuine=genuine and source_bound and not missing,
+        source_bound=source_bound,
+        missing=missing,
+        receipt_sha256=receipt_sha if genuine else "",
+        schema=str(report.get("schema") or "") if isinstance(report, Mapping) else "",
+        reason=reason,
+    )
+
+
+def bind_current_definition_correspondence_owners(
+    source_text: str,
+    *,
+    request_id: str,
+    declared_populations: Mapping[str, Sequence[str]] | None = None,
+    scope_correspondence: Mapping[str, Any] | None = None,
+    correspondence_requests: Mapping[str, Any] | None = None,
+    applicability: Mapping[str, Any] | None = None,
+    contextual_review: Mapping[str, Any] | None = None,
+    supplied_receipt: Mapping[str, Any] | None = None,
+    training_metrics: Any = None,
+    graph_join: Any = None,
+) -> Dict[str, Any]:
+    """Bind current definition and correspondence owners to one exact legal source.
+
+    Receipts count only when the pinned owner regenerates them from the
+    forwarded populations. A caller-supplied receipt JSON, a training metric,
+    an incomplete graph join, or an unbound definition does not authorize law
+    or proof. Regenerated owner reports remain non-authority.
+    """
+
+    populations = dict(declared_populations or {})
+    limitations = [
+        "A regenerated owner receipt is not governing law.",
+        "A regenerated owner receipt is not executed proof.",
+        "Incomplete graph joins do not authorize law or proof.",
+        "Model training metrics do not authorize law or proof.",
+        "Unbound definitions do not authorize law or proof.",
+        "User-supplied receipt JSON is not a current owner receipt.",
+    ]
+    record: Dict[str, Any] = {
+        "schema": DEFINITION_CORRESPONDENCE_SCHEMA,
+        "operation": "bind_current_definition_correspondence_owners",
+        "request_id": str(request_id or ""),
+        "status": "failed",
+        "reason": "",
+        "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest() if isinstance(source_text, str) else "",
+        "owners": {},
+        "authorizes_law": False,
+        "authorizes_proof": False,
+        "executed_proof": False,
+        "governing_legal_authority": False,
+        "proof": False,
+        "supplied_receipt_ignored": supplied_receipt is not None,
+        "training_metrics_authorize_law": False,
+        "training_metrics_authorize_proof": False,
+        "training_metrics_present": training_metrics is not None,
+        "graph_join_authorizes_law": False,
+        "graph_join_authorizes_proof": False,
+        "graph_join_present": graph_join is not None,
+        "incomplete_graph_join": False,
+        "definition_unbound": True,
+        "limitations": limitations,
+    }
+    if not isinstance(source_text, str) or not source_text.strip():
+        record["reason"] = "legal_source_required"
+        return record
+    if not isinstance(request_id, str) or not request_id.strip():
+        record["reason"] = "request_id_required"
+        return record
+    normalized: Dict[str, List[str]] = {}
+    for family in _REQUIRED_CORRESPONDENCE_FAMILIES:
+        required = populations.get(family)
+        if not isinstance(required, (list, tuple)) or not required or any(
+            not isinstance(item, str) or not item.strip() for item in required
+        ):
+            record["reason"] = "incomplete_declared_population"
+            record["owners"][family] = _failed_family("", "incomplete_declared_population")
+            return record
+        normalized[family] = [str(item) for item in required]
+    if graph_join is not None:
+        covered: set[str] = set()
+        if isinstance(graph_join, Mapping) and isinstance(graph_join.get("population_ids"), list):
+            covered = {item for item in graph_join["population_ids"] if isinstance(item, str)}
+        needed = {item for ids in normalized.values() for item in ids}
+        record["incomplete_graph_join"] = graph_join.get("complete") is not True if isinstance(graph_join, Mapping) else True
+        if not needed <= covered or record["incomplete_graph_join"]:
+            record["incomplete_graph_join"] = True
+    bundles = {
+        "source_correspondence": scope_correspondence,
+        "definition_applicability": applicability,
+        "contextual_review": contextual_review,
+    }
+    if any(not isinstance(bundle, Mapping) or not bundle for bundle in bundles.values()):
+        record["status"] = "incomplete_graph_join" if record["incomplete_graph_join"] and not any(bundles.values()) else "incomplete"
+        record["reason"] = "owner_populations_required" if any(bundles.values()) else (
+            "incomplete_graph_join" if record["incomplete_graph_join"] else "owner_populations_required"
+        )
+        if training_metrics is not None and not any(isinstance(bundle, Mapping) and bundle for bundle in bundles.values()):
+            record["status"] = "rejected"
+            record["reason"] = "training_metrics_are_not_authority"
+        if supplied_receipt is not None and not any(isinstance(bundle, Mapping) and bundle for bundle in bundles.values()):
+            record["status"] = "rejected"
+            record["reason"] = "supplied_receipt_ignored"
+        return record
+    try:
+        record["owners"]["source_correspondence"] = _replay_scope(
+            scope_correspondence, source_text, normalized["source_correspondence"],
+        )
+        record["owners"]["definition_applicability"] = _replay_applicability(
+            applicability, source_text, normalized["definition_applicability"],
+        )
+        record["owners"]["contextual_review"] = _replay_contextual(
+            contextual_review, source_text, normalized["contextual_review"],
+        )
+        if isinstance(correspondence_requests, Mapping) and correspondence_requests:
+            requests_population = populations.get("source_correspondence_requests") or normalized["source_correspondence"]
+            record["owners"]["source_correspondence_requests"] = _replay_correspondence_requests(
+                correspondence_requests,
+                source_text,
+                [str(item) for item in requests_population],
+            )
+    except Exception as exc:
+        record["status"] = "unavailable"
+        record["reason"] = str(exc) or type(exc).__name__
+        return record
+    families = [record["owners"][name] for name in _REQUIRED_CORRESPONDENCE_FAMILIES]
+    requests_family = record["owners"].get("source_correspondence_requests")
+    if requests_family is not None and requests_family.get("genuine_current_owner_receipt") is not True:
+        record["status"] = "rejected"
+        record["reason"] = str(requests_family.get("reason") or "correspondence_requests_rejected")
+        record["definition_unbound"] = True
+        return record
+    if any(family.get("reason") == "unbound_definition" for family in families):
+        record["status"] = "unbound_definition"
+        record["reason"] = "unbound_definition"
+        record["definition_unbound"] = True
+        return record
+    record["definition_unbound"] = any(family.get("definition_unbound") is True for family in families)
+    if all(family.get("genuine_current_owner_receipt") is True for family in families) and not record["definition_unbound"]:
+        record["status"] = "bound"
+        record["reason"] = ""
+    elif any(family.get("reason") == "source_unbound" for family in families):
+        record["status"] = "source_unbound"
+        record["reason"] = "source_unbound"
+    elif any(family.get("reason") == "incomplete_declared_population" for family in families):
+        record["status"] = "incomplete_declared_population"
+        record["reason"] = "incomplete_declared_population"
+    else:
+        record["status"] = "rejected"
+        record["reason"] = next((str(family.get("reason") or "") for family in families if family.get("reason")), "owner_rejected")
+    if record["incomplete_graph_join"]:
+        record["graph_join_authorizes_law"] = False
+        record["graph_join_authorizes_proof"] = False
+    return record
+
+
 def reset_bound_proof_obligation_cache() -> None:
     """Drop the obligation reuse index. Stored receipts stay until this reset."""
 
@@ -7819,6 +8271,8 @@ __all__ = [
     "reset_canonical_formalization_cache",
     "verify_canonical_formalization_receipt",
     "attach_canonical_legal_ir_source_obligations",
+    "bind_current_definition_correspondence_owners",
+    "DEFINITION_CORRESPONDENCE_SCHEMA",
     "CANONICAL_IR_ATTACHMENT_SCHEMA",
     "TYPED_SOURCE_OBLIGATION_KINDS",
     "route_bound_legal_ir_proof",
