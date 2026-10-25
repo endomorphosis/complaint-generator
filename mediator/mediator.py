@@ -13803,6 +13803,7 @@ class Mediator:
 
 	def resolve_intake_legal_selection(self, claims, intake_case_file):
 		"""Ask or resolve jurisdiction, relevant date, and claim candidates first."""
+		from copy import deepcopy
 		from complaint_phases.intake_case_file import refresh_explicit_legal_context
 		from integrations.ipfs_datasets.legal import intake_legal_selection
 
@@ -13811,7 +13812,28 @@ class Mediator:
 		candidates = list(case.get('candidate_claims') or [])
 		if not candidates:
 			candidates = list(claims or [])
+		# The GUI stores an explicit applicability decision beside the selected
+		# context. A later refresh/resume must not turn an unresolved decision
+		# back into governing-ready law merely by re-reading its jurisdiction.
+		# Older workflows without this field retain their established contract.
+		applicability = None
+		if 'legal_context_applicability' in case:
+			applicability = str(case.get('legal_context_applicability') or 'unknown')
+			if applicability != 'explicit':
+				applicability = 'disputed' if applicability == 'disputed' else 'unknown'
+				context = deepcopy(context)
+				context['candidate_jurisdiction'] = (
+					context.get('candidate_jurisdiction') or context.get('jurisdiction') or 'unknown')
+				context['candidate_forum'] = deepcopy(case.get('legal_context_forum'))
+				context['jurisdiction'] = 'unknown'
+				context['jurisdiction_explicit'] = False
+				context['jurisdiction_applicability'] = applicability
+				context['status'] = applicability
 		selection = intake_legal_selection(context, candidates)
+		if applicability is not None:
+			selection['context_applicability'] = applicability
+			if applicability != 'explicit':
+				selection['unresolved_reasons'].append('legal_context_applicability_' + applicability)
 		selection['legal_context'] = context
 		return selection
 

@@ -119,9 +119,9 @@ def test_explicit_context_keeps_unknown_and_disputed_without_governing_law():
         "source_id": "src-fact-immutable", "stable_id": "fact-1", "text": "Alex arrived at nine",
     }]
     assert selected["prior_versions"][0]["context_revision"] == 0
-    assert mediator.updates and mediator.updates[0]["jurisdiction"] == "Oregon"
+    assert mediator.intake_case_file["legal_context_overrides"]["jurisdiction"] == "Oregon"
     assert mediator.refreshes and mediator.refreshes[0]["jurisdiction_changed"] is True
-    assert "governing_law" not in mediator.updates[0]
+    assert "governing_law" not in mediator.intake_case_file["legal_context_overrides"]
 
     disputed = select_explicit_legal_context(mediator, {
         "expected_context_revision": selected["context_revision"],
@@ -188,32 +188,8 @@ def test_forum_change_invalidates_dependencies_and_rejects_defaults():
 
 
 def _world(tmp_path):
-    principals = PrincipalStore(tmp_path / "principals", key=os.urandom(32), key_id="principal-key")
-    owner = principals.register_from_request({})
-    stranger = principals.register_from_request({})
-    cases = CaseDirectory(tmp_path / "cases", key=os.urandom(32), key_id="case-key")
-    case = cases.create_case(actor_principal_id=owner.principal_id)
-    second = cases.create_case(actor_principal_id=owner.principal_id)
-    authorizer = CaseActionAuthorizer(principals, cases)
-    sessions = BrowserSessionService(BrowserSessionConfiguration(
-        adapter=PrincipalStoreCredentialAdapter(principals, {
-            "synthetic-owner-credential": owner.principal_id,
-            "synthetic-stranger-credential": stranger.principal_id,
-        }),
-        signing_key=os.urandom(32),
-        ttl_seconds=300,
-    ))
-    handlers = CaseHandlerRegistry()
-    mediators = {}
-    for selected in (case, second):
-        mediator = _Mediator(_case_file())
-        handlers.bind(selected, mediator=mediator, workspace_service=SimpleNamespace(case_id=selected.case_id),
-            authorize_delegated=lambda _decision: False)
-        mediators[selected.case_id] = mediator
-    app = FastAPI()
-    compose_case_routes(app, authorizer=authorizer, browser_sessions=sessions, case_handlers=handlers,
-        include_workspace=False, include_review=False, include_document=False)
-    return SimpleNamespace(owner=owner, stranger=stranger, case=case, second=second, app=app, mediators=mediators)
+    from tests.test_cimp_gui_14 import _composed_case_world
+    return _composed_case_world(tmp_path)
 
 
 def _headers(case, csrf=None):
@@ -242,6 +218,11 @@ def test_http_selection_allows_owner_and_denies_default_and_cross_case(tmp_path)
         anonymous = client.get(path, headers=_headers(case))
         assert anonymous.status_code == 401
         csrf = _login(client, "synthetic-owner-credential")
+        from tests.test_cimp_gui_14 import NARRATIVE
+        started = client.post("/api/complaint-workspace/intake-chat", headers=_headers(case, csrf),
+            json={"message": NARRATIVE, "interview_action": "start"})
+        assert started.status_code == 200, started.text
+        before = client.get("/api/complaint-workspace/session", headers=_headers(case)).json()["session"]
         initial = client.get(path, headers=_headers(case, csrf))
         assert initial.status_code == 200, initial.text
         assert initial.json()["jurisdiction"] == "unknown"
@@ -253,8 +234,12 @@ def test_http_selection_allows_owner_and_denies_default_and_cross_case(tmp_path)
         assert body["case_id"] == case.case_id
         assert body["jurisdiction"] == "OR"
         assert body["forum_applicability"] == "explicit"
-        assert body["legal_dependencies"][0]["proof_state"] == "invalidated"
-        assert body["factual_provenance"][0]["source_id"] == "src-fact-immutable"
+        # The real intake snapshot has no pre-admitted synthetic legal proof.
+        # Actual typed proof/cache invalidation is exercised separately in the
+        # transition-owner tests; this frontdoor proves persisted source facts.
+        after = client.get("/api/complaint-workspace/session", headers=_headers(case)).json()["session"]
+        assert after["shared_interview"]["knowledge_graph"] == before["shared_interview"]["knowledge_graph"]
+        assert int(after["private_revision"]) == int(before["private_revision"]) + 1
         assert body["prior_versions"]
         refused = client.post(path, headers=_headers(case, csrf), json={
             "expected_context_revision": body["context_revision"],
@@ -270,7 +255,9 @@ def test_http_selection_allows_owner_and_denies_default_and_cross_case(tmp_path)
             expected_context_revision=body["context_revision"]))
         assert crossed.status_code == 403
         assert crossed.json()["error"] == "cross_case_id"
-        assert world.mediators[world.second.case_id].intake_case_file["legal_context"] == {}
+        # The foreign owned service was never opened or modified by this POST.
+        from tests.test_cimp_gui_14 import _composed_ciphertext_snapshot
+        assert _composed_ciphertext_snapshot(world.services[world.second.case_id]) == {}
         _login(client, "synthetic-stranger-credential")
         denied = client.get(path, headers=_headers(case))
         assert denied.status_code == 403
