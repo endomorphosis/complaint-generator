@@ -55,7 +55,12 @@ def _refusal(result):
     return {k:gate.get(k) for k in ('attempted','accepted','reason_codes','proposal_id','receipt_id','repository_tree_id','changed_paths')}
 
 
-def _proof(supervisor,item,daemon):
+def _scope(result):
+    _need(isinstance(result,Mapping))
+    return tuple(result.get(k) for k in ('task_id','branch','worktree_path','implementation_commit','baseline_ref','recovery_key'))
+
+
+def _proof(supervisor,item,daemon,allowed_scopes):
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
     from ipfs_accelerate_py.agent_supervisor.todo_daemon.current_incident_adjudication import _baseline_unchanged
     from .startup_terminal_candidate import _worktree_custody
@@ -86,9 +91,11 @@ def _proof(supervisor,item,daemon):
         and all(terminal.get(k)==v for k,v in binding.items())
         and recovery.get('task_id')==task_id and recovery.get('task_cid')==identity.canonical_task_cid
         and type(terminal.get('attempt')) is int and terminal['attempt']>=0)
+    scope=_scope(recovery)
     starts=[r for r in native_rows if r.get('type')=='worktree_reconciliation_validation_started'
-        and r.get('task_id')==task_id and r.get('sequence',0)<terminal['sequence']]
+        and _scope(r)==scope]
     _need(bool(starts));start=starts[-1]
+    _need(start['sequence']<terminal['sequence'])
     accepted=[r for r in native_rows if r.get('type')=='implementation_proposal_validated'
         and r.get('sequence',0)<start['sequence'] and r.get('task_id')==task_id
         and r.get('accepted') is True and r.get('proposal_id')==gate['proposal_id']
@@ -102,14 +109,18 @@ def _proof(supervisor,item,daemon):
         if row['sequence']<=start['sequence']:continue
         same=row.get('task_id')==task_id
         _need(not (same and row['sequence']>terminal['sequence'] and row.get('type') in {
-            'implementation_started','worktree_reconciliation_validation_started','implementation_finished','todo_status_updated'}))
+            'implementation_started','implementation_finished','todo_status_updated'}))
+        if same and row['sequence']>terminal['sequence'] and row.get('type')=='worktree_reconciliation_validation_started':
+            # A later same-task reconciliation is harmless only after the
+            # whole current batch independently proves that exact scope closed.
+            _need(_scope(row) in allowed_scopes)
         _need(not (same and row.get('type')=='implementation_proposal_validated' and row.get('accepted') is True))
         _need(not (row.get('branch')==branch and row.get('type') in {'merge_candidate_enqueued','merge_finished'}))
     rows,supervisor_pin=_journal(Path(config.events_path))
-    reports=[entry for row in rows if row.get('type')=='worktree_reconciliation'
+    reports=[(row,entry) for row in rows if row.get('type')=='worktree_reconciliation'
         for entry in row.get('processed',[]) if isinstance(entry,Mapping)
         and entry.get('branch')==branch and entry.get('head')==head and entry.get('recovery_key')==key]
-    _need(bool(reports));report=reports[-1]
+    _need(bool(reports));report_event,report=reports[-1]
     _need(report.get('path')==str(path) and _refusal(report.get('recovery_result'))==gate
         and report.get('recovery_result',{}).get('implementation_commit')==head)
     _need(path.is_absolute() and path.parent==config.worktree_root and path.resolve(strict=True)==path
@@ -155,7 +166,7 @@ def _proof(supervisor,item,daemon):
     _need(pending==0)
     return (native_pin,supervisor_pin,hashlib.sha256(state_raw).hexdigest(),
         hashlib.sha256(evidence._read(Path(daemon.todo_path),source=True)).hexdigest(),target,
-        terminal['event_id'],start['event_id'],gate)
+        terminal['event_id'],start['event_id'],gate,report_event['event_id'])
 
 
 def retained_replay_rejection(supervisor,item,*,maintenance_result) -> bool:
@@ -171,8 +182,18 @@ def retained_replay_rejection(supervisor,item,*,maintenance_result) -> bool:
         if not isinstance(daemon,PortalImplementationDaemon) or daemon.implement is not False:return False
         with maintenance(Path(supervisor.config.repo_root)) as unfenced:
             if not unfenced:return False
-            first=_proof(supervisor,item,daemon)
-            return (first==_proof(supervisor,item,daemon)
+            processed=maintenance_result.get('worktree_reconciliation',{}).get('processed')
+            _need(isinstance(processed,list) and 0<len(processed)<=50 and isinstance(item,Mapping))
+            task_id=item.get('recovery_result',{}).get('task_id')
+            batch=[entry for entry in processed if isinstance(entry,Mapping)
+                and entry.get('recovery_result',{}).get('task_id')==task_id]
+            _need(bool(task_id) and item in batch)
+            scopes=[_scope(entry.get('recovery_result')) for entry in batch]
+            _need(len(set(scopes))==len(scopes))
+            allowed_scopes=set(scopes)
+            first=[_proof(supervisor,entry,daemon,allowed_scopes) for entry in batch]
+            _need(len({proof[-1] for proof in first})==1)
+            return (first==[_proof(supervisor,entry,daemon,allowed_scopes) for entry in batch]
                 and getattr(supervisor,'_complaint_startup_reconciliation_context',None) is context
                 and getattr(supervisor,'_complaint_startup_preflight_pending',False) is True)
     except Exception:
