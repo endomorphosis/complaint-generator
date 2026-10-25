@@ -4325,7 +4325,8 @@ class ComplaintWorkspaceService:
         return hmac.new(key, b"joined-intake-effect@1\x00" + body, hashlib.sha256).hexdigest()
 
     def _commit_joined_snapshot(self, state: Dict[str, Any], *, effect_id: Optional[str] = None,
-                                question_id: Optional[str] = None, answer: Optional[str] = None) -> Dict[str, Any]:
+                                question_id: Optional[str] = None, answer: Optional[str] = None,
+                                before_publish: Optional[Callable[[], Any]] = None) -> Dict[str, Any]:
         from integrations.private_storage import commit_private_revision
         user = str(state["user_id"])
         context, key_id, key = self._joined_key(user, _state_case_id(state, user))
@@ -4358,7 +4359,8 @@ class ComplaintWorkspaceService:
             fact_graph=json.dumps({"relationships": state.get("annotation_knowledge_graph", {}).get("relationships", []),
                                    "revision": revision}, sort_keys=True).encode("utf-8"),
             proof=json.dumps({"entries": state.get("proof_history", []), "revision": revision}, sort_keys=True).encode("utf-8"),
-            transaction_id=transaction, effect_id=effect)
+            transaction_id=transaction, effect_id=effect,
+            **({"before_publish": before_publish} if before_publish is not None else {}))
         if not publication.committed:
             raise WorkspacePersistenceError("joined revision did not commit", code="durability_unproven", public_status="recoverable")
         return state
@@ -9142,6 +9144,110 @@ class ComplaintWorkspaceService:
             expected_graph_revision=expected_graph_revision,
             expected_session_revision=expected_session_revision,
         )
+
+    def _case_legal_context_state(self, user_id, case_id, *, action):
+        """Resolve the live issued owner and its current encrypted workflow DTO."""
+        authority = self._owner_case_authority()
+        if authority is None or authority.case_id != case_id or authority.action != action:
+            raise WorkspaceAuthorizationDenied()
+        actor = authority.actor_principal_id
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        resolved = self._resolve_user_id(user_id)
+        self._check_access(resolved, ability="write" if action == "case.update" else "read", case_id=case_id)
+        state = self._load_state(resolved, case_id=case_id)
+        shared = state.get("shared_interview")
+        if (not isinstance(shared, dict) or not isinstance(shared.get("intake_case_file"), dict)
+                or not isinstance(shared.get("dependency_graph"), dict)):
+            raise WorkspacePersistenceError("A saved shared interview is required.",
+                code="legal_context_unavailable", public_status="unavailable")
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return authority, resolved, state
+
+    @staticmethod
+    def _case_legal_context_identity(state):
+        return hashlib.sha256(json.dumps({
+            "user_id": state.get("user_id"), "case_id": state.get("case_id"),
+            "private_revision": state.get("private_revision"),
+            "shared_interview": state.get("shared_interview"),
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+
+    def read_case_legal_context(self, user_id: Optional[str], *, case_id: str) -> Dict[str, Any]:
+        """Read current encrypted context; neither a mediator cache nor GET writes."""
+        from applications.legal_context_api import project_legal_context
+
+        authority, resolved, state = self._case_legal_context_state(user_id, case_id, action="case.read")
+        before = self._case_legal_context_identity(state)
+        payload = project_legal_context(state["shared_interview"]["intake_case_file"])
+        current = self._load_state(resolved, case_id=case_id)
+        if before != self._case_legal_context_identity(current):
+            raise WorkspacePersistenceError("Legal context changed during the read.",
+                code="revision_conflict", public_status="conflict")
+        authority.revalidate(actor_principal_id=authority.actor_principal_id, workspace=self, require_owner=True)
+        return {**payload, "case_id": case_id, "private_revision": state.get("private_revision"),
+            "session_revision": state["shared_interview"].get("session_revision"), "read_only": True}
+
+    def update_case_legal_context(self, user_id: Optional[str], *, case_id: str,
+                                 updates: Mapping[str, Any]) -> Dict[str, Any]:
+        """Commit one explicit context/DG change using the existing encrypted CAS.
+
+        All access/key/source bindings are derived here, not accepted in the
+        request document. A refused or stale selection never mutates the live
+        mediator cache. Successful publication evicts only this case's cache;
+        the ordinary workflow resume then reads the new committed projection.
+        """
+        from applications.legal_context_selection import apply_legal_context_selection
+        from complaint_phases.dependency_graph import DependencyGraph
+        from integrations.private_storage import PrivateStorageError
+        from mediator.workflow_service import WorkflowActionService
+
+        authority, resolved, state = self._case_legal_context_state(user_id, case_id, action="case.update")
+        actor = authority.actor_principal_id
+        before = self._case_legal_context_identity(state)
+        shared = state["shared_interview"]
+        graph = DependencyGraph.from_dict(deepcopy(shared["dependency_graph"]))
+        selected = apply_legal_context_selection(shared["intake_case_file"], updates, dependency_graph=graph)
+        _context, admitted_key_id, admitted_key = self._joined_key(resolved, case_id)
+
+        def revalidate_publication():
+            # The revision writer already holds its CAS lock. _load_state is
+            # read-only and takes no second revision writer lock; get_session
+            # would be wrong here because a case.update scope may save it.
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(resolved, case_id)
+            if key_id != admitted_key_id or key != admitted_key:
+                raise WorkspacePersistenceError("Private key changed before publication.",
+                    code="revision_conflict", public_status="conflict")
+            current = self._load_state(resolved, case_id=case_id)
+            if before != self._case_legal_context_identity(current):
+                raise WorkspacePersistenceError("Legal context changed before publication.",
+                    code="revision_conflict", public_status="conflict")
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(resolved, case_id)
+            if key_id != admitted_key_id or key != admitted_key:
+                raise WorkspacePersistenceError("Private key changed before publication.",
+                    code="revision_conflict", public_status="conflict")
+
+        if not selected["changed"]:
+            revalidate_publication()
+            return {**selected["projection"], "case_id": case_id, "changed": False,
+                "private_revision": state.get("private_revision"), "session_revision": shared.get("session_revision")}
+        projection = WorkflowActionService.project_legal_context_selection(shared,
+            case_file=selected["case_file"], dependency_graph=selected["dependency_graph"])
+        draft = deepcopy(state)
+        draft["shared_interview"] = projection
+        draft["updated_at"] = _utc_now()
+        revalidate_publication()
+        try:
+            committed = self._commit_joined_snapshot(draft, before_publish=revalidate_publication)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Legal context did not commit.",
+                code=str(getattr(exc, "code", "") or "durability_unproven"), public_status="recoverable") from None
+        # No cache mutation occurs until the actual durable head succeeds.
+        self._interview_mediators.pop((resolved, case_id), None)
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return {**selected["projection"], "case_id": case_id, "changed": True,
+            "private_revision": committed.get("private_revision"), "session_revision": projection["session_revision"],
+            "dependency_refresh": selected["dependency_refresh"]}
 
     def run_legal_research(
         self,

@@ -5996,7 +5996,27 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         document.getElementById('consent-case-id').addEventListener('change', clearCaseProcessingConsentView);
         document.getElementById('consent-case-id').addEventListener('input', clearCaseProcessingConsentView);
         document.getElementById('consent-purpose').addEventListener('change', clearCaseProcessingConsentView);
-        let legalContextRevision = 0;
+        let legalContextRequestEpoch = 0;
+        let legalContextVerified = null;
+        const legalContextFieldIds = ['legal-context-jurisdiction', 'legal-context-forum',
+            'legal-context-event-date', 'legal-context-applicable-law-date',
+            'legal-context-filing-reference-date', 'legal-context-corpus-retrieval-date'];
+
+        function clearLegalContextView() {
+            legalContextRequestEpoch += 1;
+            legalContextVerified = null;
+            legalContextFieldIds.forEach(id => { document.getElementById(id).value = ''; });
+            document.getElementById('legal-context-applicability').value = 'unknown';
+            ['legal-context-proofs', 'legal-context-versions', 'legal-context-provenance'].forEach(id => {
+                document.getElementById(id).textContent = '';
+            });
+            const node = document.getElementById('legal-context-display');
+            node.textContent = 'Legal context has not been verified for this case.';
+            node.dataset.applicability = 'unknown';
+            node.dataset.verification = 'unknown';
+            node.dataset.governingLawDefaulted = 'false';
+            delete node.dataset.contextRevision;
+        }
 
         function legalContextFields() {
             return {
@@ -6011,87 +6031,111 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             };
         }
 
-        function renderLegalContext(payload) {
+        function legalContextCapture() {
+            return {fields: legalContextFields(), requestEpoch: ++legalContextRequestEpoch,
+                privacyEpoch: workspacePrivacyEpoch, clientEpoch: client._privacyEpoch,
+                actor: client.activePrincipalId, caseContext: JSON.stringify(client.caseContext)};
+        }
+
+        function legalContextCurrent(capture) {
+            return !workspacePrivacyInactive && capture.requestEpoch === legalContextRequestEpoch
+                && capture.privacyEpoch === workspacePrivacyEpoch && capture.clientEpoch === client._privacyEpoch
+                && capture.actor === client.activePrincipalId && capture.fields.caseId === legalContextFields().caseId
+                && capture.caseContext === JSON.stringify(client.caseContext)
+                && client.caseContext && client.caseContext.case_id === capture.fields.caseId;
+        }
+
+        function legalContextAccept(payload, capture) {
+            if (!legalContextCurrent(capture) || payload.case_id !== capture.fields.caseId
+                    || !Number.isSafeInteger(payload.context_revision) || payload.context_revision < 0) return false;
+            legalContextVerified = {caseId: capture.fields.caseId, revision: payload.context_revision,
+                actor: capture.actor, privacyEpoch: capture.privacyEpoch, clientEpoch: capture.clientEpoch,
+                caseContext: capture.caseContext};
+            return true;
+        }
+
+        function legalContextDate(value) {
+            return typeof value === 'string' ? value : (value && typeof value.raw_text === 'string' ? value.raw_text : '');
+        }
+
+        function renderLegalContext(payload, capture) {
+            if (!legalContextAccept(payload, capture)) return;
             const node = document.getElementById('legal-context-display');
             const applicability = payload.applicability || 'unknown';
             node.dataset.applicability = applicability;
+            node.dataset.verification = 'verified';
             node.dataset.governingLawDefaulted = 'false';
             node.dataset.contextRevision = String(payload.context_revision);
-            legalContextRevision = Number(payload.context_revision || 0);
             node.textContent = 'Jurisdiction ' + (payload.jurisdiction || 'unknown')
                 + ' (' + (payload.jurisdiction_applicability || 'unknown') + '). Forum '
                 + (payload.forum || 'unknown') + ' (' + (payload.forum_applicability || 'unknown')
                 + '). Applicability ' + applicability + '. Governing law was not defaulted.';
-            document.getElementById('legal-context-applicability').value = ['unknown', 'disputed', 'explicit'].indexOf(applicability) >= 0 ? applicability : 'unknown';
-            if (payload.jurisdiction && payload.jurisdiction !== 'unknown') {
-                document.getElementById('legal-context-jurisdiction').value = payload.candidate_jurisdiction || payload.jurisdiction;
-            }
-            if (payload.forum && payload.forum !== 'unknown') {
-                document.getElementById('legal-context-forum').value = payload.forum_candidate || payload.forum;
-            }
-            const proofs = document.getElementById('legal-context-proofs');
+            document.getElementById('legal-context-applicability').value = ['unknown', 'disputed', 'explicit'].includes(applicability) ? applicability : 'unknown';
+            document.getElementById('legal-context-jurisdiction').value = payload.candidate_jurisdiction
+                || (payload.jurisdiction === 'unknown' ? '' : payload.jurisdiction || '');
+            document.getElementById('legal-context-forum').value = payload.forum_candidate
+                || (payload.forum === 'unknown' ? '' : payload.forum || '');
+            [['event_date', 'event-date'], ['applicable_law_date', 'applicable-law-date'],
+                ['filing_reference_date', 'filing-reference-date'], ['corpus_retrieval_date', 'corpus-retrieval-date']]
+                .forEach(([field, id]) => { document.getElementById('legal-context-' + id).value = legalContextDate(payload[field]); });
             const dependencies = Array.isArray(payload.legal_dependencies) ? payload.legal_dependencies : [];
-            proofs.textContent = dependencies.map(function (item) {
-                return (item.dependency_id || 'dependency') + ': ' + (item.proof_state || 'unknown');
-            }).join(' | ') || 'No legal dependencies are recorded.';
-            const versions = document.getElementById('legal-context-versions');
+            document.getElementById('legal-context-proofs').textContent = dependencies.map(item =>
+                (item.dependency_id || 'dependency') + ': ' + (item.proof_state || 'unknown')).join(' | ')
+                || 'No legal dependencies are recorded.';
             const prior = Array.isArray(payload.prior_versions) ? payload.prior_versions : [];
-            versions.textContent = prior.length
-                ? prior.map(function (item) { return 'revision ' + item.context_revision; }).join(', ')
-                : 'No prior legal context version.';
-            const provenance = document.getElementById('legal-context-provenance');
+            document.getElementById('legal-context-versions').textContent = prior.length
+                ? prior.map(item => 'revision ' + item.context_revision).join(', ') : 'No prior legal context version.';
             const facts = Array.isArray(payload.factual_provenance) ? payload.factual_provenance : [];
-            provenance.textContent = facts.map(function (item) {
-                return item.source_id || item.immutable_source_id || '';
-            }).filter(Boolean).join(', ') || 'No factual provenance on this context.';
+            document.getElementById('legal-context-provenance').textContent = facts.map(item =>
+                item.source_id || item.immutable_source_id || '').filter(Boolean).join(', ') || 'No factual provenance on this context.';
         }
 
-        function legalContextUnavailable(message) {
+        function legalContextUnavailable(capture, message) {
+            if (!legalContextCurrent(capture)) return;
+            legalContextVerified = null;
             const node = document.getElementById('legal-context-display');
-            node.dataset.applicability = 'unknown';
-            node.dataset.governingLawDefaulted = 'false';
-            node.textContent = message || 'Legal context could not be verified. Applicability stays unknown.';
+            node.dataset.verification = 'unknown';
+            delete node.dataset.contextRevision;
+            node.textContent = message || 'Legal context could not be verified. Reload before using it.';
         }
 
         async function refreshLegalContext() {
-            const fields = legalContextFields();
-            if (!fields.caseId) {
-                legalContextUnavailable('Enter a case id. Applicability stays unknown.');
-                return;
-            }
+            const capture = legalContextCapture();
+            if (!legalContextCurrent(capture)) return;
             try {
-                const payload = await client._request('/api/legal-context/' + encodeURIComponent(fields.caseId), {method: 'GET'});
-                renderLegalContext(payload);
-            } catch (_error) {
-                legalContextUnavailable('Legal context could not be verified. Applicability stays unknown.');
-            }
+                const payload = await client._request('/api/legal-context/' + encodeURIComponent(capture.fields.caseId), {method: 'GET'});
+                renderLegalContext(payload, capture);
+            } catch (_error) { legalContextUnavailable(capture); }
         }
 
         async function saveLegalContext() {
-            const fields = legalContextFields();
-            if (!fields.caseId) {
-                legalContextUnavailable('Enter a case id. Applicability stays unknown.');
-                return;
-            }
-            const body = {
-                expected_context_revision: legalContextRevision,
-                applicability: fields.applicability,
-                jurisdiction: fields.jurisdiction,
-                forum: fields.forum,
-                event_date: fields.event_date,
-                applicable_law_date: fields.applicable_law_date,
-                filing_reference_date: fields.filing_reference_date,
-                corpus_retrieval_date: fields.corpus_retrieval_date
-            };
+            const capture = legalContextCapture();
+            if (!legalContextCurrent(capture)) return;
             try {
-                const payload = await client._request('/api/legal-context/' + encodeURIComponent(fields.caseId),
+                const verified = legalContextVerified;
+                if (!verified || verified.caseId !== capture.fields.caseId || verified.actor !== capture.actor
+                        || verified.privacyEpoch !== capture.privacyEpoch || verified.clientEpoch !== capture.clientEpoch
+                        || verified.caseContext !== capture.caseContext) {
+                    const current = await client._request('/api/legal-context/' + encodeURIComponent(capture.fields.caseId), {method: 'GET'});
+                    if (!legalContextAccept(current, capture)) return;
+                }
+                if (!legalContextCurrent(capture)) return;
+                const body = {...capture.fields, expected_context_revision: legalContextVerified.revision};
+                delete body.caseId;
+                const payload = await client._request('/api/legal-context/' + encodeURIComponent(capture.fields.caseId),
                     {method: 'POST', body: JSON.stringify(body)});
-                renderLegalContext(payload);
+                renderLegalContext(payload, capture);
             } catch (_error) {
-                legalContextUnavailable('Legal context was not saved. Prior applicability was not replaced with governing law.');
+                legalContextUnavailable(capture, 'Legal context update could not be verified. Reload the current revision before retrying.');
             }
         }
 
+        document.getElementById('legal-context-case-id').addEventListener('input', clearLegalContextView);
+        document.getElementById('legal-context-case-id').addEventListener('change', clearLegalContextView);
+        [...legalContextFieldIds, 'legal-context-applicability'].forEach(id => {
+            document.getElementById(id).addEventListener('input', () => { legalContextRequestEpoch += 1; });
+            document.getElementById(id).addEventListener('change', () => { legalContextRequestEpoch += 1; });
+        });
         document.getElementById('legal-context-refresh').addEventListener('click', function () { refreshLegalContext(); });
         document.getElementById('legal-context-save').addEventListener('click', function () { saveLegalContext(); });
 
@@ -13693,6 +13737,7 @@ function extractComplaintOutputSignals(result) {
             workspacePrivacyEpoch += 1;
             workspacePrivacyInactive = true;
             clearCaseProcessingConsentView();
+            clearLegalContextView();
             removePrivateWorkspaceStorage();
             workspaceSession = null;
             workspaceCapabilities = null;
