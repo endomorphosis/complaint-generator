@@ -215,14 +215,27 @@ def _campaign_process_argv(argv: list[str], *, repo_root: Path | None = None,
     }
     if repo_root is not None and state_dir is not None and len(argv) > 2:
         from .improvement_plan import BOARD_RELATIVE
-        expected = {'--todo-path': str(repo_root / BOARD_RELATIVE), '--state-dir': str(state_dir)}
         if (re.fullmatch(r'python(?:\d+(?:\.\d+)*)?', Path(argv[0]).name)
-                and argv[1] == str(repo_root / 'integrations/ipfs_accelerate/improvement_runner.py')
-                and all(argv.count(flag) == 1 and argv.index(flag) + 1 < len(argv)
+                and argv[1] == str(repo_root / 'integrations/ipfs_accelerate/improvement_runner.py')):
+            board = str(repo_root / BOARD_RELATIVE)
+            launcher = state_dir / 'launcher.json'
+            if os.path.lexists(launcher):
+                # This only detects a potentially related process for the
+                # negative quiescence census; it grants no signal authority.
+                # Unknown full-launch custody must refuse, never hide a child.
+                from .improvement_shutdown import _context
+                record = json.loads(_owned_bytes(launcher))
+                context = _context(state_dir, record)
+                if context is not None:
+                    if context['repo_root'] != str(repo_root):
+                        raise ValueError('campaign process launcher repository differs')
+                    board = record['board_path']
+            expected = {'--todo-path': board, '--state-dir': str(state_dir)}
+            if all(argv.count(flag) == 1 and argv.index(flag) + 1 < len(argv)
                     and argv[argv.index(flag) + 1] == value
                     and not any(item.startswith(flag + '=') for item in argv)
-                    for flag, value in expected.items())):
-            return True
+                    for flag, value in expected.items()):
+                return True
     return bool(argv and (Path(argv[0]).name in {"grok", "grok-build"}
         or any(item in modules for item in argv)
         or ("_run" in argv and "--owner-token" in argv)))
