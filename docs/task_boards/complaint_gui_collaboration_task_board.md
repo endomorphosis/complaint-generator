@@ -1332,7 +1332,7 @@ Implementation instructions:
 
 ## CIMP-GUI-45 Build assigned-lawyer case review workspace
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
