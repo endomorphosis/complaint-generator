@@ -547,6 +547,130 @@ def migrate_original_complaint(state: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 
+def _graph_revision_label(graph: Mapping[str, Any], fallback: str) -> str:
+    for key in ("graph_revision", "revision", "graph_version"):
+        value = graph.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return fallback
+
+
+def _browser_resume_record(state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Exact interview fields sealed for a later process. This does not dispatch."""
+
+    interview = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+    pending = interview.get("pending_inquiry") if isinstance(interview.get("pending_inquiry"), dict) else {}
+    factual = interview.get("knowledge_graph") if isinstance(interview.get("knowledge_graph"), dict) else {}
+    legal = interview.get("dependency_graph") if isinstance(interview.get("dependency_graph"), dict) else {}
+    gaps = state.get("deferred_gaps")
+    if not isinstance(gaps, list):
+        gaps = interview.get("preserved_gaps") if isinstance(interview.get("preserved_gaps"), list) else interview.get("capped_reasons")
+    if not isinstance(gaps, list):
+        gaps = []
+    corrections = state.get("factual_corrections") if isinstance(state.get("factual_corrections"), list) else []
+    consent = state.get("operation_consent") if isinstance(state.get("operation_consent"), dict) else {}
+    receipts: List[Dict[str, Any]] = []
+    router = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
+    for item in router.get("receipts") or []:
+        if isinstance(item, dict):
+            receipts.append(dict(item))
+    history = [dict(item) for item in (state.get("intake_history") or []) if isinstance(item, dict)]
+    return {
+        "schema": "gui-encrypted-interview-resume-v1",
+        "case_id": _state_case_id(state, str(state.get("user_id") or "")),
+        "session_revision": interview.get("session_revision", 0),
+        "pending_inquiry": dict(pending),
+        "consent": dict(consent),
+        "factual_graph": dict(factual),
+        "legal_graph": dict(legal),
+        "factual_graph_revision": _graph_revision_label(factual, "unknown"),
+        "legal_graph_revision": _graph_revision_label(legal, "unknown"),
+        "deferred_gaps": [dict(item) if isinstance(item, dict) else item for item in gaps],
+        "corrections": [dict(item) if isinstance(item, dict) else item for item in corrections],
+        "hook_receipts": receipts,
+        "intake_history": history,
+    }
+
+
+def _browser_resume_record_complete(record: Optional[Mapping[str, Any]]) -> bool:
+    if not isinstance(record, Mapping) or record.get("schema") != "gui-encrypted-interview-resume-v1":
+        return False
+    pending = record.get("pending_inquiry")
+    required = ("case_id", "consent", "factual_graph", "legal_graph", "factual_graph_revision", "legal_graph_revision", "deferred_gaps", "corrections")
+    if not isinstance(pending, Mapping) or not str(record.get("case_id") or "").strip():
+        return False
+    if not isinstance(record.get("consent"), Mapping):
+        return False
+    if not isinstance(record.get("factual_graph"), Mapping) or not isinstance(record.get("legal_graph"), Mapping):
+        return False
+    if not isinstance(record.get("deferred_gaps"), list) or not isinstance(record.get("corrections"), list):
+        return False
+    return all(key in record for key in required)
+
+
+def _apply_browser_resume_record(state: Dict[str, Any], record: Mapping[str, Any]) -> None:
+    pending = dict(record["pending_inquiry"])
+    gaps = [dict(item) if isinstance(item, dict) else item for item in record["deferred_gaps"]]
+    state["case_id"] = str(record["case_id"])
+    state["operation_consent"] = dict(record["consent"])
+    state["shared_interview"] = {
+        "schema_version": "shared-interview-session-v1",
+        "contract_version": "interview-transition-v1",
+        "session_id": str(state.get("user_id") or record["case_id"]),
+        "session_revision": record.get("session_revision", 0),
+        "pending_inquiry": pending,
+        "knowledge_graph": dict(record["factual_graph"]),
+        "dependency_graph": dict(record["legal_graph"]),
+        "preserved_gaps": gaps,
+        "capped_reasons": gaps,
+        "unknown_reasons": [],
+        "legal_sufficiency": False,
+    }
+    state["deferred_gaps"] = gaps
+    state["factual_corrections"] = [dict(item) if isinstance(item, dict) else item for item in record["corrections"]]
+    state["factual_graph_binding"] = {
+        "status": "bound",
+        "revision": record["factual_graph_revision"],
+        "graph_id": str((record["factual_graph"] or {}).get("graph_id") or ""),
+    }
+    state["legal_graph_binding"] = {
+        "status": "bound",
+        "revision": record["legal_graph_revision"],
+        "graph_id": str((record["legal_graph"] or {}).get("graph_id") or ""),
+    }
+    state["intake_history"] = [dict(item) if isinstance(item, dict) else item for item in (record.get("intake_history") or [])]
+    state["intake_router"] = {
+        "receipts": [dict(item) if isinstance(item, dict) else item for item in (record.get("hook_receipts") or [])],
+        "provider_replayed": False,
+        "hooks_replayed": False,
+    }
+    state["explained_inquiry"] = {
+        key: pending.get(key)
+        for key in ("inquiry_id", "objective_id", "target_id", "target_revision", "question")
+    }
+
+
+def _encrypted_resume_refusal(user_id: Optional[str], receipt: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "status": receipt.get("status") or "refused",
+        "message": str(receipt.get("code") or "refused"),
+        "encrypted_resume": dict(receipt),
+        "session": {"user_id": user_id},
+        "stored_as_answer": False,
+        "legal_sufficiency": False,
+        "hooks_replayed": False,
+        "messages_replayed": False,
+        "browser_cache_used": False,
+        "adaptive_inquiry": {
+            "schema": "adaptive-inquiry-v1",
+            "source": "encrypted_interview_snapshot",
+            "pending": False,
+            "from_fixed_intake_fields": False,
+            "browser_cache_used": False,
+        },
+    }
+
+
 def _grounded_owners_from_state(state: Mapping[str, Any]) -> Dict[str, Any]:
     """Read graph, receipt, inquiry, and stop owners already on the session."""
 
@@ -3803,6 +3927,10 @@ class ComplaintWorkspaceRequestHandlers:
         expected_session_revision: Optional[int] = None,
     ) -> Dict[str, Any]:
         workspace = self.workspace
+        if str(interview_action or "").strip().lower() == "encrypted_resume":
+            # Resume opens the encrypted snapshot before any session read so a
+            # locked or missing key stays explicit and a browser cache is ignored.
+            return workspace.resume_encrypted_browser_interview(user_id, browser_cache=message)
         state = self._load_state(user_id)
         normalized_message = str(message or "").strip()
         if normalized_message.lower() == "/why":
@@ -6106,6 +6234,121 @@ class ComplaintWorkspaceService:
         if kwargs:
             return label_ciphertext_replica_observations(observations, **kwargs)
         return count_verified_ciphertext_replicas(observations)
+
+    def seal_encrypted_browser_interview(self, user_id: str, *, case_id: Optional[str] = None) -> Dict[str, Any]:
+        """Seal the current interview into the encrypted snapshot. No hook or message is sent."""
+
+        from integrations.ipfs_datasets.storage import assemble_interview_snapshot
+
+        state = self._load_state(user_id, case_id=case_id)
+        record = _browser_resume_record(state)
+        interview = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        pending = record["pending_inquiry"]
+        snapshot = assemble_interview_snapshot(
+            session_id=str(interview.get("session_id") or state.get("user_id") or user_id),
+            revision="0",
+            outcome_reason="awaiting_user" if pending.get("inquiry_id") else "unknown",
+            pending_inquiry=pending,
+            knowledge_graph=record["factual_graph"],
+            dependency_graph=record["legal_graph"],
+            provenance={"source": "encrypted-browser-resume", "narrative_reextracted": False, "hooks_replayed": False, "model_calls": 0},
+            unknown_items=list(interview.get("unknown_reasons") or []),
+            deferred_items=list(record["deferred_gaps"]),
+            complaint_text=str((_narrative_record(state).get("text") or "")),
+            transcript=[],
+            exports={"status": "not_filed"},
+            durability_payload={"writer": "encrypted-browser-resume", "remote_replicas_claimed": False},
+            revisions={
+                "session_revision": record["session_revision"],
+                "question_revision": pending.get("revision", "unknown"),
+                "graph_revision": record["factual_graph_revision"],
+            },
+        )
+        snapshot["browser_resume"] = record
+        saved = self.persist_complete_interview_snapshot(user_id, snapshot, case_id=case_id)
+        saved["hooks_replayed"] = False
+        saved["messages_replayed"] = False
+        saved["browser_cache_used"] = False
+        return saved
+
+    def resume_encrypted_browser_interview(self, user_id: Optional[str], *, browser_cache: Any = None) -> Dict[str, Any]:
+        """Restore one interview from the encrypted snapshot in a new process.
+
+        The browser cache argument is ignored. Hook receipts and prior messages
+        are copied as already-recorded state and are not dispatched again.
+        Denied, revoked, and missing-key results stay explicit and do not invent
+        a case from caller plaintext.
+        """
+
+        del browser_cache
+        receipt: Dict[str, Any] = {
+            "schema": "gui-encrypted-interview-resume-v1",
+            "restored": False,
+            "explicit": True,
+            "hooks_replayed": False,
+            "messages_replayed": False,
+            "browser_cache_used": False,
+            "source": "encrypted_interview_snapshot",
+            "code": "",
+            "status": "refused",
+        }
+        try:
+            resolved = self._check_access(user_id, ability="read")
+        except WorkspaceAuthorizationDenied:
+            receipt["code"] = "authorization_denied"
+            receipt["status"] = "denied"
+            return _encrypted_resume_refusal(user_id, receipt)
+        try:
+            loaded = self.load_complete_interview_snapshot(resolved)
+        except WorkspacePersistenceError as exc:
+            code = str(exc.code or "unavailable")
+            if code == "unlock_needed":
+                public = self._private_key_session().public_state()
+                if public.get("code") == "key_store_absent":
+                    receipt["code"] = "missing_key"
+                    receipt["status"] = "missing_key"
+                else:
+                    receipt["code"] = "unlock_needed"
+                    receipt["status"] = "denied"
+            elif code == "authentication_failed":
+                receipt["code"] = "key_revoked"
+                receipt["status"] = "revoked"
+            elif code == "snapshot_missing":
+                receipt["code"] = "snapshot_missing"
+                receipt["status"] = "refused"
+            else:
+                receipt["code"] = code
+                receipt["status"] = "refused"
+            return _encrypted_resume_refusal(resolved, receipt)
+        snapshot = loaded.get("snapshot") if isinstance(loaded.get("snapshot"), dict) else {}
+        record = snapshot.get("browser_resume") if isinstance(snapshot.get("browser_resume"), dict) else None
+        if not _browser_resume_record_complete(record):
+            receipt["code"] = "snapshot_incomplete"
+            receipt["status"] = "refused"
+            return _encrypted_resume_refusal(resolved, receipt)
+        assert record is not None
+        state = self._load_state(resolved)
+        _apply_browser_resume_record(state, record)
+        state = self._save_state(state)
+        receipt["restored"] = True
+        receipt["status"] = "resumed"
+        receipt["code"] = "resumed"
+        receipt["case_id"] = record["case_id"]
+        receipt["pending_inquiry_id"] = record["pending_inquiry"].get("inquiry_id")
+        receipt["factual_graph_revision"] = record["factual_graph_revision"]
+        receipt["legal_graph_revision"] = record["legal_graph_revision"]
+        receipt["consent_generation"] = (record.get("consent") or {}).get("generation")
+        receipt["deferred_gap_count"] = len(record.get("deferred_gaps") or [])
+        receipt["correction_count"] = len(record.get("corrections") or [])
+        payload = self._build_intake_chat_payload(state)
+        payload["encrypted_resume"] = receipt
+        payload["status"] = "resumed"
+        payload["stored_as_answer"] = False
+        payload["legal_sufficiency"] = False
+        payload["hooks_replayed"] = False
+        payload["messages_replayed"] = False
+        payload["browser_cache_used"] = False
+        return payload
 
     def load_complete_interview_snapshot(
         self,
