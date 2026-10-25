@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections import Counter
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -18,6 +19,46 @@ _CLOSE = (b"[auto-rescue] inline_provider_rescue returncode=",
           b"[auto-rescue] inline_provider_rescue error:")
 _WORK = frozenset({"usage", "tool_call", "tool_call_update"})
 _ACTIVITY = _WORK | {"thought", "text"}
+_REASONS = frozenset({"not_active_rescue", "rescue_held", "native_owner_unavailable",
+    "native_binding_unavailable", "native_owner_command_changed", "provider_deadline_unavailable",
+    "provider_deadline_expired", "primary_start_unavailable", "primary_start_unbound", "attempt_finished",
+    "rescue_start_unavailable", "rescue_start_unbound", "rescue_time_unbound", "rescue_closed",
+    "provider_pid_invalid", "provider_birth_unbound", "provider_uid_unbound", "provider_workspace_unbound",
+    "provider_session_unbound", "provider_stdout_unbound", "provider_event_birth_unbound", "provider_birth_changed",
+    "log_custody_invalid", "log_prefix_truncated", "log_prefix_changed", "log_custody_changed",
+    "rescue_log_stale", "log_header_ambiguous", "log_header_unbound", "rescue_frame_incomplete",
+    "rescue_marker_unbound", "rescue_terminal", "rescue_activity_unavailable", "native_binding_changed",
+    "bounded_native_rescue_activity", "rescue_observation_unavailable"})
+
+
+def summary(value):
+    """Closed private/journal metadata; no paths, argv, lease or text fields."""
+    value = value if type(value) is dict else {}
+    reason = value.get("reason")
+    result = {"activity_verified": value.get("activity_verified") is True,
+        "work_progress_verified": value.get("work_progress_verified") is True,
+        "reason": reason if type(reason) is str and reason in _REASONS else "rescue_observation_unavailable"}
+    for key in ("deadline_at", "rescue_started_at"):
+        item = value.get(key)
+        if type(item) in (int,float) and math.isfinite(item) and 0 <= item < 2**53:
+            result[key] = item
+    for key in ("attempt", "log_device", "log_inode", "log_bytes", "log_mtime_ns"):
+        item = value.get(key)
+        if type(item) is int and 0 <= item < 2**63:
+            result[key] = item
+    for key in ("owner_birth", "provider_birth"):
+        item = value.get(key)
+        if type(item) is dict:
+            safe = {name:item[name] for name in ("pid","start_time_ticks","parent_pid")
+                if type(item.get(name)) is int and 0 <= item[name] < 2**63}
+            if safe:result[key] = safe
+    counts = value.get("frame_counts")
+    if type(counts) is dict:
+        result["frame_counts"] = {key:counts[key] for key in sorted(_ACTIVITY)
+            if type(counts.get(key)) is int and 0 <= counts[key] < 1_000_000_000}
+    if type(value.get("last_frame_kind")) is str and value["last_frame_kind"] in _ACTIVITY:
+        result["last_frame_kind"] = value["last_frame_kind"]
+    return result
 
 
 class _Unavailable(ValueError):

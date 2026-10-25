@@ -267,11 +267,14 @@ def _validating_provider_repair(tmp_path, monkeypatch):
     return root, spec, state, record, log, start, repair
 
 
-def test_native_provider_repair_progress_is_active_while_phase_remains_validating(tmp_path, monkeypatch):
+def test_synthetic_integer_provider_pid_cannot_authorize_validation_phase_repair(tmp_path, monkeypatch):
     root, spec, state, _, _, _, _ = _validating_provider_repair(tmp_path, monkeypatch)
     result = runner.status(root, spec, state)
-    assert result['status'] == 'active' and result['healthy'] is True
-    assert result['provider_execution_evidence']['provider_repair_in_flight'] is True
+    # This old shape has no actual Native lease, born child or stdout binding.
+    # Actual producer positives live in test_owned_auto_rescue_activity.py.
+    assert result['status'] == 'stalled' and result['healthy'] is False
+    assert result['provider_execution_evidence']['provider_repair_in_flight'] is False
+    assert result['provider_progress_verified'] is False
     assert result['validation_activity_verified'] is False
     assert result['completion_authority'] is False
 
@@ -299,7 +302,7 @@ def test_validating_usage_requires_current_native_repair_with_unclosed_log_marke
                 handle.write('[auto-rescue] inline_provider_rescue start\n')
             handle.write('{"type":"usage","usage":{"inputTokens":23}}\n')
     result = runner.status(root, spec, state)
-    assert result['provider_progress_verified'] is True
+    assert result['provider_progress_verified'] is False
     assert result['provider_execution_evidence']['provider_repair_in_flight'] is False
     assert result['status'] == 'stalled' and result['healthy'] is False
 

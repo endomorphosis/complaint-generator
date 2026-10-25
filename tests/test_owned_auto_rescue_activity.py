@@ -30,6 +30,7 @@ def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as runtime
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import portal_task_state_control_plane as plane
     from integrations.ipfs_accelerate.reconciliation_activity import catalog_path
+    tmp_path.mkdir(parents=True,exist_ok=True)
     root = Path(runner.__file__).resolve().parents[2]
     spec = root / "docs/task_boards/complaint_gui_collaboration_spec.json"
     _, artifacts = runner._campaign_spec(root, spec)
@@ -71,16 +72,24 @@ def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
         "last_implementation_task_id":task.task_id,"last_implementation_task_cid":identity.canonical_task_cid,
         "last_implementation_task_key":identity.canonical_task_key,"last_implementation_started_at":started,
         "last_implementation_worktree_path":str(workspace),"last_implementation_log_path":str(log),
+        "heartbeat_at":started,"last_progress_at":started,
         "owner_process_birth":runtime.read_process_birth(os.getpid()).to_dict()}.items():
         setattr(state,key,value)
     state.implementation_attempts={task.task_id:1};state.implementation_attempts_by_cid={identity.canonical_task_cid:1}
     target,_ = catalog_path(runner,campaign);plane.bind_task_state_control_plane(daemon.state_path,str(target))
     state.save(daemon.state_path)
     body=runner._validation_activity_snapshot(campaign)["body"]
+    parent = runner.process_identity(os.getppid())
+    assert parent is not None
     launcher={"schema_version":"complaint-improvement-launcher@1","repo_root":str(root),
         "state_dir":str(campaign),"spec_path":str(spec),"board_path":str(root/artifacts.board_relative),
-        "plan_id":runner._requested_plan_id(spec),"provider":"grok_cli","model":runner.MODEL,"allow_fallback":False}
+        "plan_id":runner._requested_plan_id(spec),"provider":"grok_cli","model":runner.MODEL,"allow_fallback":False,
+        "identity":parent,"argv":parent["argv"],"status":"running","owner_token":"private-inert-fixture",
+        "started_at":now-400}
     runner._atomic_json(campaign/"launcher.json",launcher)
+    runner._atomic_json(campaign/(runner.STATE_PREFIX+"_supervisor_status.json"),{
+        "status":"running","supervisor_pid":parent["pid"],"daemon_pid":os.getpid(),
+        "daemon_pid_alive":True,"updated_at":started})
     runtime.write_supervised_child_identity(campaign/(runner.STATE_PREFIX+"_managed_daemon.identity.json"),
         pid=os.getpid(), command=runtime.read_process_command_argv(os.getpid()), owner_scope={
         "repo_root":str(root),"state_dir":str(campaign),"state_prefix":runner.STATE_PREFIX,
@@ -120,7 +129,7 @@ print(json.dumps({'type':'end'}),flush=True)
     try:
         assert (workspace/"ready").exists(), errors
         yield {"root":root,"campaign":campaign,"workspace":workspace,"daemon":daemon,"task":task,
-            "body":body,"log":log,"lease_path":lease_path,"claim_path":claim_path,"worker":worker}
+            "body":body,"log":log,"lease_path":lease_path,"claim_path":claim_path,"worker":worker,"spec":spec}
     finally:
         (workspace/"release").touch();worker.join(15)
         assert not worker.is_alive() and not errors, errors
@@ -169,3 +178,67 @@ def test_primary_terminal_followed_by_real_native_thought_is_not_work_progress(t
         assert original is None or original["provider_terminal_observed"] is True
         current=activity.observe(runner,world["root"],world["campaign"],world["body"],now_ts=time.time())
         assert current["activity_verified"] is True and current["work_progress_verified"] is False,current
+
+
+def test_actual_native_rescue_status_is_live_without_asserting_work_or_validation(tmp_path,monkeypatch):
+    with _native_world(tmp_path,monkeypatch) as world:
+        result=runner.status(world["root"],world["spec"],world["campaign"])
+        closed={k:result.get(k) for k in ("status","healthy","native_read_errors","worker_liveness",
+            "auto_rescue_activity_verified","provider_progress_verified","validation_activity_verified")}
+        assert result["status"]=="active" and result["healthy"] is True,closed
+        assert result["auto_rescue_activity_verified"] is True,closed
+        assert result["provider_progress_verified"] is False and result["progress_verified"] is False
+        assert result["validation_activity_verified"] is False
+        assert result["scope_liveness"]["provider"]=="fresh" and result["scope_liveness"]["validation"]=="idle"
+
+
+@pytest.mark.parametrize("damage",["cid","key","attempt","workspace","phase","hold","deadline"])
+def test_real_native_producer_cannot_cross_current_scope_or_deadline(tmp_path,monkeypatch,damage):
+    from copy import deepcopy
+    with _native_world(tmp_path,monkeypatch) as world:
+        state=deepcopy(world["body"]); now=time.time()
+        if damage=="cid":state["active_task_cid"]+="foreign"
+        elif damage=="key":state["active_task_key"]+="foreign"
+        elif damage=="attempt":state["active_attempt"]=2
+        elif damage=="workspace":state["active_worktree_path"]=str(world["root"])
+        elif damage=="phase":state["active_phase"]="implementing"
+        elif damage=="hold":state["manual_hold"]=True
+        else:now=runner._event_timestamp({"timestamp":state["active_task_started_at"]})+runner.TIMEOUT_SECONDS+.01
+        result=activity.observe(runner,world["root"],world["campaign"],state,now_ts=now)
+        assert result["activity_verified"] is False and result["work_progress_verified"] is False
+        assert result["reason"] in activity._REASONS
+
+
+def test_real_native_finished_provider_and_later_validation_output_are_not_rescue_activity(tmp_path,monkeypatch):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as runtime
+    with _native_world(tmp_path,monkeypatch) as world:
+        (world["workspace"]/"release").touch();world["worker"].join(10)
+        assert not world["worker"].is_alive()
+        with world["log"].open("a") as output:
+            runtime.run_process_group_stream([sys.executable,"-I","-B","-c",
+                "print('{\"type\":\"tool_call\"}',flush=True)"],cwd=world["workspace"],stdout=output,
+                env={},inherit_environment=False,timeout_seconds=10)
+        result=activity.observe(runner,world["root"],world["campaign"],world["body"],now_ts=time.time())
+        assert result["activity_verified"] is False
+        status=runner.status(world["root"],world["spec"],world["campaign"])
+        assert status["status"]=="stalled" and status["healthy"] is False
+        assert status["provider_progress_verified"] is False
+
+
+@pytest.mark.parametrize("kind",["available_commands","watchdog_heartbeat","validation_activity"])
+def test_real_native_generic_or_validation_frames_cannot_renew_activity(tmp_path,monkeypatch,kind):
+    with _native_world(tmp_path,monkeypatch,frame_kind=kind) as world:
+        result=activity.observe(runner,world["root"],world["campaign"],world["body"],now_ts=time.time())
+        assert result["activity_verified"] is False and result["work_progress_verified"] is False
+
+
+def test_closed_summary_never_retains_arbitrary_private_fields_or_reason_text():
+    value={"reason":"private-provider-text","activity_verified":"true","work_progress_verified":1,
+        "argv":["private-token"],"text":"private-provider-text","log_path":"/private/path",
+        "lease_id":"private-lease","frame_counts":{"thought":3,"private-provider-text":17},
+        "owner_birth":{"pid":12,"start_time_ticks":13,"parent_pid":14,"argv":"private-token","boot_id":"private-token"}}
+    closed=activity.summary(value)
+    assert closed=={"reason":"rescue_observation_unavailable","activity_verified":False,"work_progress_verified":False,
+        "owner_birth":{"pid":12,"start_time_ticks":13,"parent_pid":14},"frame_counts":{"thought":3}}
+    assert "private" not in json.dumps(closed)
+    assert activity.summary({"reason":[],"last_frame_kind":{}})["reason"]=="rescue_observation_unavailable"
