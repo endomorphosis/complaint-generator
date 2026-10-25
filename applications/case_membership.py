@@ -110,6 +110,7 @@ class MembershipGrant:
     invite_key: str
     decision_key: str | None
     open_requests: tuple[OpenRequest, ...]
+    original_invite_fingerprint: str | None = None
 
     def public_view(self) -> dict[str, Any]:
         return {
@@ -230,7 +231,9 @@ class CaseMembershipStore:
         if member.principal_id == owner.principal_id:
             raise CaseMembershipError("actor_not_owner")
         granted = self._actions(actions)
-        expiry = self._expiry(expires_at)
+        if type(expires_at) is not int:
+            raise CaseMembershipError("expiry")
+        expiry = expires_at
         key = _label(idempotency_key, "idempotency_key")
         case = self._select(owner.principal_id, case_id)
         if case.owner_principal_id != owner.principal_id:
@@ -258,6 +261,7 @@ class CaseMembershipStore:
                 if existing.invite_key != key or _invite_fingerprint(existing) != fingerprint:
                     raise CaseMembershipError("replay_mismatch")
                 return existing
+            self._expiry(expiry)
             record = MembershipGrant(
                 grant_id=_opaque_id(),
                 version=1,
@@ -273,6 +277,7 @@ class CaseMembershipStore:
                 invite_key=key,
                 decision_key=None,
                 open_requests=(),
+                original_invite_fingerprint=fingerprint,
             )
             self._seal(record)
             self._write_idem(key, record.grant_id)
@@ -743,6 +748,7 @@ def _replace(grant: MembershipGrant, **changes: Any) -> MembershipGrant:
         "invite_key": grant.invite_key,
         "decision_key": grant.decision_key,
         "open_requests": grant.open_requests,
+        "original_invite_fingerprint": grant.original_invite_fingerprint,
     }
     data.update(changes)
     return MembershipGrant(**data)
@@ -761,20 +767,15 @@ def _ticket(grant: MembershipGrant, item: OpenRequest) -> OpenCaseRequest:
 
 
 def _invite_fingerprint(grant: MembershipGrant) -> str:
-    return _fingerprint({
-        "owner_principal_id": grant.owner_principal_id,
-        "member_principal_id": grant.member_principal_id,
-        "case_id": grant.case_id,
-        "resource_id": grant.resource_id,
-        "tenant_id": grant.tenant_id,
-        "actions": list(grant.actions),
-        "expires_at": grant.expires_at,
-        "case_revision": grant.case_revision,
-    })
+    # Legacy records never authenticated the original invite payload. Current
+    # actions/expiry may have changed, so they cannot establish replay identity.
+    if grant.original_invite_fingerprint is None:
+        raise CaseMembershipError("invite_replay_unverifiable")
+    return grant.original_invite_fingerprint
 
 
 def _grant_document(grant: MembershipGrant) -> dict[str, Any]:
-    return {
+    document = {
         "schema_version": SCHEMA_VERSION,
         "grant_id": grant.grant_id,
         "version": grant.version,
@@ -799,6 +800,9 @@ def _grant_document(grant: MembershipGrant) -> dict[str, Any]:
             for item in grant.open_requests
         ],
     }
+    if grant.original_invite_fingerprint is not None:
+        document["original_invite_fingerprint"] = grant.original_invite_fingerprint
+    return document
 
 
 def _grant_from_document(document: Mapping[str, Any]) -> MembershipGrant:
@@ -831,6 +835,13 @@ def _grant_from_document(document: Mapping[str, Any]) -> MembershipGrant:
             grant_version=opened_version,
         ))
     decision = document.get("decision_key")
+    original_fingerprint = document.get("original_invite_fingerprint")
+    if original_fingerprint is not None and (
+        not isinstance(original_fingerprint, str)
+        or len(original_fingerprint) != 64
+        or any(char not in "0123456789abcdef" for char in original_fingerprint)
+    ):
+        raise CaseMembershipError("invite_fingerprint")
     return MembershipGrant(
         grant_id=_label(str(document.get("grant_id") or ""), "grant_id"),
         version=version,
@@ -846,4 +857,5 @@ def _grant_from_document(document: Mapping[str, Any]) -> MembershipGrant:
         invite_key=_label(str(document.get("invite_key") or ""), "idempotency_key"),
         decision_key=None if decision is None else _label(str(decision), "idempotency_key"),
         open_requests=tuple(opens),
+        original_invite_fingerprint=original_fingerprint,
     )
