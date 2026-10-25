@@ -14045,158 +14045,214 @@ class ComplaintWorkspaceService:
             current_session_revision=current_session_revision,
         )
 
-    def record_gui_inference_authority(
-        self,
-        user_id: Optional[str],
-        *,
-        grant: Mapping[str, Any],
-        source_bindings: Sequence[Mapping[str, Any]],
-        graph_revision: str,
-        session_revision: int,
-        session_id: str,
-    ) -> Dict[str, Any]:
-        """Persist the grant and source references checked again at late admission.
+    def record_gui_inference_authority(self, user_id: Optional[str], **untrusted: Any) -> Dict[str, Any]:
+        """Caller JSON is not a browser grant or a source/revision owner."""
+        return {"recorded": False, "code": "server_case_authority_required",
+                "live_model_identity_verified": False}
 
-        Source rows keep id and content hash. Complaint text is not stored here.
+    def _gui_inference_snapshot(self, user_id: Optional[str], purpose: str) -> Dict[str, Any]:
+        from mediator.hook_runtime import HookContextError, graph_revision_token, source_binding_hash
+        from complaint_phases.knowledge_graph import KnowledgeGraph
+        authority = self._owner_case_authority()
+        if authority is None:
+            raise HookContextError("server_case_authority_required")
+        actor = authority.actor_principal_id
+        decision = authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        if user_id not in (None, "", actor, decision.canonical_owner_principal_id):
+            raise HookContextError("wrong_case")
+        view = authority.processing_consent(purpose=purpose, actor_principal_id=actor, workspace=self)
+        choices = [item for item in view["decisions"] if item["purpose"] == purpose]
+        if len(choices) != 1:
+            raise HookContextError("consent_missing")
+        choice = choices[0]
+        # The legacy raw-intake/global-Grok fallback is never GUI authority.
+        authorized = (choice.get("egress_authorized") is True and choice.get("explicit") is True
+                      and choice.get("revoked") is False and choice.get("provider") == "grok_cli"
+                      and choice.get("model") == "grok-4.7")
+        if not authorized:
+            raise HookContextError("consent_revoked" if choice.get("revoked") else "case_purpose_consent_required")
+        canonical = decision.canonical_owner_principal_id
+        state = self._load_state(canonical, case_id=decision.case_id)
+        projection = state.get("shared_interview")
+        if not isinstance(projection, dict) or not isinstance(projection.get("knowledge_graph"), dict):
+            raise HookContextError("source_binding_missing")
+        narrative = str(_narrative_record(state).get("text") or "")
+        graph = projection["knowledge_graph"]
+        if not narrative or not graph.get("entities"):
+            raise HookContextError("source_binding_missing")
+        revision = projection.get("session_revision")
+        session = projection.get("session_id")
+        if type(revision) is not int or revision < 0 or not isinstance(session, str) or not session:
+            raise HookContextError("stale_request")
+        graph_token = graph_revision_token(KnowledgeGraph.from_dict(graph))
+        graph_raw = json.dumps(graph, sort_keys=True, separators=(",", ":")).encode()
+        sources = [{"source_id": "original_complaint", "content_hash": hashlib.sha256(narrative.encode()).hexdigest()},
+                   {"source_id": "factual_graph", "content_hash": hashlib.sha256(graph_raw).hexdigest()}]
+        pending = projection.get("pending_inquiry") or {}
+        dependencies = projection.get("dependency_graph") or {}
+        targets = set(graph.get("entities", {})) | set(dependencies.get("nodes", {}))
+        targets.update(str(pending[k]) for k in ("target_id", "objective_id") if pending.get(k))
+        gap_codes = {str(item.get("code") or item.get("type") or "") if isinstance(item, dict) else str(item)
+                     for item in projection.get("unknown_reasons", [])}
+        gap_codes.update(str(pending[k]) for k in ("type", "grounding_status") if pending.get(k))
+        key_id = self._interview_snapshot_key(canonical, decision.case_id)["key_id"]
+        grant_fields = {"actor": actor, "tenant": decision.tenant_id, "case": decision.case_id,
+                        "resource": decision.resource_id, "revision": decision.revision,
+                        "membership_revision": decision.membership_revision, "key_id": key_id,
+                        "browser_session": authority.inference_session_binding(actor_principal_id=actor, workspace=self)}
+        grant_id = hashlib.sha256(json.dumps(grant_fields, sort_keys=True).encode()).hexdigest()
+        source_revision = source_binding_hash(sources)
+        consent = dict(view["operation_consent"])
+        consent["grants"] = [g for g in consent["grants"] if g.get("purpose") == purpose]
+        consent["revoked"] = False
+        policy = {"found": True, "case_match": True, "user_id": actor, "case_id": decision.case_id,
+                  "privacy_policy": _privacy_helpers()["privacy_policy_for_mode"](actor, decision.case_id, "grok"),
+                  "operation_consent": consent}
+        case_file = projection.get("intake_case_file") or {}
+        legal = case_file.get("legal_context") if isinstance(case_file.get("legal_context"), dict) else {}
+        return {"authority": authority, "actor": actor, "case_id": decision.case_id,
+                "policy": policy, "grant": {"grant_id": grant_id, "case_id": decision.case_id,
+                    "generation": max(1, decision.membership_revision), "revoked": False,
+                    "source_revision": source_revision}, "source_bindings": sources,
+                "graph_revision": graph_token, "session_revision": revision, "session_id": session,
+                "legal_context": legal, "narrative": narrative, "targets": targets, "gap_codes": gap_codes}
+
+    @staticmethod
+    def _gui_inference_refusal(code: str) -> Dict[str, Any]:
+        return {"status": "refused", "code": code, "accepted": False, "output": None,
+                "model_dispatched": False, "live_model_identity_verified": False,
+                "requirements_satisfied": False, "completion_authority": False}
+
+    def dispatch_bounded_gui_inference(self, user_id: Optional[str], *, purpose: str,
+            inputs: Mapping[str, Any], timeout_seconds: float = 30.0, **caller_context: Any) -> Dict[str, Any]:
+        """Dispatch through fresh issued owner authority and exact persisted purpose.
+
+        Source, graph/session, actor, grant, narrative and clock come from their
+        server owners. Request bodies cannot supply replacement authority.
         """
-
-        from mediator.hook_runtime import HookContextError, minimal_source_references, source_binding_hash
-
-        resolved_user_id = str(user_id or DEFAULT_USER_ID)
-        state = self._load_state(resolved_user_id)
-        case_id = _state_case_id(state, resolved_user_id)
+        from datetime import timedelta
+        import time
+        from mediator.hook_runtime import (HookContextError, dispatch_gui_bounded_inference,
+            discard_gui_inference_hold, MODEL_PURPOSE_IDS, native_gui_inference_transport)
+        from .workspace_case_authority import WorkspaceCaseAuthorityError
+        from .case_consent_api import CaseConsentError
+        if caller_context:
+            return self._gui_inference_refusal("caller_authority_not_accepted")
+        if type(purpose) is not str or purpose not in MODEL_PURPOSE_IDS:
+            return self._gui_inference_refusal("undeclared_purpose")
+        if type(timeout_seconds) not in (int, float) or not 0 < timeout_seconds <= 60:
+            return self._gui_inference_refusal("invalid_deadline")
+        started_monotonic = time.monotonic()
+        now = datetime.now(timezone.utc)
         try:
-            references = [dict(row) for row in minimal_source_references(source_bindings)]
-            source_revision = source_binding_hash(source_bindings)
-        except HookContextError as exc:
-            return {"recorded": False, "code": exc.code, "case_id": case_id, "live_model_identity_verified": False}
-        if type(graph_revision) is not str or not graph_revision.strip():
-            return {"recorded": False, "code": "stale_revision", "case_id": case_id, "live_model_identity_verified": False}
-        if type(session_revision) is not int or isinstance(session_revision, bool) or session_revision < 0:
-            return {"recorded": False, "code": "stale_request", "case_id": case_id, "live_model_identity_verified": False}
-        if type(session_id) is not str or not session_id.strip():
-            return {"recorded": False, "code": "wrong_case", "case_id": case_id, "live_model_identity_verified": False}
-        sealed_grant = {
-            "grant_id": grant.get("grant_id") if isinstance(grant, Mapping) else None,
-            "case_id": case_id,
-            "generation": grant.get("generation") if isinstance(grant, Mapping) else None,
-            "revoked": bool(grant.get("revoked")) if isinstance(grant, Mapping) else True,
-            "source_revision": source_revision,
-        }
-        state["gui_inference_authority"] = {
-            "grant": sealed_grant,
-            "source_bindings": references,
-            "graph_revision": graph_revision.strip(),
-            "session_revision": session_revision,
-            "session_id": session_id.strip(),
-        }
-        self._save_state(state)
-        return {
-            "recorded": True,
-            "code": "recorded",
-            "case_id": case_id,
-            "source_revision": source_revision,
-            "source_references": references,
-            "grant_id": sealed_grant["grant_id"],
-            "grant_generation": sealed_grant["generation"],
-            "live_model_identity_verified": False,
-        }
+            snapshot = self._gui_inference_snapshot(user_id, purpose)
+            if not isinstance(inputs, Mapping):
+                raise HookContextError("input_bounds")
+            target = inputs.get("target_ref", inputs.get("candidate_ref"))
+            if type(target) is not str or target not in snapshot["targets"]:
+                raise HookContextError("source_binding_mismatch")
+            if purpose == "extract_facts":
+                fragment = inputs.get("source_text")
+                if type(fragment) is not str or not fragment or fragment not in snapshot["narrative"]:
+                    raise HookContextError("source_binding_mismatch")
+                if fragment == snapshot["narrative"]:
+                    raise HookContextError("query_not_minimized")
+            elif type(inputs.get("gap_code")) is not str or inputs["gap_code"] not in snapshot["gap_codes"]:
+                raise HookContextError("source_binding_mismatch")
+            authority = snapshot["authority"]
+            transport = authority.inference_transport(actor_principal_id=snapshot["actor"], workspace=self)
+            if transport is None:
+                return self._gui_inference_refusal("model_transport_unavailable")
+            holds = getattr(self, "_gui_server_holds", {})
+            for invocation, held in list(holds.items()):
+                if now.timestamp() > held["deadline"]:
+                    holds.pop(invocation, None)
+                    discard_gui_inference_hold(invocation)
+            self._gui_server_holds = holds
+            if len(holds) >= 64:
+                return self._gui_inference_refusal("inference_capacity_reached")
+            boundary_code = None
+            def current_revision():
+                fresh = self._gui_inference_snapshot(user_id, purpose)
+                for name in ("policy", "grant", "source_bindings", "graph_revision", "session_revision", "session_id"):
+                    if fresh[name] != snapshot[name]:
+                        raise HookContextError("stale_request")
+                return {"record": fresh["policy"], "grant": fresh["grant"],
+                        "graph_revision": fresh["graph_revision"], "session_revision": fresh["session_revision"]}
+            def observed_transport(call):
+                nonlocal boundary_code
+                try:
+                    current_revision()
+                    remaining = timeout_seconds - (time.monotonic() - started_monotonic)
+                    if remaining <= 0:
+                        boundary_code = "deadline_expired"
+                        return {"status": "unavailable"}
+                    bounded_call = {**call, "timeout_seconds": remaining,
+                        "deadline": (now + timedelta(seconds=timeout_seconds)).isoformat()}
+                    return transport(bounded_call)
+                except (HookContextError, WorkspaceCaseAuthorityError, CaseConsentError, WorkspaceAuthorizationDenied) as exc:
+                    boundary_code = getattr(exc, "code", "authorization_denied")
+                    return {"status": "unavailable"}
+            remaining = timeout_seconds - (time.monotonic() - started_monotonic)
+            if remaining <= 0:
+                return {**self._gui_inference_refusal("deadline_expired"), "status": "timeout"}
+            result = dispatch_gui_bounded_inference(policy_record=snapshot["policy"], grant=snapshot["grant"],
+                purpose_id=purpose, inputs=inputs, source_bindings=snapshot["source_bindings"],
+                legal_context=snapshot["legal_context"], owner_id=snapshot["actor"], case_id=snapshot["case_id"],
+                session_id=snapshot["session_id"], session_revision=snapshot["session_revision"],
+                graph_revision=snapshot["graph_revision"], deadline=now + timedelta(seconds=timeout_seconds), now=now,
+                privacy_context=_privacy_helpers()["build_complaint_privacy_context"](snapshot["policy"]["privacy_policy"],
+                    user_id=snapshot["actor"], case_id=snapshot["case_id"], data_class="raw_intake"),
+                model_transport=(native_gui_inference_transport if transport is native_gui_inference_transport else observed_transport),
+                complaint_text=snapshot["narrative"], revision_reader=current_revision,
+                timeout=remaining)
+            if boundary_code:
+                return {**self._gui_inference_refusal(boundary_code),
+                        "status": "timeout" if boundary_code == "deadline_expired" else "refused"}
+            if time.monotonic() - started_monotonic > timeout_seconds:
+                discard_gui_inference_hold(str(result.get("invocation_id") or ""))
+                return {**self._gui_inference_refusal("deadline_expired"), "status": "timeout",
+                        "model_dispatched": result.get("model_dispatched") is True}
+            if result.get("status") == "held":
+                holds = getattr(self, "_gui_server_holds", {})
+                holds[result["invocation_id"]] = {"actor": snapshot["actor"], "case_id": snapshot["case_id"],
+                    "purpose": purpose, "deadline": now.timestamp() + timeout_seconds}
+                self._gui_server_holds = holds
+            result["actor_principal_id"] = snapshot["actor"]
+            result["development_grok_authorization_ignored"] = True
+            return result
+        except (HookContextError, WorkspaceCaseAuthorityError, CaseConsentError, WorkspaceAuthorizationDenied,
+                WorkspacePersistenceError) as exc:
+            return self._gui_inference_refusal(getattr(exc, "code", "authorization_denied"))
 
-    def _gui_inference_authority(self, user_id: str) -> Dict[str, Any]:
-        state = self._load_state(user_id)
-        authority = state.get("gui_inference_authority") if isinstance(state.get("gui_inference_authority"), dict) else {}
-        return authority
-
-    def dispatch_bounded_gui_inference(
-        self,
-        user_id: Optional[str],
-        *,
-        purpose: str,
-        inputs: Mapping[str, Any],
-        legal_context: Mapping[str, Any],
-        deadline: Any,
-        now: Any,
-        model_transport: Optional[Any] = None,
-        complaint_text: Any = None,
-        allow_local_fallback: bool = False,
-        allow_cross_provider_fallback: bool = False,
-        requested_provider: Optional[str] = None,
-        requested_model: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Run GUI inference through consented hook dispatch on the pinned Grok route.
-
-        Development authorization is not read. The transport is the caller's
-        observed synthetic transport. Output stays held for late admission.
-        """
-
-        from mediator.hook_runtime import dispatch_gui_bounded_inference
-
-        resolved_user_id = str(user_id or DEFAULT_USER_ID)
-        policy = self.read_persisted_owner_case_policy(resolved_user_id)
-        authority = self._gui_inference_authority(resolved_user_id)
-        helpers = _privacy_helpers()
-        case_id = str(policy.get("case_id") or resolved_user_id)
-        privacy_context = helpers["build_complaint_privacy_context"](
-            policy.get("privacy_policy"),
-            user_id=resolved_user_id,
-            case_id=case_id,
-            data_class="raw_intake",
-        )
-        result = dispatch_gui_bounded_inference(
-            policy_record=policy,
-            grant=authority.get("grant") if isinstance(authority.get("grant"), Mapping) else None,
-            purpose_id=purpose,
-            inputs=inputs,
-            source_bindings=authority.get("source_bindings") if isinstance(authority.get("source_bindings"), list) else None,
-            legal_context=legal_context,
-            owner_id=resolved_user_id,
-            case_id=case_id,
-            session_id=str(authority.get("session_id") or ""),
-            session_revision=authority.get("session_revision") if type(authority.get("session_revision")) is int else -1,
-            graph_revision=str(authority.get("graph_revision") or ""),
-            deadline=deadline,
-            now=now,
-            privacy_context=privacy_context,
-            model_transport=model_transport,
-            complaint_text=complaint_text,
-            allow_local_fallback=allow_local_fallback,
-            allow_cross_provider_fallback=allow_cross_provider_fallback,
-            requested_provider=requested_provider,
-            requested_model=requested_model,
-        )
-        result["user_id"] = resolved_user_id
-        result["case_id"] = case_id
-        result["development_grok_authorization_ignored"] = True
-        return result
-
-    def admit_bounded_gui_inference(
-        self,
-        user_id: Optional[str],
-        *,
-        invocation_id: str,
-    ) -> Dict[str, Any]:
-        """Reload consent, grant, and source revision before releasing a held proposal."""
-
-        from mediator.hook_runtime import admit_gui_bounded_inference
-
-        resolved_user_id = str(user_id or DEFAULT_USER_ID)
-        policy = self.read_persisted_owner_case_policy(resolved_user_id)
-        authority = self._gui_inference_authority(resolved_user_id)
-        case_id = str(policy.get("case_id") or resolved_user_id)
-        result = admit_gui_bounded_inference(
-            invocation_id=invocation_id,
-            policy_record=policy,
-            grant=authority.get("grant") if isinstance(authority.get("grant"), Mapping) else None,
-            source_bindings=authority.get("source_bindings") if isinstance(authority.get("source_bindings"), list) else None,
-            owner_id=resolved_user_id,
-            case_id=case_id,
-            graph_revision=str(authority.get("graph_revision") or ""),
-            session_revision=authority.get("session_revision") if type(authority.get("session_revision")) is int else -1,
-        )
-        result["user_id"] = resolved_user_id
-        result["case_id"] = case_id
-        result["live_model_identity_verified"] = False
-        return result
+    def admit_bounded_gui_inference(self, user_id: Optional[str], *, invocation_id: str) -> Dict[str, Any]:
+        """Release only after fresh browser, case, purpose, key and source reproof."""
+        from mediator.hook_runtime import HookContextError, admit_gui_bounded_inference, discard_gui_inference_hold
+        from .workspace_case_authority import WorkspaceCaseAuthorityError
+        from .case_consent_api import CaseConsentError
+        holds = getattr(self, "_gui_server_holds", {})
+        if type(invocation_id) is not str:
+            return self._gui_inference_refusal("invocation_missing")
+        held = holds.get(invocation_id)
+        if held is None:
+            return self._gui_inference_refusal("invocation_missing")
+        try:
+            snapshot = self._gui_inference_snapshot(user_id, held["purpose"])
+            if (snapshot["actor"] != held["actor"] or snapshot["case_id"] != held["case_id"]):
+                raise HookContextError("wrong_case")
+            if datetime.now(timezone.utc).timestamp() > held["deadline"]:
+                raise HookContextError("deadline_expired")
+            result = admit_gui_bounded_inference(invocation_id=invocation_id, policy_record=snapshot["policy"],
+                grant=snapshot["grant"], source_bindings=snapshot["source_bindings"], owner_id=snapshot["actor"],
+                case_id=snapshot["case_id"], graph_revision=snapshot["graph_revision"],
+                session_revision=snapshot["session_revision"])
+            return result
+        except (HookContextError, WorkspaceCaseAuthorityError, CaseConsentError, WorkspaceAuthorizationDenied,
+                WorkspacePersistenceError) as exc:
+            return self._gui_inference_refusal(getattr(exc, "code", "authorization_denied"))
+        finally:
+            holds.pop(invocation_id, None)
+            discard_gui_inference_hold(invocation_id)
 
     def _adverse_public_anchor(self, user_id: str) -> Dict[str, Any]:
         """Graph token, pending inquiry, and snapshot head. Reads do not dispatch."""
@@ -15106,6 +15162,8 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.create_identity", "description": "Create a decentralized identity for browser or CLI use."},
                 {"name": "complaint.list_intake_questions", "description": "List the complaint intake questions used across browser, CLI, and MCP flows."},
                 {"name": "complaint.list_claim_elements", "description": "List the tracked claim elements used for evidence and review."},
+                {"name": "complaint.dispatch_bounded_gui_inference", "description": "Bound owner-case inference with fresh persisted purpose consent."},
+                {"name": "complaint.admit_bounded_gui_inference", "description": "Revalidate current case consent, grant and source before release."},
                 {"name": "complaint.start_session", "description": "Load or initialize a complaint workspace session."},
                 {"name": "complaint.submit_intake", "description": "Save complaint intake answers."},
                 {"name": "complaint.run_intake_chat_turn", "description": "Advance the shared mediator-style intake chat one turn and persist the captured answer."},
@@ -15193,6 +15251,15 @@ class ComplaintWorkspaceService:
         return self._dispatch_mcp_tool(tool_name, args)
 
     def _dispatch_mcp_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        if tool_name == "complaint.dispatch_bounded_gui_inference":
+            if set(args) - {"user_id", "purpose", "inputs", "timeout_seconds"}:
+                return self._gui_inference_refusal("caller_authority_not_accepted")
+            return self.dispatch_bounded_gui_inference(args.get("user_id"), purpose=args.get("purpose"),
+                inputs=args.get("inputs"), timeout_seconds=args.get("timeout_seconds", 30.0))
+        if tool_name == "complaint.admit_bounded_gui_inference":
+            if set(args) - {"user_id", "invocation_id"}:
+                return self._gui_inference_refusal("caller_authority_not_accepted")
+            return self.admit_bounded_gui_inference(args.get("user_id"), invocation_id=args.get("invocation_id"))
         if tool_name == "complaint.read_contained_file":
             data = self.read_contained_workspace_file(args.get("user_id"), str(args.get("relative_name") or ""))
             return {

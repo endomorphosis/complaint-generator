@@ -1255,6 +1255,7 @@ def dispatch_observed_hook_purpose(
     timeout: float = 30.0,
     data_class: str = "raw_intake",
     provider_kind: str = "grok_inference",
+    provider_source_references: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Dispatch a declared hook purpose through the Native observation seam.
 
@@ -1391,10 +1392,21 @@ def dispatch_observed_hook_purpose(
         data_class=data_class,
         generation=int(consent["generation"]),
     )
+    generation_inputs = dict(clean_inputs)
+    if provider_source_references is not None:
+        try:
+            references = minimal_source_references(source_bindings)
+            if tuple(dict(row) for row in provider_source_references) != references:
+                raise HookContextError("source_binding_mismatch")
+        except (HookContextError, TypeError, ValueError):
+            _INFLIGHT_DISPATCHES.discard(guard_key)
+            return seal(_purpose_result(purpose_id=purpose_id, status="refused", code="source_binding_mismatch",
+                model_dispatched=False, output=None, identity=None, route=route))
+        generation_inputs["source_references"] = [dict(row) for row in references]
     try:
         observed_call = generate_observed_hook_purpose(
             purpose_id=purpose_id,
-            inputs=clean_inputs,
+            inputs=generation_inputs,
             request_id=request_id,
             timeout=timeout,
             cancel_event=cancel_event,
@@ -1466,7 +1478,19 @@ def dispatch_observed_hook_purpose(
             "record": state.get("record", consent_record),
         }
 
-    late_state = current_late()
+    try:
+        late_state = current_late()
+    except Exception:
+        # Authorization/session/key/source reproof failed after the observed
+        # provider call. Refuse output without erasing the dispatch fact.
+        result = _purpose_result(purpose_id=purpose_id, status="refused", code="late_revalidation_unavailable",
+            model_dispatched=True, output=None, identity=identity, route=route)
+        result.update(dispatch="refused", provider_invoked=True, synthetic_transport_invoked=False,
+            invocation_id=invocation_id, request_id=request_id, accepted=False)
+        result["receipt"] = _hook_observation_receipt(purpose_id=purpose_id, status="refused",
+            code="late_revalidation_unavailable", request_id=request_id, pending_revision=pending_revision,
+            identity=identity, accepted=False)
+        return seal(result)
     late = accept_late_remote_result(
         late_state.get("record"),
         invocation_id=invocation_id,
@@ -2498,6 +2522,11 @@ def clear_gui_inference_holds() -> None:
     _GUI_INFERENCE_HOLDS.clear()
 
 
+def discard_gui_inference_hold(invocation_id: str) -> None:
+    """Discard one held proposal without admitting it."""
+    _GUI_INFERENCE_HOLDS.pop(invocation_id, None)
+
+
 def minimal_source_references(source_bindings: Sequence[Mapping[str, Any]] | None) -> tuple[dict[str, str], ...]:
     """Source id and content hash only. Passages and secrets are not copied."""
 
@@ -2550,6 +2579,16 @@ def _gui_refusal(
     return result
 
 
+def native_gui_inference_transport(call: Mapping[str, Any]) -> dict[str, Any]:
+    """First-party operator-selected route; the workspace owns its authority.
+
+    This adapter accepts the server's bound hook arguments, not a browser
+    policy document. The existing observed route owns the real router call,
+    bounded Native observation, tools denial and output validation.
+    """
+    return dispatch_observed_hook_purpose(**dict(call))
+
+
 def dispatch_gui_bounded_inference(
     *,
     policy_record: Mapping[str, Any] | None,
@@ -2573,6 +2612,9 @@ def dispatch_gui_bounded_inference(
     requested_provider: Optional[str] = None,
     requested_model: Optional[str] = None,
     operation: str = "refresh_grounding",
+    timeout: float = 30.0,
+    cancel_event: Any = None,
+    revision_reader: Optional[Callable[[], Mapping[str, Any]]] = None,
 ) -> dict[str, Any]:
     """Dispatch one GUI purpose through the existing consented hook boundary.
 
@@ -2588,7 +2630,10 @@ def dispatch_gui_bounded_inference(
     purpose = purpose_id if type(purpose_id) is str else ""
     if purpose not in MODEL_PURPOSE_IDS:
         return _gui_refusal(purpose_id=purpose or str(purpose_id), code="undeclared_purpose", route=None)
-    if allow_local_fallback is not False or allow_cross_provider_fallback is not False:
+    native_route = model_transport is native_gui_inference_transport
+    if (allow_local_fallback is not False or allow_cross_provider_fallback is not False
+            or requested_provider not in (None, route["provider"])
+            or requested_model not in (None, route["model"])):
         return _gui_refusal(purpose_id=purpose, code="unpinned_route", route=route)
     try:
         references = minimal_source_references(source_bindings)
@@ -2652,7 +2697,31 @@ def dispatch_gui_bounded_inference(
         data_class="raw_intake",
         generation=int(consent["generation"]),
     )
-    result = dispatch_declared_hook_purpose(
+    if native_route:
+        import math
+        if (type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 60
+                or not callable(revision_reader)):
+            return _gui_refusal(purpose_id=purpose, code="live_revalidation_required", route=route)
+        fresh = revision_reader()
+        if (not isinstance(fresh, Mapping) or fresh.get("record") != policy_record
+                or fresh.get("grant") != grant or fresh.get("graph_revision") != graph_revision
+                or fresh.get("session_revision") != session_revision):
+            return _gui_refusal(purpose_id=purpose, code="stale_request", route=route)
+        current = datetime.now(timezone.utc)
+        remaining = min(float(timeout), (context.deadline - current).total_seconds())
+        if remaining <= 0 or (cancel_event is not None and cancel_event.is_set()):
+            return _gui_refusal(purpose_id=purpose, code="deadline_expired" if remaining <= 0 else "cancelled", route=route)
+        result = native_gui_inference_transport({
+            "context": context, "purpose_id": purpose, "inputs": inputs,
+            "owner_id": owner_id, "case_id": case_id, "session_id": session_id,
+            "session_revision": session_revision, "graph_revision": graph_revision,
+            "legal_context": legal_context, "source_bindings": source_bindings,
+            "privacy_context": privacy_context, "now": current, "consent_record": policy_record,
+            "revision_reader": revision_reader, "cancel_event": cancel_event, "timeout": remaining,
+            "provider_source_references": references,
+        })
+    else:
+        result = dispatch_declared_hook_purpose(
         context,
         purpose,
         inputs,
@@ -2675,7 +2744,7 @@ def dispatch_gui_bounded_inference(
     result["source_references"] = [dict(row) for row in references]
     result["invocation_id"] = invocation_id
     result["accepted"] = False
-    result["live_model_identity_verified"] = False
+    result["live_model_identity_verified"] = native_route and result.get("live_model_identity_verified") is True
     result["requirements_satisfied"] = False
     result["requirements_satisfied_by_model"] = False
     result["bound_source_revision"] = source_revision
@@ -2684,8 +2753,9 @@ def dispatch_gui_bounded_inference(
     result["bound_session_revision"] = session_revision
     result["consent_generation"] = int(consent["generation"])
     result["limitations"] = (
-        "synthetic_transport_does_not_qualify_live_model",
+        "current_call_native_observation_only" if native_route else "synthetic_transport_does_not_qualify_live_model",
         "development_authorization_is_not_case_consent",
+        "provider_output_is_not_verified_legal_support",
         "output_waits_for_late_admission",
     )
     if result.get("status") == "available" and result.get("output") is not None:
@@ -2700,6 +2770,11 @@ def dispatch_gui_bounded_inference(
             "graph_revision": graph_revision,
             "session_revision": session_revision,
             "invocation_id": invocation_id,
+            "observation": {"transport_kind": "native_observation" if native_route else "synthetic",
+                "provider_invoked": result.get("provider_invoked") is True,
+                "live_model_identity_verified": result.get("live_model_identity_verified") is True,
+                "native_observation_bound": bool((result.get("identity") or {}).get("native_observation_bound")),
+                "request_id": str(result.get("request_id") or "")},
         }
         result["output"] = None
         result["status"] = "held"
@@ -2793,6 +2868,12 @@ def admit_gui_bounded_inference(
     base["accepted"] = True
     base["code"] = "accepted"
     base["output"] = output
+    observation = held.get("observation") or {}
+    base.update(observation)
+    base["live_model_identity_verified"] = (observation.get("transport_kind") == "native_observation"
+        and observation.get("native_observation_bound") is True
+        and observation.get("live_model_identity_verified") is True)
+    base["unverified_legal_support"] = True
     return base
 
 
