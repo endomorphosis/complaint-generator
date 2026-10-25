@@ -2,7 +2,7 @@
 
 This guide is the operator surface for the `complaint-gui-collaboration` campaign. It documents user, lawyer, and admin authorization, key and grant recovery, consent, private messaging, graph provenance, finite stopping, and authenticated watchdog operation. It is not completion authority, provider authority, campaign-state authority, or publication authority.
 
-Validation of this document does not complete `CIMP-GUI-60`. That task stays self-pending until a Root post-Native-callback audit, outside this task, accepts an actual Native member receipt, an actual Native callback, the current canonical task identity, and a settled merge queue. A passing focused test is not that callback and does not manufacture completion.
+Validation of this document does not complete `CIMP-GUI-60`. During pre-callback validation the task is self-pending; no test requires its own completion first. Native produces the actual member receipts and canonical completion callbacks. After those callbacks, the operator invokes the existing read-only verifier described below. That observation neither issues a callback nor overwrites an already completed task. This instructional contract and its caller-label examples authenticate no person, watchdog, receipt, or completion.
 
 The new plan is `docs/task_boards/complaint_gui_collaboration_spec.json`, `docs/task_boards/complaint_gui_collaboration_formal_work_plan.json`, and `docs/task_boards/complaint_gui_collaboration_task_board.md`. Its namespace is `complaint-gui-collaboration` and its task ids are `CIMP-GUI-01` through `CIMP-GUI-60`. Source baseline `2c1439a7029eb9035338133210d8b43319add8a4` identifies the program that was specified. Packet shape and ingestion of that plan do not complete any task. Completion of the old 58-task intake program and completion of the old 44-task mediator program do not complete this new program. Preserve those boards, histories, and qualification artifacts as historical scoped evidence. Do not remap them onto `CIMP-GUI-*` ids.
 
@@ -52,14 +52,44 @@ The interview stops when no actionable question remains, or when a declared limi
 
 ## Authenticated watchdog
 
-Run `prepare`, `doctor`, and `start` with this campaign's explicit specification and a fresh private state. Install this campaign's own persistent progress watchdog and the expected plan and spec pins. A doctor report or a PID alone does not establish startup. Authenticated watchdog operation observes the actual Grok route (`grok_cli`, model `grok-4.7`, fallback disabled), the canonical active task and attempt, fresh owned activity, measured validation, merge, and the normal completion callback. The watchdog preserves holds and attempts and uses verified bounded reconciliation. Legitimate user-input waits stay distinct from development workers stalled without progress.
+For a separately authorized new campaign, run `prepare`, `doctor`, and `start` with its explicit specification and fresh private state. For this existing campaign, preserve its recorded state, identities, holds, attempts, and budget ledger; do not initialize replacement state to obtain a clean result. Install the campaign's own persistent progress watchdog and the expected plan and spec pins. A doctor report or a PID alone does not establish startup. Authenticated watchdog operation observes the actual Grok route (`grok_cli`, model `grok-4.7`, fallback disabled), the canonical active task and attempt, fresh owned activity, measured validation, merge, and the normal completion callback. The watchdog preserves holds and attempts and uses verified bounded reconciliation. Legitimate user-input waits stay distinct from development workers stalled without progress.
 
 ## What closes this campaign
 
-The completion contract in `docs/task_boards/complaint_gui_collaboration_completion_contract.json` defines two audits:
+The completion contract in `docs/task_boards/complaint_gui_collaboration_completion_contract.json` is non-authoritative instructional metadata. Its two phases explain the order of actual operations:
 
-- Pre-completion. Focused validation may pass while `CIMP-GUI-60` remains self-pending. This task never manufactures its own completion.
-- Post-Native-callback. Root, outside this task, requires the new plan's actual task id, canonical task CID, goal id, and subgoal id, plus an actual Native member receipt, an actual Native callback from Root, and a settled merge queue whose pending count is zero. Missing evidence is `unavailable`. Work that cannot proceed is `blocked`. Neither result is success.
+- Pre-completion: validate the task's focused behavior while `CIMP-GUI-60` is self-pending. Do not require all sixty callbacks before that task can validate.
+- Post-Native-callback: Native owns the actual Native member receipt and callback. The operator supplies the existing explicit repository, specification, and state paths to `integrations.ipfs_accelerate.campaign_completion.verify_campaign_completion`. This read-only function checks current canonical task identities, Native completion history, Git integration, and the settled merge queue. Missing or mismatched evidence fails closed; a packet containing `accepted: true` or `authenticated: true` is not evidence.
+
+Use an approved Python 3.12 interpreter and all three installed pinned SDK roots. The paths below are operator-selected existing paths, not locations discovered from a receipt or an arbitrary saved JSON file:
+
+```bash
+GUI_ROOT=/absolute/approved/complaint-generator
+GUI_STATE=/absolute/existing/recorded-campaign-state
+GUI_PYTHON=/absolute/approved/python3.12
+export PYTHONPATH="$GUI_ROOT:$GUI_ROOT/external/ipfs_accelerate_py:$GUI_ROOT/external/ipfs_datasets_py:$GUI_ROOT/external/ipfs_kit_py"
+"$GUI_PYTHON" - "$GUI_ROOT" "$GUI_STATE" <<'PY'
+import json, sys
+from pathlib import Path
+from integrations.ipfs_accelerate.campaign_completion import verify_campaign_completion
+root = Path(sys.argv[1]).resolve(strict=True)
+state = Path(sys.argv[2]).resolve(strict=True)
+result = verify_campaign_completion(root, root / "docs/task_boards/complaint_gui_collaboration_spec.json", state)
+print(json.dumps(result, sort_keys=True))
+raise SystemExit(0 if result["verified"] is True else 1)
+PY
+```
+
+A successful observation proves historical Native execution and completion only. It explicitly does not qualify the current checkout's product behavior. Do not fix a failed observation by editing the control plane, Markdown status, receipts, queue, claims, callback history, or budget.
+
+After the final source settles, run the strict Task59 current-source acceptance CLI separately, outside any Native task's 900-second validation. Set `GUI_OUTPUT_PARENT` to an existing canonical directory owned by the operator with mode `0700`, independent of source, `.git`, campaign, and other control-state directories. The `--output-root` child must not exist:
+
+```bash
+GUI_OUTPUT_PARENT=/absolute/independent/private-owned-0700-parent
+"$GUI_PYTHON" "$GUI_ROOT/scripts/validate_gui_collaboration.py" --output-root "$GUI_OUTPUT_PARENT/fresh-gui-acceptance"
+```
+
+The default process CLI executes all twelve mandatory groups with separate bounded canonical Host collect/run children. It returns success only when every required current-source case passes with source, AST, kernel, and measurement evidence intact. A `--group` run remains partial. `main`/`run_bounded_acceptance` compatibility helpers and `--legacy-probes` are foundation probes, not current closure; saved JSON, old receipts, caller booleans, optional live descriptors, and unexecuted groups cannot replace fresh measurements. The completion verifier and current-source acceptance are separate observations, and neither grants publication authority.
 
 These do not complete the new program:
 
