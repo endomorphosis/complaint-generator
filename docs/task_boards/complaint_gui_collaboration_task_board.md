@@ -1212,7 +1212,7 @@ Implementation instructions:
 
 ## CIMP-GUI-41 Invite and accept scoped lawyer assignments
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
