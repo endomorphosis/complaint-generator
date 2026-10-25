@@ -5666,6 +5666,38 @@ def _failed_family(owner: str, reason: str, *, source_bound: bool = False) -> Di
     )
 
 
+def _verified_definition_source_basis(correspondence: Any, source_text: str) -> Dict[str, Any] | None:
+    """Read exact byte scope only after the actual owner replay succeeded."""
+    from ipfs_datasets_py.logic.autoformal import legal_norm_scope_correspondence_v1 as correspondence_owner
+    from ipfs_datasets_py.logic.autoformal import legal_source_norm_scope_v1 as scope_owner
+    if not isinstance(correspondence, Mapping) or correspondence.get("schema") != correspondence_owner.SCHEMA:
+        return None
+    scope = correspondence.get("source_scope")
+    if not isinstance(scope, Mapping) or scope.get("schema") != scope_owner.SCHEMA:
+        return None
+    selection = scope.get("source_selector")
+    records = scope.get("source_records")
+    occurrence = records.get("source_occurrence") if isinstance(records, Mapping) else None
+    if (not isinstance(selection, Mapping) or not isinstance(occurrence, Mapping)
+            or not isinstance(source_text, str) or not source_text
+            or selection.get("text") != source_text or occurrence.get("span_text") != source_text):
+        return None
+    start, end = selection.get("utf8_byte_start"), selection.get("utf8_byte_end")
+    if (type(start) is not int or type(end) is not int or start < 0
+            or end - start != len(source_text.encode("utf-8"))
+            or (occurrence.get("start_utf8"), occurrence.get("end_utf8")) != (start, end)):
+        return None
+    pins = scope.get("input_pins")
+    selected = pins.get("selected_unit_ref") if isinstance(pins, Mapping) else None
+    if not isinstance(selected, Mapping):
+        return None
+    return {"schema": "definition-owner-current-source-basis/v1",
+        "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
+        "source_bytes": len(source_text.encode("utf-8")), "selected_unit_ref": deepcopy(dict(selected)),
+        "source_scope_report_sha256": scope_owner.sampled_norm_scope_report_sha256(scope),
+        "exact_selected_bytes_verified": True, "source_semantics_verified": False}
+
+
 def _replay_scope(bundle: Mapping[str, Any], source_text: str, population: Sequence[str]) -> Dict[str, Any]:
     from .definition_evidence import (
         prepare_norm_scope_correspondence_v1,
@@ -5676,7 +5708,7 @@ def _replay_scope(bundle: Mapping[str, Any], source_text: str, population: Seque
     kwargs = dict(bundle.get("kwargs") or {})
     kwargs.pop("expected_report_sha256", None)
     kwargs.pop("supplied_receipt", None)
-    source_bound = _walk_contains_source((args, kwargs), source_text)
+    source_bound = False
     prepared = prepare_norm_scope_correspondence_v1(*args, **kwargs)
     if prepared.get("status") != "replayed" or not isinstance(prepared.get("result"), Mapping):
         return _failed_family(_SOURCE_CORRESPONDENCE_OWNER, str(prepared.get("reason") or prepared.get("status") or "scope_correspondence_failed"), source_bound=source_bound)
@@ -5692,13 +5724,15 @@ def _replay_scope(bundle: Mapping[str, Any], source_text: str, population: Seque
         and isinstance(checked.get("result"), Mapping)
         and checked["result"] == report
     )
+    basis = _verified_definition_source_basis(report, source_text) if genuine else None
+    source_bound = basis is not None
     missing = _missing_population(report, population)
     reason = "" if genuine and source_bound and not missing else (
         "source_unbound" if genuine and not source_bound else
         "incomplete_declared_population" if genuine and missing else
         str(checked.get("reason") or "scope_correspondence_not_genuine")
     )
-    return _family_record(
+    record = _family_record(
         owner=_SOURCE_CORRESPONDENCE_OWNER,
         genuine=genuine and source_bound and not missing,
         source_bound=source_bound,
@@ -5707,9 +5741,12 @@ def _replay_scope(bundle: Mapping[str, Any], source_text: str, population: Seque
         schema=str(report.get("schema") or ""),
         reason=reason,
     )
+    record["source_basis"] = basis
+    return record
 
 
-def _replay_contextual(bundle: Mapping[str, Any], source_text: str, population: Sequence[str]) -> Dict[str, Any]:
+def _replay_contextual(bundle: Mapping[str, Any], source_text: str, population: Sequence[str], *,
+                       verified_endpoint_bases: Mapping[str, Any] | None = None) -> Dict[str, Any]:
     from .definition_evidence import (
         prepare_contextual_definition_review,
         validate_contextual_definition_review,
@@ -5719,7 +5756,7 @@ def _replay_contextual(bundle: Mapping[str, Any], source_text: str, population: 
     review_subject = bundle.get("review_subject")
     raw_kwargs = dict(bundle.get("kwargs") or {})
     kwargs = {key: raw_kwargs[key] for key in _CONTEXTUAL_REVIEW_FIELDS if key in raw_kwargs}
-    source_bound = _walk_contains_source((binding_result, review_subject, kwargs), source_text)
+    source_bound = False
     prepared = prepare_contextual_definition_review(binding_result, review_subject, **kwargs)
     if prepared.get("status") != "replayed" or not isinstance(prepared.get("result"), Mapping):
         return _failed_family(
@@ -5743,13 +5780,16 @@ def _replay_contextual(bundle: Mapping[str, Any], source_text: str, population: 
         and isinstance(checked.get("result"), Mapping)
         and checked["result"] == report
     )
+    basis = (verified_endpoint_bases or {}).get(receipt_sha) if genuine else None
+    source_bound = (isinstance(basis, Mapping) and basis.get("source_text_sha256")
+        == hashlib.sha256(source_text.encode("utf-8")).hexdigest())
     missing = _missing_population(report, population)
     reason = "" if genuine and source_bound and not missing else (
         "source_unbound" if genuine and not source_bound else
         "incomplete_declared_population" if genuine and missing else
         str(checked.get("reason") or "contextual_review_not_genuine")
     )
-    return _family_record(
+    record = _family_record(
         owner=_CONTEXTUAL_REVIEW_OWNER,
         genuine=genuine and source_bound and not missing,
         source_bound=source_bound,
@@ -5758,6 +5798,8 @@ def _replay_contextual(bundle: Mapping[str, Any], source_text: str, population: 
         schema=str(report.get("schema") or ""),
         reason=reason,
     )
+    record["source_basis"] = deepcopy(basis) if source_bound else None
+    return record
 
 
 def _replay_applicability(bundle: Mapping[str, Any], source_text: str, population: Sequence[str]) -> Dict[str, Any]:
@@ -5768,7 +5810,7 @@ def _replay_applicability(bundle: Mapping[str, Any], source_text: str, populatio
     kwargs = dict(bundle.get("kwargs") or {})
     kwargs.pop("supplied_receipt", None)
     kwargs.pop("expected_report_sha256", None)
-    source_bound = _walk_contains_source((args, kwargs), source_text)
+    source_bound = False
     builders = {
         "template": applicability.build_norm_definition_applicability_template_v1,
         "declaration": applicability.build_norm_definition_applicability_declaration_v1,
@@ -5787,6 +5829,21 @@ def _replay_applicability(bundle: Mapping[str, Any], source_text: str, populatio
     receipt_sha = applicability.norm_definition_applicability_sha256(report)
     regenerated_sha = applicability.norm_definition_applicability_sha256(regenerated)
     genuine = receipt_sha == regenerated_sha and _json_blob(report) == _json_blob(regenerated)
+    basis, endpoints = None, {}
+    if genuine:
+        from ipfs_datasets_py.logic.autoformal import legal_norm_interpretation_review_v1 as norm_owner
+        inputs = kwargs.get("companion_inputs")
+        preparation = inputs.get("norm_preparation") if isinstance(inputs, Mapping) else None
+        if (isinstance(preparation, Mapping) and norm_owner.norm_review_sha256(preparation)
+                == inputs.get("expected_norm_preparation_sha256")):
+            basis = _verified_definition_source_basis(preparation.get("correspondence"), source_text)
+            definitions = inputs.get("definitions")
+            if basis is not None and isinstance(definitions, list) and len(definitions) <= 128:
+                for endpoint in definitions:
+                    pin = endpoint.get("expected_correspondence_sha256") if isinstance(endpoint, Mapping) else None
+                    if isinstance(pin, str) and len(pin) == 64 and all(char in "0123456789abcdef" for char in pin):
+                        endpoints[pin] = deepcopy(basis)
+    source_bound = basis is not None
     declared = operation == "declaration" and _selected_applicability(report)
     unbound = not declared
     missing = _missing_population(report, population)
@@ -5799,7 +5856,7 @@ def _replay_applicability(bundle: Mapping[str, Any], source_text: str, populatio
         reason = "incomplete_declared_population"
     elif unbound:
         reason = "unbound_definition"
-    return _family_record(
+    record = _family_record(
         owner=_APPLICABILITY_OWNER,
         genuine=genuine and source_bound and not missing and not unbound,
         source_bound=source_bound,
@@ -5809,6 +5866,9 @@ def _replay_applicability(bundle: Mapping[str, Any], source_text: str, populatio
         reason=reason,
         definition_unbound=unbound,
     )
+    record["source_basis"] = basis
+    record["verified_contextual_endpoint_bases"] = endpoints
+    return record
 
 
 def _replay_correspondence_requests(bundle: Mapping[str, Any], source_text: str, population: Sequence[str]) -> Dict[str, Any]:
@@ -5817,7 +5877,7 @@ def _replay_correspondence_requests(bundle: Mapping[str, Any], source_text: str,
     args = list(bundle.get("args") or [])
     kwargs = dict(bundle.get("kwargs") or {})
     kwargs.pop("supplied_receipt", None)
-    source_bound = _walk_contains_source((args, kwargs), source_text)
+    source_bound = False
     try:
         report = requests_owner.prepare_source_correspondence_requests_v3(*args, **kwargs)
         receipt_sha = requests_owner.source_correspondence_requests_v3_sha256(report)
@@ -5955,6 +6015,7 @@ def bind_current_definition_correspondence_owners(
         )
         record["owners"]["contextual_review"] = _replay_contextual(
             contextual_review, source_text, normalized["contextual_review"],
+            verified_endpoint_bases=record["owners"]["definition_applicability"].pop("verified_contextual_endpoint_bases", {}),
         )
         if isinstance(correspondence_requests, Mapping) and correspondence_requests:
             requests_population = populations.get("source_correspondence_requests") or normalized["source_correspondence"]
