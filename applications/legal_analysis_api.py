@@ -10,6 +10,9 @@ does not claim WebSocket or SSE support.
 from __future__ import annotations
 
 import json
+import base64
+import lzma
+import binascii
 import hashlib
 from copy import deepcopy
 from typing import Any, Dict, Mapping, MutableMapping
@@ -19,6 +22,7 @@ from starlette.requests import Request
 TASK_ID = "CIMP-GUI-29"
 DEFINITION_CORRESPONDENCE_TASK_ID = "CIMP-GUI-30"
 LEGAL_ANALYSIS_PREFIX = "/api/legal-analysis"
+DEFINITION_CORRESPONDENCE_ROUTE = LEGAL_ANALYSIS_PREFIX + "/{case_id}/definition-correspondence"
 _BODY_CAP = 65536
 _VOCABULARY_KEYS = ("actors", "actions", "objects", "qualifiers")
 
@@ -253,6 +257,177 @@ def project_definition_correspondence(case_file: Mapping[str, Any]) -> Dict[str,
     return projected
 
 
+_DEFINITION_BODY_CAP = 256 * 1024
+_DEFINITION_BYTES_CAP = 2 * 1024 * 1024
+_DEFINITION_EXPANDED_CAP = 8 * 1024 * 1024
+_DEFINITION_INPUT_TAG = "$complaint_definition_inputs"
+_DEFINITION_WIRE_TAG = "$complaint_definition_bytes"
+
+
+def definition_wire(value, *, decode=False):
+    """Bounded versioned JSON byte transport; never file/object authority."""
+    count, byte_count = 0, 0
+    def walk(item, depth):
+        nonlocal count, byte_count
+        count += 1
+        if depth > 32 or count > 100000:
+            raise LegalAnalysisError("legal_analysis_bounds")
+        if isinstance(item, dict):
+            if _DEFINITION_WIRE_TAG in item:
+                if not decode or set(item) != {_DEFINITION_WIRE_TAG}:
+                    raise LegalAnalysisError("legal_analysis_field")
+                inner = item[_DEFINITION_WIRE_TAG]
+                if (not isinstance(inner, dict) or set(inner) != {"version", "base64"}
+                        or type(inner["version"]) is not int or inner["version"] != 1
+                        or not isinstance(inner["base64"], str) or len(inner["base64"]) > 4 * ((_DEFINITION_BYTES_CAP + 2) // 3)):
+                    raise LegalAnalysisError("legal_analysis_field")
+                padding = len(inner["base64"]) - len(inner["base64"].rstrip("="))
+                estimated = len(inner["base64"]) // 4 * 3 - padding
+                if padding > 2 or len(inner["base64"]) % 4:
+                    raise LegalAnalysisError("legal_analysis_field")
+                if estimated < 0 or byte_count + estimated > _DEFINITION_BYTES_CAP:
+                    raise LegalAnalysisError("legal_analysis_bounds")
+                try:
+                    raw = base64.b64decode(inner["base64"], validate=True)
+                except (ValueError, binascii.Error):
+                    raise LegalAnalysisError("legal_analysis_field") from None
+                if base64.b64encode(raw).decode("ascii") != inner["base64"]:
+                    raise LegalAnalysisError("legal_analysis_field")
+                byte_count += len(raw)
+                if byte_count > _DEFINITION_BYTES_CAP:
+                    raise LegalAnalysisError("legal_analysis_bounds")
+                return raw
+            if any(not isinstance(key, str) for key in item):
+                raise LegalAnalysisError("legal_analysis_field")
+            return {key: walk(child, depth + 1) for key, child in item.items()}
+        if isinstance(item, (list, tuple)):
+            return [walk(child, depth + 1) for child in item]
+        if isinstance(item, bytes) and not decode:
+            byte_count += len(item)
+            if byte_count > _DEFINITION_BYTES_CAP:
+                raise LegalAnalysisError("legal_analysis_bounds")
+            return {_DEFINITION_WIRE_TAG: {"version": 1, "base64": base64.b64encode(item).decode("ascii")}}
+        if item is None or type(item) in {str, bool, int, float}:
+            return item
+        raise LegalAnalysisError("legal_analysis_field")
+    result = walk(value, 0)
+    if not decode:
+        try:
+            if len(json.dumps(result, allow_nan=False).encode()) > _DEFINITION_EXPANDED_CAP:
+                raise LegalAnalysisError("legal_analysis_bounds")
+        except (ValueError, TypeError):
+            raise LegalAnalysisError("legal_analysis_field") from None
+    return result
+
+
+def definition_inputs_wire(bundle):
+    """Lossless v1 data transport for the unchanged current Data owners.
+
+    Wire JSON stays below256KiB and ordinary case middleware remains1MiB.
+    Expanded canonical JSON is at most8MiB,100000nodes,depth32; decoded
+    byte leaves total at most2MiB. XZ decoder memory is capped at32MiB.
+    No file/env/object references, custom constructors or verdicts are loaded.
+    """
+    raw = json.dumps(definition_wire(bundle), sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    if len(raw) > _DEFINITION_EXPANDED_CAP:
+        raise LegalAnalysisError("legal_analysis_bounds")
+    packed = {_DEFINITION_INPUT_TAG: {"version": 1, "encoding": "xz-json-base64",
+        "byte_length": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
+        "base64": base64.b64encode(lzma.compress(raw, format=lzma.FORMAT_XZ, preset=6)).decode("ascii")}}
+    if len(json.dumps(packed).encode()) > _DEFINITION_BODY_CAP:
+        raise LegalAnalysisError("legal_analysis_bounds")
+    return packed
+
+
+def _definition_inputs(bundle):
+    if not isinstance(bundle, dict) or set(bundle) != {_DEFINITION_INPUT_TAG}:
+        raise LegalAnalysisError("legal_analysis_field")
+    fields = bundle[_DEFINITION_INPUT_TAG]
+    if (not isinstance(fields, dict) or set(fields) != {"version", "encoding", "byte_length", "sha256", "base64"}
+            or type(fields["version"]) is not int or fields["version"] != 1
+            or fields["encoding"] != "xz-json-base64"
+            or type(fields["byte_length"]) is not int or not 0 < fields["byte_length"] <= _DEFINITION_EXPANDED_CAP
+            or not isinstance(fields["sha256"], str) or len(fields["sha256"]) != 64
+            or any(char not in "0123456789abcdef" for char in fields["sha256"])
+            or not isinstance(fields["base64"], str) or len(fields["base64"]) > _DEFINITION_BODY_CAP):
+        raise LegalAnalysisError("legal_analysis_field")
+    try:
+        compressed = base64.b64decode(fields["base64"], validate=True)
+        if base64.b64encode(compressed).decode("ascii") != fields["base64"]:
+            raise ValueError("noncanonical_base64")
+        decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ, memlimit=32 * 1024 * 1024)
+        raw = decoder.decompress(compressed, max_length=fields["byte_length"] + 1)
+        # Before EOF, needs_input distinguishes truncation from buffered output
+        # past the declared budget. Both are refused; no draining/flush occurs.
+        if (not decoder.eof or decoder.unused_data
+                or len(raw) != fields["byte_length"]
+                or hashlib.sha256(raw).hexdigest() != fields["sha256"]):
+            raise ValueError("invalid_expansion")
+        def pairs(rows):
+            result = {}
+            for key, value in rows:
+                if key in result:
+                    raise ValueError("duplicate_json_key")
+                result[key] = value
+            return result
+        def constant(_value):
+            raise ValueError("nonfinite_json")
+        decoded = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant)
+        if json.dumps(decoded, sort_keys=True, separators=(",", ":"), allow_nan=False).encode() != raw:
+            raise ValueError("noncanonical_json")
+    except (ValueError, TypeError, UnicodeDecodeError, RecursionError, lzma.LZMAError, binascii.Error):
+        raise LegalAnalysisError("legal_analysis_field") from None
+    return definition_wire(decoded, decode=True)
+
+
+def bind_current_case_definition_correspondence(case_file, body, *, case_id, source_scope_sha256):
+    """Replay unchanged Data owners using one current server-owned source."""
+    from integrations.ipfs_datasets.logic import bind_current_definition_correspondence_owners
+    if not isinstance(body, Mapping):
+        raise LegalAnalysisError("legal_analysis_field")
+    forbidden = {"source_text", "current_source", "source_record", "canonical_source", "case_file",
+        "legal_context", "applicability_context", "user_facts", "factual_premises", "receipt", "canonical_receipt"}
+    if forbidden.intersection(body):
+        raise LegalAnalysisError("client_case_authority")
+    allowed = {"request_id", "source_content_hash", "declared_populations", "scope_correspondence",
+        "correspondence_requests", "applicability", "contextual_review", "training_metrics", "graph_join",
+        "expected_private_revision", "expected_session_revision", "owner_inputs"}
+    if set(body) - allowed or len(json.dumps(body, allow_nan=False).encode()) > _DEFINITION_BODY_CAP:
+        raise LegalAnalysisError("legal_analysis_bounds")
+    selected = current_case_legal_ir_source(case_file, body.get("source_content_hash"), case_id=case_id)
+    admission, record = selected["admission"], selected["record"]
+    if admission.get("source_scope_sha256") != source_scope_sha256:
+        raise LegalAnalysisError("legal_source_changed")
+    request_id = body.get("request_id")
+    if not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 80:
+        raise LegalAnalysisError("legal_analysis_field")
+    if "owner_inputs" in body:
+        if any(name in body for name in ("scope_correspondence", "correspondence_requests", "applicability", "contextual_review")):
+            raise LegalAnalysisError("legal_analysis_field")
+        inputs = _definition_inputs(body["owner_inputs"])
+        if not isinstance(inputs, dict) or set(inputs) - {"scope_correspondence", "correspondence_requests", "applicability", "contextual_review"}:
+            raise LegalAnalysisError("legal_analysis_field")
+        decoded = {**dict(body), **inputs}
+    else:
+        decoded = definition_wire(dict(body), decode=True)
+    payload = bind_current_definition_correspondence_owners(selected["text"], request_id=request_id,
+        declared_populations=_population_ids(decoded.get("declared_populations") or {}),
+        scope_correspondence=_owner_bundle(decoded.get("scope_correspondence")),
+        correspondence_requests=_owner_bundle(decoded.get("correspondence_requests")),
+        applicability=_owner_bundle(decoded.get("applicability")),
+        contextual_review=_owner_bundle(decoded.get("contextual_review")),
+        training_metrics=decoded.get("training_metrics"), graph_join=decoded.get("graph_join"))
+    if payload.get("status") == "unavailable":
+        raise LegalAnalysisError("definition_owner_unavailable")
+    payload.update(task_id=DEFINITION_CORRESPONDENCE_TASK_ID, case_id=case_id,
+        authorizes_law=False, authorizes_proof=False, executed_proof=False, governing_legal_authority=False, proof=False,
+        source_binding={"content_hash":body["source_content_hash"], "source_record_sha256":_document_sha256(record),
+            "source_scope_sha256":source_scope_sha256, "source_storage_admitted":True,
+            "governing_applicability":selected["review"].get("governing_applicability", "unknown")},
+        case_applicability_unchanged=True, current_owner_replayed=True)
+    return definition_wire(payload)
+
+
 def _document_sha256(value: Mapping[str, Any]) -> str:
     try:
         raw = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
@@ -461,43 +636,40 @@ def mount_legal_analysis_routes(app: Any) -> None:
         return await dispatch(request, case_id, True)
 
 
-    # Retain the Native30 owner path during isolated characterization.
-    def _authorized(request, case_id):
-        authorized(request, case_id)
-        return _BOUND_HANDLERS.get()()[0]
+    def definition_execute(workspace, authority, actor, case_id, body=None):
+        with workspace_access_scope(WorkspaceAccess.authenticated(actor, case_id)):
+            authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+            payload = (workspace.read_case_definition_correspondence(actor, case_id=case_id) if body is None
+                else workspace.bind_case_definition_correspondence(actor, case_id=case_id, request=body))
+            authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+            return payload
 
-    def _fail(exc):
-        return fail(exc.code)
-
-    @app.get(LEGAL_ANALYSIS_PREFIX + "/{case_id}/definition-correspondence")
-    async def read_definition_correspondence(case_id: str, request: Request):
+    async def definition_apply(request, case_id, *, write=False):
         try:
-            mediator = _authorized(request, case_id)
-            payload = project_definition_correspondence(_case_file_from_mediator(mediator))
-        except LegalAnalysisError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        payload["authorizes_law"] = False
-        payload["authorizes_proof"] = False
-        return JSONResponse(payload)
-
-
-    @app.post(LEGAL_ANALYSIS_PREFIX + "/{case_id}/definition-correspondence")
-    async def bind_definition_correspondence(case_id: str, request: Request):
-        try:
-            mediator = _authorized(request, case_id)
-            body = await request.json()
-            if not isinstance(body, dict):
+            workspace, authority, actor = authorized(request, case_id)
+            body = await request.json() if write else None
+            if write and not isinstance(body, dict):
                 raise LegalAnalysisError("legal_analysis_field")
-            if len(json.dumps(body, default=str)) > _BODY_CAP:
-                raise LegalAnalysisError("legal_analysis_bounds")
-            payload = bind_case_definition_correspondence(mediator, body)
+            payload = await run_in_threadpool(definition_execute, workspace, authority, actor, case_id, body)
+        except (WorkspaceAuthorizationDenied, WorkspaceCaseAuthorityError):
+            return definition_fail("legal_analysis_ungranted")
+        except WorkspacePersistenceError as exc:
+            return definition_fail(str(getattr(exc, "code", "") or "legal_analysis_unavailable"))
         except LegalAnalysisError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        payload["authorizes_law"] = False
-        payload["authorizes_proof"] = False
-        payload["executed_proof"] = False
-        payload["governing_legal_authority"] = False
+            return definition_fail(exc.code)
+        except (ValueError, UnicodeDecodeError):
+            return definition_fail("legal_analysis_field")
         return JSONResponse(payload)
 
+    def definition_fail(code):
+        return JSONResponse({"error": code, "status": "denied", "task_id": DEFINITION_CORRESPONDENCE_TASK_ID,
+            "authorizes_law": False, "authorizes_proof": False, "executed_proof": False,
+            "governing_legal_authority": False, "proof": False}, status_code=legal_analysis_http_status(code))
+
+    @app.get(DEFINITION_CORRESPONDENCE_ROUTE)
+    async def read_definition_correspondence(case_id: str, request: Request):
+        return await definition_apply(request, case_id)
+
+    @app.post(DEFINITION_CORRESPONDENCE_ROUTE)
+    async def bind_definition_correspondence(case_id: str, request: Request):
+        return await definition_apply(request, case_id, write=True)
