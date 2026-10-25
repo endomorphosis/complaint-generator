@@ -20,6 +20,11 @@ from starlette.requests import Request
 
 TASK_ID = "CIMP-GUI-32"
 REVIEW_TRANSITION_TASK_ID = "CIMP-GUI-47"
+WORKFLOW_STAGE_TASK_ID = "CIMP-GUI-49"
+WORKFLOW_STAGE_ROUTE = "/api/documents/{case_id}/workflow-stage"
+DRAFT_VERSIONS_ROUTE = "/api/documents/{case_id}/draft-versions"
+DRAFT_REVIEWS_ROUTE = "/api/documents/{case_id}/draft-reviews"
+DRAFT_EXPORTS_ROUTE = "/api/documents/{case_id}/draft-exports"
 LAWYER_REVIEW_ROUTE = "/api/legal-analysis/{case_id}/lawyer-reviews"
 LAWYER_WORKSPACE_ROUTE = "/api/legal-analysis/{case_id}/lawyer-workspace"
 REVIEW_ITEMS_ROUTE = "/api/legal-analysis/{case_id}/review-items"
@@ -42,6 +47,32 @@ _REVIEW_STATE_KEYS = ("facts", "answers", "legal_admissions", "draft_revisions")
 _SOURCE_UNBOUND = "source-unbound"
 _FACTS_UNBOUND = "facts-unbound"
 _PROOF_UNBOUND = "proof-unbound"
+_WORKFLOW_DOMAINS = ("factual", "legal", "evidence", "proof")
+_CHECKBOX_KEYS = {"complete", "completed", "checked", "done", "ready", "ready_to_file"}
+_PROOF_UNRESOLVED = {"not_executed", "timeout", "unavailable", "unknown", "cancelled", "disproved"}
+_OWNER_ACTIONS_BY_STAGE = {
+    "factual_unresolved": ("record_current_facts",),
+    "legal_unresolved": ("admit_current_authority",),
+    "evidence_unresolved": ("bind_current_evidence",),
+    "proof_unresolved": ("record_current_proof",),
+    "draft_review": ("version_draft", "review_draft"),
+}
+_LAWYER_ACTIONS_BY_STAGE = {
+    "factual_unresolved": ("review_factual_gap",),
+    "legal_unresolved": ("review_legal_gap",),
+    "evidence_unresolved": ("review_evidence_gap",),
+    "proof_unresolved": ("review_proof_gap",),
+    "draft_review": ("review_draft",),
+}
+_WORKFLOW_LIMITATIONS = (
+    "Stage and readiness follow current factual, legal, evidence, and proof bindings.",
+    "Checkbox completion does not advance a stage or create readiness.",
+    "Draft, review, and export are separate versioned operations.",
+    "Export requires case.download and a review of the same draft revision.",
+    "Export does not file with a court.",
+    "No operation claims legal sufficiency or governing law.",
+    "WebSocket and SSE transports are not supported.",
+)
 
 
 class CaseReviewError(Exception):
@@ -633,6 +664,395 @@ def accept_review_transition(mediator: Any, body: Mapping[str, Any], *, actor_pr
         if not any(item.get("item_id") == dissent_id for item in projected["dissent"]):
             raise CaseReviewError("dissent_lost")
     return projected
+
+def _positive_revision(value: Any) -> int:
+    return value if type(value) is int and value > 0 else 0
+
+
+def _workflow_domains(case_file: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    stored = case_file.get("workflow_domains")
+    if not isinstance(stored, dict):
+        stored = {}
+    return {name: dict(stored.get(name)) if isinstance(stored.get(name), dict) else {} for name in _WORKFLOW_DOMAINS}
+
+
+def _ignored_checkboxes(case_file: Mapping[str, Any], domains: Mapping[str, Mapping[str, Any]]) -> list:
+    found = []
+    stored = case_file.get("workflow_checkboxes")
+    if isinstance(stored, dict):
+        found.extend(sorted(str(key) for key in stored))
+    for name, domain in domains.items():
+        for key in _CHECKBOX_KEYS:
+            if key in domain:
+                found.append(name + "." + key)
+    return found
+
+
+def _factual_view(domain: Mapping[str, Any]) -> Dict[str, Any]:
+    revision = _positive_revision(domain.get("revision"))
+    assertions = domain.get("assertions")
+    bound = (
+        domain.get("status") == "current"
+        and revision > 0
+        and isinstance(assertions, list)
+        and len(assertions) > 0
+        and all(
+            isinstance(item, dict)
+            and item.get("bound") is True
+            and _positive_revision(item.get("revision")) == revision
+            for item in assertions
+        )
+    )
+    reason = "current" if bound else "factual_not_current"
+    return {"settled": bound, "revision": revision, "reason": reason}
+
+
+def _legal_view(domain: Mapping[str, Any], factual_revision: int) -> Dict[str, Any]:
+    revision = _positive_revision(domain.get("revision"))
+    authority = str(domain.get("authority_id") or "").strip()
+    settled = (
+        domain.get("status") == "admitted"
+        and revision > 0
+        and domain.get("factual_revision") == factual_revision
+        and factual_revision > 0
+        and authority != ""
+    )
+    if settled:
+        reason = "admitted_for_current_facts"
+    elif domain.get("status") != "admitted":
+        reason = "legal_not_admitted"
+    elif domain.get("factual_revision") != factual_revision:
+        reason = "legal_factual_mismatch"
+    else:
+        reason = "authority_missing"
+    return {
+        "settled": settled,
+        "revision": revision,
+        "reason": reason,
+        "governing_law": False,
+        "governing_law_claim_ignored": domain.get("governing_law") is True,
+    }
+
+
+def _evidence_view(domain: Mapping[str, Any], factual_revision: int, legal_revision: int) -> Dict[str, Any]:
+    revision = _positive_revision(domain.get("revision"))
+    exhibits = domain.get("exhibits")
+    settled = (
+        domain.get("status") == "bound"
+        and revision > 0
+        and domain.get("factual_revision") == factual_revision
+        and domain.get("legal_revision") == legal_revision
+        and factual_revision > 0
+        and legal_revision > 0
+        and isinstance(exhibits, list)
+        and len(exhibits) > 0
+        and all(
+            isinstance(item, dict) and item.get("supports_factual_revision") == factual_revision
+            for item in exhibits
+        )
+    )
+    reason = "bound" if settled else "evidence_not_bound" if domain.get("status") != "bound" else "evidence_binding_mismatch"
+    return {"settled": settled, "revision": revision, "reason": reason}
+
+
+def _proof_view(domain: Mapping[str, Any], factual_revision: int, evidence_revision: int) -> Dict[str, Any]:
+    revision = _positive_revision(domain.get("revision"))
+    status = str(domain.get("status") or "not_executed")
+    settled = (
+        status == "executed"
+        and domain.get("result") == "verified"
+        and revision > 0
+        and domain.get("factual_revision") == factual_revision
+        and domain.get("evidence_revision") == evidence_revision
+        and factual_revision > 0
+        and evidence_revision > 0
+    )
+    if settled:
+        reason = "executed_for_current_bindings"
+    elif status in _PROOF_UNRESOLVED:
+        reason = status
+    elif domain.get("factual_revision") != factual_revision or domain.get("evidence_revision") != evidence_revision:
+        reason = "proof_binding_mismatch"
+    else:
+        reason = "proof_not_verified"
+    return {"settled": settled, "revision": revision, "reason": reason, "legal_sufficiency": False}
+
+
+def _draft_store(case_file: MutableMapping[str, Any]) -> Dict[str, Any]:
+    stored = case_file.get("draft_workflow")
+    if not isinstance(stored, dict):
+        stored = {"versions": [], "reviews": [], "exports": []}
+        case_file["draft_workflow"] = stored
+    for key in ("versions", "reviews", "exports"):
+        if not isinstance(stored.get(key), list):
+            stored[key] = []
+    return stored
+
+
+def _domain_snapshot(views: Mapping[str, Mapping[str, Any]]) -> Dict[str, int]:
+    return {name: int(views[name]["revision"]) for name in _WORKFLOW_DOMAINS}
+
+
+def _snapshot_matches(snapshot: Mapping[str, Any], views: Mapping[str, Mapping[str, Any]]) -> bool:
+    return all(snapshot.get(name) == views[name]["revision"] for name in _WORKFLOW_DOMAINS)
+
+
+def _accepted_review(store: Mapping[str, Any], draft_id: str, revision: int, snapshot: Mapping[str, Any]) -> Dict[str, Any] | None:
+    for item in reversed(store.get("reviews") or []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("draft_id") == draft_id and item.get("draft_revision") == revision and item.get("decision") == "accepted_for_export":
+            if item.get("domain_snapshot") == dict(snapshot):
+                return item
+    return None
+
+
+def project_workflow_stage(case_file: Mapping[str, Any]) -> Dict[str, Any]:
+    """Project stage, actions, and readiness from live domain bindings.
+
+    Checkbox maps are reported and ignored. A verified proof or a drafted
+    paragraph is not legal sufficiency and does not file anything.
+    """
+
+    domains = _workflow_domains(case_file)
+    factual = _factual_view(domains["factual"])
+    legal = _legal_view(domains["legal"], factual["revision"])
+    evidence = _evidence_view(domains["evidence"], factual["revision"], legal["revision"] if legal["settled"] else 0)
+    proof = _proof_view(domains["proof"], factual["revision"], evidence["revision"] if evidence["settled"] else 0)
+    views = {"factual": factual, "legal": legal, "evidence": evidence, "proof": proof}
+    stage = "draft_review"
+    for name, label in (
+        ("factual", "factual_unresolved"),
+        ("legal", "legal_unresolved"),
+        ("evidence", "evidence_unresolved"),
+        ("proof", "proof_unresolved"),
+    ):
+        if not views[name]["settled"]:
+            stage = label
+            break
+    store = case_file.get("draft_workflow") if isinstance(case_file.get("draft_workflow"), dict) else {}
+    versions = [item for item in store.get("versions") or [] if isinstance(item, dict)]
+    reviews = [item for item in store.get("reviews") or [] if isinstance(item, dict)]
+    snapshot = _domain_snapshot(views)
+    exportable = []
+    if stage == "draft_review":
+        for version in versions:
+            if version.get("domain_snapshot") == snapshot and _accepted_review(store, str(version.get("draft_id") or ""), int(version.get("revision") or 0), snapshot):
+                exportable.append({"draft_id": version.get("draft_id"), "revision": version.get("revision")})
+    ignored = _ignored_checkboxes(case_file, domains)
+    return {
+        "task_id": WORKFLOW_STAGE_TASK_ID,
+        "operation": "project_workflow_stage",
+        "stage": stage,
+        "readiness": {
+            "derived_from": list(_WORKFLOW_DOMAINS),
+            "checkbox_completion_counts": False,
+            "ignored_checkbox_keys": ignored,
+            "ready_for_draft_review": stage == "draft_review",
+            "ready_for_versioned_export": bool(exportable),
+            "legal_sufficiency": False,
+            "automatic_court_filing": False,
+            "court_filed": False,
+            "governing_law": False,
+        },
+        "domains": views,
+        "owner_actions": list(_OWNER_ACTIONS_BY_STAGE[stage]),
+        "lawyer_actions": list(_LAWYER_ACTIONS_BY_STAGE[stage]),
+        "download_scoped_actions": ["export_reviewed_draft"] if exportable else [],
+        "refused_actions": ["file_with_court", "declare_legal_sufficiency"],
+        "exportable_drafts": exportable,
+        "draft_version_count": len(versions),
+        "draft_review_count": len(reviews),
+        "legal_sufficiency": False,
+        "automatic_court_filing": False,
+        "court_filed": False,
+        "limitations": list(_WORKFLOW_LIMITATIONS),
+    }
+
+
+def _require_draft_body(body: Mapping[str, Any], operation: str) -> None:
+    if not isinstance(body, Mapping) or len(json.dumps(body, default=str)) > _BODY_CAP:
+        raise CaseReviewError("draft_bounds")
+    requested = body.get("operation", operation)
+    if requested in {"file_with_court", "court_filing", "automatic_filing"}:
+        raise CaseReviewError("automatic_filing_refused")
+    if requested != operation:
+        raise CaseReviewError("draft_field")
+    if body.get("legal_sufficiency") is True or body.get("court_filed") is True or body.get("governing_law") is True:
+        raise CaseReviewError("legal_sufficiency_refused")
+
+
+def _require_stage_snapshot(projection: Mapping[str, Any], body: Mapping[str, Any]) -> Dict[str, int]:
+    if projection["stage"] != "draft_review":
+        raise CaseReviewError("stage_not_ready")
+    snapshot = _domain_snapshot(projection["domains"])
+    for name in _WORKFLOW_DOMAINS:
+        key = "expected_" + name + "_revision"
+        if key in body and body.get(key) != snapshot[name]:
+            raise CaseReviewError("stale_domain")
+    return snapshot
+
+
+def version_draft(case_file: MutableMapping[str, Any], body: Mapping[str, Any], *, actor_principal_id: str,
+                  membership: str, action: str) -> Dict[str, Any]:
+    """Store one owner draft revision bound to the current domain snapshot."""
+
+    _require_draft_body(body, "version_draft")
+    if membership != "owner" or action != "case.update":
+        raise CaseReviewError("actor_not_permitted")
+    projection = project_workflow_stage(case_file)
+    snapshot = _require_stage_snapshot(projection, body)
+    text = _text(body.get("text"), limit=4000, required=True)
+    draft_id = _text(body.get("draft_id"), limit=80, required=True)
+    request_id = _text(body.get("request_id"), limit=80, required=True)
+    store = _draft_store(case_file)
+    for existing in store["versions"]:
+        if existing.get("request_id") == request_id:
+            if existing.get("draft_id") != draft_id or existing.get("text") != text:
+                raise CaseReviewError("replay_mismatch")
+            projected = project_workflow_stage(case_file)
+            projected["record"] = {key: existing[key] for key in existing if key != "text"}
+            projected["replayed"] = True
+            projected["text_digest"] = existing["text_digest"]
+            return projected
+    revision = 1 + max((int(item.get("revision") or 0) for item in store["versions"] if item.get("draft_id") == draft_id), default=0)
+    record = {
+        "task_id": WORKFLOW_STAGE_TASK_ID,
+        "operation": "version_draft",
+        "request_id": request_id,
+        "draft_id": draft_id,
+        "revision": revision,
+        "text": text,
+        "text_digest": _digest("draft-version", draft_id + "\n" + str(revision) + "\n" + text),
+        "domain_snapshot": snapshot,
+        "actor_principal_id": actor_principal_id,
+        "membership": membership,
+        "legal_sufficiency": False,
+        "court_filed": False,
+        "automatic_court_filing": False,
+    }
+    store["versions"].append(record)
+    projected = project_workflow_stage(case_file)
+    projected["record"] = {key: record[key] for key in record if key != "text"}
+    projected["text_digest"] = record["text_digest"]
+    projected["replayed"] = False
+    return projected
+
+
+def review_draft_version(case_file: MutableMapping[str, Any], body: Mapping[str, Any], *, actor_principal_id: str,
+                         membership: str, action: str) -> Dict[str, Any]:
+    """Review one draft revision. Acceptance authorizes export only."""
+
+    _require_draft_body(body, "review_draft")
+    if membership not in {"owner", "assigned-lawyer"} or action != "case.review":
+        raise CaseReviewError("actor_not_permitted")
+    projection = project_workflow_stage(case_file)
+    snapshot = _domain_snapshot(projection["domains"])
+    draft_id = _text(body.get("draft_id"), limit=80, required=True)
+    request_id = _text(body.get("request_id"), limit=80, required=True)
+    decision = _text(body.get("decision"), limit=40, required=True)
+    if decision not in {"withheld", "commented", "accepted_for_export"}:
+        raise CaseReviewError("draft_field")
+    expected_revision = body.get("expected_revision")
+    if type(expected_revision) is not int:
+        raise CaseReviewError("draft_field")
+    store = _draft_store(case_file)
+    for existing in store["reviews"]:
+        if existing.get("request_id") == request_id:
+            if existing.get("draft_id") != draft_id or existing.get("decision") != decision or existing.get("draft_revision") != expected_revision:
+                raise CaseReviewError("replay_mismatch")
+            projected = project_workflow_stage(case_file)
+            projected["record"] = dict(existing)
+            projected["replayed"] = True
+            return projected
+    version = next((item for item in store["versions"] if item.get("draft_id") == draft_id and item.get("revision") == expected_revision), None)
+    if version is None:
+        raise CaseReviewError("draft_revision_required")
+    if projection["stage"] != "draft_review" or version.get("domain_snapshot") != snapshot:
+        raise CaseReviewError("stale_domain")
+    digest = _text(body.get("expected_text_digest"), limit=80, required=True)
+    if digest != version.get("text_digest"):
+        raise CaseReviewError("stale_revision")
+    record = {
+        "task_id": WORKFLOW_STAGE_TASK_ID,
+        "operation": "review_draft",
+        "request_id": request_id,
+        "draft_id": draft_id,
+        "draft_revision": expected_revision,
+        "decision": decision,
+        "expected_text_digest": digest,
+        "domain_snapshot": dict(version["domain_snapshot"]),
+        "actor_principal_id": actor_principal_id,
+        "membership": membership,
+        "authorizes_export": decision == "accepted_for_export",
+        "legal_sufficiency": False,
+        "court_filed": False,
+        "automatic_court_filing": False,
+        "governing_law": False,
+    }
+    store["reviews"].append(record)
+    projected = project_workflow_stage(case_file)
+    projected["record"] = dict(record)
+    projected["replayed"] = False
+    return projected
+
+
+def export_draft_version(case_file: MutableMapping[str, Any], body: Mapping[str, Any], *, actor_principal_id: str,
+                         membership: str, action: str) -> Dict[str, Any]:
+    """Export one reviewed revision. The result is not a court filing."""
+
+    _require_draft_body(body, "export_draft")
+    if action != "case.download" or membership not in {"owner", "assigned-lawyer"}:
+        raise CaseReviewError("export_authorization_required")
+    projection = project_workflow_stage(case_file)
+    snapshot = _domain_snapshot(projection["domains"])
+    draft_id = _text(body.get("draft_id"), limit=80, required=True)
+    request_id = _text(body.get("request_id"), limit=80, required=True)
+    expected_revision = body.get("expected_revision")
+    if type(expected_revision) is not int:
+        raise CaseReviewError("draft_field")
+    store = _draft_store(case_file)
+    for existing in store["exports"]:
+        if existing.get("request_id") == request_id:
+            if existing.get("draft_id") != draft_id or existing.get("draft_revision") != expected_revision:
+                raise CaseReviewError("replay_mismatch")
+            projected = project_workflow_stage(case_file)
+            projected["record"] = dict(existing)
+            projected["replayed"] = True
+            return projected
+    version = next((item for item in store["versions"] if item.get("draft_id") == draft_id and item.get("revision") == expected_revision), None)
+    if version is None:
+        raise CaseReviewError("draft_revision_required")
+    if projection["stage"] != "draft_review" or version.get("domain_snapshot") != snapshot:
+        raise CaseReviewError("stale_domain")
+    review = _accepted_review(store, draft_id, expected_revision, snapshot)
+    if review is None:
+        raise CaseReviewError("review_required")
+    record = {
+        "task_id": WORKFLOW_STAGE_TASK_ID,
+        "operation": "export_draft",
+        "request_id": request_id,
+        "export_id": _digest("draft-export", request_id + "\n" + draft_id + "\n" + str(expected_revision)),
+        "draft_id": draft_id,
+        "draft_revision": expected_revision,
+        "text_digest": version["text_digest"],
+        "review_request_id": review["request_id"],
+        "domain_snapshot": dict(snapshot),
+        "actor_principal_id": actor_principal_id,
+        "membership": membership,
+        "authorization_scope": "case.download",
+        "legal_sufficiency": False,
+        "court_filed": False,
+        "automatic_court_filing": False,
+        "governing_law": False,
+        "status": "exported",
+    }
+    store["exports"].append(record)
+    projected = project_workflow_stage(case_file)
+    projected["record"] = dict(record)
+    projected["replayed"] = False
+    return projected
+
 
 def submit_lawyer_review(mediator: Any, body: Mapping[str, Any], **scope) -> Dict[str, Any]:
     """Legacy pure reported-record helper; mounted routes use the encrypted owner."""

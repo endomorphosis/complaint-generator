@@ -3566,9 +3566,12 @@
                 </section>
 
                 <div class="stage-grid" aria-label="Complaint workflow summary">
-                    <div class="stage-card">
+                    <div class="stage-card" id="derived-workflow-stage" data-checkbox-completion="ignored" data-automatic-court-filing="false" data-legal-sufficiency="false">
                         <strong id="workflow-stage-chip">What is complete</strong>
                         <span id="workflow-stage-summary">We are checking what information is already present and what still needs to be gathered.</span>
+                        <span id="derived-workflow-stage-note">Stage, owner and lawyer actions, and readiness follow the current factual, legal, evidence, and proof states. Checked boxes do not complete a stage.</span>
+                        <span id="derived-workflow-export-note">Draft, review, and export are versioned and separately authorized. Export does not file with a court and is not a claim of legal sufficiency.</span>
+                        <span id="derived-workflow-stage-value">Stage appears after the case record is loaded.</span>
                     </div>
                     <div class="stage-card">
                         <strong>Exactly what to do next</strong>
