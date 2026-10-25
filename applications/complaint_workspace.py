@@ -9577,6 +9577,121 @@ class ComplaintWorkspaceService:
         return {**receipt, "case_id": case_id, "private_revision": committed.get("private_revision"),
             "session_revision": projection["session_revision"]}
 
+    def read_case_legal_analysis(self, user_id: Optional[str], *, case_id: str) -> Dict[str, Any]:
+        """Project current encrypted IR only after live owner/key/source reproof."""
+        from applications.legal_analysis_api import (project_canonical_legal_ir,
+            current_case_legal_ir_source, LegalAnalysisError)
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.read":
+            raise WorkspaceAuthorizationDenied()
+        snapshot = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        payload = project_canonical_legal_ir(snapshot["case_file"])
+        binding = payload.get("source_binding")
+        if payload.get("status") != "empty":
+            source_current = (isinstance(binding, dict)
+                and binding.get("source_scope_sha256") == snapshot["source_scope_sha256"])
+            if source_current:
+                try:
+                    current_source = current_case_legal_ir_source(snapshot["case_file"],
+                        binding.get("content_hash"), case_id=case_id)
+                    source_current = (binding.get("source_record_sha256")
+                        == hashlib.sha256(json.dumps(current_source["record"], sort_keys=True,
+                            separators=(",", ":"), allow_nan=False).encode()).hexdigest())
+                except LegalAnalysisError:
+                    source_current = False
+            payload["source_current"] = source_current
+            if not source_current:
+                payload.update(status="stale", reason="legal_case_sources_changed",
+                    source_spans=[], typed_obligations=[])
+            # A saved execution receipt is historical data. The adapter's
+            # process-local registry alone can establish current execution
+            # provenance; a cold read must never reconstruct that authority.
+            from integrations.ipfs_datasets.logic import verify_canonical_formalization_receipt
+            payload["recorded_receipt_verification"] = deepcopy(payload.get("receipt_verification"))
+            audit = verify_canonical_formalization_receipt(str(payload.get("receipt_id") or ""),
+                **({"source_text": current_source["text"]} if source_current else {}))
+            payload["receipt_verification"] = {"status": audit.get("status"),
+                "tampered": audit.get("tampered") is True,
+                "execution_origin_verified": source_current and audit.get("execution_origin_verified") is True,
+                "reason": str(audit.get("reason") or "")}
+            payload["current_execution_verified"] = (source_current and audit.get("status") == "verified"
+                and audit.get("execution_origin_verified") is True and audit.get("tampered") is not True)
+            payload["recorded_compilation_is_proof"] = False
+        current = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        if (snapshot["source_identity"], snapshot["key_id"]) != (current["source_identity"], current["key_id"]):
+            raise WorkspacePersistenceError("Legal analysis changed during read.", code="revision_conflict", public_status="conflict")
+        authority.revalidate(actor_principal_id=snapshot["actor_principal_id"], workspace=self, require_owner=True)
+        return {**payload, "case_id": case_id, "private_revision": snapshot["private_revision"],
+            "session_revision": snapshot["session_revision"], "read_only": True}
+
+
+    def attach_case_legal_analysis(self, user_id: Optional[str], *, case_id: str,
+                                   request: Mapping[str, Any]) -> Dict[str, Any]:
+        """Compile a current stored source and commit through the encrypted CAS.
+
+        Request source/context/fact assertions are never the case's authority.
+        Local compilation needs no model consent and performs no model egress.
+        """
+        from applications.legal_analysis_api import compile_current_case_legal_ir, LegalAnalysisError
+        from integrations.private_storage import PrivateStorageError
+        from mediator.workflow_service import WorkflowActionService
+
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.update" or not isinstance(request, Mapping):
+            raise WorkspaceAuthorizationDenied()
+        snapshot = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        actor, canonical = snapshot["actor_principal_id"], snapshot["canonical_owner_principal_id"]
+        for field, actual in (("expected_private_revision", snapshot["private_revision"]),
+                              ("expected_session_revision", snapshot["session_revision"])):
+            value = request.get(field)
+            valid_type = (type(value) is str and 1 <= len(value) <= 19
+                and value.isascii() and value.isdecimal() and (value == "0" or not value.startswith("0"))
+                ) if field == "expected_private_revision" else type(value) is int
+            if not valid_type or value != actual:
+                raise WorkspacePersistenceError("Legal analysis precondition changed.", code="revision_conflict", public_status="conflict")
+        _context, admitted_key_id, admitted_key = self._joined_key(canonical, case_id)
+        if admitted_key_id != snapshot["key_id"]:
+            raise WorkspacePersistenceError("Legal analysis key changed.", code="revision_conflict", public_status="conflict")
+
+        def before_publish():
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _current, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Legal analysis key changed.", code="revision_conflict", public_status="conflict")
+            current = self._load_state(canonical, case_id=case_id)
+            if self._case_legal_context_identity(current) != snapshot["source_identity"]:
+                raise WorkspacePersistenceError("Legal analysis source changed.", code="revision_conflict", public_status="conflict")
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _current, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Legal analysis key changed.", code="revision_conflict", public_status="conflict")
+
+        state = snapshot["state"]
+        shared = state["shared_interview"]
+        payload = compile_current_case_legal_ir(snapshot["case_file"], shared["knowledge_graph"], request,
+            case_id=case_id, source_scope_sha256=snapshot["source_scope_sha256"])
+        before_publish()
+        if payload.get("status") != "attached":
+            return {**payload, "attachment_persisted": False,
+                "private_revision": snapshot["private_revision"], "session_revision": snapshot["session_revision"]}
+        case_file = deepcopy(snapshot["case_file"])
+        case_file["canonical_legal_ir_attachment"] = deepcopy(payload)
+        projection = WorkflowActionService.project_legal_context_selection(shared,
+            case_file=case_file, dependency_graph=snapshot["dependency_graph"])
+        draft = deepcopy(state)
+        draft["shared_interview"] = projection
+        draft["updated_at"] = _utc_now()
+        try:
+            committed = self._commit_joined_snapshot(draft, before_publish=before_publish)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Legal analysis did not commit.",
+                code=str(getattr(exc, "code", "") or "durability_unproven"), public_status="recoverable") from None
+        self._interview_mediators.pop((canonical, case_id), None)
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return {**payload, "attachment_persisted": True,
+            "private_revision": committed.get("private_revision"), "session_revision": projection["session_revision"]}
+
+
     def refresh_case_legal_dependency_graph(self, user_id, *, case_id, updates):
         return self._run_case_legal_dependency_refresh(user_id, case_id=case_id, updates=updates, late=False)
 

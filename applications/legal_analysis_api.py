@@ -10,6 +10,8 @@ does not claim WebSocket or SSE support.
 from __future__ import annotations
 
 import json
+import hashlib
+from copy import deepcopy
 from typing import Any, Dict, Mapping, MutableMapping
 
 from starlette.requests import Request
@@ -17,7 +19,6 @@ from starlette.requests import Request
 TASK_ID = "CIMP-GUI-29"
 DEFINITION_CORRESPONDENCE_TASK_ID = "CIMP-GUI-30"
 LEGAL_ANALYSIS_PREFIX = "/api/legal-analysis"
-DEFINITION_CORRESPONDENCE_ROUTE = LEGAL_ANALYSIS_PREFIX + "/{case_id}/definition-correspondence"
 _BODY_CAP = 65536
 _VOCABULARY_KEYS = ("actors", "actions", "objects", "qualifiers")
 
@@ -29,12 +30,14 @@ class LegalAnalysisError(Exception):
 
 
 def legal_analysis_http_status(code: str) -> int:
-    if code in {"unauthenticated", "legal_analysis_unavailable"}:
+    if code == "unauthenticated":
         return 401
-    if code in {"legal_analysis_field", "legal_analysis_bounds"}:
+    if code in {"legal_analysis_field", "legal_analysis_bounds", "client_case_authority"}:
         return 422
-    if code in {"canonical_compiler_unavailable", "definition_owner_unavailable"}:
+    if code in {"canonical_compiler_unavailable", "definition_owner_unavailable", "legal_analysis_unavailable", "unlock_needed"}:
         return 503
+    if code in {"revision_conflict", "legal_source_changed", "legal_source_unavailable"}:
+        return 409
     return 403
 
 
@@ -112,7 +115,7 @@ def _request_body(body: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def attach_case_canonical_legal_ir(mediator: Any, body: Mapping[str, Any]) -> Dict[str, Any]:
-    """Public case entry. Stores the attachment on the intake case file."""
+    """Legacy in-process utility; not the authenticated GUI publication owner."""
 
     from integrations.ipfs_datasets.logic import attach_canonical_legal_ir_source_obligations
 
@@ -148,7 +151,7 @@ def project_canonical_legal_ir(case_file: Mapping[str, Any]) -> Dict[str, Any]:
             "admitted_law": False,
             "limitations": ["No canonical legal IR attachment has been recorded."],
         }
-    projected = dict(stored)
+    projected = deepcopy(stored)
     projected["task_id"] = TASK_ID
     projected["executed_proof"] = False
     projected["governing_legal_authority"] = False
@@ -250,75 +253,221 @@ def project_definition_correspondence(case_file: Mapping[str, Any]) -> Dict[str,
     return projected
 
 
+def _document_sha256(value: Mapping[str, Any]) -> str:
+    try:
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    except (TypeError, ValueError):
+        raise LegalAnalysisError("legal_analysis_field") from None
+    return hashlib.sha256(raw).hexdigest()
+
+
+def current_case_legal_ir_source(case_file: Mapping[str, Any], source_hash: str, *, case_id: str) -> Dict[str, Any]:
+    """Revalidate the saved current SourceRecord without compilation or mutation."""
+    from integrations.ipfs_datasets.logic import prepare_acquired_authority_record
+    digest = source_hash[7:] if isinstance(source_hash, str) and source_hash.startswith("sha256:") else source_hash
+    if (not isinstance(digest, str) or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)):
+        raise LegalAnalysisError("legal_analysis_field")
+    index = case_file.get("legal_source_passage_index")
+    stored = index.get(source_hash) if isinstance(index, Mapping) else None
+    if not isinstance(stored, Mapping):
+        raise LegalAnalysisError("legal_source_unavailable")
+    if (stored.get("version_state") == "stale"
+            or (stored.get("current_version") and stored.get("current_version") != stored.get("version"))):
+        raise LegalAnalysisError("legal_source_changed")
+    admission = stored.get("source_admission")
+    source = stored.get("canonical_source")
+    record = stored.get("reviewed_source_record")
+    if not all(isinstance(item, Mapping) for item in (admission, source, record)):
+        raise LegalAnalysisError("legal_source_unavailable")
+    metadata = record.get("metadata")
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    prepared = prepare_acquired_authority_record(source,
+        jurisdiction=str(record.get("jurisdiction") or ""), as_of_date=str(metadata.get("as_of_date") or ""))
+    record_ids = admission.get("stored_record_ids")
+    if (prepared.get("status") != "admitted" or prepared.get("record") != record
+            or admission.get("record") != record or admission.get("status") != "admitted"
+            or admission.get("proof") is not False or admission.get("hashes") != prepared.get("hashes")
+            or admission.get("source_record_sha256") != _document_sha256(record)
+            or not isinstance(record_ids, list) or not record_ids
+            or any(type(item) is not int or item < 0 for item in record_ids)):
+        raise LegalAnalysisError("legal_source_changed")
+    text = record.get("content")
+    if (not isinstance(text, str) or not text or len(text) > 8192
+            or hashlib.sha256(text.encode()).hexdigest() != digest
+            or stored.get("content_hash") != source_hash or stored.get("source_passage") != text):
+        raise LegalAnalysisError("legal_source_changed")
+    reviews = case_file.get("legal_authority_admissions")
+    current_review = next((row for row in reversed(reviews) if isinstance(row, Mapping)
+        and row.get("content_hash") == source_hash), None) if isinstance(reviews, list) else None
+    if (not current_review or current_review.get("case_id") != case_id
+            or current_review.get("source_status") != "source_admitted"
+            or current_review.get("source_admission") != admission
+            or current_review.get("proof") is not False):
+        raise LegalAnalysisError("legal_source_unavailable")
+    return {"stored": stored, "record": record, "admission": admission,
+        "review": current_review, "text": text, "metadata": metadata}
+
+
+def compile_current_case_legal_ir(case_file: Mapping[str, Any], knowledge_graph: Mapping[str, Any],
+                                  body: Mapping[str, Any], *, case_id: str,
+                                  source_scope_sha256: str) -> Dict[str, Any]:
+    """Compile one freshly read, reviewed SourceRecord; grant no access here.
+
+    The authenticated Workspace owner supplies the copied current case and KG.
+    Client fields select a stored source and annotate exact spans only. Neither
+    source admission nor compiler execution appoints governing law or a proof.
+    """
+    from complaint_phases.knowledge_graph import KnowledgeGraph
+    from integrations.ipfs_datasets.logic import attach_canonical_legal_ir_source_obligations
+    from mediator.integrations.graph_tools import project_factual_kg
+
+    if not isinstance(body, Mapping) or not isinstance(case_file, Mapping):
+        raise LegalAnalysisError("legal_analysis_field")
+    forbidden = {"source_text", "current_source", "legal_context", "applicability_context", "user_facts",
+        "factual_premises", "admitted_law", "source_record", "canonical_source", "receipt", "canonical_receipt"}
+    if forbidden.intersection(body):
+        raise LegalAnalysisError("client_case_authority")
+    allowed = {"request_id", "source_content_hash", "vocabulary", "typed_obligations", "emitted_lean",
+        "expected_private_revision", "expected_session_revision"}
+    if set(body) - allowed or len(json.dumps(body, default=str)) > _BODY_CAP:
+        raise LegalAnalysisError("legal_analysis_bounds")
+    source_hash = body.get("source_content_hash")
+    selected = current_case_legal_ir_source(case_file, source_hash, case_id=case_id)
+    stored, record, admission = selected["stored"], selected["record"], selected["admission"]
+    current_review, text, metadata = selected["review"], selected["text"], selected["metadata"]
+    fields = _request_body({**dict(body), "source_text": text})
+    fields.pop("supplied_receipt")
+    context = case_file.get("legal_context")
+    context = context if isinstance(context, Mapping) else {}
+    applicability = current_review.get("governing_applicability")
+    if applicability not in {"applicable", "inapplicable", "limited", "unknown"}:
+        applicability = "unknown"
+    # A source can be admitted to storage while its case applicability remains
+    # unresolved. Retain that distinction instead of manufacturing applicable law.
+    declared_applicability = case_file.get("legal_context_applicability")
+    if (declared_applicability != "explicit"
+            or admission.get("source_scope_sha256") != source_scope_sha256):
+        applicability = "unknown"
+    source_context = {"authority_version": str(metadata.get("authority_version") or ""),
+        "effective_date": str(metadata.get("effective_date") or ""), "applicability": applicability}
+    for name, value in (("jurisdiction", context.get("jurisdiction")),
+                        ("forum", case_file.get("legal_context_forum"))):
+        if isinstance(value, str) and value.strip():
+            source_context[name] = value
+    try:
+        graph = KnowledgeGraph.from_dict(deepcopy(dict(knowledge_graph)))
+        factual = project_factual_kg(graph, case_id=case_id)
+    except (TypeError, ValueError, KeyError, AttributeError):
+        raise LegalAnalysisError("legal_analysis_unavailable") from None
+    facts = [row for row in factual.get("user_statements", [])
+        if isinstance(row, dict) and row.get("admitted_user_fact") is True]
+    bounded = [row for row in facts if isinstance(row.get("text"), str) and len(row["text"]) <= 512][:16]
+    fields.update(current_source=text, user_facts=[row["text"] for row in bounded],
+        applicability_context=source_context,
+        legal_context={"citation": str(record.get("citation") or ""),
+            "authority_locator": str(metadata.get("source_locator") or ""),
+            "authority_version": str(metadata.get("authority_version") or ""), "source_text": text})
+    payload = attach_canonical_legal_ir_source_obligations(**fields)
+    if payload.get("status") == "unavailable":
+        raise LegalAnalysisError("canonical_compiler_unavailable")
+    payload.update(task_id=TASK_ID, case_id=case_id, admitted_law=False, proof=False, legal_sufficiency=False,
+        source_binding={"content_hash": source_hash, "source_record_sha256": _document_sha256(record),
+            "source_scope_sha256": source_scope_sha256,
+            "authority_locator": str(metadata.get("source_locator") or ""),
+            "authority_version": str(metadata.get("authority_version") or ""),
+            "source_storage_admitted": True, "governing_applicability": applicability},
+        factual_premise_bindings=[{"assertion_id": row["assertion_id"], "source_identity": row["source_identity"]}
+            for row in bounded], factual_premises_truncated=len(bounded) != len(facts))
+    return payload
+
+
 def mount_legal_analysis_routes(app: Any) -> None:
-    """Mount canonical IR attachment routes. Authorization middleware protects the prefix."""
-
+    """Serve only the current encrypted owner, under the issued case capability."""
     from fastapi.responses import JSONResponse
-
+    from starlette.concurrency import run_in_threadpool
     from applications.case_routes import _BOUND_HANDLERS
-    from applications.workspace_case_authority import current_workspace_case_authority
+    from applications.complaint_workspace import (ComplaintWorkspaceService, WorkspaceAccess,
+        WorkspaceAuthorizationDenied, WorkspacePersistenceError, workspace_access_scope)
+    from applications.workspace_case_authority import (current_workspace_case_authority,
+        WorkspaceCaseAuthorityError)
 
-    def _fail(exc: LegalAnalysisError) -> JSONResponse:
-        return JSONResponse(
-            {
-                "error": exc.code,
-                "status": "denied",
-                "executed_proof": False,
-                "governing_legal_authority": False,
-                "proof": False,
-            },
-            status_code=legal_analysis_http_status(exc.code),
-        )
+    def fail(code):
+        return JSONResponse({"error": code, "status": "denied", "executed_proof": False,
+            "governing_legal_authority": False, "proof": False}, status_code=legal_analysis_http_status(code))
 
-    def _authorized(request: Request, case_id: str):
+    def authorized(request, case_id):
         decision = getattr(request.state, "case_authorization", None)
-        if decision is None or getattr(decision, "permits_case_content", False) is not True:
+        expected = "case.read" if request.method.upper() in {"GET", "HEAD"} else "case.update"
+        if (decision is None or getattr(decision, "permits_case_content", False) is not True
+                or getattr(decision, "action", "") != expected):
             raise LegalAnalysisError("legal_analysis_ungranted")
-        action = getattr(decision, "action", "")
-        method = request.method.upper()
-        expected = "case.read" if method in {"GET", "HEAD"} else "case.update"
-        if action != expected:
-            raise LegalAnalysisError("legal_analysis_ungranted")
-        authorized_case = str(getattr(decision, "case_id", "") or "")
         query_case = str(request.query_params.get("case_id") or "")
-        if authorized_case != case_id or (query_case and query_case != authorized_case):
+        if getattr(decision, "case_id", "") != case_id or (query_case and query_case != case_id):
             raise LegalAnalysisError("cross_case_id")
         resolver = _BOUND_HANDLERS.get()
         if resolver is None:
             raise LegalAnalysisError("legal_analysis_unavailable")
         try:
-            mediator, _workspace, _root = resolver()
-            authority = current_workspace_case_authority()
-        except Exception as exc:
-            raise LegalAnalysisError("legal_analysis_unavailable") from exc
-        if authority is None or getattr(authority, "case_id", None) != case_id:
+            _mediator, workspace, _root = resolver()
+        except Exception:
+            raise LegalAnalysisError("legal_analysis_unavailable") from None
+        if not isinstance(workspace, ComplaintWorkspaceService):
+            raise LegalAnalysisError("legal_analysis_unavailable")
+        principal = getattr(request.state, "browser_principal", None)
+        actor = getattr(principal, "principal_id", None)
+        authority = current_workspace_case_authority()
+        if not actor or authority is None or authority.case_id != case_id:
             raise LegalAnalysisError("legal_analysis_ungranted")
-        return mediator
+        authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+        return workspace, authority, actor
+
+    def execute(workspace, actor, case_id, body):
+        with workspace_access_scope(WorkspaceAccess.authenticated(actor, case_id)):
+            if body is None:
+                return workspace.read_case_legal_analysis(actor, case_id=case_id)
+            return workspace.attach_case_legal_analysis(actor, case_id=case_id, request=body)
+
+    async def dispatch(request, case_id, write):
+        try:
+            workspace, authority, actor = authorized(request, case_id)
+            body = None
+            if write:
+                try:
+                    body = await request.json()
+                except (UnicodeDecodeError, ValueError):
+                    raise LegalAnalysisError("legal_analysis_field") from None
+                if not isinstance(body, dict):
+                    raise LegalAnalysisError("legal_analysis_field")
+            # Permit real logout/revocation to complete while local compilation
+            # runs; copied ContextVars retain only this issued request scope.
+            payload = await run_in_threadpool(execute, workspace, actor, case_id, body)
+            authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+            return JSONResponse(payload)
+        except (WorkspaceAuthorizationDenied, WorkspaceCaseAuthorityError):
+            return fail("legal_analysis_ungranted")
+        except WorkspacePersistenceError as exc:
+            return fail("revision_conflict" if exc.code == "revision_conflict" else (
+                "unlock_needed" if exc.code == "unlock_needed" else "legal_analysis_unavailable"))
+        except LegalAnalysisError as exc:
+            return fail(exc.code)
 
     @app.get(LEGAL_ANALYSIS_PREFIX + "/{case_id}")
     async def read_legal_analysis(case_id: str, request: Request):
-        try:
-            mediator = _authorized(request, case_id)
-            payload = project_canonical_legal_ir(_case_file_from_mediator(mediator))
-        except LegalAnalysisError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        return JSONResponse(payload)
+        return await dispatch(request, case_id, False)
 
     @app.post(LEGAL_ANALYSIS_PREFIX + "/{case_id}")
     async def attach_legal_analysis(case_id: str, request: Request):
-        try:
-            mediator = _authorized(request, case_id)
-            body = await request.json()
-            if not isinstance(body, dict):
-                raise LegalAnalysisError("legal_analysis_field")
-            payload = attach_case_canonical_legal_ir(mediator, body)
-        except LegalAnalysisError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        payload["executed_proof"] = False
-        payload["governing_legal_authority"] = False
-        return JSONResponse(payload)
+        return await dispatch(request, case_id, True)
+
+
+    # Retain the Native30 owner path during isolated characterization.
+    def _authorized(request, case_id):
+        authorized(request, case_id)
+        return _BOUND_HANDLERS.get()()[0]
+
+    def _fail(exc):
+        return fail(exc.code)
 
     @app.get(LEGAL_ANALYSIS_PREFIX + "/{case_id}/definition-correspondence")
     async def read_definition_correspondence(case_id: str, request: Request):
@@ -331,6 +480,7 @@ def mount_legal_analysis_routes(app: Any) -> None:
         payload["authorizes_law"] = False
         payload["authorizes_proof"] = False
         return JSONResponse(payload)
+
 
     @app.post(LEGAL_ANALYSIS_PREFIX + "/{case_id}/definition-correspondence")
     async def bind_definition_correspondence(case_id: str, request: Request):
@@ -350,3 +500,4 @@ def mount_legal_analysis_routes(app: Any) -> None:
         payload["executed_proof"] = False
         payload["governing_legal_authority"] = False
         return JSONResponse(payload)
+
