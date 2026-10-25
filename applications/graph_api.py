@@ -226,12 +226,14 @@ def legal_dependency_http_status(code: str) -> int:
     if code in {
         "stale_case_revision", "stale_consent", "stale_actor_grant", "stale_legal_source_hash",
         "stale_dependency_generation", "stale_late_result", "consent_revision_conflict", "source_unchanged",
+        "graph_revision_changed",
     }:
         return 409
     if code in {"graph_read_ungranted", "cross_case_id", "cross_case", "actor_authority_required",
                 "actor_not_permitted", "consent_revoked", "purpose_consent_required"}:
         return 403
-    if code in {"legal_dependency_unavailable", "mediator_graph_hook_unavailable"}:
+    if code in {"legal_dependency_unavailable", "mediator_graph_hook_unavailable", "unlock_needed",
+                "workspace_graph_read_unavailable"}:
         return 503
     return 403
 
@@ -718,6 +720,44 @@ def accept_versioned_law_late_result(mediator: Any, *, live: Mapping[str, Any], 
     return receipt
 
 
+def _read_current_law_materials(workspace, authority, actor, case_id):
+    """Read canonical legal materials through the public, read-only owner."""
+    from copy import deepcopy
+
+    decision = authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+    if authority.action != "case.read" or authority.case_id != case_id:
+        raise LegalDependencyGraphError("graph_read_ungranted")
+    response = workspace.get_session(actor, case_id=case_id)
+    state = response.get("session") if isinstance(response, dict) else None
+    if (not isinstance(state, dict) or state.get("case_id") != case_id
+            or state.get("user_id") != decision.canonical_owner_principal_id):
+        raise LegalDependencyGraphError("cross_case_id")
+    shared = state.get("shared_interview")
+    if (not isinstance(shared, dict) or not isinstance(shared.get("intake_case_file"), dict)
+            or not isinstance(shared.get("dependency_graph"), dict)):
+        raise LegalDependencyGraphError("legal_dependency_unavailable")
+    try:
+        identity = hashlib.sha256(json.dumps({
+            "owner": state["user_id"], "case_id": case_id,
+            "private_revision": state.get("private_revision"), "shared_interview": shared,
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    except (ValueError, TypeError, KeyError):
+        raise LegalDependencyGraphError("legal_dependency_unavailable") from None
+    authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+    return deepcopy(shared["intake_case_file"]), deepcopy(shared["dependency_graph"]), identity
+
+
+def _project_current_law_graph(workspace, authority, actor, case_id):
+    with workspace_access_scope(WorkspaceAccess.authenticated(actor, case_id)):
+        case_file, graph, before = _read_current_law_materials(workspace, authority, actor, case_id)
+        payload = project_law_derived_dependency_graph(case_file, dependency_graph=graph, case_id=case_id)
+        _case_again, _graph_again, after = _read_current_law_materials(workspace, authority, actor, case_id)
+        if before != after:
+            raise LegalDependencyGraphError("graph_revision_changed")
+        authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+        return payload
+
+
 def mount_law_dependency_graph_routes(app: Any) -> None:
     """Mount the read-only law-derived dependency graph beside the factual graph."""
 
@@ -829,9 +869,30 @@ def mount_law_dependency_graph_routes(app: Any) -> None:
     @app.get(FACTUAL_GRAPH_PREFIX + "/{case_id}/legal-dependency")
     async def read_law_dependency_graph(case_id: str, request: Request):
         try:
-            mediator = _authorized(request, case_id)
-            case_file, graph = _materials_from_mediator(mediator)
-            payload = project_law_derived_dependency_graph(case_file, dependency_graph=graph, case_id=case_id)
+            decision = getattr(request.state, "case_authorization", None)
+            if (decision is None or getattr(decision, "permits_case_content", False) is not True
+                    or getattr(decision, "action", "") != "case.read"):
+                raise LegalDependencyGraphError("graph_read_ungranted")
+            query_case = str(request.query_params.get("case_id", "") or "")
+            if decision.case_id != case_id or (query_case and query_case != case_id):
+                raise LegalDependencyGraphError("cross_case_id")
+            resolver = _BOUND_HANDLERS.get()
+            if resolver is None:
+                raise LegalDependencyGraphError("mediator_graph_hook_unavailable")
+            _mediator, workspace, _root = resolver()
+            if not isinstance(workspace, ComplaintWorkspaceService):
+                raise LegalDependencyGraphError("workspace_graph_read_unavailable")
+            authority = current_workspace_case_authority()
+            actor = getattr(getattr(request.state, "browser_principal", None), "principal_id", None)
+            if authority is None or not actor:
+                raise LegalDependencyGraphError("graph_read_ungranted")
+            payload = await run_in_threadpool(_project_current_law_graph, workspace, authority, actor, case_id)
+            authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+        except (WorkspaceAuthorizationDenied, WorkspaceCaseAuthorityError):
+            return _fail(LegalDependencyGraphError("actor_not_permitted"))
+        except WorkspacePersistenceError as exc:
+            code = str(getattr(exc, "code", "") or "")
+            return _fail(LegalDependencyGraphError("unlock_needed" if code == "unlock_needed" else "legal_dependency_unavailable"))
         except LegalDependencyGraphError as exc:
             return _fail(exc)
         return JSONResponse(payload)
