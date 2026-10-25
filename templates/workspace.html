@@ -13936,6 +13936,7 @@ function extractComplaintOutputSignals(result) {
             clearLegalContextView();
             removePrivateWorkspaceStorage();
             workspaceSession = null;
+            adaptiveInquiryState = null;
             workspaceCapabilities = null;
             workspaceToolingContract = null;
             workspaceMediatorPrompt = null;
@@ -14009,6 +14010,19 @@ function extractComplaintOutputSignals(result) {
         let adaptiveInquiryState = null;
         window.adaptiveModelAttempts = 0;
 
+        function adaptiveRequestCapture() {
+            return {pageEpoch: workspacePrivacyEpoch, sdkEpoch: client._privacyEpoch,
+                actor: client.activePrincipalId, caseContext: JSON.stringify(client.caseContext),
+                userId: workspaceUserId};
+        }
+
+        function adaptiveRequestCurrent(capture) {
+            return !workspacePrivacyInactive && client._privacyActive !== false
+                && capture.pageEpoch === workspacePrivacyEpoch && capture.sdkEpoch === client._privacyEpoch
+                && capture.actor === client.activePrincipalId && capture.caseContext === JSON.stringify(client.caseContext)
+                && capture.userId === workspaceUserId;
+        }
+
         function adaptiveViewFrom(payload) {
             if (payload && payload.adaptive_inquiry && payload.adaptive_inquiry.schema === 'adaptive-inquiry-v1') {
                 return payload.adaptive_inquiry;
@@ -14030,7 +14044,8 @@ function extractComplaintOutputSignals(result) {
                 legal_sufficiency: false};
         }
 
-        function renderAdaptiveInquiry(payload) {
+        function renderAdaptiveInquiry(payload, capture) {
+            if (workspacePrivacyInactive || (capture && !adaptiveRequestCurrent(capture))) return;
             const view = adaptiveViewFrom(payload);
             adaptiveInquiryState = view;
             const pendingNode = document.getElementById('adaptive-pending');
@@ -14083,6 +14098,8 @@ function extractComplaintOutputSignals(result) {
         }
 
         async function enterAdaptiveNarrative() {
+            const capture = adaptiveRequestCapture();
+            if (!adaptiveRequestCurrent(capture)) return;
             const narrative = adaptiveNarrativeText();
             if (!narrative) {
                 setStatus('Enter a complaint narrative before asking the shared mediator.');
@@ -14091,16 +14108,20 @@ function extractComplaintOutputSignals(result) {
             setBusyStatus('Asking the shared mediator for the pending inquiry…');
             try {
                 const result = await client.runIntakeChatTurn(workspaceUserId, narrative, 'original_complaint', {interview_action: 'start'});
+                if (!adaptiveRequestCurrent(capture)) return;
                 workspaceSession = result;
-                renderAdaptiveInquiry(result);
+                renderAdaptiveInquiry(result, capture);
                 const view = adaptiveViewFrom(result);
                 setStatus(view.pending ? 'Pending inquiry loaded from the shared mediator.' : 'The shared mediator has no pending inquiry.');
             } catch (error) {
+                if (!adaptiveRequestCurrent(capture)) return;
                 setStatus(`The shared mediator did not return an inquiry: ${String((error && error.message) || error)}`);
             }
         }
 
         async function answerAdaptiveInquiry(kind) {
+            const capture = adaptiveRequestCapture();
+            if (!adaptiveRequestCurrent(capture)) return;
             const view = adaptiveInquiryState || adaptiveViewFrom(workspaceSession);
             if (!view || !view.pending || String(view.inquiry_id || '').indexOf('inq-') !== 0) {
                 setStatus('There is no mediator inquiry to answer. Enter a narrative first.');
@@ -14119,12 +14140,14 @@ function extractComplaintOutputSignals(result) {
                     expected_question_revision: view.revision,
                     interview_action: 'answer',
                 });
+                if (!adaptiveRequestCurrent(capture)) return;
             } catch (error) {
+                if (!adaptiveRequestCurrent(capture)) return;
                 setStatus(`The answer was not accepted: ${String((error && error.message) || error)}`);
                 return;
             }
             workspaceSession = result;
-            renderAdaptiveInquiry(result);
+            renderAdaptiveInquiry(result, capture);
             const next = adaptiveViewFrom(result);
             if (kind === 'unknown' || kind === 'deferred') {
                 setStatus(`The ${kind} answer preserved the graph gap. The next inquiry follows the remaining gaps.`);
@@ -14135,11 +14158,13 @@ function extractComplaintOutputSignals(result) {
             }
         }
 
-        async function persistedPurposeConsent(purpose) {
+        async function persistedPurposeConsent(purpose, capture) {
+            if (!adaptiveRequestCurrent(capture)) return {authorized: false, code: 'private_state_changed'};
             const caseId = adaptiveCaseId(workspaceSession);
             if (!caseId) return {authorized: false, code: 'case_purpose_consent_required'};
             try {
                 const payload = await client._request('/api/cases/' + encodeURIComponent(caseId) + '/processing-consent', {method: 'GET'});
+                if (!adaptiveRequestCurrent(capture)) return {authorized: false, code: 'private_state_changed'};
                 const match = Array.isArray(payload.decisions) ? payload.decisions.find((item) => item.purpose === purpose) : null;
                 if (!match || match.egress_authorized !== true || payload.case_id !== caseId) {
                     return {authorized: false, code: 'case_purpose_consent_required'};
@@ -14153,14 +14178,19 @@ function extractComplaintOutputSignals(result) {
         function showAdaptiveModelStatus(code, dispatched) {
             const node = document.getElementById('adaptive-model-status');
             if (!node) return;
-            node.dataset.modelDispatched = dispatched ? 'true' : 'false';
+            node.dataset.modelDispatched = dispatched === true ? 'true' : (dispatched === false ? 'false' : 'unknown');
             node.dataset.code = code;
-            node.textContent = dispatched
+            node.textContent = dispatched === true
                 ? 'The model was called only after persisted case-purpose consent and a minimized request.'
-                : `Model not called (${code}). Persisted per-case consent and a minimized purpose are required.`;
+                : (dispatched === false
+                    ? `Model not called (${code}). Persisted per-case consent and a minimized purpose are required.`
+                    : `Model dispatch outcome has not been verified (${code}). No model output has been accepted.`);
         }
 
         async function askAdaptiveModel() {
+            const capture = adaptiveRequestCapture();
+            if (!adaptiveRequestCurrent(capture)) return;
+            showAdaptiveModelStatus('checking_consent', null);
             const purposeNode = document.getElementById('adaptive-model-purpose');
             const purpose = purposeNode ? purposeNode.value : 'extract_facts';
             const view = adaptiveInquiryState || adaptiveViewFrom(workspaceSession);
@@ -14168,7 +14198,8 @@ function extractComplaintOutputSignals(result) {
             const narrative = adaptiveNarrativeText();
             const fragmentNode = document.getElementById('adaptive-model-fragment');
             const fragment = fragmentNode ? fragmentNode.value.trim() : '';
-            const consent = await persistedPurposeConsent(purpose);
+            const consent = await persistedPurposeConsent(purpose, capture);
+            if (!adaptiveRequestCurrent(capture)) return;
             if (!consent.authorized) {
                 showAdaptiveModelStatus(consent.code, false);
                 setStatus('Model extraction stayed off. This case has no persisted remote-processing consent for that purpose.');
@@ -14192,11 +14223,21 @@ function extractComplaintOutputSignals(result) {
                 }
                 inputs = {gap_code: gap, target_ref: target};
             }
-            window.adaptiveModelAttempts += 1;
-            const result = await client._request('/api/complaint-workspace/inference/dispatch', {
-                method: 'POST',
-                body: JSON.stringify({purpose, inputs}),
-            });
+            let result;
+            try {
+                if (!adaptiveRequestCurrent(capture)) return;
+                window.adaptiveModelAttempts += 1;
+                result = await client._request('/api/complaint-workspace/inference/dispatch', {
+                    method: 'POST',
+                    body: JSON.stringify({purpose, inputs}),
+                });
+                if (!adaptiveRequestCurrent(capture)) return;
+            } catch (_error) {
+                if (!adaptiveRequestCurrent(capture)) return;
+                showAdaptiveModelStatus('inference_unavailable', null);
+                setStatus('The model response could not be verified.');
+                return;
+            }
             const dispatched = result && result.model_dispatched === true;
             showAdaptiveModelStatus(String((result && result.code) || (dispatched ? 'dispatched' : 'refused')), dispatched);
             setStatus(dispatched ? 'Minimized model request dispatched for this case purpose.' : 'The model request was refused.');
