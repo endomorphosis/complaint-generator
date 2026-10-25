@@ -432,7 +432,7 @@ Implementation instructions:
 
 ## CIMP-GUI-15 Make browser SDK failures and private state truthful
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
