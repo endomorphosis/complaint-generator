@@ -57,7 +57,7 @@ def test_actual_owner_correction_survives_fresh_encrypted_workspace(tmp_path):
         assert receipt["actor_principal_id"] == world.owner.principal_id
         assert receipt["canonical_owner_principal_id"] == world.case.tenant_id
         assert receipt["actor_matches_canonical_owner"] is False
-    cold = ComplaintWorkspaceService(root_dir=service._root_dir)
+    cold = ComplaintWorkspaceService(root_dir=service._session_dir)
     cold.unlock_private_keys(passphrase=PASSPHRASE)
     registry = CaseHandlerRegistry()
     registry.bind(world.case, mediator=cold, workspace_service=cold)
