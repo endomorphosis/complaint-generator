@@ -167,6 +167,101 @@ function dispatchSharedSyncEvent(detail, storageKey) {
     return normalizedDetail;
 }
 
+const MAX_BOUNDED_INFERENCE_RETRIES = 2;
+const BOUNDED_INFERENCE_RETRYABLE = new Set(['unavailable', 'rate_limited', 'timeout']);
+const BOUNDED_INFERENCE_STAGE = new Set(['recorded', 'denied', 'not_reached', 'malformed', 'cancelled', 'timeout', 'unavailable', 'dispatching', 'held', 'admitted', 'refused', 'partial', 'rate_limited', 'unobserved', 'checking_consent']);
+
+function boundedInferenceRevision(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    if (Number.isSafeInteger(payload.bound_session_revision)) return payload.bound_session_revision;
+    if (Number.isSafeInteger(payload.session_revision)) return payload.session_revision;
+    return null;
+}
+
+function boundedInferenceKey(body, revision) {
+    const purpose = body && typeof body.purpose === 'string' ? body.purpose : '';
+    let inputs = '';
+    try { inputs = JSON.stringify(body && body.inputs && typeof body.inputs === 'object' ? body.inputs : {}); }
+    catch (error) { inputs = ''; }
+    return purpose + '\n' + inputs + '\n' + (revision == null ? '' : String(revision));
+}
+
+function boundedInferenceStages(payload, seeded) {
+    const stages = Array.isArray(seeded) ? seeded.filter((item) => item && BOUNDED_INFERENCE_STAGE.has(item.status)).map((item) => ({kind: String(item.kind || 'request'), status: item.status})) : [];
+    const receipts = payload && Array.isArray(payload.receipts) ? payload.receipts : [];
+    receipts.forEach((item) => {
+        if (!item || typeof item !== 'object' || !BOUNDED_INFERENCE_STAGE.has(item.status)) return;
+        stages.push({kind: String(item.kind || 'outcome'), status: item.status});
+    });
+    return stages.slice(0, 8);
+}
+
+function projectBoundedInferenceReceipt(payload, context) {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const extra = context && typeof context === 'object' ? context : {};
+    const error = extra.error;
+    const codeFromError = error ? String(error.code || error.message || 'unobserved') : '';
+    const status = typeof source.status === 'string' ? source.status : '';
+    const code = error ? codeFromError : (typeof source.code === 'string' ? source.code : '');
+    const partial = source.partial === true || status === 'partial' || code === 'partial_response';
+    let lifecycle = 'unobserved';
+    if (extra.lifecycle) lifecycle = String(extra.lifecycle);
+    else if (code === 'cancelled' || status === 'cancelled' || (error && error.name === 'AbortError')) lifecycle = 'cancelled';
+    else if (code === 'retry_exhausted') lifecycle = 'retry_exhausted';
+    else if (code === 'retry_not_applicable') lifecycle = extra.previousLifecycle || 'unobserved';
+    else if (status === 'timeout' || code === 'timeout' || code === 'deadline_expired' || (error && (error.status === 408 || error.status === 504))) lifecycle = 'timeout';
+    else if (status === 'rate_limited' || code === 'rate_limited' || status === 'quota' || code === 'quota' || (error && error.status === 429)) lifecycle = 'rate_limited';
+    else if (status === 'unavailable' || code === 'model_transport_unavailable' || code === 'provider_unavailable' || code === 'inference_unavailable') lifecycle = 'unavailable';
+    else if (partial) lifecycle = 'partial';
+    else if (status === 'held' || code === 'awaiting_late_admission') lifecycle = 'held';
+    else if (source.accepted === true && status === 'admitted') lifecycle = 'admitted';
+    else if (status === 'refused' || code) lifecycle = 'refused';
+    let revision = boundedInferenceRevision(source);
+    if (revision == null && Number.isSafeInteger(extra.preserveRevision)) revision = extra.preserveRevision;
+    if (Object.prototype.hasOwnProperty.call(extra, 'revision')) revision = Number.isSafeInteger(extra.revision) ? extra.revision : null;
+    let remote = extra.remoteRevoked === true ? 'revoked' : 'unchanged';
+    if (code === 'consent_revoked' || source.remote_processing_revoked === true || source.revoked === true) remote = 'revoked';
+    if (partial && (source.remote_processing_enabled === true || source.reenable_remote_processing === true)) remote = remote === 'revoked' ? 'revoked' : 'not_reenabled';
+    const terminal = extra.terminal !== false && lifecycle !== 'dispatching' && lifecycle !== 'checking_consent';
+    const retryable = BOUNDED_INFERENCE_RETRYABLE.has(lifecycle) && terminal;
+    const texts = {
+        idle: 'No inference request has started.',
+        checking_consent: 'Persisted case-purpose consent is being read. No model call has been observed.',
+        dispatching: 'The inference request was sent. Completion has not been observed.',
+        held: 'The provider response is held for late admission. Legal requirements are not marked supported.',
+        admitted: 'Late admission accepted the held result. Model text does not mark legal requirements supported.',
+        cancelled: 'The inference request was cancelled.',
+        unavailable: 'Inference is unavailable.',
+        rate_limited: 'The provider rate limit was observed.',
+        timeout: 'The inference request timed out.',
+        refused: 'The inference request was refused (' + (code || 'refused') + ').',
+        partial: 'A partial response was observed. It does not support legal requirements or restore remote processing.',
+        unobserved: 'No inference outcome was observed.',
+        retry_exhausted: 'The retry limit was reached. The request was not sent again.',
+    };
+    return {
+        schema: 'bounded-inference-progress-v1',
+        lifecycle: lifecycle,
+        code: code || lifecycle,
+        revision: revision,
+        percent: null,
+        fabricated_progress: false,
+        requirements_supported: false,
+        model_dispatched: source.model_dispatched === true,
+        remote_processing: remote,
+        retry_count: Number.isSafeInteger(extra.retryCount) ? extra.retryCount : 0,
+        attempt_count: Number.isSafeInteger(extra.attemptCount) ? extra.attemptCount : 0,
+        retry_limit: MAX_BOUNDED_INFERENCE_RETRIES,
+        terminal: terminal,
+        retryable: retryable,
+        stages: boundedInferenceStages(source, extra.stages),
+        lifecycle_text: texts[lifecycle] || texts.unobserved,
+        status_text: (texts[lifecycle] || texts.unobserved) + (revision == null ? ' Current revision: unobserved.' : ' Current revision: ' + revision + '.'),
+        streaming: false,
+        limitations: ['progress_percent_is_not_estimated', 'partial_output_is_not_legal_support', 'revoked_remote_processing_stays_revoked', 'ws_sse_streaming_not_used'],
+    };
+}
+
 class ComplaintMcpClient {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || '/api/complaint-workspace';
@@ -186,6 +281,7 @@ class ComplaintMcpClient {
         this._privacyEpoch = 0;
         this._privacyActive = true;
         this._pendingRequests = new Set();
+        this._boundedInference = {key: '', attempts: 0, retries: 0, view: projectBoundedInferenceReceipt(null, {lifecycle: 'idle', terminal: true, revision: null}), inflight: null, controller: null, remoteRevoked: false};
         clearPrivateBrowserStorage([this.lastToolCallStorageKey, this.toolCallLedgerStorageKey, this.syncEventStorageKey]);
         // A legacy cache accepted arbitrary text; retain only opaque IDs.
         try { this.getCachedDid(); } catch (error) { /* Storage may be unavailable. */ }
@@ -233,6 +329,10 @@ class ComplaintMcpClient {
             target.searchParams.delete('user_id');
             requestTarget = target.toString();
         }
+        if (options.signal) {
+            if (options.signal.aborted) controller.abort();
+            else options.signal.addEventListener('abort', () => controller.abort(), {once: true});
+        }
         const headers = new Headers(options.headers || {});
         if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
         if (caseRequest) {
@@ -249,6 +349,8 @@ class ComplaintMcpClient {
             if (!response.ok) {
                 const denied = response.status === 401 || response.status === 403;
                 let code = denied ? 'authorization_denied' : `http_${response.status}`;
+                if (response.status === 429) code = 'rate_limited';
+                if (response.status === 408 || response.status === 504) code = 'timeout';
                 let contract;
                 if (response.status === 409) {
                     try {
@@ -263,6 +365,7 @@ class ComplaintMcpClient {
                 }
                 if (!lifecycle && epoch !== this._privacyEpoch) throw stateChangedError();
                 const error = new Error(code);
+                error.code = code;
                 error.status = response.status; error.authorizationDenied = denied; error.isError = true;
                 if (contract) error.contract = contract;
                 throw error;
@@ -271,10 +374,18 @@ class ComplaintMcpClient {
             if (!lifecycle && epoch !== this._privacyEpoch) throw stateChangedError();
             if (payload && payload.isError === true && !payload.jsonrpc) {
                 const code = publicToolErrorCode(payload);
-                const error = new Error(code); error.status = response.status; error.authorizationDenied = code === 'authorization_denied'; error.isError = true;
+                const error = new Error(code); error.code = code; error.status = response.status; error.authorizationDenied = code === 'authorization_denied'; error.isError = true;
                 throw error;
             }
             return payload;
+        } catch (error) {
+            if (error && error.name === 'AbortError' && options.signal && options.signal.aborted) {
+                const cancelled = new Error('cancelled');
+                cancelled.code = 'cancelled';
+                cancelled.isError = true;
+                throw cancelled;
+            }
+            throw error;
         } finally { this._pendingRequests.delete(controller); }
     }
 
@@ -1104,6 +1215,107 @@ class ComplaintMcpClient {
     runBrowserAudit(payload) {
         return this.callTool('complaint.run_browser_audit', payload || {});
     }
+
+    _boundedInferenceContext(extra) {
+        const state = this._boundedInference;
+        return Object.assign({
+            attemptCount: state.attempts,
+            retryCount: state.retries,
+            remoteRevoked: state.remoteRevoked,
+            preserveRevision: state.view && Number.isSafeInteger(state.view.revision) ? state.view.revision : null,
+        }, extra || {});
+    }
+
+    _settleBoundedInference(view) {
+        const state = this._boundedInference;
+        if (view.remote_processing === 'revoked') state.remoteRevoked = true;
+        if (view.remote_processing !== 'revoked' && state.remoteRevoked) view = Object.assign({}, view, {remote_processing: 'revoked', requirements_supported: false});
+        if (view.lifecycle === 'partial') view = Object.assign({}, view, {requirements_supported: false, remote_processing: state.remoteRevoked ? 'revoked' : 'not_reenabled'});
+        view.requirements_supported = false;
+        state.view = view;
+        return view;
+    }
+
+    async dispatchBoundedGuiInference(body, options) {
+        const extra = options && typeof options === 'object' ? options : {};
+        const retry = extra.retry === true;
+        const state = this._boundedInference;
+        const revision = this.caseContext && Number.isSafeInteger(this.caseContext.expected_revision) ? this.caseContext.expected_revision : null;
+        const key = boundedInferenceKey(body, revision);
+        if (state.inflight) return state.inflight;
+        if (!retry && state.key === key && state.view && state.view.terminal && state.view.lifecycle !== 'cancelled') return state.view;
+        if (retry) {
+            if (state.key !== key || !state.view || state.view.retryable !== true) {
+                return this._settleBoundedInference(projectBoundedInferenceReceipt(state.view, this._boundedInferenceContext({
+                    lifecycle: state.view ? state.view.lifecycle : 'unobserved',
+                    error: {code: 'retry_not_applicable'},
+                    previousLifecycle: state.view ? state.view.lifecycle : 'idle',
+                    terminal: true,
+                    stages: state.view ? state.view.stages : [],
+                })));
+            }
+            if (state.retries >= MAX_BOUNDED_INFERENCE_RETRIES) {
+                return this._settleBoundedInference(projectBoundedInferenceReceipt(null, this._boundedInferenceContext({
+                    lifecycle: 'retry_exhausted',
+                    error: {code: 'retry_exhausted'},
+                    terminal: true,
+                    stages: state.view.stages,
+                })));
+            }
+            state.retries += 1;
+        } else {
+            state.key = key;
+            state.attempts = 0;
+            state.retries = 0;
+        }
+        state.attempts += 1;
+        const controller = new AbortController();
+        state.controller = controller;
+        const pending = projectBoundedInferenceReceipt(null, this._boundedInferenceContext({
+            lifecycle: 'dispatching', terminal: false, stages: [{kind: 'request', status: 'dispatching'}],
+        }));
+        state.view = pending;
+        if (typeof extra.onView === 'function') extra.onView(pending);
+        const run = (async () => {
+            try {
+                const payload = await this._request('/api/complaint-workspace/inference/dispatch', {
+                    method: 'POST', body: JSON.stringify(body || {}), signal: controller.signal,
+                });
+                const view = this._settleBoundedInference(projectBoundedInferenceReceipt(payload, this._boundedInferenceContext({
+                    terminal: true, stages: [{kind: 'request', status: 'dispatching'}],
+                })));
+                if (typeof extra.onView === 'function') extra.onView(view);
+                return view;
+            } catch (error) {
+                const view = this._settleBoundedInference(projectBoundedInferenceReceipt(null, this._boundedInferenceContext({
+                    error: error, terminal: true, stages: [{kind: 'request', status: 'dispatching'}],
+                })));
+                if (typeof extra.onView === 'function') extra.onView(view);
+                return view;
+            } finally {
+                state.inflight = null;
+                state.controller = null;
+            }
+        })();
+        state.inflight = run;
+        return run;
+    }
+
+    observeBoundedGuiInference(payload, context) {
+        const state = this._boundedInference;
+        if (state.inflight) return state.inflight;
+        const view = this._settleBoundedInference(projectBoundedInferenceReceipt(payload, this._boundedInferenceContext(Object.assign({terminal: true}, context || {}))));
+        state.key = '';
+        state.controller = null;
+        return view;
+    }
+
+    cancelBoundedGuiInference() {
+        const state = this._boundedInference;
+        if (state.controller) state.controller.abort();
+        if (state.inflight) return state.inflight;
+        return state.view;
+    }
 }
 
 
@@ -1114,6 +1326,8 @@ const ComplaintMcpSdk = {
     DEFAULT_SYNC_EVENT_STORAGE_KEY,
     publishSyncEvent: dispatchSharedSyncEvent,
     projectSyncDetail: projectSyncDetail,
+    projectBoundedInferenceReceipt: projectBoundedInferenceReceipt,
+    MAX_BOUNDED_INFERENCE_RETRIES: MAX_BOUNDED_INFERENCE_RETRIES,
     clearPrivateBrowserStorage: clearPrivateBrowserStorage,
 };
 
