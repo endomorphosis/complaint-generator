@@ -1242,7 +1242,7 @@ Implementation instructions:
 
 ## CIMP-GUI-42 Persist authorized encrypted case conversations
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
