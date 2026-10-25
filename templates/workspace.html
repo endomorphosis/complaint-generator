@@ -16916,14 +16916,28 @@ function extractComplaintOutputSignals(result) {
                 if (payload.revision != null) document.getElementById('grant-revision').value = String(payload.revision);
                 statusNode.textContent = payload.error || (payload.admitted === true ? 'admitted ' + payload.surface : (payload.change ? payload.change.operation : 'inspected'));
             }
+            let grantRequestEpoch = 0;
+            function grantCapture() {
+                return {request: ++grantRequestEpoch, page: workspacePrivacyEpoch,
+                    sdk: client._privacyEpoch, actor: client.activePrincipalId,
+                    caseContext: JSON.stringify(client.caseContext),
+                    grant: text('grant-id'), csrf: text('grant-csrf')};
+            }
+            function grantCurrent(capture) {
+                return capture.request === grantRequestEpoch && capture.page === workspacePrivacyEpoch
+                    && capture.sdk === client._privacyEpoch && capture.actor === client.activePrincipalId
+                    && capture.caseContext === JSON.stringify(client.caseContext)
+                    && capture.grant === text('grant-id') && capture.csrf === text('grant-csrf');
+            }
             async function grantFetch(path, options) {
+                const capture = grantCapture();
                 const headers = {accept: 'application/json'};
-                const csrf = text('grant-csrf');
-                if (csrf) headers['x-csrf-token'] = csrf;
+                if (capture.csrf) headers['x-csrf-token'] = capture.csrf;
                 const init = Object.assign({credentials: 'same-origin', headers: headers}, options || {});
                 if (init.body) headers['content-type'] = 'application/json';
                 const response = await fetch(path, init);
                 const payload = await response.json();
+                if (!grantCurrent(capture)) return null;
                 payload.error = payload.error || '';
                 show(payload);
                 return payload;

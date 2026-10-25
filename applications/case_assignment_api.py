@@ -14,7 +14,8 @@ module does not send external messages and does not claim WebSocket or SSE.
 from __future__ import annotations
 
 import json
-import uuid
+import hashlib
+from copy import deepcopy
 from typing import Any, Callable, Mapping
 
 from starlette.requests import Request
@@ -27,7 +28,7 @@ from integrations.private_collaboration import (
     CaseResourceKeyGrantError,
     CaseResourceKeyGrantStore,
 )
-from integrations.private_storage import UserOwnedKeySession
+from integrations.private_storage import UserOwnedKeySession, PrivateStorageError, PrivateArtifactBinding
 
 TASK_ID = "CIMP-GUI-41"
 ASSIGNMENT_LIMITATIONS = (
@@ -134,8 +135,6 @@ class CaseAssignmentService:
         self._clock = clock
         self._artifacts: dict[tuple[str, str, str], bytes] = {}
         self._admitted: dict[str, dict[str, str]] = {}
-        self._change_idem: dict[tuple[str, str], dict[str, Any]] = {}
-        self._audit: list[dict[str, Any]] = []
 
     def bind_artifact(self, *, case_id: str, artifact_kind: str, artifact_revision: str, envelope: bytes) -> None:
         """Operator binding. Request bodies cannot supply ciphertext."""
@@ -157,7 +156,7 @@ class CaseAssignmentService:
             "limitations": list(ASSIGNMENT_LIMITATIONS),
         }
 
-    def invite(self, actor_principal_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
+    def invite(self, actor_principal_id: str, body: Mapping[str, Any], *, before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
         actor = self._active(actor_principal_id)
         payload = self._body(body)
         case_id = _label(payload.get("case_id"), "case_id")
@@ -183,6 +182,7 @@ class CaseAssignmentService:
                 expires_at=payload.get("expires_at"),
                 expected_case_revision=payload.get("expected_case_revision"),
                 idempotency_key=_label(payload.get("idempotency_key"), "idempotency_key"),
+                before_publish=before_publish,
             )
         except CaseMembershipError as exc:
             raise CaseAssignmentError(_invite_code(exc.code)) from exc
@@ -203,27 +203,25 @@ class CaseAssignmentService:
             "limitations": list(ASSIGNMENT_LIMITATIONS),
         }
 
-    def accept(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
-        return self._respond(actor_principal_id, grant_id, body, status="accepted")
+    def accept(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any], *, before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
+        return self._respond(actor_principal_id, grant_id, body, status="accepted", before_publish=before_publish)
 
-    def decline(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
-        return self._respond(actor_principal_id, grant_id, body, status="declined")
+    def decline(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any], *, before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
+        return self._respond(actor_principal_id, grant_id, body, status="declined", before_publish=before_publish)
 
-    def remove(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
-        actor = self._active(actor_principal_id)
+    def remove(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any],
+               *, before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
+        """The explicit remove route uses the same durable cryptographic cutoff."""
         payload = self._body(body)
-        grant = self._visible(actor, grant_id)
-        if grant.owner_principal_id != actor:
-            raise CaseAssignmentError("missing_grant")
-        try:
-            updated = self._memberships.remove(
-                owner_principal_id=actor,
-                grant_id=grant.grant_id,
-                expected_version=payload.get("expected_version"),
-            )
-        except CaseMembershipError as exc:
-            raise CaseAssignmentError(_decision_code(exc.code)) from exc
-        return self._view(updated, actor)
+        expected = payload.get("expected_version")
+        if type(expected) is not int:
+            raise CaseAssignmentError("revision_conflict")
+        identity = hashlib.sha256(json.dumps([actor_principal_id,grant_id,expected],
+            separators=(",",":")).encode()).hexdigest()
+        return self.change_grant(actor_principal_id,grant_id,{
+            "confirm_grant_change":True,"expected_version":expected,"revoke":True,
+            "idempotency_key":payload.get("idempotency_key", "remove-"+identity)},
+            before_publish=before_publish)
 
     def inspect_grant(self, actor_principal_id: str, grant_id: str) -> dict[str, Any]:
         """Owner or recipient reads the effective scope, expiry, and revocation."""
@@ -232,14 +230,15 @@ class CaseAssignmentService:
         grant = self._visible(actor, grant_id)
         return self._inspected(grant, actor)
 
-    def change_grant(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
-        """Owner changes scope, expiry, or revocation.
+    def change_grant(self, actor_principal_id: str, grant_id: str,
+            body: Mapping[str, Any], *, before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
+        """Durably prepare, apply and audit an exact current owner change.
 
-        The current revision and ``confirm_grant_change: true`` are required.
-        The same idempotency key and payload return the recorded result and do
-        not append another audit event.
+        The Member record fences pending access. Cryptographic revocation is
+        a separate resumable operation: a failed publication never reports a
+        completed change, and an identical fresh-authorized retry resumes its
+        stored cutoff. No independent-store atomicity is claimed.
         """
-
         actor = self._active(actor_principal_id)
         payload = self._body(body)
         if payload.get("confirm_grant_change") is not True:
@@ -252,93 +251,88 @@ class CaseAssignmentService:
         if type(expected) is not int:
             raise CaseAssignmentError("revision_conflict")
         revoke = payload.get("revoke", False)
-        if revoke is not True and revoke is not False:
+        if type(revoke) is not bool:
             raise CaseAssignmentError("confirmation_required")
-        has_scope = "scope" in payload
-        has_expiry = "expires_at" in payload
-        if revoke is True and (has_scope or has_expiry):
-            raise CaseAssignmentError("empty_update")
-        if revoke is False and not has_scope and not has_expiry:
+        has_scope, has_expiry = "scope" in payload, "expires_at" in payload
+        if revoke and (has_scope or has_expiry) or not revoke and not has_scope and not has_expiry:
             raise CaseAssignmentError("empty_update")
         scope = _scope(payload.get("scope")) if has_scope else None
         expiry = payload.get("expires_at") if has_expiry else None
         if has_expiry and type(expiry) is not int:
             raise CaseAssignmentError("expiry")
-        fingerprint = json.dumps({
-            "actor_principal_id": actor,
-            "grant_id": grant.grant_id,
-            "expected_version": expected,
-            "revoke": revoke,
-            "scope": None if scope is None else sorted(scope),
-            "expires_at": expiry,
-        }, sort_keys=True, separators=(",", ":"))
-        cached = self._change_idem.get((actor, key))
-        if cached is not None:
-            if cached["fingerprint"] != fingerprint or cached["grant_id"] != grant.grant_id:
-                raise CaseAssignmentError("replay_mismatch")
-            replay = json.loads(json.dumps(cached["view"]))
-            replay["idempotent_replay"] = True
-            return replay
-        prior_scope = list(grant.actions)
-        prior_expiry = grant.expires_at
-        prior_version = grant.version
+        owner_session = self._sessions.get(actor)
+        admitted_unlocked = isinstance(owner_session, UserOwnedKeySession) and owner_session.unlocked
+        case = self._cases.select_case(actor_principal_id=actor, case_id=grant.case_id)
+        def admit():
+            if before_publish is not None and before_publish() is False:
+                raise CaseAssignmentError("unauthenticated")
+            self._active(actor)
+            current = self._cases.select_case(actor_principal_id=actor, case_id=grant.case_id)
+            if current != case or current.owner_principal_id != actor:
+                raise CaseAssignmentError("missing_case")
+            if admitted_unlocked and not owner_session.unlocked:
+                raise CaseAssignmentError("key_owner_required")
         try:
-            if revoke is True:
-                updated = self._memberships.remove(
-                    owner_principal_id=actor,
-                    grant_id=grant.grant_id,
-                    expected_version=expected,
-                )
-                operation = "revocation"
-            else:
-                updated = self._memberships.update_scope(
-                    owner_principal_id=actor,
-                    grant_id=grant.grant_id,
-                    expected_version=expected,
-                    actions=scope,
-                    expires_at=expiry,
-                )
-                if has_scope and has_expiry:
-                    operation = "scope_and_expiry"
-                elif has_scope:
-                    operation = "scope"
-                else:
-                    operation = "expiry"
+            with self._memberships.owner_change_scope():
+                admit()
+                plan = self._key_grants.review_recipient_revocation(actor_principal_id=actor,
+                    recipient_principal_id=grant.member_principal_id, case_id=grant.case_id,
+                    tenant_id=grant.tenant_id, resource_id=grant.resource_id) if revoke else None
+                if plan is not None and plan["rotation_pending"]:
+                    # A different trusted rotation must not acquire a fresh
+                    # membership intent that its crypto operation cannot resume.
+                    current = self._visible(actor, grant.grant_id)
+                    if not any(item["phase"] == "prepared" and item["idempotency_key"] == key
+                               for item in current.owner_changes):
+                        raise CaseAssignmentError("case_key_rotation_incomplete")
+                prepared = self._memberships.prepare_owner_change(owner_principal_id=actor,
+                    grant_id=grant.grant_id, expected_version=expected, idempotency_key=key,
+                    actions=scope, expires_at=expiry, revoke=revoke,
+                    revoke_cutoff=plan["cutoff"] if plan else None, before_publish=admit)
+                operation = prepared["operation"]
+                if operation["phase"] == "complete":
+                    admit()
+                    return self._change_view(prepared, actor, replay=True)
+                effects = {}
+                if revoke and plan["key_grants_present"]:
+                    if not isinstance(owner_session, UserOwnedKeySession) or not owner_session.unlocked:
+                        raise CaseAssignmentError("key_owner_required")
+                    sessions = {identity:session for identity,session in self._sessions.items()
+                        if identity not in {actor,grant.member_principal_id}}
+                    result = self._key_grants.revoke_and_rotate(actor_principal_id=actor,
+                        recipient_principal_id=grant.member_principal_id,case_id=grant.case_id,
+                        tenant_id=grant.tenant_id,resource_id=grant.resource_id,
+                        cutoff=operation["revoke_cutoff"],owner_session=owner_session,
+                        recipient_sessions=sessions,idempotency_key="owner-change-"+operation["operation_id"],
+                        before_publish=admit,publication_scope=lambda:self._memberships.owner_change_publication_scope(
+                            owner_principal_id=actor,grant_id=grant.grant_id,operation_id=operation["operation_id"]))
+                    effects = {name:result[name] for name in ("generation","cutoff","data_key_id",
+                        "previous_data_key_id","revoked_key_grant_ids","rewrapped_key_grant_ids",
+                        "data_key_rotated","grant_wrap_rotated","future_access_revoked") if name in result}
+                completed = self._memberships.finish_owner_change(owner_principal_id=actor,
+                    grant_id=grant.grant_id,operation_id=operation["operation_id"],
+                    effect_metadata=effects,before_publish=admit)
+                admit()
+                return self._change_view(completed,actor,replay=prepared["replayed"])
         except CaseMembershipError as exc:
             raise CaseAssignmentError(_decision_code(exc.code)) from exc
-        audit = {
-            "audit_id": uuid.uuid4().hex,
-            "grant_id": updated.grant_id,
-            "actor_principal_id": actor,
-            "operation": operation,
-            "from_revision": prior_version,
-            "revision": updated.version,
-            "prior_scope": prior_scope,
-            "scope": list(updated.actions),
-            "prior_expires_at": prior_expiry,
-            "expires_at": updated.expires_at,
-            "revoked": updated.status == "removed",
-            "confirmed": True,
-            "idempotency_key": key,
-        }
-        self._audit.append(audit)
-        view = self._inspected(updated, actor)
-        view["change"] = {
-            "operation": operation,
-            "from_revision": prior_version,
-            "revision": updated.version,
-            "confirmed": True,
-            "idempotency_key": key,
-            "audit_id": audit["audit_id"],
-            "prior_scope": prior_scope,
-            "prior_expires_at": prior_expiry,
-        }
-        view["idempotent_replay"] = False
-        self._change_idem[(actor, key)] = {
-            "fingerprint": fingerprint,
-            "grant_id": updated.grant_id,
-            "view": json.loads(json.dumps(view)),
-        }
+        except CaseResourceKeyGrantError as exc:
+            raise CaseAssignmentError(_key_code(exc.code)) from exc
+        except CaseDirectoryError as exc:
+            raise CaseAssignmentError("missing_case") from exc
+        except OSError as exc:
+            raise CaseAssignmentError("case_key_rotation_incomplete") from exc
+        except PrivateStorageError as exc:
+            raise CaseAssignmentError("key_owner_required") from exc
+
+    def _change_view(self, result, actor, *, replay):
+        grant, operation = result["grant"], result["operation"]
+        view = self._inspected(grant, actor)
+        view["change"] = {name:deepcopy(operation[name]) for name in ("operation","from_revision",
+            "revision","idempotency_key","audit_id","prior_scope","prior_expires_at","effect_metadata")}
+        view["change"].update(confirmed=True, phase="complete")
+        view["idempotent_replay"] = replay
+        view["current_result"] = grant.version == operation["revision"]
         return view
 
     def enforce_participant(
@@ -413,7 +407,7 @@ class CaseAssignmentService:
             request_action=request_action,
         )
 
-    def issue_key_grant(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
+    def issue_key_grant(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any], *, before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
         actor = self._active(actor_principal_id)
         payload = self._body(body)
         grant = self._visible(actor, grant_id)
@@ -423,6 +417,18 @@ class CaseAssignmentService:
         recipient_session = self._sessions.get(grant.member_principal_id)
         if not isinstance(owner_session, UserOwnedKeySession) or not isinstance(recipient_session, UserOwnedKeySession):
             raise CaseAssignmentError("key_owner_required")
+        def admit():
+            if before_publish is not None and before_publish() is False:
+                raise CaseAssignmentError("unauthenticated")
+            self._active(actor)
+            if self._visible(actor,grant.grant_id) != grant or self._display(grant) != "accepted":
+                raise CaseAssignmentError("revision_conflict")
+            self._memberships.authorize(actor_principal_id=grant.member_principal_id,
+                grant_id=grant.grant_id,tenant_id=grant.tenant_id,case_id=grant.case_id,
+                resource_id=grant.resource_id,action="case.read",expected_version=grant.version)
+            owner_session.provider().resolve(PrivateArtifactBinding(tenant_id=grant.tenant_id,
+                case_id=grant.case_id,principal_id=grant.tenant_id,artifact_kind="session",revision="session-v1"))
+            recipient_session.recipient_wrap_key()
         try:
             issued = self._key_grants.issue(
                 actor_principal_id=actor,
@@ -437,7 +443,13 @@ class CaseAssignmentService:
                 owner_session=owner_session,
                 recipient_session=recipient_session,
                 idempotency_key=_label(payload.get("idempotency_key"), "idempotency_key"),
+                before_publish=admit,
             )
+            admit()
+        except CaseMembershipError as exc:
+            raise CaseAssignmentError(_decision_code(exc.code)) from exc
+        except PrivateStorageError as exc:
+            raise CaseAssignmentError("key_owner_required") from exc
         except CaseResourceKeyGrantError as exc:
             raise CaseAssignmentError(_key_code(exc.code)) from exc
         self._admitted[grant.grant_id] = {
@@ -450,7 +462,7 @@ class CaseAssignmentService:
         view["plaintext_available"] = False
         return view
 
-    def open_content(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
+    def open_content(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any], *, before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
         actor = self._active(actor_principal_id)
         payload = self._body(body)
         grant = self._visible(actor, grant_id)
@@ -501,6 +513,17 @@ class CaseAssignmentService:
             text = plaintext.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise CaseAssignmentError("content_unavailable") from exc
+        try:
+            self._memberships.authorize(actor_principal_id=actor,grant_id=grant.grant_id,
+                tenant_id=grant.tenant_id,case_id=grant.case_id,resource_id=grant.resource_id,
+                action="case.read",expected_version=grant.version)
+            session.recipient_wrap_key()
+            if before_publish is not None:
+                before_publish()
+        except CaseMembershipError as exc:
+            raise CaseAssignmentError(_decision_code(exc.code)) from exc
+        except PrivateStorageError as exc:
+            raise CaseAssignmentError("key_owner_required") from exc
         return {
             "actor_principal_id": actor,
             "grant_id": grant.grant_id,
@@ -516,7 +539,7 @@ class CaseAssignmentService:
             "limitations": list(ASSIGNMENT_LIMITATIONS),
         }
 
-    def _respond(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any], *, status: str) -> dict[str, Any]:
+    def _respond(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any], *, status: str, before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
         actor = self._active(actor_principal_id)
         payload = self._body(body)
         grant = self._visible(actor, grant_id)
@@ -533,6 +556,7 @@ class CaseAssignmentService:
                 grant_id=grant.grant_id,
                 expected_version=payload.get("expected_version"),
                 idempotency_key=_label(payload.get("idempotency_key"), "idempotency_key"),
+                before_publish=before_publish,
             )
         except CaseMembershipError as exc:
             raise CaseAssignmentError(_decision_code(exc.code)) from exc
@@ -563,7 +587,9 @@ class CaseAssignmentService:
         view["actor_is_encrypted_owner"] = False
         view["canonical_owner_principal_id"] = grant.tenant_id
         view["revision"] = grant.version
-        view["effective"] = shown == "accepted"
+        view["effective"] = shown == "accepted" and not any(
+            item["phase"] == "prepared" for item in grant.owner_changes)
+        view["change_pending"] = any(item["phase"] == "prepared" for item in grant.owner_changes)
         view["revoked"] = grant.status == "removed"
         view["limitations"] = list(ASSIGNMENT_LIMITATIONS)
         return view
@@ -571,7 +597,7 @@ class CaseAssignmentService:
     def _inspected(self, grant, actor: str) -> dict[str, Any]:
         view = self._view(grant, actor)
         if actor == grant.owner_principal_id:
-            view["audit"] = [dict(item) for item in self._audit if item["grant_id"] == grant.grant_id]
+            view["audit"] = [deepcopy(item["audit"]) for item in grant.owner_changes if item["phase"] == "complete"]
         else:
             view["audit"] = []
         return view
@@ -634,11 +660,11 @@ def _key_code(code: str) -> str:
 def assignment_http_status(code: str) -> int:
     if code in {"missing_case", "missing_grant", "missing_principal"}:
         return 404
-    if code in {"revision_conflict", "replay_mismatch", "membership_replay"}:
+    if code in {"revision_conflict", "replay_mismatch", "membership_replay", "owner_change_pending", "case_key_rotation_incomplete"}:
         return 409
-    if code in {"unauthenticated", "request_body"}:
+    if code in {"unauthenticated", "request_body", "session_required", "session_expired", "authentication_failed"}:
         return 401
-    if code == "assignment_unavailable":
+    if code in {"assignment_unavailable", "key_owner_required", "recipient_session_required"}:
         return 503
     return 403
 
@@ -647,6 +673,8 @@ def mount_case_assignments(app: Any) -> None:
     """Mount assignment routes. Catalog authentication runs before these handlers."""
 
     from fastapi.responses import JSONResponse
+    from starlette.concurrency import run_in_threadpool
+    from applications.browser_sessions import BrowserSessionService, BrowserSessionError, SESSION_COOKIE
 
     def _service(request: Any) -> CaseAssignmentService:
         service = getattr(request.app.state, "case_assignments", None)
@@ -665,6 +693,22 @@ def mount_case_assignments(app: Any) -> None:
     def _material(request: Any) -> Mapping[str, Any]:
         material = getattr(request.state, "case_catalog_material", None)
         return material if isinstance(material, dict) else {}
+
+    def _verify(request):
+        sessions = getattr(request.app.state, "browser_sessions", None)
+        bound = getattr(request.state, "browser_principal", None)
+        token = request.cookies.get(SESSION_COOKIE)
+        if not isinstance(sessions, BrowserSessionService) or bound is None:
+            raise CaseAssignmentError("unauthenticated")
+        def verify():
+            try:
+                current = sessions.authenticate_token(token)
+            except BrowserSessionError as exc:
+                raise CaseAssignmentError(exc.code) from exc
+            if current != bound:
+                raise CaseAssignmentError("unauthenticated")
+        verify()
+        return verify
 
     def _fail(exc: CaseAssignmentError) -> JSONResponse:
         return JSONResponse({"error": exc.code}, status_code=assignment_http_status(exc.code))
@@ -686,7 +730,10 @@ def mount_case_assignments(app: Any) -> None:
     @app.post("/api/cases/assignments")
     async def assignment_invite(request: Request):
         try:
-            created = _service(request).invite(_actor(request), _material(request))
+            verify = _verify(request)
+            created = await run_in_threadpool(_service(request).invite, _actor(request),
+                _material(request), before_publish=verify)
+            verify()
         except CaseAssignmentError as exc:
             return _fail(exc)
         return JSONResponse(created, status_code=201)
@@ -694,21 +741,33 @@ def mount_case_assignments(app: Any) -> None:
     @app.post("/api/cases/assignments/{grant_id}/accept")
     async def assignment_accept(grant_id: str, request: Request):
         try:
-            return JSONResponse(_service(request).accept(_actor(request), grant_id, _material(request)))
+            verify = _verify(request)
+            result = await run_in_threadpool(_service(request).accept, _actor(request),
+                grant_id, _material(request), before_publish=verify)
+            verify()
+            return JSONResponse(result)
         except CaseAssignmentError as exc:
             return _fail(exc)
 
     @app.post("/api/cases/assignments/{grant_id}/decline")
     async def assignment_decline(grant_id: str, request: Request):
         try:
-            return JSONResponse(_service(request).decline(_actor(request), grant_id, _material(request)))
+            verify = _verify(request)
+            result = await run_in_threadpool(_service(request).decline, _actor(request),
+                grant_id, _material(request), before_publish=verify)
+            verify()
+            return JSONResponse(result)
         except CaseAssignmentError as exc:
             return _fail(exc)
 
     @app.post("/api/cases/assignments/{grant_id}/remove")
     async def assignment_remove(grant_id: str, request: Request):
         try:
-            return JSONResponse(_service(request).remove(_actor(request), grant_id, _material(request)))
+            verify = _verify(request)
+            result = await run_in_threadpool(_service(request).remove, _actor(request),
+                grant_id, _material(request), before_publish=verify)
+            verify()
+            return JSONResponse(result)
         except CaseAssignmentError as exc:
             return _fail(exc)
 
@@ -722,7 +781,11 @@ def mount_case_assignments(app: Any) -> None:
     @app.post("/api/cases/assignments/{grant_id}/change")
     async def assignment_change(grant_id: str, request: Request):
         try:
-            return JSONResponse(_service(request).change_grant(_actor(request), grant_id, _material(request)))
+            verify = _verify(request)
+            result = await run_in_threadpool(_service(request).change_grant, _actor(request),
+                grant_id, _material(request), before_publish=verify)
+            verify()
+            return JSONResponse(result)
         except CaseAssignmentError as exc:
             return _fail(exc)
 
@@ -736,7 +799,10 @@ def mount_case_assignments(app: Any) -> None:
     @app.post("/api/cases/assignments/{grant_id}/key-grant")
     async def assignment_key_grant(grant_id: str, request: Request):
         try:
-            created = _service(request).issue_key_grant(_actor(request), grant_id, _material(request))
+            verify = _verify(request)
+            created = await run_in_threadpool(_service(request).issue_key_grant, _actor(request),
+                grant_id, _material(request), before_publish=verify)
+            verify()
         except CaseAssignmentError as exc:
             return _fail(exc)
         return JSONResponse(created, status_code=201)
@@ -744,7 +810,11 @@ def mount_case_assignments(app: Any) -> None:
     @app.post("/api/cases/assignments/{grant_id}/content")
     async def assignment_content(grant_id: str, request: Request):
         try:
-            return JSONResponse(_service(request).open_content(_actor(request), grant_id, _material(request)))
+            verify = _verify(request)
+            result = await run_in_threadpool(_service(request).open_content, _actor(request),
+                grant_id, _material(request), before_publish=verify)
+            verify()
+            return JSONResponse(result)
         except CaseAssignmentError as exc:
             return _fail(exc)
         except CaseAccessError as exc:
