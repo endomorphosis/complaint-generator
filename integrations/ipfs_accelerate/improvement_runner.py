@@ -2792,6 +2792,51 @@ def _call_validation_with_activity(*, executor, spec, workspace_path, timeout_se
             os.close(inode_guard)
 
 
+def _owned_validation_child_exists(native, owner_birth) -> bool:
+    """Read an exact owned descendant during the first executor pulse gap.
+
+    Native 6af's legacy marker detector joins its scalar command text as
+    characters. Use actual procfs argv, retaining its existing marker scope,
+    only after the caller has proved the full current Native dispatch owner.
+    """
+    markers = ("playwright", "run_playwright_test.mjs", "pytest", "vitest", "npm run test",
+        "npm run evidence", "release-readiness-gate", "audit-release-evidence-freshness",
+        "build-virtual-desktop-release-evidence", "tsc --noemit", "run_legal_ir_10m_smoke.sh",
+        "run_legal_ir_8h_canary.sh", "run_hammer_leanstral_smoke.sh", "run_hammer_leanstral_hparam.sh",
+        "uscode_modal_daemon_runner")
+    try:
+        if native.read_process_birth(owner_birth.pid) != owner_birth:
+            return False
+        for row in native.descendant_processes(owner_birth.pid):
+            pid = row.get("pid")
+            if type(pid) is not int or pid <= 1:
+                continue
+            birth = native.read_process_birth(pid)
+            if (birth is None or birth.start_time_ticks != row.get("start_ticks")
+                    or birth.start_time_ticks < owner_birth.start_time_ticks
+                    or birth.boot_id != owner_birth.boot_id
+                    or os.stat(f"/proc/{pid}").st_uid != os.getuid()):
+                continue
+            argv = native.read_process_command_argv(pid)
+            if not argv or not any(marker in " ".join(argv).lower() for marker in markers):
+                continue
+            current, seen = birth, set()
+            for _ in range(64):
+                if current == owner_birth:
+                    return (native.read_process_birth(pid) == birth
+                            and native.read_process_birth(owner_birth.pid) == owner_birth
+                            and native.read_process_command_argv(pid) == argv)
+                if current.pid in seen or current.parent_pid <= 1:
+                    break
+                seen.add(current.pid)
+                current = native.read_process_birth(current.parent_pid)
+                if current is None:
+                    break
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+    return False
+
+
 def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
     """Observe a fixed validation deadline without refreshing any task clock.
 
@@ -2853,6 +2898,7 @@ def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
             return False
         from .validation_handoff import owned as owned_handoff
         return bool(supervisor._active_validation_subprocess_exists()
+                    or _owned_validation_child_exists(native, birth)
                     or _owned_validation_activity(supervisor, state, now_ts=now_ts, owner_pid=birth.pid)
                     or owned_handoff(sys.modules[__name__], supervisor, state, now_ts=now_ts, owner_pid=birth.pid))
     except (OSError, TypeError, ValueError, AttributeError, KeyError):
