@@ -1406,7 +1406,8 @@ def _campaign_scope_liveness(native_state: Mapping[str, Any], *, phase: str, int
                              worker_liveness: str, active: bool, attempt_age: float | None,
                              active_age: float | None, heartbeat_fresh: bool,
                              provider_fresh: bool, provider_terminal: bool,
-                             validation_fresh: bool, now: float, provider_repair: bool = False) -> dict[str, Any]:
+                             validation_fresh: bool, now: float, provider_repair: bool = False,
+                             canonical_validation_active: bool = False) -> dict[str, Any]:
     """Project five execution scopes without folding in an application interview.
 
     Typed stall classification comes from the existing native progress and
@@ -1417,7 +1418,9 @@ def _campaign_scope_liveness(native_state: Mapping[str, Any], *, phase: str, int
     claim_id = str(native_state.get("active_task_id") or "")
     if not claim_id:
         claim = "absent"
-    elif attempt_age is not None and attempt_age > TIMEOUT_SECONDS:
+    elif (attempt_age is not None and attempt_age > TIMEOUT_SECONDS
+            and not (canonical_validation_active and active and not interview_hold
+                     and phase.startswith("valid") and worker_liveness == "alive")):
         claim = "expired"
     elif worker_liveness in {"dead", "pid_reuse"}:
         claim = "owner_dead"
@@ -1837,14 +1840,12 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "heartbeat_identity_mismatch"
     elif heartbeat_age is not None and heartbeat_age > 120:
         health = "stalled"
-    elif (canonical_activity_evidence is not None
-            and canonical_activity_evidence.get("type") in {
-                "canonical_native_validation_finalizing", "canonical_reconciled_validation_finalizing"}):
-        health = "active"  # Returned executor only; no additional execution budget.
+    elif canonical_activity_evidence is not None:
+        # The exact canonical executor has its existing fixed validation
+        # deadline. Its pulse/finalization proof never renews the provider.
+        health = "active"
     elif active and attempt_age is not None and attempt_age > TIMEOUT_SECONDS:
         health = "stalled"
-    elif canonical_activity_evidence is not None:
-        health = "active"
     elif rescue_active:
         health = "active"  # Exact live repair inside the original provider cap.
     elif heartbeat_age is not None and startup_maintenance:
@@ -1921,6 +1922,7 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         active=active, attempt_age=attempt_age, active_age=active_age, heartbeat_fresh=heartbeat_fresh,
         provider_fresh=bool(provider_progress or rescue_active), provider_terminal=provider_terminal,
         validation_fresh=bool(validation_evidence), now=now, provider_repair=rescue_active,
+        canonical_validation_active=canonical_activity_evidence is not None,
     )
     identity_ok = worker_liveness == "alive" and health not in {"identity_mismatch", "heartbeat_identity_mismatch", "state_error"}
     activity_ok = (not active) or bool(provider_progress or validation_evidence or rescue_active
