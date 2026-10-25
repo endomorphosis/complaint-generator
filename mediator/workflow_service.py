@@ -234,6 +234,9 @@ class WorkflowActionService:
 			return self._interview_receipt(action="answer", status=self._interview_runtime_status(), engine=engine)
 		if normalized == "status":
 			return self._interview_receipt(action="status", status=self._interview_runtime_status())
+		if normalized in {"why", "review"}:
+			# Read the current explanation. Do not record an answer or edit either graph.
+			return self._interview_receipt(action=normalized, status=self._interview_runtime_status())
 		return self._interview_receipt(
 			action=normalized,
 			status="refused",
@@ -625,7 +628,14 @@ class WorkflowActionService:
 			"expected_update_contract": self._host_contract(question, selected, "expected_update_contract"),
 			"source_references": self._host_source_references(question, selected),
 		}
-		return self._explicit_grounding(inquiry)
+		inquiry["inquiry_explanation"] = self._build_inquiry_explanation(inquiry, question, selected)
+		grounded = self._explicit_grounding(inquiry)
+		if isinstance(grounded, dict):
+			explanation = grounded.get("inquiry_explanation")
+			if isinstance(explanation, dict):
+				grounded["factual_target"] = explanation.get("factual_target")
+				grounded["law_derived_requirement"] = explanation.get("sourced_legal_requirement")
+		return grounded
 
 	def _host_selection_for_question(self, question: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 		"""Read the denoiser selection contract for this question.
@@ -789,6 +799,7 @@ class WorkflowActionService:
 			else:
 				copied["source_references"] = None
 				copied["source_references_status"] = "unknown"
+			self._preserve_inquiry_explanation(copied)
 			return copied
 		if not objective:
 			copied["objective_id"] = "unknown"
@@ -813,7 +824,244 @@ class WorkflowActionService:
 			reasons.append("grounding_unknown")
 		copied["unknown_reasons"] = reasons
 		copied["legal_sufficiency"] = False
+		self._preserve_inquiry_explanation(copied)
 		return copied
+
+	def _preserve_inquiry_explanation(self, inquiry: Dict[str, Any]) -> None:
+		"""Keep one explanation identity for this inquiry revision.
+
+		Why and review read this object. They do not mint a new revision.
+		"""
+		stored = inquiry.get("inquiry_explanation")
+		revision = int(inquiry.get("revision") or 0)
+		if isinstance(stored, dict) and stored.get("explanation_id") and int(stored.get("revision") or -1) == revision:
+			stored = dict(stored)
+			stored["stores_answer"] = False
+			stored["changes_law"] = False
+			stored["legal_sufficiency"] = False
+			inquiry["inquiry_explanation"] = stored
+			return
+		if isinstance(stored, dict) and stored.get("explanation_id"):
+			return
+		built = self._build_inquiry_explanation(inquiry, inquiry, None)
+		if isinstance(built, dict):
+			inquiry["inquiry_explanation"] = built
+			inquiry["factual_target"] = built.get("factual_target")
+			inquiry["law_derived_requirement"] = built.get("sourced_legal_requirement")
+
+	def _clip_explanation_text(self, value: Any, limit: int = 160) -> str:
+		text = " ".join(str(value or "").split())
+		if len(text) > limit:
+			return text[: limit - 3] + "..."
+		return text
+
+	def _explanation_graphs(self) -> tuple:
+		phase_manager = getattr(self._mediator, "phase_manager", None)
+		getter = getattr(phase_manager, "get_phase_data", None)
+		if not callable(getter):
+			return None, None
+		try:
+			return (
+				getter(ComplaintPhase.INTAKE, "knowledge_graph"),
+				getter(ComplaintPhase.INTAKE, "dependency_graph"),
+			)
+		except Exception:
+			return None, None
+
+	def _compact_provenance(self, record: Any, *, graph_kind: str, graph_id: str, node_id: str) -> Dict[str, Any]:
+		"""Ids and source locators only. Question text and narrative stay out."""
+		source = record if isinstance(record, dict) else {}
+		nested = source.get("provenance") if isinstance(source.get("provenance"), dict) else {}
+		attributes = source.get("attributes") if isinstance(source.get("attributes"), dict) else {}
+		origin = str(source.get("origin") or source.get("source") or attributes.get("origin") or "").strip().lower()
+		model_authored = origin in {"model", "model_suggestion", "llm", "inference"}
+		citation = self._clip_explanation_text(
+			source.get("citation") or attributes.get("citation") or nested.get("citation") or ""
+		)
+		span = self._clip_explanation_text(
+			source.get("span") or source.get("span_id") or attributes.get("span")
+			or attributes.get("source_passage_id") or nested.get("span_id") or nested.get("source_passage_id") or ""
+		)
+		source_id = self._clip_explanation_text(
+			source.get("source_id") or attributes.get("source_id") or attributes.get("source_passage_id")
+			or nested.get("source_id") or nested.get("source_passage_id") or ""
+		)
+		jurisdiction = self._clip_explanation_text(source.get("jurisdiction") or attributes.get("jurisdiction") or "")
+		sourced = bool((citation or source_id or span) and not model_authored and graph_kind == "legal_dependency_graph")
+		return {
+			"status": "sourced" if sourced else "unknown",
+			"graph_kind": graph_kind,
+			"graph_id": graph_id or "unknown",
+			"node_id": node_id or "unknown",
+			"source_id": source_id or "unknown",
+			"citation": citation or "unknown",
+			"span": span or "unknown",
+			"jurisdiction": jurisdiction or "unknown",
+			"model_authored": model_authored,
+			"inspectable": True,
+			"changes_law": False,
+		}
+
+	def _matching_legal_node(self, dependency_graph: Any, question: Dict[str, Any], target_id: str) -> Any:
+		nodes = getattr(dependency_graph, "nodes", None)
+		if not isinstance(nodes, dict):
+			return None
+		context = question.get("context") if isinstance(question.get("context"), dict) else {}
+		ranking = question.get("ranking_explanation") if isinstance(question.get("ranking_explanation"), dict) else {}
+		wanted = {
+			str(question.get("requirement_id") or "").strip(),
+			str(context.get("requirement_id") or "").strip(),
+			str(ranking.get("target_element_id") or "").strip(),
+			str(question.get("target_element_id") or "").strip(),
+		}
+		wanted.discard("")
+		legal_types = {NodeType.REQUIREMENT, NodeType.LEGAL_ELEMENT}
+		for node in nodes.values():
+			node_type = getattr(node, "node_type", None)
+			if node_type not in legal_types:
+				continue
+			node_id = str(getattr(node, "id", "") or "")
+			attributes = getattr(node, "attributes", None)
+			element_id = ""
+			if isinstance(attributes, dict):
+				element_id = str(attributes.get("element_id") or attributes.get("requirement_id") or "").strip()
+			if node_id in wanted or element_id in wanted:
+				return node
+		if target_id:
+			for node in nodes.values():
+				if str(getattr(node, "id", "") or "") == target_id and getattr(node, "node_type", None) in legal_types:
+					return node
+		return None
+
+	def _matching_factual_entity(self, knowledge_graph: Any, target_id: str) -> Any:
+		entities = getattr(knowledge_graph, "entities", None)
+		if not isinstance(entities, dict) or not target_id:
+			return None
+		entity = entities.get(target_id)
+		if entity is not None:
+			return entity
+		for item in entities.values():
+			if str(getattr(item, "id", "") or "") == target_id:
+				return item
+		return None
+
+	def _build_inquiry_explanation(
+		self,
+		inquiry: Dict[str, Any],
+		question: Dict[str, Any],
+		selected: Optional[Dict[str, Any]],
+	) -> Dict[str, Any]:
+		"""Why this question is asked, and which graph each part comes from.
+
+		The factual knowledge graph and the legal dependency graph stay separate.
+		A missing admitted source stays unknown. This record is not an answer and
+		it does not rewrite a legal rule.
+		"""
+		question = question if isinstance(question, dict) else {}
+		selected = selected if isinstance(selected, dict) else {}
+		knowledge_graph, dependency_graph = self._explanation_graphs()
+		factual_graph_id = self._clip_explanation_text(getattr(knowledge_graph, "graph_id", "") or "")
+		legal_meta = getattr(dependency_graph, "metadata", None)
+		legal_graph_id = ""
+		if isinstance(legal_meta, dict):
+			legal_graph_id = self._clip_explanation_text(legal_meta.get("graph_id") or "")
+		target_id = str(inquiry.get("target_id") or question.get("target_id") or selected.get("target_id") or "").strip()
+		if target_id == "unknown":
+			target_id = ""
+		unresolved = question.get("unresolved_target") if isinstance(question.get("unresolved_target"), dict) else {}
+		if not target_id:
+			target_id = str(unresolved.get("target_id") or "").strip()
+		factual_label = str(
+			unresolved.get("label") or unresolved.get("name") or selected.get("target_kind") or question.get("target_kind") or ""
+		).strip()
+		entity = self._matching_factual_entity(knowledge_graph, target_id)
+		entity_record: Dict[str, Any] = {}
+		if entity is not None:
+			factual_label = factual_label or str(getattr(entity, "name", "") or "")
+			entity_record = {
+				"source": getattr(entity, "source", ""),
+				"provenance": getattr(entity, "provenance", {}) if isinstance(getattr(entity, "provenance", None), dict) else {},
+				"attributes": getattr(entity, "attributes", {}) if isinstance(getattr(entity, "attributes", None), dict) else {},
+			}
+			if not target_id:
+				target_id = str(getattr(entity, "id", "") or "")
+		factual_provenance = self._compact_provenance(
+			entity_record,
+			graph_kind="factual_knowledge_graph",
+			graph_id=factual_graph_id,
+			node_id=target_id,
+		)
+		factual_provenance["status"] = "recorded" if entity is not None else "unknown"
+		factual_provenance["model_authored"] = False
+		legal_node = self._matching_legal_node(dependency_graph, question, target_id)
+		legal_record: Dict[str, Any] = {}
+		requirement_id = ""
+		requirement_label = ""
+		if legal_node is not None:
+			requirement_id = str(getattr(legal_node, "id", "") or "")
+			requirement_label = str(getattr(legal_node, "name", "") or "")
+			legal_record = {
+				"citation": getattr(legal_node, "description", "") and "",
+				"attributes": getattr(legal_node, "attributes", {}) if isinstance(getattr(legal_node, "attributes", None), dict) else {},
+				"source": (getattr(legal_node, "attributes", {}) or {}).get("origin") if isinstance(getattr(legal_node, "attributes", None), dict) else "",
+			}
+			attributes = legal_record["attributes"]
+			legal_record["citation"] = attributes.get("citation") or ""
+			legal_record["provenance"] = attributes.get("provenance") if isinstance(attributes.get("provenance"), dict) else {}
+		legal_provenance = self._compact_provenance(
+			legal_record,
+			graph_kind="legal_dependency_graph",
+			graph_id=legal_graph_id,
+			node_id=requirement_id,
+		)
+		law_derived = legal_provenance["status"] == "sourced"
+		why = self._host_why(question, selected) or str(inquiry.get("why_it_matters") or "").strip()
+		if not why:
+			why = "This question is asked because that factual target is still unresolved. An answer is recorded against the target and does not change the legal rule."
+		why = self._clip_explanation_text(why, 400)
+		inquiry_id = str(inquiry.get("inquiry_id") or "")
+		revision = int(inquiry.get("revision") or 0)
+		identity_material = f"{inquiry_id}|{revision}|{target_id}|{requirement_id}"
+		explanation_id = "exp-" + hashlib.sha256(identity_material.encode("utf-8")).hexdigest()[:20]
+		factual_source = {
+			"graph_kind": "factual_knowledge_graph",
+			"graph_id": factual_graph_id or "unknown",
+			"role": "factual_target",
+			"node_id": target_id or "unknown",
+			"provenance": factual_provenance,
+		}
+		legal_source = {
+			"graph_kind": "legal_dependency_graph",
+			"graph_id": legal_graph_id or "unknown",
+			"role": "sourced_legal_requirement",
+			"node_id": requirement_id or "unknown",
+			"provenance": legal_provenance,
+		}
+		return {
+			"schema": "inquiry-explanation-v1",
+			"explanation_id": explanation_id,
+			"revision": revision,
+			"inquiry_id": inquiry_id,
+			"why_asked": why,
+			"factual_target": {
+				"target_id": target_id or "unknown",
+				"label": self._clip_explanation_text(factual_label) or "unknown",
+				"kind": "factual",
+				"graph_kind": "factual_knowledge_graph",
+				"provenance": factual_provenance,
+			},
+			"sourced_legal_requirement": {
+				"requirement_id": requirement_id or "unknown",
+				"label": self._clip_explanation_text(requirement_label) or "unknown",
+				"law_derived": law_derived,
+				"graph_kind": "legal_dependency_graph",
+				"provenance": legal_provenance,
+			},
+			"graph_sources": [factual_source, legal_source],
+			"stores_answer": False,
+			"changes_law": False,
+			"legal_sufficiency": False,
+		}
 
 	def _narrative_prompt_inquiry(self) -> Dict[str, Any]:
 		return {
