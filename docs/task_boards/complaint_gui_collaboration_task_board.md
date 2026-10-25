@@ -1182,7 +1182,7 @@ Implementation instructions:
 
 ## CIMP-GUI-40 Migrate explicitly selected legacy cases safely
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
