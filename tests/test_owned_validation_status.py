@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -24,6 +25,8 @@ pytestmark = [pytest.mark.no_auto_llm, pytest.mark.no_auto_network, pytest.mark.
 def observe_actual_executor(world, mode):
     """Run inside the real Native child of the inert owned _run parent."""
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+    from ipfs_accelerate_py.agent_supervisor.validation.validation_runtime import (
+        build_validation_environment, VALIDATION_PYTHON_ENV)
     campaign, workspace = world['campaign'], world['workspace']
     stamp = lambda seconds: datetime.fromtimestamp(seconds, timezone.utc).isoformat()
     now = time.time()
@@ -68,7 +71,8 @@ def observe_actual_executor(world, mode):
         try:
             results.append(runner._call_validation_with_activity(executor=executor,
                 spec=SimpleNamespace(command=command,raw_command=command), workspace_path=workspace,
-                timeout_seconds=25, environment=dict(os.environ), task=task, context=context))
+                timeout_seconds=25, environment=build_validation_environment(
+                    {**os.environ,VALIDATION_PYTHON_ENV:sys.executable}), task=task, context=context))
         except BaseException as exc:
             errors.append(exc)
     thread = threading.Thread(target=execute,daemon=True); thread.start()
