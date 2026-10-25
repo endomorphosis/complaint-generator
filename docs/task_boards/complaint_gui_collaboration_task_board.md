@@ -942,7 +942,7 @@ Implementation instructions:
 
 ## CIMP-GUI-32 Record scoped lawyer review of requirements and proofs
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
