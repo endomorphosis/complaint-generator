@@ -1779,7 +1779,14 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         provider_evidence = log_evidence or provider_evidence
     provider_progress = bool(provider_evidence and provider_evidence.get("progress_fresh", True))
     validation_evidence = _validation_event_evidence(events_path, binding, started_at=invocation_start) if claim_verified else None
+    from .reconciliation_activity import evidence as owned_executor_activity_evidence
+    canonical_activity_evidence = (owned_executor_activity_evidence(sys.modules[__name__], repo_root, state_dir,
+        record, native_state, now_ts=now) if owned and current_state else None)
+    if canonical_activity_evidence is not None:
+        validation_evidence = canonical_activity_evidence
     worker_liveness = _owner_liveness(native_state.get("owner_process_birth"))
+    if canonical_activity_evidence is not None:
+        worker_liveness = "alive"  # Exact live maintenance birth, re-proved above.
     if worker_liveness == "missing":
         worker_liveness = "alive" if daemon_alive else ("absent" if not owned else "unknown")
     shutdown = _read_json(state_dir / "container_shutdown.json")
@@ -1807,6 +1814,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "stalled"
     elif active and attempt_age is not None and attempt_age > TIMEOUT_SECONDS:
         health = "stalled"
+    elif canonical_activity_evidence is not None:
+        health = "active"
     elif heartbeat_age is not None and startup_maintenance:
         health = "starting"
     elif heartbeat_age is not None and maintenance_ready:
@@ -1840,7 +1849,7 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
                                and provider_evidence.get("provider_repair_in_flight"))
         # Fresh generic log lines and a live PID are not provider or validation progress.
         silent = silent_window and (not (validation_evidence or provider_repair) if in_validation else not provider_progress)
-        post_provider = bool(provider_evidence and provider_evidence.get("provider_terminal_observed"))
+        post_provider = bool(not in_validation and provider_evidence and provider_evidence.get("provider_terminal_observed"))
         health = ("stalled" if hard_expired or log_stale else "post_provider" if post_provider
                   else "stalled" if silent else "active")
     elif selected:
@@ -1885,7 +1894,7 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     )
     identity_ok = worker_liveness == "alive" and health not in {"identity_mismatch", "heartbeat_identity_mismatch", "state_error"}
     activity_ok = (not active) or bool(provider_progress or validation_evidence
-        or (provider_evidence and provider_evidence.get("provider_terminal_observed"))) or not (
+        or (not phase.startswith("valid") and provider_evidence and provider_evidence.get("provider_terminal_observed"))) or not (
         attempt_age is not None and attempt_age > STALL_SECONDS
     )
     healthy = bool(identity_ok and heartbeat_fresh and activity_ok and health in {
@@ -1919,7 +1928,7 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
             "provider_execution_evidence": provider_evidence,
             "validation_activity_verified": bool(owned and validation_evidence),
             "validation_activity_evidence": validation_evidence,
-            "progress_verified": bool(owned and provider_progress),
+            "progress_verified": bool(owned and (provider_progress or canonical_activity_evidence)),
             "completion_authority": False}
 
 
@@ -2431,6 +2440,11 @@ def _validation_activity_log_identity(path: Path):
     return value.st_dev, value.st_ino
 
 
+def _validation_activity_snapshot(campaign):
+    from .reconciliation_activity import snapshot
+    return snapshot(sys.modules[__name__], campaign)
+
+
 def _validation_activity_binding(workspace: Path, task: Mapping[str, Any], context: Mapping[str, Any], *, now_ts: float, owner_pid=None):
     """Read one exact live Native validation owner without changing its state."""
     from types import SimpleNamespace
@@ -2443,12 +2457,17 @@ def _validation_activity_binding(workspace: Path, task: Mapping[str, Any], conte
         if target != Path(__file__).resolve().parents[2]:
             return None
         state_path = campaign / f"{STATE_PREFIX}_task_state.json"
-        snapshot = plane.read_portal_task_state_snapshot(state_path)
+        snapshot = _validation_activity_snapshot(campaign)
         if not isinstance(snapshot, dict) or type(snapshot.get("revision")) is not int:
             return None
         state = snapshot.get("body")
         if not isinstance(state, dict):
             return None
+        if state.get("active_phase") == "validating_reconciled_candidate":
+            from .reconciliation_activity import binding as reconciled_binding
+            return reconciled_binding(sys.modules[__name__], daemon, native,
+                campaign=campaign, target=target, workspace=workspace, state=state,
+                task=task, context=context, now_ts=now_ts, owner_pid=owner_pid)
         expected = {"task_id": task["id"], "canonical_task_cid": context["task_cid"],
                     "canonical_task_key": context["task_key"], "attempt": state.get("active_attempt")}
         if (not expected["task_id"] or not expected["canonical_task_cid"] or not expected["canonical_task_key"]
