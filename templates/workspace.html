@@ -3402,9 +3402,19 @@
             }
         }
     </style>
+    <link id="workspace-shell-style" rel="stylesheet" href="/static/complaint_app_shell.css">
 </head>
 <body data-workspace-hydrated="booting">
-    <div class="shell">
+    <a class="cg-skip-link" href="#workspace-main">Skip to workspace</a>
+    <div id="workspace-case-context" class="cg-case-context" role="region" aria-label="Current case" data-state="empty" tabindex="-1">
+        <span class="cg-case-context__label">Current case</span>
+        <strong id="workspace-case-context-value">No case selected</strong>
+    </div>
+    <div id="workspace-error-summary" class="cg-error-summary" role="alert" aria-labelledby="workspace-error-summary-title" tabindex="-1" hidden>
+        <h2 id="workspace-error-summary-title">Workspace needs attention</h2>
+        <ul id="workspace-error-summary-list"></ul>
+    </div>
+    <div class="shell" id="workspace-main" tabindex="-1">
         <section class="topbar" aria-label="Workspace identity">
             <div class="brand-lockup">
                 <strong>Complaint Generator</strong>
@@ -6149,9 +6159,46 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         const readinessStorageKey = 'complaintGenerator.uiReadiness';
         const lastToolCallStorageKey = 'complaintGenerator.sdkLastToolCall';
 
+        function publishWorkspaceCaseContext() {
+            const context = document.getElementById('workspace-case-context-value');
+            const identity = document.getElementById('workflow-user-id');
+            if (!context) return;
+            const text = identity && identity.textContent ? identity.textContent.trim() : '';
+            context.textContent = text && !/loading/i.test(text) ? text : 'No case selected';
+        }
+
+        function publishWorkspaceErrorSummary(state) {
+            const summary = document.getElementById('workspace-error-summary');
+            const list = document.getElementById('workspace-error-summary-list');
+            const status = document.getElementById('workspace-status');
+            if (!summary || !list) return;
+            if (state !== 'error' && state !== 'denied') {
+                if (state === 'ready' || state === 'partial') {
+                    summary.hidden = true;
+                    list.replaceChildren();
+                }
+                return;
+            }
+            const item = document.createElement('li');
+            const link = document.createElement('a');
+            link.href = '#workspace-status';
+            link.textContent = (status && status.textContent.trim()) || (state === 'denied' ? 'Access denied' : 'Workspace could not load');
+            item.appendChild(link);
+            list.replaceChildren(item);
+            summary.hidden = false;
+        }
+
         function setWorkspaceHydrationState(state) {
             if (workspacePrivacyInactive && !privacyBoundaryUpdating) return;
             document.body.dataset.workspaceHydrated = state;
+            const context = document.getElementById('workspace-case-context');
+            if (context) {
+                context.dataset.state = state === 'booting' || state === 'loading'
+                    ? 'loading'
+                    : (state === 'error' || state === 'denied' ? 'error' : (state === 'ready' || state === 'partial' ? 'ready' : 'empty'));
+            }
+            publishWorkspaceCaseContext();
+            publishWorkspaceErrorSummary(state);
         }
 
         function setStatus(message) {
@@ -6159,6 +6206,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             const statusNode = document.getElementById('workspace-status');
             statusNode.textContent = message;
             statusNode.classList.remove('is-busy');
+            publishWorkspaceErrorSummary(document.body.dataset.workspaceHydrated);
         }
 
         function setBusyStatus(message) {
@@ -10143,6 +10191,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('case-theory-detail').textContent = theoryDetail;
             refreshSynopsisEditor(sessionPayload);
             document.getElementById('workflow-user-id').textContent = `Complainant ID: ${workspaceUserId || session.user_id || 'unknown'}`;
+            publishWorkspaceCaseContext();
             document.getElementById('workflow-priority-text').textContent = nextActionText;
             document.getElementById('workflow-stage-detail').textContent = `Case phase: ${casePhaseLabel}. Answered intake questions: ${answeredCount}. Supported elements: ${overview.supported_elements || 0}. Missing elements: ${overview.missing_elements || 0}.`;
             document.getElementById('workflow-stage-chip').textContent = `Current stage: ${activeStageLabel.toLowerCase()}`;

@@ -1573,7 +1573,7 @@ Implementation instructions:
 
 ## CIMP-GUI-53 Make authenticated GUI flows accessible and responsive
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1

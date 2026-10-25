@@ -353,6 +353,105 @@
     pointer-events: none;
 }
 
+.cg-skip-link {
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    z-index: 40;
+    transform: translateY(-200%);
+    padding: 8px 12px;
+    background: #0f172a;
+    color: #f8fafc;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.cg-skip-link:focus {
+    transform: none;
+}
+
+.cg-case-context {
+    position: relative;
+    z-index: 30;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    align-items: baseline;
+    margin: 0;
+    padding: 12px 16px;
+    background: #0f172a;
+    color: #f8fafc;
+    font-size: 16px;
+    line-height: 1.4;
+}
+
+.cg-case-context__label {
+    color: #e2e8f0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.cg-error-summary {
+    margin: 12px 16px;
+    padding: 12px 14px;
+    border: 2px solid #9a3412;
+    border-radius: 12px;
+    background: #fff7ed;
+    color: #7c2d12;
+}
+
+.cg-error-summary h2 {
+    margin: 0 0 8px;
+    font-size: 16px;
+}
+
+.cg-error-summary a {
+    color: #7c2d12;
+    font-weight: 700;
+}
+
+.cg-state-empty,
+.cg-state-loading,
+.cg-state-error {
+    margin: 0 0 8px;
+    font-size: 16px;
+    line-height: 1.4;
+}
+
+.cg-state-empty {
+    color: #1e293b;
+    background: #f8fafc;
+}
+
+.cg-state-loading {
+    color: #1e3a8a;
+    background: #eff6ff;
+}
+
+.cg-state-error {
+    padding: 8px 10px;
+    background: #fef2f2;
+    color: #7f1d1d;
+}
+
+input:focus,
+textarea:focus,
+select:focus,
+button:focus,
+a:focus,
+summary:focus,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+    outline: 3px solid #082f49;
+    outline-offset: 2px;
+}
+
 @media (max-width: 1180px) {
     .cg-app-shell-active {
         padding-right: 0;
@@ -364,5 +463,28 @@
         max-width: calc(100% - 24px);
         max-height: none;
         margin: 16px;
+    }
+}
+
+@media (max-width: 720px) {
+    .cg-case-context {
+        position: sticky;
+        top: 0;
+    }
+
+    #cases-main,
+    #workspace-main {
+        min-height: 160vh;
+    }
+
+    .cg-app-shell-active {
+        padding-right: 0;
+    }
+
+    .cg-app-shell {
+        position: static;
+        width: auto;
+        max-width: none;
+        margin: 8px;
     }
 }
