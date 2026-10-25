@@ -1,5 +1,9 @@
 """Adversarial multi-role and transport isolation.
 
+Transport-probe cases below qualify outer route admission. The additional
+``test_actual_*`` cases use real encrypted workspaces and actual recipient-key
+review admission; a probe packet alone does not qualify those product paths.
+
 Synthetic owner, lawyer, admin, and stranger contexts share one principal
 store and one mediator per case. Legacy HTTP, workspace HTTP, MCP, review,
 download, and message routes are the production handlers. WebSockets and
@@ -448,3 +452,122 @@ def _forged_browser_denied(harness, profile, cookie, headers):
         assert OWNER_MARKER not in result["text"] and MESSAGE not in result["text"]
     finally:
         context.close()
+
+
+def test_actual_encrypted_workspaces_preserve_actor_case_and_mcp_isolation(tmp_path):
+    from tests.gui_real_security_fixtures import actual_security_world, ADMIN_CREDENTIAL
+    from tests.test_cimp_gui_14 import (NARRATIVE, PASSPHRASE, _composed_login,
+        _composed_headers, _composed_ciphertext_snapshot)
+    world = actual_security_world(tmp_path)
+    world.owner_keys.unlock_passphrase(PASSPHRASE)
+    world.service.unlock_private_keys(passphrase=PASSPHRASE)
+    app = world.review_app
+    with TestClient(app, base_url="https://testserver") as owner, TestClient(app, base_url="https://testserver") as stranger, TestClient(app, base_url="https://testserver") as admin:
+        csrf_token = _composed_login(owner)
+        headers = _composed_headers(world.case, csrf_token)
+        session = owner.get('/api/complaint-workspace/session', headers=headers)
+        assert session.status_code == 200, session.text
+        state = session.json()['session']
+        assert state['case_id'] == world.case.case_id
+        assert state['user_id'] == world.case.tenant_id != world.owner.principal_id
+        assert state['shared_interview']['knowledge_graph']['entities']
+        assert NARRATIVE in session.text
+        before = _composed_ciphertext_snapshot(world.service)
+        assert before
+        assert any(path.read_bytes().startswith(b'CGPE') for path in
+            (world.service._session_dir/'joined-revisions').rglob('*') if path.is_file())
+        for transport in ('call', 'rpc'):
+            call = {'tool_name':'complaint.run_intake_chat_turn', 'arguments':{'message':'/why'}}
+            if transport == 'rpc':
+                call = {'jsonrpc':'2.0','id':'real55-why','method':'tools/call',
+                    'params':{'name':call['tool_name'],'arguments':call['arguments']}}
+            response = owner.post('/api/complaint-workspace/mcp/'+transport, headers=headers, json=call)
+            assert response.status_code == 200, response.text
+            assert world.case.case_id in response.text
+            if transport == 'rpc':
+                assert response.json()['result']['isError'] is False
+        assert _composed_ciphertext_snapshot(world.service) == before
+        _composed_login(stranger, 'synthetic-stranger-credential')
+        _composed_login(admin, ADMIN_CREDENTIAL)
+        for client in (stranger, admin):
+            for path in ('/api/complaint-workspace/session', '/api/complaint-workspace/mcp/tools'):
+                denied = client.get(path, headers=_composed_headers(world.case))
+                assert denied.status_code == 403, denied.text
+                assert NARRATIVE not in denied.text
+        forged = owner.get('/api/complaint-workspace/session', headers={**headers,'x-role':'operational_admin'})
+        assert forged.status_code == 403 and NARRATIVE not in forged.text
+        cross = owner.get('/api/complaint-workspace/session', headers=_composed_headers(world.foreign))
+        assert cross.status_code == 403 and NARRATIVE not in cross.text
+        foreign_csrf = _composed_login(stranger, 'synthetic-stranger-credential')
+        own_foreign = stranger.post('/api/complaint-workspace/intake-chat',
+            headers=_composed_headers(world.foreign, foreign_csrf),
+            json={'message':'Authored separate stranger complaint about an employment dismissal.', 'interview_action':'start'})
+        assert own_foreign.status_code == 200, own_foreign.text
+        assert own_foreign.json()['session']['case_id'] == world.foreign.case_id
+        assert _composed_ciphertext_snapshot(world.service) == before
+
+
+@pytest.mark.parametrize('invalidate', ['disable', 'demote'])
+def test_actual_recipient_review_and_forged_cookie_lose_authority(tmp_path, invalidate):
+    from tests.gui_real_security_fixtures import actual_security_world, ADMIN_CREDENTIAL
+    from tests.test_cimp_gui_14 import _composed_login
+    from tests.test_gui32_private_review_http import _headers, _propose, MARKER
+    world = actual_security_world(tmp_path)
+    assert not world.owner_keys.unlocked
+    assert not world.service._private_key_session().unlocked
+    with TestClient(world.review_app, base_url='https://testserver') as lawyer, TestClient(world.review_app, base_url='https://testserver') as admin, TestClient(world.review_app, base_url='https://testserver') as forged:
+        lawyer_csrf = _composed_login(lawyer, 'synthetic-lawyer-credential')
+        admin_csrf = _composed_login(admin, ADMIN_CREDENTIAL)
+        _propose(lawyer, world, lawyer_csrf)
+        path = '/api/legal-analysis/'+world.case.case_id+'/lawyer-reviews'
+        positive = lawyer.get(path, headers=_headers(world))
+        assert positive.status_code == 200 and MARKER in positive.text, positive.text
+        forged.cookies.set(SESSION_COOKIE, lawyer.cookies.get(SESSION_COOKIE))
+        if invalidate == 'disable':
+            endpoint, body = 'status', {'status':'disabled'}
+        else:
+            endpoint, body = 'role', {'account_kind':'complainant'}
+        body['expected_revision'] = world.lawyer.revision
+        changed = admin.post('/api/admin/accounts/'+world.lawyer.principal_id+'/'+endpoint,
+            headers={'x-csrf-token':admin_csrf}, json=body)
+        assert changed.status_code == 200, changed.text
+        for client in (lawyer, forged):
+            denied = client.get(path, headers=_headers(world))
+            assert denied.status_code == 401, denied.text
+            assert MARKER not in denied.text
+        if invalidate == 'demote':
+            _composed_login(lawyer, 'synthetic-lawyer-credential')
+            assert lawyer.get('/api/admin/accounts').status_code == 403
+            # A case grant is independent of a staff role; server-owned role
+            # demotion cannot mint a different grant or erase a valid one.
+            assert world.memberships.load(world.membership.grant_id).version == world.membership.version
+
+
+def test_actual_encrypted_owner_is_denied_in_already_open_chromium_after_disable(tmp_path):
+    from tests.gui_real_security_fixtures import actual_security_world, ADMIN_CREDENTIAL
+    from tests.test_cimp_gui_14 import NARRATIVE, PASSPHRASE, _composed_login, _composed_headers
+    from tests.test_cimp_gui_46 import _browser
+    from tests import gui_native_browser as actual_browser
+    world = actual_security_world(tmp_path)
+    world.owner_keys.unlock_passphrase(PASSPHRASE)
+    world.service.unlock_private_keys(passphrase=PASSPHRASE)
+    browser_root = tmp_path/'actual-browser';browser_root.mkdir()
+    with _browser(browser_root, world.review_app) as page, TestClient(world.review_app, base_url='https://testserver') as admin:
+        page.goto(actual_browser.SAME_ORIGIN+'/workspace', wait_until='domcontentloaded')
+        assert page.locator('#adaptive-narrative').count() == 1
+        issued = page.evaluate("""async () => {
+            const response=await fetch('/api/complaint-workspace/auth/login',{method:'POST',credentials:'same-origin',
+                headers:{'content-type':'application/json'},body:JSON.stringify({credential:'synthetic-owner-credential'})});
+            if(response.status!==200)throw new Error('actual owner login failed');return await response.json();
+        }""")
+        assert issued['principal_id'] == world.owner.principal_id != world.case.tenant_id
+        get_session = """async headers => {const response=await fetch('/api/complaint-workspace/session',
+            {credentials:'same-origin',headers});return {status:response.status,text:await response.text()};}"""
+        positive = page.evaluate(get_session, _composed_headers(world.case))
+        assert positive['status'] == 200 and NARRATIVE in positive['text']
+        csrf_token = _composed_login(admin, ADMIN_CREDENTIAL)
+        changed = admin.post('/api/admin/accounts/'+world.owner.principal_id+'/status',
+            headers={'x-csrf-token':csrf_token},json={'status':'disabled','expected_revision':world.owner.revision})
+        assert changed.status_code == 200, changed.text
+        denied = page.evaluate(get_session, _composed_headers(world.case))
+        assert denied['status'] == 401 and NARRATIVE not in denied['text']
