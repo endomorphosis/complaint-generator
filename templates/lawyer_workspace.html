@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scoped lawyer review</title>
+    <style>
+        :root {
+            --ink: #182229;
+            --muted: #58656e;
+            --line: rgba(24, 34, 41, 0.14);
+            --panel: #fffaf4;
+            --stale: #9a3412;
+            --human: #1e3a5f;
+            --model: #6b4c1e;
+            --machine: #1f4d3a;
+        }
+        body {
+            margin: 0;
+            color: var(--ink);
+            background: #f6efe4;
+            font-family: "Public Sans", "Segoe UI", sans-serif;
+        }
+        main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+        h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+        p.limit { color: var(--muted); }
+        section {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+        h2 { margin: 0 0 8px; font-size: 1.05rem; }
+        .human h2 { color: var(--human); }
+        .model h2 { color: var(--model); }
+        .machine h2 { color: var(--machine); }
+        table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+        th, td { text-align: left; vertical-align: top; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+        .stale { color: var(--stale); font-weight: 700; }
+        .current { font-weight: 700; }
+        code { font-size: 0.82rem; }
+        form { display: grid; gap: 8px; margin-top: 12px; }
+        label { display: grid; gap: 4px; font-size: 0.9rem; }
+        input, textarea, select, button { font: inherit; padding: 8px; }
+        button { width: fit-content; }
+    </style>
+</head>
+<body>
+<main id="lawyer-workspace" data-task-id="CIMP-GUI-32">
+    <h1>Scoped lawyer review</h1>
+    <p class="limit" id="lawyer-review-limitations">Human legal review, model suggestions, and machine proof are separate records. A stale approval does not promote changed law or facts. This page is not governing law.</p>
+    <section id="live-revisions">
+        <h2>Bound revisions</h2>
+        <dl id="revision-list"></dl>
+    </section>
+    <section class="human" id="human-legal-reviews">
+        <h2>Human legal review</h2>
+        <table>
+            <thead><tr><th>Actor</th><th>Decision</th><th>Interpretation</th><th>Revisions</th><th>Applies now</th></tr></thead>
+            <tbody id="human-review-rows"></tbody>
+        </table>
+        <form id="lawyer-review-form">
+            <label>Operation
+                <select name="operation">
+                    <option value="propose">Propose sourced interpretation</option>
+                    <option value="review">Review proposal</option>
+                    <option value="promote">Promote fresh approval</option>
+                    <option value="record_model_suggestion">Record model suggestion</option>
+                    <option value="record_machine_proof">Record machine proof</option>
+                </select>
+            </label>
+            <label>Request id <input name="request_id" required maxlength="80"></label>
+            <label>Interpretation <textarea name="interpretation" maxlength="2000"></textarea></label>
+            <label>Source citation <input name="source_citation" maxlength="512"></label>
+            <label>Proposal or approval id <input name="target_id" maxlength="80"></label>
+            <label>Review decision
+                <select name="decision">
+                    <option value="approved">approved</option>
+                    <option value="rejected">rejected</option>
+                    <option value="withheld">withheld</option>
+                </select>
+            </label>
+            <label>Model id <input name="model_id" maxlength="80"></label>
+            <label>Suggestion <textarea name="suggestion" maxlength="2000"></textarea></label>
+            <button type="submit">Record under the live revisions</button>
+            <p id="lawyer-review-result" role="status"></p>
+        </form>
+    </section>
+    <section class="model" id="model-suggestions">
+        <h2>Model suggestions</h2>
+        <p>A model suggestion is not a human legal review and cannot approve law or facts.</p>
+        <table>
+            <thead><tr><th>Model</th><th>Suggestion</th><th>Status</th></tr></thead>
+            <tbody id="model-suggestion-rows"></tbody>
+        </table>
+    </section>
+    <section class="machine" id="machine-proofs">
+        <h2>Machine proof</h2>
+        <p>Machine proof is not legal sufficiency and is not a human approval.</p>
+        <table>
+            <thead><tr><th>Status</th><th>Engine</th><th>Proof revision</th></tr></thead>
+            <tbody id="machine-proof-rows"></tbody>
+        </table>
+    </section>
+</main>
+<script id="lawyer-review-state" type="application/json">__LAWYER_REVIEW_JSON__</script>
+<script>
+(function () {
+    var node = document.getElementById("lawyer-review-state");
+    var state = JSON.parse(node.textContent);
+    var live = state.live_revisions || {};
+    var list = document.getElementById("revision-list");
+    ["case_revision", "source_revision", "fact_revision", "proof_revision"].forEach(function (key) {
+        var row = document.createElement("div");
+        row.dataset.revisionKey = key;
+        row.dataset.revisionValue = String(live[key] == null ? "" : live[key]);
+        row.textContent = key + ": " + row.dataset.revisionValue;
+        list.appendChild(row);
+    });
+    function revisions(record) {
+        return [record.case_revision, record.source_revision, record.fact_revision, record.proof_revision].join(" | ");
+    }
+    function fill(id, records, cells) {
+        var body = document.getElementById(id);
+        (records || []).forEach(function (record) {
+            var tr = document.createElement("tr");
+            tr.dataset.recordKind = record.record_kind || "";
+            tr.dataset.authorKind = record.author_kind || "";
+            tr.dataset.stale = record.stale ? "true" : "false";
+            tr.dataset.promotesChangedLaw = "false";
+            tr.dataset.promotesChangedFacts = "false";
+            cells(record).forEach(function (value) {
+                var td = document.createElement("td");
+                td.textContent = value == null ? "" : String(value);
+                tr.appendChild(td);
+            });
+            var flag = document.createElement("td");
+            flag.textContent = record.stale ? "stale; does not promote changed law or facts" : "bound to the live revisions";
+            flag.className = record.stale ? "stale" : "current";
+            tr.appendChild(flag);
+            body.appendChild(tr);
+        });
+    }
+    fill("human-review-rows", state.human_legal_reviews, function (record) {
+        return [record.actor_principal_id, record.decision, record.interpretation, revisions(record)];
+    });
+    fill("model-suggestion-rows", state.model_suggestions, function (record) {
+        return [record.model_id, record.suggestion, record.status];
+    });
+    fill("machine-proof-rows", state.machine_proofs, function (record) {
+        return [record.proof_status, (record.engine_name || "") + " " + (record.engine_version || ""), record.proof_revision];
+    });
+    var form = document.getElementById("lawyer-review-form");
+    form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        var data = new FormData(form);
+        var operation = data.get("operation");
+        var body = {
+            operation: operation,
+            request_id: data.get("request_id"),
+            expected_case_revision: live.case_revision,
+            expected_source_revision: live.source_revision,
+            expected_fact_revision: live.fact_revision,
+            expected_proof_revision: live.proof_revision
+        };
+        if (operation === "propose") {
+            body.interpretation = data.get("interpretation");
+            body.source_citation = data.get("source_citation");
+        } else if (operation === "review") {
+            body.proposal_id = data.get("target_id");
+            body.decision = data.get("decision");
+            body.interpretation = data.get("interpretation");
+        } else if (operation === "promote") {
+            body.approval_id = data.get("target_id");
+        } else if (operation === "record_model_suggestion") {
+            body.model_id = data.get("model_id");
+            body.suggestion = data.get("suggestion");
+        } else {
+            body.engine_name = "workspace-displayed-engine";
+            body.engine_version = "unexecuted";
+        }
+        var result = document.getElementById("lawyer-review-result");
+        result.textContent = "Recording " + operation + " against the live case, source, fact, and proof revisions.";
+        form.dataset.pendingBody = JSON.stringify(body);
+    });
+}());
+</script>
+</body>
+</html>

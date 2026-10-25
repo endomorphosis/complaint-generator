@@ -522,7 +522,7 @@ Implementation instructions:
 
 ## CIMP-GUI-18 Apply GUI corrections through mediator supersession
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -942,7 +942,7 @@ Implementation instructions:
 
 ## CIMP-GUI-32 Record scoped lawyer review of requirements and proofs
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1

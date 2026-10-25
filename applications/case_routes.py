@@ -261,6 +261,12 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     if not any(PROOF_TRACE_ROUTE.startswith(prefix + "/") or PROOF_TRACE_ROUTE.startswith(prefix) for prefix in PROTECTED_PREFIXES):
         raise CaseAccessError("proof_trace_route")
     mount_legal_analysis_routes(app)
+    from .case_review import LAWYER_REVIEW_ROUTE, LAWYER_WORKSPACE_ROUTE, mount_lawyer_review_routes
+    if not any(LAWYER_REVIEW_ROUTE.startswith(prefix + "/") or LAWYER_REVIEW_ROUTE.startswith(prefix) for prefix in PROTECTED_PREFIXES):
+        raise CaseAccessError("lawyer_review_route")
+    if not any(LAWYER_WORKSPACE_ROUTE.startswith(prefix + "/") or LAWYER_WORKSPACE_ROUTE.startswith(prefix) for prefix in PROTECTED_PREFIXES):
+        raise CaseAccessError("lawyer_workspace_route")
+    mount_lawyer_review_routes(app)
     app.state.case_authorizer = authorizer
     app.state.browser_sessions = sessions
     app.state.case_handlers = case_handlers
@@ -395,6 +401,9 @@ def _check_actor_claims(scope: Dict[str, Any], body: bytes, principal_id: str) -
 
 def _required_action(path: str, method: str, material: Mapping[str, Any], extensions) -> str:
     if _within_prefix(path, "/api/legal-research") and path.rstrip("/").endswith("/admissions"):
+        return "case.read" if method in {"GET", "HEAD"} else "case.review"
+    # Assigned-lawyer review is case.review. It is not case.update and not an owner-key grant.
+    if "/lawyer-review" in path:
         return "case.read" if method in {"GET", "HEAD"} else "case.review"
     # Factual review writes the encrypted owner graph. Assigned-lawyer review
     # authority is not an owner-key grant, so this route stays case.update.
