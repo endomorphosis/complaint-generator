@@ -2786,6 +2786,8 @@ def _terminal_edit_receipt(
     correction: Optional[Mapping[str, Any]] = None,
     graph_revision: str = "",
     session_revision: int = 0,
+    actor_principal_id: str = "",
+    canonical_owner_principal_id: str = "",
 ) -> Dict[str, Any]:
     error = None
     if error_code:
@@ -2803,6 +2805,9 @@ def _terminal_edit_receipt(
         "graph_revision": graph_revision,
         "session_revision": session_revision,
         "correction": dict(correction) if isinstance(correction, Mapping) else None,
+        "actor_principal_id": str(actor_principal_id or ""),
+        "canonical_owner_principal_id": str(canonical_owner_principal_id or ""),
+        "actor_matches_canonical_owner": bool(canonical_owner_principal_id) and str(actor_principal_id or "") == str(canonical_owner_principal_id),
         "error": error,
     }
     if error_code:
@@ -2934,11 +2939,222 @@ def _last_eligible_accepted_answer(state: Mapping[str, Any], knowledge: Any) -> 
     return None
 
 
+def _correction_actor_ids(state: Mapping[str, Any]) -> tuple[str, str]:
+    """Actual actor, then canonical owner. They are not copied from each other."""
+
+    from .workspace_case_authority import current_workspace_case_authority
+
+    authority = current_workspace_case_authority()
+    if authority is not None:
+        return str(authority.actor_principal_id or ""), str(authority.canonical_owner_principal_id or "")
+    return str(state.get("user_id") or ""), ""
+
+
+def _assertion_owner(state: Mapping[str, Any], stable_id: str, envelope: Mapping[str, Any]) -> tuple[str, bool]:
+    env_actor = str((envelope or {}).get("actor") or "").strip()
+    history_actor = ""
+    history = state.get("intake_history") if isinstance(state.get("intake_history"), list) else []
+    for item in history:
+        if not isinstance(item, Mapping):
+            continue
+        linked = {str(item.get("target_stable_id") or ""), str(item.get("stable_id") or "")}
+        if stable_id not in linked:
+            continue
+        actor = str(item.get("actor_principal_id") or "").strip()
+        if actor:
+            history_actor = actor
+    if env_actor and history_actor and env_actor != history_actor:
+        return "", True
+    return env_actor or history_actor, False
+
+
+def _target_from_stable(state: Mapping[str, Any], knowledge: Any, stable_id: str) -> Optional[Dict[str, Any]]:
+    ledger = knowledge.factual_ledger()
+    states = ledger.get("assertion_states") if isinstance(ledger.get("assertion_states"), Mapping) else {}
+    record = states.get(stable_id) if isinstance(states.get(stable_id), Mapping) else {}
+    if str(record.get("status") or "") != "active":
+        return None
+    envelope = record.get("envelope") if isinstance(record.get("envelope"), Mapping) else {}
+    span = envelope.get("source_span") if isinstance(envelope.get("source_span"), Mapping) else {}
+    text = str(span.get("text") or envelope.get("source_text") or "")
+    question_id = ""
+    history = state.get("intake_history") if isinstance(state.get("intake_history"), list) else []
+    for item in history:
+        if not isinstance(item, Mapping):
+            continue
+        if stable_id not in {str(item.get("target_stable_id") or ""), str(item.get("stable_id") or "")}:
+            continue
+        question_id = str(item.get("question_id") or question_id)
+        if not text:
+            text = str(item.get("answer") or "")
+    return {
+        "question_id": question_id,
+        "answer": text,
+        "stable_id": stable_id,
+        "entity_id": str(record.get("entity_id") or ""),
+        "envelope": dict(envelope),
+    }
+
+
+def _eligible_correction_for_actor(
+    state: Mapping[str, Any],
+    knowledge: Any,
+    actor: str,
+    target_stable_id: str,
+) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """The caller's active assertion. Another participant's fact is not eligible."""
+
+    requested = str(target_stable_id or "").strip()
+    if requested:
+        target = _target_from_stable(state, knowledge, requested)
+        if target is None:
+            return None, "missing_target"
+        owner, conflict = _assertion_owner(state, requested, target.get("envelope") or {})
+        if conflict or (owner and owner != actor):
+            return None, "unauthorized_actor"
+        return target, None
+    history = state.get("intake_history") if isinstance(state.get("intake_history"), list) else []
+    ineligible = {"skipped", "unknown", "refused", "deferred"}
+    for item in reversed(history):
+        if not isinstance(item, Mapping):
+            continue
+        disposition = str(item.get("disposition") or "accepted").strip().lower()
+        if disposition in ineligible:
+            continue
+        answer = str(item.get("answer") or "").strip()
+        if not answer or answer.lower() in _UNKNOWN_INTAKE_ANSWERS:
+            continue
+        stable_id = str(item.get("target_stable_id") or item.get("stable_id") or "").strip()
+        owner, conflict = _assertion_owner(state, stable_id, {})
+        if conflict or (owner and owner != actor):
+            continue
+        if stable_id:
+            target = _target_from_stable(state, knowledge, stable_id)
+            if target is not None:
+                owner, conflict = _assertion_owner(state, stable_id, target.get("envelope") or {})
+                if conflict or (owner and owner != actor):
+                    continue
+                return target, None
+        matches = _active_assertion_matches(knowledge, answer)
+        if len(matches) != 1:
+            contained = _contained_assertion_matches(knowledge, answer)
+            matches = contained if len(contained) == 1 else []
+        if len(matches) != 1:
+            continue
+        _index, matched_id, envelope = matches[0]
+        owner, conflict = _assertion_owner(state, matched_id, envelope)
+        if conflict or (owner and owner != actor):
+            continue
+        ledger = knowledge.factual_ledger()
+        states = ledger.get("assertion_states") if isinstance(ledger.get("assertion_states"), Mapping) else {}
+        record = states.get(matched_id) if isinstance(states.get(matched_id), Mapping) else {}
+        return {
+            "question_id": str(item.get("question_id") or ""),
+            "answer": answer,
+            "stable_id": matched_id,
+            "entity_id": str(record.get("entity_id") or ""),
+            "envelope": envelope,
+        }, None
+    return None, "missing_target"
+
+
+def _stored_graph_revision(state: Mapping[str, Any]) -> str:
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    raw = projection.get("knowledge_graph") if isinstance(projection, Mapping) else None
+    if not isinstance(raw, Mapping):
+        return ""
+    try:
+        from complaint_phases.knowledge_graph import KnowledgeGraph
+        from mediator.hook_runtime import graph_revision_token
+
+        return graph_revision_token(KnowledgeGraph.from_dict(dict(raw)))
+    except Exception:
+        return ""
+
+
+def _factual_correction_offer(state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Revisions the browser must send back. This view does not change the graph."""
+
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    actor, canonical_owner = _correction_actor_ids(state)
+    session_revision = int(projection.get("session_revision") or 0) if isinstance(projection, Mapping) else 0
+    token = _stored_graph_revision(state)
+    target: Optional[Dict[str, Any]] = None
+    raw = projection.get("knowledge_graph") if isinstance(projection, Mapping) else None
+    if isinstance(raw, Mapping) and actor:
+        try:
+            from complaint_phases.knowledge_graph import KnowledgeGraph
+
+            target, _code = _eligible_correction_for_actor(state, KnowledgeGraph.from_dict(dict(raw)), actor, "")
+        except Exception:
+            target = None
+    return {
+        "schema": "gui-factual-correction-v1",
+        "actor_principal_id": actor,
+        "canonical_owner_principal_id": canonical_owner,
+        "actor_matches_canonical_owner": bool(canonical_owner) and actor == canonical_owner,
+        "expected_graph_revision": token,
+        "expected_session_revision": session_revision,
+        "target_stable_id": str((target or {}).get("stable_id") or ""),
+        "prior_answer": str((target or {}).get("answer") or ""),
+        "requires_expected_revision": True,
+        "legal_sufficiency": False,
+    }
+
+
+def _parse_gui_correction_message(
+    message: Optional[str],
+    *,
+    expected_graph_revision: Optional[str],
+    expected_session_revision: Optional[int],
+) -> Dict[str, Any]:
+    raw = str(message or "").strip()
+    body = raw[5:].strip() if raw.lower().startswith("/edit") else raw
+    parsed: Dict[str, Any] = {}
+    if body.startswith("{"):
+        try:
+            loaded = json.loads(body)
+        except json.JSONDecodeError:
+            loaded = None
+        if isinstance(loaded, dict):
+            parsed = loaded
+    replacement = str(parsed.get("replacement") or "").strip() if parsed else body
+    graph_value = parsed.get("expected_graph_revision", expected_graph_revision)
+    session_value = parsed.get("expected_session_revision", expected_session_revision)
+    conflict = ""
+    if expected_graph_revision not in {None, ""} and parsed.get("expected_graph_revision") not in {None, ""}:
+        if str(parsed.get("expected_graph_revision")) != str(expected_graph_revision):
+            conflict = "stale_target"
+    if expected_session_revision is not None and parsed.get("expected_session_revision") not in {None, ""}:
+        if str(parsed.get("expected_session_revision")) != str(expected_session_revision):
+            conflict = conflict or "stale_target"
+    session_revision: Optional[int]
+    if session_value in {None, ""}:
+        session_revision = None
+    else:
+        try:
+            session_revision = int(session_value)
+        except (TypeError, ValueError):
+            session_revision = None
+            conflict = conflict or "stale_target"
+    graph_revision = None if graph_value in {None, ""} else str(graph_value)
+    return {
+        "replacement": replacement,
+        "expected_graph_revision": graph_revision,
+        "expected_session_revision": session_revision,
+        "actor_principal_id": str(parsed.get("actor_principal_id") or "").strip(),
+        "target_stable_id": str(parsed.get("target_stable_id") or "").strip(),
+        "conflict": conflict,
+    }
+
+
 def _append_correction_history(
     state: Dict[str, Any],
     target: Mapping[str, Any],
     replacement: str,
     receipt: Mapping[str, Any],
+    *,
+    actor_principal_id: str = "",
 ) -> None:
     question_id = str(target.get("question_id") or "")
     answers = state.setdefault("intake_answers", {})
@@ -2960,6 +3176,7 @@ def _append_correction_history(
         "supersedes_stable_id": str(target.get("stable_id") or ""),
         "captured_at": state.get("updated_at"),
         "display_only": False,
+        "actor_principal_id": str(actor_principal_id or receipt.get("actor_principal_id") or ""),
     })
 
 
@@ -3082,6 +3299,7 @@ def _adaptive_inquiry_view(state: Mapping[str, Any]) -> Dict[str, Any]:
         "unknown_reasons": [str(item) for item in (projection.get("unknown_reasons") or [])],
         "preserved_gaps": [dict(item) for item in (projection.get("preserved_gaps") or []) if isinstance(item, Mapping)],
         "legal_sufficiency": False,
+        "factual_correction": _factual_correction_offer(state),
     }
 
 
@@ -3243,6 +3461,13 @@ class ComplaintWorkspaceRequestHandlers:
             payload["message"] = str(research.get("display") or format_legal_research_result(research))
             return payload
         normalized_action = str(interview_action or "").strip().lower()
+        if normalized_action == "correct" or normalized_message.lower().startswith("/edit"):
+            return self._apply_gui_factual_correction(
+                state,
+                message=normalized_message,
+                expected_graph_revision=expected_graph_revision,
+                expected_session_revision=expected_session_revision,
+            )
         if normalized_action == "resume":
             interview = workspace.apply_shared_interview(
                 state,
@@ -3387,6 +3612,58 @@ class ComplaintWorkspaceRequestHandlers:
                 payload["message"] = f"{_PRIVACY_MODE_NOTICE}\n\n{payload['message']}"
         return payload
 
+    def _apply_gui_factual_correction(
+        self,
+        state: Dict[str, Any],
+        *,
+        message: str,
+        expected_graph_revision: Optional[str],
+        expected_session_revision: Optional[int],
+    ) -> Dict[str, Any]:
+        """Correct one fact through the canonical mediator path.
+
+        The browser sends the revisions it was shown. A stale revision or an
+        edit of another participant's assertion is refused and does not write.
+        """
+
+        parsed = _parse_gui_correction_message(
+            message,
+            expected_graph_revision=expected_graph_revision,
+            expected_session_revision=expected_session_revision,
+        )
+        pending = _pending_inquiry_copy(state)
+        actor_id, canonical_owner = _correction_actor_ids(state)
+        if parsed["conflict"]:
+            receipt = _terminal_edit_receipt(
+                status="refused",
+                message="Stale concurrent edit rejected. The pending inquiry was kept.",
+                error_code=parsed["conflict"],
+                pending_inquiry=pending,
+                actor_principal_id=actor_id,
+                canonical_owner_principal_id=canonical_owner,
+            )
+        else:
+            receipt = self.apply_terminal_graph_edit(
+                str(state.get("user_id") or ""),
+                parsed["replacement"],
+                expected_graph_revision=parsed["expected_graph_revision"],
+                expected_session_revision=parsed["expected_session_revision"],
+                target_stable_id=parsed["target_stable_id"] or None,
+                actor_principal_id=parsed["actor_principal_id"] or None,
+                require_expected_revision=True,
+            )
+        try:
+            fresh = self._load_state(str(state.get("user_id") or ""))
+        except WorkspacePersistenceError:
+            fresh = state
+        payload = self.workspace._build_intake_chat_payload(fresh)
+        payload["factual_correction"] = receipt
+        payload["stored_as_answer"] = receipt.get("status") == "applied"
+        payload["command"] = "correct"
+        payload["legal_sufficiency"] = False
+        payload["message"] = str(receipt.get("message") or payload.get("message") or "")
+        return payload
+
     def apply_terminal_graph_edit(
         self,
         user_id: Optional[str],
@@ -3394,6 +3671,9 @@ class ComplaintWorkspaceRequestHandlers:
         *,
         expected_graph_revision: Optional[str] = None,
         expected_session_revision: Optional[int] = None,
+        target_stable_id: Optional[str] = None,
+        actor_principal_id: Optional[str] = None,
+        require_expected_revision: bool = False,
     ) -> Dict[str, Any]:
         """Correct the last eligible accepted answer on the shared factual graph.
 
@@ -3420,6 +3700,31 @@ class ComplaintWorkspaceRequestHandlers:
             )
         user = str(state.get("user_id") or user_id or DEFAULT_USER_ID)
         case_id = _state_case_id(state, user)
+        actor_id, canonical_owner = _correction_actor_ids(state)
+        claimed_actor = str(actor_principal_id or "").strip()
+
+        def finish(receipt: Dict[str, Any]) -> Dict[str, Any]:
+            receipt["actor_principal_id"] = actor_id
+            receipt["canonical_owner_principal_id"] = canonical_owner
+            receipt["actor_matches_canonical_owner"] = bool(canonical_owner) and actor_id == canonical_owner
+            return receipt
+
+        if claimed_actor and claimed_actor != actor_id:
+            return finish(_terminal_edit_receipt(
+                status="refused",
+                message="This actor cannot edit that answer. Other participants were left unchanged.",
+                error_code="unauthorized_actor",
+                pending_inquiry=_pending_inquiry_copy(state),
+            ))
+        if require_expected_revision and (
+            expected_graph_revision is None or str(expected_graph_revision).strip() == "" or expected_session_revision is None
+        ):
+            return finish(_terminal_edit_receipt(
+                status="refused",
+                message="A correction needs the expected graph and session revisions. Nothing was changed.",
+                error_code="stale_target",
+                pending_inquiry=_pending_inquiry_copy(state),
+            ))
         projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else None
         if not isinstance(projection, dict) or projection.get("schema_version") != "shared-interview-session-v1":
             return _terminal_edit_receipt(
@@ -3482,29 +3787,53 @@ class ComplaintWorkspaceRequestHandlers:
         metadata = getattr(knowledge, "metadata", None)
         if isinstance(metadata, dict) and not str(metadata.get("case_id") or "").strip():
             metadata["case_id"] = case_id
-        target = _last_eligible_accepted_answer(state, knowledge)
         pending_before = _pending_inquiry_copy(state)
-        if target is None:
-            return _terminal_edit_receipt(
-                status="refused",
-                message="Nothing to edit yet. The pending question is unchanged.",
-                error_code="missing_target",
-                pending_inquiry=pending_before,
-            )
         from mediator.hook_runtime import graph_revision_token
 
         current_token = graph_revision_token(knowledge)
         current_session = int((actions._interview_meta or {}).get("session_revision") or 0)
-        graph_token = current_token if expected_graph_revision is None else str(expected_graph_revision)
-        session_revision = current_session if expected_session_revision is None else int(expected_session_revision)
+        if require_expected_revision and (
+            str(expected_graph_revision) != current_token or int(expected_session_revision or 0) != current_session
+        ):
+            return finish(_terminal_edit_receipt(
+                status="refused",
+                message="Stale concurrent edit rejected. The pending inquiry was kept.",
+                error_code="stale_target",
+                pending_inquiry=pending_before,
+            ))
+        if require_expected_revision:
+            target, selection_code = _eligible_correction_for_actor(
+                state, knowledge, actor_id, str(target_stable_id or ""),
+            )
+        else:
+            target, selection_code = _last_eligible_accepted_answer(state, knowledge), None
+        if target is None:
+            code = selection_code or "missing_target"
+            if code == "unauthorized_actor":
+                message = "This actor cannot edit that answer. Other participants were left unchanged."
+            else:
+                message = "Nothing to edit yet. The pending question is unchanged."
+            return finish(_terminal_edit_receipt(
+                status="refused",
+                message=message,
+                error_code=code,
+                pending_inquiry=pending_before,
+            ))
+        if require_expected_revision:
+            graph_token = str(expected_graph_revision)
+            session_revision = int(expected_session_revision or 0)
+        else:
+            graph_token = current_token if expected_graph_revision is None else str(expected_graph_revision)
+            session_revision = current_session if expected_session_revision is None else int(expected_session_revision)
         event_id = "edit-" + hashlib.sha256(
             f"{target['stable_id']}|{text}".encode("utf-8")
         ).hexdigest()[:24]
+        source_context = _edit_source_context(target.get("envelope") or {}, text, event_id)
         receipt = mediator.apply_factual_correction(
             action="correct",
             target_stable_id=target["stable_id"],
             replacement=text,
-            source_context=_edit_source_context(target.get("envelope") or {}, text, event_id),
+            source_context=source_context,
             event_id=event_id,
             case_id=case_id,
             expected_graph_revision=graph_token,
@@ -3522,26 +3851,29 @@ class ComplaintWorkspaceRequestHandlers:
                 message = f"Edit is unavailable ({error_code or 'unavailable'}). The pending question is unchanged."
             else:
                 message = f"Edit was refused ({error_code or status or 'refused'}). The pending question is unchanged."
-            return _terminal_edit_receipt(
+            return finish(_terminal_edit_receipt(
                 status=status or "refused",
                 message=message,
                 error_code=error_code or None,
                 pending_inquiry=pending_before,
                 correction=receipt,
-            )
+            ))
         pending, reselected = _reselect_affected_pending(actions, knowledge, target, pending_before)
         exported = actions.export_session_projection()
         if not isinstance(exported, dict):
-            return _terminal_edit_receipt(
+            return finish(_terminal_edit_receipt(
                 status="unavailable",
                 message="Edit is unavailable (projection_invalid). The pending question is unchanged.",
                 error_code="projection_invalid",
                 pending_inquiry=pending_before,
                 correction=receipt,
-            )
+            ))
         state["shared_interview"] = exported
         if receipt.get("idempotent_replay") is not True:
-            _append_correction_history(state, target, text, receipt)
+            _append_correction_history(
+                state, target, text, receipt,
+                actor_principal_id=actor_id if require_expected_revision else "",
+            )
         _note_terminal_edit_controls(
             state,
             pending=pending,
@@ -3556,18 +3888,18 @@ class ComplaintWorkspaceRequestHandlers:
         try:
             self.workspace._save_state(state)
         except WorkspacePersistenceError as exc:
-            return _terminal_edit_receipt(
+            return finish(_terminal_edit_receipt(
                 status="unavailable",
                 message=f"Edit is unavailable ({exc.code or 'durability_unproven'}). The pending question is unchanged.",
                 error_code=str(exc.code or "durability_unproven"),
                 pending_inquiry=pending_before,
                 correction=receipt,
-            )
+            ))
         if reselected:
             message = "Edited the last recorded answer. The pending question was reopened because its target changed."
         else:
             message = "Edited the last recorded answer. The pending question is unchanged."
-        return _terminal_edit_receipt(
+        return finish(_terminal_edit_receipt(
             status="applied",
             message=message,
             pending_inquiry=pending,
@@ -3575,7 +3907,7 @@ class ComplaintWorkspaceRequestHandlers:
             correction=receipt,
             graph_revision=str(receipt.get("graph_revision") or ""),
             session_revision=int(exported.get("session_revision") or 0),
-        )
+        ))
 
     def save_evidence(
         self,
@@ -9226,12 +9558,18 @@ class ComplaintWorkspaceService:
         *,
         expected_graph_revision: Optional[str] = None,
         expected_session_revision: Optional[int] = None,
+        target_stable_id: Optional[str] = None,
+        actor_principal_id: Optional[str] = None,
+        require_expected_revision: bool = False,
     ) -> Dict[str, Any]:
         return self.request_handlers.apply_terminal_graph_edit(
             user_id,
             replacement,
             expected_graph_revision=expected_graph_revision,
             expected_session_revision=expected_session_revision,
+            target_stable_id=target_stable_id,
+            actor_principal_id=actor_principal_id,
+            require_expected_revision=require_expected_revision,
         )
 
     def review_case_factual_graph(self, user_id: Optional[str], *, case_id: str,
