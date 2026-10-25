@@ -239,3 +239,26 @@ def test_optional_capture_descriptor_close_refusal_cannot_escape(tmp_path,monkey
         patch.setattr(evidence.os,'close',close)
         result=evidence.capture(tmp_path/'watchdog',**_inputs())
     assert result['status']=='captured'
+
+
+@pytest.mark.parametrize('phase',['validating_reconciled_candidate','selected','setup'])
+def test_zero_ordinal_observation_preserves_native_metadata_without_inventing_a_paid_attempt(tmp_path,phase):
+    inputs=_inputs();inputs['observation']['attempt']=0
+    inputs['status']['native_state'].update(active_attempt=0,active_phase=phase)
+    result=evidence.capture(tmp_path/'watchdog',**inputs)
+    assert result['status']=='captured'
+    record=json.loads(_records(tmp_path/'watchdog')[0].read_bytes())
+    assert record['binding']['attempt']==0 and record['binding']['phase']==phase
+    assert record['completion_authority'] is False
+
+
+@pytest.mark.parametrize('damage',['native_attempt','native_cid','native_bool','observed_bool'])
+def test_zero_ordinal_cannot_borrow_a_different_native_body_or_boolean_attempt(tmp_path,damage):
+    inputs=_inputs();inputs['observation']['attempt']=0
+    inputs['status']['native_state'].update(active_attempt=0,active_phase='validating_reconciled_candidate')
+    if damage=='native_attempt':inputs['status']['native_state']['active_attempt']=1
+    elif damage=='native_cid':inputs['status']['native_state']['active_task_cid']='b'+'c'*40
+    elif damage=='native_bool':inputs['status']['native_state']['active_attempt']=False
+    else:inputs['observation']['attempt']=False
+    assert evidence.capture(tmp_path/'watchdog',**inputs)=={'status':'capture_unavailable'}
+    assert not (tmp_path/'watchdog').exists()

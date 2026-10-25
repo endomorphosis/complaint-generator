@@ -26,7 +26,7 @@ _FAILURES = frozenset({"stalled", "no_progress", "daemon_failed", "stop_incomple
     "identity_mismatch", "state_error", "board_error", "budget_exhausted", "unknown", "stopped", "blocked"})
 _PHASES = frozenset({"implementing", "implementation", "provider", "validating",
     "validating_reconciled_candidate", "merging", "merge", "preparing_worktree", "worktree",
-    "awaiting_user", "waiting_for_user", "manual_hold", "paused", "cancelled", "unknown"})
+    "selected", "setup", "awaiting_user", "waiting_for_user", "manual_hold", "paused", "cancelled", "unknown"})
 _LIVENESS = frozenset({"alive", "dead", "absent", "pid_reuse", "unknown", "missing"})
 _PREFLIGHT_FLAGS = ("grok_binary_present", "auth_material_present", "private_runtime_ready",
     "worktree_capacity_sufficient", "resource_capacity_ready")
@@ -67,7 +67,7 @@ def _snapshot(scope, observation, status, preflight, observed_at):
     if task in (None,"") and cid in (None,"") and attempt in (None,0):
         binding = {"task_id":None,"task_cid":None,"attempt":0}
     elif (type(task) is str and _TASK.fullmatch(task) and type(cid) is str and _CID.fullmatch(cid)
-            and type(attempt) is int and 1 <= attempt <= 3
+            and type(attempt) is int and 0 <= attempt <= 3
             and native.get("active_task_id") == task and native.get("active_task_cid") == cid
             and type(native.get("active_attempt")) is int and native["active_attempt"] == attempt):
         binding = {"task_id":task,"task_cid":cid,"attempt":attempt}
