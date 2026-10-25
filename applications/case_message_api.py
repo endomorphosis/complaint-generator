@@ -13,6 +13,8 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from starlette.requests import Request
+from starlette.concurrency import run_in_threadpool
+from applications.browser_sessions import BrowserSessionError, BrowserSessionService, SESSION_COOKIE
 
 from applications.case_messages import (
     CaseMessageError,
@@ -21,6 +23,7 @@ from applications.case_messages import (
 )
 
 TASK_ID = "CIMP-GUI-42"
+_NO_STORE = {"Cache-Control": "no-store, max-age=0, private", "Pragma": "no-cache", "Expires": "0"}
 
 
 class CaseMessageService:
@@ -85,23 +88,44 @@ class CaseMessageService:
     def store(self) -> CaseMessageStore:
         return self._store
 
-    def create_thread(self, actor_principal_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
-        return self._store.create_thread(actor_principal_id, body)
+    def _current_call(self, method, actor, *args, verify_access=None):
+        if verify_access is None:
+            return getattr(self._store, method)(actor, *args)
+        body = args[-1]
+        key = (self._store._key_id, self._store._key)
+        def verify():
+            verify_access()
+            self._store._active(actor)
+            if (self._store._key_id, self._store._key) != key:
+                raise CaseMessageError("message_unavailable")
+            payload = self._store._body(body)
+            if method in {"page", "list_threads"}:
+                admission = self._store._admit_read(actor, str(payload.get("case_id") or ""), payload)
+            else:
+                admission = self._store._admit(actor, str(payload.get("case_id") or ""),
+                    "case.review" if method == "adopt" else "case.message.send", payload)
+            if method not in {"create_thread", "list_threads"}:
+                self._store._require_thread(args[0], admission["case_id"])
+        with self._store.publication_scope(verify):
+            return getattr(self._store, method)(actor, *args)
 
-    def list_threads(self, actor_principal_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
-        return self._store.list_threads(actor_principal_id, body)
+    def create_thread(self, actor_principal_id: str, body: Mapping[str, Any], *, verify_access=None) -> dict[str, Any]:
+        return self._current_call("create_thread", actor_principal_id, body, verify_access=verify_access)
 
-    def send(self, actor_principal_id: str, thread_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
-        return self._store.send(actor_principal_id, thread_id, body)
+    def list_threads(self, actor_principal_id: str, body: Mapping[str, Any], *, verify_access=None) -> dict[str, Any]:
+        return self._current_call("list_threads", actor_principal_id, body, verify_access=verify_access)
 
-    def revise(self, actor_principal_id: str, thread_id: str, message_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
-        return self._store.revise(actor_principal_id, thread_id, message_id, body)
+    def send(self, actor_principal_id: str, thread_id: str, body: Mapping[str, Any], *, verify_access=None) -> dict[str, Any]:
+        return self._current_call("send", actor_principal_id, thread_id, body, verify_access=verify_access)
 
-    def page(self, actor_principal_id: str, thread_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
-        return self._store.page(actor_principal_id, thread_id, body)
+    def revise(self, actor_principal_id: str, thread_id: str, message_id: str, body: Mapping[str, Any], *, verify_access=None) -> dict[str, Any]:
+        return self._current_call("revise", actor_principal_id, thread_id, message_id, body, verify_access=verify_access)
 
-    def adopt(self, actor_principal_id: str, thread_id: str, message_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
-        return self._store.adopt(actor_principal_id, thread_id, message_id, body)
+    def page(self, actor_principal_id: str, thread_id: str, body: Mapping[str, Any], *, verify_access=None) -> dict[str, Any]:
+        return self._current_call("page", actor_principal_id, thread_id, body, verify_access=verify_access)
+
+    def adopt(self, actor_principal_id: str, thread_id: str, message_id: str, body: Mapping[str, Any], *, verify_access=None) -> dict[str, Any]:
+        return self._current_call("adopt", actor_principal_id, thread_id, message_id, body, verify_access=verify_access)
 
 
 def mount_case_messages(app: Any) -> None:
@@ -127,48 +151,55 @@ def mount_case_messages(app: Any) -> None:
         return material if isinstance(material, dict) else {}
 
     def _fail(exc: CaseMessageError) -> JSONResponse:
-        return JSONResponse({"error": exc.code}, status_code=message_http_status(exc.code))
+        return JSONResponse({"error": exc.code}, status_code=message_http_status(exc.code), headers=_NO_STORE)
+
+    async def _dispatch(request, method, *identities, status=200):
+        try:
+            service = _service(request)
+            sessions = getattr(request.app.state, "browser_sessions", None)
+            bound = getattr(request.state, "browser_principal", None)
+            token = request.cookies.get(SESSION_COOKIE)
+            if not isinstance(sessions, BrowserSessionService) or bound is None:
+                raise CaseMessageError("unauthenticated")
+            def verify():
+                try:
+                    current = sessions.authenticate_token(token)
+                except BrowserSessionError:
+                    raise CaseMessageError("unauthenticated") from None
+                if (current.principal_id, current.tenant_id, current.generation) != (
+                        bound.principal_id, bound.tenant_id, bound.generation):
+                    raise CaseMessageError("unauthenticated")
+                if (_service(request) is not service
+                        or getattr(request.app.state, "browser_sessions", None) is not sessions):
+                    raise CaseMessageError("message_unavailable")
+            verify()
+            result = await run_in_threadpool(getattr(service, method), _actor(request),
+                *identities, _material(request), verify_access=verify)
+            verify()
+            return JSONResponse(result, status_code=status, headers=_NO_STORE)
+        except CaseMessageError as exc:
+            return _fail(exc)
 
     @app.post("/api/cases/messages/threads")
     async def message_thread_create(request: Request):
-        try:
-            created = _service(request).create_thread(_actor(request), _material(request))
-        except CaseMessageError as exc:
-            return _fail(exc)
-        return JSONResponse(created, status_code=201)
+        return await _dispatch(request, "create_thread", status=201)
 
     @app.get("/api/cases/messages/threads")
     async def message_thread_list(request: Request):
-        try:
-            return JSONResponse(_service(request).list_threads(_actor(request), _material(request)))
-        except CaseMessageError as exc:
-            return _fail(exc)
+        return await _dispatch(request, "list_threads")
 
     @app.post("/api/cases/messages/threads/{thread_id}/messages")
     async def message_send(thread_id: str, request: Request):
-        try:
-            created = _service(request).send(_actor(request), thread_id, _material(request))
-        except CaseMessageError as exc:
-            return _fail(exc)
-        return JSONResponse(created, status_code=201)
+        return await _dispatch(request, "send", thread_id, status=201)
 
     @app.post("/api/cases/messages/threads/{thread_id}/messages/{message_id}/revise")
     async def message_revise(thread_id: str, message_id: str, request: Request):
-        try:
-            return JSONResponse(_service(request).revise(_actor(request), thread_id, message_id, _material(request)))
-        except CaseMessageError as exc:
-            return _fail(exc)
+        return await _dispatch(request, "revise", thread_id, message_id)
 
     @app.get("/api/cases/messages/threads/{thread_id}/messages")
     async def message_page(thread_id: str, request: Request):
-        try:
-            return JSONResponse(_service(request).page(_actor(request), thread_id, _material(request)))
-        except CaseMessageError as exc:
-            return _fail(exc)
+        return await _dispatch(request, "page", thread_id)
 
     @app.post("/api/cases/messages/threads/{thread_id}/messages/{message_id}/adopt")
     async def message_adopt(thread_id: str, message_id: str, request: Request):
-        try:
-            return JSONResponse(_service(request).adopt(_actor(request), thread_id, message_id, _material(request)))
-        except CaseMessageError as exc:
-            return _fail(exc)
+        return await _dispatch(request, "adopt", thread_id, message_id)

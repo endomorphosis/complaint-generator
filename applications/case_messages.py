@@ -17,6 +17,7 @@ import json
 import os
 import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
@@ -36,6 +37,7 @@ TASK_ID = "CIMP-GUI-42"
 SCHEMA_VERSION = 1
 THREAD_KIND = "case-message-thread"
 MESSAGE_KIND = "case-message-version"
+ATTACHMENT_BINDING_KIND = "case-message-attachment-binding"
 MAX_TEXT_CHARS = 4000
 DEFAULT_PAGE_LIMIT = 10
 MAX_PAGE_LIMIT = 20
@@ -97,6 +99,16 @@ class _CanonicalAccess:
     trust: str
     principal_id: str
     case_id: str
+
+
+@dataclass(eq=False)
+class _PublicationScope:
+    store: Any
+    verify: Callable[[], Any]
+    active: bool = True
+
+
+_PUBLICATION_SCOPE: ContextVar[Any] = ContextVar("case_message_publication_scope", default=None)
 
 
 def _opaque_id() -> str:
@@ -176,7 +188,7 @@ class CaseMessageStore:
         os.chmod(self._root, 0o700)
         self._lock_path = self._root / ".lock"
         self._lock_path.touch(mode=0o600)
-        for name in ("threads", "messages", "order", "case-threads", "idem"):
+        for name in ("threads", "messages", "order", "case-threads", "idem", "attachments"):
             path = self._root / name
             path.mkdir(mode=0o700, exist_ok=True)
         for name in ("thread", "send", "revise", "adopt"):
@@ -185,6 +197,106 @@ class CaseMessageStore:
     @property
     def root(self) -> Path:
         return self._root
+
+    @contextmanager
+    def publication_scope(self, verify: Callable[[], Any]):
+        """Use only a trusted current-request verifier, never a body flag.
+
+        Its lifetime ends even in a copied context. Each existing atomic
+        publication rechecks after preparation and immediately before replace.
+        """
+        if not callable(verify):
+            raise CaseMessageError("message_unavailable")
+        scope = _PublicationScope(self, verify)
+        token = _PUBLICATION_SCOPE.set(scope)
+        try:
+            self._verify_publication()
+            yield
+            self._verify_publication()
+        finally:
+            scope.active = False
+            _PUBLICATION_SCOPE.reset(token)
+
+    def _verify_publication(self) -> None:
+        scope = _PUBLICATION_SCOPE.get()
+        if scope is not None:
+            if type(scope) is not _PublicationScope or not scope.active or scope.store is not self:
+                raise CaseMessageError("message_unavailable")
+            scope.verify()
+
+    def _attachment_directory(self, tenant_id: str, case_id: str) -> Path:
+        identity = _fingerprint({"tenant_id": tenant_id, "case_id": case_id})
+        return self._root / "attachments" / identity
+
+    def record_thread_attachment(self, actor_principal_id: str, body: Mapping[str, Any],
+                                 record: Mapping[str, Any], *, verify_access=None) -> dict[str, Any]:
+        """Persist immutable thread metadata after the attachment owner admitted bytes.
+
+        This encrypted record contains no path, CID, filename, key or payload.
+        It cannot authorize attachment decryption: that remains the real grant
+        and recipient-key owner on every read.
+        """
+        actor = self._active(actor_principal_id)
+        payload = self._body(body)
+        keys = {"attachment_id", "thread_id", "tenant_id", "case_id", "resource_id",
+            "resource_revision", "artifact_revision", "actor_principal_id"}
+        if not isinstance(record, Mapping) or set(record) != keys or record.get("actor_principal_id") != actor:
+            raise CaseMessageError("binding_mismatch")
+        document = dict(record)
+        for field in keys - {"resource_revision"}:
+            _label(document[field], "binding_mismatch")
+        if type(document["resource_revision"]) is not int:
+            raise CaseMessageError("revision_conflict")
+
+        def verify():
+            if verify_access is not None:
+                verify_access()
+            admission = self._admit(actor, document["case_id"], "case.message.send", payload)
+            if any(document[key] != admission[key] for key in ("case_id", "tenant_id", "resource_id", "resource_revision")):
+                raise CaseMessageError("revision_conflict")
+            self._require_thread(document["thread_id"], admission["case_id"])
+
+        with self.publication_scope(verify), self._locked():
+            directory = self._attachment_directory(document["tenant_id"], document["case_id"])
+            directory.mkdir(mode=0o700, exist_ok=True)
+            path = directory / (document["attachment_id"] + ".envelope")
+            if path.exists():
+                prior = self._open_document(path, kind=ATTACHMENT_BINDING_KIND, revision=1,
+                    tenant_id=document["tenant_id"], case_id=document["case_id"])
+                if prior != document:
+                    raise CaseMessageError("replay_mismatch")
+                return dict(prior)
+            self._seal(document=document, kind=ATTACHMENT_BINDING_KIND, directory=directory,
+                stem=document["attachment_id"], revision=1, tenant_id=document["tenant_id"], case_id=document["case_id"])
+            return dict(document)
+
+    def thread_attachment_bindings(self, actor_principal_id: str, body: Mapping[str, Any],
+                                   *, attachment_id: str | None = None) -> list[dict[str, Any]]:
+        actor, payload = self._active(actor_principal_id), self._body(body)
+        case_id = _label(payload.get("case_id"), "case_id")
+        thread = _label(payload.get("thread_id"), "thread_id")
+        admission = self._admit_read(actor, case_id, payload)
+        with self._locked():
+            self._require_thread(thread, case_id)
+            directory = self._attachment_directory(admission["tenant_id"], case_id)
+            paths = ([directory / (_label(attachment_id, "attachment_id") + ".envelope")]
+                if attachment_id is not None else sorted(directory.glob("*.envelope")))
+            if len(paths) > 4096:
+                raise CaseMessageError("page_limit")
+            rows = []
+            for path in paths:
+                if not path.exists():
+                    continue
+                record = self._open_document(path, kind=ATTACHMENT_BINDING_KIND, revision=1,
+                    tenant_id=admission["tenant_id"], case_id=case_id)
+                if (record.get("attachment_id") != path.stem or record.get("case_id") != case_id
+                        or record.get("tenant_id") != admission["tenant_id"]
+                        or record.get("resource_id") != admission["resource_id"]):
+                    raise CaseMessageError("binding_mismatch")
+                if record.get("thread_id") == thread:
+                    rows.append(record)
+            self._readmit_read(actor, case_id, payload)
+            return rows
 
     def create_thread(self, actor_principal_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
         actor = self._active(actor_principal_id)
@@ -490,6 +602,7 @@ class CaseMessageStore:
                 "tenant_id": owned.tenant_id,
                 "case_id": owned.case_id,
                 "resource_id": owned.resource_id,
+                "resource_revision": owned.revision,
                 "action": action,
             }
         if payload.get("membership_grant_id") in (None, ""):
@@ -521,6 +634,7 @@ class CaseMessageStore:
             "tenant_id": decision.tenant_id,
             "case_id": decision.case_id,
             "resource_id": decision.resource_id,
+            "resource_revision": grant.case_revision,
             "action": action,
         }
 
@@ -660,7 +774,11 @@ class CaseMessageStore:
         temporary = directory / f"{stem}.envelope.tmp"
         temporary.write_bytes(envelope)
         os.chmod(temporary, 0o600)
-        os.replace(temporary, path)
+        try:
+            self._verify_publication()
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _load_thread(self, thread_id: str) -> dict[str, Any]:
         path = self._root / "threads" / f"{thread_id}.envelope"
@@ -779,13 +897,21 @@ class CaseMessageStore:
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(json.dumps(document, sort_keys=True, separators=(",", ":")), encoding="utf-8")
         os.chmod(temporary, 0o600)
-        os.replace(temporary, path)
+        try:
+            self._verify_publication()
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _write_text(self, path: Path, text: str) -> None:
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(text, encoding="utf-8")
         os.chmod(temporary, 0o600)
-        os.replace(temporary, path)
+        try:
+            self._verify_publication()
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _text(self, value: Any) -> str:
         if not isinstance(value, str) or value == "" or "\x00" in value:
