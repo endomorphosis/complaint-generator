@@ -4137,11 +4137,22 @@ class EvidenceValidationScheduler:
                 legal_data_version=observed["host_measurement"]["source_before"]["dependencies"].get("external/ipfs_datasets_py", {}).get("head", "unavailable"))
             receipts.append(receipt)
             result = dict(observed.native_result)
+            failure_reason = str(receipt.get("reason") or "")
             rejected_status = 78
-            if result.get("timed_out") is True:
+            if failure_reason == "subprocess_timeout" and result.get("timed_out") is True:
                 rejected_status = 124
-            elif result.get("infrastructure_failure") is True:
+            elif (failure_reason in {"validation_process_cleanup_unverified", "validation_output_limit_exceeded"}
+                    and result.get("infrastructure_failure") is True and result.get("error") == failure_reason):
                 rejected_status = 75
+            if not receipt["admitted"] and rejected_status == 78:
+                # A stronger source/policy refusal must not become an
+                # environment retry just because the raw command timed out.
+                # The owned measurement retains the executor's original facts.
+                result["native_executor_failure"] = {key: result[key] for key in
+                    ("returncode", "error", "timed_out", "infrastructure_failure",
+                     "process_tree_quiesced", "execution_deadline_exceeded") if key in result}
+                result.update(timed_out=False, infrastructure_failure=False,
+                              error=failure_reason or "current_behavioral_evidence_required")
             result.update(command=str(spec.command), raw_command=str(spec.raw_command or spec.command),
                           returncode=0 if receipt["admitted"] else rejected_status, behavioral_evidence=receipt)
             return result

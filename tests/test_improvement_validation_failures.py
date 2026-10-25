@@ -93,3 +93,29 @@ def test_real_native_scheduler_retains_timeout_or_infrastructure_status_through_
     assert row['returncode'] == status
     if status == 124: assert row['timed_out'] is True
     else: assert row['infrastructure_failure'] is True
+
+
+@pytest.mark.parametrize('kind', ['timeout_verified', 'validation_process_cleanup_unverified'])
+def test_source_denial_dominates_raw_executor_timeout_or_infrastructure_failure(tmp_path, kind):
+    root, task, command = _world(tmp_path)
+    native = ValidationScheduler(max_workers=1, resource_budget=1,
+        default_timeout_seconds=30, cache_dir=tmp_path / 'native-cache')
+    wrapped = host.EvidenceValidationScheduler(native, state_dir=tmp_path / 'state',
+        spec={'tasks':[task]}, defer_readiness=True)
+    from types import SimpleNamespace
+    wrapped.bind_task(SimpleNamespace(task_id=task['id'],canonical_task_cid='synthetic-cid',
+        canonical_task_key='synthetic-key'), root)
+    fault = _fault(kind)
+    def mutate_source_then_fail(**call):
+        (root / task['targets'][0]).write_text('def test_synthetic():\n assert False\n')
+        return fault(**call)
+    result = wrapped.run([command], workspace_path=root, environment={'PATH':'/usr/bin:/bin'},
+        runner=mutate_source_then_fail, require_full_validation=True, changed_files=task['targets'])
+    assert result['passed'] is False and result['returncode'] == 78
+    assert result['behavioral_evidence'][0]['reason'] == 'stale_source_hash'
+    row = result['results'][0]
+    assert row['error'] == 'stale_source_hash'
+    assert row['timed_out'] is row['infrastructure_failure'] is False
+    assert row['native_executor_failure']['returncode'] == (124 if kind == 'timeout_verified' else 75)
+    from ipfs_accelerate_py.agent_supervisor.validation.validation_scheduler import classify_validation_attempts, ValidationOutcome
+    assert classify_validation_attempts([row]) is ValidationOutcome.DETERMINISTIC_FAILURE
