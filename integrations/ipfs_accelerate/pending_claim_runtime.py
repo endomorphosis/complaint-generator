@@ -20,6 +20,8 @@ MODULE = "ipfs_accelerate_py.agent_supervisor.todo_daemon.pending_task_claim_rec
 RELATIVE = MODULE.replace(".", "/") + ".py"
 CONFIG_NAME = "pending-task-claim-runtime.json"
 SCHEMA = "complaint.pending-task-claim-runtime.v1"
+HANDOFF_SCHEMA = "complaint.pending-candidate-handoff.v1"
+HANDOFF_DIRECTORY = "pending-candidate-handoffs"
 
 
 def _need(condition, reason):
@@ -148,7 +150,8 @@ def load_runtime(repo_root, spec_path, state_dir, record, native):
     native_sources = {native.__name__: {"path": str(actual), "sha256": _sha(native_raw), "commit": runtime_commit}}
     for name in (".current_incident_adjudication", ".portal_task_state_control_plane",
                  "..merge.worktree_lifecycle", "..merge.checkout_lock", "..merge.merge_queue",
-                 "..merge.workspace_quarantine", "..runtime.grok_cli_runner"):
+                 "..merge.workspace_quarantine", "..runtime.grok_cli_runner",
+                 "..proof.code_proof_obligations", "..validation.proposal_validation"):
         support = importlib.import_module(name, MODULE.rsplit(".", 1)[0])
         support_path = _canonical(Path(support.__file__))
         _need(support_path.is_relative_to(runtime_root), "pending_claim_runtime_support_origin_changed")
@@ -198,6 +201,63 @@ def load_runtime(repo_root, spec_path, state_dir, record, native):
     return module, binding
 
 
+def _handoff_path(state, task_id, *, create=False):
+    directory = Path(state) / HANDOFF_DIRECTORY
+    if create:
+        directory.mkdir(mode=0o700, exist_ok=True)
+    if not os.path.lexists(directory):
+        return None
+    directory = _canonical(directory)
+    info = directory.stat()
+    _need(info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o700,
+          "pending_claim_handoff_directory_unsafe")
+    return directory / (_sha(task_id.encode()) + ".json")
+
+
+def _handoff_read(path):
+    if path is None or not os.path.lexists(path):
+        return None
+    value = json.loads(_read(path, private=True))
+    _need(type(value) is dict and value.get("schema") == HANDOFF_SCHEMA
+          and value.get("phase") in {"reviewed", "preserved", "complete"}
+          and type(value.get("task_id")) is str and value.get("completion_authority") is False
+          and path.name == _sha(value["task_id"].encode()) + ".json"
+          and value.get("handoff_id") == "sha256:" + _sha(json.dumps(
+              {k: v for k, v in value.items() if k != "handoff_id"}, sort_keys=True,
+              ensure_ascii=False, separators=(",", ":")).encode()),
+          "pending_claim_handoff_invalid")
+    return value
+
+
+def _handoff_write(path, value):
+    from .improvement_runner import _atomic_json
+    if os.path.lexists(path):
+        _handoff_read(path)
+    body = {k: v for k, v in value.items() if k != "handoff_id"}
+    body["handoff_id"] = "sha256:" + _sha(json.dumps(body, sort_keys=True, ensure_ascii=False,
+                                                     separators=(",", ":")).encode())
+    _need(len(json.dumps(body, indent=2, sort_keys=True).encode()) <= 65536,
+          "pending_claim_handoff_too_large")
+    _atomic_json(path, body)
+
+
+def unfinished_handoff_task(state):
+    """Return one owned unfinished transfer; never infer task completion."""
+    directory = Path(state) / HANDOFF_DIRECTORY
+    if not os.path.lexists(directory):
+        return None
+    _handoff_path(state, "directory-check")
+    pending = []
+    for path in directory.glob("*.json"):
+        value = _handoff_read(path)
+        _need(path.name == _sha(value["task_id"].encode()) + ".json",
+              "pending_claim_handoff_identity_changed")
+        if value["phase"] != "complete":
+            pending.append(value["task_id"])
+    _need(len(pending) <= 1, "pending_claim_multiple_unfinished_handoffs")
+    return pending[0] if pending else None
+
+
 def reconcile_pending_claim(repo_root, spec_path, state_dir, record, native, daemon, task_id):
     """Use the SDK API under caller-held campaign/checkout/queue guards."""
     from .improvement_runner import _read_native_state
@@ -212,14 +272,46 @@ def reconcile_pending_claim(repo_root, spec_path, state_dir, record, native, dae
     before, source = _read_native_state(repo_root, daemon.state_path)
     _need(not before.get("read_error") and source.get("source") != "unavailable",
           "pending_claim_runtime_state_unavailable")
-    native_facades = binding.get("mode") == "native" and all(callable(getattr(daemon, name, None)) for name in (
+    path = _handoff_path(state_dir, task_id)
+    journal = _handoff_read(path)
+    if journal is not None and journal["phase"] == "complete":
+        journal = None
+    automatic = all(callable(getattr(module, name, None)) for name in ("review_recovery", "reconcile_recovery"))
+    _need(journal is None or automatic, "pending_claim_handoff_api_unavailable")
+    native_facades = not automatic and binding.get("mode") == "native" and all(callable(getattr(daemon, name, None)) for name in (
         "review_quiesced_pending_task_claim", "reconcile_quiesced_pending_task_claim"))
-    request = (daemon.review_quiesced_pending_task_claim(task_id=task_id) if native_facades
-               else module.review(daemon, task_id=task_id))
+    if journal is not None:
+        _need(journal.get("task_id") == task_id and journal.get("binding") == binding
+              and journal.get("repo_root") == str(repo_root)
+              and journal.get("state_dir") == str(state_dir)
+              and journal.get("native_payload_sha256") == _sha(json.dumps(before, sort_keys=True).encode()),
+              "pending_claim_handoff_binding_changed")
+        request = journal["request"]
+    else:
+        request = (module.review_recovery(daemon, task_id=task_id) if automatic else
+                   daemon.review_quiesced_pending_task_claim(task_id=task_id) if native_facades else
+                   module.review(daemon, task_id=task_id))
+        if automatic:
+            path = _handoff_path(state_dir, task_id, create=True)
+            journal = {"schema": HANDOFF_SCHEMA, "phase": "reviewed", "task_id": task_id,
+                       "repo_root": str(repo_root), "state_dir": str(state_dir), "binding": binding,
+                       "request": request, "native_payload_sha256": _sha(json.dumps(before, sort_keys=True).encode()),
+                       "completion_authority": False}
     _, fresh = load_runtime(repo_root, spec_path, state_dir, record, native)
     _need(fresh == binding, "pending_claim_runtime_binding_changed")
-    result = (daemon.reconcile_quiesced_pending_task_claim(request=request) if native_facades
-              else module.reconcile(daemon, request=request))
+    request_identity = request.get("base", request) if isinstance(request, dict) else None
+    _need(isinstance(request_identity, dict) and request_identity.get("task_id") == task_id,
+          "pending_claim_request_task_changed")
+    if automatic and journal["phase"] == "reviewed":
+        _handoff_write(path, journal)
+    if journal is not None and journal["phase"] == "preserved":
+        fresh_request = module.review_recovery(daemon, task_id=task_id)
+        _need(fresh_request == request, "pending_claim_handoff_native_authority_changed")
+        result = journal["result"]
+    else:
+        result = (module.reconcile_recovery(daemon, request=request) if automatic else
+                  daemon.reconcile_quiesced_pending_task_claim(request=request) if native_facades else
+                  module.reconcile(daemon, request=request))
     _, final_binding = load_runtime(repo_root, spec_path, state_dir, record, native)
     _need(final_binding == binding, "pending_claim_runtime_binding_changed")
     after, source = _read_native_state(repo_root, daemon.state_path)
@@ -228,8 +320,38 @@ def reconcile_pending_claim(repo_root, spec_path, state_dir, record, native, dae
     _need(isinstance(result, dict) and result.get("reconciled") is True
           and result.get("blocked") is False and result.get("counters_preserved") is True
           and result.get("task_status_unchanged") is True
-          and result.get("reason") in {"quiesced_pending_task_claim_released", "pending_claim_already_released"}
+          and result.get("reason") in {"quiesced_pending_task_claim_released", "pending_claim_already_released",
+                                       "preserved_candidate_pending_task_claim_released"}
           and all(result.get(key) is False for key in ("completion_authority", "attempt_refunded",
                   "provider_callback_settled", "new_attempt_authority")),
           "pending_claim_runtime_reconciliation_unverified")
+    candidate = result.get("preserved_candidate")
+    if result["reason"] == "preserved_candidate_pending_task_claim_released":
+        _need(automatic and type(candidate) is dict and candidate.get("task_id") == task_id,
+              "pending_claim_candidate_proof_required")
+        proof_path = Path(str(candidate.get("preservation_receipt_path") or ""))
+        _need(proof_path.parent == Path(state_dir) / "pending-task-claim-recoveries"
+              and re.fullmatch(r"candidate-[a-f0-9]{64}\.json", proof_path.name) is not None,
+              "pending_claim_candidate_receipt_scope")
+        _need(re.fullmatch(r"sha256:[a-f0-9]{64}", str(result.get("receipt_id") or "")) is not None,
+              "pending_claim_candidate_receipt_identity")
+        if journal["phase"] == "preserved":
+            receipt_sha256 = journal["preservation_receipt_sha256"]
+        else:
+            receipt_sha256 = _sha(_read(proof_path, private=True))
+        journal.update(phase="preserved", result=result, preservation_receipt_sha256=receipt_sha256)
+        _handoff_write(path, journal)
+        from .preserved_candidate_runtime import materialize
+        materialized = materialize(repo_root, spec_path, state_dir, record, daemon, candidate,
+            root_base=request["base"]["repo_head"], receipt_id=result["receipt_id"], receipt_sha256=receipt_sha256)
+        _, final_binding = load_runtime(repo_root, spec_path, state_dir, record, native)
+        after, source = _read_native_state(repo_root, daemon.state_path)
+        _need(final_binding == binding and after == before and source.get("source") != "unavailable",
+              "pending_claim_materialization_scope_changed")
+        result = {**result, "candidate_materialization": materialized}
+    else:
+        _need(candidate is None, "pending_claim_unexpected_candidate")
+    if journal is not None:
+        journal.update(phase="complete", result=result)
+        _handoff_write(path, journal)
     return {**result, "host_runtime_binding": binding}

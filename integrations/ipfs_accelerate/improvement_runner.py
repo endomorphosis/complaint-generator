@@ -898,6 +898,15 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
             if full_launch and not _campaign_tuple_matches(previous, repo_root, spec_path, state_dir):
                 return _stop_incomplete(state_dir, "live_campaign_mismatch")
             return {"status": "already_running", "pid": previous["identity"]["pid"], "state_dir": str(state_dir)}
+        from .pending_claim_runtime import unfinished_handoff_task
+        try:
+            unfinished = unfinished_handoff_task(state_dir)
+        except (OSError, ValueError, TypeError):
+            return {"status": "not_ready", "reason": "pending_candidate_handoff_unverified",
+                    "execution_started": False, "paid_calls": 0}
+        if unfinished:
+            return {"status": "not_ready", "reason": "pending_candidate_materialization_required",
+                    "task_id": unfinished, "execution_started": False, "paid_calls": 0}
         shutdown_path = state_dir / "container_shutdown.json"
         shutdown = {}
         shutdown_raw = None
@@ -1779,7 +1788,14 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         provider_evidence = log_evidence or provider_evidence
     provider_progress = bool(provider_evidence and provider_evidence.get("progress_fresh", True))
     validation_evidence = _validation_event_evidence(events_path, binding, started_at=invocation_start) if claim_verified else None
+    from .reconciliation_activity import evidence as owned_executor_activity_evidence
+    canonical_activity_evidence = (owned_executor_activity_evidence(sys.modules[__name__], repo_root, state_dir,
+        record, native_state, now_ts=now) if owned and current_state else None)
+    if canonical_activity_evidence is not None:
+        validation_evidence = canonical_activity_evidence
     worker_liveness = _owner_liveness(native_state.get("owner_process_birth"))
+    if canonical_activity_evidence is not None:
+        worker_liveness = "alive"  # Exact live maintenance birth, re-proved above.
     if worker_liveness == "missing":
         worker_liveness = "alive" if daemon_alive else ("absent" if not owned else "unknown")
     shutdown = _read_json(state_dir / "container_shutdown.json")
@@ -1807,6 +1823,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "stalled"
     elif active and attempt_age is not None and attempt_age > TIMEOUT_SECONDS:
         health = "stalled"
+    elif canonical_activity_evidence is not None:
+        health = "active"
     elif heartbeat_age is not None and startup_maintenance:
         health = "starting"
     elif heartbeat_age is not None and maintenance_ready:
@@ -1840,7 +1858,7 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
                                and provider_evidence.get("provider_repair_in_flight"))
         # Fresh generic log lines and a live PID are not provider or validation progress.
         silent = silent_window and (not (validation_evidence or provider_repair) if in_validation else not provider_progress)
-        post_provider = bool(provider_evidence and provider_evidence.get("provider_terminal_observed"))
+        post_provider = bool(not in_validation and provider_evidence and provider_evidence.get("provider_terminal_observed"))
         health = ("stalled" if hard_expired or log_stale else "post_provider" if post_provider
                   else "stalled" if silent else "active")
     elif selected:
@@ -1885,7 +1903,7 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     )
     identity_ok = worker_liveness == "alive" and health not in {"identity_mismatch", "heartbeat_identity_mismatch", "state_error"}
     activity_ok = (not active) or bool(provider_progress or validation_evidence
-        or (provider_evidence and provider_evidence.get("provider_terminal_observed"))) or not (
+        or (not phase.startswith("valid") and provider_evidence and provider_evidence.get("provider_terminal_observed"))) or not (
         attempt_age is not None and attempt_age > STALL_SECONDS
     )
     healthy = bool(identity_ok and heartbeat_fresh and activity_ok and health in {
@@ -1919,7 +1937,7 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
             "provider_execution_evidence": provider_evidence,
             "validation_activity_verified": bool(owned and validation_evidence),
             "validation_activity_evidence": validation_evidence,
-            "progress_verified": bool(owned and provider_progress),
+            "progress_verified": bool(owned and (provider_progress or canonical_activity_evidence)),
             "completion_authority": False}
 
 
@@ -2210,12 +2228,16 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             }
             if terminal_claim_ok and not unsafe:
                 claim_result = daemon.reconcile_quiesced_implementation_task_claim()
-            if (isinstance(claim_result, dict) and claim_result.get("blocked") is True
-                    and claim_result.get("reason") == "canonical_task_not_terminal"):
-                from .pending_claim_runtime import reconcile_pending_claim
+            from .pending_claim_runtime import reconcile_pending_claim, unfinished_handoff_task
+            unfinished = unfinished_handoff_task(state_dir)
+            nonterminal_claim = (isinstance(claim_result, dict) and claim_result.get("blocked") is True
+                and claim_result.get("reason") == "canonical_task_not_terminal")
+            if terminal_claim_ok and not unsafe and (nonterminal_claim or unfinished):
+                if unfinished and nonterminal_claim and unfinished != claim_result.get("task_id"):
+                    raise ValueError("pending_candidate_handoff_conflicts_with_current_claim")
                 _, native = _native_modules(repo_root)
                 pending_claim_result = reconcile_pending_claim(repo_root, spec_path, state_dir,
-                    record, native, daemon, str(claim_result.get("task_id") or ""))
+                    record, native, daemon, unfinished or str(claim_result.get("task_id") or ""))
                 if pending_claim_result.get("reconciled") is True and not pending_claim_result.get("blocked"):
                     # The companion releases only the exact claim. Let the
                     # unchanged Native API finish its ordinary stale-lock cleanup.
@@ -2431,6 +2453,11 @@ def _validation_activity_log_identity(path: Path):
     return value.st_dev, value.st_ino
 
 
+def _validation_activity_snapshot(campaign):
+    from .reconciliation_activity import snapshot
+    return snapshot(sys.modules[__name__], campaign)
+
+
 def _validation_activity_binding(workspace: Path, task: Mapping[str, Any], context: Mapping[str, Any], *, now_ts: float, owner_pid=None):
     """Read one exact live Native validation owner without changing its state."""
     from types import SimpleNamespace
@@ -2443,12 +2470,17 @@ def _validation_activity_binding(workspace: Path, task: Mapping[str, Any], conte
         if target != Path(__file__).resolve().parents[2]:
             return None
         state_path = campaign / f"{STATE_PREFIX}_task_state.json"
-        snapshot = plane.read_portal_task_state_snapshot(state_path)
+        snapshot = _validation_activity_snapshot(campaign)
         if not isinstance(snapshot, dict) or type(snapshot.get("revision")) is not int:
             return None
         state = snapshot.get("body")
         if not isinstance(state, dict):
             return None
+        if state.get("active_phase") == "validating_reconciled_candidate":
+            from .reconciliation_activity import binding as reconciled_binding
+            return reconciled_binding(sys.modules[__name__], daemon, native,
+                campaign=campaign, target=target, workspace=workspace, state=state,
+                task=task, context=context, now_ts=now_ts, owner_pid=owner_pid)
         expected = {"task_id": task["id"], "canonical_task_cid": context["task_cid"],
                     "canonical_task_key": context["task_key"], "attempt": state.get("active_attempt")}
         if (not expected["task_id"] or not expected["canonical_task_cid"] or not expected["canonical_task_key"]
@@ -3837,6 +3869,34 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     artifacts, results, network_proofs = [], [], []
     required, cases, imported = [], [], {}
     reason = ""
+    infrastructure_reasons = {"validation_process_cleanup_unverified", "validation_output_limit_exceeded"}
+    def invoke(specification, effective_environment, remaining):
+        try:
+            return _call_validation_with_activity(executor=runner, spec=specification,
+                workspace_path=root, timeout_seconds=remaining, environment=effective_environment,
+                task=task, context=context)
+        except subprocess.TimeoutExpired as exc:
+            # Native's public executor raises this after its own deadline.
+            # Preserve only typed facts; output/argv do not prove cleanup.
+            result = {"command": str(specification.command), "raw_command": str(specification.raw_command),
+                      "returncode": 124, "timed_out": True, "error": "subprocess_timeout"}
+            if getattr(exc, "process_tree_quiesced", None) is True:
+                result["process_tree_quiesced"] = True
+            else:
+                # Legacy timeout exceptions do not prove descendant closure.
+                # Preserve the deadline fact without classifying an uncertain
+                # process tree as a clean timeout that recovery may retry.
+                result.update(returncode=75, error="validation_process_cleanup_unverified",
+                              infrastructure_failure=True, execution_deadline_exceeded=True)
+                result.pop("timed_out")
+            return result
+
+    def reject_executor_failure(result):
+        if result.get("infrastructure_failure") is True and result.get("error") in infrastructure_reasons:
+            raise ValueError(result["error"])
+        if result.get("timed_out") or result.get("error") == "subprocess_timeout":
+            raise TimeoutError("subprocess_timeout")
+
     def execute(mode):
         catalog, manifest = run / (mode + ".duckdb"), run / (mode + ".json")
         junit = run / "junit.xml"
@@ -3852,16 +3912,15 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         remaining = timeout_seconds - (time.monotonic() - start)
         if remaining <= 0:
             raise TimeoutError("subprocess_timeout")
-        result = _call_validation_with_activity(executor=runner,
-                        spec=SimpleNamespace(command=instrumented, raw_command=command),
-                        workspace_path=root, timeout_seconds=remaining, environment=environment,
-                        task=task, context=context)
+        result = invoke(SimpleNamespace(command=instrumented, raw_command=command), environment, remaining)
         _atomic_json(run / (mode + "-native-result.json"), result)
         results.append({"mode": mode, "original_command": command, "instrumented_command": instrumented, "executed_command": result.get("command"),
                         "returncode": result.get("returncode"), "timed_out": bool(result.get("timed_out")),
+                        "error": result.get("error"), "infrastructure_failure": result.get("infrastructure_failure") is True,
+                        "process_tree_quiesced": result.get("process_tree_quiesced") is True,
+                        "execution_deadline_exceeded": result.get("execution_deadline_exceeded") is True,
                         "validation_python_launcher": result.get("validation_python_launcher", {})})
-        if result.get("timed_out") or result.get("error") == "subprocess_timeout":
-            raise TimeoutError("subprocess_timeout")
+        reject_executor_failure(result)
         if result.get("validation_python_launcher", {}).get("sealed") is not True:
             raise ValueError("sealed_execution_unavailable")
         network_path = manifest.with_suffix(network_guard["proof_suffix"])
@@ -3924,14 +3983,16 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                 release_qualification_before = read_current_release_qualification(
                     root, root / release_spec_relative, campaign, phase="pre-admission",
                     validation_environment=environment)
-            original = _call_validation_with_activity(executor=runner,
-                spec=SimpleNamespace(command=original_command, raw_command=original_command),
-                workspace_path=root, timeout_seconds=max(0.001, timeout_seconds - (time.monotonic() - start)),
-                environment=release_environment, task=task, context=context)
+            original = invoke(SimpleNamespace(command=original_command, raw_command=original_command),
+                release_environment, max(0.001, timeout_seconds - (time.monotonic() - start)))
             _atomic_json(run / "declared-script-result.json", original)
             artifacts.append({"path": str(run / "declared-script-result.json"), "sha256": _hash_file(run / "declared-script-result.json")})
             results.append({"mode": "declared_script", "original_command": original_command,
                 "instrumented_command": original_command, "returncode": original.get("returncode"),
+                "timed_out": bool(original.get("timed_out")), "error": original.get("error"),
+                "infrastructure_failure": original.get("infrastructure_failure") is True,
+                "process_tree_quiesced": original.get("process_tree_quiesced") is True,
+                "execution_deadline_exceeded": original.get("execution_deadline_exceeded") is True,
                 "validation_python_launcher": original.get("validation_python_launcher", {})})
             if (context or {}).get("campaign_state_dir"):
                 release_qualification_after = read_current_release_qualification(
@@ -3939,8 +4000,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                     validation_environment=environment)
                 if release_qualification_before != release_qualification_after:
                     raise ValueError("release_current_qualification_changed")
-            if original.get("timed_out"):
-                raise TimeoutError("subprocess_timeout")
+            reject_executor_failure(original)
             if original.get("validation_python_launcher", {}).get("sealed") is not True:
                 raise ValueError("sealed_execution_unavailable")
             if original.get("returncode") != 0:
@@ -3990,7 +4050,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         if any(imported.get(p) != h for p, h in collected_hashes.items()):
             raise ValueError("stale_source_hash")
     except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
-        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable"} else "host_measurement_unavailable"
+        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable", *infrastructure_reasons} else "host_measurement_unavailable"
     try:
         if replica_binding != _private_replica_acceptance_binding(root, task, impacted):
             reason = "trusted_replica_acceptance_changed"
@@ -4010,6 +4070,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     imported.update(bootstrap_before)
     from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
     measured = {"schema": "complaint-owned-behavioral-measurement@1", "reason": reason,
+                "infrastructure_failure": any(row.get("infrastructure_failure") is True for row in results),
                 "preserved_behavioral_definitions": preserved_behavioral_definitions,
                 "trusted_executor": {"module": str(getattr(runner, "__module__", "")), "qualname": str(getattr(runner, "__qualname__", "")),
                     "canonical_native_identity": runner is PortalImplementationDaemon._validation_command_runner,
@@ -4108,8 +4169,24 @@ class EvidenceValidationScheduler:
                 legal_data_version=observed["host_measurement"]["source_before"]["dependencies"].get("external/ipfs_datasets_py", {}).get("head", "unavailable"))
             receipts.append(receipt)
             result = dict(observed.native_result)
+            failure_reason = str(receipt.get("reason") or "")
+            rejected_status = 78
+            if failure_reason == "subprocess_timeout" and result.get("timed_out") is True:
+                rejected_status = 124
+            elif (failure_reason in {"validation_process_cleanup_unverified", "validation_output_limit_exceeded"}
+                    and result.get("infrastructure_failure") is True and result.get("error") == failure_reason):
+                rejected_status = 75
+            if not receipt["admitted"] and rejected_status == 78:
+                # A stronger source/policy refusal must not become an
+                # environment retry just because the raw command timed out.
+                # The owned measurement retains the executor's original facts.
+                result["native_executor_failure"] = {key: result[key] for key in
+                    ("returncode", "error", "timed_out", "infrastructure_failure",
+                     "process_tree_quiesced", "execution_deadline_exceeded") if key in result}
+                result.update(timed_out=False, infrastructure_failure=False,
+                              error=failure_reason or "current_behavioral_evidence_required")
             result.update(command=str(spec.command), raw_command=str(spec.raw_command or spec.command),
-                          returncode=0 if receipt["admitted"] else 78, behavioral_evidence=receipt)
+                          returncode=0 if receipt["admitted"] else rejected_status, behavioral_evidence=receipt)
             return result
         kwargs["runner"] = measured_runner
         # A previous cached return code cannot stand in for current measured cases.

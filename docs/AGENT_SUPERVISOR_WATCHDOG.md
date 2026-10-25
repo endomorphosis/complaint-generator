@@ -124,6 +124,42 @@ in-process. Missing runtime preserves the original blocked claim result;
 unsafe configuration, changed source or unproved custody fails closed. No
 companion is installed or enabled merely by updating this repository.
 
+The additive Native `review_recovery` / `reconcile_recovery` API also handles a
+stopped ordinary attempt whose declared outputs are staged. It verifies the
+accepted proposal against those exact bytes, the pending task and consumed
+ordinal, dead process births, settled queue, authenticated terminal lifecycle
+and clean pinned dependencies. Native preserves the candidate in an immutable
+commit and rescue ref and retires the old terminal checkout before releasing
+the exact claim. It does not complete the task, refund an attempt or grant
+another dispatch. The original unchanged-workspace API keeps its narrower
+checks.
+
+The Host saves the source-bound request in its private
+`pending-candidate-handoffs/` directory before invoking that operation. Recovery
+can replay an interruption before or after SDK preservation without skipping
+the transfer. An unfinished transfer blocks public start. Materialization
+rechecks the released SDK receipt, its digest and candidate manifest, then
+creates a fresh registered `rescue/worktree/` checkout under the recorded
+worktree root. It verifies the Root Git common directory and independent pinned
+dependency clones. If Root advanced, only the exact declared candidate bytes
+are transplanted onto the current baseline; overlapping edits are refused.
+Fresh Native proposal admission, measured tests and its normal callback are
+still required. Creating a worktree grants no task or lifecycle authority.
+
+Validation activity is read from the existing campaign-confined Native catalog
+without changing environment routing or creating a missing catalog. Ordinary
+validation requires the matching managed child, claim, lease and private log.
+Startup reconciliation additionally requires its accepted immutable proposal
+and bounded maintenance scope. Only the canonical executor's fresh private
+activity pulse proves current validation activity. A heartbeat or provider end
+frame cannot substitute for it, and the existing hard deadlines still apply.
+
+Native validation timeouts produce failed measurements. A verified descendant
+closure remains a timeout (124); unproved cleanup remains infrastructure failure
+(75). A stronger source or policy denial retains denial status (78), with the
+executor facts kept as diagnostics rather than authorizing an environment
+retry. These outcomes do not settle a callback or change attempt accounting.
+
 An unexpected startup exit can leave public status at `stop_incomplete` before
 a new shutdown proof exists. Recovery requires the saved launch birth to be
 independently proved dead, a launch that was expected to run, and the current
