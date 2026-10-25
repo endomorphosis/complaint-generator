@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from .browser_sessions import (
@@ -1016,17 +1017,20 @@ def create_complaint_workspace_router(
 
     @router.post("/api/complaint-workspace/inference/dispatch")
     async def dispatch_gui_inference(request: GuiInferenceRequest) -> Dict[str, Any]:
-        return workspace.dispatch_bounded_gui_inference(None, purpose=request.purpose,
+        return await run_in_threadpool(workspace.dispatch_bounded_gui_inference, None, purpose=request.purpose,
             inputs=request.inputs, timeout_seconds=request.timeout_seconds)
 
     @router.post("/api/complaint-workspace/inference/admit")
     async def admit_gui_inference(request: GuiInferenceAdmissionRequest) -> Dict[str, Any]:
-        return workspace.admit_bounded_gui_inference(None, invocation_id=request.invocation_id)
+        return await run_in_threadpool(workspace.admit_bounded_gui_inference, None, invocation_id=request.invocation_id)
 
     @router.post("/api/complaint-workspace/mcp/call")
     async def call_mcp_tool(request: McpCallRequest) -> Response:
         try:
-            payload = workspace.call_mcp_tool(request.tool_name, request.arguments)
+            if request.tool_name in {"complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}:
+                payload = await run_in_threadpool(workspace.call_mcp_tool, request.tool_name, request.arguments)
+            else:
+                payload = workspace.call_mcp_tool(request.tool_name, request.arguments)
         except WorkspaceAuthorizationDenied:
             return JSONResponse(status_code=200, content={"ok": False, "error": "authorization_denied", "isError": True})
         except Exception:
@@ -1047,7 +1051,12 @@ def create_complaint_workspace_router(
             authorization = http_request.headers.get("authorization", "")
             if authorization != f"Bearer {token}":
                 raise HTTPException(status_code=401, detail="MCP bearer token required")
-        response = handle_jsonrpc_message(workspace, request.model_dump())
+        params = request.params if isinstance(request.params, dict) else {}
+        if request.method == "tools/call" and params.get("name") in {
+                "complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}:
+            response = await run_in_threadpool(handle_jsonrpc_message, workspace, request.model_dump())
+        else:
+            response = handle_jsonrpc_message(workspace, request.model_dump())
         body = response or {"jsonrpc": "2.0", "id": request.id, "result": None}
         return Response(
             content=json.dumps(body),

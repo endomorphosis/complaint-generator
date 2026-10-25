@@ -186,7 +186,8 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
                         json_body_limits: Optional[CaseJSONBodyLimits] = None,
                         case_catalog: Any = None,
                         case_assignments: Any = None,
-                        case_consent: Any = None, gui_inference_transport: Any = None) -> Any:
+                        case_consent: Any = None, gui_inference_transport: Any = None,
+                        gui_inference_route: Any = None) -> Any:
     """Mount the same fail-closed boundary in every production app variant.
 
     Historical mediator/workspace arguments grant no ambient case access.
@@ -231,6 +232,9 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
         raise CaseAccessError("case_consent")
     if gui_inference_transport is not None and not callable(gui_inference_transport):
         raise CaseAccessError("gui_inference_transport")
+    from .gui_inference_route import resolve_gui_inference_route
+    selected_inference_transport = resolve_gui_inference_route(gui_inference_route,
+        synthetic_transport=gui_inference_transport)
     mount_case_consent(app)
     from .case_api import mount_case_catalog
     mount_case_catalog(app)
@@ -240,7 +244,8 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     app.state.case_catalog = case_catalog
     app.state.case_assignments = case_assignments
     app.state.case_consent = case_consent
-    app.state.gui_inference_transport = gui_inference_transport
+    app.state.gui_inference_transport = selected_inference_transport
+    app.state.gui_inference_route = gui_inference_route
     app.state.case_json_body_limits = limits
     app.state.case_route_composition = COMPOSITION_NAME
     app.state.case_route_extension_kinds = tuple(kind for kind, _mount, _prefixes in modules)
