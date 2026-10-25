@@ -1513,7 +1513,7 @@ Implementation instructions:
 
 ## CIMP-GUI-51 Inspect assignment and campaign operations safely
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1

@@ -9,11 +9,16 @@ they do not copy narratives, messages, evidence, keys, or summaries.
 Disabling an account, or changing its role, drops that principal's current
 browser session before the response returns. The next request on an
 already-open client, and any forged replay of the old cookie, fails closed.
-This module does not send external messages and does not use WebSocket or SSE.
+Operations inspection adds sealed-index and assignment counts, storage and
+worker states, and bounded diagnostic codes. It does not open owner envelopes.
+Incident handling records that code and does not impersonate a case owner or
+grant case content. This module does not send external messages and does not
+use WebSocket or SSE.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from starlette.requests import Request
@@ -27,8 +32,34 @@ from applications.principal_store import (
 )
 
 TASK_ID = "CIMP-GUI-50"
+OPERATIONS_TASK_ID = "CIMP-GUI-51"
 ADMIN_PAGE_PATH = "/admin"
 ADMIN_API_PREFIX = "/api/admin"
+OPERATIONS_PATH = ADMIN_API_PREFIX + "/operations"
+INCIDENT_PATH = OPERATIONS_PATH + "/incidents"
+ASSIGNMENT_STATUSES = ("pending", "accepted", "declined", "expired", "removed")
+WORKER_STATES = ("idle", "running", "stalled", "unavailable")
+SUPPORT_DIAGNOSTIC_CODES = frozenset({
+    "storage_unresolved",
+    "worker_stalled",
+    "assignment_backlog",
+    "support_unobserved",
+    "readback_mismatch",
+    "backend_unavailable",
+})
+INCIDENT_SCOPES = frozenset({"assignment", "storage", "worker", "support"})
+IMPERSONATION_FIELDS = frozenset({
+    "act_as",
+    "act_as_owner",
+    "as_owner",
+    "impersonate",
+    "impersonate_owner",
+    "owner_principal_id",
+    "decrypt",
+    "open_case",
+    "grant_case_content",
+    "case_content_access",
+})
 ACCOUNT_KINDS = KNOWN_ROLES
 ACCOUNT_STATUSES = frozenset({"active", "disabled"})
 LEAST_PRIVILEGE_FIELDS = (
@@ -80,6 +111,10 @@ ADMIN_LIMITATIONS = (
     "disable_and_role_change_drop_existing_sessions",
     "no_external_notification_delivery",
     "no_websocket_or_sse",
+    "operations_counts_do_not_open_owner_envelopes",
+    "incident_handling_does_not_impersonate_case_owner",
+    "incident_handling_does_not_grant_case_content",
+    "support_diagnostics_are_bounded_codes",
 )
 
 
@@ -110,6 +145,10 @@ class OperationalAdminService:
         clock: Callable[[], int],
         audit_principal_ids: Sequence[str] = (),
         memberships: Any = None,
+        cases: Any = None,
+        storage: Any = None,
+        assignments: Any = None,
+        workers: Callable[[], Sequence[Mapping[str, Any]]] | None = None,
     ) -> None:
         if not isinstance(principals, PrincipalStore) or not isinstance(sessions, BrowserSessionService):
             raise OperationalAdminError("authority_owners")
@@ -117,12 +156,19 @@ class OperationalAdminService:
             raise OperationalAdminError("authority_owners")
         if not isinstance(audit_principal_ids, Sequence) or isinstance(audit_principal_ids, (str, bytes)):
             raise OperationalAdminError("authority_owners")
+        if workers is not None and not callable(workers):
+            raise OperationalAdminError("authority_owners")
         self._principals = principals
         self._sessions = sessions
         self._clock = clock
         self._memberships = memberships
+        self._cases = cases
+        self._storage = storage
+        self._assignments = assignments
+        self._workers = workers
         self._audit_readers = {str(item) for item in audit_principal_ids}
         self._events: list[dict[str, Any]] = []
+        self._incidents: list[dict[str, Any]] = []
 
     def list_accounts(self, actor_principal_id: str, session_roles: Sequence[str], query: Mapping[str, Any] | None = None) -> dict[str, Any]:
         actor = self._require_admin(actor_principal_id, session_roles)
@@ -272,6 +318,85 @@ class OperationalAdminService:
         self._event(actor.principal_id, "audit_right", subject, detail="granted" if enabled else "revoked")
         return self._least(subject)
 
+    def inspect_operations(
+        self,
+        actor_principal_id: str,
+        session_roles: Sequence[str],
+        query: Mapping[str, Any] | None = None,
+        *,
+        sources: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Counts and operational states for an admin. Envelopes stay sealed."""
+
+        actor = self._require_admin(actor_principal_id, session_roles)
+        payload = self._query(query or {})
+        self._reject_operations_request(payload)
+        view = self._operations_view(self._sources(sources))
+        view["actor_principal_id"] = actor.principal_id
+        view["task_id"] = OPERATIONS_TASK_ID
+        return view
+
+    def record_incident(
+        self,
+        actor_principal_id: str,
+        session_roles: Sequence[str],
+        body: Mapping[str, Any],
+        *,
+        sources: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Record an operational incident without becoming a case owner.
+
+        The handler does not select, list, or open a case, and it does not
+        write a membership or key grant. A request that asks for either is
+        rejected before any operations snapshot is built.
+        """
+
+        actor = self._require_admin(actor_principal_id, session_roles)
+        payload = self._body(body)
+        self._reject_operations_request(payload)
+        code = _label(payload.get("code"), "support_diagnostic_code")
+        scope = _label(payload.get("scope"), "incident_scope")
+        if code not in SUPPORT_DIAGNOSTIC_CODES:
+            raise OperationalAdminError("support_diagnostic_code")
+        if scope not in INCIDENT_SCOPES:
+            raise OperationalAdminError("incident_scope")
+        if set(payload) - {"code", "scope"}:
+            raise OperationalAdminError("incident_fields")
+        resolved = self._sources(sources)
+        incident = {
+            "at": self._now(),
+            "actor_principal_id": actor.principal_id,
+            "action": "operational_incident",
+            "code": code,
+            "scope": scope,
+            "impersonated_case_owner": False,
+            "case_content_granted": False,
+        }
+        self._incidents.append(dict(incident))
+        self._events.append({
+            "at": incident["at"],
+            "actor_principal_id": actor.principal_id,
+            "action": "operational_incident",
+            "subject_principal_id": actor.principal_id,
+            "detail": code,
+            "revision": actor.revision,
+        })
+        view = self._operations_view(resolved)
+        view.update({
+            "actor_principal_id": actor.principal_id,
+            "task_id": OPERATIONS_TASK_ID,
+            "incident": {
+                "at": incident["at"],
+                "code": code,
+                "scope": scope,
+                "impersonated_case_owner": False,
+                "case_content_granted": False,
+            },
+            "case_content": None,
+            "opened_case_ids": [],
+        })
+        return view
+
     def audit_log(self, actor_principal_id: str, session_roles: Sequence[str]) -> dict[str, Any]:
         actor = self._require_admin(actor_principal_id, session_roles)
         if actor.principal_id not in self._audit_readers:
@@ -349,6 +474,216 @@ class OperationalAdminService:
         if any(name in payload for name in CONTENT_REQUEST_FIELDS):
             raise OperationalAdminError("admin_case_content_denied")
 
+    def _reject_operations_request(self, payload: Mapping[str, Any]) -> None:
+        self._reject_content_request(payload)
+        if any(name in payload for name in IMPERSONATION_FIELDS):
+            raise OperationalAdminError("incident_cannot_impersonate_owner")
+        if payload.get("case_id") not in (None, ""):
+            raise OperationalAdminError("operations_case_scope_denied")
+
+    def _sources(self, sources: Mapping[str, Any] | None) -> dict[str, Any]:
+        provided = sources if isinstance(sources, Mapping) else {}
+        cases = provided.get("cases", self._cases)
+        storage = provided.get("storage", self._storage)
+        assignments = provided.get("assignments", self._assignments)
+        memberships = provided.get("memberships", self._memberships)
+        if memberships is None and assignments is not None:
+            memberships = getattr(assignments, "_memberships", None)
+        workers = provided.get("workers", self._workers)
+        return {
+            "cases": cases,
+            "storage": storage,
+            "assignments": assignments,
+            "memberships": memberships,
+            "workers": workers,
+        }
+
+    def _operations_view(self, sources: Mapping[str, Any]) -> dict[str, Any]:
+        assignments = self._assignment_counts(sources.get("memberships"))
+        storage = self._storage_states(sources.get("storage"))
+        workers = self._worker_states(sources.get("workers"))
+        diagnostics = self._support_diagnostics(assignments, storage, workers)
+        return {
+            "case_counts": self._case_counts(sources.get("cases"), assignments),
+            "assignment_status": assignments,
+            "storage": storage,
+            "workers": workers,
+            "support_diagnostics": diagnostics,
+            "incidents": [
+                {
+                    "at": item["at"],
+                    "code": item["code"],
+                    "scope": item["scope"],
+                    "impersonated_case_owner": False,
+                    "case_content_granted": False,
+                }
+                for item in self._incidents
+            ],
+            "case_content": None,
+            "narratives": [],
+            "messages": [],
+            "evidence": [],
+            "keys": [],
+            "summaries": [],
+            "opened_case_ids": [],
+            "impersonated_case_owner": False,
+            "case_content_granted": False,
+            "limitations": list(ADMIN_LIMITATIONS),
+        }
+
+    def _case_counts(self, cases: Any, assignments: Mapping[str, Any]) -> dict[str, Any]:
+        sealed = _sealed_owner_indexes(cases)
+        return {
+            "sealed_owner_indexes": sealed,
+            "assigned_case_count": assignments["assigned_case_count"],
+            "exact_case_count_available": False,
+            "envelopes_opened": False,
+            "owner_impersonated": False,
+        }
+
+    def _assignment_counts(self, memberships: Any) -> dict[str, Any]:
+        counts = {status: 0 for status in ASSIGNMENT_STATUSES}
+        case_ids: set[str] = set()
+        if memberships is None or not hasattr(memberships, "recover"):
+            return {
+                "counts": counts,
+                "assigned_case_count": 0,
+                "observed": False,
+            }
+        try:
+            grants = memberships.recover()
+        except Exception as exc:
+            raise OperationalAdminError("assignment_status_unavailable") from exc
+        now = self._now()
+        for grant in grants:
+            status = getattr(grant, "status", None)
+            expires_at = getattr(grant, "expires_at", None)
+            if status == "pending" and type(expires_at) is int and now >= expires_at:
+                status = "expired"
+            if status not in counts:
+                raise OperationalAdminError("assignment_status_unavailable")
+            counts[status] += 1
+            case_id = getattr(grant, "case_id", None)
+            if isinstance(case_id, str) and case_id:
+                case_ids.add(case_id)
+        return {
+            "counts": counts,
+            "assigned_case_count": len(case_ids),
+            "observed": True,
+        }
+
+    def _storage_states(self, storage: Any) -> dict[str, Any]:
+        receipts = getattr(storage, "_receipts", None) if storage is not None else None
+        if not isinstance(receipts, dict):
+            return {
+                "observed": False,
+                "readiness": "unobserved",
+                "receipt_count": 0,
+                "durable_count": 0,
+                "unresolved_count": 0,
+                "pending_replica_count": 0,
+                "readiness_counts": {"ready": 0, "unavailable": 0, "unresolved": 0, "unobserved": 1},
+            }
+        readiness_counts = {"ready": 0, "unavailable": 0, "unresolved": 0, "unobserved": 0}
+        durable_count = 0
+        unresolved_count = 0
+        pending_count = 0
+        failure_kinds: set[str] = set()
+        for receipt in receipts.values():
+            if not isinstance(receipt, Mapping):
+                raise OperationalAdminError("storage_state_unavailable")
+            readiness = receipt.get("storage_readiness")
+            if readiness not in readiness_counts:
+                raise OperationalAdminError("storage_state_unavailable")
+            readiness_counts[readiness] += 1
+            if receipt.get("durable") is True:
+                durable_count += 1
+            else:
+                unresolved_count += 1
+            if receipt.get("pending_replica") is True:
+                pending_count += 1
+            kind = receipt.get("failure_kind")
+            if isinstance(kind, str) and kind in {"readback_mismatch", "backend", "backend_unavailable", "storage", "none", ""}:
+                if kind in SUPPORT_DIAGNOSTIC_CODES:
+                    failure_kinds.add(kind)
+                elif kind == "backend":
+                    failure_kinds.add("backend_unavailable")
+        if durable_count and unresolved_count == 0:
+            readiness = "ready"
+        elif not receipts:
+            readiness = "unobserved"
+        elif readiness_counts["unavailable"] and durable_count == 0 and readiness_counts["unresolved"] == 0:
+            readiness = "unavailable"
+        else:
+            readiness = "unresolved"
+        return {
+            "observed": True,
+            "readiness": readiness,
+            "receipt_count": len(receipts),
+            "durable_count": durable_count,
+            "unresolved_count": unresolved_count,
+            "pending_replica_count": pending_count,
+            "readiness_counts": readiness_counts,
+            "failure_kinds": sorted(failure_kinds),
+        }
+
+    def _worker_states(self, workers: Any) -> dict[str, Any]:
+        counts = {state: 0 for state in WORKER_STATES}
+        if workers is None:
+            return {"observed": False, "state": "unobserved", "counts": counts, "queue_depth": 0}
+        if not callable(workers):
+            raise OperationalAdminError("worker_state_unavailable")
+        try:
+            rows = workers()
+        except OperationalAdminError:
+            raise
+        except Exception as exc:
+            raise OperationalAdminError("worker_state_unavailable") from exc
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise OperationalAdminError("worker_state_unavailable")
+        queue_depth = 0
+        for row in rows:
+            if not isinstance(row, Mapping) or set(row) - {"worker_id", "state", "queue_depth"}:
+                raise OperationalAdminError("worker_payload")
+            state = row.get("state")
+            depth = row.get("queue_depth")
+            if state not in counts or type(depth) is not int or depth < 0:
+                raise OperationalAdminError("worker_state_unavailable")
+            _label(row.get("worker_id"), "worker_id")
+            counts[state] += 1
+            queue_depth += depth
+        if counts["stalled"]:
+            summary = "stalled"
+        elif counts["unavailable"] and sum(counts.values()) == counts["unavailable"]:
+            summary = "unavailable"
+        elif counts["running"]:
+            summary = "running"
+        else:
+            summary = "idle"
+        return {"observed": True, "state": summary, "counts": counts, "queue_depth": queue_depth}
+
+    def _support_diagnostics(self, assignments: Mapping[str, Any], storage: Mapping[str, Any], workers: Mapping[str, Any]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        if storage.get("observed") and storage.get("unresolved_count", 0):
+            items.append({"code": "storage_unresolved", "count": int(storage["unresolved_count"])})
+        for kind in storage.get("failure_kinds") or []:
+            if kind in SUPPORT_DIAGNOSTIC_CODES and kind != "storage_unresolved":
+                items.append({"code": kind, "count": 1})
+        stalled = int((workers.get("counts") or {}).get("stalled") or 0)
+        if stalled:
+            items.append({"code": "worker_stalled", "count": stalled})
+        pending = int((assignments.get("counts") or {}).get("pending") or 0)
+        if pending:
+            items.append({"code": "assignment_backlog", "count": pending})
+        if not items and not storage.get("observed") and not workers.get("observed") and not assignments.get("observed"):
+            items.append({"code": "support_unobserved", "count": 0})
+        if len(items) > 8:
+            raise OperationalAdminError("support_diagnostics_bounded")
+        for item in items:
+            if set(item) != {"code", "count"} or item["code"] not in SUPPORT_DIAGNOSTIC_CODES:
+                raise OperationalAdminError("support_diagnostics_bounded")
+        return items
+
     def _body(self, body: Mapping[str, Any]) -> Mapping[str, Any]:
         if not isinstance(body, Mapping):
             raise OperationalAdminError("request_body")
@@ -394,6 +729,26 @@ class OperationalAdminService:
         return value
 
 
+def _sealed_owner_indexes(cases: Any) -> int | None:
+    """Count sealed owner index files. Do not open or decrypt them."""
+
+    if cases is None:
+        return None
+    root = getattr(cases, "_root", None)
+    if root is None:
+        return None
+    directory = Path(root)
+    if not directory.is_dir() or directory.is_symlink():
+        return None
+    count = 0
+    for path in directory.iterdir():
+        if path.is_symlink() or not path.is_file():
+            continue
+        if path.name.endswith(".envelope"):
+            count += 1
+    return count
+
+
 def _role_code(code: str) -> str:
     if code in {"actor_lacks_role_authority", "actor_cannot_drop_own_staff_role", "unknown_role", "revision_conflict", "missing_principal"}:
         return code
@@ -409,6 +764,8 @@ def admin_http_status(code: str) -> int:
         return 503
     if code == "missing_principal":
         return 404
+    if code in {"assignment_status_unavailable", "storage_state_unavailable", "worker_state_unavailable"}:
+        return 503
     return 403
 
 
@@ -436,6 +793,16 @@ def mount_operational_admin(app: Any) -> None:
     def _material(request: Any) -> Mapping[str, Any]:
         material = getattr(request.state, "admin_material", None)
         return material if isinstance(material, dict) else {}
+
+    def _operations_sources(request: Any, service: OperationalAdminService) -> dict[str, Any]:
+        state = request.app.state
+        return {
+            "cases": getattr(state, "case_directory", None) if getattr(state, "case_directory", None) is not None else service._cases,
+            "assignments": getattr(state, "case_assignments", None) if getattr(state, "case_assignments", None) is not None else service._assignments,
+            "storage": getattr(state, "case_storage", None) if getattr(state, "case_storage", None) is not None else service._storage,
+            "memberships": service._memberships,
+            "workers": service._workers,
+        }
 
     def _fail(exc: OperationalAdminError) -> JSONResponse:
         return JSONResponse({"error": exc.code}, status_code=admin_http_status(exc.code))
@@ -485,6 +852,26 @@ def mount_operational_admin(app: Any) -> None:
             return JSONResponse(_service(request).set_audit_right(actor, roles, principal_id, _material(request)))
         except OperationalAdminError as exc:
             return _fail(exc)
+
+    @app.get(OPERATIONS_PATH)
+    async def admin_operations(request: Request):
+        try:
+            actor, roles = _actor(request)
+            service = _service(request)
+            payload = service.inspect_operations(actor, roles, _material(request), sources=_operations_sources(request, service))
+            return JSONResponse(payload)
+        except OperationalAdminError as exc:
+            return _fail(exc)
+
+    @app.post(INCIDENT_PATH)
+    async def admin_incident(request: Request):
+        try:
+            actor, roles = _actor(request)
+            service = _service(request)
+            payload = service.record_incident(actor, roles, _material(request), sources=_operations_sources(request, service))
+        except OperationalAdminError as exc:
+            return _fail(exc)
+        return JSONResponse(payload, status_code=201)
 
     @app.get(ADMIN_API_PREFIX + "/audit")
     async def admin_audit(request: Request):

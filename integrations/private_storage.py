@@ -3769,6 +3769,82 @@ def read_private_revision(
     return opened
 
 
+@contextmanager
+def private_revision_source_scope(repository: str | Path):
+    """Hold an existing joined source against its normal CAS writers.
+
+    The yielded hash identifies opaque ciphertext only. It grants no read,
+    key, source, law or proof authority. Trusted provisioning must authenticate
+    the actual snapshot with ``read_private_revision`` while this hold lasts.
+    No repository or ownership marker is created by this observer.
+    """
+    root = Path(os.path.abspath(repository))
+    if root.resolve(strict=True) != root:
+        raise PrivateRevisionError("Source path is aliased.", code="source_unavailable")
+    info = root.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        raise PrivateRevisionError("Source is not privately owned.", code="source_unavailable")
+    lock = _process_lock(root)
+    lock.acquire()
+    descriptor = -1
+    try:
+        descriptor = os.open(root / _LOCK_NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid() or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) != 0o600:
+            raise PrivateRevisionError("Source lock changed.", code="source_unavailable")
+        import fcntl
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        def opaque_identity():
+            material = {}
+            for name in (_HEAD_NAME, "head.rev"):
+                try:
+                    fd = os.open(root / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+                except FileNotFoundError:
+                    if name == _HEAD_NAME:
+                        raise PrivateRevisionError("Source head is missing.", code="source_unavailable") from None
+                    continue
+                try:
+                    item = os.fstat(fd)
+                    if (not stat.S_ISREG(item.st_mode) or item.st_uid != os.getuid() or item.st_nlink != 1
+                            or stat.S_IMODE(item.st_mode) != 0o600 or not 0 < item.st_size <= 8 * 1024 * 1024):
+                        raise PrivateRevisionError("Source head is untrusted.", code="source_unavailable")
+                    raw = bytearray()
+                    while len(raw) <= item.st_size:
+                        chunk = os.read(fd, min(65536, item.st_size + 1 - len(raw)))
+                        if not chunk:
+                            break
+                        raw.extend(chunk)
+                    after = os.fstat(fd)
+                    signature = lambda x: (x.st_dev, x.st_ino, x.st_size, x.st_mtime_ns, x.st_ctime_ns)
+                    if len(raw) != item.st_size or signature(item) != signature(after):
+                        raise PrivateRevisionError("Source changed while read.", code="revision_conflict")
+                    material[name] = hashlib.sha256(raw).hexdigest()
+                finally:
+                    os.close(fd)
+            return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        identity = opaque_identity()
+        yield {"head_sha256": identity, "opaque_ciphertext_only": True, "authority": False}
+        current = (root / _LOCK_NAME).lstat()
+        current_root = root.lstat()
+        if (root.resolve(strict=True) != root
+                or (current_root.st_dev, current_root.st_ino) != (info.st_dev, info.st_ino)
+                or not stat.S_ISDIR(current_root.st_mode) or current_root.st_uid != os.getuid()
+                or stat.S_IMODE(current_root.st_mode) & 0o077
+                or (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino)
+                or not stat.S_ISREG(current.st_mode) or current.st_uid != os.getuid()
+                or current.st_nlink != 1 or stat.S_IMODE(current.st_mode) != 0o600
+                or opaque_identity() != identity):
+            raise PrivateRevisionError("Source changed during admission.", code="revision_conflict")
+    finally:
+        if descriptor >= 0:
+            try:
+                import fcntl
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+        lock.release()
+
+
 # --- Case manifest CAS (CIMP-DUR-004) --------------------------------------
 # One encrypted manifest binds answer, fact-graph, legal-rule-source,
 # evaluation, and proof revisions to an opaque parent generation. The public
@@ -7563,7 +7639,7 @@ def _kit_call(kit: Any, name: str, *args: Any) -> Any:
     return result
 
 
-def _opaque_ref(result: Mapping[str, Any]) -> str:
+def _ciphertext_commit_reference(result: Mapping[str, Any]) -> str:
     ref = result.get("ref") or result.get("locator")
     if isinstance(ref, str) and ref.strip() and ref == ref.strip() and len(ref) <= 200:
         if any(marker in ref.lower() for marker in _GATEWAY_MARKERS):
@@ -7603,7 +7679,7 @@ def verify_ciphertext_durability(kit: Any, envelope: bytes) -> dict[str, Any]:
     manifest = _kit_call(kit, "manifest", payload)
     if not isinstance(manifest, Mapping):
         raise CiphertextDurabilityError("kit_manifest_failed")
-    ref = _opaque_ref(manifest)
+    ref = _ciphertext_commit_reference(manifest)
     _record(DURABILITY_STATE_LOCAL_COMMIT, ref=ref, kit_state="local_commit")
 
     queued = _kit_call(kit, "queue_replication", ref)

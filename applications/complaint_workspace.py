@@ -3018,6 +3018,72 @@ def _default_state(user_id: str) -> Dict[str, Any]:
     return _apply_effective_privacy_policy(state, user_id)
 
 
+def _canonical_review_sha(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class _ReviewFactAcceptance:
+    """Private server context; no public wrapper or JSON field accepts it."""
+    workspace: Any
+    review_service: Any
+    authority: Any
+    actor: str
+    canonical: str
+    case_id: str
+    proposal: Dict[str, Any]
+    request_id: str
+    request_sha256: str
+    state_identity: Any
+    graph_revision: str
+    private_revision: str
+    session_revision: int
+
+    def check_preimage(self, state: Mapping[str, Any], *, workspace: Any, actor: str, case_id: str) -> None:
+        if (workspace is not self.workspace or actor != self.actor or case_id != self.case_id
+                or state.get("user_id") != self.canonical):
+            raise WorkspaceAuthorizationDenied()
+        if self.workspace._case_legal_context_identity(state) != self.state_identity:
+            raise WorkspacePersistenceError("Acceptance source changed.", code="revision_conflict", public_status="conflict")
+        self.authority.revalidate(actor_principal_id=self.actor, workspace=self.workspace, require_owner=True)
+
+    def reprove_review(self) -> None:
+        # The caller's canonical writer already owns the source lock. This
+        # public service operation acquires ONLY its review lock, in that order.
+        record = self.review_service.reprove_proposal_for_owner(self.actor,
+            case_id=self.case_id, proposal_id=self.proposal["proposal_id"], authority=self.authority,
+            expected_review_revision=self.proposal["review_revision"],
+            expected_record_sha256=self.proposal["record_sha256"])
+        if _canonical_review_sha(record) != self.proposal["record_sha256"]:
+            raise WorkspacePersistenceError("Review changed before publication.", code="revision_conflict", public_status="conflict")
+
+    def write_receipt(self, state: Dict[str, Any], correction: Mapping[str, Any], projection: Mapping[str, Any]) -> None:
+        ledger = state.setdefault("canonical_review_acceptances", {})
+        if not isinstance(ledger, dict) or self.request_id in ledger:
+            raise WorkspacePersistenceError("Acceptance preimage changed.", code="revision_conflict", public_status="conflict")
+        receipt = {"schema": "case-review-canonical-fact-acceptance@1", "task_id": "CIMP-GUI-47",
+            "status": "accepted", "applied": True, "acceptance_persisted": True,
+            "request_id": self.request_id, "request_sha256": self.request_sha256,
+            "proposal_id": self.proposal["proposal_id"], "proposal_record_sha256": self.proposal["record_sha256"],
+            "review_revision": self.proposal["review_revision"],
+            "review_ledger_sha256": self.proposal["review_ledger_sha256"],
+            "base_source": deepcopy(self.proposal["source_base"]),
+            "accepting_owner_actor": self.actor, "canonical_owner_principal_id": self.canonical,
+            "case_id": self.case_id, "target_stable_id": self.proposal["record"]["target_id"],
+            "replacement_stable_id": correction.get("replacement_stable_id"),
+            "base_graph_revision": self.graph_revision, "base_session_revision": self.session_revision,
+            "base_private_revision": self.private_revision,
+            "result_graph_revision": correction.get("graph_revision"),
+            "result_session_revision": projection.get("session_revision"),
+            "result_private_revision": str(int(self.private_revision) + 1),
+            "invalidated_support_targets": deepcopy(correction.get("affected_support_targets") or []),
+            "actual_factual_correction": deepcopy(dict(correction)),
+            "review_status_repository_updated": False, "governing_legal_authority": False,
+            "legal_sufficiency": False, "executed_proof": False}
+        receipt["receipt_sha256"] = _canonical_review_sha(receipt)
+        ledger[self.request_id] = receipt
+
+
 class _ComplaintWorkspaceHandlerBackend(Protocol):
     """Narrow service contract required by the request-handler boundary."""
 
@@ -3989,6 +4055,7 @@ class ComplaintWorkspaceRequestHandlers:
         target_stable_id: Optional[str] = None,
         actor_principal_id: Optional[str] = None,
         require_expected_revision: bool = False,
+        _review_acceptance: Optional[_ReviewFactAcceptance] = None,
     ) -> Dict[str, Any]:
         """Correct the last eligible accepted answer on the shared factual graph.
 
@@ -4017,11 +4084,17 @@ class ComplaintWorkspaceRequestHandlers:
         case_id = _state_case_id(state, user)
         actor_id, canonical_owner = _correction_actor_ids(state)
         claimed_actor = str(actor_principal_id or "").strip()
+        if _review_acceptance is not None:
+            if type(_review_acceptance) is not _ReviewFactAcceptance:
+                raise WorkspaceAuthorizationDenied()
+            _review_acceptance.check_preimage(state, workspace=self.workspace, actor=actor_id, case_id=case_id)
 
         def finish(receipt: Dict[str, Any]) -> Dict[str, Any]:
             receipt["actor_principal_id"] = actor_id
             receipt["canonical_owner_principal_id"] = canonical_owner
             receipt["actor_matches_canonical_owner"] = bool(canonical_owner) and actor_id == canonical_owner
+            if _review_acceptance is not None and receipt.get("status") == "applied":
+                receipt["review_acceptance"] = deepcopy(state["canonical_review_acceptances"][_review_acceptance.request_id])
             return receipt
 
         if claimed_actor and claimed_actor != actor_id:
@@ -4055,6 +4128,13 @@ class ComplaintWorkspaceRequestHandlers:
             return finish(_terminal_edit_receipt(status="unavailable",
                 message="Edit is unavailable. The pending question is unchanged.",
                 error_code=str(exc.code or "unavailable"), pending_inquiry=_pending_inquiry_copy(state)))
+        before_case_publish = publication_guard
+        if _review_acceptance is not None:
+            if publication_guard is None:
+                raise WorkspaceAuthorizationDenied()
+            def before_case_publish():
+                publication_guard()
+                _review_acceptance.reprove_review()
         try:
             # Never publish a request-local draft through the shared cache,
             # even briefly between factory construction and its removal.
@@ -4210,10 +4290,12 @@ class ComplaintWorkspaceRequestHandlers:
             graph_token=str(receipt.get("graph_revision") or ""),
             session_revision=int(exported.get("session_revision") or 0),
         )
+        if _review_acceptance is not None:
+            _review_acceptance.write_receipt(state, receipt, exported)
         try:
             if publication_guard is not None:
                 publication_guard()
-                self.workspace._save_state(state, before_publish=publication_guard)
+                self.workspace._save_state(state, before_publish=before_case_publish)
             else:
                 self.workspace._save_state(state)
         except WorkspacePersistenceError as exc:
@@ -4488,6 +4570,21 @@ class _WorkspaceCaseKeyProvider:
         canonical_associated_data(binding)
         return self._workspace._private_key_session().provider().resolve(binding)
 
+
+
+def case_legal_source_scope(state: Mapping[str, Any], *, case_id: str) -> str:
+    """Hash canonical case sources; this pure value grants no access authority."""
+    shared = state["shared_interview"]
+    case_file = shared["intake_case_file"]
+    context = case_file.get("legal_context") or {}
+    selected_context = {name: context.get(name) for name in ("jurisdiction", "jurisdiction_explicit",
+        "jurisdiction_applicability", "candidate_jurisdiction", "context_revision", "applicable_law_date",
+        "event_date", "event_dates", "filing_reference_date", "corpus_retrieval_date")}
+    return hashlib.sha256(json.dumps({"case_id": case_id, "session_id": shared.get("session_id"),
+        "knowledge_graph": shared.get("knowledge_graph"), "narrative": _narrative_record(state),
+        "legal_context": selected_context, "forum": case_file.get("legal_context_forum"),
+        "applicability": case_file.get("legal_context_applicability")},
+        sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 class ComplaintWorkspaceService:
     def __init__(
@@ -10208,6 +10305,122 @@ class ComplaintWorkspaceService:
             "private_revision": committed.get("private_revision"), "session_revision": projection["session_revision"],
             "dependency_refresh": selected["dependency_refresh"]}
 
+    def accept_case_review_fact_proposal(self, actor, *, case_id, review_service, proposal_id,
+            expected_review_revision, expected_private_revision, expected_session_revision, request_id):
+        """Accept server-owned proposed fact text through the real correction owner.
+
+        The canonical receipt and KG correction share one encrypted case CAS.
+        The review repository remains an immutable proposal/evidence source.
+        """
+        from applications.case_review_store import CaseReviewService, CaseReviewStoreError
+        from integrations.private_storage import PrivateStorageError, private_revision_source_scope
+        from complaint_phases.knowledge_graph import KnowledgeGraph
+        from mediator.hook_runtime import graph_revision_token
+
+        def text(value):
+            return isinstance(value, str) and 0 < len(value) <= 80 and value == value.strip()
+        if (not text(actor) or not text(case_id) or not text(proposal_id) or not text(request_id)
+                or type(expected_review_revision) is not int or expected_review_revision < 0
+                or type(expected_session_revision) is not int or expected_session_revision < 0
+                or not isinstance(expected_private_revision, str)
+                or not re.fullmatch(r"(?:0|[1-9][0-9]{0,31})", expected_private_revision)):
+            raise CaseReviewStoreError("review_field")
+        if type(review_service) is not CaseReviewService:
+            raise CaseReviewStoreError("review_unavailable")
+        try:
+            authority = self._owner_case_authority()
+            if authority is None or authority.action != "case.update":
+                raise CaseReviewStoreError("lawyer_review_ungranted")
+            authority, canonical, state = self._case_legal_context_state(actor, case_id, action="case.update")
+            decision = authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            if decision.membership != "owner" or authority.actor_principal_id != actor:
+                raise WorkspaceAuthorizationDenied()
+            shared = state["shared_interview"]
+            fingerprint = _canonical_review_sha({"actor": actor, "canonical": canonical, "case_id": case_id,
+                "request_id": request_id, "proposal_id": proposal_id,
+                "expected_review_revision": expected_review_revision,
+                "expected_private_revision": expected_private_revision,
+                "expected_session_revision": expected_session_revision})
+            ledger = state.get("canonical_review_acceptances") or {}
+            if not isinstance(ledger, dict):
+                raise CaseReviewStoreError("review_integrity")
+            def deliver(receipt, *, replayed):
+                # A valid earlier commit is never rolled back by a delivery
+                # refusal. Re-open current material and reprove both key
+                # owners, review CAS and browser authority after projection.
+                with private_revision_source_scope(self.joined_revision_repository(canonical, case_id)):
+                    _context, key_id, key = self._joined_key(canonical, case_id)
+                    current = self._load_state(canonical, case_id=case_id)
+                    saved = (current.get("canonical_review_acceptances") or {}).get(request_id)
+                    if not isinstance(saved, dict) or _canonical_review_sha(saved) != _canonical_review_sha(receipt):
+                        raise CaseReviewStoreError("stale_revision")
+                    graph = KnowledgeGraph.from_dict(current["shared_interview"]["knowledge_graph"])
+                    current_result = (graph_revision_token(graph) == receipt["result_graph_revision"]
+                        and current["shared_interview"]["session_revision"] == receipt["result_session_revision"]
+                        and current["private_revision"] == receipt["result_private_revision"])
+                    response = {**deepcopy(receipt), "applied": False if replayed else True,
+                        "replayed": replayed, "historically_applied": True, "current_result": current_result,
+                        "current_private_revision": current["private_revision"]}
+                    review_service.reprove_proposal_for_owner(actor, case_id=case_id, proposal_id=proposal_id,
+                        authority=authority, expected_review_revision=expected_review_revision,
+                        expected_record_sha256=receipt["proposal_record_sha256"])
+                    _context, current_key_id, current_key = self._joined_key(canonical, case_id)
+                    if (key_id, key) != (current_key_id, current_key):
+                        raise CaseReviewStoreError("revision_conflict")
+                    authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+                    return response
+            existing = ledger.get(request_id)
+            if existing is not None:
+                if (not isinstance(existing, dict) or existing.get("request_sha256") != fingerprint
+                        or existing.get("proposal_id") != proposal_id
+                        or existing.get("accepting_owner_actor") != actor):
+                    raise CaseReviewStoreError("replay_mismatch")
+                signed = {k: v for k, v in existing.items() if k != "receipt_sha256"}
+                if existing.get("receipt_sha256") != _canonical_review_sha(signed):
+                    raise CaseReviewStoreError("review_integrity")
+                # Lost-response replay can outlive its own source revision,
+                # but cannot outlive changed authority or a changed proposal.
+                return deliver(existing, replayed=True)
+            if any(isinstance(row, dict) and row.get("proposal_id") == proposal_id for row in ledger.values()):
+                raise CaseReviewStoreError("proposal_already_accepted")
+            if (state.get("private_revision") != expected_private_revision
+                    or shared.get("session_revision") != expected_session_revision):
+                raise CaseReviewStoreError("stale_revision")
+            proposal = review_service.read_proposal_for_owner(actor,
+                case_id=case_id, proposal_id=proposal_id, authority=authority)
+            record, base = proposal.get("record"), proposal.get("source_base")
+            if (proposal.get("schema") != "case-review-owner-proposal@1"
+                    or proposal.get("case_id") != case_id or proposal.get("actor_principal_id") != actor
+                    or proposal.get("canonical_owner_principal_id") != canonical
+                    or proposal.get("review_revision") != expected_review_revision
+                    or not isinstance(record, dict) or not isinstance(base, dict)
+                    or record.get("item_type") != "review_proposal" or record.get("item_id") != proposal_id
+                    or _canonical_review_sha(record) != proposal.get("record_sha256")
+                    or base.get("private_revision") != expected_private_revision
+                    or base.get("session_revision") != expected_session_revision):
+                raise CaseReviewStoreError("stale_approval")
+            if record.get("target_kind") not in {"fact", "answer"}:
+                raise CaseReviewStoreError("review_target_capability_unavailable")
+            target, replacement = record.get("target_id"), record.get("proposed_text")
+            if not text(target) or not isinstance(replacement, str) or not 0 < len(replacement) <= 2000 or replacement != replacement.strip():
+                raise CaseReviewStoreError("review_field")
+            graph = KnowledgeGraph.from_dict(shared["knowledge_graph"])
+            graph_revision = graph_revision_token(graph)
+            context = _ReviewFactAcceptance(self, review_service, authority, actor, canonical, case_id,
+                deepcopy(proposal), request_id, fingerprint, self._case_legal_context_identity(state),
+                graph_revision, expected_private_revision, expected_session_revision)
+            result = self.request_handlers.apply_terminal_graph_edit(actor, replacement,
+                expected_graph_revision=graph_revision, expected_session_revision=expected_session_revision,
+                target_stable_id=target, actor_principal_id=actor, require_expected_revision=True,
+                _review_acceptance=context)
+            if result.get("status") != "applied" or not isinstance(result.get("review_acceptance"), dict):
+                raise CaseReviewStoreError(str((result.get("error") or {}).get("code") or "review_transition_refused"))
+            return deliver(result["review_acceptance"], replayed=False)
+        except WorkspaceAuthorizationDenied:
+            raise CaseReviewStoreError("lawyer_review_ungranted") from None
+        except (WorkspacePersistenceError, PrivateStorageError) as exc:
+            raise CaseReviewStoreError(str(getattr(exc, "code", "") or "durability_unproven")) from None
+
     def read_case_legal_research_snapshot(self, user_id: Optional[str], *, case_id: str) -> Dict[str, Any]:
         """Read an authorized encrypted DTO, without GET/session-save or cache effects.
 
@@ -10227,15 +10440,7 @@ class ComplaintWorkspaceService:
         authority.revalidate(actor_principal_id=authority.actor_principal_id, workspace=self, require_owner=True)
         shared = state["shared_interview"]
         case_file = shared["intake_case_file"]
-        context = case_file.get("legal_context") or {}
-        selected_context = {name: context.get(name) for name in ("jurisdiction", "jurisdiction_explicit",
-            "jurisdiction_applicability", "candidate_jurisdiction", "context_revision", "applicable_law_date",
-            "event_date", "event_dates", "filing_reference_date", "corpus_retrieval_date")}
-        source_scope = hashlib.sha256(json.dumps({"case_id": case_id, "session_id": shared.get("session_id"),
-            "knowledge_graph": shared.get("knowledge_graph"), "narrative": _narrative_record(state),
-            "legal_context": selected_context, "forum": case_file.get("legal_context_forum"),
-            "applicability": case_file.get("legal_context_applicability")},
-            sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+        source_scope = case_legal_source_scope(state, case_id=case_id)
         return {"state": deepcopy(state), "canonical_owner_principal_id": resolved,
             "actor_principal_id": authority.actor_principal_id, "case_id": case_id,
             "private_revision": state.get("private_revision"), "session_revision": shared.get("session_revision"),

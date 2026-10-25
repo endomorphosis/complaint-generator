@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -348,8 +349,50 @@ class ComplaintCampaignWatchdog:
         from ipfs_accelerate_py.agent_supervisor.rescue.campaign_watchdog import (
             CampaignProgressWatchdog, CampaignProgressWatchdogPolicy)
         policy = CampaignProgressWatchdogPolicy(deadline_ms=1_200_000)
-        result = CampaignProgressWatchdog(self.directory, repository_root=self.root, scope=self.scope, observe=self.observe,
-            recover=self.recover, policy=policy).run_once()
+        # Frozen SDK profiles have no activity-only observation field. Keep a
+        # strictly owned, deadline-bound repair passive without calling its
+        # recovery policy or changing its durable incident/work-progress state.
+        initial_error = None
+        try:
+            first = self.observe()
+        except Exception as exc:
+            # Let the unchanged SDK map observation failures to its existing
+            # typed error result, without retrying or authorizing an effect.
+            first, initial_error = {}, exc
+        rescue = self.latest_status.get("auto_rescue_activity_evidence")
+        rescue = rescue if type(rescue) is dict else {}
+        passive_rescue = (first.get("owner_binding_verified") is True
+            and first.get("healthy") is True and first.get("status") == "active"
+            and first.get("manual_hold") is False and not first.get("hold_reason")
+            and first.get("completion_verified") is False and first.get("pending_task_ids")
+            and first.get("active_task_id") in first["pending_task_ids"]
+            and first.get("active_task_id") == rescue.get("task_id")
+            and first.get("active_task_cid") == rescue.get("task_cid")
+            and self.latest_status.get("owned_process_alive") is True
+            and self.latest_status.get("worker_liveness") == "alive"
+            and first.get("progress_verified") is False
+            and self.latest_status.get("auto_rescue_activity_verified") is True
+            and rescue.get("activity_verified") is True and rescue.get("work_progress_verified") is False
+            and rescue.get("reason") == "bounded_native_rescue_activity"
+            and type(rescue.get("deadline_at")) in (int,float) and math.isfinite(rescue["deadline_at"])
+            and self.clock() < rescue["deadline_at"])
+        if passive_rescue:
+            result = {"schema":"campaign-progress-watchdog-result@1", "scope":dict(self.scope),
+                "status":"healthy", "reason":"bounded_native_rescue_activity", "progress_verified":False,
+                "completion_authority":False,"provider_calls_by_watchdog":0,"attempt_refunded":False}
+        else:
+            # Preserve the SDK's original observation count/order and every
+            # pre-effect re-observation, rather than observing twice initially.
+            pending = [first]
+            def observe():
+                if pending:
+                    value = pending.pop()
+                    if initial_error is not None:
+                        raise initial_error
+                    return value
+                return self.observe()
+            result = CampaignProgressWatchdog(self.directory, repository_root=self.root, scope=self.scope, observe=observe,
+                recover=self.recover, policy=policy).run_once()
         if result.get("status") == "complete" and stop_completed and not self.latest_observation.get("manual_hold"):
             expected = self.latest_observation
             if self.observe() != expected or not self.latest_observation["completion_verified"]:
@@ -363,6 +406,18 @@ class ComplaintCampaignWatchdog:
                         "quiesced": (stopped.get("container_shutdown") or {}).get("quiesced")}}
                     if stopped.get("status") != "stopped":
                         result.update(status="refused", reason="completed_supervisor_cleanup_incomplete")
+        from .auto_rescue_activity import summary as rescue_summary
+        provider = self.latest_status.get("provider_execution_evidence")
+        provider = provider if type(provider) is dict else {}
+        provider_counts = provider.get("frame_counts")
+        provider_counts = provider_counts if type(provider_counts) is dict else {}
+        failure_evidence = {"auto_rescue":rescue_summary(self.latest_status.get("auto_rescue_activity_evidence")),
+            "provider_progress_verified":self.latest_status.get("provider_progress_verified") is True,
+            "validation_activity_verified":self.latest_status.get("validation_activity_verified") is True,
+            "claim_progress_verified":self.latest_status.get("claim_progress_verified") is True,
+            "provider_terminal_observed":provider.get("provider_terminal_observed") is True,
+            "provider_frame_counts":{key:provider_counts[key] for key in ("usage","tool_call","tool_call_update")
+                if type(provider_counts.get(key)) is int and 0 <= provider_counts[key] < 1_000_000_000}}
         report = {**result, "checked_at": self.clock(), "plan_id": self.plan_id,
             "repo_root": str(self.root), "state_dir": str(self.state),
             "completed": (self.latest_status.get("board") or {}).get("completed"),
@@ -370,7 +425,7 @@ class ComplaintCampaignWatchdog:
             "active_task_id": self.latest_observation.get("active_task_id"),
             "last_action": self.last_action, "completion": self.latest_completion,
             "preflight": getattr(self, "latest_preflight", {}),
-            "native_status": self.latest_status.get("status")}
+            "native_status": self.latest_status.get("status"), "activity_evidence":failure_evidence}
         import stat
         self.directory.mkdir(mode=0o700, exist_ok=True)
         info = self.directory.lstat()
