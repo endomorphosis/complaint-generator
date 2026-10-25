@@ -255,3 +255,258 @@ def test_cases_page_clears_transient_ui_and_states_owner_only_limits(tmp_path):
     assert "WebSocket" not in page
     assert world.owner.principal_id not in page
     assert set(CATALOG_LIMITATIONS)
+
+
+def _persistent_catalog(tmp_path):
+    principals = PrincipalStore(tmp_path / "principals", key=os.urandom(32), key_id="principal-key")
+    owner = principals.register_from_request({})
+    other = principals.register_from_request({})
+    key = os.urandom(32)
+    cases = CaseDirectory(tmp_path / "cases", key=key, key_id="case-key")
+    authorizer = CaseActionAuthorizer(principals, cases)
+    return SimpleNamespace(principals=principals, owner=owner.principal_id, other=other.principal_id,
+                           key=key, cases=cases, authorizer=authorizer,
+                           catalog=CaseCatalog(cases, authorizer, key=key, key_id="case-key"))
+
+
+def test_catalog_reopens_encrypted_revisions_and_rejects_wrong_key_cross_case(tmp_path):
+    from applications.case_access import CaseAccessError
+    world = _persistent_catalog(tmp_path)
+    first = world.catalog.create(world.owner, {"label": "private-case-label"})
+    second = world.catalog.create(world.owner, {})
+    world.catalog.set_gaps(world.owner, first["case_id"], {"expected_content_revision": 1,
+                           "unresolved_gaps": ["private-persisted-gap"]})
+    before = world.catalog.sealed_envelope(world.owner, first["case_id"])
+    reopened_cases = CaseDirectory(tmp_path / "cases", key=world.key, key_id="case-key")
+    reopened = CaseCatalog(reopened_cases, CaseActionAuthorizer(world.principals, reopened_cases),
+                           key=world.key, key_id="case-key")
+    view = reopened.read(world.owner, first["case_id"])
+    assert view["unresolved_gaps"] == ["private-persisted-gap"]
+    assert view["encrypted_content_revision"] == 2
+    assert reopened.sealed_envelope(world.owner, first["case_id"]) == before
+    assert reopened.read(world.owner, second["case_id"])["unresolved_gaps"] == []
+    for path in (tmp_path / "cases").rglob("*"):
+        if path.is_file():
+            assert b"private-persisted-gap" not in path.read_bytes()
+            assert b"private-case-label" not in path.read_bytes()
+    wrong = CaseCatalog(reopened_cases, world.authorizer, key=os.urandom(32), key_id="case-key")
+    with pytest.raises(CaseAccessError, match="missing_key"):
+        wrong.read(world.owner, first["case_id"])
+    assert reopened.sealed_envelope(world.owner, first["case_id"]) == before
+    with pytest.raises(CaseAccessError, match="missing_case"):
+        reopened.read(world.other, first["case_id"])
+    one = reopened_cases.owned_revision_directory(actor_principal_id=world.owner, case_id=first["case_id"]) / "revision.json"
+    two = reopened_cases.owned_revision_directory(actor_principal_id=world.owner, case_id=second["case_id"]) / "revision.json"
+    original = two.read_bytes()
+    try:
+        two.write_bytes(one.read_bytes())
+        with pytest.raises(CaseAccessError, match="missing_key"):
+            reopened.read(world.owner, second["case_id"])
+    finally:
+        two.write_bytes(original)
+    assert reopened.read(world.owner, second["case_id"])["unresolved_gaps"] == []
+
+
+def test_distinct_catalog_instances_serialize_creation_and_compare_and_swap(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from applications.case_access import CaseAccessError
+    world = _persistent_catalog(tmp_path)
+    other_cases = CaseDirectory(tmp_path / "cases", key=world.key, key_id="case-key")
+    other = CaseCatalog(other_cases, CaseActionAuthorizer(world.principals, other_cases),
+                        key=world.key, key_id="case-key")
+    barrier = threading.Barrier(2)
+    def create(catalog):
+        barrier.wait(timeout=5)
+        return catalog.create(world.owner, {})
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        one, two = list(pool.map(create, [world.catalog, other]))
+    assert {v["case_id"] for v in other.list_cases(world.owner)["cases"]} == {one["case_id"], two["case_id"]}
+    barrier = threading.Barrier(2)
+    def update(item):
+        catalog, gap = item
+        barrier.wait(timeout=5)
+        try:
+            catalog.set_gaps(world.owner, one["case_id"], {"expected_content_revision": 1, "unresolved_gaps": [gap]})
+            return "written"
+        except CaseAccessError as exc:
+            return exc.code
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(update, [(world.catalog, "one"), (other, "two")]))
+    assert sorted(outcomes) == ["encrypted_revision_conflict", "written"]
+    view = other.read(world.owner, one["case_id"])
+    assert view["encrypted_content_revision"] == 2
+    assert view["unresolved_gaps"] in (["one"], ["two"])
+
+
+@pytest.mark.parametrize("alias", ["symlink", "hardlink", "public"])
+def test_revision_store_rejects_aliases_and_public_ciphertext(tmp_path, alias):
+    from applications.case_access import CaseAccessError
+    world = _persistent_catalog(tmp_path)
+    case = world.catalog.create(world.owner, {})
+    directory = world.cases.owned_revision_directory(actor_principal_id=world.owner, case_id=case["case_id"])
+    path = directory / "revision.json"
+    if alias == "public":
+        path.chmod(0o644)
+    else:
+        original = directory / "original.json"
+        path.rename(original)
+        if alias == "symlink":
+            path.symlink_to(original)
+        else:
+            os.link(original, path)
+    with pytest.raises(CaseAccessError, match="case_revision_unavailable"):
+        world.catalog.read(world.owner, case["case_id"])
+
+
+def test_real_cases_dom_login_create_switch_save_and_late_response(tmp_path):
+    import asyncio
+    import json
+    from tests import gui_native_browser as browser
+
+    assert browser.probe_inherited_network_denial()["af_unix_only"], "trusted executor fence is required"
+    world = _world(tmp_path)
+    from applications.server import SERVER
+    world.app = SERVER(None, authorizer=world.authorizer,
+                       browser_sessions=world.app.state.browser_sessions,
+                       case_catalog=world.catalog).app
+    delayed = {"case_id": None}
+    async def application(scope, receive, send):
+        if (scope.get("method") == "POST" and delayed["case_id"]
+                and scope.get("path") == "/api/cases/" + delayed["case_id"] + "/gaps"):
+            await asyncio.sleep(0.25)
+        await world.app(scope, receive, send)
+
+    bridge = browser.SameOriginAsgiBridge(application)
+    node, chromium = browser.pin_executables()
+    profile = tmp_path / "actual-case-browser"
+    profile.mkdir(mode=0o700)
+    prior_node = os.environ.get("PLAYWRIGHT_NODEJS_PATH")
+    os.environ["PLAYWRIGHT_NODEJS_PATH"] = node.path
+    playwright, context = None, None
+    observed = set()
+    try:
+        playwright = browser._load_sync_playwright()().start()
+        context = browser._launch_context(playwright, chromium.path, profile, bridge)
+        browser._assert_process_custody(node, chromium, profile)
+        observed |= browser._with_descendants(browser._matching_pids((str(profile), node.argv[1])))
+        page = context.pages[0] if context.pages else context.new_page()
+        page.set_default_timeout(10000)
+        page.goto(browser.SAME_ORIGIN + "/cases", wait_until="domcontentloaded")
+        page.fill("#case-credential", OWNER_CREDENTIAL)
+        page.click("#case-login button")
+        page.wait_for_function("document.querySelector('#case-auth-status').textContent === 'Signed in'")
+        assert page.input_value("#case-credential") == ""
+        for label in ("alpha-dom", "beta-dom"):
+            page.fill("#case-label", label)
+            page.click("#create-case button")
+            page.wait_for_function("label => Array.from(document.querySelectorAll('#case-list button')).some(n => n.textContent === label)", arg=label)
+        page.get_by_role("button", name="alpha-dom", exact=True).click()
+        page.wait_for_function("document.querySelector('#selected-case-label').textContent === 'alpha-dom'")
+        page.fill("#case-draft", "unsaved-alpha-draft")
+        page.fill("#gap-input", "unsaved-alpha-gap")
+        page.get_by_role("button", name="beta-dom", exact=True).click()
+        page.wait_for_function("document.querySelector('#selected-case-label').textContent === 'beta-dom'")
+        assert page.input_value("#case-draft") == page.input_value("#gap-input") == ""
+        page.fill("#gap-input", "saved-beta-gap")
+        page.click("#save-gaps")
+        page.wait_for_function("document.querySelector('#unresolved-gaps').textContent.includes('saved-beta-gap')")
+        assert page.text_content("#encrypted-revision") == "2"
+        page.get_by_role("button", name="alpha-dom", exact=True).click()
+        page.wait_for_function("document.querySelector('#selected-case-label').textContent === 'alpha-dom'")
+        first = next(x for x in world.catalog.list_cases(world.owner.principal_id)["cases"] if x["label"] == "alpha-dom")
+        delayed["case_id"] = first["case_id"]
+        page.fill("#gap-input", "late-alpha-gap")
+        # The sync bridge may serialize ASGI calls. This proves a client
+        # delivery/selection race, not concurrent transport: both real DOM
+        # clicks happen before the first real response is consumed.
+        page.evaluate("""() => { window.caseResponsePaints = [];
+            window.casePaintObserver = new MutationObserver(() => {
+                window.caseResponsePaints.push(document.querySelector('#selected-case-label').textContent);
+            });
+            window.casePaintObserver.observe(document.querySelector('#selected-case-label'), {childList: true, subtree: true});
+            document.querySelector('#save-gaps').click();
+            Array.from(document.querySelectorAll('#case-list button')).find(n => n.textContent === 'beta-dom').click(); }""")
+        page.wait_for_function("document.querySelector('#selected-case-label').textContent === 'beta-dom' && !document.querySelector('#selected-case').hidden")
+        assert "late-alpha-gap" not in page.text_content("#unresolved-gaps")
+        assert page.text_content("#unresolved-gaps").strip() == "saved-beta-gap"
+        paints = page.evaluate("() => { window.casePaintObserver.disconnect(); return window.caseResponsePaints; }")
+        assert "beta-dom" in paints and all(label in {"", "beta-dom"} for label in paints), "an older response repainted the selected case"
+        assert page.input_value("#gap-input") == ""
+        assert world.catalog.read(world.owner.principal_id, first["case_id"])["unresolved_gaps"] == ["late-alpha-gap"]
+        # A distinct principal signs in using the real form and public session
+        # adapter. Hidden DOM is still DOM: no previous case content may remain.
+        page.fill("#case-label", "unsent-owner-case-label")
+        page.fill("#case-credential", STRANGER_CREDENTIAL)
+        page.click("#case-login button")
+        page.wait_for_function("document.querySelector('#case-auth-status').textContent === 'Signed in'")
+        page.wait_for_function("""async actor => {
+            const response = await fetch('/api/complaint-workspace/auth/session', {credentials: 'same-origin'});
+            return response.ok && (await response.json()).principal_id === actor;
+        }""", arg=world.stranger.principal_id)
+        assert page.locator("#case-list button").count() == 0
+        assert page.locator("#selected-case").is_hidden()
+        for selector in ("#selected-case-label", "#unresolved-gaps", "#directory-revision", "#encrypted-revision", "#envelope-sha256"):
+            assert page.text_content(selector) == ""
+        for selector in ("#case-label", "#case-draft", "#gap-input", "#case-credential"):
+            assert page.input_value(selector) == ""
+        text = page.locator("body").text_content()
+        assert all(marker not in text for marker in ("alpha-dom", "beta-dom", "saved-beta-gap", "late-alpha-gap", "unsent-owner-case-label"))
+        page.fill("#case-label", "stranger-dom")
+        page.click("#create-case button")
+        page.wait_for_function("document.querySelector('#case-list').textContent.includes('stranger-dom')")
+        assert page.locator("#case-list button").all_text_contents() == ["stranger-dom"]
+        # A new document gets no CSRF from cookies or persistent browser storage.
+        page.reload(wait_until="domcontentloaded")
+        assert page.text_content("#case-auth-status") == "Sign in required"
+        assert page.evaluate("Object.keys(localStorage).length + Object.keys(sessionStorage).length") == 0
+        assert bridge.cookie_headers_seen and bridge.asgi_calls > 10
+        assert not bridge.aborted_external
+    finally:
+        if context is not None:
+            context.close()
+        if playwright is not None:
+            playwright.stop()
+        if prior_node is None:
+            os.environ.pop("PLAYWRIGHT_NODEJS_PATH", None)
+        else:
+            os.environ["PLAYWRIGHT_NODEJS_PATH"] = prior_node
+        cleanup = browser._wait_for_cleanup(observed)
+        assert cleanup["cleaned"], "owned browser descendants must quiesce"
+    (tmp_path / "case-dom-observation.json").write_text(json.dumps({
+        "actual_dom": True, "actual_asgi": True, "login_csrf_from_public_route": True,
+        "unsaved_gap_cleared": True, "late_response_did_not_repaint": True,
+        "race_scope": "client_delivery_and_selection; ASGI calls may be serialized",
+        "concurrent_asgi_transport_qualified": False,
+        "distinct_principal_login_cleared_private_dom": True,
+        "reauthentication_after_navigation_required": True, "owned_cleanup": cleanup,
+        "completion_authority": False}, sort_keys=True))
+
+
+@pytest.mark.parametrize("variant", ["server", "review_api", "dashboard", "review_surface"])
+def test_actual_app_factories_forward_catalog_and_missing_configuration_is_unavailable(tmp_path, variant):
+    from applications.server import SERVER
+    from applications.review_api import create_review_api_app
+    from applications.review_ui import create_review_dashboard_app, create_review_surface_app
+    world = _world(tmp_path)
+    common = {"authorizer": world.authorizer, "browser_sessions": world.app.state.browser_sessions}
+    def build(catalog):
+        options = dict(common, case_catalog=catalog)
+        if variant == "server":
+            return SERVER(None, **options).app
+        if variant == "review_api":
+            return create_review_api_app(None, **options)
+        if variant == "dashboard":
+            return create_review_dashboard_app(**options)
+        return create_review_surface_app(None, **options)
+    with TestClient(build(None), base_url="https://testserver") as client:
+        _login(client, OWNER_CREDENTIAL)
+        denied = client.get("/api/cases")
+        assert denied.status_code == 503
+        assert denied.json() == {"error": "case_catalog_unavailable"}
+    with TestClient(build(world.catalog), base_url="https://testserver") as client:
+        token = _login(client, OWNER_CREDENTIAL)
+        assert client.get("/cases").status_code == 200
+        created = client.post("/api/cases", headers=_csrf(token), json={"label": "factory-case"})
+        assert created.status_code == 201
+        assert created.json()["membership"] == "owner-only"

@@ -288,7 +288,7 @@ def attach_review_surface_chat_routes(app: FastAPI, mediator: Any) -> FastAPI:
 
 
 def create_review_dashboard_app(authorizer: Any = None, *, browser_sessions: Any = None,
-                                case_handlers: Any = None, json_body_limits: Any = None) -> FastAPI:
+                                case_handlers: Any = None, json_body_limits: Any = None, case_catalog: Any = None) -> FastAPI:
     app = FastAPI(title="Complaint Generator Review Dashboard")
     attach_static_asset_routes(app)
     attach_claim_support_review_ui_routes(app)
@@ -303,12 +303,13 @@ def create_review_dashboard_app(authorizer: Any = None, *, browser_sessions: Any
         browser_sessions=browser_sessions,
         case_handlers=case_handlers,
         json_body_limits=json_body_limits,
+        case_catalog=case_catalog,
     )
     return app
 
 
 def create_review_surface_app(mediator: Any, authorizer: Any = None, workspace_service: Any = None,
-                              *, browser_sessions: Any = None, case_handlers: Any = None, json_body_limits: Any = None) -> FastAPI:
+                              *, browser_sessions: Any = None, case_handlers: Any = None, json_body_limits: Any = None, case_catalog: Any = None) -> FastAPI:
     app = FastAPI(title="Complaint Generator Review Surface")
     attach_static_asset_routes(app)
     attach_core_site_ui_routes(app)
@@ -325,5 +326,6 @@ def create_review_surface_app(mediator: Any, authorizer: Any = None, workspace_s
         browser_sessions=browser_sessions,
         case_handlers=case_handlers,
         json_body_limits=json_body_limits,
+        case_catalog=case_catalog,
     )
     return app

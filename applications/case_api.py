@@ -14,6 +14,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import base64
+from contextlib import contextmanager
+import fcntl
+import os
+import stat
+import uuid
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -95,7 +101,6 @@ class CaseCatalog:
         self._authorizer = authorizer
         self._key = bytes(key)
         self._key_id = key_id
-        self._sealed: dict[tuple[str, str, str], _SealedRevision] = {}
         self._ui: dict[str, _TransientUI] = {}
 
     def create(self, actor_principal_id: str, body: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -174,10 +179,15 @@ class CaseCatalog:
         if type(expected) is not int:
             raise CaseAccessError("encrypted_revision_conflict")
         gaps = self._gaps(payload.get("unresolved_gaps"))
-        sealed = self._sealed.get(self._key_for(record))
-        if sealed is None or sealed.content_revision != expected:
-            raise CaseAccessError("encrypted_revision_conflict")
-        self._write_sealed(record, content_revision=sealed.content_revision + 1, gaps=gaps, label=sealed.label)
+        # The same private lock is used by every catalog instance. Read and
+        # compare inside the lock so a stale writer cannot overwrite a newer
+        # revision merely because its own in-memory view is older.
+        with self._revision_lock(record) as directory:
+            sealed = self._load_sealed(record, directory)
+            if sealed is None or sealed.content_revision != expected:
+                raise CaseAccessError("encrypted_revision_conflict")
+            self._write_sealed(record, content_revision=sealed.content_revision + 1,
+                               gaps=gaps, label=sealed.label, directory=directory)
         return self._owner_view(decision, record, switched=False)
 
     def session(self, actor_principal_id: str) -> dict[str, Any]:
@@ -201,7 +211,8 @@ class CaseCatalog:
         if record is None:
             raise CaseAccessError("missing_case")
         self._authorize_owned(actor, record, action="case.read")
-        sealed = self._sealed.get(self._key_for(record))
+        with self._revision_lock(record) as directory:
+            sealed = self._load_sealed(record, directory)
         if sealed is None:
             raise CaseAccessError("missing_case")
         return sealed.envelope
@@ -307,7 +318,10 @@ class CaseCatalog:
             raise CaseAccessError(exc.code) from exc
 
     def _owner_view(self, decision: Any, record: CaseNamespace, *, switched: bool) -> dict[str, Any]:
-        sealed = self._sealed[self._key_for(record)]
+        with self._revision_lock(record) as directory:
+            sealed = self._load_sealed(record, directory)
+        if sealed is None:
+            raise CaseAccessError("case_revision_unavailable")
         opened = self._open_sealed(record, sealed)
         return {
             "actor_principal_id": decision.actor_principal_id,
@@ -328,7 +342,14 @@ class CaseCatalog:
             "limitations": list(CATALOG_LIMITATIONS),
         }
 
-    def _write_sealed(self, record: CaseNamespace, *, content_revision: int, gaps: tuple[str, ...], label: str) -> None:
+    def _write_sealed(self, record: CaseNamespace, *, content_revision: int, gaps: tuple[str, ...],
+                      label: str, directory: int | None = None) -> None:
+        if directory is None:
+            with self._revision_lock(record) as owned:
+                if self._load_sealed(record, owned) is not None:
+                    raise CaseAccessError("encrypted_revision_conflict")
+                return self._write_sealed(record, content_revision=content_revision,
+                                          gaps=gaps, label=label, directory=owned)
         document = {
             "content_revision": content_revision,
             "unresolved_gaps": list(gaps),
@@ -344,7 +365,93 @@ class CaseCatalog:
             key=self._key,
             key_id=self._key_id,
         )
-        self._sealed[self._key_for(record)] = _SealedRevision(content_revision, envelope, gaps, label)
+        raw = json.dumps({"schema": "complaint-case-ui-revision@1", "revision": content_revision,
+                          "envelope": base64.b64encode(envelope).decode("ascii")},
+                         sort_keys=True, separators=(",", ":")).encode()
+        temporary = ".revision-" + uuid.uuid4().hex + ".tmp"
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                             0o600, dir_fd=directory)
+        try:
+            remaining = memoryview(raw)
+            while remaining:
+                written = os.write(descriptor, remaining)
+                if written <= 0:
+                    raise CaseAccessError("case_revision_unavailable")
+                remaining = remaining[written:]
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        try:
+            os.replace(temporary, "revision.json", src_dir_fd=directory, dst_dir_fd=directory)
+            os.fsync(directory)
+        finally:
+            try:
+                os.unlink(temporary, dir_fd=directory)
+            except FileNotFoundError:
+                pass
+
+    @contextmanager
+    def _revision_lock(self, record: CaseNamespace):
+        try:
+            path = self._cases.owned_revision_directory(actor_principal_id=record.owner_principal_id,
+                                                       case_id=record.case_id)
+            directory = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            lock = None
+            try:
+                info = os.fstat(directory)
+                if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+                    raise CaseAccessError("case_revision_unavailable")
+                lock = os.open(".revision.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                               0o600, dir_fd=directory)
+                self._private_file(os.fstat(lock))
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                yield directory
+            finally:
+                if lock is not None:
+                    os.close(lock)
+                os.close(directory)
+        except CaseDirectoryError as exc:
+            raise CaseAccessError(exc.code) from exc
+        except OSError as exc:
+            raise CaseAccessError("case_revision_unavailable") from exc
+
+    @staticmethod
+    def _private_file(info):
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+            raise CaseAccessError("case_revision_unavailable")
+
+    def _load_sealed(self, record: CaseNamespace, directory: int) -> _SealedRevision | None:
+        try:
+            descriptor = os.open("revision.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory)
+        except FileNotFoundError:
+            return None
+        try:
+            before = os.fstat(descriptor)
+            self._private_file(before)
+            if not 0 < before.st_size <= 65536:
+                raise CaseAccessError("case_revision_unavailable")
+            raw = os.read(descriptor, before.st_size + 1)
+            after = os.fstat(descriptor)
+            identity = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+            if len(raw) != before.st_size or identity(before) != identity(after):
+                raise CaseAccessError("case_revision_unavailable")
+        finally:
+            os.close(descriptor)
+        try:
+            value = json.loads(raw)
+            if (not isinstance(value, dict) or set(value) != {"schema", "revision", "envelope"}
+                    or value["schema"] != "complaint-case-ui-revision@1"
+                    or type(value["revision"]) is not int or value["revision"] < 1
+                    or not isinstance(value["envelope"], str)):
+                raise ValueError("revision")
+            sealed = _SealedRevision(value["revision"], base64.b64decode(value["envelope"], validate=True), (), "")
+            document = self._open_sealed(record, sealed)
+            sealed.gaps = self._gaps(document["unresolved_gaps"])
+            sealed.label = document["label"]
+            return sealed
+        except (ValueError, TypeError, KeyError) as exc:
+            raise CaseAccessError("case_revision_unavailable") from exc
 
     def _open_sealed(self, record: CaseNamespace, sealed: _SealedRevision) -> dict[str, Any]:
         binding = self._binding(record, sealed.content_revision)
@@ -355,7 +462,11 @@ class CaseCatalog:
             document = json.loads(plaintext.decode("utf-8"))
         except (PrivateArtifactIntegrityError, PrivateStorageError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise CaseAccessError("missing_key") from exc
-        if not isinstance(document, dict) or document.get("content_revision") != sealed.content_revision:
+        if (not isinstance(document, dict) or set(document) != {"content_revision", "unresolved_gaps", "label", "membership"}
+                or type(document.get("content_revision")) is not int
+                or document["content_revision"] != sealed.content_revision
+                or document["membership"] != MEMBERSHIP_OWNER_ONLY
+                or not isinstance(document["label"], str) or len(document["label"]) > _MAX_GAP_LENGTH):
             raise CaseAccessError("encrypted_revision_conflict")
         return document
 
@@ -411,6 +522,7 @@ def mount_case_catalog(app: Any) -> None:
             "encrypted_revision_conflict": 409,
             "revision_conflict": 409,
             "case_catalog_unavailable": 503,
+            "case_revision_unavailable": 503,
             "unauthenticated": 401,
             "authorizer_required": 401,
         }.get(exc.code, 403)
