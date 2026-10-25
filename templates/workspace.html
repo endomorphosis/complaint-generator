@@ -5714,6 +5714,51 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                     </div>
                 </section>
 
+                <section id="legal-source-candidates" data-task="CIMP-GUI-25">
+                    <h2>Bounded legal source candidates</h2>
+                    <p id="legal-research-notice">Search uses the current case purpose and a bounded query. Snippets, missing archives, and model text are research gaps. Results are candidates, never admitted law.</p>
+                    <div class="field-row">
+                        <div>
+                            <label for="legal-research-case-id">Case</label>
+                            <input id="legal-research-case-id" type="text" autocomplete="off">
+                        </div>
+                        <div>
+                            <label for="legal-research-purpose">Purpose</label>
+                            <select id="legal-research-purpose">
+                                <option value="citation_acquisition">citation_acquisition</option>
+                                <option value="public_law_citation">public_law_citation</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div>
+                            <label for="legal-research-query">Bounded query</label>
+                            <input id="legal-research-query" type="text" maxlength="256" autocomplete="off" placeholder="Public citation terms only">
+                        </div>
+                        <div>
+                            <label for="legal-research-consent-generation">Consent generation</label>
+                            <input id="legal-research-consent-generation" type="number" min="0" value="0">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div>
+                            <label for="legal-research-max-results">Maximum results</label>
+                            <input id="legal-research-max-results" type="number" min="1" max="5" value="5">
+                        </div>
+                        <div>
+                            <label for="legal-research-deadline">Deadline seconds</label>
+                            <input id="legal-research-deadline" type="number" min="0.1" max="5" step="0.1" value="5">
+                        </div>
+                    </div>
+                    <div class="status" id="legal-research-display" data-admitted-law="false" data-status="empty">No legal-source acquisition has been run. Nothing here is admitted law.</div>
+                    <div class="list" id="legal-research-receipts"></div>
+                    <div class="button-row">
+                        <button type="button" id="legal-research-refresh">Show source receipts</button>
+                        <button type="button" id="legal-research-run">Acquire bounded candidates</button>
+                        <button type="button" id="legal-research-cancel">Cancel acquisition</button>
+                    </div>
+                </section>
+
                 <div class="button-row" id="workspace-privacy-actions">
                     <button type="button" id="workspace-clear-private-state">Clear private browser state</button>
                     <label for="workspace-switch-user-id">Switch to user</label>
@@ -6049,6 +6094,81 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
 
         document.getElementById('legal-context-refresh').addEventListener('click', function () { refreshLegalContext(); });
         document.getElementById('legal-context-save').addEventListener('click', function () { saveLegalContext(); });
+
+        function legalResearchFields() {
+            return {
+                caseId: document.getElementById('legal-research-case-id').value.trim(),
+                purpose: document.getElementById('legal-research-purpose').value,
+                query: document.getElementById('legal-research-query').value.trim(),
+                maxResults: Number(document.getElementById('legal-research-max-results').value),
+                deadline: Number(document.getElementById('legal-research-deadline').value),
+                consentGeneration: Number(document.getElementById('legal-research-consent-generation').value)
+            };
+        }
+
+        function renderLegalResearch(payload) {
+            const node = document.getElementById('legal-research-display');
+            node.dataset.admittedLaw = 'false';
+            node.dataset.status = payload.status || 'empty';
+            const receipts = Array.isArray(payload.source_version_receipts) ? payload.source_version_receipts : [];
+            node.textContent = 'Status ' + (payload.status || 'empty')
+                + '. Candidates ' + String(payload.candidate_count || 0)
+                + '. Research gaps ' + String(payload.research_gap_count || 0)
+                + '. Admitted law: false.';
+            document.getElementById('legal-research-receipts').textContent = receipts.map(function (item) {
+                return (item.kind || 'research_gap') + ' ' + (item.version || item.reason || 'unversioned')
+                    + ' admitted_law=false';
+            }).join(' | ') || 'No source or version receipt yet. Nothing is admitted law.';
+        }
+
+        function legalResearchUnavailable(message) {
+            const node = document.getElementById('legal-research-display');
+            node.dataset.admittedLaw = 'false';
+            node.dataset.status = 'unavailable';
+            node.textContent = message || 'Legal-source acquisition was not run. Nothing was admitted as law.';
+        }
+
+        async function postLegalResearch(cancelled) {
+            const fields = legalResearchFields();
+            if (!fields.caseId || !fields.query) {
+                legalResearchUnavailable('Enter a case and a bounded query. Nothing was admitted as law.');
+                return;
+            }
+            const body = {
+                purpose: fields.purpose,
+                query: fields.query,
+                max_results: fields.maxResults,
+                deadline_seconds: fields.deadline,
+                expected_consent_generation: fields.consentGeneration,
+                retrieval_mode: 'cache',
+                cancelled: cancelled === true
+            };
+            try {
+                const payload = await client._request('/api/legal-research/' + encodeURIComponent(fields.caseId),
+                    {method: 'POST', body: JSON.stringify(body)});
+                renderLegalResearch(payload);
+            } catch (_error) {
+                legalResearchUnavailable('Legal-source acquisition was refused or unavailable. Nothing was admitted as law.');
+            }
+        }
+
+        async function refreshLegalResearch() {
+            const fields = legalResearchFields();
+            if (!fields.caseId) {
+                legalResearchUnavailable('Enter a case id. Nothing was admitted as law.');
+                return;
+            }
+            try {
+                const payload = await client._request('/api/legal-research/' + encodeURIComponent(fields.caseId), {method: 'GET'});
+                renderLegalResearch(payload);
+            } catch (_error) {
+                legalResearchUnavailable('Source receipts could not be read. Nothing was admitted as law.');
+            }
+        }
+
+        document.getElementById('legal-research-refresh').addEventListener('click', function () { refreshLegalResearch(); });
+        document.getElementById('legal-research-run').addEventListener('click', function () { postLegalResearch(false); });
+        document.getElementById('legal-research-cancel').addEventListener('click', function () { postLegalResearch(true); });
 
         document.getElementById('consent-refresh').addEventListener('click', function () { refreshCaseProcessingConsent(); });
         document.getElementById('consent-choose-local').addEventListener('click', function () { submitCaseProcessingConsent('local_private'); });
