@@ -13,6 +13,8 @@ module does not send external messages and does not claim WebSocket or SSE.
 
 from __future__ import annotations
 
+import json
+import uuid
 from typing import Any, Callable, Mapping
 
 from starlette.requests import Request
@@ -36,7 +38,16 @@ ASSIGNMENT_LIMITATIONS = (
     "expiry_is_derived_not_client_status",
     "no_external_notification_delivery",
     "no_websocket_or_sse",
+    "grant_changes_require_current_revision_and_confirmation",
+    "grant_changes_are_idempotent_and_audited",
+    "revocation_denies_later_api_download_inference_and_browser_resume",
 )
+GRANT_SURFACES = frozenset({"api", "download", "inference", "browser_resume"})
+_SURFACE_ACTION = {
+    "download": "case.download",
+    "inference": "case.review",
+    "browser_resume": "case.read",
+}
 _REJECTED_BODY_FIELDS = frozenset({
     "trusted_local",
     "trust",
@@ -123,6 +134,8 @@ class CaseAssignmentService:
         self._clock = clock
         self._artifacts: dict[tuple[str, str, str], bytes] = {}
         self._admitted: dict[str, dict[str, str]] = {}
+        self._change_idem: dict[tuple[str, str], dict[str, Any]] = {}
+        self._audit: list[dict[str, Any]] = []
 
     def bind_artifact(self, *, case_id: str, artifact_kind: str, artifact_revision: str, envelope: bytes) -> None:
         """Operator binding. Request bodies cannot supply ciphertext."""
@@ -212,6 +225,194 @@ class CaseAssignmentService:
             raise CaseAssignmentError(_decision_code(exc.code)) from exc
         return self._view(updated, actor)
 
+    def inspect_grant(self, actor_principal_id: str, grant_id: str) -> dict[str, Any]:
+        """Owner or recipient reads the effective scope, expiry, and revocation."""
+
+        actor = self._active(actor_principal_id)
+        grant = self._visible(actor, grant_id)
+        return self._inspected(grant, actor)
+
+    def change_grant(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
+        """Owner changes scope, expiry, or revocation.
+
+        The current revision and ``confirm_grant_change: true`` are required.
+        The same idempotency key and payload return the recorded result and do
+        not append another audit event.
+        """
+
+        actor = self._active(actor_principal_id)
+        payload = self._body(body)
+        if payload.get("confirm_grant_change") is not True:
+            raise CaseAssignmentError("confirmation_required")
+        grant = self._visible(actor, grant_id)
+        if grant.owner_principal_id != actor:
+            raise CaseAssignmentError("missing_grant")
+        key = _label(payload.get("idempotency_key"), "idempotency_key")
+        expected = payload.get("expected_version")
+        if type(expected) is not int:
+            raise CaseAssignmentError("revision_conflict")
+        revoke = payload.get("revoke", False)
+        if revoke is not True and revoke is not False:
+            raise CaseAssignmentError("confirmation_required")
+        has_scope = "scope" in payload
+        has_expiry = "expires_at" in payload
+        if revoke is True and (has_scope or has_expiry):
+            raise CaseAssignmentError("empty_update")
+        if revoke is False and not has_scope and not has_expiry:
+            raise CaseAssignmentError("empty_update")
+        scope = _scope(payload.get("scope")) if has_scope else None
+        expiry = payload.get("expires_at") if has_expiry else None
+        if has_expiry and type(expiry) is not int:
+            raise CaseAssignmentError("expiry")
+        fingerprint = json.dumps({
+            "actor_principal_id": actor,
+            "grant_id": grant.grant_id,
+            "expected_version": expected,
+            "revoke": revoke,
+            "scope": None if scope is None else sorted(scope),
+            "expires_at": expiry,
+        }, sort_keys=True, separators=(",", ":"))
+        cached = self._change_idem.get((actor, key))
+        if cached is not None:
+            if cached["fingerprint"] != fingerprint or cached["grant_id"] != grant.grant_id:
+                raise CaseAssignmentError("replay_mismatch")
+            replay = json.loads(json.dumps(cached["view"]))
+            replay["idempotent_replay"] = True
+            return replay
+        prior_scope = list(grant.actions)
+        prior_expiry = grant.expires_at
+        prior_version = grant.version
+        try:
+            if revoke is True:
+                updated = self._memberships.remove(
+                    owner_principal_id=actor,
+                    grant_id=grant.grant_id,
+                    expected_version=expected,
+                )
+                operation = "revocation"
+            else:
+                updated = self._memberships.update_scope(
+                    owner_principal_id=actor,
+                    grant_id=grant.grant_id,
+                    expected_version=expected,
+                    actions=scope,
+                    expires_at=expiry,
+                )
+                if has_scope and has_expiry:
+                    operation = "scope_and_expiry"
+                elif has_scope:
+                    operation = "scope"
+                else:
+                    operation = "expiry"
+        except CaseMembershipError as exc:
+            raise CaseAssignmentError(_decision_code(exc.code)) from exc
+        audit = {
+            "audit_id": uuid.uuid4().hex,
+            "grant_id": updated.grant_id,
+            "actor_principal_id": actor,
+            "operation": operation,
+            "from_revision": prior_version,
+            "revision": updated.version,
+            "prior_scope": prior_scope,
+            "scope": list(updated.actions),
+            "prior_expires_at": prior_expiry,
+            "expires_at": updated.expires_at,
+            "revoked": updated.status == "removed",
+            "confirmed": True,
+            "idempotency_key": key,
+        }
+        self._audit.append(audit)
+        view = self._inspected(updated, actor)
+        view["change"] = {
+            "operation": operation,
+            "from_revision": prior_version,
+            "revision": updated.version,
+            "confirmed": True,
+            "idempotency_key": key,
+            "audit_id": audit["audit_id"],
+            "prior_scope": prior_scope,
+            "prior_expires_at": prior_expiry,
+        }
+        view["idempotent_replay"] = False
+        self._change_idem[(actor, key)] = {
+            "fingerprint": fingerprint,
+            "grant_id": updated.grant_id,
+            "view": json.loads(json.dumps(view)),
+        }
+        return view
+
+    def enforce_participant(
+        self,
+        actor_principal_id: str,
+        *,
+        grant_id: str,
+        surface: str,
+        expected_version: Any,
+        request_action: str | None = None,
+    ) -> dict[str, Any]:
+        """Read the live grant. Scope, expiry, and revocation apply immediately."""
+
+        actor = self._active(actor_principal_id)
+        if surface not in GRANT_SURFACES:
+            raise CaseAssignmentError("surface_required")
+        grant = self._visible(actor, grant_id)
+        if actor == grant.owner_principal_id and actor != grant.member_principal_id:
+            return {
+                "admitted": False,
+                "enforced": False,
+                "surface": surface,
+                "party": "owner",
+                "grant_id": grant.grant_id,
+                "actor_is_encrypted_owner": False,
+                "canonical_owner_principal_id": grant.tenant_id,
+            }
+        if actor != grant.member_principal_id:
+            raise CaseAssignmentError("missing_grant")
+        action = _SURFACE_ACTION.get(surface)
+        if surface == "api":
+            action = request_action if request_action in ASSIGNED_LAWYER_ACTIONS else "case.read"
+        try:
+            decision = self._memberships.authorize(
+                actor_principal_id=actor,
+                grant_id=grant.grant_id,
+                tenant_id=grant.tenant_id,
+                case_id=grant.case_id,
+                resource_id=grant.resource_id,
+                action=action,
+                expected_version=expected_version,
+            )
+        except CaseMembershipError as exc:
+            raise CaseAssignmentError(_decision_code(exc.code)) from exc
+        return {
+            "admitted": True,
+            "enforced": True,
+            "surface": surface,
+            "action": decision.action,
+            "grant_id": decision.grant_id,
+            "revision": decision.version,
+            "expires_at": decision.expires_at,
+            "actor_principal_id": actor,
+            "actor_is_encrypted_owner": False,
+            "canonical_owner_principal_id": decision.canonical_owner_principal_id,
+            "party": "recipient",
+        }
+
+    def use_grant(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
+        payload = self._body(body)
+        surface = payload.get("surface")
+        if not isinstance(surface, str):
+            raise CaseAssignmentError("surface_required")
+        request_action = payload.get("action") if surface == "api" else None
+        if request_action is not None and not isinstance(request_action, str):
+            raise CaseAssignmentError("action_not_permitted")
+        return self.enforce_participant(
+            actor_principal_id,
+            grant_id=grant_id,
+            surface=surface,
+            expected_version=payload.get("expected_version"),
+            request_action=request_action,
+        )
+
     def issue_key_grant(self, actor_principal_id: str, grant_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
         actor = self._active(actor_principal_id)
         payload = self._body(body)
@@ -257,6 +458,18 @@ class CaseAssignmentService:
             raise CaseAssignmentError("membership_required")
         if type(payload.get("expected_version")) is not int or payload.get("expected_version") != grant.version:
             raise CaseAssignmentError("revision_conflict")
+        try:
+            self._memberships.authorize(
+                actor_principal_id=actor,
+                grant_id=grant.grant_id,
+                tenant_id=grant.tenant_id,
+                case_id=grant.case_id,
+                resource_id=grant.resource_id,
+                action="case.read",
+                expected_version=grant.version,
+            )
+        except CaseMembershipError as exc:
+            raise CaseAssignmentError(_decision_code(exc.code)) from exc
         kind = _label(payload.get("artifact_kind"), "artifact_kind")
         revision = _label(payload.get("artifact_revision"), "artifact_revision")
         envelope = self._artifacts.get((grant.case_id, kind, revision))
@@ -349,7 +562,18 @@ class CaseAssignmentService:
             view["artifact_revision"] = admitted["artifact_revision"]
         view["actor_is_encrypted_owner"] = False
         view["canonical_owner_principal_id"] = grant.tenant_id
+        view["revision"] = grant.version
+        view["effective"] = shown == "accepted"
+        view["revoked"] = grant.status == "removed"
         view["limitations"] = list(ASSIGNMENT_LIMITATIONS)
+        return view
+
+    def _inspected(self, grant, actor: str) -> dict[str, Any]:
+        view = self._view(grant, actor)
+        if actor == grant.owner_principal_id:
+            view["audit"] = [dict(item) for item in self._audit if item["grant_id"] == grant.grant_id]
+        else:
+            view["audit"] = []
         return view
 
     def _display(self, grant) -> str:
@@ -485,6 +709,27 @@ def mount_case_assignments(app: Any) -> None:
     async def assignment_remove(grant_id: str, request: Request):
         try:
             return JSONResponse(_service(request).remove(_actor(request), grant_id, _material(request)))
+        except CaseAssignmentError as exc:
+            return _fail(exc)
+
+    @app.get("/api/cases/assignments/{grant_id}")
+    async def assignment_inspect(grant_id: str, request: Request):
+        try:
+            return JSONResponse(_service(request).inspect_grant(_actor(request), grant_id))
+        except CaseAssignmentError as exc:
+            return _fail(exc)
+
+    @app.post("/api/cases/assignments/{grant_id}/change")
+    async def assignment_change(grant_id: str, request: Request):
+        try:
+            return JSONResponse(_service(request).change_grant(_actor(request), grant_id, _material(request)))
+        except CaseAssignmentError as exc:
+            return _fail(exc)
+
+    @app.post("/api/cases/assignments/{grant_id}/use")
+    async def assignment_use(grant_id: str, request: Request):
+        try:
+            return JSONResponse(_service(request).use_grant(_actor(request), grant_id, _material(request)))
         except CaseAssignmentError as exc:
             return _fail(exc)
 
