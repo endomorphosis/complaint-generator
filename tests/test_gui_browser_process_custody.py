@@ -112,3 +112,21 @@ def test_kernel_uid_and_running_executable_digest_must_match(monkeypatch):
     monkeypatch.setattr(browser.os, 'getuid', lambda: actual_uid + 1)
     with pytest.raises(browser.BrowserCapabilityError, match='identity'):
         browser._process_birth(pid)
+
+
+@pytest.mark.parametrize('argv', [
+    (*NODE.argv, '--inspect=0'),
+    (NODE.path, '--require', '/foreign/module.js', *NODE.argv[1:]),
+    (NODE.path, '-e', 'process.exit(0)', *NODE.argv[1:]),
+    (NODE.path, NODE.argv[2], NODE.argv[1]),
+    (*NODE.argv, 'extra'),
+])
+def test_owned_node_requires_exact_pinned_driver_arguments(monkeypatch, argv):
+    table = _table()
+    table[10] = (1, argv, NODE.path)
+    monkeypatch.setattr(browser.os, 'getpid', lambda: 1)
+    monkeypatch.setattr(browser, '_process_table', lambda: table)
+    monkeypatch.setattr(browser, '_process_birth', lambda pid: (0, 1, (1000,) * 4, '/python'))
+    monkeypatch.setattr(browser, '_pinned_process', lambda *args: pytest.fail('wrong driver arguments were admitted'))
+    with pytest.raises(browser.BrowserCapabilityError, match='driver arguments'):
+        browser._assert_process_custody(NODE, CHROME, PROFILE)

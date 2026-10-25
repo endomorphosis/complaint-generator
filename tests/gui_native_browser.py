@@ -770,6 +770,8 @@ def _assert_process_custody(node: PinnedExecutable, chromium: PinnedExecutable, 
             cursor = table[cursor][0]
         if cursor != owner_pid:
             continue
+        if tuple(argv) != node.argv:
+            raise BrowserCapabilityError("Playwright driver arguments do not match the pin")
         birth = _pinned_process(pid, node)
         chain = {pid: birth}
         parent = birth[0]
