@@ -1452,7 +1452,7 @@ Implementation instructions:
 
 ## CIMP-GUI-49 Coordinate workflow stages and draft review
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
