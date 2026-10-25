@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from typing import Any, Dict, Mapping, MutableMapping
 
 from starlette.requests import Request
@@ -254,13 +255,14 @@ def _passage_index_record(item: Mapping[str, Any], *, source_text: str, version:
     identity = str(item.get("authority_identity") or item.get("authority_id") or locator or "")
     exceptions = _string_list(item.get("exceptions"))
     applicability = item.get("applicability") if isinstance(item.get("applicability"), str) else ""
-    treatment = item.get("treatment_state") if isinstance(item.get("treatment_state"), str) else ""
+    treatment = item.get("treatment_state") if isinstance(item.get("treatment_state"), str) else "unknown"
+    retrieval = item.get("retrieval") if isinstance(item.get("retrieval"), Mapping) else {}
     passage = source_text if len(source_text) <= PASSAGE_MAX_CHARS else ""
     return {
         "source_passage": passage,
         "authority_identity": identity,
         "jurisdiction": str(item.get("jurisdiction") or ""),
-        "effective_date": str(item.get("effective_date") or ""),
+        "effective_date": str(item.get("effective_date") or retrieval.get("effective_date") or ""),
         "applicability": applicability,
         "exceptions": exceptions,
         "treatment_state": treatment,
@@ -289,6 +291,7 @@ def _index_acquired_passages(case_file: MutableMapping[str, Any], acquisition: M
         if not content_hash or not receipt.get("source_passage"):
             continue
         index[content_hash] = {
+            **deepcopy(item),
             "source_passage": receipt["source_passage"],
             "authority_identity": receipt["authority_identity"],
             "jurisdiction": receipt["jurisdiction"],
@@ -302,6 +305,8 @@ def _index_acquired_passages(case_file: MutableMapping[str, Any], acquisition: M
             "content_hash": content_hash,
             "source_id": receipt["source_id"],
             "locator": receipt["locator"],
+            # Presentation fields never replace the owned admission record.
+            "canonical_source": deepcopy(item),
         }
 
 
@@ -380,8 +385,15 @@ def acquire_bounded_legal_sources(mediator: Any, workspace: Any, authority: Any,
         seen = {}
         mediator._gui_legal_research_operations = seen
     operation_id = bounds["operation_id"]
+    fingerprint = _operation_fingerprint({
+        "request": bounds, "actor": authority.actor_principal_id,
+        "case_id": authority.case_id, "legal_context": case_file.get("legal_context"),
+    })
     if operation_id and operation_id in seen:
-        replay = dict(seen[operation_id])
+        prior = seen[operation_id]
+        if prior.get("fingerprint") != fingerprint:
+            raise LegalResearchError("legal_research_revision_conflict")
+        replay = deepcopy(prior["receipt"])
         replay["replayed"] = True
         replay["dispatched"] = False
         replay["admitted_law"] = False
@@ -420,7 +432,7 @@ def acquire_bounded_legal_sources(mediator: Any, workspace: Any, authority: Any,
         _index_acquired_passages(case_file, acquisition)
     case_file["legal_source_candidate_receipt"] = receipt
     if operation_id:
-        seen[operation_id] = dict(receipt)
+        seen[operation_id] = {"fingerprint": fingerprint, "receipt": deepcopy(receipt)}
     return receipt
 
 
@@ -430,6 +442,14 @@ def _admission_ledger(case_file: MutableMapping[str, Any]) -> list:
         ledger = []
         case_file["legal_authority_admissions"] = ledger
     return ledger
+
+
+def _operation_fingerprint(value: Mapping[str, Any]) -> str:
+    try:
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    except (TypeError, ValueError):
+        raise LegalResearchError("legal_research_field") from None
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _review_fields(body: Mapping[str, Any]) -> Dict[str, Any]:
@@ -450,7 +470,7 @@ def _review_fields(body: Mapping[str, Any]) -> Dict[str, Any]:
         if not isinstance(value, str) or len(value) > 256:
             raise LegalResearchError("legal_research_field")
     exceptions = _string_list(body.get("exceptions"))
-    if exceptions is None:
+    if exceptions is None and body.get("exceptions") is not None:
         raise LegalResearchError("legal_research_field")
     operation_id = body.get("operation_id", "")
     if not isinstance(operation_id, str) or len(operation_id) > 64:
@@ -490,7 +510,7 @@ def _admission_record(fields: Mapping[str, Any], *, status: str, reason: str, ad
         "jurisdiction": fields["jurisdiction"],
         "effective_date": fields["effective_date"],
         "applicability": fields["applicability"],
-        "exceptions": list(fields["exceptions"]),
+        "exceptions": list(fields["exceptions"]) if fields["exceptions"] is not None else None,
         "treatment_state": fields["treatment_state"],
         "version": fields["version"],
         "content_hash": fields["content_hash"],
@@ -528,6 +548,8 @@ def _compare_passage(fields: Mapping[str, Any], stored: Mapping[str, Any] | None
     )
     if not same:
         return "source_mismatch"
+    if fields["applicability"] in {"", "unknown", "disputed"} or fields["treatment_state"] in {"", "unknown"} or fields["exceptions"] is None:
+        return "source_metadata_unresolved"
     if fields["applicability"] not in APPLICABILITY_VALUES or fields["treatment_state"] not in TREATMENT_STATES:
         return "source_mismatch"
     return ""
@@ -568,13 +590,20 @@ def review_versioned_authority(
         seen = {}
         mediator._gui_authority_admission_operations = seen
     operation_id = fields["operation_id"]
+    index = case_file.get("legal_source_passage_index") if isinstance(case_file.get("legal_source_passage_index"), dict) else {}
+    stored = index.get(fields["content_hash"]) if isinstance(index.get(fields["content_hash"]), dict) else None
+    fingerprint = _operation_fingerprint({
+        "request": fields, "attribution": attribution,
+        "case_id": getattr(authority, "case_id", ""),
+        "legal_context": case_file.get("legal_context"), "source": stored,
+    })
     if operation_id and operation_id in seen:
         prior = seen[operation_id]
-        if prior.get("content_hash") != fields["content_hash"] or prior.get("decision") != fields["decision"]:
+        if prior.get("fingerprint") != fingerprint:
             raise LegalResearchError("legal_research_revision_conflict")
-        replay = dict(prior)
+        replay = deepcopy(prior["receipt"])
         replay["replayed"] = True
-        replay["admitted_law"] = prior.get("admitted_law") is True
+        replay["admitted_law"] = replay.get("admitted_law") is True
         replay["proof"] = False
         return replay
     reason = ""
@@ -582,8 +611,6 @@ def review_versioned_authority(
         reason = "unauthorized_reviewer"
     elif attribution.get("claimed_reviewer_principal_id"):
         reason = "unauthorized_reviewer"
-    index = case_file.get("legal_source_passage_index") if isinstance(case_file.get("legal_source_passage_index"), dict) else {}
-    stored = index.get(fields["content_hash"]) if isinstance(index.get(fields["content_hash"]), dict) else None
     if not reason and fields["decision"] == "reject":
         reason = "rejected"
     if not reason:
@@ -596,16 +623,28 @@ def review_versioned_authority(
             admitted = False
         else:
             try:
+                source = stored.get("canonical_source") if isinstance(stored, dict) else None
+                if not isinstance(source, dict):
+                    raise LegalResearchError("canonical_source_missing")
+                canonical_owner = str(canonical_owner_principal_id or getattr(authority, "canonical_owner_principal_id", "") or "")
+                if not canonical_owner:
+                    raise LegalResearchError("canonical_owner_unavailable")
+                claims = case_file.get("candidate_claims")
+                claims = [dict(item) for item in claims if isinstance(item, dict)] if isinstance(claims, list) else []
                 outcome = owner(
-                    {"status": "candidates", "candidates": [dict(stored or {})], "explicit_review": True, "proof": False},
-                    [],
+                    {"status": "candidates", "candidates": [deepcopy(source)], "explicit_review": True, "proof": False},
+                    claims,
                     case_file,
-                    user_id=actor_id,
+                    user_id=canonical_owner,
                 )
             except Exception:
-                outcome = {"status": "unavailable"}
-            owner_status = outcome.get("status") if isinstance(outcome, dict) else ""
-            if owner_status != "admitted":
+                outcome = {}
+            admission = outcome.get("admission") if isinstance(outcome, dict) else None
+            owner_status = admission.get("status") if isinstance(admission, dict) else ""
+            stored_ids = admission.get("stored_record_ids") if isinstance(admission, dict) else None
+            if (owner_status != "admitted" or admission.get("proof") is not False
+                    or not isinstance(stored_ids, list) or not stored_ids
+                    or any(type(item) is not int or item < 0 for item in stored_ids)):
                 reason = "admission_owner_unresolved"
                 admitted = False
                 attribution["owner_status"] = str(owner_status or "unavailable")
@@ -621,7 +660,7 @@ def review_versioned_authority(
     record["workspace_bound"] = workspace is not None
     _admission_ledger(case_file).append(record)
     if operation_id:
-        seen[operation_id] = dict(record)
+        seen[operation_id] = {"fingerprint": fingerprint, "receipt": deepcopy(record)}
     return record
 
 
