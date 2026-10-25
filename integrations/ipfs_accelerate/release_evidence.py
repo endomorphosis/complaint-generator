@@ -580,7 +580,7 @@ def _compact_queue_host_measurements(state: Path, validation: Mapping[str, Any],
             raise ReleaseEvidenceError("compact_queue_source_binding_invalid")
         # Git bytes, not current mutable worktree files, bind the old source
         # seal to the immutable candidate Native actually integrated.
-        result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "show", candidate + ":" + relative],
+        result = subprocess.run(["git", "--no-replace-objects", "--no-optional-locks", "-c", "core.hooksPath=/dev/null", "show", candidate + ":" + relative],
             cwd=root, env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "GIT_CONFIG_GLOBAL": "/dev/null",
                            "GIT_CONFIG_SYSTEM": "/dev/null"}, capture_output=True, timeout=30, check=False)
         if result.returncode or len(result.stdout) > MAX_METADATA or hashlib.sha256(result.stdout).hexdigest() != item["sha256"]:

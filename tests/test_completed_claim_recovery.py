@@ -410,7 +410,7 @@ def test_real_successful_finish_allows_cleanup_without_missing_finish_fallback(u
 
 
 
-@pytest.mark.parametrize("damage", ["missing", "task_cid", "task_key", "proposal", "baseline", "command", "targets", "contract_digest", "candidate_bytes"])
+@pytest.mark.parametrize("damage", ["missing", "task_cid", "task_key", "proposal", "baseline", "command", "targets", "contract_digest", "candidate_bytes", "candidate_replace"])
 def test_compact_queue_requires_exact_owned_host_contract_and_candidate(unchanged_world, damage):
     from integrations.ipfs_accelerate import release_evidence as evidence
     from integrations.ipfs_accelerate import improvement_plan as compiler
@@ -421,14 +421,30 @@ def test_compact_queue_requires_exact_owned_host_contract_and_candidate(unchange
     measurement = Path(w["admission"]["measurement_record"]["path"])
     measured_raw = measurement.read_bytes()
     receipt = json.loads(raw)
+    replaced = False
     try:
         if damage == "missing":
             path.unlink()
-        elif damage == "candidate_bytes":
+        elif damage in {"candidate_bytes", "candidate_replace"}:
             # Even an internally consistent replacement seal cannot describe
             # bytes different from the immutable queued Git candidate.
             item = "result.txt"
             replacement = hashlib.sha256(b"different synthetic candidate").hexdigest()
+            if damage == "candidate_replace":
+                # A real Git replacement reference must not change which
+                # immutable candidate bytes the historical verifier hashes.
+                root = w["root"]
+                blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=root,
+                    input=b"different synthetic candidate", capture_output=True, check=True).stdout.decode().strip()
+                original_tree = git(root, "ls-tree", w["candidate"])
+                lines = [line.split("\t")[0].rsplit(" ", 1)[0] + " " + blob + "\tresult.txt"
+                         if line.endswith("\tresult.txt") else line for line in original_tree.splitlines()]
+                tree = subprocess.run(["git", "mktree"], cwd=root, input="\n".join(lines)+"\n",
+                    text=True, capture_output=True, check=True).stdout.strip()
+                replacement_commit = subprocess.run(["git", "commit-tree", tree, "-p", git(root, "rev-parse", w["candidate"]+"^")],
+                    cwd=root, input="Synthetic replacement-ref adversary\n", text=True, capture_output=True, check=True).stdout.strip()
+                git(root, "replace", w["candidate"], replacement_commit)
+                replaced = True
             receipt["source_binding"]["files"][item]["sha256"] = replacement
             measured = json.loads(measured_raw)
             for frame in (measured["source_before"], measured["source_after"]):
@@ -452,6 +468,8 @@ def test_compact_queue_requires_exact_owned_host_contract_and_candidate(unchange
         with pytest.raises((ValueError, OSError)):
             _observe(w)
     finally:
+        if replaced:
+            git(w["root"], "replace", "-d", w["candidate"])
         path.write_bytes(raw)
         measurement.write_bytes(measured_raw)
 
