@@ -40,8 +40,7 @@ def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
         strategy_path=campaign / (runner.STATE_PREFIX + "_strategy.json"),
         events_path=campaign / (runner.STATE_PREFIX + "_events.jsonl"),
         repo_root=root, worktree_root=campaign / "worktrees", board_namespace=artifacts.board_namespace,
-        implementation_timeout=runner.TIMEOUT_SECONDS,
-        implementation_max_timeout=runner.TIMEOUT_SECONDS, implement=False)
+        implementation_timeout=runner.TIMEOUT_SECONDS, implement=False)
     tasks = daemon._load_tasks(); daemon._register_task_identities(tasks)
     task = next(task for task in tasks if task.task_id == "CIMP-GUI-60")
     identity = daemon._identity_for_task(task)
