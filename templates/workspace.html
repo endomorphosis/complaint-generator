@@ -5676,9 +5676,23 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                     </div>
                 </section>
 
+                <section id="definition-correspondence-panel" data-task="CIMP-GUI-30">
+                    <h2>Definitions in a reviewed source</h2>
+                    <p>Select a source already reviewed for this case. A definition correspondence is a candidate interpretation, not governing law or a proof. Checking cannot supply missing reviewed definition inputs.</p>
+                    <div class="field-row">
+                        <div><label for="definition-case-id">Case</label><input id="definition-case-id" type="text" autocomplete="off"></div>
+                        <div><label for="definition-source">Reviewed source</label><select id="definition-source" disabled></select></div>
+                    </div>
+                    <div class="status" id="definition-summary" role="status" aria-live="polite" data-status="unknown" data-proof="false">Load reviewed sources to check available definition inputs.</div>
+                    <div class="button-row">
+                        <button type="button" id="definition-refresh">Load reviewed sources</button>
+                        <button type="button" id="definition-check" disabled>Check available definition inputs</button>
+                    </div>
+                </section>
+
                 <section id="proof-trace-panel" data-task="CIMP-GUI-31">
                     <h2>Proof traces and unavailable states</h2>
-                    <p id="proof-trace-notice">Source-bound obligations, counterexamples, and engine versions stay visible. Executed, degraded, and not-executed are separate. A missing prover, a timeout, and source drift are not green checkmarks and are not legal sufficiency.</p>
+                    <p id="proof-trace-notice">Current source-bound obligations can be shown without executing a prover. The current proof backend has no configured checked kernel. A missing prover, a timeout, and source drift are not green checkmarks and are not legal sufficiency. Compilation is not proof.</p>
                     <div class="field-row">
                         <div>
                             <label for="proof-trace-case-id">Case</label>
@@ -6291,6 +6305,114 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         document.getElementById('legal-context-refresh').addEventListener('click', function () { refreshLegalContext(); });
         document.getElementById('legal-context-save').addEventListener('click', function () { saveLegalContext(); });
 
+        let definitionRequestEpoch = 0;
+
+        function clearDefinitionCorrespondenceView() {
+            definitionRequestEpoch += 1;
+            const source = document.getElementById('definition-source');
+            source.replaceChildren();
+            source.disabled = true;
+            document.getElementById('definition-check').disabled = true;
+            const summary = document.getElementById('definition-summary');
+            summary.dataset.status = 'unknown';
+            summary.dataset.proof = 'false';
+            summary.textContent = 'Load reviewed sources to check available definition inputs.';
+        }
+
+        function definitionCapture() {
+            return {caseId: document.getElementById('definition-case-id').value.trim(),
+                source: document.getElementById('definition-source').value,
+                requestEpoch: ++definitionRequestEpoch, privacyEpoch: workspacePrivacyEpoch,
+                clientEpoch: client._privacyEpoch, actor: client.activePrincipalId,
+                caseContext: JSON.stringify(client.caseContext)};
+        }
+
+        function definitionCurrent(capture) {
+            return !workspacePrivacyInactive && capture.caseId && capture.requestEpoch === definitionRequestEpoch
+                && capture.privacyEpoch === workspacePrivacyEpoch && capture.clientEpoch === client._privacyEpoch
+                && capture.actor === client.activePrincipalId && capture.caseContext === JSON.stringify(client.caseContext)
+                && capture.caseId === document.getElementById('definition-case-id').value.trim()
+                && client.caseContext && client.caseContext.case_id === capture.caseId;
+        }
+
+        function definitionSummary(payload, capture) {
+            if (!definitionCurrent(capture) || payload.case_id !== capture.caseId) return;
+            const summary = document.getElementById('definition-summary');
+            summary.dataset.proof = 'false';
+            const sourceMatches = payload.source_binding && payload.source_binding.content_hash === document.getElementById('definition-source').value;
+            const bound = sourceMatches && payload.status === 'bound'
+                && (payload.source_current === true || payload.current_owner_replayed === true);
+            summary.dataset.status = bound ? 'recorded' : ['incomplete', 'failed', 'stale', 'empty'].includes(payload.status)
+                ? payload.status : 'unavailable';
+            summary.textContent = bound
+                ? 'A recorded definition correspondence is available for the current reviewed source. It is not governing law or an executed proof.'
+                : 'Definition inputs are incomplete or unavailable for the selected reviewed source. No proof or governing law has been established.';
+        }
+
+        function definitionUnavailable(capture) {
+            if (!definitionCurrent(capture)) return;
+            clearDefinitionCorrespondenceView();
+            const summary = document.getElementById('definition-summary');
+            summary.dataset.status = 'unavailable';
+            summary.textContent = 'Current reviewed sources or definition inputs could not be verified. Reload before retrying.';
+        }
+
+        async function refreshDefinitionCorrespondence() {
+            clearDefinitionCorrespondenceView();
+            const capture = definitionCapture();
+            if (!definitionCurrent(capture)) return;
+            try {
+                const rows = await client._request('/api/legal-research/' + encodeURIComponent(capture.caseId) + '/admissions', {method: 'GET'});
+                if (!definitionCurrent(capture) || rows.case_id !== capture.caseId) return;
+                const payload = await client._request('/api/legal-analysis/' + encodeURIComponent(capture.caseId) + '/definition-correspondence', {method: 'GET'});
+                if (!definitionCurrent(capture)) return;
+                const source = document.getElementById('definition-source');
+                source.replaceChildren();
+                const seen = new Set();
+                (Array.isArray(rows.admissions) ? rows.admissions : []).forEach(item => {
+                    if (item.source_status !== 'source_admitted' || typeof item.content_hash !== 'string' || seen.has(item.content_hash)) return;
+                    seen.add(item.content_hash);
+                    const option = document.createElement('option');
+                    option.value = item.content_hash;
+                    const record = item.source_admission && item.source_admission.record || {};
+                    option.textContent = String(record.citation || record.title || item.content_hash);
+                    source.appendChild(option);
+                });
+                source.disabled = !source.options.length;
+                document.getElementById('definition-check').disabled = source.disabled;
+                definitionSummary(payload, capture);
+            } catch (_error) { definitionUnavailable(capture); }
+        }
+
+        async function checkDefinitionCorrespondence() {
+            const capture = definitionCapture();
+            if (!definitionCurrent(capture) || !capture.source) return;
+            try {
+                const current = await client._request('/api/legal-analysis/' + encodeURIComponent(capture.caseId) + '/definition-correspondence', {method: 'GET'});
+                if (!definitionCurrent(capture) || document.getElementById('definition-source').value !== capture.source) return;
+                if (current.case_id !== capture.caseId || typeof current.private_revision !== 'string'
+                        || !Number.isSafeInteger(current.session_revision)) { definitionUnavailable(capture); return; }
+                const payload = await client._request('/api/legal-analysis/' + encodeURIComponent(capture.caseId) + '/definition-correspondence', {
+                    method: 'POST', body: JSON.stringify({request_id: 'definition-ui-' + crypto.randomUUID(),
+                        source_content_hash: capture.source, expected_private_revision: current.private_revision,
+                        expected_session_revision: current.session_revision, declared_populations: {}})});
+                if (!definitionCurrent(capture) || document.getElementById('definition-source').value !== capture.source) return;
+                definitionSummary(payload, capture);
+            } catch (_error) { definitionUnavailable(capture); }
+        }
+
+        document.getElementById('definition-case-id').addEventListener('input', clearDefinitionCorrespondenceView);
+        document.getElementById('definition-case-id').addEventListener('change', clearDefinitionCorrespondenceView);
+        document.getElementById('definition-source').addEventListener('change', function () {
+            definitionRequestEpoch += 1;
+            const summary = document.getElementById('definition-summary');
+            summary.dataset.status = 'unknown';
+            summary.dataset.proof = 'false';
+            summary.textContent = 'Definition inputs for this selected source have not been verified.';
+        });
+        document.getElementById('definition-refresh').addEventListener('click', function () { refreshDefinitionCorrespondence(); });
+        document.getElementById('definition-check').addEventListener('click', function () { checkDefinitionCorrespondence(); });
+
         let proofTraceRequestEpoch = 0;
         const proofTraceUnavailable = ['missing_prover', 'timeout', 'source_drift', 'degraded', 'not_executed'];
 
@@ -6324,17 +6446,18 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         }
 
         function renderProofTraces(payload, capture) {
-            if (!proofTraceCurrent(capture) || payload.case_id !== capture.caseId || payload.legal_sufficiency !== false) return;
+            if (!proofTraceCurrent(capture)) return;
+            if (payload.case_id !== capture.caseId || payload.legal_sufficiency !== false) { proofTraceUnavailableView(capture); return; }
             const summary = document.getElementById('proof-trace-summary');
             const rows = Array.isArray(payload.obligations) ? payload.obligations : [];
             const unavailable = rows.filter(row => proofTraceUnavailable.includes(row.proof_status));
             summary.dataset.legalSufficiency = 'false';
             summary.dataset.proof = 'false';
-            summary.dataset.verification = 'visible';
+            summary.dataset.verification = payload.status === 'stale' ? 'stale' : 'unavailable';
             summary.dataset.sourceDrift = payload.source_drift === true ? 'true' : 'false';
-            summary.textContent = 'Proof traces are visible and are not legal sufficiency. '
-                + rows.length + ' source-bound obligation' + (rows.length === 1 ? '' : 's') + '. Unavailable: '
-                + (unavailable.map(row => (row.obligation_id || 'obligation') + ' ' + row.proof_status).join(', ') || 'none') + '.';
+            summary.textContent = rows.length + ' source-bound obligation' + (rows.length === 1 ? '' : 's')
+                + '. A checked proof backend is unavailable; these are not executed proofs or legal sufficiency.'
+                + (payload.source_drift === true ? ' The source has changed.' : '');
             const list = document.getElementById('proof-trace-list');
             list.replaceChildren();
             rows.forEach(row => {
@@ -6344,8 +6467,9 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                 article.dataset.obligationId = row.obligation_id || '';
                 article.dataset.proofStatus = status;
                 article.dataset.sourceBound = row.source_bound === true ? 'true' : 'false';
-                const blocked = proofTraceUnavailable.includes(status) || Boolean(row.counterexample);
-                article.dataset.greenCheckmark = (!blocked && status === 'executed' && row.green_checkmark === true) ? 'true' : 'false';
+                // The current first-party adapter has no checked proof producer.
+                // Serialized status/engine/green labels cannot issue that authority.
+                article.dataset.greenCheckmark = 'false';
                 article.dataset.legalSufficiency = 'false';
                 const engineName = row.engine_name || 'engine unavailable';
                 const engineVersion = row.engine_version || 'version unavailable';
@@ -6378,6 +6502,10 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             summary.dataset.verification = 'unavailable';
             summary.dataset.legalSufficiency = 'false';
             summary.dataset.proof = 'false';
+            delete summary.dataset.sourceDrift;
+            ['proof-trace-list', 'proof-trace-counterexamples', 'proof-trace-engines'].forEach(id => {
+                document.getElementById(id).replaceChildren();
+            });
             summary.textContent = 'Proof traces could not be loaded. That gap is visible and is not legal sufficiency.';
         }
 
@@ -14086,6 +14214,7 @@ function extractComplaintOutputSignals(result) {
             clearCaseProcessingConsentView();
             clearLegalContextView();
             clearProofTraceView();
+            clearDefinitionCorrespondenceView();
             removePrivateWorkspaceStorage();
             workspaceSession = null;
             adaptiveInquiryState = null;
