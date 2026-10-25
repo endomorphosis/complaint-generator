@@ -792,7 +792,7 @@ Implementation instructions:
 
 ## CIMP-GUI-27 Expose a law-derived dependency graph
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
