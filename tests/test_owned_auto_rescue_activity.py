@@ -100,10 +100,15 @@ def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
     monkeypatch.setattr(daemon,"_stage_declared_candidate_outputs",lambda *a:())
     monkeypatch.setattr(daemon,"_run_validation_with_candidate_binding",lambda *a,**kw:{"passed":False,"reason":"synthetic_validation_not_performed"})
     monkeypatch.setattr(daemon,"_apply_implementation_failure_review",lambda **kw:dict(kw["validation_result"]))
-    program = """import json,pathlib,sys,time
+    program = """import json,os,pathlib,sys,time
 sys.stdin.read()
 root=pathlib.Path.cwd()
 kind=sys.argv[1]
+if kind=='redirect_stdout':
+ descriptor=os.open(root/'other-output.log',os.O_WRONLY|os.O_CREAT,0o600)
+ os.dup2(descriptor,1);os.close(descriptor);kind='thought'
+if kind=='different_cwd':
+ (root/'other-cwd').mkdir();os.chdir(root/'other-cwd');kind='thought'
 while not (root/'release').exists():
  frame={'type':kind,'text':'synthetic inert provider output'}
  if kind=='usage':frame['usage']={}
@@ -282,3 +287,55 @@ def test_closed_summary_never_retains_arbitrary_private_fields_or_reason_text():
         "owner_birth":{"pid":12,"start_time_ticks":13,"parent_pid":14},"frame_counts":{"thought":3}}
     assert "private" not in json.dumps(closed)
     assert activity.summary({"reason":[],"last_frame_kind":{}})["reason"]=="rescue_observation_unavailable"
+
+
+@pytest.mark.parametrize('mode,reason',[('redirect_stdout','provider_stdout_unbound'),('different_cwd','provider_workspace_unbound')])
+def test_real_native_child_must_keep_actual_stdout_and_workspace(tmp_path,monkeypatch,mode,reason):
+    with _native_world(tmp_path,monkeypatch,frame_kind=mode) as world:
+        result=activity.observe(runner,world['root'],world['campaign'],world['body'],now_ts=time.time())
+        assert not result['activity_verified'] and result['reason']==reason,result
+
+
+@pytest.mark.parametrize('which',['lease','claim'])
+def test_real_current_native_claim_and_lease_are_reproved(tmp_path,monkeypatch,which):
+    with _native_world(tmp_path,monkeypatch) as world:
+        path=world[which+'_path'];original=path.read_bytes();document=json.loads(original)
+        document['canonical_task_cid']='explicit-private-fixture-foreign-cid'
+        try:
+            path.write_text(json.dumps(document))
+            result=activity.observe(runner,world['root'],world['campaign'],world['body'],now_ts=time.time())
+            assert not result['activity_verified'] and not result['work_progress_verified']
+        finally:path.write_bytes(original)
+
+
+def test_real_birth_cannot_be_borrowed_by_an_older_provider_event(tmp_path,monkeypatch):
+    with _native_world(tmp_path,monkeypatch) as world:
+        result=activity.observe(runner,world['root'],world['campaign'],world['body'],now_ts=time.time())
+        assert result['activity_verified'],result
+        _,native,_=runner._validation_activity_modules()
+        with pytest.raises(activity._Unavailable,match='provider_event_birth_unbound'):
+            activity._provider_birth(native,result['provider_birth']['pid'],
+                native.ProcessBirthIdentity.from_dict(result['owner_birth']),world['workspace'],
+                (result['log_device'],result['log_inode']),result['rescue_started_at']-60)
+
+
+@pytest.mark.parametrize('damage',['symlink','hardlink','replace','truncate','rewrite'])
+def test_append_reader_rejects_alias_replacement_truncation_or_changed_prefix(tmp_path,monkeypatch,damage):
+    path=tmp_path/'owned-live-log';path.write_bytes(b'{"type":"thought"}\n');path.chmod(0o600)
+    other=tmp_path/'other'
+    if damage=='symlink':path.rename(other);path.symlink_to(other)
+    elif damage=='hardlink':os.link(path,other)
+    else:
+        actual=os.pread;changed=[]
+        def read(descriptor,size,offset):
+            data=actual(descriptor,size,offset)
+            if not changed:
+                changed.append(True)
+                if damage=='replace':path.rename(other);path.write_bytes(data);path.chmod(0o600)
+                elif damage=='truncate':path.write_bytes(b'x')
+                else:
+                    with path.open('r+b') as output:output.write(b'X')
+            return data
+        monkeypatch.setattr(activity.os,'pread',read)
+    with pytest.raises((OSError,activity._Unavailable)):
+        activity._append_prefix(path)

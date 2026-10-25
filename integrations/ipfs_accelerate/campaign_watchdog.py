@@ -369,6 +369,7 @@ class ComplaintCampaignWatchdog:
             and first.get("active_task_id") == rescue.get("task_id")
             and first.get("active_task_cid") == rescue.get("task_cid")
             and self.latest_status.get("owned_process_alive") is True
+            and self.latest_status.get("worker_liveness") == "alive"
             and first.get("progress_verified") is False
             and self.latest_status.get("auto_rescue_activity_verified") is True
             and rescue.get("activity_verified") is True and rescue.get("work_progress_verified") is False

@@ -33,6 +33,8 @@ _REASONS = frozenset({"not_active_rescue", "rescue_held", "native_owner_unavaila
 
 def summary(value):
     """Closed private/journal metadata; no paths, argv, lease or text fields."""
+    if value is None:
+        value = {"reason":"not_active_rescue"}
     value = value if type(value) is dict else {}
     reason = value.get("reason")
     result = {"activity_verified": value.get("activity_verified") is True,
@@ -173,6 +175,9 @@ def observe(runner, repo_root, campaign, state, *, now_ts):
         _require(all(value is not None for value in start_times), "provider_deadline_unavailable")
         deadline = min(binding["phase_deadline"], *(value + runner.TIMEOUT_SECONDS for value in start_times))
         report["deadline_at"] = deadline
+        # This is the conservative existing Host cap, not a fabricated copy
+        # of Native's unpersisted absolute monotonic provider deadline.
+        report["deadline_basis"] = "existing_host_caps_and_native_timestamps"
         _require(now_ts < deadline, "provider_deadline_expired")
         from .improvement_recovery import _owned_bytes
         from ipfs_accelerate_py.agent_supervisor.todo_daemon.current_incident_adjudication import _event_rows

@@ -22,7 +22,7 @@ def _carrier(tmp_path,monkeypatch,evidence,body):
     tmp_path.mkdir()
     watcher, fake, view=_adapter(tmp_path,monkeypatch,state="active")
     watcher.clock=time.time
-    view.update(status="active",healthy=True,owned_process_alive=True,
+    view.update(status="active",healthy=True,owned_process_alive=True,worker_liveness="alive",
         auto_rescue_activity_verified=True,auto_rescue_activity_evidence=deepcopy(evidence),
         provider_progress_verified=False,validation_activity_verified=False,
         provider_execution_evidence={"frame_counts":{},"log_bytes":evidence["log_bytes"]})
@@ -52,7 +52,7 @@ def test_real_native_thought_is_passive_without_reading_or_changing_recovery_bud
         assert result["activity_evidence"]["auto_rescue"]["work_progress_verified"] is False
 
 
-@pytest.mark.parametrize("damage",["expired","refused","hold","different_task","work_progress","not_owned"])
+@pytest.mark.parametrize("damage",["expired","refused","hold","different_task","work_progress","not_owned","dead_worker"])
 def test_activity_override_refusal_returns_to_unchanged_sdk_policy(tmp_path,monkeypatch,damage):
     from ipfs_accelerate_py.agent_supervisor.rescue import campaign_watchdog as sdk
     # Policy-only payloads are explicit doubles; the real producer positive
@@ -68,7 +68,8 @@ def test_activity_override_refusal_returns_to_unchanged_sdk_policy(tmp_path,monk
     elif damage=="work_progress":
         view["provider_progress_verified"]=True
         view["auto_rescue_activity_evidence"]["work_progress_verified"]=True
-    else:view["owned_process_alive"]=False
+    elif damage=="not_owned":view["owned_process_alive"]=False
+    else:view["worker_liveness"]="dead"
     real=sdk.CampaignProgressWatchdog.run_once;calls=[]
     def run_once(instance):
         calls.append(True)
