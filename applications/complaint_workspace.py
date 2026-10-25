@@ -3006,6 +3006,85 @@ def _reselect_affected_pending(
     return pending, True
 
 
+_ADAPTIVE_NON_FACT_ANSWERS = {
+    "unknown": "unknown",
+    "i do not know": "unknown",
+    "i don't know": "unknown",
+    "i dont know": "unknown",
+    "idk": "unknown",
+    "not sure": "unknown",
+    "unsure": "unknown",
+    "deferred": "deferred",
+    "defer": "deferred",
+    "later": "deferred",
+    "not now": "deferred",
+    "ask me later": "deferred",
+}
+
+
+def _adaptive_non_fact_kind(message: Optional[str]) -> Optional[str]:
+    return _ADAPTIVE_NON_FACT_ANSWERS.get(str(message or "").strip().lower())
+
+
+def _preserve_adaptive_gap(state: Dict[str, Any], message: Optional[str], prior: Mapping[str, Any]) -> None:
+    """Keep an unknown or deferred answer as an open gap.
+
+    The answered inquiry is recorded on the shared projection. It does not
+    become a fact and it does not satisfy the graph target.
+    """
+
+    kind = _adaptive_non_fact_kind(message)
+    inquiry_id = str(prior.get("inquiry_id") or "")
+    if not kind or not inquiry_id:
+        return
+    projection = state.get("shared_interview")
+    if not isinstance(projection, dict):
+        return
+    marker = "user_answer_unknown" if kind == "unknown" else "user_answer_deferred"
+    reasons = [str(item) for item in (projection.get("unknown_reasons") or []) if str(item or "").strip()]
+    if marker not in reasons:
+        reasons.append(marker)
+    projection["unknown_reasons"] = reasons
+    gaps = [item for item in (projection.get("preserved_gaps") or []) if isinstance(item, dict)]
+    gaps.append({
+        "inquiry_id": inquiry_id,
+        "target_id": prior.get("target_id"),
+        "objective_id": prior.get("objective_id"),
+        "target_revision": prior.get("target_revision"),
+        "disposition": kind,
+        "preserved": True,
+        "creates_fact": False,
+        "satisfies_requirement": False,
+    })
+    projection["preserved_gaps"] = gaps[-32:]
+
+
+def _adaptive_inquiry_view(state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Pending question from the shared mediator, never the fixed intake list."""
+
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), Mapping) else None
+    inquiry_id = str((pending or {}).get("inquiry_id") or "")
+    pending_open = bool(inquiry_id)
+    fixed_ids = [str(question["id"]) for question in _INTAKE_QUESTIONS]
+    return {
+        "schema": "adaptive-inquiry-v1",
+        "source": "shared_mediator",
+        "pending": pending_open,
+        "inquiry_id": inquiry_id or None,
+        "revision": (pending or {}).get("revision") if pending_open else None,
+        "prompt": str((pending or {}).get("question") or "") if pending_open else "",
+        "objective_id": (pending or {}).get("objective_id") if pending_open else None,
+        "target_id": (pending or {}).get("target_id") if pending_open else None,
+        "target_revision": (pending or {}).get("target_revision") if pending_open else None,
+        "from_fixed_intake_fields": False,
+        "fixed_intake_question_ids": fixed_ids,
+        "unknown_reasons": [str(item) for item in (projection.get("unknown_reasons") or [])],
+        "preserved_gaps": [dict(item) for item in (projection.get("preserved_gaps") or []) if isinstance(item, Mapping)],
+        "legal_sufficiency": False,
+    }
+
+
 def _note_terminal_edit_controls(
     state: Dict[str, Any],
     *,
@@ -3096,6 +3175,7 @@ class ComplaintWorkspaceRequestHandlers:
             "next_question": self.workspace._next_question(answers),
             "review": self.workspace._build_review(state),
             "case_synopsis": self.workspace._build_case_synopsis(state),
+            "adaptive_inquiry": _adaptive_inquiry_view(state),
         }
 
     def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
@@ -3913,6 +3993,11 @@ class ComplaintWorkspaceService:
                 restored = mediator.transition_shared_interview(action="resume", session_projection=projection, **kwargs)
                 if restored.get("error"):
                     return restored
+            prior_pending = None
+            if graph_question or action == "answer":
+                current_projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+                current_pending = current_projection.get("pending_inquiry") if isinstance(current_projection.get("pending_inquiry"), dict) else None
+                prior_pending = dict(current_pending) if current_pending else None
             if action == "resume":
                 receipt = mediator.transition_shared_interview(action="resume", **kwargs)
             elif narrative_turn or action == "start":
@@ -4029,6 +4114,8 @@ class ComplaintWorkspaceService:
                     receipt["error"] = {"code": "provider_unavailable", "resumable": True,
                                         "router_failures": dict(snapshot["errors"]), "legal_sufficiency": False}
                 receipt["intake_router"] = deepcopy(state["intake_router"])
+            if prior_pending and receipt.get("status") != "refused":
+                _preserve_adaptive_gap(state, message, prior_pending)
             return receipt
         except Exception as exc:
             return {
@@ -6301,6 +6388,8 @@ class ComplaintWorkspaceService:
         payload["legal_sufficiency"] = False
         payload["core_facts_complete"] = False
         payload["filing_ready"] = False
+        payload["adaptive_inquiry"] = _adaptive_inquiry_view(state)
+        payload["gap_preserved"] = bool(payload["adaptive_inquiry"]["preserved_gaps"])
         return payload
 
     def _support_matrix(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -9154,6 +9243,78 @@ class ComplaintWorkspaceService:
             expected_graph_revision=expected_graph_revision,
             expected_session_revision=expected_session_revision,
         )
+
+    def review_case_factual_graph(self, user_id: Optional[str], *, case_id: str,
+                                  updates: Mapping[str, Any]) -> Dict[str, Any]:
+        """Publish one factual review only under current owner/key/source CAS.
+
+        The graph route cannot save a decrypted DTO itself. The existing
+        private revision writer rechecks this issued capability immediately
+        before replacing the durable head, including after encryption/fsync.
+        """
+        from complaint_phases.knowledge_graph import KnowledgeGraph, FactualReviewError
+        from mediator.integrations.graph_tools import FactualGraphProjectionError
+        from integrations.private_storage import PrivateStorageError
+
+        authority = self._owner_case_authority()
+        if authority is None or authority.case_id != case_id or authority.action != "case.update":
+            raise FactualReviewError("actor_authority_required")
+        actor = authority.actor_principal_id
+        decision = authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        resolved = self._resolve_user_id(user_id)
+        self._check_access(resolved, ability="write", case_id=case_id)
+        state = self._load_state(resolved, case_id=case_id)
+        if state.get("user_id") != decision.canonical_owner_principal_id or state.get("case_id") != case_id:
+            raise FactualGraphProjectionError("cross_case_id")
+        shared = state.get("shared_interview")
+        payload = shared.get("knowledge_graph") if isinstance(shared, dict) else None
+        if not isinstance(payload, dict) or not payload:
+            raise FactualGraphProjectionError("knowledge_graph_unavailable")
+        graph = KnowledgeGraph.from_dict(deepcopy(payload))
+        # This existing identity binds the entire private shared interview,
+        # including its KG, pending question and private revision.
+        before = self._case_legal_context_identity(state)
+        _context, admitted_key_id, admitted_key = self._joined_key(resolved, case_id)
+
+        def revalidate_publication():
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(resolved, case_id)
+            if key_id != admitted_key_id or key != admitted_key:
+                raise FactualGraphProjectionError("graph_revision_changed")
+            current = self._load_state(resolved, case_id=case_id)
+            if before != self._case_legal_context_identity(current):
+                raise FactualGraphProjectionError("graph_revision_changed")
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(resolved, case_id)
+            if key_id != admitted_key_id or key != admitted_key:
+                raise FactualGraphProjectionError("graph_revision_changed")
+
+        result = graph.apply_factual_review(
+            actor_role="user", actor_principal_id=actor, authority_granted=True,
+            expected_revision=str(updates.get("expected_graph_revision") or ""),
+            action=str(updates.get("review_action") or ""),
+            text=updates.get("text") if isinstance(updates.get("text"), str) else "",
+            source_text=updates.get("source_text") if isinstance(updates.get("source_text"), str) else "",
+            message_id=str(updates.get("message_id") or ""),
+            target_stable_id=str(updates.get("target_stable_id") or ""),
+            proposal_id=str(updates.get("proposal_id") or ""),
+            origin=str(updates.get("origin") or "actor"),
+            event_id=str(updates.get("event_id") or ""), case_id=case_id,
+            record_class=str(updates.get("record_class") or ""),
+        )
+        revalidate_publication()
+        if result.get("graph_mutated") is True:
+            draft = deepcopy(state)
+            draft["shared_interview"]["knowledge_graph"] = graph.to_dict()
+            draft["updated_at"] = _utc_now()
+            try:
+                self._commit_joined_snapshot(draft, before_publish=revalidate_publication)
+            except PrivateStorageError as exc:
+                raise WorkspacePersistenceError("Factual review did not commit.",
+                    code=str(getattr(exc, "code", "") or "durability_unproven"), public_status="recoverable") from None
+            self._interview_mediators.pop((resolved, case_id), None)
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return {**result, "case_id": case_id, "task_id": "CIMP-GUI-22"}
 
     def _case_legal_context_state(self, user_id, case_id, *, action):
         """Resolve the live issued owner and its current encrypted workflow DTO."""

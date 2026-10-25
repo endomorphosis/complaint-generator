@@ -462,7 +462,7 @@ Implementation instructions:
 
 ## CIMP-GUI-16 Connect browser complaint entry to adaptive questions
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -642,7 +642,7 @@ Implementation instructions:
 
 ## CIMP-GUI-22 Review contradictions and general factual edits
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -792,7 +792,7 @@ Implementation instructions:
 
 ## CIMP-GUI-27 Expose a law-derived dependency graph
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -822,7 +822,7 @@ Implementation instructions:
 
 ## CIMP-GUI-28 Refresh graphs when facts or legal context changes
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -852,7 +852,7 @@ Implementation instructions:
 
 ## CIMP-GUI-29 Attach canonical legal IR and source obligations
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -1242,7 +1242,7 @@ Implementation instructions:
 
 ## CIMP-GUI-42 Persist authorized encrypted case conversations
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1

@@ -107,6 +107,20 @@ class AnswerEventConflict(ValueError):
     """The same scoped answer-event id was reused with a different payload."""
 
 
+class FactualReviewError(ValueError):
+    """Fail-closed factual proposal or review refusal. ``code`` is stable."""
+
+    def __init__(self, code: str) -> None:
+        self.code = str(code)
+        super().__init__(self.code)
+
+
+_FACTUAL_REVIEW_ACTORS = frozenset({"user", "lawyer"})
+_FACTUAL_REVIEW_ACTIONS = frozenset({"propose", "admit", "supersede", "retract", "contradict"})
+_MAX_FACTUAL_REVIEW_CHARS = 2000
+_FACTUAL_REVIEW_EXTRACTOR = "cimp-gui-22-v1"
+
+
 def answer_event_payload(
     *,
     question: Any,
@@ -1312,7 +1326,40 @@ class KnowledgeGraph:
         ledger.setdefault("conflicts", [])
         ledger.setdefault("reopened_questions", [])
         ledger.setdefault("inquiry_targets", [])
+        ledger.setdefault("proposals", [])
         return ledger
+
+    def factual_review_revision(self) -> str:
+        """Expected-revision token for proposals and admitted graph revisions.
+
+        Reading the token does not create a ledger. Proposal status is part of
+        the token so a hypothesis is a real revision even before admission.
+        """
+        ledger = self.metadata.get("factual_ledger") if isinstance(self.metadata, dict) else None
+        if not isinstance(ledger, Mapping):
+            ledger = {}
+        revisions = ledger.get("revisions") if isinstance(ledger.get("revisions"), list) else []
+        proposals = ledger.get("proposals") if isinstance(ledger.get("proposals"), list) else []
+        material = {
+            "revisions": [
+                {
+                    "revision_index": item.get("revision_index"),
+                    "event_id": item.get("event_id"),
+                    "action": item.get("action"),
+                }
+                for item in revisions if isinstance(item, Mapping)
+            ],
+            "proposals": [
+                {
+                    "proposal_id": item.get("proposal_id"),
+                    "status": item.get("status"),
+                    "event_id": item.get("event_id"),
+                }
+                for item in proposals if isinstance(item, Mapping)
+            ],
+        }
+        encoded = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        return "fr_" + hashlib.sha256(encoded).hexdigest()
 
     def register_inquiry_target(
         self,
@@ -1532,6 +1579,372 @@ class KnowledgeGraph:
         previous.provenance = {**dict(previous.provenance or {}), "revision_refs": notes, "user_assertion": previous_proof}
         self.invalidate_dependents(previous.id, reason="retracted", event_id=event_id)
         return revision
+
+    def apply_factual_review(
+        self,
+        *,
+        actor_role: str,
+        actor_principal_id: str,
+        authority_granted: bool,
+        expected_revision: str,
+        action: str,
+        text: str = "",
+        source_text: str = "",
+        message_id: str = "",
+        target_stable_id: str = "",
+        proposal_id: str = "",
+        origin: str = "actor",
+        event_id: str = "",
+        case_id: str = "",
+        record_class: str = "",
+    ) -> Dict[str, Any]:
+        """Apply one constrained user or lawyer factual review.
+
+        Generated suggestions stay hypotheses until ``admit``. Supersession,
+        contradiction, and retraction keep the original source envelope.
+        Retraction invalidates support edges and proof caches that cite the
+        target. A missing explicit authority grant or a stale expected
+        revision changes nothing.
+        """
+        role = str(actor_role or "").strip().lower()
+        principal = str(actor_principal_id or "").strip()
+        if authority_granted is not True or not principal:
+            raise FactualReviewError("actor_authority_required")
+        if role not in _FACTUAL_REVIEW_ACTORS:
+            raise FactualReviewError("actor_not_permitted")
+        selected = str(action or "").strip().lower()
+        if selected not in _FACTUAL_REVIEW_ACTIONS:
+            raise FactualReviewError("unknown_action")
+        bound_case = str((self.metadata or {}).get("case_id") or "")
+        if case_id and bound_case and str(case_id) != bound_case:
+            raise FactualReviewError("cross_case_id")
+        if str(record_class or "") == "legal_text":
+            raise FactualReviewError("constrained_record")
+        normalized_origin = "model" if str(origin or "").strip().lower() in {"model", "llm", "generated"} else "actor"
+        stable_event = str(event_id or "").strip()
+        review_payload = answer_event_payload(
+            question={"action": selected, "proposal_id": proposal_id, "target_stable_id": target_stable_id},
+            answer={"text": text, "source_text": source_text, "message_id": message_id, "origin": normalized_origin},
+            factual_action=selected,
+            supersedes_stable_id=target_stable_id if selected == "supersede" else None,
+            retracts_stable_id=target_stable_id if selected == "retract" else None,
+            contradicts_stable_id=target_stable_id if selected == "contradict" else None,
+        )
+        if stable_event:
+            try:
+                prior = self.begin_answer_event(stable_event, review_payload)
+            except AnswerEventConflict:
+                raise FactualReviewError("event_conflict") from None
+            if isinstance(prior, Mapping) and isinstance(prior.get("review_result"), Mapping):
+                replay = copy.deepcopy(dict(prior["review_result"]))
+                replay["idempotent_replay"] = True
+                replay["graph_mutated"] = False
+                return replay
+        if str(expected_revision or "") != self.factual_review_revision():
+            raise FactualReviewError("stale_graph_revision")
+        if selected == "propose":
+            result = self._propose_factual_hypothesis(
+                text=text, origin=normalized_origin, role=role, principal=principal,
+                event_id=stable_event, case_id=bound_case or str(case_id or ""),
+            )
+        elif selected == "admit":
+            result = self._admit_factual_proposal(
+                proposal_id=proposal_id, source_text=source_text or text, message_id=message_id,
+                role=role, principal=principal, event_id=stable_event,
+            )
+        elif selected == "supersede":
+            result = self._revise_factual_assertion(
+                kind="supersede", target_stable_id=target_stable_id, source_text=source_text or text,
+                message_id=message_id, role=role, principal=principal, event_id=stable_event,
+            )
+        elif selected == "retract":
+            result = self._revise_factual_assertion(
+                kind="retract", target_stable_id=target_stable_id, source_text=source_text or text,
+                message_id=message_id, role=role, principal=principal, event_id=stable_event,
+            )
+        else:
+            result = self._contradict_factual_assertion(
+                target_stable_id=target_stable_id, source_text=source_text or text, message_id=message_id,
+                role=role, principal=principal, event_id=stable_event,
+            )
+        result["graph_revision"] = self.factual_review_revision()
+        result["idempotent_replay"] = False
+        result["graph_mutated"] = True
+        if stable_event:
+            self.finish_answer_event(stable_event, review_payload, review_result=result)
+        return copy.deepcopy(result)
+
+    def _proposal_records(self) -> List[Dict[str, Any]]:
+        records = self.factual_ledger()["proposals"]
+        return records if isinstance(records, list) else []
+
+    def _constrained_statement(self, text: str) -> str:
+        if not isinstance(text, str):
+            raise FactualReviewError("constrained_text")
+        statement = " ".join(text.split())
+        if not statement or len(statement) > _MAX_FACTUAL_REVIEW_CHARS or "\x00" in text:
+            raise FactualReviewError("constrained_text")
+        return statement
+
+    def _review_envelope(self, text: str, message_id: str) -> UserAssertionEnvelope:
+        statement = self._constrained_statement(text)
+        identity = str(message_id or "").strip()
+        if not identity:
+            raise FactualReviewError("source_required")
+        from integrations.ipfs_datasets.types import source_byte_hash
+        envelope = build_user_assertion_envelope(
+            source_text=statement,
+            source_kind="user_statement",
+            source_id=identity,
+            message_id=identity,
+            assertion_status="asserted",
+            extractor_version=_FACTUAL_REVIEW_EXTRACTOR,
+            source_hash=source_byte_hash(statement),
+            source_span={"start": 0, "end": len(statement.encode("utf-8")), "text": statement, "unit": "byte"},
+            factual_record_class="user_fact",
+        )
+        if not envelope.is_asserted_user_fact:
+            raise FactualReviewError("source_not_user_fact")
+        return envelope
+
+    def _entity_for_envelope(self, envelope: UserAssertionEnvelope, *, entity_id: str) -> Entity:
+        text = envelope.source_span_text
+        return Entity(
+            id=entity_id,
+            type="fact",
+            name=text,
+            attributes={"description": text, "factual_record_class": "user_fact"},
+            confidence=1.0,
+            source="complaint",
+            provenance={"user_assertion": envelope.as_dict(), "case_id": self.metadata.get("case_id")},
+        )
+
+    def _stamp_actor(self, revision: Mapping[str, Any], *, role: str, principal: str) -> Dict[str, Any]:
+        stamped = dict(revision)
+        stamped["actor_role"] = role
+        stamped["actor_principal_id"] = principal
+        stamped["actor_authority"] = role
+        revisions = self.factual_ledger()["revisions"]
+        if revisions and isinstance(revisions[-1], dict) and revisions[-1].get("revision_index") == stamped.get("revision_index"):
+            revisions[-1].update({
+                "actor_role": role,
+                "actor_principal_id": principal,
+                "actor_authority": role,
+            })
+        return stamped
+
+    def _propose_factual_hypothesis(
+        self, *, text: str, origin: str, role: str, principal: str, event_id: str, case_id: str,
+    ) -> Dict[str, Any]:
+        statement = self._constrained_statement(text)
+        proposal_id = "proposal-" + hashlib.sha256(
+            f"{origin}|{role}|{principal}|{statement}|{event_id}".encode("utf-8")
+        ).hexdigest()[:24]
+        entity_id = "hypothesis-" + proposal_id
+        entity = Entity(
+            id=entity_id,
+            type="fact",
+            name=statement,
+            attributes={
+                "description": statement,
+                "factual_record_class": "extraction_hypothesis",
+                "origin": origin,
+                "hypothesis": True,
+                "admitted": False,
+                "proposal_id": proposal_id,
+            },
+            confidence=0.2 if origin == "model" else 0.4,
+            source="inference" if origin == "model" else "complaint",
+            provenance={"source_id": proposal_id, "case_id": case_id, "origin": origin},
+        )
+        self.add_entity(entity)
+        record = {
+            "proposal_id": proposal_id,
+            "entity_id": entity_id,
+            "status": "hypothesis",
+            "origin": origin,
+            "text": statement,
+            "actor_role": role,
+            "actor_principal_id": principal,
+            "actor_authority": role,
+            "event_id": event_id,
+            "admitted_stable_id": "",
+            "source_history_retained": True,
+        }
+        self._proposal_records().append(record)
+        revision = self._stamp_actor(self.append_revision({
+            "action": "propose",
+            "event_id": event_id,
+            "proposal_id": proposal_id,
+            "entity_id": entity_id,
+            "origin": origin,
+            "status": "hypothesis",
+        }), role=role, principal=principal)
+        return {
+            "status": "hypothesis",
+            "action": "propose",
+            "proposal_id": proposal_id,
+            "entity_id": entity_id,
+            "admitted": False,
+            "hypothesis": True,
+            "origin": origin,
+            "actor_role": role,
+            "actor_principal_id": principal,
+            "actor_authority": role,
+            "revision_index": revision["revision_index"],
+            "source_history_retained": True,
+        }
+
+    def _find_proposal(self, proposal_id: str) -> Dict[str, Any]:
+        identity = str(proposal_id or "").strip()
+        if not identity:
+            raise FactualReviewError("proposal_required")
+        for record in self._proposal_records():
+            if isinstance(record, dict) and record.get("proposal_id") == identity:
+                return record
+        raise FactualReviewError("proposal_missing")
+
+    def _admit_factual_proposal(
+        self, *, proposal_id: str, source_text: str, message_id: str, role: str, principal: str, event_id: str,
+    ) -> Dict[str, Any]:
+        proposal = self._find_proposal(proposal_id)
+        if proposal.get("status") != "hypothesis":
+            raise FactualReviewError("proposal_not_hypothesis")
+        envelope = self._review_envelope(source_text, message_id)
+        entity = self._entity_for_envelope(envelope, entity_id="admitted-" + envelope.stable_id[:20])
+        self.add_entity(entity)
+        self.register_assertion(entity, envelope, status="active", event_id=event_id)
+        hypothesis = self.entities.get(str(proposal.get("entity_id") or ""))
+        if hypothesis is not None:
+            attributes = dict(hypothesis.attributes or {})
+            attributes["admitted"] = False
+            attributes["hypothesis"] = True
+            attributes["admission_status"] = "cited_by_admission"
+            attributes["admitted_entity_id"] = entity.id
+            hypothesis.attributes = attributes
+        proposal["status"] = "admitted"
+        proposal["admitted_stable_id"] = envelope.stable_id
+        proposal["admitted_entity_id"] = entity.id
+        revision = self._stamp_actor(self.append_revision({
+            "action": "admit",
+            "event_id": event_id,
+            "proposal_id": proposal["proposal_id"],
+            "new_stable_id": envelope.stable_id,
+            "new_entity_id": entity.id,
+            "previous_entity_id": proposal.get("entity_id"),
+            "hypothesis_retained": True,
+            "new_envelope": copy.deepcopy(envelope.as_dict()),
+        }), role=role, principal=principal)
+        return {
+            "status": "admitted",
+            "action": "admit",
+            "proposal_id": proposal["proposal_id"],
+            "entity_id": entity.id,
+            "hypothesis_entity_id": proposal.get("entity_id"),
+            "stable_id": envelope.stable_id,
+            "admitted": True,
+            "hypothesis": False,
+            "hypothesis_retained": True,
+            "actor_role": role,
+            "actor_principal_id": principal,
+            "actor_authority": role,
+            "revision_index": revision["revision_index"],
+            "source_history_retained": True,
+        }
+
+    def _revise_factual_assertion(
+        self, *, kind: str, target_stable_id: str, source_text: str, message_id: str,
+        role: str, principal: str, event_id: str,
+    ) -> Dict[str, Any]:
+        identity = str(target_stable_id or "").strip()
+        if not identity:
+            raise FactualReviewError("target_required")
+        previous = self.entity_for_stable_id(identity)
+        if previous is None:
+            raise FactualReviewError("unknown_target")
+        preserved = copy.deepcopy((previous.provenance or {}).get("user_assertion"))
+        envelope = self._review_envelope(source_text, message_id)
+        entity = self._entity_for_envelope(envelope, entity_id=f"{kind}-" + envelope.stable_id[:20])
+        self.add_entity(entity)
+        try:
+            if kind == "retract":
+                revision = self.retract_assertion(identity, entity, envelope, event_id=event_id)
+            else:
+                revision = self.supersede_assertion(identity, entity, envelope, event_id=event_id)
+        except FactualReviewError:
+            self.entities.pop(entity.id, None)
+            raise
+        except KeyError:
+            self.entities.pop(entity.id, None)
+            raise FactualReviewError("unknown_target") from None
+        except ValueError:
+            self.entities.pop(entity.id, None)
+            raise FactualReviewError("revision_refused") from None
+        revision = self._stamp_actor(revision, role=role, principal=principal)
+        still = self.entities.get(previous.id)
+        retained = isinstance((still.provenance or {}).get("user_assertion"), Mapping) if still is not None else False
+        if isinstance(preserved, Mapping) and retained:
+            retained = (still.provenance or {}).get("user_assertion", {}).get("stable_id") == preserved.get("stable_id")
+        return {
+            "status": "retracted" if kind == "retract" else "superseded",
+            "action": kind,
+            "target_stable_id": identity,
+            "stable_id": envelope.stable_id,
+            "entity_id": entity.id,
+            "previous_entity_id": previous.id,
+            "admitted": True,
+            "hypothesis": False,
+            "actor_role": role,
+            "actor_principal_id": principal,
+            "actor_authority": role,
+            "revision_index": revision.get("revision_index"),
+            "source_history_retained": retained,
+            "invalidated_support": kind == "retract",
+        }
+
+    def _contradict_factual_assertion(
+        self, *, target_stable_id: str, source_text: str, message_id: str, role: str, principal: str, event_id: str,
+    ) -> Dict[str, Any]:
+        identity = str(target_stable_id or "").strip()
+        if not identity:
+            raise FactualReviewError("target_required")
+        previous = self.entity_for_stable_id(identity)
+        if previous is None:
+            raise FactualReviewError("unknown_target")
+        if self.entity_activity(previous.id) in _INACTIVE_ASSERTION_STATES:
+            raise FactualReviewError("revision_refused")
+        preserved = copy.deepcopy((previous.provenance or {}).get("user_assertion"))
+        envelope = self._review_envelope(source_text, message_id)
+        entity = self._entity_for_envelope(envelope, entity_id="contradict-" + envelope.stable_id[:20])
+        self.add_entity(entity)
+        self.register_assertion(entity, envelope, status="active", event_id=event_id)
+        try:
+            revision = self.record_assertion_conflict(
+                identity, envelope.stable_id, event_id=event_id,
+                left_entity_id=previous.id, right_entity_id=entity.id,
+            )
+        except ValueError:
+            raise FactualReviewError("revision_refused") from None
+        revision = self._stamp_actor(revision, role=role, principal=principal)
+        still = self.entities.get(previous.id)
+        retained = isinstance(preserved, Mapping) and still is not None and isinstance(
+            (still.provenance or {}).get("user_assertion"), Mapping)
+        return {
+            "status": "conflict",
+            "action": "contradict",
+            "target_stable_id": identity,
+            "stable_id": envelope.stable_id,
+            "entity_id": entity.id,
+            "previous_entity_id": previous.id,
+            "admitted": False,
+            "hypothesis": False,
+            "unresolved": True,
+            "actor_role": role,
+            "actor_principal_id": principal,
+            "actor_authority": role,
+            "revision_index": revision.get("revision_index"),
+            "source_history_retained": retained,
+        }
 
     def record_assertion_conflict(
         self,

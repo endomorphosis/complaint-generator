@@ -3852,6 +3852,38 @@
                     </div>
                     <h2>Intake Questions</h2>
                     <p class="muted">Capture the facts once, then reuse them everywhere else in the workflow. Court details are optional and can wait until the story is clear.</p>
+                    <section id="adaptive-inquiry" data-task="CIMP-GUI-16">
+                        <h3>Adaptive questions from the shared mediator</h3>
+                        <p class="muted">Enter the complaint narrative. The question that appears is the pending inquiry from the shared mediator. Later questions follow answers and open graph gaps. The fixed intake fields below do not choose this question.</p>
+                        <label for="adaptive-narrative">Complaint narrative</label>
+                        <textarea id="adaptive-narrative" placeholder="Describe what happened in plain language."></textarea>
+                        <div class="button-row">
+                            <button class="primary" id="adaptive-enter-narrative" type="button">Enter narrative</button>
+                        </div>
+                        <div id="adaptive-pending" data-source="shared_mediator" data-pending="false" data-from-fixed-intake="false">
+                            <p id="adaptive-pending-prompt">No pending inquiry yet. Enter a narrative to ask the shared mediator.</p>
+                            <p id="adaptive-pending-meta"></p>
+                        </div>
+                        <label for="adaptive-answer">Answer to the pending inquiry</label>
+                        <textarea id="adaptive-answer" placeholder="Answer only the pending inquiry."></textarea>
+                        <div class="button-row">
+                            <button class="primary" id="adaptive-submit-answer" type="button">Answer pending inquiry</button>
+                            <button class="secondary" id="adaptive-unknown" type="button">I don't know</button>
+                            <button class="secondary" id="adaptive-defer" type="button">Defer</button>
+                        </div>
+                        <div class="status" id="adaptive-gap-status" data-gap-preserved="unknown">Unknown and deferred answers keep the graph gap open.</div>
+                        <label for="adaptive-model-purpose">Model purpose</label>
+                        <select id="adaptive-model-purpose">
+                            <option value="extract_facts">extract_facts</option>
+                            <option value="propose_questions">propose_questions</option>
+                        </select>
+                        <label for="adaptive-model-fragment">Minimized source fragment</label>
+                        <textarea id="adaptive-model-fragment" placeholder="A short fragment of the narrative, not the whole narrative."></textarea>
+                        <div class="button-row">
+                            <button class="secondary" id="adaptive-model-extract" type="button">Ask model about this gap</button>
+                        </div>
+                        <div class="status" id="adaptive-model-status" data-model-dispatched="false" data-code="">Model extraction stays off until this case has persisted consent for the selected purpose and the request is purpose-minimized.</div>
+                    </section>
                     <div class="section-intro">
                         <strong>What to do here</strong>
                         <span>Focus on who was involved, what happened, when it happened, and how it affected the complainant. If the exact date or wording is uncertain, save the best current version and improve it later.</span>
@@ -12718,6 +12750,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             hydratePersistedWorkflowArtifacts(sessionPayload);
             hydrateResolvedDraftState(sessionPayload);
             renderIntake(sessionPayload);
+            renderAdaptiveInquiry(sessionPayload);
             renderEvidence(sessionPayload);
             renderDocketLane(sessionPayload);
             renderReview(sessionPayload);
@@ -13985,6 +14018,202 @@ function extractComplaintOutputSignals(result) {
             }
         }
 
+        let adaptiveInquiryState = null;
+        window.adaptiveModelAttempts = 0;
+
+        function adaptiveViewFrom(payload) {
+            if (payload && payload.adaptive_inquiry && payload.adaptive_inquiry.schema === 'adaptive-inquiry-v1') {
+                return payload.adaptive_inquiry;
+            }
+            const session = (payload && payload.session) || ((workspaceSession || {}).session) || {};
+            const projection = session.shared_interview && typeof session.shared_interview === 'object' ? session.shared_interview : {};
+            const pending = projection.pending_inquiry && typeof projection.pending_inquiry === 'object' ? projection.pending_inquiry : null;
+            if (!pending || !pending.inquiry_id) {
+                return {schema: 'adaptive-inquiry-v1', source: 'shared_mediator', pending: false, prompt: '',
+                    from_fixed_intake_fields: false, preserved_gaps: projection.preserved_gaps || [],
+                    unknown_reasons: projection.unknown_reasons || [], inquiry_id: null, revision: null,
+                    target_id: null, objective_id: null, legal_sufficiency: false};
+            }
+            return {schema: 'adaptive-inquiry-v1', source: 'shared_mediator', pending: true,
+                inquiry_id: pending.inquiry_id, revision: pending.revision, prompt: String(pending.question || ''),
+                objective_id: pending.objective_id || null, target_id: pending.target_id || null,
+                target_revision: pending.target_revision || null, from_fixed_intake_fields: false,
+                preserved_gaps: projection.preserved_gaps || [], unknown_reasons: projection.unknown_reasons || [],
+                legal_sufficiency: false};
+        }
+
+        function renderAdaptiveInquiry(payload) {
+            const view = adaptiveViewFrom(payload);
+            adaptiveInquiryState = view;
+            const pendingNode = document.getElementById('adaptive-pending');
+            const promptNode = document.getElementById('adaptive-pending-prompt');
+            const metaNode = document.getElementById('adaptive-pending-meta');
+            const gapNode = document.getElementById('adaptive-gap-status');
+            if (!pendingNode || !promptNode || !metaNode) return;
+            const inquiryId = String(view.inquiry_id || '');
+            const fromMediator = view.pending === true && inquiryId.indexOf('inq-') === 0 && view.from_fixed_intake_fields !== true;
+            pendingNode.dataset.pending = fromMediator ? 'true' : 'false';
+            pendingNode.dataset.source = 'shared_mediator';
+            pendingNode.dataset.fromFixedIntake = 'false';
+            pendingNode.dataset.inquiryId = fromMediator ? inquiryId : '';
+            pendingNode.dataset.revision = fromMediator && view.revision !== undefined && view.revision !== null ? String(view.revision) : '';
+            pendingNode.dataset.targetId = fromMediator && view.target_id ? String(view.target_id) : '';
+            promptNode.textContent = fromMediator ? view.prompt : 'No pending inquiry yet. Enter a narrative to ask the shared mediator.';
+            metaNode.textContent = fromMediator
+                ? `Inquiry ${inquiryId} revision ${view.revision}. Target ${view.target_id || 'unbound'}. Objective ${view.objective_id || 'unbound'}.`
+                : 'Fixed intake fields stay on this page and do not select the mediator question.';
+            if (gapNode) {
+                const gaps = Array.isArray(view.preserved_gaps) ? view.preserved_gaps : [];
+                const preserved = gaps.some((item) => item && item.preserved === true && item.creates_fact === false);
+                gapNode.dataset.gapPreserved = preserved ? 'true' : 'false';
+                gapNode.textContent = preserved
+                    ? `Open gaps preserved: ${gaps.map((item) => `${item.disposition} ${item.inquiry_id}`).join('; ')}.`
+                    : 'Unknown and deferred answers keep the graph gap open.';
+            }
+        }
+
+        function adaptiveCaseId(payload) {
+            const session = (payload && payload.session) || ((workspaceSession || {}).session) || {};
+            const fromSession = String(session.case_id || '').trim();
+            if (fromSession) return fromSession;
+            const consentCase = document.getElementById('consent-case-id');
+            return consentCase ? consentCase.value.trim() : '';
+        }
+
+        function adaptiveNarrativeText() {
+            const field = document.getElementById('adaptive-narrative');
+            const typed = field ? field.value.trim() : '';
+            if (typed) return typed;
+            const record = (((workspaceSession || {}).session) || {}).original_complaint || (workspaceSession || {}).original_complaint || {};
+            return String(record.text || '').trim();
+        }
+
+        function adaptiveFragmentAllowed(narrative, fragment) {
+            const whole = String(narrative || '').trim();
+            const piece = String(fragment || '').trim();
+            return Boolean(piece) && Boolean(whole) && piece !== whole && whole.indexOf(piece) !== -1;
+        }
+
+        async function enterAdaptiveNarrative() {
+            const narrative = adaptiveNarrativeText();
+            if (!narrative) {
+                setStatus('Enter a complaint narrative before asking the shared mediator.');
+                return;
+            }
+            setBusyStatus('Asking the shared mediator for the pending inquiry…');
+            try {
+                const result = await client.runIntakeChatTurn(workspaceUserId, narrative, 'original_complaint', {interview_action: 'start'});
+                workspaceSession = result;
+                renderAdaptiveInquiry(result);
+                const view = adaptiveViewFrom(result);
+                setStatus(view.pending ? 'Pending inquiry loaded from the shared mediator.' : 'The shared mediator has no pending inquiry.');
+            } catch (error) {
+                setStatus(`The shared mediator did not return an inquiry: ${String((error && error.message) || error)}`);
+            }
+        }
+
+        async function answerAdaptiveInquiry(kind) {
+            const view = adaptiveInquiryState || adaptiveViewFrom(workspaceSession);
+            if (!view || !view.pending || String(view.inquiry_id || '').indexOf('inq-') !== 0) {
+                setStatus('There is no mediator inquiry to answer. Enter a narrative first.');
+                return;
+            }
+            const answerField = document.getElementById('adaptive-answer');
+            const message = kind === 'answer' ? (answerField ? answerField.value.trim() : '') : kind;
+            if (!message) {
+                setStatus('Enter an answer, or choose unknown or defer.');
+                return;
+            }
+            setBusyStatus('Sending the answer to the shared mediator…');
+            let result;
+            try {
+                result = await client.runIntakeChatTurn(workspaceUserId, message, view.inquiry_id, {
+                    expected_question_revision: view.revision,
+                    interview_action: 'answer',
+                });
+            } catch (error) {
+                setStatus(`The answer was not accepted: ${String((error && error.message) || error)}`);
+                return;
+            }
+            workspaceSession = result;
+            renderAdaptiveInquiry(result);
+            const next = adaptiveViewFrom(result);
+            if (kind === 'unknown' || kind === 'deferred') {
+                setStatus(`The ${kind} answer preserved the graph gap. The next inquiry follows the remaining gaps.`);
+            } else if (next.inquiry_id && next.inquiry_id !== view.inquiry_id) {
+                setStatus('The next inquiry comes from the updated graph, not from the fixed intake list.');
+            } else {
+                setStatus('The shared mediator kept the current inquiry.');
+            }
+        }
+
+        async function persistedPurposeConsent(purpose) {
+            const caseId = adaptiveCaseId(workspaceSession);
+            if (!caseId) return {authorized: false, code: 'case_purpose_consent_required'};
+            try {
+                const payload = await client._request('/api/cases/' + encodeURIComponent(caseId) + '/processing-consent', {method: 'GET'});
+                const match = Array.isArray(payload.decisions) ? payload.decisions.find((item) => item.purpose === purpose) : null;
+                if (!match || match.egress_authorized !== true || payload.case_id !== caseId) {
+                    return {authorized: false, code: 'case_purpose_consent_required'};
+                }
+                return {authorized: true, code: 'consented'};
+            } catch (error) {
+                return {authorized: false, code: 'case_purpose_consent_required'};
+            }
+        }
+
+        function showAdaptiveModelStatus(code, dispatched) {
+            const node = document.getElementById('adaptive-model-status');
+            if (!node) return;
+            node.dataset.modelDispatched = dispatched ? 'true' : 'false';
+            node.dataset.code = code;
+            node.textContent = dispatched
+                ? 'The model was called only after persisted case-purpose consent and a minimized request.'
+                : `Model not called (${code}). Persisted per-case consent and a minimized purpose are required.`;
+        }
+
+        async function askAdaptiveModel() {
+            const purposeNode = document.getElementById('adaptive-model-purpose');
+            const purpose = purposeNode ? purposeNode.value : 'extract_facts';
+            const view = adaptiveInquiryState || adaptiveViewFrom(workspaceSession);
+            const target = view && view.target_id ? String(view.target_id) : '';
+            const narrative = adaptiveNarrativeText();
+            const fragmentNode = document.getElementById('adaptive-model-fragment');
+            const fragment = fragmentNode ? fragmentNode.value.trim() : '';
+            const consent = await persistedPurposeConsent(purpose);
+            if (!consent.authorized) {
+                showAdaptiveModelStatus(consent.code, false);
+                setStatus('Model extraction stayed off. This case has no persisted remote-processing consent for that purpose.');
+                return;
+            }
+            let inputs = null;
+            if (purpose === 'extract_facts') {
+                if (!adaptiveFragmentAllowed(narrative, fragment) || !target) {
+                    showAdaptiveModelStatus('query_not_minimized', false);
+                    setStatus('The model request was not minimized to a fragment of this case narrative.');
+                    return;
+                }
+                inputs = {source_text: fragment, target_ref: target};
+            } else {
+                const reasons = (view && view.unknown_reasons) || [];
+                const gap = reasons.map((item) => String(item || '')).find((item) => item && item !== narrative) || '';
+                if (!gap || !target) {
+                    showAdaptiveModelStatus('query_not_minimized', false);
+                    setStatus('Question generation needs an open gap code, not the full narrative.');
+                    return;
+                }
+                inputs = {gap_code: gap, target_ref: target};
+            }
+            window.adaptiveModelAttempts += 1;
+            const result = await client._request('/api/complaint-workspace/inference/dispatch', {
+                method: 'POST',
+                body: JSON.stringify({purpose, inputs}),
+            });
+            const dispatched = result && result.model_dispatched === true;
+            showAdaptiveModelStatus(String((result && result.code) || (dispatched ? 'dispatched' : 'refused')), dispatched);
+            setStatus(dispatched ? 'Minimized model request dispatched for this case purpose.' : 'The model request was refused.');
+        }
+
         async function saveIntake() {
             setBusyStatus('Saving intake answers to the shared complaint session…');
             const answers = {};
@@ -15049,6 +15278,11 @@ function extractComplaintOutputSignals(result) {
             node.addEventListener('click', () => activateTab(node.dataset.tabTarget));
         });
         document.getElementById('save-intake-button').addEventListener('click', saveIntake);
+        document.getElementById('adaptive-enter-narrative').addEventListener('click', enterAdaptiveNarrative);
+        document.getElementById('adaptive-submit-answer').addEventListener('click', () => answerAdaptiveInquiry('answer'));
+        document.getElementById('adaptive-unknown').addEventListener('click', () => answerAdaptiveInquiry('unknown'));
+        document.getElementById('adaptive-defer').addEventListener('click', () => answerAdaptiveInquiry('deferred'));
+        document.getElementById('adaptive-model-extract').addEventListener('click', askAdaptiveModel);
         document.getElementById('refresh-session-button').addEventListener('click', refreshWorkspace);
         document.getElementById('intake-step-list').addEventListener('click', (event) => {
             const button = event.target.closest('[data-intake-step-target]');

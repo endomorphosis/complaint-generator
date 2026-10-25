@@ -27,7 +27,7 @@ from .case_directory import CaseNamespace
 
 CASE_ROUTE_KINDS = ("case", "graph", "message", "admin")
 COMPOSITION_NAME = "compose_case_routes"
-PROTECTED_PREFIXES = ("/api/complaint-workspace", "/api/claim-support", "/api/documents", "/api/chat", "/api/graphs", "/api/legal-context", "/api/legal-research")
+PROTECTED_PREFIXES = ("/api/complaint-workspace", "/api/claim-support", "/api/documents", "/api/chat", "/api/graphs", "/api/legal-context", "/api/legal-research", "/api/legal-analysis")
 CASE_CATALOG_PREFIX = "/api/cases"
 CASE_PAGE_PATH = "/cases"
 RETIRED_EXACT_PATHS = frozenset({"/cookies", "/load_profile", "/create_profile", "/api/chat", "/api/chat/fallback"})
@@ -186,6 +186,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
                         json_body_limits: Optional[CaseJSONBodyLimits] = None,
                         case_catalog: Any = None,
                         case_assignments: Any = None,
+                        case_messages: Any = None,
                         case_consent: Any = None, gui_inference_transport: Any = None,
                         gui_inference_route: Any = None) -> Any:
     """Mount the same fail-closed boundary in every production app variant.
@@ -227,6 +228,10 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     if case_assignments is not None and not isinstance(case_assignments, CaseAssignmentService):
         raise CaseAccessError("case_assignments")
     mount_case_assignments(app)
+    from .case_message_api import CaseMessageService, mount_case_messages
+    if case_messages is not None and not isinstance(case_messages, CaseMessageService):
+        raise CaseAccessError("case_messages")
+    mount_case_messages(app)
     from .case_consent_api import CaseConsentService, mount_case_consent
     if case_consent is not None and not isinstance(case_consent, CaseConsentService):
         raise CaseAccessError("case_consent")
@@ -238,17 +243,21 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     mount_case_consent(app)
     from .case_api import mount_case_catalog
     mount_case_catalog(app)
-    from .graph_api import mount_factual_graph_routes
+    from .graph_api import mount_factual_graph_routes, mount_law_dependency_graph_routes
     mount_factual_graph_routes(app)
+    mount_law_dependency_graph_routes(app)
     from .legal_context_api import mount_legal_context_routes
     mount_legal_context_routes(app)
     from .legal_research_api import mount_legal_research_routes
     mount_legal_research_routes(app)
+    from .legal_analysis_api import mount_legal_analysis_routes
+    mount_legal_analysis_routes(app)
     app.state.case_authorizer = authorizer
     app.state.browser_sessions = sessions
     app.state.case_handlers = case_handlers
     app.state.case_catalog = case_catalog
     app.state.case_assignments = case_assignments
+    app.state.case_messages = case_messages
     app.state.case_consent = case_consent
     app.state.gui_inference_transport = selected_inference_transport
     app.state.gui_inference_route = gui_inference_route
@@ -377,6 +386,10 @@ def _check_actor_claims(scope: Dict[str, Any], body: bytes, principal_id: str) -
 def _required_action(path: str, method: str, material: Mapping[str, Any], extensions) -> str:
     if _within_prefix(path, "/api/legal-research") and path.rstrip("/").endswith("/admissions"):
         return "case.read" if method in {"GET", "HEAD"} else "case.review"
+    # Factual review writes the encrypted owner graph. Assigned-lawyer review
+    # authority is not an owner-key grant, so this route stays case.update.
+    if _within_prefix(path, "/api/graphs"):
+        return "case.read" if method in {"GET", "HEAD"} else "case.update"
     if path.startswith("/api/documents"):
         return "case.download" if method in {"GET", "HEAD"} else "case.update"
     if path.startswith("/api/claim-support"):
