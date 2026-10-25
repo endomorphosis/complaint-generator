@@ -5648,8 +5648,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                     <p id="consent-choice-local">Local private: this purpose never calls a remote provider.</p>
                     <p id="consent-choice-grok">Explicitly authorized Grok processing: grok_cli / grok-4.7 for this case and purpose.</p>
                     <p id="consent-choice-revoked">Revoked: Grok processing for this purpose is not authorized. Processing is local private.</p>
-                    <div class="status" id="consent-decision-display">Local private. No remote processing is authorized.</div>
-                    <input id="consent-csrf-token" type="hidden" value="">
+                    <div class="status" id="consent-decision-display" data-egress-authorized="unknown" data-verification="unknown">Consent has not been verified for this case and purpose.</div>
                     <div class="button-row">
                         <button type="button" id="consent-refresh">Show persisted decision</button>
                         <button type="button" id="consent-choose-local">Keep local private</button>
@@ -5788,56 +5787,113 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
 
         applyWorkspaceShellMode();
 
-        function consentCasePath(suffix) {
-            const caseId = document.getElementById('consent-case-id').value.trim();
-            return '/api/cases/' + encodeURIComponent(caseId) + '/processing-consent' + (suffix || '');
+        let consentRequestEpoch = 0;
+        let consentVerified = null;
+
+        function consentSelection() {
+            return {caseId: document.getElementById('consent-case-id').value.trim(),
+                    purpose: document.getElementById('consent-purpose').value};
         }
 
-        function renderConsentDecision(payload) {
-            const purpose = document.getElementById('consent-purpose').value;
+        function clearCaseProcessingConsentView() {
+            consentRequestEpoch += 1;
+            consentVerified = null;
             const node = document.getElementById('consent-decision-display');
-            const match = (payload.decisions || []).find(function (item) { return item.purpose === purpose; });
-            node.textContent = match ? match.display : 'Local private: this purpose never calls a remote provider.';
-            node.dataset.egressAuthorized = match && match.egress_authorized ? 'true' : 'false';
-            node.dataset.generation = String(payload.generation || 0);
+            node.textContent = 'Consent has not been verified for this case and purpose.';
+            node.dataset.egressAuthorized = 'unknown';
+            node.dataset.verification = 'unknown';
+            delete node.dataset.generation;
+        }
+
+        function consentCapture() {
+            const selected = consentSelection();
+            return {...selected, requestEpoch: ++consentRequestEpoch, privacyEpoch: workspacePrivacyEpoch,
+                    clientEpoch: client._privacyEpoch, actor: client.activePrincipalId};
+        }
+
+        function consentCaptureCurrent(capture) {
+            const selected = consentSelection();
+            return !workspacePrivacyInactive && capture.requestEpoch === consentRequestEpoch
+                && capture.privacyEpoch === workspacePrivacyEpoch
+                && capture.clientEpoch === client._privacyEpoch && capture.actor === client.activePrincipalId
+                && capture.caseId === selected.caseId && capture.purpose === selected.purpose;
+        }
+
+        function consentCasePath(capture, suffix) {
+            return '/api/cases/' + encodeURIComponent(capture.caseId) + '/processing-consent' + (suffix || '');
+        }
+
+        function renderConsentDecision(payload, capture) {
+            if (!consentCaptureCurrent(capture)) return false;
+            const match = Array.isArray(payload.decisions)
+                ? payload.decisions.find(item => item.purpose === capture.purpose) : null;
+            if (payload.case_id !== capture.caseId || (capture.actor && payload.owner_principal_id !== capture.actor)
+                    || !Number.isSafeInteger(payload.generation)
+                    || payload.generation < 0 || !match || typeof match.display !== 'string'
+                    || typeof match.egress_authorized !== 'boolean') throw new Error('consent_contract_unavailable');
+            consentVerified = {caseId: capture.caseId, purpose: capture.purpose,
+                generation: payload.generation, display: match.display, authorized: match.egress_authorized,
+                clientEpoch: capture.clientEpoch, actor: capture.actor};
+            const node = document.getElementById('consent-decision-display');
+            node.textContent = match.display;
+            node.dataset.egressAuthorized = match.egress_authorized ? 'true' : 'false';
+            node.dataset.generation = String(payload.generation);
+            node.dataset.verification = 'verified';
+            return true;
+        }
+
+        function consentUnavailable(capture, revocation) {
+            if (!consentCaptureCurrent(capture)) return;
+            const node = document.getElementById('consent-decision-display');
+            const prior = consentVerified && consentVerified.caseId === capture.caseId
+                && consentVerified.purpose === capture.purpose && consentVerified.clientEpoch === capture.clientEpoch
+                && consentVerified.actor === capture.actor ? consentVerified : null;
+            node.textContent = 'Consent could not be verified. '
+                + (prior ? 'Last verified: ' + prior.display : 'No decision has been verified for this case and purpose.')
+                + (revocation ? ' Revocation has not been confirmed.' : ' No updated decision has been confirmed.');
+            node.dataset.verification = 'unavailable';
+            node.dataset.egressAuthorized = prior ? (prior.authorized ? 'true' : 'false') : 'unknown';
+            if (prior) node.dataset.generation = String(prior.generation);
+            else delete node.dataset.generation;
+        }
+
+        async function loadConsentDecision(capture) {
+            if (!capture.caseId) throw new Error('consent_case_required');
+            // Reuse the one authenticated client: its real CSRF token, request
+            // cancellation and privacy epoch also govern this case surface.
+            const payload = await client._request(consentCasePath(capture, ''), {method: 'GET'});
+            return renderConsentDecision(payload, capture);
         }
 
         async function refreshCaseProcessingConsent() {
-            const node = document.getElementById('consent-decision-display');
-            if (!document.getElementById('consent-case-id').value.trim()) {
-                node.textContent = 'Local private. No remote processing is authorized.';
-                node.dataset.egressAuthorized = 'false';
-                return;
-            }
-            const response = await fetch(consentCasePath(''), {credentials: 'same-origin'});
-            if (!response.ok) {
-                node.textContent = 'Local private: this purpose never calls a remote provider.';
-                node.dataset.egressAuthorized = 'false';
-                return;
-            }
-            renderConsentDecision(await response.json());
+            const capture = consentCapture();
+            try { await loadConsentDecision(capture); }
+            catch (_error) { consentUnavailable(capture, false); }
         }
 
         async function submitCaseProcessingConsent(mode) {
-            const node = document.getElementById('consent-decision-display');
-            const generation = Number(node.dataset.generation || '0');
-            const headers = {'content-type': 'application/json'};
-            const csrf = document.getElementById('consent-csrf-token').value;
-            if (csrf) headers['x-csrf-token'] = csrf;
-            const path = mode === 'revoke' ? consentCasePath('/revoke') : consentCasePath('');
-            const body = {
-                purpose: document.getElementById('consent-purpose').value,
-                expected_generation: generation
-            };
-            if (mode !== 'revoke') {
-                body.mode = mode;
-                if (mode === 'grok_cloud') body.explicit_case_purpose = true;
-            }
-            const response = await fetch(path, {method: 'POST', credentials: 'same-origin', headers: headers, body: JSON.stringify(body)});
-            if (response.ok) renderConsentDecision(await response.json());
-            else node.textContent = 'Local private: this purpose never calls a remote provider.';
+            const capture = consentCapture();
+            try {
+                if (!consentVerified || consentVerified.caseId !== capture.caseId
+                        || consentVerified.purpose !== capture.purpose || consentVerified.clientEpoch !== capture.clientEpoch
+                        || consentVerified.actor !== capture.actor) {
+                    if (!await loadConsentDecision(capture)) return;
+                }
+                if (!consentCaptureCurrent(capture)) return;
+                const body = {purpose: capture.purpose, expected_generation: consentVerified.generation};
+                if (mode !== 'revoke') {
+                    body.mode = mode;
+                    if (mode === 'grok_cloud') body.explicit_case_purpose = true;
+                }
+                const payload = await client._request(consentCasePath(capture, mode === 'revoke' ? '/revoke' : ''),
+                    {method: 'POST', body: JSON.stringify(body)});
+                renderConsentDecision(payload, capture);
+            } catch (_error) { consentUnavailable(capture, mode === 'revoke'); }
         }
 
+        document.getElementById('consent-case-id').addEventListener('change', clearCaseProcessingConsentView);
+        document.getElementById('consent-case-id').addEventListener('input', clearCaseProcessingConsentView);
+        document.getElementById('consent-purpose').addEventListener('change', clearCaseProcessingConsentView);
         document.getElementById('consent-refresh').addEventListener('click', function () { refreshCaseProcessingConsent(); });
         document.getElementById('consent-choose-local').addEventListener('click', function () { submitCaseProcessingConsent('local_private'); });
         document.getElementById('consent-authorize-grok').addEventListener('click', function () { submitCaseProcessingConsent('grok_cloud'); });
@@ -13360,6 +13416,7 @@ function extractComplaintOutputSignals(result) {
         function resetPrivateWorkspaceView(state, message) {
             workspacePrivacyEpoch += 1;
             workspacePrivacyInactive = true;
+            clearCaseProcessingConsentView();
             removePrivateWorkspaceStorage();
             workspaceSession = null;
             workspaceCapabilities = null;
