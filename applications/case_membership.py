@@ -18,6 +18,7 @@ revision. Concurrent edits use an exclusive lock and an expected version.
 from __future__ import annotations
 
 import fcntl
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -406,6 +407,29 @@ class CaseMembershipStore:
                 actor_is_encrypted_owner=False,
                 permits_case_content=True,
             )
+
+    @contextmanager
+    def authorization_scope(self, *, actor_principal_id: str, grant_id: str,
+                            tenant_id: str, case_id: str, resource_id: str,
+                            action: str, expected_version: int):
+        """Hold current membership through a trusted synchronous admission.
+
+        Crypto and external work belong before this scope. Removal and scope
+        renewal share this lock, so they cannot finish between the final
+        membership check and the consumer's admission point.
+        """
+        actor = self._active(actor_principal_id)
+        requested = self._one_action(action)
+        with self._locked():
+            grant = self._usable(actor_id=actor.principal_id, grant_id=grant_id,
+                tenant_id=tenant_id, case_id=case_id, resource_id=resource_id,
+                action=requested, expected_version=expected_version)
+            yield MembershipDecision(grant_id=grant.grant_id, version=grant.version,
+                action=requested, actor_principal_id=actor.principal_id,
+                tenant_id=grant.tenant_id, case_id=grant.case_id,
+                resource_id=grant.resource_id, expires_at=grant.expires_at,
+                canonical_owner_principal_id=grant.tenant_id,
+                actor_is_encrypted_owner=False, permits_case_content=True)
 
     def begin_request(
         self,
