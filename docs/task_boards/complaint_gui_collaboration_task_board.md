@@ -1152,7 +1152,7 @@ Implementation instructions:
 
 ## CIMP-GUI-39 Show truthful durability and failure recovery states
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
