@@ -522,7 +522,7 @@ Implementation instructions:
 
 ## CIMP-GUI-18 Apply GUI corrections through mediator supersession
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
