@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import Any, Mapping
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
@@ -258,3 +258,439 @@ def mount_factual_graph_routes(app: Any) -> None:
         except FactualGraphProjectionError as exc:
             return _fail(exc)
         return JSONResponse(payload)
+
+
+LAW_DEPENDENCY_TASK_ID = "CIMP-GUI-27"
+_LAW_LINK_KINDS = frozenset({"supports", "contradicts", "missing_evidence"})
+_MODEL_ORIGINS = frozenset({"model", "llm", "inference", "model_output", "llm_text"})
+_NARRATIVE_KEYS = ("user_narrative", "model_output", "llm_text")
+
+
+class LegalDependencyGraphError(Exception):
+    """Fail-closed law-derived graph error. ``code`` is a stable machine reason."""
+
+    def __init__(self, code: str) -> None:
+        self.code = str(code)
+        super().__init__(self.code)
+
+
+def legal_dependency_http_status(code: str) -> int:
+    if code in {"narrative_not_law", "legal_dependency_field"}:
+        return 400
+    if code in {"graph_read_ungranted", "cross_case_id", "actor_authority_required"}:
+        return 403
+    if code in {"legal_dependency_unavailable", "mediator_graph_hook_unavailable"}:
+        return 503
+    return 403
+
+
+def _mapping(value: Any) -> dict:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _clean_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def _admitted_authority(record: Mapping[str, Any] | dict) -> bool:
+    return (
+        isinstance(record, dict)
+        and record.get("admitted_law") is True
+        and record.get("status") == "admitted"
+        and bool(_clean_text(record.get("source_passage")))
+        and bool(_clean_text(record.get("content_hash")))
+    )
+
+
+def _passage_index(case_file: Mapping[str, Any]) -> dict:
+    index = case_file.get("legal_source_passage_index")
+    return index if isinstance(index, dict) else {}
+
+
+def _burden_from_authority(admission: Mapping[str, Any], stored: Mapping[str, Any] | None) -> tuple[str, str]:
+    """A burden is law only when the stored admitted passage contains that text.
+
+    A burden string on the review record, a user narrative, or model output
+    does not become the burden unless the stored passage index already has it.
+    """
+    passage = _clean_text(admission.get("source_passage"))
+    stored_burden = _clean_text((stored or {}).get("burden"))
+    if stored_burden and stored_burden in passage:
+        return stored_burden, "admitted_passage"
+    return "", "missing_from_admitted_authority"
+
+
+def _requirement_from_admission(admission: Mapping[str, Any], stored: Mapping[str, Any] | None) -> dict:
+    passage = _clean_text(admission.get("source_passage"))
+    exceptions = admission.get("exceptions")
+    if not isinstance(exceptions, list):
+        exceptions = []
+    exceptions = [item for item in exceptions if isinstance(item, str)]
+    burden, burden_status = _burden_from_authority(admission, stored)
+    stored_applicability = _clean_text((stored or {}).get("applicability"))
+    applicability = _clean_text(admission.get("applicability"))
+    if stored is not None and stored_applicability and applicability != stored_applicability:
+        applicability = stored_applicability
+    return {
+        "content_hash": _clean_text(admission.get("content_hash")),
+        "authority_identity": _clean_text(admission.get("authority_identity")),
+        "requirement": passage,
+        "burden": burden,
+        "burden_status": burden_status,
+        "exceptions": exceptions,
+        "applicability": applicability,
+        "jurisdiction": _clean_text(admission.get("jurisdiction")),
+        "effective_date": _clean_text(admission.get("effective_date")),
+        "treatment_state": _clean_text(admission.get("treatment_state")),
+        "version": _clean_text(admission.get("version")),
+        "source": "admitted_authority",
+        "admitted_law": True,
+        "proof": False,
+        "legal_sufficiency": False,
+        "rewritten_by_user_or_model": False,
+    }
+
+
+def _node_rows(graph: Any) -> list[dict]:
+    if graph is None:
+        return []
+    raw_nodes = getattr(graph, "nodes", None)
+    if raw_nodes is None and isinstance(graph, dict):
+        raw_nodes = graph.get("nodes")
+    rows = []
+    if isinstance(raw_nodes, dict):
+        values = list(raw_nodes.values())
+    elif isinstance(raw_nodes, list):
+        values = raw_nodes
+    else:
+        return []
+    for item in values:
+        if hasattr(item, "to_dict"):
+            item = item.to_dict()
+        if isinstance(item, dict):
+            rows.append(item)
+    return rows
+
+
+def _edge_rows(graph: Any) -> list[dict]:
+    if graph is None:
+        return []
+    raw = getattr(graph, "dependencies", None)
+    if raw is None and isinstance(graph, dict):
+        raw = graph.get("edges") if isinstance(graph.get("edges"), list) else graph.get("dependencies")
+    if isinstance(raw, dict):
+        values = list(raw.values())
+    elif isinstance(raw, list):
+        values = raw
+    else:
+        return []
+    rows = []
+    for item in values:
+        if hasattr(item, "to_dict"):
+            item = item.to_dict()
+        if isinstance(item, dict):
+            rows.append(item)
+    return rows
+
+
+def _node_text(node: Mapping[str, Any]) -> str:
+    attributes = node.get("attributes") if isinstance(node.get("attributes"), dict) else {}
+    return _clean_text(node.get("description") or node.get("name") or attributes.get("description"))
+
+
+def _node_origin(node: Mapping[str, Any]) -> str:
+    attributes = node.get("attributes") if isinstance(node.get("attributes"), dict) else {}
+    return _clean_text(node.get("origin") or attributes.get("origin") or node.get("source") or attributes.get("source")).lower()
+
+
+def _node_hash(node: Mapping[str, Any]) -> str:
+    attributes = node.get("attributes") if isinstance(node.get("attributes"), dict) else {}
+    return _clean_text(node.get("content_hash") or attributes.get("content_hash") or attributes.get("authority_text_sha256"))
+
+
+def _node_source_id(node: Mapping[str, Any]) -> str:
+    attributes = node.get("attributes") if isinstance(node.get("attributes"), dict) else {}
+    provenance = node.get("provenance") if isinstance(node.get("provenance"), dict) else {}
+    return _clean_text(
+        node.get("source_id")
+        or node.get("immutable_source_id")
+        or attributes.get("source_id")
+        or provenance.get("source_id")
+        or node.get("id")
+    )
+
+
+def _edge_kind(edge: Mapping[str, Any]) -> str:
+    kind = _clean_text(edge.get("dependency_type") or edge.get("link_kind")).lower()
+    if kind == "supports":
+        return "supports"
+    if kind == "contradicts":
+        return "contradicts"
+    return ""
+
+
+def _edge_endpoint(edge: Mapping[str, Any], side: str) -> str:
+    return _clean_text(edge.get(side) or edge.get(side.replace("_id", "")) or "")
+
+
+def project_law_derived_dependency_graph(
+    case_file: Mapping[str, Any] | None,
+    *,
+    dependency_graph: Any = None,
+    case_id: str = "",
+) -> dict:
+    """Project legal rules from admitted authorities and facts as separate links.
+
+    User narratives and model text may show support, contradiction, or a
+    missing-evidence gap. They never replace requirement, burden, exception,
+    or applicability text taken from an admitted authority.
+    """
+    if not isinstance(case_file, Mapping):
+        raise LegalDependencyGraphError("legal_dependency_unavailable")
+    index = _passage_index(case_file)
+    rows = case_file.get("legal_authority_admissions")
+    admissions = [item for item in rows if isinstance(item, dict)] if isinstance(rows, list) else []
+    requirements = []
+    rejected = []
+    seen_hashes = set()
+    for item in admissions:
+        if not _admitted_authority(item):
+            rejected.append({
+                "origin": "unadmitted_record",
+                "content_hash": _clean_text(item.get("content_hash")),
+                "text": _clean_text(item.get("source_passage"))[:500],
+                "reason": _clean_text(item.get("reason")) or "not_admitted_authority",
+                "rewrites_legal_rule": False,
+            })
+            continue
+        content_hash = _clean_text(item.get("content_hash"))
+        stored = index.get(content_hash) if isinstance(index.get(content_hash), dict) else None
+        if stored is None or _clean_text(stored.get("source_passage")) != _clean_text(item.get("source_passage")):
+            rejected.append({
+                "origin": "admission_without_stored_passage",
+                "content_hash": content_hash,
+                "text": _clean_text(item.get("source_passage"))[:500],
+                "reason": "stored_passage_mismatch",
+                "rewrites_legal_rule": False,
+            })
+            continue
+        if content_hash in seen_hashes:
+            continue
+        seen_hashes.add(content_hash)
+        claimed_rule = _clean_text(item.get("requirement") or item.get("rule_text"))
+        passage = _clean_text(item.get("source_passage"))
+        if claimed_rule and claimed_rule != passage:
+            rejected.append({
+                "origin": "admission_rewrite",
+                "content_hash": content_hash,
+                "text": claimed_rule[:500],
+                "reason": "user_or_model_text_not_law",
+                "rewrites_legal_rule": False,
+            })
+        requirements.append(_requirement_from_admission(item, stored))
+    for key in _NARRATIVE_KEYS:
+        text = _clean_text(case_file.get(key))
+        if text:
+            rejected.append({
+                "origin": key,
+                "content_hash": "",
+                "text": text[:500],
+                "reason": "user_or_model_text_not_law",
+                "rewrites_legal_rule": False,
+            })
+    nodes = {_clean_text(node.get("id")): node for node in _node_rows(dependency_graph)}
+    factual_links = []
+    supported = set()
+    rewritten_hashes = set()
+    for edge in _edge_rows(dependency_graph):
+        kind = _edge_kind(edge)
+        if not kind:
+            continue
+        source = nodes.get(_edge_endpoint(edge, "source_id"))
+        target = nodes.get(_edge_endpoint(edge, "target_id"))
+        if source is None or target is None:
+            continue
+        source_hash = _node_hash(source)
+        target_hash = _node_hash(target)
+        if target_hash in seen_hashes:
+            content_hash, rule_node, fact = target_hash, target, source
+        elif source_hash in seen_hashes:
+            content_hash, rule_node, fact = source_hash, source, target
+        else:
+            rejected.append({
+                "origin": _node_origin(target) or _node_origin(source) or "dependency_graph",
+                "content_hash": target_hash or source_hash,
+                "text": (_node_text(target) or _node_text(source))[:500],
+                "reason": "unadmitted_dependency",
+                "rewrites_legal_rule": False,
+            })
+            continue
+        rule = next(item for item in requirements if item["content_hash"] == content_hash)
+        graph_rule = _node_text(rule_node)
+        if graph_rule and graph_rule != rule["requirement"] and content_hash not in rewritten_hashes:
+            rewritten_hashes.add(content_hash)
+            rejected.append({
+                "origin": _node_origin(rule_node) or "dependency_graph",
+                "content_hash": content_hash,
+                "text": graph_rule[:500],
+                "reason": "graph_text_does_not_rewrite_admitted_rule",
+                "rewrites_legal_rule": False,
+            })
+        origin = _node_origin(fact) or "fact"
+        factual_links.append({
+            "link_kind": kind,
+            "content_hash": content_hash,
+            "fact_source_id": _node_source_id(fact),
+            "fact_text": _node_text(fact),
+            "origin": origin,
+            "authority_is_user_fact": origin not in _MODEL_ORIGINS and origin not in {"legal", "authority"},
+            "rewrites_legal_rule": False,
+            "reason": "",
+        })
+        if kind == "supports":
+            supported.add(content_hash)
+    for rule in requirements:
+        if rule["content_hash"] not in supported:
+            factual_links.append({
+                "link_kind": "missing_evidence",
+                "content_hash": rule["content_hash"],
+                "fact_source_id": "",
+                "fact_text": "",
+                "origin": "projection",
+                "authority_is_user_fact": False,
+                "rewrites_legal_rule": False,
+                "reason": "no_supporting_fact",
+            })
+        if rule["burden_status"] != "admitted_passage":
+            factual_links.append({
+                "link_kind": "missing_evidence",
+                "content_hash": rule["content_hash"],
+                "fact_source_id": "",
+                "fact_text": "",
+                "origin": "projection",
+                "authority_is_user_fact": False,
+                "rewrites_legal_rule": False,
+                "reason": "burden_not_in_admitted_authority",
+            })
+    requirement_text = "\n".join(item["requirement"] for item in requirements)
+    for rejected_item in rejected:
+        if rejected_item["text"] and rejected_item["text"] == requirement_text and rejected_item["origin"] in _NARRATIVE_KEYS:
+            rejected_item["reason"] = "narrative_matches_passage_but_is_not_the_authority"
+    return {
+        "task_id": LAW_DEPENDENCY_TASK_ID,
+        "case_id": case_id,
+        "requirements": requirements,
+        "factual_links": factual_links,
+        "rejected_narratives": rejected,
+        "admitted_count": len(requirements),
+        "user_facts_are_not_law": True,
+        "rules_rewritten_by_user_or_model": False,
+        "proof": False,
+        "legal_sufficiency": False,
+        "research_gap": "" if requirements else "no_admitted_authority",
+        "limitations": [
+            "Requirements, burdens, exceptions, and applicability come only from admitted authority passages.",
+            "User narratives, search snippets, and model output do not rewrite legal rules.",
+            "Factual support, contradiction, and missing evidence stay links beside the rule.",
+            "This projection is not a proof of legal sufficiency.",
+            "WebSocket and SSE transports are not supported.",
+        ],
+    }
+
+
+def _materials_from_mediator(mediator: Any) -> tuple[dict, Any]:
+    from complaint_phases.phase_manager import ComplaintPhase
+
+    case_file = None
+    graph = None
+    phase_manager = getattr(mediator, "phase_manager", None)
+    if phase_manager is not None and hasattr(phase_manager, "get_phase_data"):
+        stored = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file")
+        if isinstance(stored, dict):
+            case_file = stored
+        graph = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
+    if case_file is None:
+        stored = getattr(mediator, "intake_case_file", None)
+        if isinstance(stored, dict):
+            case_file = stored
+    if graph is None:
+        graph = getattr(mediator, "dependency_graph", None)
+    if case_file is None:
+        raise LegalDependencyGraphError("legal_dependency_unavailable")
+    return case_file, graph
+
+
+def mount_law_dependency_graph_routes(app: Any) -> None:
+    """Mount the read-only law-derived dependency graph beside the factual graph."""
+
+    from fastapi.responses import JSONResponse
+
+    from applications.case_routes import _BOUND_HANDLERS
+    from applications.workspace_case_authority import current_workspace_case_authority
+
+    def _fail(exc: LegalDependencyGraphError) -> JSONResponse:
+        return JSONResponse(
+            {"error": exc.code, "status": "denied", "rules_rewritten_by_user_or_model": False, "proof": False},
+            status_code=legal_dependency_http_status(exc.code),
+        )
+
+    def _authorized(request: Request, case_id: str):
+        decision = getattr(request.state, "case_authorization", None)
+        if decision is None or getattr(decision, "permits_case_content", False) is not True:
+            raise LegalDependencyGraphError("graph_read_ungranted")
+        action = getattr(decision, "action", "")
+        expected = "case.read" if request.method.upper() in {"GET", "HEAD"} else "case.update"
+        if action != expected:
+            raise LegalDependencyGraphError("graph_read_ungranted")
+        authorized_case = str(getattr(decision, "case_id", "") or "")
+        query_case = str(request.query_params.get("case_id") or "")
+        if authorized_case != case_id or (query_case and query_case != authorized_case):
+            raise LegalDependencyGraphError("cross_case_id")
+        resolver = _BOUND_HANDLERS.get()
+        if resolver is None:
+            raise LegalDependencyGraphError("mediator_graph_hook_unavailable")
+        try:
+            mediator, _workspace, _root = resolver()
+            authority = current_workspace_case_authority()
+        except Exception as exc:
+            raise LegalDependencyGraphError("mediator_graph_hook_unavailable") from exc
+        if mediator is None or authority is None or getattr(authority, "case_id", None) != case_id:
+            raise LegalDependencyGraphError("graph_read_ungranted")
+        return mediator
+
+    @app.get(FACTUAL_GRAPH_PREFIX + "/{case_id}/legal-dependency")
+    async def read_law_dependency_graph(case_id: str, request: Request):
+        try:
+            mediator = _authorized(request, case_id)
+            case_file, graph = _materials_from_mediator(mediator)
+            payload = project_law_derived_dependency_graph(case_file, dependency_graph=graph, case_id=case_id)
+        except LegalDependencyGraphError as exc:
+            return _fail(exc)
+        return JSONResponse(payload)
+
+    @app.post(FACTUAL_GRAPH_PREFIX + "/{case_id}/legal-dependency")
+    async def reject_law_dependency_rewrite(case_id: str, request: Request):
+        """User narratives and model output cannot be posted back as legal rules."""
+        try:
+            _authorized(request, case_id)
+            raw = await request.body()
+            if raw:
+                parsed = json.loads(raw.decode("utf-8"))
+                if not isinstance(parsed, dict):
+                    raise LegalDependencyGraphError("legal_dependency_field")
+        except LegalDependencyGraphError as exc:
+            return _fail(exc)
+        except (UnicodeDecodeError, ValueError):
+            return _fail(LegalDependencyGraphError("legal_dependency_field"))
+        return JSONResponse(
+            {
+                "error": "narrative_not_law",
+                "status": "refused",
+                "task_id": LAW_DEPENDENCY_TASK_ID,
+                "rules_rewritten_by_user_or_model": False,
+                "proof": False,
+            },
+            status_code=400,
+        )
