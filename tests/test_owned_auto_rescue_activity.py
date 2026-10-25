@@ -133,7 +133,7 @@ print(json.dumps({'type':'end'}),flush=True)
 def test_actual_native_rescue_producer_has_owned_bounded_activity(tmp_path,monkeypatch,kind):
     with _native_world(tmp_path,monkeypatch,frame_kind=kind) as world:
         result=activity.observe(runner,world["root"],world["campaign"],world["body"],now_ts=time.time())
-        assert result["activity_verified"] is True,result
+        assert result["activity_verified"] is True,json.dumps(result,sort_keys=True)
         assert result["work_progress_verified"] is (kind in activity._WORK)
         assert result["reason"]=="bounded_native_rescue_activity"
         assert result["deadline_at"] <= runner._event_timestamp({"timestamp":world["body"]["active_task_started_at"]})+runner.TIMEOUT_SECONDS
