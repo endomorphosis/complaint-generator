@@ -1633,7 +1633,7 @@ Implementation instructions:
 
 ## CIMP-GUI-55 Prove adversarial multi-role and transport isolation
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
