@@ -4948,6 +4948,170 @@ class ComplaintWorkspaceService:
             )
         return saved
 
+    def case_manifest_repository(self, user_id: str, case_id: Optional[str] = None) -> Path:
+        """Private CAS root for complete encrypted case revisions."""
+
+        return self.joined_revision_repository(user_id, case_id)
+
+    def _case_manifest_identity(self, user_id: str, case_id: Optional[str] = None) -> Dict[str, Any]:
+        context, key_id, key = self._joined_key(user_id, case_id)
+        return {
+            "tenant_id": str(context["tenant_id"]),
+            "case_id": str(context["case_id"]),
+            "principal_id": str(context["principal_id"]),
+            "key": key,
+            "key_id": key_id,
+        }
+
+    def _complete_case_artifacts(self, snapshot: Mapping[str, Any]) -> Dict[str, Any]:
+        from integrations.private_storage import _COMPLETE_CASE_ROLES
+
+        if not isinstance(snapshot, Mapping):
+            raise WorkspacePersistenceError(
+                "A complete case snapshot is required.",
+                code="role_missing",
+                public_status="recoverable",
+            )
+        artifacts: Dict[str, Any] = {}
+        for public_name, _kind in _COMPLETE_CASE_ROLES:
+            value = snapshot.get(public_name)
+            if isinstance(value, (bytes, bytearray)):
+                body = bytes(value)
+                revision = public_name
+            elif isinstance(value, Mapping) and isinstance(value.get("body"), (bytes, bytearray)):
+                body = bytes(value["body"])
+                revision = str(value.get("revision") or public_name)
+            elif isinstance(value, Mapping) and value:
+                body = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                revision = str(value.get("revision") or public_name)
+            else:
+                raise WorkspacePersistenceError(
+                    "A complete case snapshot is missing a required owner.",
+                    code="role_missing",
+                    public_status="recoverable",
+                )
+            if not body or body in {b"{}", b"[]", b"null"}:
+                raise WorkspacePersistenceError(
+                    "A complete case snapshot is missing a required owner.",
+                    code="role_missing",
+                    public_status="recoverable",
+                )
+            artifacts[public_name] = {"body": body, "revision": revision}
+        return artifacts
+
+    def commit_complete_encrypted_case_revision(
+        self,
+        user_id: str,
+        snapshot: Mapping[str, Any],
+        *,
+        case_id: Optional[str] = None,
+        expected_head: Optional[str] = None,
+        expected_hash: Optional[str] = None,
+        fail_before_head: bool = False,
+        private_names: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Publish one complete encrypted case revision through the existing CAS.
+
+        Missing owners, a crashed head update, and a conflicting writer leave
+        the acknowledged head unchanged. This method does not mint an empty case.
+        """
+
+        from integrations.private_storage import (
+            CaseManifestConflict,
+            PrivateRevisionError,
+            publish_case_manifest,
+        )
+
+        artifacts = self._complete_case_artifacts(snapshot)
+        try:
+            self.ensure_private_case_key(user_id, str(case_id or user_id))
+            identity = self._case_manifest_identity(user_id, case_id)
+        except WorkspacePersistenceError:
+            raise
+        except Exception as exc:
+            raise WorkspacePersistenceError(
+                "Private workspace keys require unlock.",
+                code="unlock_needed",
+                public_status="unlock_needed",
+            ) from exc
+        repository = self.case_manifest_repository(identity["tenant_id"], identity["case_id"])
+        try:
+            publication = publish_case_manifest(
+                repository,
+                tenant_id=identity["tenant_id"],
+                case_id=identity["case_id"],
+                principal_id=identity["principal_id"],
+                key=identity["key"],
+                key_id=identity["key_id"],
+                expected_head=expected_head,
+                expected_hash=expected_hash,
+                artifacts=artifacts,
+                private_names=dict(private_names or {}),
+                complete=True,
+                fail_before_head=fail_before_head,
+            )
+        except CaseManifestConflict as exc:
+            raise WorkspacePersistenceError(
+                "case manifest head conflict",
+                code="manifest_conflict",
+                public_status="recoverable",
+            ) from exc
+        except PrivateRevisionError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.state) from exc
+        receipt = publication.as_dict()
+        receipt["empty_replacement"] = False
+        receipt["complete"] = True
+        return receipt
+
+    def read_complete_encrypted_case_revision(
+        self,
+        user_id: str,
+        *,
+        case_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        from integrations.private_storage import PrivateRevisionError, read_case_manifest
+
+        identity = self._case_manifest_identity(user_id, case_id)
+        repository = self.case_manifest_repository(identity["tenant_id"], identity["case_id"])
+        try:
+            opened = read_case_manifest(repository, **identity)
+        except PrivateRevisionError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.state) from exc
+        if opened is None:
+            return None
+        if opened.get("complete") is not True:
+            raise WorkspacePersistenceError(
+                "case manifest blob is missing or stale",
+                code="stale_head",
+                public_status="recoverable",
+            )
+        return opened
+
+    def replay_acknowledged_encrypted_case_revision(
+        self,
+        user_id: str,
+        *,
+        generation: str,
+        manifest_hash: str,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from integrations.private_storage import PrivateRevisionError, replay_acknowledged_case_revision
+
+        identity = self._case_manifest_identity(user_id, case_id)
+        repository = self.case_manifest_repository(identity["tenant_id"], identity["case_id"])
+        try:
+            publication = replay_acknowledged_case_revision(
+                repository,
+                generation=generation,
+                manifest_hash=manifest_hash,
+                **identity,
+            )
+        except PrivateRevisionError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.state) from exc
+        receipt = publication.as_dict()
+        receipt["empty_replacement"] = False
+        return receipt
+
     def _replica_identity(self, user_id: str, case_id: Optional[str]) -> Dict[str, Any]:
         context = self._interview_snapshot_key(user_id, case_id)
         return {
