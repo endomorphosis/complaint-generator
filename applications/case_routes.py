@@ -238,8 +238,9 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     mount_case_consent(app)
     from .case_api import mount_case_catalog
     mount_case_catalog(app)
-    from .graph_api import mount_factual_graph_routes
+    from .graph_api import mount_factual_graph_routes, mount_law_dependency_graph_routes
     mount_factual_graph_routes(app)
+    mount_law_dependency_graph_routes(app)
     from .legal_context_api import mount_legal_context_routes
     mount_legal_context_routes(app)
     from .legal_research_api import mount_legal_research_routes
