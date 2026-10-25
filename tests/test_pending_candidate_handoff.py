@@ -148,3 +148,28 @@ def test_preserved_replay_reproves_native_custody_without_repeating_release(hand
     with pytest.raises(ValueError, match="renewed claim"): handoff.run()
     assert handoff.calls["reconcile"] == 1
     assert runtime.unfinished_handoff_task(handoff.state) == "CIMP-SYNTHETIC"
+
+
+@pytest.mark.parametrize("sdk_reason,expected", [
+    ("native_preservation_event_required", "pending_claim_sdk_blocked_native_preservation_event_required"),
+    ("unsafe/path?secret=private", "pending_claim_runtime_reconciliation_unverified"),
+])
+def test_blocked_sdk_reason_is_visible_only_as_a_closed_identifier(handoff, sdk_reason, expected):
+    handoff.result.update(reconciled=False, blocked=True, reason=sdk_reason)
+    with pytest.raises(ValueError) as caught:
+        handoff.run()
+    assert str(caught.value) == expected
+    assert handoff.calls == {"review": 1, "reconcile": 1, "materialize": 0}
+    assert runtime.unfinished_handoff_task(handoff.state) == "CIMP-SYNTHETIC"
+
+
+def test_sdk_refusal_cannot_conceal_changed_native_state(handoff):
+    handoff.result.update(reconciled=False, blocked=True, reason="native_preservation_event_required")
+    original = handoff.module.reconcile_recovery
+    def changes_state(*args, **kwargs):
+        handoff.body["implementation_attempts"]["CIMP-SYNTHETIC"] = 2
+        return original(*args, **kwargs)
+    handoff.module.reconcile_recovery = changes_state
+    with pytest.raises(ValueError, match="pending_claim_runtime_native_state_changed"):
+        handoff.run()
+    assert handoff.calls["materialize"] == 0
