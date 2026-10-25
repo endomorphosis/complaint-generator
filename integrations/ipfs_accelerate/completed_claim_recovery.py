@@ -236,11 +236,20 @@ def review_completed_claim(daemon):
     lease = None
     if os.path.lexists(lock_path):
         value, inode, sha = _file(lock_path)
-        _require(all(value.get(k) == claim.get(k) for k in
-            ("task_id", "canonical_task_cid", "canonical_task_key", "board_namespace",
-             "attempt", "pid", "owner_process_birth", "state_dir", "state_path", "repository_id")),
+        # Actual 6af implementation leases predate birth/repository fields.
+        # Join that exact producer schema to the fully proved task claim;
+        # never invent a birth field or accept a current merge/foreign lease.
+        legacy_fields = {"kind", "lease_id", "pid", "owner_script", "repo_root", "state_dir",
+            "task_id", "canonical_task_key", "canonical_task_cid", "board_namespace", "attempt", "started_at"}
+        _require(set(value) == legacy_fields and value.get("kind") == "implementation"
+            and type(value.get("pid")) is int and type(value.get("attempt")) is int
+            and isinstance(value.get("lease_id"), str) and 0 < len(value["lease_id"]) <= 256
+            and value.get("repo_root") == str(root.resolve())
+            and all(value.get(k) == claim.get(k) for k in
+                ("task_id", "canonical_task_cid", "canonical_task_key", "board_namespace",
+                 "attempt", "pid", "owner_script", "state_dir", "started_at")),
             "completed_claim_implementation_lease_mismatch")
-        _dead(value)
+        _dead(claim)
         lease = {"path": str(lock_path), "metadata": value, "identity": inode, "sha256": sha}
     return {"schema": SCHEMA, "task_id": task_id, **binding, "attempt": attempt,
         "task_source": "native_markdown", "source_status": "completed",

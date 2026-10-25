@@ -65,7 +65,11 @@ def world(tmp_path_factory):
         "worktree_submodule_paths=[],merge_queue_dir=Path(sys.argv[6]),llm_merge_resolver_command='')\n"
         "t=d._load_tasks()[0]\nm=d._build_implementation_task_claim_metadata(t,1,sys.argv[7])\n"
         "p=d._implementation_task_claim_path(t.task_id,canonical_task_cid=d._identity_for_task(t).canonical_task_cid)\n"
-        "ok,reason,prior=d._try_acquire_implementation_task_claim(p,m)\nassert ok,reason\n")
+        "ok,reason,prior=d._try_acquire_implementation_task_claim(p,m)\nassert ok,reason\n"
+        "m=d._build_implementation_lock_metadata(t,1,sys.argv[7])\n"
+        "fd,reason,prior=d._try_acquire_lock(d._implementation_lock_path(),lock_kind='implementation',"
+        "owner_active=d._implementation_lock_owner_is_active)\nassert fd is not None,reason\n"
+        "d._write_lock_metadata(fd,m)\n")
     subprocess.run([sys.executable, "-I", "-B", str(driver), str(daemon.todo_path),
         str(daemon.state_path), str(daemon.strategy_path), str(daemon.events_path),
         str(root), str(state / "merge-queue"), started_at], check=True, timeout=90)
@@ -135,7 +139,7 @@ def world(tmp_path_factory):
 @pytest.fixture
 def unchanged_world(world):
     d = world["daemon"]
-    files = [world["claim_path"], d.todo_path, d.events_path]
+    files = [world["claim_path"], d._implementation_lock_path(), d.todo_path, d.events_path]
     original = {p: p.read_bytes() for p in files}
     state = native.PortalTaskState.load(d.state_path)
     yield world
@@ -161,13 +165,15 @@ def test_exact_native_primitive_retires_only_claim_preserving_full_cp(unchanged_
     result = repair.reconcile_completed_claim(w["daemon"], reprove_closure=lambda: closures.append(True))
     assert result["reconciled"] and len(closures) == 3
     assert not w["claim_path"].exists()
+    assert not w["daemon"]._implementation_lock_path().exists()
     assert asdict(native.PortalTaskState.load(w["daemon"].state_path)) == before
     assert not result["completion_authority"] and not result["attempt_refunded"]
     assert json.loads(Path(result["receipt_path"]).read_text())["phase"] == "released"
 
 
 @pytest.mark.parametrize("damage", ["pending", "changed_definition", "wrong_cid", "wrong_key",
-    "attempt", "live_owner", "fence", "corrupt_journal", "nonancestor", "new_lane"])
+    "attempt", "live_owner", "fence", "corrupt_journal", "nonancestor", "new_lane",
+    "foreign_impl_lease", "wrong_impl_start", "merge_impl_lease", "bool_impl_attempt"])
 def test_unknown_or_nonterminal_authority_cannot_release(unchanged_world, damage):
     w = unchanged_world; d = w["daemon"]
     if damage in {"pending", "changed_definition"}:
@@ -190,6 +196,12 @@ def test_unknown_or_nonterminal_authority_cannot_release(unchanged_world, damage
         if damage == "attempt": value.implementation_attempts[w["task"].task_id] = 2
         else: value.implementation_in_progress = True
         value.save(d.state_path)
+    elif damage in {"foreign_impl_lease", "wrong_impl_start", "merge_impl_lease", "bool_impl_attempt"}:
+        value = json.loads(d._implementation_lock_path().read_text())
+        key = {"foreign_impl_lease": "task_id", "wrong_impl_start": "started_at", "merge_impl_lease": "kind",
+               "bool_impl_attempt": "attempt"}[damage]
+        value[key] = True if damage == "bool_impl_attempt" else "different"
+        d._implementation_lock_path().write_text(json.dumps(value))
     elif damage == "corrupt_journal":
         d.events_path.write_bytes(d.events_path.read_bytes().replace(b'"synthetic_history":true', b'"synthetic_history":false', 1))
     else:
@@ -214,4 +226,19 @@ def test_replacement_at_closure_cannot_be_released(unchanged_world):
     with pytest.raises(ValueError, match="proof_changed"):
         repair.reconcile_completed_claim(w["daemon"], reprove_closure=closure)
     assert w["claim_path"].exists()
+
+
+def test_real_retained_checkout_guard_is_distinct_and_preserved(unchanged_world):
+    from integrations.ipfs_accelerate import improvement_runner as runner
+    from ipfs_accelerate_py.agent_supervisor.merge.checkout_lock import board_scoped_checkout_mutation_lock_path
+    w = unchanged_world
+    namespace = "synthetic-completed-claim"
+    guard = board_scoped_checkout_mutation_lock_path(w["root"], namespace)
+    assert guard != w["daemon"]._implementation_lock_path()
+    with runner._recovery_checkout_lease(w["root"], board_namespace=namespace):
+        original = guard.read_bytes()
+        result = repair.reconcile_completed_claim(w["daemon"], reprove_closure=lambda: None)
+        assert result["reconciled"]
+        assert guard.read_bytes() == original
+        assert not w["claim_path"].exists() and not w["daemon"]._implementation_lock_path().exists()
 
