@@ -3877,6 +3877,20 @@
                             <p id="adaptive-pending-prompt">No pending inquiry yet. Enter a narrative to ask the shared mediator.</p>
                             <p id="adaptive-pending-meta"></p>
                         </div>
+                        <section id="inquiry-explanation" data-task="CIMP-GUI-17" data-explanation-id="" data-revision="" data-stores-answer="false" data-changes-law="false" data-legal-sufficiency="false">
+                            <h3>Why this question is asked</h3>
+                            <p class="muted">The explanation names the factual target and the related legal requirement. Each part cites its own graph. Why and Review do not store an answer and do not change the legal rule.</p>
+                            <p id="inquiry-explanation-why">No explanation is stored until the shared mediator asks a question.</p>
+                            <p id="inquiry-explanation-factual"></p>
+                            <p id="inquiry-explanation-law"></p>
+                            <ul id="inquiry-explanation-sources"></ul>
+                            <div id="inquiry-explanation-provenance" data-provenance-status="unknown"></div>
+                            <div class="button-row">
+                                <button class="secondary" id="inquiry-why" type="button">Why this question</button>
+                                <button class="secondary" id="inquiry-review" type="button">Review explanation</button>
+                            </div>
+                            <div class="status" id="inquiry-explanation-status" data-stored-as-answer="false" data-changes-law="false" data-law-unchanged="true">Why and Review leave the answer record and the legal rule unchanged.</div>
+                        </section>
                         <label for="adaptive-answer">Answer to the pending inquiry</label>
                         <textarea id="adaptive-answer" placeholder="Answer only the pending inquiry."></textarea>
                         <div class="button-row">
@@ -14695,6 +14709,111 @@ function extractComplaintOutputSignals(result) {
             }
             renderFactualCorrectionOffer(payload);
             renderFiniteInterviewOutcome(payload);
+            renderInquiryExplanation(payload, view);
+        }
+
+        function pendingInquiryRecord(payload) {
+            const session = (payload && payload.session) || ((workspaceSession || {}).session) || {};
+            const projection = session.shared_interview && typeof session.shared_interview === 'object' ? session.shared_interview : {};
+            const pending = projection.pending_inquiry && typeof projection.pending_inquiry === 'object' ? projection.pending_inquiry : null;
+            const fromInterview = payload && payload.interview && payload.interview.inquiry && typeof payload.interview.inquiry === 'object'
+                ? payload.interview.inquiry : null;
+            if (pending && pending.inquiry_explanation) return pending;
+            if (fromInterview && fromInterview.inquiry_explanation) return fromInterview;
+            return pending || fromInterview;
+        }
+
+        function renderInquiryExplanation(payload, view) {
+            const panel = document.getElementById('inquiry-explanation');
+            const whyNode = document.getElementById('inquiry-explanation-why');
+            const factualNode = document.getElementById('inquiry-explanation-factual');
+            const lawNode = document.getElementById('inquiry-explanation-law');
+            const sourcesNode = document.getElementById('inquiry-explanation-sources');
+            const provenanceNode = document.getElementById('inquiry-explanation-provenance');
+            if (!panel || !whyNode || !factualNode || !lawNode || !sourcesNode || !provenanceNode) return;
+            const record = pendingInquiryRecord(payload);
+            const explanation = record && record.inquiry_explanation && record.inquiry_explanation.schema === 'inquiry-explanation-v1'
+                ? record.inquiry_explanation : null;
+            const shown = Boolean(explanation && view && view.pending === true);
+            panel.dataset.explanationId = shown ? String(explanation.explanation_id || '') : '';
+            panel.dataset.revision = shown && explanation.revision !== undefined && explanation.revision !== null ? String(explanation.revision) : '';
+            panel.dataset.storesAnswer = 'false';
+            panel.dataset.changesLaw = 'false';
+            panel.dataset.legalSufficiency = 'false';
+            if (!shown) {
+                whyNode.textContent = 'No explanation is stored until the shared mediator asks a question.';
+                factualNode.textContent = '';
+                lawNode.textContent = '';
+                sourcesNode.innerHTML = '';
+                provenanceNode.dataset.provenanceStatus = 'unknown';
+                provenanceNode.textContent = '';
+                return;
+            }
+            const factual = explanation.factual_target || {};
+            const law = explanation.sourced_legal_requirement || {};
+            const factualProvenance = factual.provenance || {};
+            const lawProvenance = law.provenance || {};
+            whyNode.textContent = String(explanation.why_asked || '');
+            factualNode.textContent = `Factual target ${factual.target_id || 'unknown'} (${factual.label || 'unknown'}) from the factual knowledge graph. Provenance ${factualProvenance.status || 'unknown'}, node ${factualProvenance.node_id || 'unknown'}.`;
+            lawNode.textContent = `Legal requirement ${law.requirement_id || 'unknown'} (${law.label || 'unknown'}). Law-derived ${law.law_derived === true ? 'yes' : 'no'}. Provenance ${lawProvenance.status || 'unknown'}, citation ${lawProvenance.citation || 'unknown'}, source ${lawProvenance.source_id || 'unknown'}, span ${lawProvenance.span || 'unknown'}.`;
+            const sources = Array.isArray(explanation.graph_sources) ? explanation.graph_sources : [];
+            sourcesNode.innerHTML = sources.map((item) => {
+                const kind = String((item && item.graph_kind) || 'unknown');
+                const graphId = String((item && item.graph_id) || 'unknown');
+                const nodeId = String((item && item.node_id) || 'unknown');
+                const status = String((item && item.provenance && item.provenance.status) || 'unknown');
+                return `<li data-graph-kind="${escapeHtml(kind)}" data-graph-id="${escapeHtml(graphId)}" data-node-id="${escapeHtml(nodeId)}" data-provenance-status="${escapeHtml(status)}">${escapeHtml(kind)} ${escapeHtml(graphId)} node ${escapeHtml(nodeId)} provenance ${escapeHtml(status)}</li>`;
+            }).join('');
+            panel.dataset.graphKinds = sources.map((item) => String((item && item.graph_kind) || '')).join(',');
+            provenanceNode.dataset.provenanceStatus = String(lawProvenance.status || 'unknown');
+            provenanceNode.dataset.citation = String(lawProvenance.citation || 'unknown');
+            provenanceNode.dataset.sourceId = String(lawProvenance.source_id || 'unknown');
+            provenanceNode.dataset.modelAuthored = lawProvenance.model_authored === true ? 'true' : 'false';
+            provenanceNode.textContent = `Inspect legal provenance on ${lawProvenance.graph_kind || 'legal_dependency_graph'} graph ${lawProvenance.graph_id || 'unknown'}.`;
+        }
+
+        async function explainOrReviewInquiry(action) {
+            const capture = adaptiveRequestCapture();
+            if (!adaptiveRequestCurrent(capture)) return;
+            const view = adaptiveInquiryState || adaptiveViewFrom(workspaceSession);
+            if (!view || !view.pending) {
+                setStatus('There is no mediator question to explain.');
+                return;
+            }
+            const beforeId = document.getElementById('inquiry-explanation').dataset.explanationId || '';
+            const beforeRevision = document.getElementById('inquiry-explanation').dataset.revision || '';
+            const answerField = document.getElementById('adaptive-answer');
+            const answerBefore = answerField ? answerField.value : '';
+            setBusyStatus(action === 'why' ? 'Reading why this question is asked…' : 'Reviewing the explanation…');
+            let result;
+            try {
+                result = action === 'why'
+                    ? await client.runIntakeChatTurn(workspaceUserId, '/why', view.inquiry_id, {})
+                    : await client.runIntakeChatTurn(workspaceUserId, '', '', {interview_action: 'review'});
+                if (!adaptiveRequestCurrent(capture)) return;
+            } catch (error) {
+                if (!adaptiveRequestCurrent(capture)) return;
+                setStatus(`The explanation could not be read: ${String((error && error.message) || error)}`);
+                return;
+            }
+            if (answerField) answerField.value = answerBefore;
+            workspaceSession = result;
+            renderAdaptiveInquiry(result, capture);
+            const panel = document.getElementById('inquiry-explanation');
+            const statusNode = document.getElementById('inquiry-explanation-status');
+            const stored = result && result.stored_as_answer === true;
+            const sameIdentity = panel && panel.dataset.explanationId === beforeId && panel.dataset.revision === beforeRevision && beforeId !== '';
+            if (statusNode) {
+                statusNode.dataset.storedAsAnswer = stored ? 'true' : 'false';
+                statusNode.dataset.changesLaw = 'false';
+                statusNode.dataset.lawUnchanged = 'true';
+                statusNode.dataset.identityPreserved = sameIdentity ? 'true' : 'false';
+                statusNode.dataset.action = action;
+                statusNode.textContent = stored
+                    ? 'The action was stored as an answer.'
+                    : `${action === 'why' ? 'Why' : 'Review'} did not store an answer and did not change the legal rule. Explanation ${beforeId} revision ${beforeRevision} is unchanged.`;
+            }
+            setStatus(action === 'why' ? 'Why was read. The pending question is unchanged.' : 'The explanation was reviewed. The pending question is unchanged.');
         }
 
         function renderFiniteInterviewOutcome(payload) {
@@ -16066,6 +16185,8 @@ function extractComplaintOutputSignals(result) {
         });
         document.getElementById('save-intake-button').addEventListener('click', saveIntake);
         document.getElementById('adaptive-enter-narrative').addEventListener('click', enterAdaptiveNarrative);
+        document.getElementById('inquiry-why').addEventListener('click', () => explainOrReviewInquiry('why'));
+        document.getElementById('inquiry-review').addEventListener('click', () => explainOrReviewInquiry('review'));
         document.getElementById('adaptive-submit-answer').addEventListener('click', () => answerAdaptiveInquiry('answer'));
         document.getElementById('finite-interview-pause').addEventListener('click', () => controlFiniteInterview('pause'));
         document.getElementById('finite-interview-cancel').addEventListener('click', () => controlFiniteInterview('cancel'));
