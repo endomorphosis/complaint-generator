@@ -65,3 +65,29 @@ def test_readonly_receipt_revalidation_retains_exact_typed_request_boundary(tmp_
     result = mediator.workflow_actions.accept_legal_refresh_late_result(**kwargs)
     assert result["applied"] is False and result["error"]["code"] == "refresh_field"
     assert graph.to_dict() == before
+
+
+def test_cold_source_replacement_preserves_existing_factual_dependency_edges(tmp_path, monkeypatch):
+    from complaint_phases.dependency_graph import NodeType
+    from tests.test_authority_dependency_pipeline import _CONTEXT, _local_sources, _source_record
+    from tests.test_authority_dependency_public_pipeline import _workflow
+    source = _source_record("cold-old-authority", "notice")
+    first = _workflow(tmp_path / "first")
+    _local_sources(monkeypatch, first, [source])
+    started = first.workflow_actions.transition_interview(action="start",
+        narrative="My employer discriminated against me." + _CONTEXT,
+        user_id="source-fixture-owner", case_id="synthetic-case")
+    assert not started.get("error")
+    projection = deepcopy(first.workflow_actions.export_session_projection())
+    fresh = _workflow(tmp_path / "cold")
+    assert not fresh.workflow_actions.restore_session_projection(deepcopy(projection)).get("error")
+    graph = fresh.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
+    factual = {key: deepcopy(edge.to_dict()) for key, edge in graph.dependencies.items()
+        if graph.nodes[edge.source_id].node_type == NodeType.FACT}
+    assert factual
+    replacement = _source_record("cold-new-authority", "hearing")
+    result = fresh.workflow_actions.refresh_legal_dependency_graph(**_request(replacement),
+        canonical_source_records={"employment_discrimination": [replacement]})
+    assert result["applied"] is True
+    assert {key: graph.dependencies[key].to_dict() for key in factual if key in graph.dependencies} == factual
+    assert len(graph.dependencies) == len({edge.id for edge in graph.dependencies.values()})

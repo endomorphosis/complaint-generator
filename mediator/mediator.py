@@ -14440,6 +14440,14 @@ class Mediator:
 		if dg is None:
 			return {'affected_node_ids': [], 'preserved_node_ids': [], 'recomputed_dependencies': [],
 				'graph_replaced': False, 'empty_success': False, 'case_revision': None}
+		# A cold restored graph may outlive its builder. Reserve all existing
+		# native edge IDs before source reconciliation allocates new ones, so a
+		# new legal edge cannot overwrite an unrelated factual dependency.
+		if isinstance(self.dg_builder, DependencyGraphBuilder):
+			occupied = [int(key[4:]) for key in dg.dependencies
+				if isinstance(key, str) and key.startswith('dep_')
+				and key[4:].isdigit() and len(key[4:]) <= 32]
+			self.dg_builder.dependency_counter = max([self.dg_builder.dependency_counter, *occupied])
 		payload = dict(change) if isinstance(change, dict) else {}
 		prior_available = [
 			node.id for node in dg.nodes.values()
