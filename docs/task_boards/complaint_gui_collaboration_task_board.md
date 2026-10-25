@@ -1543,7 +1543,7 @@ Implementation instructions:
 
 ## CIMP-GUI-52 Provide scoped encrypted audit and export controls
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
