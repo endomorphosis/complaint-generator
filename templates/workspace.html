@@ -3924,6 +3924,18 @@
                             <button class="secondary" id="adaptive-model-extract" type="button">Ask model about this gap</button>
                         </div>
                         <div class="status" id="adaptive-model-status" data-model-dispatched="false" data-code="">Model extraction stays off until this case has persisted consent for the selected purpose and the request is purpose-minimized.</div>
+                        <section id="bounded-inference-progress" data-task="CIMP-GUI-35" data-lifecycle="idle" data-revision="" data-requirements-supported="false" data-remote-processing="unchanged" data-retry-count="0" data-attempt-count="0" data-fabricated-progress="false" data-percent="" data-streaming="false">
+                            <h3>Bounded inference progress</h3>
+                            <p class="muted">Stages come from the observed request. This panel does not estimate how close the request is to completion, stream tokens, or treat a partial model reply as legal support.</p>
+                            <p id="bounded-inference-lifecycle">No inference request has started.</p>
+                            <p id="bounded-inference-revision">Current revision: unobserved</p>
+                            <p id="bounded-inference-stages"></p>
+                            <div class="button-row">
+                                <button class="secondary" id="bounded-inference-cancel" type="button">Cancel inference</button>
+                                <button class="secondary" id="bounded-inference-retry" type="button">Retry inference</button>
+                            </div>
+                            <div class="status" id="bounded-inference-status" role="status" data-code="">Inference has not been requested.</div>
+                        </section>
                     </section>
                     <div class="section-intro">
                         <strong>What to do here</strong>
@@ -14601,6 +14613,32 @@ function extractComplaintOutputSignals(result) {
             }
         }
 
+        function renderBoundedInferenceProgress(view) {
+            const root = document.getElementById('bounded-inference-progress');
+            if (!root || !view) return;
+            root.dataset.lifecycle = view.lifecycle || 'unobserved';
+            root.dataset.revision = Number.isSafeInteger(view.revision) ? String(view.revision) : '';
+            root.dataset.requirementsSupported = 'false';
+            root.dataset.remoteProcessing = view.remote_processing || 'unchanged';
+            root.dataset.retryCount = String(view.retry_count || 0);
+            root.dataset.attemptCount = String(view.attempt_count || 0);
+            root.dataset.fabricatedProgress = 'false';
+            root.dataset.percent = '';
+            root.dataset.streaming = 'false';
+            const lifecycle = document.getElementById('bounded-inference-lifecycle');
+            const revision = document.getElementById('bounded-inference-revision');
+            const stages = document.getElementById('bounded-inference-stages');
+            const status = document.getElementById('bounded-inference-status');
+            if (lifecycle) lifecycle.textContent = view.lifecycle_text || 'No inference outcome was observed.';
+            if (revision) revision.textContent = Number.isSafeInteger(view.revision) ? ('Current revision: ' + view.revision) : 'Current revision: unobserved';
+            if (stages) stages.textContent = Array.isArray(view.stages) ? view.stages.map((item) => item.kind + ':' + item.status).join(' ') : '';
+            if (status) {
+                status.dataset.code = view.code || '';
+                status.textContent = view.status_text || 'No inference outcome was observed.';
+            }
+        }
+        window.renderBoundedInferenceProgress = renderBoundedInferenceProgress;
+
         function showAdaptiveModelStatus(code, dispatched) {
             const node = document.getElementById('adaptive-model-status');
             if (!node) return;
@@ -14617,6 +14655,9 @@ function extractComplaintOutputSignals(result) {
             const capture = adaptiveRequestCapture();
             if (!adaptiveRequestCurrent(capture)) return;
             showAdaptiveModelStatus('checking_consent', null);
+            if (window.ComplaintMcpSdk && window.ComplaintMcpSdk.projectBoundedInferenceReceipt) {
+                renderBoundedInferenceProgress(window.ComplaintMcpSdk.projectBoundedInferenceReceipt(null, {lifecycle: 'checking_consent', terminal: false, revision: null}));
+            }
             const purposeNode = document.getElementById('adaptive-model-purpose');
             const purpose = purposeNode ? purposeNode.value : 'extract_facts';
             const view = adaptiveInquiryState || adaptiveViewFrom(workspaceSession);
@@ -14628,6 +14669,17 @@ function extractComplaintOutputSignals(result) {
             if (!adaptiveRequestCurrent(capture)) return;
             if (!consent.authorized) {
                 showAdaptiveModelStatus(consent.code, false);
+                const refusal = {
+                    status: 'refused', code: consent.code, requirements_satisfied: false,
+                    remote_processing_revoked: consent.code === 'consent_revoked',
+                };
+                const refusalContext = {terminal: true, revision: null};
+                const refusalView = client && typeof client.observeBoundedGuiInference === 'function'
+                    ? client.observeBoundedGuiInference(refusal, refusalContext)
+                    : (window.ComplaintMcpSdk && window.ComplaintMcpSdk.projectBoundedInferenceReceipt
+                        ? window.ComplaintMcpSdk.projectBoundedInferenceReceipt(refusal, refusalContext)
+                        : null);
+                if (refusalView) renderBoundedInferenceProgress(refusalView);
                 setStatus('Model extraction stayed off. This case has no persisted remote-processing consent for that purpose.');
                 return;
             }
@@ -14653,10 +14705,10 @@ function extractComplaintOutputSignals(result) {
             try {
                 if (!adaptiveRequestCurrent(capture)) return;
                 window.adaptiveModelAttempts += 1;
-                result = await client._request('/api/complaint-workspace/inference/dispatch', {
-                    method: 'POST',
-                    body: JSON.stringify({purpose, inputs}),
-                });
+                window.lastBoundedInferenceRequest = {purpose, inputs};
+                const progress = await client.dispatchBoundedGuiInference({purpose, inputs}, {onView: renderBoundedInferenceProgress});
+                renderBoundedInferenceProgress(progress);
+                result = progress;
                 if (!adaptiveRequestCurrent(capture)) return;
             } catch (_error) {
                 if (!adaptiveRequestCurrent(capture)) return;
@@ -15791,6 +15843,22 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('adaptive-unknown').addEventListener('click', () => answerAdaptiveInquiry('unknown'));
         document.getElementById('adaptive-defer').addEventListener('click', () => answerAdaptiveInquiry('deferred'));
         document.getElementById('adaptive-model-extract').addEventListener('click', askAdaptiveModel);
+        document.getElementById('bounded-inference-cancel').addEventListener('click', async () => {
+            const view = await client.cancelBoundedGuiInference();
+            renderBoundedInferenceProgress(view);
+        });
+        document.getElementById('bounded-inference-retry').addEventListener('click', async () => {
+            if (!window.lastBoundedInferenceRequest) {
+                const current = document.getElementById('bounded-inference-progress');
+                const lifecycle = current && current.dataset.lifecycle ? current.dataset.lifecycle : 'idle';
+                renderBoundedInferenceProgress(window.ComplaintMcpSdk.projectBoundedInferenceReceipt(null, {
+                    lifecycle: lifecycle, terminal: true, revision: null, error: {code: 'retry_not_applicable'},
+                }));
+                return;
+            }
+            const view = await client.dispatchBoundedGuiInference(window.lastBoundedInferenceRequest, {retry: true, onView: renderBoundedInferenceProgress});
+            renderBoundedInferenceProgress(view);
+        });
         document.getElementById('refresh-session-button').addEventListener('click', refreshWorkspace);
         document.getElementById('intake-step-list').addEventListener('click', (event) => {
             const button = event.target.closest('[data-intake-step-target]');
