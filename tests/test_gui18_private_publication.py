@@ -57,6 +57,7 @@ def test_actual_owner_correction_survives_fresh_encrypted_workspace(tmp_path):
         assert receipt["actor_principal_id"] == world.owner.principal_id
         assert receipt["canonical_owner_principal_id"] == world.case.tenant_id
         assert receipt["actor_matches_canonical_owner"] is False
+        replacement_id = receipt["correction"]["replacement_stable_id"]
     cold = ComplaintWorkspaceService(root_dir=service._session_dir)
     cold.unlock_private_keys(passphrase=PASSPHRASE)
     registry = CaseHandlerRegistry()
@@ -71,10 +72,14 @@ def test_actual_owner_correction_survives_fresh_encrypted_workspace(tmp_path):
         history = response.json()["session"]["intake_history"]
         answers = [row.get("answer") for row in history]
         assert ANSWER in answers and CORRECTION in answers
+        from complaint_phases.knowledge_graph import KnowledgeGraph
+        graph = KnowledgeGraph.from_dict(response.json()["session"]["shared_interview"]["knowledge_graph"])
+        assert graph.assertion_state(offer["target_stable_id"])["status"] == "superseded"
+        assert graph.assertion_state(replacement_id)["status"] == "active"
 
 
 @pytest.mark.parametrize("stage", ["crypto", "head_temp_fsync"])
-@pytest.mark.parametrize("boundary", ["logout", "key_lock"])
+@pytest.mark.parametrize("boundary", ["logout", "key_lock", "rotate", "expire"])
 def test_revoked_actual_correction_never_publishes_or_recovers(tmp_path, monkeypatch, stage, boundary):
     from integrations import private_storage
     world = _composed_case_world(tmp_path)
@@ -85,6 +90,9 @@ def test_revoked_actual_correction_never_publishes_or_recovers(tmp_path, monkeyp
         csrf, offer = _prepare(client, world)
         repository = service.joined_revision_repository(world.case.tenant_id, world.case.case_id)
         before = (repository / "head.cgpe").read_bytes()
+        journal = repository / "wal/transaction-decisions.jsonl"
+        journal_before = len(journal.read_text().splitlines())
+        commits_before = private_storage._native_commit_transactions(repository)
 
         def pause():
             entered.set()
@@ -117,6 +125,10 @@ def test_revoked_actual_correction_never_publishes_or_recovers(tmp_path, monkeyp
             assert (repository / "head.cgpe").read_bytes() == before
             if boundary == "logout":
                 assert client.post("/api/complaint-workspace/auth/logout", headers={"x-csrf-token": csrf}).status_code == 200
+            elif boundary == "rotate":
+                assert client.post("/api/complaint-workspace/auth/rotate", headers={"x-csrf-token": csrf}).status_code == 200
+            elif boundary == "expire":
+                world.clock["now"] += 301
             else:
                 service.lock_private_keys()
             assert worker.is_alive(), "The boundary must occur while the real writer is still paused."
@@ -128,8 +140,84 @@ def test_revoked_actual_correction_never_publishes_or_recovers(tmp_path, monkeyp
         if errors:
             raise errors[0]
         assert len(responses) == 1
+        assert responses[0].status_code >= 400
+        assert CORRECTION not in responses[0].text and ANSWER not in responses[0].text
+        decisions = [json.loads(line) for line in journal.read_text().splitlines()[journal_before:]]
+        assert any(row.get("kind") == "abort" for row in decisions)
+        assert not any(row.get("kind") in {"commit", "commit_pending"} for row in decisions)
+        assert private_storage._native_commit_transactions(repository) == commits_before
         if boundary == "key_lock":
             service.unlock_private_keys(passphrase=PASSPHRASE)
         service.recover_joined_intake_revision(world.case.tenant_id, case_id=world.case.case_id)
         service.recover_joined_intake_revision(world.case.tenant_id, case_id=world.case.case_id)
         assert (repository / "head.cgpe").read_bytes() == before
+
+
+def test_correction_draft_is_not_visible_to_concurrent_read_and_stale_source_cannot_commit(tmp_path, monkeypatch):
+    from mediator.mediator import Mediator
+    from complaint_phases.knowledge_graph import KnowledgeGraph
+    world = _composed_case_world(tmp_path)
+    service = world.services[world.case.case_id]
+    entered, release = Event(), Event()
+    actual = Mediator.apply_factual_correction
+
+    def corrected_then_wait(mediator, *args, **kwargs):
+        result = actual(mediator, *args, **kwargs)
+        assert result["status"] == "applied"
+        entered.set()
+        assert release.wait(20), "The private correction draft did not release."
+        return result
+
+    with TestClient(world.app, base_url="https://testserver") as client:
+        csrf, offer = _prepare(client, world)
+        repository = service.joined_revision_repository(world.case.tenant_id, world.case.case_id)
+        monkeypatch.setattr(Mediator, "apply_factual_correction", corrected_then_wait)
+        responses, errors = [], []
+        def correct():
+            try:
+                responses.append(_correct(client, world, csrf, offer))
+            except BaseException as exc:
+                errors.append(exc)
+        worker = Thread(target=correct, daemon=True)
+        worker.start()
+        try:
+            assert entered.wait(20)
+            current = client.get("/api/complaint-workspace/session", headers=_composed_headers(world.case))
+            assert current.status_code == 200, current.text
+            assert CORRECTION not in current.text, "A reader observed an uncommitted cached correction."
+            shared = current.json()["session"]["shared_interview"]
+            graph = KnowledgeGraph.from_dict(shared["knowledge_graph"])
+            assert graph.assertion_state(offer["target_stable_id"])["status"] == "active"
+            inquiry = shared["pending_inquiry"]
+            changed = client.post("/api/complaint-workspace/intake-chat", headers=_composed_headers(world.case, csrf),
+                json={"message": "A witness saw the safety report before the termination.",
+                    "interview_action": "answer", "question_id": inquiry["inquiry_id"],
+                    "expected_question_revision": inquiry["revision"]})
+            assert changed.status_code == 200, changed.text
+            assert changed.json()["interview"]["session_revision"] > shared["session_revision"]
+            after_legitimate_change = (repository / "head.cgpe").read_bytes()
+        finally:
+            release.set()
+            worker.join(20)
+        assert not worker.is_alive() and not errors
+        assert len(responses) == 1 and responses[0].json()["stored_as_answer"] is False
+        assert responses[0].json()["factual_correction"]["error_code"] == "revision_conflict"
+        assert (repository / "head.cgpe").read_bytes() == after_legitimate_change
+        current = client.get("/api/complaint-workspace/session", headers=_composed_headers(world.case))
+        assert CORRECTION not in [row.get("answer") for row in current.json()["session"]["intake_history"]]
+
+
+def test_guarded_save_never_falls_back_to_unjoined_legacy_storage(tmp_path):
+    from applications.complaint_workspace import WorkspacePersistenceError
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "legacy-sessions")
+    service.initialize_private_keys(protection="passphrase", passphrase=PASSPHRASE)
+    service.ensure_private_case_key("synthetic-legacy", "synthetic-legacy")
+    state = service._load_state("synthetic-legacy")
+    before = sorted((str(p.relative_to(service._session_dir)), p.read_bytes())
+        for p in service._session_dir.rglob("*") if p.is_file())
+    with pytest.raises(WorkspacePersistenceError) as error:
+        service._save_state(state, before_publish=lambda: None)
+    assert error.value.code == "joined_revision_required"
+    after = sorted((str(p.relative_to(service._session_dir)), p.read_bytes())
+        for p in service._session_dir.rglob("*") if p.is_file())
+    assert after == before

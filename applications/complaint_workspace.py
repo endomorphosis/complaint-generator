@@ -3748,14 +3748,11 @@ class ComplaintWorkspaceRequestHandlers:
             return finish(_terminal_edit_receipt(status="unavailable",
                 message="Edit is unavailable. The pending question is unchanged.",
                 error_code=str(exc.code or "unavailable"), pending_inquiry=_pending_inquiry_copy(state)))
-        if publication_guard is not None:
-            # A live owner correction works on a fresh, request-local mediator.
-            # Its uncommitted supersession must never appear through a cache.
-            self.workspace._interview_mediators.pop((user, case_id), None)
         try:
-            mediator = self.workspace._mediator_for_shared_interview(user, case_id)
-            if publication_guard is not None:
-                self.workspace._interview_mediators.pop((user, case_id), None)
+            # Never publish a request-local draft through the shared cache,
+            # even briefly between factory construction and its removal.
+            mediator = self.workspace._mediator_for_shared_interview(user, case_id,
+                **({"cache": False} if publication_guard is not None else {}))
             actions = mediator.workflow_actions
             if not actions.interview_started:
                 restored = actions.restore_session_projection(projection)
@@ -4492,10 +4489,10 @@ class ComplaintWorkspaceService:
                 },
             }
 
-    def _mediator_for_shared_interview(self, user_id: str, case_id: str):
+    def _mediator_for_shared_interview(self, user_id: str, case_id: str, *, cache: bool = True):
         self._check_access(user_id, ability="read", case_id=case_id, record_case_id=case_id)
         cache_key = (user_id, case_id)
-        cached = self._interview_mediators.get(cache_key)
+        cached = self._interview_mediators.get(cache_key) if cache else None
         if cached is not None:
             return cached
         from mediator.mediator import Mediator
@@ -4533,8 +4530,10 @@ class ComplaintWorkspaceService:
         mediator.state.username = user_id
         self.activate_private_evidence_hook(mediator, user_id, case_id)
         self.activate_private_derived_indexes(mediator, user_id, case_id)
-        self._interview_mediators[cache_key] = mediator
+        if cache:
+            self._interview_mediators[cache_key] = mediator
         return mediator
+
 
     def activate_private_evidence_hook(self, mediator: Any, user_id: str, case_id: Optional[str] = None) -> Dict[str, Any]:
         """Inject the current private artifact context into a newly activated evidence hook.
