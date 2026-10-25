@@ -1062,7 +1062,7 @@ Implementation instructions:
 
 ## CIMP-GUI-36 Commit complete encrypted case revisions
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
