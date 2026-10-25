@@ -3872,6 +3872,24 @@
                             <button class="secondary" id="adaptive-defer" type="button">Defer</button>
                         </div>
                         <div class="status" id="adaptive-gap-status" data-gap-preserved="unknown">Unknown and deferred answers keep the graph gap open.</div>
+                        <section id="factual-correction" data-task="CIMP-GUI-18" data-status="">
+                            <h3>Correct a recorded answer</h3>
+                            <p class="muted">A correction uses the shared mediator supersession path. The previous assertion stays in the record. Support and proof that depended on it are invalidated. The expected graph and session revisions must match. Another participant's answer is refused.</p>
+                            <label for="factual-correction-replacement">Replacement fact</label>
+                            <textarea id="factual-correction-replacement" placeholder="The corrected fact."></textarea>
+                            <label for="factual-correction-graph-revision">Expected graph revision</label>
+                            <input id="factual-correction-graph-revision" type="text" autocomplete="off">
+                            <label for="factual-correction-session-revision">Expected session revision</label>
+                            <input id="factual-correction-session-revision" type="text" inputmode="numeric" autocomplete="off">
+                            <label for="factual-correction-target">Target assertion</label>
+                            <input id="factual-correction-target" type="text" autocomplete="off">
+                            <label for="factual-correction-actor">Actor</label>
+                            <input id="factual-correction-actor" type="text" autocomplete="off">
+                            <div class="button-row">
+                                <button class="secondary" id="factual-correction-submit" type="button">Apply correction</button>
+                            </div>
+                            <div class="status" id="factual-correction-status" data-status="" data-actor="" data-error="" data-prior-retained="false" data-support-invalidated="false">No correction has been applied.</div>
+                        </section>
                         <label for="adaptive-model-purpose">Model purpose</label>
                         <select id="adaptive-model-purpose">
                             <option value="extract_facts">extract_facts</option>
@@ -14163,7 +14181,30 @@ function extractComplaintOutputSignals(result) {
                 objective_id: pending.objective_id || null, target_id: pending.target_id || null,
                 target_revision: pending.target_revision || null, from_fixed_intake_fields: false,
                 preserved_gaps: projection.preserved_gaps || [], unknown_reasons: projection.unknown_reasons || [],
-                legal_sufficiency: false};
+                legal_sufficiency: false, factual_correction: null};
+        }
+
+        function renderFactualCorrectionOffer(payload) {
+            const view = adaptiveViewFrom(payload);
+            const offer = (view && view.factual_correction) || ((payload && payload.adaptive_inquiry && payload.adaptive_inquiry.factual_correction) || null);
+            const graph = document.getElementById('factual-correction-graph-revision');
+            const session = document.getElementById('factual-correction-session-revision');
+            const target = document.getElementById('factual-correction-target');
+            const actor = document.getElementById('factual-correction-actor');
+            if (!graph || !session || !target || !actor || !offer) return;
+            graph.value = offer.expected_graph_revision || '';
+            session.value = offer.expected_session_revision === undefined || offer.expected_session_revision === null ? '' : String(offer.expected_session_revision);
+            target.value = offer.target_stable_id || '';
+            actor.value = offer.actor_principal_id || '';
+            const panel = document.getElementById('factual-correction');
+            if (panel) {
+                panel.dataset.graphRevision = graph.value;
+                panel.dataset.sessionRevision = session.value;
+                panel.dataset.targetStableId = target.value;
+                panel.dataset.actor = actor.value;
+                panel.dataset.canonicalOwner = offer.canonical_owner_principal_id || '';
+                panel.dataset.priorAnswer = offer.prior_answer || '';
+            }
         }
 
         function renderAdaptiveInquiry(payload, capture) {
@@ -14195,6 +14236,61 @@ function extractComplaintOutputSignals(result) {
                     ? `Open gaps preserved: ${gaps.map((item) => `${item.disposition} ${item.inquiry_id}`).join('; ')}.`
                     : 'Unknown and deferred answers keep the graph gap open.';
             }
+            renderFactualCorrectionOffer(payload);
+        }
+
+        async function applyFactualCorrection() {
+            const capture = adaptiveRequestCapture();
+            if (!adaptiveRequestCurrent(capture)) return;
+            const replacement = (document.getElementById('factual-correction-replacement').value || '').trim();
+            const graphRevision = (document.getElementById('factual-correction-graph-revision').value || '').trim();
+            const sessionText = (document.getElementById('factual-correction-session-revision').value || '').trim();
+            const targetStableId = (document.getElementById('factual-correction-target').value || '').trim();
+            const actor = (document.getElementById('factual-correction-actor').value || '').trim();
+            const prior = (document.getElementById('factual-correction').dataset.priorAnswer || '');
+            const message = JSON.stringify({
+                schema: 'gui-factual-correction-v1',
+                replacement: replacement,
+                expected_graph_revision: graphRevision,
+                expected_session_revision: sessionText === '' ? null : Number(sessionText),
+                target_stable_id: targetStableId,
+                actor_principal_id: actor,
+            });
+            setBusyStatus('Applying the correction through the shared mediator…');
+            let result;
+            try {
+                result = await client.runIntakeChatTurn(workspaceUserId, message, targetStableId, {interview_action: 'correct'});
+                if (!adaptiveRequestCurrent(capture)) return;
+            } catch (error) {
+                if (!adaptiveRequestCurrent(capture)) return;
+                setStatus('The correction was not accepted: ' + String((error && error.message) || error));
+                return;
+            }
+            workspaceSession = result;
+            renderAdaptiveInquiry(result, capture);
+            const receipt = result.factual_correction || {};
+            const correction = receipt.correction || {};
+            const lineage = correction.lineage || {};
+            const statusNode = document.getElementById('factual-correction-status');
+            const panel = document.getElementById('factual-correction');
+            const applied = receipt.status === 'applied';
+            const supportCount = Array.isArray(correction.affected_support_targets) ? correction.affected_support_targets.length : 0;
+            if (statusNode) {
+                statusNode.dataset.status = String(receipt.status || '');
+                statusNode.dataset.actor = String(receipt.actor_principal_id || '');
+                statusNode.dataset.canonicalOwner = String(receipt.canonical_owner_principal_id || '');
+                statusNode.dataset.error = receipt.error && receipt.error.code ? String(receipt.error.code) : '';
+                statusNode.dataset.priorRetained = applied && lineage.previous_envelope_retained === true ? 'true' : 'false';
+                statusNode.dataset.supportInvalidated = applied && supportCount > 0 ? 'true' : 'false';
+                statusNode.dataset.replacementStableId = String(correction.replacement_stable_id || '');
+                statusNode.textContent = String(receipt.message || 'The correction was refused.');
+            }
+            if (panel) panel.dataset.status = String(receipt.status || '');
+            if (applied && prior) {
+                const kept = document.getElementById('factual-correction');
+                if (kept) kept.dataset.priorAnswer = prior;
+            }
+            setStatus(String(receipt.message || 'The correction finished.'));
         }
 
         function adaptiveCaseId(payload) {
@@ -15431,6 +15527,7 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('save-intake-button').addEventListener('click', saveIntake);
         document.getElementById('adaptive-enter-narrative').addEventListener('click', enterAdaptiveNarrative);
         document.getElementById('adaptive-submit-answer').addEventListener('click', () => answerAdaptiveInquiry('answer'));
+        document.getElementById('factual-correction-submit').addEventListener('click', applyFactualCorrection);
         document.getElementById('adaptive-unknown').addEventListener('click', () => answerAdaptiveInquiry('unknown'));
         document.getElementById('adaptive-defer').addEventListener('click', () => answerAdaptiveInquiry('deferred'));
         document.getElementById('adaptive-model-extract').addEventListener('click', askAdaptiveModel);
