@@ -6235,6 +6235,172 @@ class ComplaintWorkspaceService:
             return label_ciphertext_replica_observations(observations, **kwargs)
         return count_verified_ciphertext_replicas(observations)
 
+    def resume_encrypted_interview(self, user_id: Optional[str], *, browser_cache: Any = None) -> Dict[str, Any]:
+        """Restore one interview from the encrypted revision without replaying it.
+
+        A new process supplies the same unlocked case key. Pending inquiry, case
+        identity, consent, graph revisions, deferred gaps, and corrections come
+        from that revision. Browser caches and caller messages are ignored.
+        Denied, revoked, and missing-key results name the failure and omit case
+        plaintext. This read does not call mediator hooks or append history.
+        """
+
+        def denial(status: str, code: str) -> Dict[str, Any]:
+            return {
+                "schema": "encrypted-interview-resume-v1",
+                "status": status,
+                "code": code,
+                "resumed": False,
+                "hooks_replayed": False,
+                "messages_replayed": False,
+                "reconstructed_from_browser_cache": False,
+                "browser_cache_ignored": True,
+                "pending_inquiry": None,
+                "case": None,
+                "consent": None,
+                "factual_graph_revision": None,
+                "legal_graph_revision": None,
+                "deferred_gaps": [],
+                "corrections": [],
+                "legal_sufficiency": False,
+                "plaintext_case_state": None,
+                "encrypted_resume": {
+                    "status": status,
+                    "code": code,
+                    "resumed": False,
+                    "hooks_replayed": False,
+                    "messages_replayed": False,
+                    "reconstructed_from_browser_cache": False,
+                },
+            }
+
+        del browser_cache
+        try:
+            resolved = self._check_access(user_id, ability="read")
+        except WorkspaceAuthorizationDenied:
+            return denial("denied", "authorization_denied")
+        try:
+            keys = self._private_key_session()
+        except WorkspaceAuthorizationDenied:
+            return denial("denied", "authorization_denied")
+        if not keys.unlocked:
+            return denial("missing_key", "missing_key")
+        try:
+            state = self._load_state(resolved)
+        except WorkspaceAuthorizationDenied:
+            return denial("denied", "authorization_denied")
+        except WorkspacePersistenceError as exc:
+            code = str(exc.code or "")
+            if code in {"unlock_needed", "key_unavailable"}:
+                return denial("missing_key", "missing_key")
+            if code in {"authentication_failed", "corrupt_session"}:
+                return denial("missing_key", code)
+            return denial("missing_key", code or "missing_key")
+        case_id = _state_case_id(state, resolved)
+        source_identity = self._case_legal_context_identity(state)
+        try:
+            _, source_key_id, source_key = self._joined_key(resolved, case_id)
+        except WorkspaceAuthorizationDenied:
+            return denial("denied", "authorization_denied")
+        except WorkspacePersistenceError as exc:
+            return denial("missing_key", str(exc.code or "missing_key"))
+        grant = state.get("case_key_grant") if isinstance(state.get("case_key_grant"), dict) else {}
+        consent = state.get("operation_consent") if isinstance(state.get("operation_consent"), dict) else {}
+        if grant.get("revoked") is True or str(grant.get("status") or "") == "revoked":
+            return denial("revoked", "key_revoked")
+        if consent.get("revoked") is True:
+            return denial("revoked", "consent_revoked")
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else None
+        gaps = [deepcopy(item) for item in (projection.get("preserved_gaps") or []) if isinstance(item, dict)]
+        deferred = [item for item in gaps if str(item.get("disposition") or "") == "deferred"]
+        history = [item for item in (state.get("intake_history") or []) if isinstance(item, dict)]
+        corrections: List[Dict[str, Any]] = []
+        for item in history:
+            if str(item.get("disposition") or "") in {"corrected", "correction"}:
+                corrections.append({"source": "intake_history", "record": deepcopy(item)})
+        graph_payload = projection.get("knowledge_graph") if isinstance(projection.get("knowledge_graph"), dict) else {}
+        legal_payload = projection.get("dependency_graph") if isinstance(projection.get("dependency_graph"), dict) else {}
+        factual_revision = None
+        if graph_payload:
+            try:
+                from complaint_phases.knowledge_graph import KnowledgeGraph
+                from mediator.hook_runtime import graph_revision_token
+                factual_revision = graph_revision_token(KnowledgeGraph.from_dict(graph_payload))
+            except Exception:
+                factual_revision = None
+            metadata = graph_payload.get("metadata") if isinstance(graph_payload.get("metadata"), dict) else {}
+            ledger = metadata.get("factual_ledger") if isinstance(metadata.get("factual_ledger"), dict) else {}
+            revision_rows = list(graph_payload.get("revisions") or []) + list(ledger.get("revisions") or [])
+            for revision in revision_rows:
+                if isinstance(revision, dict) and str(revision.get("action") or "") in {"correct", "correction", "supersede", "edit"}:
+                    corrections.append({"source": "factual_graph", "record": deepcopy(revision)})
+        legal_revision = hashlib.sha256(
+            json.dumps(legal_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        ).hexdigest()
+        view = {
+            "schema": "encrypted-interview-resume-v1",
+            "status": "resumed",
+            "code": "resumed",
+            "resumed": True,
+            "hooks_replayed": False,
+            "messages_replayed": False,
+            "reconstructed_from_browser_cache": False,
+            "browser_cache_ignored": True,
+            "case": {
+                "case_id": _state_case_id(state, resolved),
+                "user_id": str(state.get("user_id") or resolved),
+                "session_revision": projection.get("session_revision"),
+                "private_revision": state.get("private_revision"),
+            },
+            "consent": deepcopy(consent) if consent else None,
+            "pending_inquiry": deepcopy(pending) if pending else None,
+            "factual_graph_revision": factual_revision,
+            "legal_graph_revision": legal_revision,
+            "deferred_gaps": deferred,
+            "preserved_gaps": gaps,
+            "corrections": corrections,
+            "legal_sufficiency": False,
+        }
+        payload = self.request_handlers._build_session_payload(state)
+        payload["encrypted_resume"] = view
+        payload["interview"] = {
+            "contract_version": "interview-transition-v1",
+            "action": "encrypted_resume",
+            "status": "resumed",
+            "inquiry": deepcopy(pending) if pending else None,
+            "hooks_replayed": False,
+            "messages_replayed": False,
+            "legal_sufficiency": False,
+            "error": None,
+        }
+        payload.update({
+            "schema": view["schema"],
+            "status": "resumed",
+            "code": "resumed",
+            "resumed": True,
+            "hooks_replayed": False,
+            "messages_replayed": False,
+            "reconstructed_from_browser_cache": False,
+            "browser_cache_ignored": True,
+            "legal_sufficiency": False,
+        })
+        # Projection is not delivery authority. Reopen the real current case
+        # and resolve its live key after all projection work, then reprove the
+        # issued cookie/case capability immediately before returning plaintext.
+        try:
+            current = self._load_state(resolved, case_id=case_id)
+            _, current_key_id, current_key = self._joined_key(resolved, case_id)
+            if (self._case_legal_context_identity(current) != source_identity
+                    or (current_key_id, current_key) != (source_key_id, source_key)):
+                return denial("stale", "revision_conflict")
+            self._check_access(resolved, ability="read", case_id=case_id)
+        except WorkspaceAuthorizationDenied:
+            return denial("denied", "authorization_denied")
+        except WorkspacePersistenceError as exc:
+            return denial("missing_key", str(exc.code or "missing_key"))
+        return payload
+
     def seal_encrypted_browser_interview(self, user_id: str, *, case_id: Optional[str] = None) -> Dict[str, Any]:
         """Seal the current interview into the encrypted snapshot. No hook or message is sent."""
 
@@ -6280,6 +6446,12 @@ class ComplaintWorkspaceService:
         a case from caller plaintext.
         """
 
+        # Actual browser owners resume the current authenticated joined case
+        # revision. The optional explicitly sealed legacy snapshot may be an
+        # older version and cannot overwrite current GUI state or consent.
+        from .workspace_case_authority import current_workspace_case_authority
+        if current_workspace_case_authority() is not None:
+            return self.resume_encrypted_interview(user_id, browser_cache=browser_cache)
         del browser_cache
         receipt: Dict[str, Any] = {
             "schema": "gui-encrypted-interview-resume-v1",
