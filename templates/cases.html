@@ -62,6 +62,15 @@
         document.getElementById("gap-input").value = "";
     }
 
+    function clearSelectionDisplay() {
+        document.getElementById("selected-case").hidden = true;
+        document.getElementById("selected-case-label").textContent = "";
+        document.getElementById("unresolved-gaps").replaceChildren();
+        document.getElementById("directory-revision").textContent = "";
+        document.getElementById("encrypted-revision").textContent = "";
+        document.getElementById("envelope-sha256").textContent = "";
+    }
+
     function showError(text) {
         document.getElementById("case-error").textContent = text || "";
     }
@@ -124,7 +133,8 @@
         selected = caseId;
         contentRevision = null;
         clearTransientState();
-        document.getElementById("selected-case").hidden = true;
+        clearSelectionDisplay();
+        showError("");
         try {
             var item = await api("/api/cases/" + encodeURIComponent(caseId) + "/select", {method: "POST", body: {}});
             if (ownGeneration !== generation || selected !== caseId) return;
@@ -160,7 +170,10 @@
         selected = null;
         contentRevision = null;
         clearTransientState();
-        document.getElementById("selected-case").hidden = true;
+        clearSelectionDisplay();
+        document.getElementById("case-label").value = "";
+        document.getElementById("case-auth-status").textContent = "Signing in";
+        showError("");
         renderCases([]);
         try {
             var issued = await api("/api/complaint-workspace/auth/login", {method: "POST", body: {credential: credential}});

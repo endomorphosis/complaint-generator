@@ -431,9 +431,31 @@ def test_real_cases_dom_login_create_switch_save_and_late_response(tmp_path):
         assert "late-alpha-gap" not in page.text_content("#unresolved-gaps")
         assert page.text_content("#unresolved-gaps").strip() == "saved-beta-gap"
         paints = page.evaluate("() => { window.casePaintObserver.disconnect(); return window.caseResponsePaints; }")
-        assert paints and all(label == "beta-dom" for label in paints), "an older response repainted the selected case"
+        assert "beta-dom" in paints and all(label in {"", "beta-dom"} for label in paints), "an older response repainted the selected case"
         assert page.input_value("#gap-input") == ""
         assert world.catalog.read(world.owner.principal_id, first["case_id"])["unresolved_gaps"] == ["late-alpha-gap"]
+        # A distinct principal signs in using the real form and public session
+        # adapter. Hidden DOM is still DOM: no previous case content may remain.
+        page.fill("#case-label", "unsent-owner-case-label")
+        page.fill("#case-credential", STRANGER_CREDENTIAL)
+        page.click("#case-login button")
+        page.wait_for_function("document.querySelector('#case-auth-status').textContent === 'Signed in'")
+        page.wait_for_function("""async actor => {
+            const response = await fetch('/api/complaint-workspace/auth/session', {credentials: 'same-origin'});
+            return response.ok && (await response.json()).principal_id === actor;
+        }""", arg=world.stranger.principal_id)
+        assert page.locator("#case-list button").count() == 0
+        assert page.locator("#selected-case").is_hidden()
+        for selector in ("#selected-case-label", "#unresolved-gaps", "#directory-revision", "#encrypted-revision", "#envelope-sha256"):
+            assert page.text_content(selector) == ""
+        for selector in ("#case-label", "#case-draft", "#gap-input", "#case-credential"):
+            assert page.input_value(selector) == ""
+        text = page.locator("body").text_content()
+        assert all(marker not in text for marker in ("alpha-dom", "beta-dom", "saved-beta-gap", "late-alpha-gap", "unsent-owner-case-label"))
+        page.fill("#case-label", "stranger-dom")
+        page.click("#create-case button")
+        page.wait_for_function("document.querySelector('#case-list').textContent.includes('stranger-dom')")
+        assert page.locator("#case-list button").all_text_contents() == ["stranger-dom"]
         # A new document gets no CSRF from cookies or persistent browser storage.
         page.reload(wait_until="domcontentloaded")
         assert page.text_content("#case-auth-status") == "Sign in required"
@@ -456,6 +478,7 @@ def test_real_cases_dom_login_create_switch_save_and_late_response(tmp_path):
         "unsaved_gap_cleared": True, "late_response_did_not_repaint": True,
         "race_scope": "client_delivery_and_selection; ASGI calls may be serialized",
         "concurrent_asgi_transport_qualified": False,
+        "distinct_principal_login_cleared_private_dom": True,
         "reauthentication_after_navigation_required": True, "owned_cleanup": cleanup,
         "completion_authority": False}, sort_keys=True))
 
