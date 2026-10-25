@@ -22,6 +22,7 @@ IMAGE = 'sha256:' + 'a' * 64
 CONTAINER = 'b' * 64
 OTHER_CONTAINER = 'c' * 64
 _REAL_PROCESS_IDENTITY = runner.process_identity
+_REAL_HISTORICAL_PROCESS_INVENTORY = shutdown._complete_process_inventory
 
 # The one real-process control launches only this private inert wrapper and its
 # one fixed worker. The wrapper uses the actual public native identity writer
@@ -1669,3 +1670,118 @@ def test_completed_preflight_requires_stable_receipt_and_two_empty_fresh_censuse
     result = runner.stop(fixture.state)
     assert result['status'] == 'stop_incomplete' and result['signalled'] is False
     assert not docker[0].calls and not docker[0].effects
+
+
+@pytest.fixture
+def historical_identity_preflight(completed_preflight_campaign, monkeypatch):
+    """Actual Native stale-PID repair preserves the previous sealed identity."""
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as producer
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as native
+    fixture = completed_preflight_campaign
+    observer = native.read_process_birth(os.getpid())
+    assert observer is not None and observer.start_time_ticks > 20
+    record = deepcopy(fixture.current_record)
+    record['identity']['start_ticks'] = observer.start_time_ticks - 5
+    heartbeat = deepcopy(fixture.preflight_heartbeat)
+    heartbeat['supervisor_process_birth']['start_time_ticks'] = record['identity']['start_ticks']
+    runner._atomic_json(fixture.state / 'launcher.json', record)
+    runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', heartbeat)
+    owner = native.ProcessBirthIdentity.from_dict(heartbeat['supervisor_process_birth'])
+    supervisor = object.__new__(producer.PortalImplementationSupervisor)
+    supervisor.config = producer.PortalSupervisorConfig(repo_root=fixture.repo, state_dir=fixture.state,
+        todo_path=Path(record['board_path']), state_path=fixture.state / 'complaint_intake_task_state.json',
+        strategy_path=fixture.state / 'complaint_intake_strategy.json', state_prefix='complaint_intake',
+        events_path=fixture.state / 'complaint_intake_supervisor_events.jsonl',
+        daemon_script_path=fixture.repo / 'integrations/ipfs_accelerate/improvement_runner.py',
+        worktree_root=Path(fixture.context['worktree_root']))
+    with monkeypatch.context() as scope:
+        scope.setattr(producer, 'os', SimpleNamespace(getpid=lambda: owner.pid))
+        scope.setattr(producer, 'read_process_birth', lambda pid: owner if pid == owner.pid else None)
+        producer.PortalImplementationSupervisor._write_supervisor_maintenance_receipt(supervisor,
+            'supervisor_check_event', status='completed', started_at=stamp(fixture.started + 1),
+            updated_at=stamp(fixture.started + 2))
+    context = shutdown._context(fixture.state, record)
+    old_birth = native.ProcessBirthIdentity(pid=1073741825, start_time_ticks=observer.start_time_ticks - 10,
+        boot_id=observer.boot_id, parent_pid=1073741823)
+    identity = native.SupervisedChildIdentity(process_birth=old_birth,
+        command=shutdown._managed_native_command(record, context),
+        owner_scope={'repo_root':str(fixture.repo), 'state_dir':str(fixture.state),
+            'state_prefix':runner.STATE_PREFIX, 'todo_path':record['board_path'],
+            'daemon_entrypoint':str(fixture.repo / 'integrations/ipfs_accelerate/improvement_runner.py')},
+        created_at=stamp(fixture.started - 1))
+    identity = native.SupervisedChildIdentity.from_dict(identity.to_dict())
+    pid_path = fixture.state / 'complaint_intake_managed_daemon.pid'
+    identity_path = pid_path.with_suffix('.identity.json')
+    pid_path.write_text(f'{old_birth.pid}\n');pid_path.chmod(0o600)
+    identity_path.write_text(json.dumps(identity.to_dict()));identity_path.chmod(0o600)
+    before = identity_path.read_bytes()
+    repaired = producer.PortalImplementationSupervisor.ensure_managed_daemon_pid_file(supervisor)
+    assert repaired['repaired'] is True and repaired['reason'] == 'stale_managed_pid'
+    assert not pid_path.exists() and identity_path.read_bytes() == before
+    monkeypatch.setattr(native, 'terminate_supervised_child', lambda *_a, **_k: pytest.fail('historical identity never grants signal authority'))
+    return SimpleNamespace(**{**vars(fixture), 'current_record':record, 'context':context,
+        'preflight_heartbeat':heartbeat}, identity=identity, identity_path=identity_path,
+        pid_path=pid_path, identity_bytes=before, native=native)
+
+
+def test_actual_native_pid_repair_historical_identity_allows_current_preflight_closure(
+        historical_identity_preflight, docker, monkeypatch):
+    fixture = historical_identity_preflight
+    # Invoke the actual complete inventory; other negative cases control only
+    # the observation boundary to inject concrete forbidden processes/races.
+    actual = _REAL_HISTORICAL_PROCESS_INVENTORY
+    observations = []
+    def inventory(cutoff):
+        observations.append(cutoff)
+        return actual(cutoff)
+    monkeypatch.setattr(shutdown, '_complete_process_inventory', inventory)
+    heartbeat = (fixture.state / 'complaint_intake_supervisor_status.json').read_bytes()
+    before_receipt = fixture.maintenance_receipt.read_bytes()
+    fenced = shutdown.fence_owned_orphan_native_child(fixture.state, fixture.current_record)
+    assert fenced['status'] == 'historical_identity_already_closed' and fenced['fenced'] is False
+    assert fenced['current_launch_child_authority'] is False
+    result = runner.stop(fixture.state)
+    assert result['status'] == 'stopped' and result['signalled'] is False
+    proof = result['container_shutdown']['process_closure']
+    assert proof['observations'] == 2 and proof['proc_census_complete'] is True
+    assert proof['canonical_markers_absent'] is False and proof['canonical_pid_marker_absent'] is True
+    assert proof['canonical_identity_marker_absent'] is False and proof['historical_identity_preserved'] is True
+    assert proof['historical_native_identity']['current_launch_child_authority'] is False
+    assert proof['minimum_owned_start_ticks'] == fixture.identity.process_birth.start_time_ticks
+    assert len(observations) >= 2 and set(observations) == {fixture.identity.process_birth.start_time_ticks}
+    assert fixture.identity_path.read_bytes() == fixture.identity_bytes and not fixture.pid_path.exists()
+    assert (fixture.state / 'complaint_intake_supervisor_status.json').read_bytes() == heartbeat
+    assert fixture.maintenance_receipt.read_bytes() == before_receipt and not docker[0].effects
+
+
+@pytest.mark.parametrize('damage', ['scope', 'command', 'boot', 'current_birth', 'current_time',
+    'live_pid', 'reused_pid', 'unknown_liveness', 'changed_identity', 'escaped_old_group'])
+def test_historical_identity_never_bypasses_current_or_unknown_custody(
+        historical_identity_preflight, docker, monkeypatch, damage):
+    from dataclasses import replace
+    fixture = historical_identity_preflight
+    native, identity = fixture.native, fixture.identity
+    if damage == 'scope':identity=replace(identity,owner_scope={**identity.owner_scope,'todo_path':'/foreign'},record_id='')
+    elif damage == 'command':identity=replace(identity,command=(*identity.command,'--foreign-option'),record_id='')
+    elif damage == 'boot':identity=replace(identity,process_birth=replace(identity.process_birth,boot_id='foreign'),record_id='')
+    elif damage == 'current_birth':identity=replace(identity,process_birth=replace(identity.process_birth,start_time_ticks=fixture.current_record['identity']['start_ticks']+1),record_id='')
+    elif damage == 'current_time':identity=replace(identity,created_at=stamp(fixture.started+1),record_id='')
+    elif damage in {'live_pid','reused_pid'}:
+        now=native.read_process_birth(os.getpid())
+        birth=now if damage=='live_pid' else replace(identity.process_birth,pid=os.getpid())
+        identity=replace(identity,process_birth=birth,record_id='')
+    elif damage == 'unknown_liveness':
+        monkeypatch.setattr(native,'supervised_child_identity_liveness',lambda _identity:native.OwnerLiveness.UNKNOWN)
+    elif damage == 'changed_identity':
+        def changed(_cutoff):
+            fixture.identity_path.write_text(json.dumps(replace(identity,created_at=stamp(fixture.started-2),record_id='').to_dict()))
+            return []
+        monkeypatch.setattr(shutdown,'_complete_process_inventory',changed)
+    elif damage == 'escaped_old_group':
+        monkeypatch.setattr(shutdown,'_complete_process_inventory',lambda _cutoff:[{
+            'pid':1073741826,'uid':os.getuid()+1,'process_group':identity.process_birth.parent_pid,
+            'session':1073741826,'argv':(),'cwd':'/','prelaunch_scope_excluded':True}])
+    fixture.identity_path.write_text(json.dumps(identity.to_dict()));fixture.identity_path.chmod(0o600)
+    result = runner.stop(fixture.state)
+    assert result['status'] == 'stop_incomplete' and result['signalled'] is False
+    assert fixture.identity_path.exists() and not fixture.pid_path.exists() and not docker[0].effects

@@ -215,6 +215,12 @@ def fence_owned_orphan_native_child(state_dir: Path, record: Mapping[str, Any]) 
     identity_path = pid_path.with_suffix('.identity.json')
     if not os.path.lexists(pid_path) and not os.path.lexists(identity_path):
         return {'status': 'markers_absent', 'fenced': False}
+    if not os.path.lexists(pid_path) and os.path.lexists(identity_path):
+        proof = _missing_marker_session_closed(state_dir, record, context)
+        if proof.get('historical_native_identity') is None:
+            raise ValueError('identity-only native closure is unproved')
+        return {'status': 'historical_identity_already_closed', 'fenced': False,
+            'identity_preserved': True, 'current_launch_child_authority': False}
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as native
 
     launcher_path = state_dir / 'launcher.json'
@@ -794,6 +800,37 @@ def _preflight_without_daemon(heartbeat: Mapping[str, Any], record: Mapping[str,
     return True
 
 
+def _historical_preflight_identity(raw: bytes, record: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any]:
+    """Negative scope only: an older dead identity is never this launch's child."""
+    from . import improvement_runner as runner
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as native
+    payload = json.loads(raw)
+    identity = native.SupervisedChildIdentity.from_dict(payload)
+    if identity is None or identity.to_dict() != payload:
+        raise ValueError('historical native identity is invalid')
+    parent, birth = record['identity'], identity.process_birth
+    state_dir = Path(context['state_dir'])
+    repo = Path(context['repo_root'])
+    scope = {'repo_root': str(repo), 'state_dir': str(state_dir), 'state_prefix': runner.STATE_PREFIX,
+        'todo_path': record['board_path'], 'daemon_entrypoint': str(repo / 'integrations/ipfs_accelerate/improvement_runner.py')}
+    if (dict(identity.owner_scope) != scope or identity.command != _managed_native_command(record, context)
+            or birth.boot_id != parent['boot_id']
+            or Path('/proc/sys/kernel/random/boot_id').read_text().strip() != parent['boot_id']
+            or not 0 < birth.start_time_ticks < parent['start_ticks']
+            or not 0 < _timestamp(identity.created_at) < context['started_at']
+            or birth.pid in {parent['pid'], birth.parent_pid} or birth.parent_pid == parent['pid']
+            or native.supervised_child_identity_liveness(identity) is not native.OwnerLiveness.DEAD
+            or not native._supervised_child_identity_session_quiesced(identity)):
+        raise ValueError('historical native identity is not an older quiescent launch')
+    for pid in (birth.pid, birth.parent_pid, parent['pid']):
+        if (Path('/proc') / str(pid)).exists():
+            raise ValueError('historical native numeric PID is present')
+    return {'identity_sha256': hashlib.sha256(raw).hexdigest(), 'identity_record_id': identity.record_id,
+        'historical_daemon_pid': birth.pid, 'historical_parent_pid': birth.parent_pid,
+        'minimum_owned_start_ticks': birth.start_time_ticks, 'native_session_quiesced': True,
+        'current_launch_child_authority': False, 'signals_sent': False}
+
+
 def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
                                    context: Mapping[str, Any],
                                    retained_native_child_proof: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -812,15 +849,19 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
     # This is the public Native identity path recipe, without loading an
     # absent identity or calling a Native constructor or lifecycle operation.
     identity_path = pid_path.with_suffix('.identity.json')
-    def missing_markers():
-        for path in (pid_path, identity_path):
-            try:
-                path.lstat()
-            except FileNotFoundError:
-                continue
-            except OSError as exc:
-                raise ValueError('native marker absence is unavailable') from exc
-            raise ValueError('both canonical native markers must be absent')
+    def markers():
+        if os.path.lexists(pid_path):
+            raise ValueError('canonical native PID marker must be absent')
+        if not os.path.lexists(identity_path):
+            return None
+        first = identity_path.lstat()
+        raw = _owned_bytes(identity_path, 65536, legacy_group_write=True)
+        last = identity_path.lstat()
+        fields = ('st_dev', 'st_ino', 'st_uid', 'st_nlink', 'st_mode', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+        key = tuple(getattr(first, name) for name in fields)
+        if key != tuple(getattr(last, name) for name in fields):
+            raise ValueError('historical native identity changed during read')
+        return raw, key
     def custody():
         launch = _owned_bytes(launcher_path)
         heartbeat = _owned_bytes(heartbeat_path, legacy_group_write=True)
@@ -829,11 +870,16 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         maintenance = (_owned_bytes(state_dir / 'complaint_intake_supervisor_maintenance_receipt.json', legacy_group_write=True)
             if json.loads(heartbeat).get('status') == 'agentic_maintenance_completed' else None)
         return launch, heartbeat, maintenance
-    missing_markers()
+    marker_snapshot = markers()
     before = custody()
     heartbeat = json.loads(before[1])
     repo = Path(context['repo_root'])
     preflight_without_daemon = _preflight_without_daemon(heartbeat, record, context, before[2])
+    historical_identity = None
+    if marker_snapshot is not None:
+        if not preflight_without_daemon:
+            raise ValueError('identity-only marker requires a current owned no-daemon preflight')
+        historical_identity = _historical_preflight_identity(marker_snapshot[0], record, context)
     if preflight_without_daemon and retained_native_child_proof is not None:
         raise ValueError('failed preflight cannot borrow a historical child identity')
     daemon = heartbeat.get('daemon_pid')
@@ -873,6 +919,10 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         or heartbeat.get('log_path') != str(state_dir / f'{runner.STATE_PREFIX}_managed_daemon_{run_id}.log')):
         raise ValueError('missing-marker heartbeat run paths differ')
     old_ids = {parent['pid']} if preflight_without_daemon else {parent['pid'], daemon}
+    minimum_start_ticks = parent['start_ticks']
+    if historical_identity is not None:
+        old_ids.update((historical_identity['historical_daemon_pid'], historical_identity['historical_parent_pid']))
+        minimum_start_ticks = min(minimum_start_ticks, historical_identity['minimum_owned_start_ticks'])
     worktree_root = Path(context['worktree_root'])
     def absent():
         for pid in old_ids:
@@ -890,7 +940,7 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         absent()
         prelaunch_exclusions = 0
         foreign_cwd_proofs = []
-        for process in _complete_process_inventory(parent['start_ticks']):
+        for process in _complete_process_inventory(minimum_start_ticks):
             prelaunch_exclusions += int(process.get('prelaunch_scope_excluded') is True)
             if process.get('foreign_cwd_proof') is not None:
                 foreign_cwd_proofs.append(process['foreign_cwd_proof'])
@@ -913,13 +963,17 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         raise ValueError('retained native observation changed during first census')
     if custody() != before:
         raise ValueError('missing-marker custody changed during process inventory')
-    missing_markers()
+    if markers() != marker_snapshot or (historical_identity is not None and
+            _historical_preflight_identity(marker_snapshot[0], record, context) != historical_identity):
+        raise ValueError('historical native identity changed during first census')
     second_exclusions = scan()
     if retained is not None and _retained_native_observation(state_dir, record, context, retained_native_child_proof) != retained:
         raise ValueError('retained native observation changed during second census')
     if custody() != before or Path('/proc/sys/kernel/random/boot_id').read_text().strip() != boot:
         raise ValueError('missing-marker custody changed during second process inventory')
-    missing_markers()
+    if markers() != marker_snapshot or (historical_identity is not None and
+            _historical_preflight_identity(marker_snapshot[0], record, context) != historical_identity):
+        raise ValueError('historical native identity changed during second census')
     return {'source': ('owned_completed_preflight_native_receipt_and_double_complete_proc_inventory'
             if preflight_without_daemon and before[2] is not None
             else 'owned_preflight_failure_and_double_complete_proc_inventory' if preflight_without_daemon
@@ -929,12 +983,14 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         'retained_native_observation': retained,
         'proc_census_complete': True, 'observations': 2, 'recorded_pids_absent': True,
         'scope_birth_policy': 'same_uid_birth_at_or_after_owned_launcher_requires_argv_and_cwd',
-        'minimum_owned_start_ticks': parent['start_ticks'],
+        'minimum_owned_start_ticks': minimum_start_ticks,
         'prelaunch_scope_exclusions': [first_exclusions, second_exclusions],
         'foreign_cwd_policy': 'fresh_root_broker_login_scope_unknown_cwd@1',
         'foreign_cwd_observations': foreign_cwd_observations,
         'all_births_group_and_session_checked': True,
-        'matching_processes': 0, 'canonical_markers_absent': True,
+        'matching_processes': 0, 'canonical_markers_absent': marker_snapshot is None,
+        'canonical_pid_marker_absent': True, 'canonical_identity_marker_absent': marker_snapshot is None,
+        'historical_native_identity': historical_identity, 'historical_identity_preserved': marker_snapshot is not None,
         'sealed_native_identity_used': retained is not None, 'daemon_birth_ticks_claimed': retained is not None,
         'heartbeat_status_preserved': heartbeat['status'],
         'heartbeat_sha256': hashlib.sha256(before[1]).hexdigest(),
@@ -962,7 +1018,7 @@ def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[
     if heartbeat.get('status') in {'running', 'termination_blocked', 'agentic_maintenance_failed', 'agentic_maintenance_completed'}:
         pid_path = state_dir / f'{runner.STATE_PREFIX}_managed_daemon.pid'
         identity_path = pid_path.with_suffix('.identity.json')
-        if not os.path.lexists(pid_path) and not os.path.lexists(identity_path):
+        if not os.path.lexists(pid_path):
             if retained_native_child_proof is None and heartbeat.get('daemon_pid') is None:
                 try:
                     (state_dir / RECEIPT_NAME).lstat()
