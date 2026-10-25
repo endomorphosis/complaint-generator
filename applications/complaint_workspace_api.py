@@ -532,15 +532,23 @@ def create_complaint_workspace_router(
 
     @router.post("/api/complaint-workspace/intake-chat")
     async def intake_chat_turn(request: IntakeChatTurnRequest) -> Response:
-        payload = project_shared_inquiry_contract(workspace.run_intake_chat_turn(
-            request.user_id,
-            message=request.message,
-            question_id=request.question_id,
-            expected_question_revision=request.expected_question_revision,
-            interview_action=request.interview_action,
-            expected_graph_revision=request.expected_graph_revision,
-            expected_session_revision=request.expected_session_revision,
-        ))
+        if str(request.interview_action or "").strip().lower() in {"correct", "edit"}:
+            # Keep the actual event loop available for logout/revocation while
+            # the correction encrypts. Starlette preserves the issued scope.
+            result = await run_in_threadpool(workspace.run_intake_chat_turn,
+                request.user_id, message=request.message, question_id=request.question_id,
+                expected_question_revision=request.expected_question_revision,
+                interview_action=request.interview_action,
+                expected_graph_revision=request.expected_graph_revision,
+                expected_session_revision=request.expected_session_revision)
+        else:
+            result = workspace.run_intake_chat_turn(request.user_id,
+                message=request.message, question_id=request.question_id,
+                expected_question_revision=request.expected_question_revision,
+                interview_action=request.interview_action,
+                expected_graph_revision=request.expected_graph_revision,
+                expected_session_revision=request.expected_session_revision)
+        payload = project_shared_inquiry_contract(result)
         if shared_inquiry_conflict(payload):
             return JSONResponse(status_code=INQUIRY_CONFLICT_STATUS, content=payload)
         return JSONResponse(status_code=200, content=payload)
