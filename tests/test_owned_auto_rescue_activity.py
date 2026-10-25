@@ -6,9 +6,11 @@ The provider emits synthetic NDJSON under Native's actual rescue producer.
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
+import hashlib
 import os
 from pathlib import Path
 import sys
+import subprocess
 import threading
 import time
 
@@ -32,6 +34,14 @@ def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
     from integrations.ipfs_accelerate.reconciliation_activity import catalog_path
     tmp_path.mkdir(parents=True,exist_ok=True)
     root = Path(runner.__file__).resolve().parents[2]
+    native_root=Path(native.__file__).resolve().parents[3]
+    expected=subprocess.check_output(['git','rev-parse','HEAD:external/ipfs_accelerate_py'],cwd=root,text=True).strip()
+    actual=subprocess.check_output(['git','rev-parse','HEAD'],cwd=native_root,text=True).strip()
+    assert actual==expected, 'The Native fixture must import the source pinned by this checkout.'
+    assert Path(native.PortalImplementationDaemon._automatic_implementation_rescue.__code__.co_filename).resolve()==Path(native.__file__).resolve()
+    (tmp_path/'native-origin.json').write_text(json.dumps({'module_path':str(Path(native.__file__).resolve()),
+        'module_sha256':hashlib.sha256(Path(native.__file__).read_bytes()).hexdigest(),'sdk_git_head':actual,
+        'expected_root_gitlink':expected,'actual_producer_method_origin_matches':True})+'\n')
     spec = root / "docs/task_boards/complaint_gui_collaboration_spec.json"
     _, artifacts = runner._campaign_spec(root, spec)
     campaign = tmp_path / "campaign"; campaign.mkdir(mode=0o700)
