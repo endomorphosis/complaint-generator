@@ -462,7 +462,7 @@ Implementation instructions:
 
 ## CIMP-GUI-16 Connect browser complaint entry to adaptive questions
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
