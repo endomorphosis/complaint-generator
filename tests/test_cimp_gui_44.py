@@ -179,10 +179,10 @@ def _browser(tmp_path, monkeypatch, app):
             profile.mkdir(mode=0o700)
             context = browser._launch_context(playwright, chromium.path, profile, bridge)
             contexts.append(context)
+            browser._assert_process_custody(node, chromium, profile)
             page = context.pages[0] if context.pages else context.new_page()
             page.set_default_timeout(15000)
             pages[name] = page
-        browser._assert_process_custody(node, chromium, profile_root)
         observed |= browser._with_descendants(browser._matching_pids((str(profile_root), node.argv[1])))
         yield SimpleNamespace(pages=pages, bridge=bridge)
     finally:
