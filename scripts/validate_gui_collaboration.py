@@ -591,7 +591,8 @@ class _CurrentOutput:
             raise CurrentAcceptanceError('private_output_overlaps_source')
         reserved = {'.git', 'campaign', 'campaigns', 'worker-worktrees', 'claims', 'watchdog', 'control_plane', 'control-plane'}
         for parent in (self.path.parent, *self.path.parent.parents):
-            if parent.name in reserved or (parent/'.git').exists() or (parent/'launcher.json').exists():
+            if (parent.name in reserved or (parent/'launcher.json').exists()
+                    or (parent/'.git').exists() and not root.is_relative_to(parent)):
                 raise CurrentAcceptanceError('private_output_overlaps_control_state')
         try:
             self.parent_fd = os.open(self.path.parent, os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_NONBLOCK)
@@ -703,7 +704,7 @@ def _current_environment(root, directory, identity):
                 'TODO_DAEMON_LLM_ALLOW_LOCAL_FALLBACK','TODO_DAEMON_LLM_ALLOW_CROSS_PROVIDER_FALLBACK'):
         environment[key]=source[key]
     (directory/'orchestrator').mkdir(mode=0o700)
-    environment['ORCHESTRATOR_STATE_ROOT']=str(directory/'orchestrator')
+    environment['IPFS_ACCELERATE_AGENT_ORCHESTRATION_DIR']=str(directory/'orchestrator')
     environment['PYTHONPATH'] = source['PYTHONPATH']
     import shutil
     if shutil.which('grok', path=environment['PATH']) is not None:
