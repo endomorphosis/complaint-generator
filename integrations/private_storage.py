@@ -1393,7 +1393,8 @@ class UserOwnedKeySession:
     @_key_session_operation()
     def rotate_case_grant_data_key(self, tenant_id: str, case_id: str, *,
                                    resource_id: str, expected_data_key_id: str,
-                                   operation_id: str) -> dict[str, Any]:
+                                   operation_id: str,
+                                   before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
         """Rotate the active case DEK under a verified canonical resource scope.
 
         CaseDirectory currently has one canonical resource per case. This is
@@ -1449,7 +1450,7 @@ class UserOwnedKeySession:
         state = {"schema": "case-grant-key-state@1", "resources": associations, "rotations": rotations}
         document["cases"] = cases
         self._seal_case_grant_state(document, state)
-        self._write_document(document)
+        self._write_document(document, **({"before_publish":before_publish} if before_publish is not None else {}))
         self._document = document
         self._case_grant_state = state
         self._data_keys[(tenant_id, case_id)] = (new_id, new_key)
@@ -2327,7 +2328,7 @@ class UserOwnedKeySession:
             os.close(directory)
             raise
 
-    def _write_document(self, document: Mapping[str, Any]) -> None:
+    def _write_document(self, document: Mapping[str, Any], *, before_publish: Callable[[], Any] | None = None) -> None:
         if self._operation_depth < 1:
             raise PrivateKeyMaterialError("key_store_transaction_required")
         self._acquire_store_lock()
@@ -2338,7 +2339,13 @@ class UserOwnedKeySession:
         os.chmod(self.directory, 0o700)
         temporary = self.directory / f".{KEY_STORE_FILENAME}.tmp"
         _write_private_bytes(temporary, encoded, protect_parent=True)
-        os.replace(temporary, self.path)
+        try:
+            if before_publish is not None and before_publish() is False:
+                raise PrivateKeyMaterialError("publication_denied")
+            os.replace(temporary, self.path)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
         os.chmod(self.path, 0o600)
         _assert_owner_mode(self.path, 0o600)
         assert self._store_directory_fd is not None
@@ -2813,6 +2820,7 @@ def _seal_role(
     revision: str,
     key: bytes,
     key_id: str,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> bytes:
     binding = PrivateArtifactBinding(
         tenant_id=tenant_id,
@@ -2834,6 +2842,7 @@ def _open_role(
     revision: str,
     key: bytes,
     key_id: str,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> bytes:
     binding = PrivateArtifactBinding(
         tenant_id=tenant_id,
@@ -2842,6 +2851,12 @@ def _open_role(
         revision=revision,
         principal_id=principal_id,
     )
+    actual_id = parse_private_envelope(envelope)["key_id"]
+    if actual_id != key_id and key_resolver is not None:
+        key = key_resolver(actual_id)
+        if key is None:
+            raise PrivateArtifactIntegrityError("authentication_failed")
+        key_id = actual_id
     return open_private_artifact(envelope, binding=binding, key=key, expected_key_id=key_id)
 
 
@@ -2858,6 +2873,7 @@ def _open_manifest(
     revision: str,
     key: bytes,
     key_id: str,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> dict[str, Any]:
     body = _open_role(
         envelope,
@@ -2868,6 +2884,7 @@ def _open_manifest(
         revision=revision,
         key=key,
         key_id=key_id,
+        key_resolver=key_resolver,
     )
     document = json.loads(body.decode("utf-8"))
     if not isinstance(document, dict) or document.get("schema") != _REVISION_SCHEMA:
@@ -3060,6 +3077,7 @@ def _head_record(root: Path) -> tuple[bytes | None, str | None]:
 def _open_head(
     root: Path, *, tenant_id: str, case_id: str, principal_id: str,
     key: bytes, key_id: str, revision_hint: str | None = None,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> dict[str, Any] | None:
     envelope, revision = _head_record(root)
     if envelope is None:
@@ -3069,7 +3087,7 @@ def _open_head(
     try:
         manifest = _open_manifest(envelope, tenant_id=tenant_id, case_id=case_id,
                                   principal_id=principal_id, key=key, key_id=key_id,
-                                  revision=str(revision))
+                                  revision=str(revision), key_resolver=key_resolver)
     except PrivateStorageError:
         raise PrivateRevisionError("revision head did not authenticate", code="authentication_failed") from None
     if str(manifest.get("revision")) != revision:
@@ -3094,11 +3112,12 @@ def _publish_head(
 def _authenticate_revision_owner(
     root: Path, *, tenant_id: str, case_id: str, principal_id: str, key: bytes,
     key_id: str, create: bool = False, fsync_file=None, fsync_directory=None,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> None:
     """Authenticate the caller before any WAL writer, replay, or compensation."""
     raw = _read_exact(root / _OWNER_NAME)
     options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id,
-                   key=key, key_id=key_id, kind="revision-owner", revision="1")
+                   key=key, key_id=key_id, kind="revision-owner", revision="1", key_resolver=key_resolver)
     marker = b"complaint-private-revision-owner@1"
     if raw is not None:
         try:
@@ -3113,7 +3132,7 @@ def _authenticate_revision_owner(
     # decryption. Uncommitted legacy debris has no safe ownership proof.
     if _read_exact(root / _HEAD_NAME) is not None:
         _open_head(root, tenant_id=tenant_id, case_id=case_id, principal_id=principal_id,
-                   key=key, key_id=key_id)
+                   key=key, key_id=key_id, key_resolver=key_resolver)
     elif (root / "wal").exists() or (root / "o").exists():
         raise PrivateRevisionError("legacy repository owner proof is unavailable", code="owner_binding_unavailable")
     _atomic_write(root, _OWNER_NAME, _seal_role(marker, **options),
@@ -3158,7 +3177,7 @@ def _recovery_status(root: Path, *, options: Mapping[str, Any], phase: str | Non
 
 
 def private_revision_readiness(repository: str | Path, *, tenant_id: str, case_id: str,
-                               principal_id: str, key: bytes, key_id: str) -> str:
+                               principal_id: str, key: bytes, key_id: str, key_resolver: Callable[[str], bytes | None] | None = None) -> str:
     """Pure admission for canonical readers/writers, including a missing head.
 
     Owner/objects alone never prove an empty committed state. A first-commit
@@ -3167,7 +3186,7 @@ def private_revision_readiness(repository: str | Path, *, tenant_id: str, case_i
     root = Path(repository)
     if not any((root / name).exists() for name in (_OWNER_NAME, _HEAD_NAME, "wal", "o")):
         return "new"
-    options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, key=key, key_id=key_id)
+    options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
     if (root / _HEAD_NAME).exists():
         manifest = _open_head(root, **options)
         if manifest is None:
@@ -3278,17 +3297,23 @@ def _apply_intent(root: Path, intent: Mapping[str, Any], *, install: bool, fsync
 
 
 def _authenticate_intent(root: Path, intent: Mapping[str, Any], *, tenant_id: str,
-                         case_id: str, principal_id: str, key: bytes, key_id: str) -> None:
+                         case_id: str, principal_id: str, key: bytes, key_id: str, key_resolver: Callable[[str], bytes | None] | None = None) -> None:
     """Bind every replay/rollback reference to an authenticated caller-owned revision."""
     revision = str(intent.get("revision") or "")
     expected = str(intent.get("expected_revision") or "")
-    options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, key=key, key_id=key_id)
+    options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
     try:
-        manifest = _open_manifest(_object_bytes(root, str(intent["manifest_ref"])),
+        manifest_envelope = _object_bytes(root, str(intent["manifest_ref"]))
+        manifest_key_id = parse_private_envelope(manifest_envelope)["key_id"]
+        identity_key = key if manifest_key_id == key_id else (
+            key_resolver(manifest_key_id) if key_resolver is not None else None)
+        if identity_key is None:
+            raise PrivateArtifactIntegrityError("authentication_failed")
+        manifest = _open_manifest(manifest_envelope,
                                   revision=revision, **options)
         objects = manifest.get("objects") or {}
-        keyed = (intent.get("transaction_id") == _wal_identity(key, b"transaction\x00", str(manifest.get("transaction_id") or ""))
-                 and intent.get("effect_id") == _wal_identity(key, b"effect\x00", str(manifest.get("effect_id") or "")))
+        keyed = (intent.get("transaction_id") == _wal_identity(identity_key, b"transaction\x00", str(manifest.get("transaction_id") or ""))
+                 and intent.get("effect_id") == _wal_identity(identity_key, b"effect\x00", str(manifest.get("effect_id") or "")))
         legacy = (intent.get("schema") == "cg-revision-intent-v1"
                   and intent.get("transaction_id") == manifest.get("transaction_id")
                   and intent.get("effect_id") == manifest.get("effect_id"))
@@ -3414,6 +3439,7 @@ def commit_private_revision(
     fsync_file: Callable[[int], None] | None = None,
     fsync_directory: Callable[[int], None] | None = None,
     before_publish: Callable[[], Any] | None = None,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> RevisionPublication:
     """Publish one answer revision across session, fact graph, and proof.
 
@@ -3451,7 +3477,7 @@ def commit_private_revision(
         expected = "0" if expected_revision in {None, ""} else str(expected_revision)
         _authenticate_revision_owner(root, tenant_id=tenant_id, case_id=case_id,
             principal_id=principal_id, key=key, key_id=key_id, create=True,
-            fsync_file=fsync_file, fsync_directory=fsync_directory)
+            fsync_file=fsync_file, fsync_directory=fsync_directory, key_resolver=key_resolver)
         head_raw, recorded_revision = _head_record(root)
         current = recorded_revision or "0"
         if current in {"",}:
@@ -3471,9 +3497,10 @@ def commit_private_revision(
                 revision=expected,
                 key=key,
                 key_id=key_id,
+                key_resolver=key_resolver,
             )
             _require_committed_revision(root, current_manifest, tenant_id=tenant_id,
-                case_id=case_id, principal_id=principal_id, key=key, key_id=key_id)
+                case_id=case_id, principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
             if current_manifest.get("effect_id") == effect_id and current_manifest.get("transaction_id") == transaction_id:
                 return RevisionPublication(
                     True, "committed", transaction_id, effect_id, expected,
@@ -3483,7 +3510,7 @@ def commit_private_revision(
             if head_raw not in {None, b""}:
                 raise PrivateRevisionError("unexpected head", code="revision_conflict", state="conflict")
         _recovery_status(root, options=dict(tenant_id=tenant_id, case_id=case_id,
-            principal_id=principal_id, key=key, key_id=key_id), phase="pending",
+            principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver), phase="pending",
             fsync_file=fsync_file, fsync_directory=fsync_directory)
         next_revision = str(int(expected) + 1) if expected.isdigit() else uuid.uuid4().hex
         sealed = {}
@@ -3551,7 +3578,7 @@ def commit_private_revision(
 
         def effect() -> bool:
             _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
-                                 principal_id=principal_id, key=key, key_id=key_id)
+                                 principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
             return _apply_intent(
                 root, intent, install=True, fsync_file=fsync_file, fsync_directory=fsync_directory,
                 **({"before_publish": before_publish} if before_publish is not None else {}),
@@ -3559,7 +3586,7 @@ def commit_private_revision(
 
         def compensate() -> bool:
             _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
-                                 principal_id=principal_id, key=key, key_id=key_id)
+                                 principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
             return _apply_intent(
                 root, intent, install=False, fsync_file=fsync_file, fsync_directory=fsync_directory,
             )
@@ -3614,6 +3641,7 @@ def recover_private_revision(
     key_id: str,
     fsync_file: Callable[[int], None] | None = None,
     fsync_directory: Callable[[int], None] | None = None,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> RevisionPublication:
     """Replay a committed revision or compensate an open one. A second call is a no-op."""
 
@@ -3634,11 +3662,11 @@ def recover_private_revision(
     try:
         lock = _acquire_lock(root)
         _authenticate_revision_owner(root, tenant_id=tenant_id, case_id=case_id,
-            principal_id=principal_id, key=key, key_id=key_id)
+            principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
         _open_head(root, tenant_id=tenant_id, case_id=case_id,
-                   principal_id=principal_id, key=key, key_id=key_id)
+                   principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
         lineage = _authenticate_recovery_journal(root, tenant_id=tenant_id, case_id=case_id,
-                   principal_id=principal_id, key=key, key_id=key_id)
+                   principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
         writer = __import__(
             "ipfs_kit_py.core.wal.writer", fromlist=["WALWriter"]
         ).WALWriter(root / "wal" / "records")
@@ -3649,14 +3677,14 @@ def recover_private_revision(
             if str(intent.get("effect_id") or "") != effect_id:
                 return False
             _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
-                                 principal_id=principal_id, key=key, key_id=key_id)
+                                 principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
             return _apply_intent(root, intent, install=True, fsync_file=fsync_file, fsync_directory=fsync_directory, lineage=lineage)
 
         def rollback(intent: Mapping[str, Any], effect_id: str) -> bool:
             if str(intent.get("effect_id") or "") != effect_id:
                 return False
             _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
-                                 principal_id=principal_id, key=key, key_id=key_id)
+                                 principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
             return _apply_intent(root, intent, install=False, fsync_file=fsync_file, fsync_directory=fsync_directory, lineage=lineage)
 
         try:
@@ -3675,12 +3703,13 @@ def recover_private_revision(
                     key=key,
                     key_id=key_id,
                     revision_hint=revision,
+                    key_resolver=key_resolver,
                 )
             except PrivateRevisionError:
                 raise
         if manifest is not None:
             _require_committed_revision(root, manifest, tenant_id=tenant_id, case_id=case_id,
-                                       principal_id=principal_id, key=key, key_id=key_id)
+                                       principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
         committed = bool(manifest) and counts["rolled_back"] == 0 and (
             counts["replayed"] > 0 or revision is not None
         )
@@ -3697,7 +3726,7 @@ def recover_private_revision(
             committed = True
         if manifest is None:
             _recovery_status(root, options=dict(tenant_id=tenant_id, case_id=case_id,
-                principal_id=principal_id, key=key, key_id=key_id), phase="recovered_empty",
+                principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver), phase="recovered_empty",
                 fsync_file=fsync_file, fsync_directory=fsync_directory)
         effect = str((manifest or {}).get("effect_id") or "")
         transaction = str((manifest or {}).get("transaction_id") or "")
@@ -3730,12 +3759,13 @@ def read_private_revision(
     principal_id: str,
     key: bytes,
     key_id: str,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> dict[str, Any] | None:
     """Open the published head. Wrong key or case raises; nothing is rewritten."""
 
     root = Path(repository)
     readiness = private_revision_readiness(root, tenant_id=tenant_id, case_id=case_id,
-        principal_id=principal_id, key=key, key_id=key_id)
+        principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
     if readiness in {"new", "empty"}:
         return None
     manifest = _open_head(
@@ -3745,11 +3775,12 @@ def read_private_revision(
         principal_id=principal_id,
         key=key,
         key_id=key_id,
+        key_resolver=key_resolver,
     )
     if manifest is None:
         raise PrivateRevisionError("committed revision head changed during read", code="recovery_required")
     _require_committed_revision(root, manifest, tenant_id=tenant_id, case_id=case_id,
-                               principal_id=principal_id, key=key, key_id=key_id)
+                               principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
     revision = str(manifest["revision"])
     opened: dict[str, Any] = {"manifest": manifest, "revision": revision}
     for role in _ROLE_NAMES:
@@ -3764,6 +3795,7 @@ def read_private_revision(
             revision=revision,
             key=key,
             key_id=key_id,
+            key_resolver=key_resolver,
         )
     opened["network_pinned"] = False
     return opened

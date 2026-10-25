@@ -5174,6 +5174,18 @@ class ComplaintWorkspaceService:
         key_id, key = context["key_provider"].resolve(binding)
         return context, key_id, key
 
+    def _joined_key_resolver(self, user_id: str, case_id: str):
+        """Resolve a retained envelope key through current owner admission.
+
+        This handle retains no key bytes or admission. Each lookup rechecks the
+        current issued owner, case binding and unlocked durable key session.
+        """
+        def lookup(key_id):
+            context, _active_id, _active_key = self._joined_key(user_id, case_id)
+            return self._private_key_session().lookup_data_key(
+                context["tenant_id"], context["case_id"], key_id)
+        return lookup
+
     def _joined_chat_identity(self, state: Mapping[str, Any], question_id: str, answer: str,
                               question_revision: Optional[int] = None) -> str:
         import hmac
@@ -5219,7 +5231,8 @@ class ComplaintWorkspaceService:
                                    "revision": revision}, sort_keys=True).encode("utf-8"),
             proof=json.dumps({"entries": state.get("proof_history", []), "revision": revision}, sort_keys=True).encode("utf-8"),
             transaction_id=transaction, effect_id=effect,
-            **({"before_publish": before_publish} if before_publish is not None else {}))
+               key_resolver=self._joined_key_resolver(context["tenant_id"], context["case_id"]), **({"before_publish": before_publish} if before_publish is not None else {}),
+           )
         if not publication.committed:
             raise WorkspacePersistenceError("joined revision did not commit", code="durability_unproven", public_status="recoverable")
         return state
@@ -5331,6 +5344,7 @@ class ComplaintWorkspaceService:
             writer=writer,
             fsync_file=fsync_file,
             fsync_directory=fsync_directory,
+            key_resolver=self._joined_key_resolver(resolved, binding_case),
         )
         receipt = publication.as_dict()
         receipt["network_pinned"] = False
@@ -5470,6 +5484,7 @@ class ComplaintWorkspaceService:
                 proof=json.dumps(proof_document, sort_keys=True).encode("utf-8"),
                 transaction_id=transaction_id,
                 effect_id=effect_id,
+                key_resolver=self._joined_key_resolver(resolved, binding_case),
             )
         except PrivateRevisionError as exc:
             raise WorkspacePersistenceError(
@@ -5543,6 +5558,7 @@ class ComplaintWorkspaceService:
                 principal_id=resolved,
                 key=key,
                 key_id=key_id,
+                key_resolver=self._joined_key_resolver(resolved, binding_case),
             )
             if not isinstance(opened, dict):
                 raise PrivateRevisionError("factual graph revision is missing", code="authentication_failed")
@@ -5612,6 +5628,7 @@ class ComplaintWorkspaceService:
             principal_id=resolved,
             key=key,
             key_id=key_id,
+            key_resolver=self._joined_key_resolver(resolved, context["case_id"]),
         )
         return publication.as_dict()
 
@@ -6809,7 +6826,7 @@ class ComplaintWorkspaceService:
         try:
             readiness = private_revision_readiness(repository, tenant_id=resolved_user,
                 case_id=context["case_id"], principal_id=context["principal_id"],
-                key=readiness_key, key_id=readiness_key_id)
+                key=readiness_key, key_id=readiness_key_id, key_resolver=self._joined_key_resolver(resolved_user, context["case_id"]))
         except PrivateStorageError as exc:
             raise WorkspacePersistenceError("Joined state requires authenticated recovery; original bytes were preserved.",
                 code=exc.code, public_status="recoverable") from None
@@ -6818,7 +6835,7 @@ class ComplaintWorkspaceService:
             _, key_id, key = self._joined_key(resolved_user, context["case_id"])
             try:
                 opened = read_private_revision(repository, tenant_id=resolved_user, case_id=context["case_id"],
-                    principal_id=context["principal_id"], key=key, key_id=key_id)
+                    principal_id=context["principal_id"], key=key, key_id=key_id, key_resolver=self._joined_key_resolver(resolved_user, context["case_id"]))
                 loaded = json.loads(opened["session"])
                 graph = json.loads(opened["fact_graph"])
                 proof = json.loads(opened["proof"])
@@ -6988,7 +7005,7 @@ class ComplaintWorkspaceService:
         try:
             readiness = private_revision_readiness(repository, tenant_id=user_id,
                 case_id=record_case, principal_id=context["principal_id"],
-                key=readiness_key, key_id=readiness_key_id)
+                key=readiness_key, key_id=readiness_key_id, key_resolver=self._joined_key_resolver(user_id, record_case))
         except PrivateStorageError as exc:
             raise WorkspacePersistenceError("Joined state requires authenticated recovery; original bytes were preserved.",
                 code=exc.code, public_status="recoverable") from None

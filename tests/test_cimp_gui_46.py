@@ -76,6 +76,8 @@ def _world(tmp_path):
         sessions={}, clock=clock,
     )
     app = FastAPI()
+    from applications.review_ui import attach_static_asset_routes
+    attach_static_asset_routes(app)
     compose_case_routes(
         app, authorizer=authorizer, browser_sessions=sessions, case_catalog=catalog,
         case_assignments=assignments, include_workspace=False, include_review=False, include_document=False,
@@ -454,6 +456,7 @@ def test_workspace_grant_controls_confirm_and_resume(tmp_path):
         version = accepted.json()["version"]
         with _browser(tmp_path, world.app) as page:
             page.goto(browser.SAME_ORIGIN + GRANT_CONTROL_PATH, wait_until="domcontentloaded")
+            page.wait_for_function("['ready','partial','denied','error'].includes(document.body.dataset.workspaceHydrated)")
             assert page.get_attribute("#owner-grant-control", "data-task") == "CIMP-GUI-46"
 
             def sign_in(credential):

@@ -30,6 +30,7 @@ import os
 import stat
 import uuid
 from dataclasses import dataclass, replace
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -363,6 +364,32 @@ class CaseResourceKeyGrantStore:
             raise CaseResourceKeyGrantError("browser_key_rejected")
         raise CaseResourceKeyGrantError("request_cannot_mint_key_grant")
 
+    def review_recipient_revocation(self, *, actor_principal_id: str,
+            recipient_principal_id: str, case_id: str, tenant_id: str,
+            resource_id: str) -> dict[str, Any]:
+        """Read current cryptographic cutoff under the actual case owner.
+
+        No key bytes or new authority are returned. Prepared revocation can be
+        inspected for an exact durable membership-operation retry.
+        """
+        owner = self._active(actor_principal_id)
+        recipient = self._active(recipient_principal_id)
+        self._reject_admin(owner)
+        case = self._select(owner.principal_id, case_id)
+        if case.owner_principal_id != owner.principal_id:
+            raise CaseResourceKeyGrantError("actor_not_owner")
+        if (case.tenant_id, case.resource_id) != (tenant_id, resource_id):
+            raise CaseResourceKeyGrantError("case_mismatch")
+        with self._locked():
+            state = self._generation_state(tenant_id, case_id, resource_id, allow_pending=True)
+            pending = state.get("pending_revoke")
+            grants = ([_grant_from_document(row) for row in pending["grants"]]
+                if pending else self._grants_for_case(tenant_id, case_id))
+            return {"cutoff": int(state["generation"]), "active_key_grants": sum(
+                g.status == "active" and g.recipient_principal_id == recipient.principal_id for g in grants),
+                "rotation_pending": pending is not None,
+                "key_grants_present": any(g.recipient_principal_id == recipient.principal_id for g in grants)}
+
     def revoke_and_rotate(
         self,
         *,
@@ -377,6 +404,8 @@ class CaseResourceKeyGrantStore:
         idempotency_key: str,
         retained_plaintext: bytes | None = None,
         retained_key: bytes | None = None,
+        before_publish: Any = None,
+        publication_scope: Any = None,
     ) -> dict[str, Any]:
         """Revoke one recipient at ``cutoff`` and re-wrap every surviving grant.
 
@@ -385,6 +414,10 @@ class CaseResourceKeyGrantStore:
         caller already holds are reported as still present.
         """
 
+        if before_publish is not None and not callable(before_publish):
+            raise TypeError("before_publish must be a trusted callable")
+        if publication_scope is not None and not callable(publication_scope):
+            raise TypeError("publication_scope must be a trusted scope factory")
         owner = self._active(actor_principal_id)
         recipient = self._active(recipient_principal_id)
         self._reject_admin(owner)
@@ -416,7 +449,11 @@ class CaseResourceKeyGrantStore:
         operation_id = hashlib.sha256(json.dumps(operation_identity, sort_keys=True,
                                                  separators=(",", ":")).encode()).hexdigest()
         owner_session.ensure_data_key(case.tenant_id, case.case_id)
-        with self._locked():
+        # Global order is KeyGrant -> Member -> owner key store. A trusted
+        # caller may hold a prepared membership against concurrent changes.
+        with self._locked(), (publication_scope() if publication_scope is not None else nullcontext()):
+            if before_publish is not None and before_publish() is False:
+                raise CaseResourceKeyGrantError("publication_denied")
             state = self._generation_state(case.tenant_id, case.case_id, case.resource_id, allow_pending=True)
             replay = self._revoke_replay(key_name)
             pending = state.get("pending_revoke")
@@ -427,7 +464,7 @@ class CaseResourceKeyGrantStore:
                     return _revoke_view(replay, retained_plaintext, retained_key)
             if pending is None and state.get("last_revoke", {}).get("operation_id") == operation_id:
                 summary = state["last_revoke"]["summary"]
-                self._write_revoke_replay(key_name, summary)
+                self._write_revoke_replay(key_name, summary, **({"before_publish":before_publish} if before_publish is not None else {}))
                 return _revoke_view(summary, retained_plaintext, retained_key)
             if pending is not None:
                 if pending.get("operation_id") != operation_id or pending.get("identity") != operation_identity:
@@ -462,9 +499,10 @@ class CaseResourceKeyGrantStore:
                                            "grants": [_grant_document(grant) for grant in grants]}
                 # A crash from this point fences delegated access. Cold retry
                 # uses the same authenticated snapshots and keystore operation.
-                self._write_generation(state)
+                self._write_generation(state, **({"before_publish":before_publish} if before_publish is not None else {}))
             rotation = owner_session.rotate_case_grant_data_key(case.tenant_id, case.case_id,
-                resource_id=case.resource_id, expected_data_key_id=old_key_id, operation_id=operation_id)
+                resource_id=case.resource_id, expected_data_key_id=old_key_id, operation_id=operation_id,
+                **({"before_publish":before_publish} if before_publish is not None else {}))
             new_key_id = str(rotation["new_data_key_id"])
             if new_key_id == old_key_id or rotation.get("old_data_key_id") != old_key_id:
                 raise CaseResourceKeyGrantError("case_key_epoch_mismatch")
@@ -486,9 +524,9 @@ class CaseResourceKeyGrantStore:
                         (grant.data_key_id, grant.wrapped_nonce, grant.wrapped_ciphertext),)))
             for grant in targets:
                 self._seal(replace(grant, version=grant.version + 1, status="revoked",
-                                   wrapped_nonce="", wrapped_ciphertext="", historical_wrapped_keys=()))
+                                   wrapped_nonce="", wrapped_ciphertext="", historical_wrapped_keys=()), **({"before_publish":before_publish} if before_publish is not None else {}))
             for grant in rewrapped:
-                self._seal(grant)
+                self._seal(grant, **({"before_publish":before_publish} if before_publish is not None else {}))
             summary = {"schema_version": SCHEMA_VERSION, "operation": "revoke_and_rewrap",
                 **{k: v for k, v in operation_identity.items() if k != "idempotency_sha256"},
                 "generation": cutoff + 1, "revoked_key_grant_ids": [g.key_grant_id for g in targets],
@@ -502,8 +540,8 @@ class CaseResourceKeyGrantStore:
             self._write_generation({"schema_version": SCHEMA_VERSION, "tenant_id": case.tenant_id,
                 "case_id": case.case_id, "resource_id": case.resource_id, "generation": cutoff + 1,
                 "cutoff": cutoff, "data_key_id": new_key_id,
-                "last_revoke": {"operation_id": operation_id, "summary": summary}})
-            self._write_revoke_replay(key_name, summary)
+                "last_revoke": {"operation_id": operation_id, "summary": summary}}, **({"before_publish":before_publish} if before_publish is not None else {}))
+            self._write_revoke_replay(key_name, summary, **({"before_publish":before_publish} if before_publish is not None else {}))
             return _revoke_view(summary, retained_plaintext, retained_key)
 
     def decrypt_with_admin_master(self, *_args: Any, **_kwargs: Any) -> bytes:
@@ -1122,7 +1160,7 @@ class CaseResourceKeyGrantStore:
             raise CaseResourceKeyGrantError("case_key_epoch_unavailable")
         return document
 
-    def _write_generation(self, state: Mapping[str, Any]) -> None:
+    def _write_generation(self, state: Mapping[str, Any], *, before_publish: Any = None) -> None:
         generation = int(state["generation"])
         binding = PrivateArtifactBinding(tenant_id=str(state["tenant_id"]), case_id=str(state["case_id"]),
             artifact_kind=GENERATION_KIND, revision=str(generation), principal_id=str(state["tenant_id"]))
@@ -1149,6 +1187,8 @@ class CaseResourceKeyGrantStore:
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
+            if before_publish is not None and before_publish() is False:
+                raise CaseResourceKeyGrantError("publication_denied")
             os.replace(temporary, path)
             parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
             try:
@@ -1181,7 +1221,9 @@ class CaseResourceKeyGrantStore:
             raise CaseResourceKeyGrantError("replay_mismatch")
         return document
 
-    def _write_revoke_replay(self, key: str, summary: Mapping[str, Any]) -> None:
+    def _write_revoke_replay(self, key: str, summary: Mapping[str, Any], *, before_publish: Any = None) -> None:
+        if before_publish is not None and before_publish() is False:
+            raise CaseResourceKeyGrantError("publication_denied")
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
         self._write_text(self._root / "revoke-idem" / digest, json.dumps(dict(summary), sort_keys=True))
 
