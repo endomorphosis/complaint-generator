@@ -198,7 +198,8 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
                         case_storage: Any = None,
                         case_consent: Any = None, gui_inference_transport: Any = None,
                         gui_inference_route: Any = None,
-                        operational_admin: Any = None) -> Any:
+                        operational_admin: Any = None,
+                        case_notifications: Any = None) -> Any:
     """Mount the same fail-closed boundary in every production app variant.
 
     Historical mediator/workspace arguments grant no ambient case access.
@@ -263,6 +264,12 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     selected_inference_transport = resolve_gui_inference_route(gui_inference_route,
         synthetic_transport=gui_inference_transport)
     mount_case_consent(app)
+    from .case_notifications import CaseNotificationService, mount_case_notifications
+    if case_notifications is not None and not isinstance(case_notifications, CaseNotificationService):
+        raise CaseAccessError("case_notifications")
+    if isinstance(case_notifications, CaseNotificationService):
+        case_notifications.observe(case_assignments, case_messages)
+    mount_case_notifications(app)
     from .case_api import mount_case_catalog
     mount_case_catalog(app)
     from .graph_api import mount_factual_graph_routes, mount_law_dependency_graph_routes
@@ -308,6 +315,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     app.state.case_attachments = case_attachments
     app.state.case_storage = case_storage
     app.state.case_consent = case_consent
+    app.state.case_notifications = case_notifications
     app.state.gui_inference_transport = selected_inference_transport
     app.state.gui_inference_route = gui_inference_route
     app.state.case_json_body_limits = limits
