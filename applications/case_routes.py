@@ -32,6 +32,13 @@ CASE_CATALOG_PREFIX = "/api/cases"
 CASE_PAGE_PATH = "/cases"
 RETIRED_EXACT_PATHS = frozenset({"/cookies", "/load_profile", "/create_profile", "/api/chat", "/api/chat/fallback"})
 AUTH_PATHS = frozenset("/api/complaint-workspace/auth/" + name for name in ("login", "logout", "rotate", "session"))
+INQUIRY_CONTRACT_PATHS = frozenset({
+    "/api/complaint-workspace/intake-chat",
+    "/api/complaint-workspace/mcp/call",
+    "/api/complaint-workspace/mcp/rpc",
+})
+INQUIRY_CONFLICT_CODE = "stale_question"
+INQUIRY_CONFLICT_STATUS = 409
 _MODULES: List[Tuple[str, Callable[..., None], Tuple[str, ...]]] = []
 RouteMount = Callable[[Any, Optional[CaseActionAuthorizer]], None]
 _BOUND_HANDLERS: ContextVar[Optional[Callable[[], Tuple[Any, Any, Any]]]] = ContextVar("case_route_handlers", default=None)
@@ -247,10 +254,38 @@ def boundary_for_path(path: str) -> str:
     return "http"
 
 
+def _nested_interview(payload: Any) -> Optional[Dict[str, Any]]:
+    """Find the WorkflowActionService receipt inside HTTP or MCP envelopes."""
+    if not isinstance(payload, dict):
+        return None
+    interview = payload.get("interview")
+    if isinstance(interview, dict) and ("status" in interview or "inquiry" in interview):
+        return interview
+    for key in ("structuredContent", "result"):
+        nested = _nested_interview(payload.get(key))
+        if nested is not None:
+            return nested
+    return None
+
+
+def shared_inquiry_conflict(payload: Any) -> bool:
+    """True when the service refused a stale or mismatched inquiry answer.
+
+    A missing expected revision is not a conflict. Only an explicit service
+    refusal with ``stale_question`` is. Callers must not treat that refusal
+    as a successful advance.
+    """
+    interview = _nested_interview(payload)
+    if not isinstance(interview, dict) or interview.get("status") != "refused":
+        return False
+    error = interview.get("error") if isinstance(interview.get("error"), dict) else {}
+    return error.get("code") == INQUIRY_CONFLICT_CODE
+
+
 def _status_for_denial(code: str) -> int:
     if code in {"unauthenticated", "missing_principal", "authorizer_required", "request_body"}:
         return 401
-    if code == "revision_conflict":
+    if code in {"revision_conflict", INQUIRY_CONFLICT_CODE}:
         return 409
     if code == "case_handler_unavailable":
         return 503
@@ -405,6 +440,48 @@ async def _read_json_body(scope, receive, limits: CaseJSONBodyLimits, *, login=F
     return body, replay
 
 
+def _inquiry_conflict_send(path: str, send):
+    """Rewrite a single-body 200 that carries a stale inquiry into HTTP 409.
+
+    Multi-chunk bodies are forwarded unchanged. This boundary does not claim
+    WebSocket, SSE, or streaming support.
+    """
+    if path not in INQUIRY_CONTRACT_PATHS:
+        return send
+    buffered = []
+
+    async def wrapped(message):
+        if message.get("type") == "http.response.start":
+            buffered.append(message)
+            return
+        if message.get("type") != "http.response.body":
+            await send(message)
+            return
+        start = buffered.pop(0) if buffered else {"type": "http.response.start", "status": 200, "headers": []}
+        status = int(start.get("status") or 200)
+        body = message.get("body") or b""
+        if status == 200 and not message.get("more_body", False) and body:
+            try:
+                payload = json.loads(body)
+            except (ValueError, UnicodeDecodeError):
+                payload = None
+            if shared_inquiry_conflict(payload):
+                encoded = json.dumps(payload).encode("utf-8")
+                headers = [
+                    (key, value)
+                    for key, value in start.get("headers", [])
+                    if key.lower() != b"content-length"
+                ]
+                headers.append((b"content-length", str(len(encoded)).encode("ascii")))
+                await send({"type": "http.response.start", "status": INQUIRY_CONFLICT_STATUS, "headers": headers})
+                await send({"type": "http.response.body", "body": encoded, "more_body": False})
+                return
+        await send(start)
+        await send(message)
+
+    return wrapped
+
+
 async def _send_json(send, status, payload):
     data = json.dumps(payload).encode()
     await send({"type": "http.response.start", "status": status,
@@ -496,7 +573,7 @@ class CaseRouteAuthorizationMiddleware:
         forwarded["state"] = state
         token = _BOUND_HANDLERS.set(handlers)
         try:
-            await self.app(forwarded, inbound, send)
+            await self.app(forwarded, inbound, _inquiry_conflict_send(path, send))
         finally:
             _BOUND_HANDLERS.reset(token)
 
