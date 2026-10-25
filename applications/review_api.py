@@ -8,6 +8,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Depends,
     Query,
     Request,
     Response,
@@ -30,7 +31,6 @@ from claim_support_review import (
     build_claim_support_testimony_payload,
     build_claim_support_uploaded_document_payload,
 )
-from .document_api import attach_document_routes
 from .fastapi_compat import attach_router_routes
 
 try:
@@ -195,8 +195,20 @@ def _include_router_routes(app: FastAPI, router: APIRouter) -> None:
         existing.add(route_key)
 
 
+async def require_composed_review_authorizer(request: Request) -> None:
+    """When production composition is active, review handlers require its decision."""
+
+    from .case_routes import COMPOSITION_NAME
+
+    if getattr(request.app.state, "case_route_composition", None) != COMPOSITION_NAME:
+        raise HTTPException(status_code=401, detail="authorizer_required")
+    decision = getattr(request.state, "case_authorization", None)
+    if decision is None or not getattr(decision, "permits_case_content", False):
+        raise HTTPException(status_code=401, detail="authorizer_required")
+
+
 def create_claim_support_review_router(mediator: Any) -> APIRouter:
-    router = APIRouter()
+    router = APIRouter(dependencies=[Depends(require_composed_review_authorizer)])
 
     @router.post("/api/claim-support/review")
     async def claim_support_review(
@@ -580,8 +592,19 @@ def attach_claim_support_review_routes(app: FastAPI, mediator: Any) -> FastAPI:
     return attach_router_routes(app, create_claim_support_review_router(mediator))
 
 
-def create_review_api_app(mediator: Any) -> FastAPI:
+def create_review_api_app(mediator: Any, authorizer: Any = None, workspace_service: Any = None,
+                          *, browser_sessions: Any = None, case_handlers: Any = None) -> FastAPI:
+    """Production review variant. Case routes come from the shared composition seam."""
+
+    from .case_routes import compose_case_routes
+
     app = FastAPI(title="Complaint Generator Review API")
-    attach_claim_support_review_routes(app, mediator)
-    attach_document_routes(app, mediator)
+    compose_case_routes(
+        app,
+        authorizer=authorizer,
+        mediator=mediator,
+        workspace_service=workspace_service,
+        browser_sessions=browser_sessions,
+        case_handlers=case_handlers,
+    )
     return app
