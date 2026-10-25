@@ -12,6 +12,7 @@ import errno
 import hashlib
 import html
 import json
+import math
 import os
 import secrets
 import shlex
@@ -47,6 +48,7 @@ _REQUIRED_CHROMIUM_ARG = "--remote-debugging-pipe"
 _UNQUALIFIED_TRANSPORTS = ("websocket", "sse", "streaming")
 _ASGI_REQUEST_SECONDS = 30
 _ASGI_THREAD_JOIN_SECONDS = 35
+OWNED_BROWSER_CLEANUP_SECONDS = 5
 
 
 class BrowserCapabilityError(RuntimeError):
@@ -805,6 +807,38 @@ def _assert_process_custody(node: PinnedExecutable, chromium: PinnedExecutable, 
         chromium_ok = True
     if not node_births or not chromium_ok:
         raise BrowserCapabilityError("Pinned Node or Chromium process was not observed")
+
+
+def await_owned_browser_cleanup(pids: set[int], *, deadline_seconds: float = OWNED_BROWSER_CLEANUP_SECONDS) -> dict[str, Any]:
+    """Wait for already-closed owned browser descendants. Do not signal them.
+
+    The deadline is the existing five-second cleanup ceiling. A non-positive,
+    non-finite, or longer deadline is rejected. Processes that are still alive
+    stay alive; this wait never becomes a kill or a second launch.
+    """
+
+    if (isinstance(deadline_seconds, bool) or type(deadline_seconds) not in (int, float)
+            or not math.isfinite(deadline_seconds) or deadline_seconds <= 0
+            or deadline_seconds > OWNED_BROWSER_CLEANUP_SECONDS):
+        raise BrowserCapabilityError("browser_cleanup_deadline_unbounded")
+    started = time.monotonic()
+    if (type(pids) is not set or len(pids) > 4096
+            or any(type(pid) is not int or pid <= 0 for pid in pids)):
+        raise BrowserCapabilityError("browser_cleanup_pids_invalid")
+    remaining = set(pids)
+    while remaining and time.monotonic() - started < deadline_seconds:
+        live = set(_process_table())
+        remaining &= live
+        if remaining:
+            time.sleep(0.05)
+    return {
+        "owned_count": len(pids),
+        "remaining_pids": sorted(remaining),
+        "cleaned": not remaining,
+        "elapsed_seconds": round(time.monotonic() - started, 4),
+        "deadline_seconds": float(deadline_seconds),
+        "signaled": False,
+    }
 
 
 def _wait_for_cleanup(pids: set[int]) -> dict[str, Any]:
