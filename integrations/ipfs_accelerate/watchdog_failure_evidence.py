@@ -107,18 +107,46 @@ def _snapshot(scope, observation, status, preflight, observed_at):
     return record
 
 
-def _directory(path):
-    path.mkdir(mode=0o700,exist_ok=True)
-    info = path.lstat()
-    if (path.resolve(strict=True) != path or info.st_uid != os.getuid()
-            or not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700):
-        raise ValueError("capture_directory_custody_invalid")
-    descriptor = os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
-    actual = os.fstat(descriptor)
-    if (actual.st_dev,actual.st_ino) != (info.st_dev,info.st_ino):
-        os.close(descriptor)
-        raise ValueError("capture_directory_changed")
-    return descriptor
+def _close(descriptor):
+    if descriptor >= 0:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass  # Optional capture failure cannot replace the real verdict.
+
+
+def _directory(path, *, parent_fd=None):
+    if (not path.is_absolute() or path.parent==path or path.parent.resolve(strict=True)!=path.parent):
+        raise ValueError("capture_parent_not_canonical")
+    owned_parent = parent_fd is None
+    parent = descriptor = -1
+    fields = ('st_dev','st_ino','st_uid','st_mode')
+    try:
+        parent = (os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+            if owned_parent else parent_fd)
+        info = os.fstat(parent)
+        named = path.parent.lstat()
+        if (any(getattr(info,k)!=getattr(named,k) for k in fields)
+                or not stat.S_ISDIR(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode&0o022):
+            raise ValueError("capture_parent_custody_invalid")
+        try:
+            os.mkdir(path.name,mode=0o700,dir_fd=parent)
+        except FileExistsError:
+            pass
+        descriptor = os.open(path.name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parent)
+        actual = os.fstat(descriptor)
+        named = os.stat(path.name,dir_fd=parent,follow_symlinks=False)
+        if (path.resolve(strict=True)!=path or actual.st_uid!=os.getuid()
+                or stat.S_IMODE(actual.st_mode)!=0o700
+                or any(getattr(actual,k)!=getattr(named,k) for k in fields)
+                or any(getattr(info,k)!=getattr(path.parent.lstat(),k) for k in fields)):
+            raise ValueError("capture_directory_custody_invalid")
+        result,descriptor = descriptor,-1
+        return result
+    finally:
+        _close(descriptor)
+        if owned_parent:
+            _close(parent)
 
 
 def _file_custody(info):
@@ -178,7 +206,7 @@ def capture(directory, *, scope, observation, status, preflight, observed_at):
         directory = Path(directory)
         parent = _directory(directory)
         archive_path = directory/'failure-evidence'
-        archive = _directory(archive_path)
+        archive = _directory(archive_path,parent_fd=parent)
         lock = os.open('capture.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,0o600,dir_fd=archive)
         lock_info = os.fstat(lock)
         named = os.stat('capture.lock',dir_fd=archive,follow_symlinks=False)
@@ -214,7 +242,7 @@ def capture(directory, *, scope, observation, status, preflight, observed_at):
                         or not _closed_existing(existing,record)):
                     raise ValueError('capture_existing_invalid')
             finally:
-                os.close(descriptor)
+                _close(descriptor)
             return {"status":"already_captured","record":name}
         if '.pending' in names:
             return {"status":"capture_pending"}
@@ -251,10 +279,8 @@ def capture(directory, *, scope, observation, status, preflight, observed_at):
         # replace the SDK's real effect/result or its persistent budgets.
         return {"status":"capture_unavailable"}
     finally:
-        if temporary >= 0:
-            os.close(temporary)
+        _close(temporary)
         # Retain a failed staging record; never delete potential first-failure
         # evidence on a later healthy tick or unknown publication failure.
         for descriptor in (lock,archive,parent):
-            if descriptor >= 0:
-                os.close(descriptor)
+            _close(descriptor)

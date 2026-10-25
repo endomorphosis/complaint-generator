@@ -191,3 +191,51 @@ def test_only_typed_dependency_hold_is_captured_and_healthy_never_creates_an_arc
     assert evidence.capture(directory,**inputs)['status']=='captured'
     record=json.loads(_records(directory)[0].read_bytes())
     assert record['reason']==record['failure_class']=='dependency_unavailable'
+
+
+@pytest.mark.parametrize('damage',['relative','aliased_parent','writable_parent'])
+def test_path_custody_refusal_never_creates_a_directory_in_foreign_scope(tmp_path,monkeypatch,damage):
+    monkeypatch.chdir(tmp_path)
+    parent=tmp_path/'parent';parent.mkdir(mode=0o700)
+    if damage=='relative':
+        destination=Path('relative')
+    elif damage=='aliased_parent':
+        alias=tmp_path/'alias';alias.symlink_to(parent,target_is_directory=True)
+        destination=alias/'watchdog'
+    else:
+        parent.chmod(0o777);destination=parent/'watchdog'
+    assert evidence.capture(destination,**_inputs())=={'status':'capture_unavailable'}
+    assert not (tmp_path/'relative').exists() and list(parent.iterdir())==[]
+
+
+@pytest.mark.parametrize('failure_at',[1,2])
+def test_real_file_sync_failures_never_overwrite_first_evidence_or_become_authority(tmp_path,monkeypatch,failure_at):
+    directory=tmp_path/'watchdog';real=evidence.os.fsync;calls=[]
+    def fsync(fd):
+        calls.append(fd)
+        if len(calls)==failure_at:
+            raise OSError('explicit synthetic filesystem refusal')
+        return real(fd)
+    with monkeypatch.context() as patch:
+        patch.setattr(evidence.os,'fsync',fsync)
+        result=evidence.capture(directory,**_inputs())
+    assert result=={'status':'capture_unavailable'}
+    if failure_at==1:
+        assert evidence.capture(directory,**_inputs())=={'status':'capture_pending'}
+        assert (directory/'failure-evidence/.pending').is_file() and _records(directory)==[]
+    else:
+        records=_records(directory);assert len(records)==1
+        raw=records[0].read_bytes()
+        assert evidence.capture(directory,**_inputs())['status']=='already_captured'
+        assert records[0].read_bytes()==raw
+
+
+def test_optional_capture_descriptor_close_refusal_cannot_escape(tmp_path,monkeypatch):
+    real=evidence.os.close
+    def close(fd):
+        real(fd)
+        raise OSError('explicit synthetic close diagnostic after actual close')
+    with monkeypatch.context() as patch:
+        patch.setattr(evidence.os,'close',close)
+        result=evidence.capture(tmp_path/'watchdog',**_inputs())
+    assert result['status']=='captured'
