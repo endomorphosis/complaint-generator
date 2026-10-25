@@ -1,6 +1,6 @@
 {
   "schema": "complaint-gui-collaboration-completion-contract@1",
-  "contract_version": 1,
+  "contract_version": 2,
   "task_id": "CIMP-GUI-60",
   "goal_id": "goal.gui.operations",
   "subgoal_id": "subgoal.gui.operations.closure",
@@ -14,7 +14,8 @@
   "self_task": {
     "status": "self_pending",
     "validation_closes_task": false,
-    "native_callback_owner": "root_outside_task"
+    "native_callback_owner": "Native",
+    "status_scope": "pre_callback_instruction_only"
   },
   "audit_phases": {
     "pre_completion": {
@@ -36,12 +37,14 @@
       "missing_evidence_status": "unavailable",
       "blocked_status": "blocked",
       "does_not_infer_from_pre_completion": true,
-      "root_callback_owner": "root",
       "rejects_callback_issued_by_this_task": true,
       "rejects_synthetic_callback": true,
       "packet_shape_does_not_complete": true,
       "ingestion_does_not_complete": true,
-      "old_program_completion_does_not_complete": true
+      "old_program_completion_does_not_complete": true,
+      "native_callback_owner": "Native",
+      "operator_role": "invoke_existing_read_only_verifier_after_native_callback",
+      "caller_packet_authenticates_evidence": false
     }
   },
   "new_plan": {
@@ -107,10 +110,19 @@
     "missing_key_mints_replacement": false,
     "revocation_denies_future_access": true,
     "revocation_erases_downloaded_content": false,
-    "grant_fields": ["recipient", "scope", "expiry", "revocation", "rotation"]
+    "grant_fields": [
+      "recipient",
+      "scope",
+      "expiry",
+      "revocation",
+      "rotation"
+    ]
   },
   "consent": {
-    "modes": ["local", "grok"],
+    "modes": [
+      "local",
+      "grok"
+    ],
     "omitted_flag_creates_consent": false,
     "encryption_unlock_is_consent": false,
     "development_authorization_is_egress_consent": false,
@@ -118,13 +130,31 @@
   },
   "private_messaging": {
     "default_state": "conversation",
-    "accepted_actions": ["evidence", "intake_answer", "model_input"],
+    "accepted_actions": [
+      "evidence",
+      "intake_answer",
+      "model_input"
+    ],
     "qualified_transport": "http_polling",
-    "unqualified_transports": ["websocket", "sse", "streaming"],
-    "outside_campaign": ["email", "sms", "court_filing"]
+    "unqualified_transports": [
+      "websocket",
+      "sse",
+      "streaming"
+    ],
+    "outside_campaign": [
+      "email",
+      "sms",
+      "court_filing"
+    ]
   },
   "graph_provenance": {
-    "not_governing_law": ["snippet", "llm_text", "parsed_ir", "training_metric", "unexecuted_proof"],
+    "not_governing_law": [
+      "snippet",
+      "llm_text",
+      "parsed_ir",
+      "training_metric",
+      "unexecuted_proof"
+    ],
     "legal_sufficiency_must_equal": false,
     "factual_answer_rewrites_rule": false
   },
@@ -166,7 +196,7 @@
     "pending_count_must_equal": 0
   },
   "member_receipt": {
-    "owner": "root",
+    "owner": "Native",
     "accepted_must_equal": true,
     "must_match_task_id": true,
     "must_match_canonical_task_cid": true
@@ -214,5 +244,32 @@
     "CIMP-GUI-60",
     "self-pending",
     "complaint-gui-collaboration"
-  ]
+  ],
+  "scope": "non_authoritative_instructional_operations_contract",
+  "instructional_only": true,
+  "current_campaign_status": "not_observed_by_this_document",
+  "production_verifier": {
+    "callable": "integrations.ipfs_accelerate.campaign_completion.verify_campaign_completion",
+    "arguments": [
+      "repo_root",
+      "spec_path",
+      "state_dir"
+    ],
+    "read_only": true,
+    "run_after_native_callbacks": true,
+    "required_result_field": "verified",
+    "historical_execution_only": true,
+    "current_source_qualification": false,
+    "does_not_issue_native_completion": true
+  },
+  "current_source_acceptance": {
+    "callable": "scripts.validate_gui_collaboration.current_main",
+    "process_cli": "python scripts/validate_gui_collaboration.py --output-root NONEXISTENT_PRIVATE_OUTPUT",
+    "required_groups": 12,
+    "run_separately_after_final_source_settles": true,
+    "outside_native_task_900_second_validation": true,
+    "subset_is_full_acceptance": false,
+    "legacy_main_or_probes_are_closure": false,
+    "saved_json_or_caller_flags_are_evidence": false
+  }
 }
