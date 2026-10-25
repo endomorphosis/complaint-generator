@@ -155,3 +155,62 @@ def test_real_http_boundary_completes_while_native_observed_dispatch_is_pending(
     assert body["live_model_identity_verified"] is False
     assert len(observed) == 1 and not w.seen
     assert not getattr(w.services[w.case.case_id], "_gui_server_holds", {})
+
+
+@pytest.mark.parametrize("frontdoor", ["mcp", "rpc"])
+def test_actual_mcp_refusal_is_tool_error_and_never_model_success(native_world, monkeypatch, frontdoor):
+    w = native_world
+    from integrations.ipfs_datasets import llm
+    monkeypatch.setattr(llm, "load_observed_llm_symbols", lambda: pytest.fail("consent denial cannot load provider"))
+    request = {"purpose": "extract_facts", "inputs": {"source_text": FRAGMENT, "target_ref": w.target}}
+    if frontdoor == "mcp":
+        response = w.client.post("/api/complaint-workspace/mcp/call", headers=w.headers,
+            json={"tool_name": "complaint.dispatch_bounded_gui_inference", "arguments": request})
+        result = response.json()
+        body = result
+    else:
+        response = w.client.post("/api/complaint-workspace/mcp/rpc", headers=w.headers,
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                "name": "complaint.dispatch_bounded_gui_inference", "arguments": request}})
+        result = response.json()["result"]
+        body = result["structuredContent"]
+        assert result["content"] == [{"type": "text", "text": "mcp_tool_error"}]
+    assert response.status_code == 200 and result["isError"] is True
+    assert body["status"] == "refused" and body["accepted"] is False and body["output"] is None
+    assert body["model_dispatched"] is False and not w.seen
+
+
+@pytest.mark.parametrize("flavor", ["classic", "esm"])
+def test_real_browser_sdk_does_not_publish_success_for_actual_consent_refusal(tmp_path, monkeypatch, flavor):
+    from tests.test_cimp_gui_33 import _consent_page, _consent_login
+    from tests.test_cimp_gui_15 import _client
+    from integrations.ipfs_datasets import llm
+    monkeypatch.setattr(llm, "load_observed_llm_symbols", lambda: pytest.fail("no provider before consent"))
+    with _consent_page(tmp_path, monkeypatch) as (w, page):
+        actual = w.actual
+        actual.app = SERVER(None, authorizer=actual.authorizer, browser_sessions=actual.sessions,
+            case_handlers=actual.handlers, case_consent=w.consent,
+            gui_inference_route=NATIVE_OBSERVED_GROK47).app
+        assert actual.app.state.gui_inference_transport is native_gui_inference_transport
+        issued = _consent_login(page, w)
+        _client(page, flavor)
+        result = page.evaluate("""async data => {
+            const client = window.actualClient;
+            client.setBrowserSession(data.issued); client.setCaseContext(data.case);
+            await client.bootstrapWorkspace(data.actor);
+            window.publicEvents.length = 0;
+            try {
+                await client.callTool('complaint.dispatch_bounded_gui_inference', {
+                    purpose:'extract_facts', inputs:{source_text:'not authorized', target_ref:'caller'}});
+                return {threw:false};
+            } catch (e) {
+                return {threw:true, isError:!!e.isError, last:client.getLastToolCall(), events:window.publicEvents};
+            }
+        }""", {"issued": issued, "actor": w.principal.principal_id,
+            "case": {"tenant_id": w.case.tenant_id, "case_id": w.case.case_id,
+                     "resource_id": w.case.resource_id, "revision": w.case.revision}})
+        assert result["threw"] is True and result["isError"] is True
+        assert result["last"]["status"] == "error"
+        assert not any(event.get("status") == "success" for event in result["events"])
+        stored = w.consent.read(w.principal.principal_id, w.case.case_id)
+        assert stored["egress_authorized"] is False and stored["generation"] == 0

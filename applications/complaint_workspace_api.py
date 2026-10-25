@@ -19,7 +19,8 @@ from .browser_sessions import (
     browser_session_http_status,
 )
 from .case_routes import INQUIRY_CONFLICT_STATUS, shared_inquiry_conflict
-from .complaint_mcp_protocol import handle_jsonrpc_message, project_shared_inquiry_contract, tool_list_payload
+from .complaint_mcp_protocol import (handle_jsonrpc_message, project_shared_inquiry_contract,
+    tool_list_payload, gui_inference_tool_failed)
 from .complaint_workspace import (
     ComplaintWorkspaceService,
     PrincipalRegistry,
@@ -1035,6 +1036,8 @@ def create_complaint_workspace_router(
             return JSONResponse(status_code=200, content={"ok": False, "error": "authorization_denied", "isError": True})
         except Exception:
             return JSONResponse(status_code=200, content={"ok": False, "error": "workspace_operation_failed", "isError": True})
+        if gui_inference_tool_failed(request.tool_name, payload):
+            return JSONResponse(status_code=200, content={**payload, "ok": False, "isError": True})
         if request.tool_name == "complaint.run_intake_chat_turn":
             payload = project_shared_inquiry_contract(payload)
             if shared_inquiry_conflict(payload):

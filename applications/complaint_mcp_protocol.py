@@ -12,6 +12,13 @@ MCP_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18")
 DEFAULT_MCP_PROTOCOL_VERSION = "2025-06-18"
 
 
+def gui_inference_tool_failed(tool_name: str, payload: Any) -> bool:
+    """A returned refusal is a tool error; a pending proposal is not."""
+    return (tool_name in {"complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}
+            and isinstance(payload, dict)
+            and payload.get("status") in {"refused", "unavailable", "timeout", "cancelled", "error", "failed"})
+
+
 def negotiated_protocol_version(params: Any) -> str:
     """Echo a Mike-supported MCP version, or the default when the client omits one."""
 
@@ -829,7 +836,8 @@ def _handle_jsonrpc_message(
             if tool_name == "complaint.run_intake_chat_turn":
                 structured = project_shared_inquiry_contract(structured)
             conflict = tool_name == "complaint.run_intake_chat_turn" and shared_inquiry_conflict(structured)
-            text = "stale_question" if conflict else json.dumps(structured, sort_keys=True)
+            inference_failed = gui_inference_tool_failed(tool_name, structured)
+            text = "stale_question" if conflict else "mcp_tool_error" if inference_failed else json.dumps(structured, sort_keys=True)
             return _success(
                 request_id,
                 {
@@ -840,7 +848,7 @@ def _handle_jsonrpc_message(
                         }
                     ],
                     "structuredContent": structured,
-                    "isError": conflict,
+                    "isError": conflict or inference_failed,
                     "conflict": "stale_question" if conflict else None,
                 },
             )
