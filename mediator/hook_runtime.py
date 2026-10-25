@@ -2489,6 +2489,313 @@ def accept_late_hook_result(
     }
 
 
+_GUI_INFERENCE_HOLDS: dict[str, dict[str, Any]] = {}
+
+
+def clear_gui_inference_holds() -> None:
+    """Drop held GUI proposals. This does not call a provider."""
+
+    _GUI_INFERENCE_HOLDS.clear()
+
+
+def minimal_source_references(source_bindings: Sequence[Mapping[str, Any]] | None) -> tuple[dict[str, str], ...]:
+    """Source id and content hash only. Passages and secrets are not copied."""
+
+    rows = normalize_source_bindings(source_bindings)
+    return tuple({"source_id": row["source_id"], "content_hash": row["content_hash"]} for row in rows)
+
+
+def _gui_grant_code(grant: Any, *, case_id: str, source_revision: str) -> Optional[str]:
+    if not isinstance(grant, Mapping):
+        return "grant_missing"
+    if grant.get("revoked") is True:
+        return "grant_revoked"
+    if type(grant.get("grant_id")) is not str or not grant["grant_id"].strip():
+        return "grant_missing"
+    if str(grant.get("case_id") or "") != case_id:
+        return "grant_wrong_case"
+    generation = grant.get("generation")
+    if type(generation) is not int or isinstance(generation, bool) or generation < 1:
+        return "grant_missing"
+    if type(grant.get("source_revision")) is not str or grant.get("source_revision") != source_revision:
+        return "stale_source_revision"
+    return None
+
+
+def _gui_refusal(
+    *,
+    purpose_id: str,
+    code: str,
+    route: Optional[dict[str, Any]] = None,
+    model_dispatched: bool = False,
+) -> dict[str, Any]:
+    result = _purpose_result(
+        purpose_id=purpose_id,
+        status="refused",
+        code=code,
+        model_dispatched=model_dispatched,
+        output=None,
+        identity=None,
+        route=route,
+    )
+    result["accepted"] = False
+    result["live_model_identity_verified"] = False
+    result["router_calls"] = []
+    result["source_references"] = []
+    result["requirements_satisfied"] = False
+    result["limitations"] = (
+        "synthetic_transport_does_not_qualify_live_model",
+        "development_authorization_is_not_case_consent",
+    )
+    return result
+
+
+def dispatch_gui_bounded_inference(
+    *,
+    policy_record: Mapping[str, Any] | None,
+    grant: Mapping[str, Any] | None,
+    purpose_id: str,
+    inputs: Mapping[str, Any] | None,
+    source_bindings: Sequence[Mapping[str, Any]] | None,
+    legal_context: Mapping[str, Any] | None,
+    owner_id: str,
+    case_id: str,
+    session_id: str,
+    session_revision: int,
+    graph_revision: str,
+    deadline: Any,
+    now: datetime,
+    privacy_context: Mapping[str, Any] | None,
+    model_transport: Optional[Callable[..., Any]] = None,
+    complaint_text: Any = None,
+    allow_local_fallback: bool = False,
+    allow_cross_provider_fallback: bool = False,
+    requested_provider: Optional[str] = None,
+    requested_model: Optional[str] = None,
+    operation: str = "refresh_grounding",
+) -> dict[str, Any]:
+    """Dispatch one GUI purpose through the existing consented hook boundary.
+
+    The injected transport is synthetic. A payload that claims a live Grok
+    identity is not treated as qualification. Fallback stays disabled. The
+    call carries allowed purpose inputs and source id/hash references only.
+    Model output is held until :func:`admit_gui_bounded_inference`.
+    """
+
+    from integrations.ipfs_datasets.llm import bind_remote_invocation, evaluate_remote_operation_consent
+
+    route = _pinned_route()
+    purpose = purpose_id if type(purpose_id) is str else ""
+    if purpose not in MODEL_PURPOSE_IDS:
+        return _gui_refusal(purpose_id=purpose or str(purpose_id), code="undeclared_purpose", route=None)
+    if allow_local_fallback is not False or allow_cross_provider_fallback is not False:
+        return _gui_refusal(purpose_id=purpose, code="unpinned_route", route=route)
+    try:
+        references = minimal_source_references(source_bindings)
+        source_revision = source_binding_hash(source_bindings)
+    except HookContextError as exc:
+        return _gui_refusal(purpose_id=purpose, code=exc.code, route=route)
+    complaint = complaint_text if type(complaint_text) is str else ""
+    try:
+        encoded_inputs = json.dumps(inputs, sort_keys=True, ensure_ascii=False) if inputs is not None else ""
+    except (TypeError, ValueError):
+        encoded_inputs = ""
+    if complaint and complaint in encoded_inputs:
+        return _gui_refusal(purpose_id=purpose, code="query_not_minimized", route=route)
+    grant_code = _gui_grant_code(grant, case_id=case_id, source_revision=source_revision)
+    if grant_code:
+        return _gui_refusal(purpose_id=purpose, code=grant_code, route=route)
+    consent = evaluate_remote_operation_consent(
+        policy_record,
+        user_id=owner_id,
+        case_id=case_id,
+        purpose=purpose,
+        provider_kind="grok_inference",
+        data_class="raw_intake",
+        tools=False,
+    )
+    if consent["effectful_allowed"] is not True:
+        return _gui_refusal(purpose_id=purpose, code=str(consent["code"]), route=route)
+    try:
+        context = bind_hook_execution_context(
+            operation=operation,
+            owner_id=owner_id,
+            case_id=case_id,
+            session_id=session_id,
+            session_revision=session_revision,
+            graph_revision=graph_revision,
+            legal_context=legal_context if isinstance(legal_context, Mapping) else {},
+            purpose=purpose,
+            deadline=deadline,
+            source_bindings=source_bindings,
+            privacy_context=privacy_context,
+        )
+    except HookContextError as exc:
+        return _gui_refusal(purpose_id=purpose, code=exc.code, route=route)
+    observed: list[dict[str, Any]] = []
+
+    def observing(call: Mapping[str, Any]) -> Any:
+        forwarded = dict(call)
+        forwarded["source_references"] = [dict(row) for row in references]
+        forwarded["allow_local_fallback"] = False
+        forwarded["allow_cross_provider_fallback"] = False
+        observed.append(forwarded)
+        if model_transport is None:
+            return {"status": "unavailable"}
+        return model_transport(forwarded)
+
+    invocation_id = bind_remote_invocation(
+        user_id=owner_id,
+        case_id=case_id,
+        purpose=purpose,
+        provider_kind="grok_inference",
+        data_class="raw_intake",
+        generation=int(consent["generation"]),
+    )
+    result = dispatch_declared_hook_purpose(
+        context,
+        purpose,
+        inputs,
+        owner_id=owner_id,
+        case_id=case_id,
+        session_id=session_id,
+        session_revision=session_revision,
+        graph_revision=graph_revision,
+        legal_context=legal_context,
+        source_bindings=source_bindings,
+        privacy_context=privacy_context,
+        now=now,
+        model_transport=observing,
+        requested_provider=requested_provider,
+        requested_model=requested_model,
+        allow_local_fallback=False,
+        allow_cross_provider_fallback=False,
+    )
+    result["router_calls"] = observed
+    result["source_references"] = [dict(row) for row in references]
+    result["invocation_id"] = invocation_id
+    result["accepted"] = False
+    result["live_model_identity_verified"] = False
+    result["requirements_satisfied"] = False
+    result["requirements_satisfied_by_model"] = False
+    result["bound_source_revision"] = source_revision
+    result["bound_grant_generation"] = int(grant["generation"]) if isinstance(grant, Mapping) else 0
+    result["bound_graph_revision"] = graph_revision
+    result["bound_session_revision"] = session_revision
+    result["consent_generation"] = int(consent["generation"])
+    result["limitations"] = (
+        "synthetic_transport_does_not_qualify_live_model",
+        "development_authorization_is_not_case_consent",
+        "output_waits_for_late_admission",
+    )
+    if result.get("status") == "available" and result.get("output") is not None:
+        _GUI_INFERENCE_HOLDS[invocation_id] = {
+            "output": result["output"],
+            "owner_id": owner_id,
+            "case_id": case_id,
+            "purpose": purpose,
+            "source_revision": source_revision,
+            "grant_id": str(grant.get("grant_id")) if isinstance(grant, Mapping) else "",
+            "grant_generation": int(grant["generation"]) if isinstance(grant, Mapping) else 0,
+            "graph_revision": graph_revision,
+            "session_revision": session_revision,
+            "invocation_id": invocation_id,
+        }
+        result["output"] = None
+        result["status"] = "held"
+        result["code"] = "awaiting_late_admission"
+    return result
+
+
+def admit_gui_bounded_inference(
+    *,
+    invocation_id: str,
+    policy_record: Mapping[str, Any] | None,
+    grant: Mapping[str, Any] | None,
+    source_bindings: Sequence[Mapping[str, Any]] | None,
+    owner_id: str,
+    case_id: str,
+    graph_revision: str,
+    session_revision: int,
+) -> dict[str, Any]:
+    """Re-read consent, the resource grant, and source revisions before release.
+
+    A synthetic hold is not a live model qualification. Revocation, a new
+    grant generation, or a changed source hash drops the held proposal.
+    """
+
+    from integrations.ipfs_datasets.llm import accept_late_remote_result
+
+    base = {
+        "accepted": False,
+        "code": "invocation_missing",
+        "output": None,
+        "live_model_identity_verified": False,
+        "requirements_satisfied": False,
+        "requirements_satisfied_by_model": False,
+        "consent_revalidated": False,
+        "grant_revalidated": False,
+        "source_revision_revalidated": False,
+        "policy_read": isinstance(policy_record, Mapping),
+    }
+    if type(invocation_id) is not str:
+        return base
+    held = _GUI_INFERENCE_HOLDS.get(invocation_id)
+    if held is None:
+        return base
+    if held["owner_id"] != owner_id or held["case_id"] != case_id:
+        base["code"] = "invocation_not_reusable"
+        _GUI_INFERENCE_HOLDS.pop(invocation_id, None)
+        return base
+    late = accept_late_remote_result(
+        policy_record,
+        invocation_id=invocation_id,
+        user_id=owner_id,
+        case_id=case_id,
+        bound_graph_revision=str(held["graph_revision"]),
+        current_graph_revision=graph_revision if type(graph_revision) is str else "",
+        bound_session_revision=int(held["session_revision"]),
+        current_session_revision=session_revision if type(session_revision) is int else -1,
+    )
+    base["consent_revalidated"] = True
+    if late["accepted"] is not True:
+        base["code"] = str(late["code"])
+        _GUI_INFERENCE_HOLDS.pop(invocation_id, None)
+        return base
+    try:
+        current_revision = source_binding_hash(source_bindings)
+    except HookContextError as exc:
+        base["code"] = exc.code
+        base["source_revision_revalidated"] = True
+        _GUI_INFERENCE_HOLDS.pop(invocation_id, None)
+        return base
+    base["source_revision_revalidated"] = True
+    if current_revision != held["source_revision"]:
+        base["code"] = "stale_source_revision"
+        _GUI_INFERENCE_HOLDS.pop(invocation_id, None)
+        return base
+    grant_code = _gui_grant_code(grant, case_id=case_id, source_revision=current_revision)
+    base["grant_revalidated"] = True
+    if grant_code:
+        base["code"] = grant_code
+        _GUI_INFERENCE_HOLDS.pop(invocation_id, None)
+        return base
+    if not isinstance(grant, Mapping) or str(grant.get("grant_id") or "") != held["grant_id"]:
+        base["code"] = "grant_missing"
+        _GUI_INFERENCE_HOLDS.pop(invocation_id, None)
+        return base
+    if int(grant["generation"]) != int(held["grant_generation"]):
+        base["code"] = "stale_grant"
+        _GUI_INFERENCE_HOLDS.pop(invocation_id, None)
+        return base
+    output = held["output"]
+    _GUI_INFERENCE_HOLDS.pop(invocation_id, None)
+    base["accepted"] = True
+    base["code"] = "accepted"
+    base["output"] = output
+    return base
+
+
 EFFECT_ACCEPTANCE_SCHEMA = "hook_effect_acceptance_v1"
 EFFECT_RECEIPT_SCHEMA = "hook_effect_receipt_v1"
 CANDIDATE_ACQUISITION_SCHEMA = "hook_candidate_acquisition_v1"

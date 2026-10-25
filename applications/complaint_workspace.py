@@ -4176,6 +4176,11 @@ class ComplaintWorkspaceService:
         """Resolve current request admission and the live user-owned key session."""
         from integrations.private_storage import PrivateArtifactBinding, PrivateKeyMaterialError
 
+        # A replaced or symlinked session root must fail closed before any key
+        # lookup. Following it would surface unlock_needed instead of the
+        # directory boundary refusal, and could read a foreign key store.
+        descriptor = self._open_session_directory()
+        os.close(descriptor)
         selected_case = str(case_id or _REQUEST_CASE.get() or self._effective_access().case_id or user_id)
         resolved = self._check_access(user_id, ability="read", case_id=selected_case, record_case_id=selected_case)
         self._require_private_case_key_access(resolved, selected_case, principal_id=resolved)
@@ -14039,6 +14044,159 @@ class ComplaintWorkspaceService:
             bound_session_revision=bound_session_revision,
             current_session_revision=current_session_revision,
         )
+
+    def record_gui_inference_authority(
+        self,
+        user_id: Optional[str],
+        *,
+        grant: Mapping[str, Any],
+        source_bindings: Sequence[Mapping[str, Any]],
+        graph_revision: str,
+        session_revision: int,
+        session_id: str,
+    ) -> Dict[str, Any]:
+        """Persist the grant and source references checked again at late admission.
+
+        Source rows keep id and content hash. Complaint text is not stored here.
+        """
+
+        from mediator.hook_runtime import HookContextError, minimal_source_references, source_binding_hash
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        case_id = _state_case_id(state, resolved_user_id)
+        try:
+            references = [dict(row) for row in minimal_source_references(source_bindings)]
+            source_revision = source_binding_hash(source_bindings)
+        except HookContextError as exc:
+            return {"recorded": False, "code": exc.code, "case_id": case_id, "live_model_identity_verified": False}
+        if type(graph_revision) is not str or not graph_revision.strip():
+            return {"recorded": False, "code": "stale_revision", "case_id": case_id, "live_model_identity_verified": False}
+        if type(session_revision) is not int or isinstance(session_revision, bool) or session_revision < 0:
+            return {"recorded": False, "code": "stale_request", "case_id": case_id, "live_model_identity_verified": False}
+        if type(session_id) is not str or not session_id.strip():
+            return {"recorded": False, "code": "wrong_case", "case_id": case_id, "live_model_identity_verified": False}
+        sealed_grant = {
+            "grant_id": grant.get("grant_id") if isinstance(grant, Mapping) else None,
+            "case_id": case_id,
+            "generation": grant.get("generation") if isinstance(grant, Mapping) else None,
+            "revoked": bool(grant.get("revoked")) if isinstance(grant, Mapping) else True,
+            "source_revision": source_revision,
+        }
+        state["gui_inference_authority"] = {
+            "grant": sealed_grant,
+            "source_bindings": references,
+            "graph_revision": graph_revision.strip(),
+            "session_revision": session_revision,
+            "session_id": session_id.strip(),
+        }
+        self._save_state(state)
+        return {
+            "recorded": True,
+            "code": "recorded",
+            "case_id": case_id,
+            "source_revision": source_revision,
+            "source_references": references,
+            "grant_id": sealed_grant["grant_id"],
+            "grant_generation": sealed_grant["generation"],
+            "live_model_identity_verified": False,
+        }
+
+    def _gui_inference_authority(self, user_id: str) -> Dict[str, Any]:
+        state = self._load_state(user_id)
+        authority = state.get("gui_inference_authority") if isinstance(state.get("gui_inference_authority"), dict) else {}
+        return authority
+
+    def dispatch_bounded_gui_inference(
+        self,
+        user_id: Optional[str],
+        *,
+        purpose: str,
+        inputs: Mapping[str, Any],
+        legal_context: Mapping[str, Any],
+        deadline: Any,
+        now: Any,
+        model_transport: Optional[Any] = None,
+        complaint_text: Any = None,
+        allow_local_fallback: bool = False,
+        allow_cross_provider_fallback: bool = False,
+        requested_provider: Optional[str] = None,
+        requested_model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Run GUI inference through consented hook dispatch on the pinned Grok route.
+
+        Development authorization is not read. The transport is the caller's
+        observed synthetic transport. Output stays held for late admission.
+        """
+
+        from mediator.hook_runtime import dispatch_gui_bounded_inference
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        policy = self.read_persisted_owner_case_policy(resolved_user_id)
+        authority = self._gui_inference_authority(resolved_user_id)
+        helpers = _privacy_helpers()
+        case_id = str(policy.get("case_id") or resolved_user_id)
+        privacy_context = helpers["build_complaint_privacy_context"](
+            policy.get("privacy_policy"),
+            user_id=resolved_user_id,
+            case_id=case_id,
+            data_class="raw_intake",
+        )
+        result = dispatch_gui_bounded_inference(
+            policy_record=policy,
+            grant=authority.get("grant") if isinstance(authority.get("grant"), Mapping) else None,
+            purpose_id=purpose,
+            inputs=inputs,
+            source_bindings=authority.get("source_bindings") if isinstance(authority.get("source_bindings"), list) else None,
+            legal_context=legal_context,
+            owner_id=resolved_user_id,
+            case_id=case_id,
+            session_id=str(authority.get("session_id") or ""),
+            session_revision=authority.get("session_revision") if type(authority.get("session_revision")) is int else -1,
+            graph_revision=str(authority.get("graph_revision") or ""),
+            deadline=deadline,
+            now=now,
+            privacy_context=privacy_context,
+            model_transport=model_transport,
+            complaint_text=complaint_text,
+            allow_local_fallback=allow_local_fallback,
+            allow_cross_provider_fallback=allow_cross_provider_fallback,
+            requested_provider=requested_provider,
+            requested_model=requested_model,
+        )
+        result["user_id"] = resolved_user_id
+        result["case_id"] = case_id
+        result["development_grok_authorization_ignored"] = True
+        return result
+
+    def admit_bounded_gui_inference(
+        self,
+        user_id: Optional[str],
+        *,
+        invocation_id: str,
+    ) -> Dict[str, Any]:
+        """Reload consent, grant, and source revision before releasing a held proposal."""
+
+        from mediator.hook_runtime import admit_gui_bounded_inference
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        policy = self.read_persisted_owner_case_policy(resolved_user_id)
+        authority = self._gui_inference_authority(resolved_user_id)
+        case_id = str(policy.get("case_id") or resolved_user_id)
+        result = admit_gui_bounded_inference(
+            invocation_id=invocation_id,
+            policy_record=policy,
+            grant=authority.get("grant") if isinstance(authority.get("grant"), Mapping) else None,
+            source_bindings=authority.get("source_bindings") if isinstance(authority.get("source_bindings"), list) else None,
+            owner_id=resolved_user_id,
+            case_id=case_id,
+            graph_revision=str(authority.get("graph_revision") or ""),
+            session_revision=authority.get("session_revision") if type(authority.get("session_revision")) is int else -1,
+        )
+        result["user_id"] = resolved_user_id
+        result["case_id"] = case_id
+        result["live_model_identity_verified"] = False
+        return result
 
     def _adverse_public_anchor(self, user_id: str) -> Dict[str, Any]:
         """Graph token, pending inquiry, and snapshot head. Reads do not dispatch."""
