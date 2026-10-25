@@ -153,7 +153,7 @@ def materialize(repo_root, spec_path, state_dir, record, daemon, candidate, *, r
         task_id=candidate["task_id"], attempt=lifecycle_attempt)
     _need(not os.path.lexists(index) and daemon.worktree_lifecycle.load_workspace(path) is None,
           "preserved_candidate_terminal_custody_not_retired")
-    _require_resource_capacity(root, state, workroot, os.environ)
+    _require_resource_capacity(root, state, workroot, os.environ, stage="preserved_candidate_materialization")
     with mutation(root, path):
         _need(not os.path.lexists(index) and daemon.worktree_lifecycle.load_workspace(path) is None,
               "preserved_candidate_terminal_custody_not_retired")
