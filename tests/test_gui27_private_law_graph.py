@@ -34,7 +34,7 @@ def test_actual_owner_reads_saved_dependency_graph_without_writing(tmp_path):
         assert response.status_code == 200, response.text
         assert response.json()["case_id"] == world.case.case_id
         assert response.json()["admitted_count"] == 0
-        assert response.json()["research_gap"] == "no_admitted_authority"
+        assert response.json()["research_gap"] == "unresolved_current_legal_context"
         assert response.json()["proof"] is False
         assert _composed_ciphertext_snapshot(world.services[world.case.case_id]) == before
 
