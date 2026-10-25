@@ -404,6 +404,31 @@ class WorkflowActionService:
 			knowledge_graph=kg,
 		)
 
+	@classmethod
+	def project_legal_context_selection(cls, projection, *, case_file, dependency_graph):
+		"""Copy one persisted workflow DTO without touching a live mediator.
+
+		The workspace owns admission and encrypted CAS. After commit, ordinary
+		resume consumes this same versioned projection; facts, pending inquiry,
+		answer history and extraction count retain their original identities.
+		"""
+		from copy import deepcopy
+		if (not isinstance(projection, dict)
+			or projection.get("schema_version") != cls.SESSION_PROJECTION_VERSION
+			or not isinstance(projection.get("knowledge_graph"), dict)
+			or not isinstance(case_file, dict)
+			or not isinstance(dependency_graph, DependencyGraph)):
+			raise ValueError("projection_invalid")
+		revision = projection.get("session_revision")
+		if type(revision) is not int or revision < 0:
+			raise ValueError("projection_invalid")
+		KnowledgeGraph.from_dict(projection["knowledge_graph"])
+		draft = deepcopy(projection)
+		draft["intake_case_file"] = deepcopy(case_file)
+		draft["dependency_graph"] = dependency_graph.to_dict()
+		draft["session_revision"] = revision + 1
+		return _json_ready(draft)
+
 	def export_session_projection(self) -> Optional[Dict[str, Any]]:
 		"""Versioned snapshot that can rebuild KG/DG without a new extraction."""
 		if not self.interview_started:
