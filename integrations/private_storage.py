@@ -7477,4 +7477,176 @@ __all__ = [
     "commit_legacy_hook_migration",
     "open_legacy_hook_artifact",
     "legacy_hook_migration_claim",
+    "DURABILITY_STATES",
+    "verify_ciphertext_durability",
+    "CiphertextDurabilityError",
 ]
+
+
+# Ciphertext durability is four observations. A local manifest commit, a queued
+# replication acknowledgement, and a pin are never a verified replica. Only a
+# Kit readback of the same ciphertext bytes can set durable. A CID string or a
+# public gateway URL is not evidence.
+
+DURABILITY_STATE_LOCAL_COMMIT = "local_commit"
+DURABILITY_STATE_QUEUED_REPLICATION = "queued_replication"
+DURABILITY_STATE_PIN = "pin"
+DURABILITY_STATE_VERIFIED_REPLICA = "verified_replica"
+DURABILITY_STATES = (
+    DURABILITY_STATE_LOCAL_COMMIT,
+    DURABILITY_STATE_QUEUED_REPLICATION,
+    DURABILITY_STATE_PIN,
+    DURABILITY_STATE_VERIFIED_REPLICA,
+)
+_GATEWAY_MARKERS = (
+    "ipfs.io",
+    "gateway.ipfs",
+    "dweb.link",
+    "cloudflare-ipfs.com",
+    "ipfs.tech/ipfs",
+    "https://",
+    "http://",
+)
+
+
+class CiphertextDurabilityError(PrivateStorageError):
+    """Kit durability could not be shown from ciphertext readback."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code, code=code)
+
+
+def _kit_replica_contract():
+    """Load the current Kit replica vocabulary. A missing contract is a failure."""
+
+    _prefer_vendored_kit()
+    try:
+        from ipfs_kit_py.core.replication.contracts import (
+            NON_DURABLE_REPLICA_STATES,
+            ReplicaState,
+        )
+    except Exception as exc:
+        raise CiphertextDurabilityError("kit_contracts_unavailable") from exc
+    if ReplicaState.QUEUED not in NON_DURABLE_REPLICA_STATES:
+        raise CiphertextDurabilityError("kit_contracts_unavailable")
+    if ReplicaState.VERIFIED in NON_DURABLE_REPLICA_STATES:
+        raise CiphertextDurabilityError("kit_contracts_unavailable")
+    return ReplicaState
+
+
+def _reject_public_gateway(value: Any) -> None:
+    if isinstance(value, str):
+        lowered = value.lower()
+        if any(marker in lowered for marker in _GATEWAY_MARKERS):
+            raise CiphertextDurabilityError("public_gateway_rejected")
+        return
+    if isinstance(value, Mapping):
+        for item in value.values():
+            _reject_public_gateway(item)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _reject_public_gateway(item)
+
+
+def _kit_call(kit: Any, name: str, *args: Any) -> Any:
+    method = getattr(kit, name, None)
+    if not callable(method):
+        raise CiphertextDurabilityError(f"kit_{name}_unavailable")
+    try:
+        result = method(*args)
+    except CiphertextDurabilityError:
+        raise
+    except Exception as exc:
+        raise CiphertextDurabilityError(f"kit_{name}_failed") from exc
+    _reject_public_gateway(result if not isinstance(result, (bytes, bytearray)) else "")
+    return result
+
+
+def _opaque_ref(result: Mapping[str, Any]) -> str:
+    ref = result.get("ref") or result.get("locator")
+    if isinstance(ref, str) and ref.strip() and ref == ref.strip() and len(ref) <= 200:
+        if any(marker in ref.lower() for marker in _GATEWAY_MARKERS):
+            raise CiphertextDurabilityError("public_gateway_rejected")
+        return ref
+    cid = result.get("cid")
+    if isinstance(cid, str) and cid.strip() and "://" not in cid and len(cid) <= 200:
+        return cid
+    raise CiphertextDurabilityError("kit_ref_rejected")
+
+
+def verify_ciphertext_durability(kit: Any, envelope: bytes) -> dict[str, Any]:
+    """Commit, queue, pin, and read back one ciphertext through a Kit owner.
+
+    ``durable`` is true only when ``readback`` returns the same bytes that
+    ``manifest`` accepted. Queued replication and pin stay distinct and
+    non-durable. Public gateway URLs are rejected. A CID is not proof.
+    """
+
+    if not isinstance(envelope, (bytes, bytearray)) or not bytes(envelope).startswith(ENVELOPE_MAGIC):
+        raise CiphertextDurabilityError("ciphertext_required")
+    payload = bytes(envelope)
+    replica_state = _kit_replica_contract()
+    states: list[dict[str, Any]] = []
+
+    def _record(state: str, *, ref: str, kit_state: str) -> None:
+        if state not in DURABILITY_STATES or any(item["state"] == state for item in states):
+            raise CiphertextDurabilityError("durability_state_collision")
+        states.append({
+            "state": state,
+            "ref": ref,
+            "kit_replica_state": kit_state,
+            "durable": False,
+            "counts_as_verified_replica": False,
+        })
+
+    manifest = _kit_call(kit, "manifest", payload)
+    if not isinstance(manifest, Mapping):
+        raise CiphertextDurabilityError("kit_manifest_failed")
+    ref = _opaque_ref(manifest)
+    _record(DURABILITY_STATE_LOCAL_COMMIT, ref=ref, kit_state="local_commit")
+
+    queued = _kit_call(kit, "queue_replication", ref)
+    if not isinstance(queued, Mapping):
+        raise CiphertextDurabilityError("kit_queue_replication_failed")
+    _record(
+        DURABILITY_STATE_QUEUED_REPLICATION,
+        ref=ref,
+        kit_state=replica_state.QUEUED.value,
+    )
+
+    pinned = _kit_call(kit, "pin", ref)
+    if not isinstance(pinned, Mapping) or pinned.get("pinned") is not True:
+        raise CiphertextDurabilityError("kit_pin_failed")
+    _record(DURABILITY_STATE_PIN, ref=ref, kit_state="pin")
+
+    loaded = _kit_call(kit, "readback", ref)
+    matched = isinstance(loaded, (bytes, bytearray)) and bytes(loaded) == payload
+    if matched:
+        _record(
+            DURABILITY_STATE_VERIFIED_REPLICA,
+            ref=ref,
+            kit_state=replica_state.VERIFIED.value,
+        )
+        states[-1]["counts_as_verified_replica"] = True
+        states[-1]["durable"] = True
+    observed = [item["state"] for item in states]
+    if observed[:3] != list(DURABILITY_STATES[:3]):
+        raise CiphertextDurabilityError("durability_state_collision")
+    if len(set(observed)) != len(observed):
+        raise CiphertextDurabilityError("durability_state_collision")
+    return {
+        "states": states,
+        "state_names": observed,
+        "durable": matched and observed[-1] == DURABILITY_STATE_VERIFIED_REPLICA,
+        "readback_matched": matched,
+        "ciphertext_sha256": hashlib.sha256(payload).hexdigest(),
+        "byte_length": len(payload),
+        "ref": ref,
+        "public_gateway_consulted": False,
+        "cid_inference": False,
+        "pin_is_durable": False,
+        "queued_replication_is_durable": False,
+        "local_commit_is_durable": False,
+        "code": "" if matched else "readback_mismatch",
+    }
