@@ -16,6 +16,13 @@
 <body>
 <main>
     <h1>Your cases</h1>
+    <form id="case-login">
+        <p>Sign in here to enable changes. Authentication is required again after reloading or leaving this page; credentials and CSRF remain in memory only.</p>
+        <label for="case-credential">Credential</label>
+        <input id="case-credential" type="password" autocomplete="current-password" required>
+        <button type="submit">Sign in</button>
+        <span id="case-auth-status" role="status">Sign in required</span>
+    </form>
     <p id="membership-notice" class="notice">Newly created cases are owner-only. This screen does not add other participants or issue key grants. Unresolved gaps and encrypted revisions stay with the case you selected.</p>
     <form id="create-case">
         <label for="case-label">Label</label>
@@ -28,6 +35,7 @@
     </section>
     <section id="selected-case" hidden>
         <h2>Selected case</h2>
+        <p id="selected-case-label"></p>
         <p>Directory revision <span id="directory-revision"></span></p>
         <p>Encrypted revision <span id="encrypted-revision"></span></p>
         <p>Envelope <span id="envelope-sha256"></span></p>
@@ -46,10 +54,12 @@
 (function () {
     var selected = null;
     var contentRevision = null;
-    var csrf = window.caseCsrf || "";
+    var csrf = "";
+    var generation = 0;
 
     function clearTransientState() {
         document.getElementById("case-draft").value = "";
+        document.getElementById("gap-input").value = "";
     }
 
     function showError(text) {
@@ -91,6 +101,7 @@
 
     function renderSelection(item) {
         document.getElementById("selected-case").hidden = false;
+        document.getElementById("selected-case-label").textContent = item.label || item.case_id;
         document.getElementById("directory-revision").textContent = String(item.directory_revision);
         document.getElementById("encrypted-revision").textContent = String(item.encrypted_content_revision);
         document.getElementById("envelope-sha256").textContent = item.envelope_sha256 || "";
@@ -109,68 +120,28 @@
     }
 
     async function selectCase(caseId) {
-        if (selected !== caseId) {
-            clearTransientState();
+        var ownGeneration = ++generation;
+        selected = caseId;
+        contentRevision = null;
+        clearTransientState();
+        document.getElementById("selected-case").hidden = true;
+        try {
+            var item = await api("/api/cases/" + encodeURIComponent(caseId) + "/select", {method: "POST", body: {}});
+            if (ownGeneration !== generation || selected !== caseId) return;
+            if (item.plaintext_available === false) {
+                showError("key_grant_required");
+                return;
+            }
+            renderSelection(item);
+            showError("");
+        } catch (error) {
+            if (ownGeneration === generation && selected === caseId) showError(error.message);
         }
-        var item = await api("/api/cases/" + encodeURIComponent(caseId) + "/select", {method: "POST", body: {}});
-        selected = item.case_id || caseId;
-        if (item.plaintext_available === false) {
-            showError("key_grant_required");
-            document.getElementById("unresolved-gaps").replaceChildren();
-            document.getElementById("encrypted-revision").textContent = "";
-            return;
-        }
-        renderSelection(item);
-        showError("");
     }
 
-    document.getElementById("create-case").addEventListener("submit", async function (event) {
-        event.preventDefault();
-        try {
-            await api("/api/cases", {method: "POST", body: {label: document.getElementById("case-label").value}});
-            document.getElementById("case-label").value = "";
-            var listed = await api("/api/cases");
-            renderCases(listed.cases || []);
-            showError("");
-        } catch (error) {
-            showError(error.message);
-        }
-    });
-
-    document.getElementById("save-draft").addEventListener("click", async function () {
-        if (!selected) return;
-        try {
-            await api("/api/cases/" + encodeURIComponent(selected) + "/transient", {
-                method: "POST",
-                body: {draft: document.getElementById("case-draft").value}
-            });
-            showError("");
-        } catch (error) {
-            showError(error.message);
-        }
-    });
-
-    document.getElementById("save-gaps").addEventListener("click", async function () {
-        if (!selected) return;
-        var gap = document.getElementById("gap-input").value.trim();
-        var existing = Array.prototype.map.call(document.querySelectorAll("#unresolved-gaps .gap"), function (node) {
-            return node.textContent;
-        });
-        if (gap) existing.push(gap);
-        try {
-            var item = await api("/api/cases/" + encodeURIComponent(selected) + "/gaps", {
-                method: "POST",
-                body: {unresolved_gaps: existing, expected_content_revision: contentRevision}
-            });
-            renderSelection(item);
-            document.getElementById("gap-input").value = "";
-            showError("");
-        } catch (error) {
-            showError(error.message);
-        }
-    });
-
-    api("/api/cases/session").then(function (session) {
+    async function loadSession(ownGeneration) {
+        var session = await api("/api/cases/session");
+        if (ownGeneration !== generation) return;
         renderCases(session.cases || []);
         if (session.selected_case_id) {
             selected = session.selected_case_id;
@@ -178,9 +149,95 @@
             if (current) renderSelection(current);
             if (session.transient) document.getElementById("case-draft").value = session.transient.draft || "";
         }
-    }).catch(function (error) {
-        showError(error.message);
+    }
+
+    document.getElementById("case-login").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        var ownGeneration = ++generation;
+        var credential = document.getElementById("case-credential").value;
+        document.getElementById("case-credential").value = "";
+        csrf = "";
+        selected = null;
+        contentRevision = null;
+        clearTransientState();
+        document.getElementById("selected-case").hidden = true;
+        renderCases([]);
+        try {
+            var issued = await api("/api/complaint-workspace/auth/login", {method: "POST", body: {credential: credential}});
+            credential = "";
+            if (ownGeneration !== generation) return;
+            if (typeof issued.csrf_token !== "string" || !issued.csrf_token) throw new Error("authentication_failed");
+            csrf = issued.csrf_token;
+            document.getElementById("case-auth-status").textContent = "Signed in";
+            await loadSession(ownGeneration);
+            if (ownGeneration === generation) showError("");
+        } catch (error) {
+            credential = "";
+            if (ownGeneration === generation) {
+                csrf = "";
+                document.getElementById("case-auth-status").textContent = "Sign in required";
+                showError(error.message);
+            }
+        }
     });
+
+    document.getElementById("create-case").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        var ownGeneration = generation;
+        var label = document.getElementById("case-label").value;
+        try {
+            await api("/api/cases", {method: "POST", body: {label: label}});
+            if (ownGeneration !== generation) return;
+            document.getElementById("case-label").value = "";
+            var listed = await api("/api/cases");
+            if (ownGeneration !== generation) return;
+            renderCases(listed.cases || []);
+            showError("");
+        } catch (error) {
+            if (ownGeneration === generation) showError(error.message);
+        }
+    });
+
+    document.getElementById("save-draft").addEventListener("click", async function () {
+        if (!selected) return;
+        var caseId = selected;
+        var ownGeneration = generation;
+        var draft = document.getElementById("case-draft").value;
+        try {
+            await api("/api/cases/" + encodeURIComponent(caseId) + "/transient", {
+                method: "POST",
+                body: {draft: draft}
+            });
+            if (ownGeneration === generation && selected === caseId) showError("");
+        } catch (error) {
+            if (ownGeneration === generation && selected === caseId) showError(error.message);
+        }
+    });
+
+    document.getElementById("save-gaps").addEventListener("click", async function () {
+        if (!selected) return;
+        var caseId = selected;
+        var ownGeneration = generation;
+        var expectedRevision = contentRevision;
+        var gap = document.getElementById("gap-input").value.trim();
+        var existing = Array.prototype.map.call(document.querySelectorAll("#unresolved-gaps .gap"), function (node) {
+            return node.textContent;
+        });
+        if (gap) existing.push(gap);
+        try {
+            var item = await api("/api/cases/" + encodeURIComponent(caseId) + "/gaps", {
+                method: "POST",
+                body: {unresolved_gaps: existing, expected_content_revision: expectedRevision}
+            });
+            if (ownGeneration !== generation || selected !== caseId) return;
+            renderSelection(item);
+            document.getElementById("gap-input").value = "";
+            showError("");
+        } catch (error) {
+            if (ownGeneration === generation && selected === caseId) showError(error.message);
+        }
+    });
+
     window.clearTransientState = clearTransientState;
 })();
 </script>

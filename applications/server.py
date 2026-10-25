@@ -20,11 +20,11 @@ def _read_template(filename: str) -> str:
 
 class SERVER:
     def __init__(self, mediator: Any, authorizer: Any = None, workspace_service: Any = None,
-                 *, browser_sessions: Any = None, case_handlers: Any = None, json_body_limits: Any = None):
+                 *, browser_sessions: Any = None, case_handlers: Any = None, json_body_limits: Any = None, case_catalog: Any = None):
         self.mediator = mediator
         self.authorizer = authorizer
         self.app = self._build_app(mediator, authorizer, workspace_service=workspace_service,
-                                   browser_sessions=browser_sessions, case_handlers=case_handlers, json_body_limits=json_body_limits)
+                                   browser_sessions=browser_sessions, case_handlers=case_handlers, json_body_limits=json_body_limits, case_catalog=case_catalog)
 
     @staticmethod
     def build_chat_payload(
@@ -96,7 +96,7 @@ class SERVER:
         )
 
     def _build_app(self, mediator: Any, authorizer: Any = None, workspace_service: Any = None,
-                   *, browser_sessions: Any = None, case_handlers: Any = None, json_body_limits: Any = None) -> FastAPI:
+                   *, browser_sessions: Any = None, case_handlers: Any = None, json_body_limits: Any = None, case_catalog: Any = None) -> FastAPI:
         app = FastAPI()
         attach_static_asset_routes(app)
         attach_claim_support_review_ui_routes(app)
@@ -201,6 +201,7 @@ class SERVER:
             browser_sessions=browser_sessions,
             case_handlers=case_handlers,
             json_body_limits=json_body_limits,
+            case_catalog=case_catalog,
         )
         return app
 

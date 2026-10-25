@@ -26,6 +26,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
+import fcntl
+from contextlib import contextmanager
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -145,6 +148,18 @@ class CaseDirectory:
         supplied_user_id: str | None = None,
         unreadable_legacy_envelope: bytes | None = None,
     ) -> CaseNamespace:
+        actor = self._actor(actor_principal_id, supplied_user_id)
+        with self._owner_lock(actor):
+            return self._create_case_locked(actor_principal_id=actor,
+                supplied_user_id=supplied_user_id, unreadable_legacy_envelope=unreadable_legacy_envelope)
+
+    def _create_case_locked(
+        self,
+        *,
+        actor_principal_id: str,
+        supplied_user_id: str | None = None,
+        unreadable_legacy_envelope: bytes | None = None,
+    ) -> CaseNamespace:
         """Mint one owner-only case. Never treats ``supplied_user_id`` as the id."""
 
         actor = self._actor(actor_principal_id, supplied_user_id)
@@ -173,6 +188,18 @@ class CaseDirectory:
         return record
 
     def adopt_owner_only_case(
+        self,
+        *,
+        actor_principal_id: str,
+        envelope: bytes,
+        supplied_user_id: str | None = None,
+    ) -> tuple[CaseNamespace, dict[str, Any]]:
+        actor = self._actor(actor_principal_id, supplied_user_id)
+        with self._owner_lock(actor):
+            return self._adopt_owner_only_case_locked(actor_principal_id=actor,
+                envelope=envelope, supplied_user_id=supplied_user_id)
+
+    def _adopt_owner_only_case_locked(
         self,
         *,
         actor_principal_id: str,
@@ -233,7 +260,8 @@ class CaseDirectory:
         supplied_user_id: str | None = None,
     ) -> tuple[CaseNamespace, ...]:
         actor = self._actor(actor_principal_id, supplied_user_id)
-        document = self._load_document(actor)
+        with self._owner_lock(actor):
+            document = self._load_document(actor)
         if document is None:
             return ()
         return tuple(_case_from_document(item, actor) for item in document["cases"])
@@ -253,6 +281,77 @@ class CaseDirectory:
             if record.case_id == selected:
                 return record
         raise CaseDirectoryError("missing_case")
+
+    def owned_revision_directory(self, *, actor_principal_id: str, case_id: str) -> Path:
+        """Return a private revision-store slot for an already authorized owner.
+
+        This is a storage locator, not a key grant. The encrypted directory is
+        opened first; missing keys and foreign cases never create a new slot.
+        Callers must retain their content binding and serialize writes there.
+        """
+        record = self.select_case(actor_principal_id=actor_principal_id, case_id=case_id)
+        root = self._root.absolute()
+        if root.resolve(strict=True) != root:
+            raise CaseDirectoryError("unexpected_path")
+        parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            info = os.fstat(parent)
+            if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o022:
+                raise CaseDirectoryError("unexpected_path")
+            identity = json.dumps([record.tenant_id, record.case_id, record.resource_id], separators=(",", ":"))
+            parts = ("case-revisions", hashlib.sha256(identity.encode()).hexdigest())
+            for part in parts:
+                try:
+                    os.mkdir(part, 0o700, dir_fd=parent)
+                    os.fsync(parent)
+                except FileExistsError:
+                    pass
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+                info = os.fstat(child)
+                if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+                    os.close(child)
+                    raise CaseDirectoryError("unexpected_path")
+                os.close(parent)
+                parent = child
+            return root.joinpath(*parts)
+        finally:
+            os.close(parent)
+
+    @contextmanager
+    def _owner_lock(self, actor: str):
+        root = self._root.absolute()
+        if root.resolve(strict=True) != root:
+            raise CaseDirectoryError("unexpected_path")
+        directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        lock = None
+        try:
+            info = os.fstat(directory)
+            if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o022:
+                raise CaseDirectoryError("unexpected_path")
+            try:
+                os.mkdir("directory-locks", 0o700, dir_fd=directory)
+                os.fsync(directory)
+            except FileExistsError:
+                pass
+            locks = os.open("directory-locks", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                            dir_fd=directory)
+            os.close(directory)
+            directory = locks
+            info = os.fstat(directory)
+            if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+                raise CaseDirectoryError("unexpected_path")
+            lock = os.open(self._slot(actor) + ".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                           0o600, dir_fd=directory)
+            info = os.fstat(lock)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1
+                    or stat.S_IMODE(info.st_mode) != 0o600):
+                raise CaseDirectoryError("unexpected_path")
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+        finally:
+            if lock is not None:
+                os.close(lock)
+            os.close(directory)
 
     def _actor(self, actor_principal_id: str, supplied_user_id: str | None, *, case_id: str | None = None) -> str:
         actor = _label(actor_principal_id, "principal_id")

@@ -541,7 +541,7 @@ def attach_claim_support_review_routes(app: FastAPI, mediator: Any) -> FastAPI:
 
 
 def create_review_api_app(mediator: Any, authorizer: Any = None, workspace_service: Any = None,
-                          *, browser_sessions: Any = None, case_handlers: Any = None, json_body_limits: Any = None) -> FastAPI:
+                          *, browser_sessions: Any = None, case_handlers: Any = None, json_body_limits: Any = None, case_catalog: Any = None) -> FastAPI:
     """Production review variant. Case routes come from the shared composition seam."""
 
     from .case_routes import compose_case_routes
@@ -555,5 +555,6 @@ def create_review_api_app(mediator: Any, authorizer: Any = None, workspace_servi
         browser_sessions=browser_sessions,
         case_handlers=case_handlers,
         json_body_limits=json_body_limits,
+        case_catalog=case_catalog,
     )
     return app
