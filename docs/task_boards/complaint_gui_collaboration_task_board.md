@@ -1272,7 +1272,7 @@ Implementation instructions:
 
 ## CIMP-GUI-43 Share message attachments through private admission
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
