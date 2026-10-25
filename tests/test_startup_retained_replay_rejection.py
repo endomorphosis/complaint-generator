@@ -85,14 +85,7 @@ def test_actual_terminal_replay_does_not_block_independent_native_selection(nati
     s._complaint_startup_reconciliation_context=None
     # This is the actual maintenance loop, including its real custody/lease/
     # source/protected guards. The baseline Host currently raises here.
-    try:
-        result=s.run_once(include_refill=False)
-    except RuntimeError:
-        from integrations.ipfs_accelerate.startup_rejected_candidate import _journal, _proof
-        reports,_=_journal(s.config.events_path)
-        item=next(row for row in reversed(reports) if row.get('type')=='worktree_reconciliation')['processed'][0]
-        _proof(s,item,s._complaint_startup_reconciliation_context['daemon'])
-        raise
+    result=s.run_once(include_refill=False)
     w['maintenance_result']=result
     assert result.get('maintenance_blocked') is not True
     assert s._complaint_startup_preflight_pending is False
@@ -110,7 +103,7 @@ def test_actual_terminal_replay_does_not_block_independent_native_selection(nati
     assert after['implementation_attempts'].get('CIMP-SYN-02',0)==0
 
 
-@pytest.mark.parametrize('damage',['new_head','new_start','scope','additional_reason','dirty','foreign_worktree','missing_terminal','queued_merge','private_hold','live_claim','live_lease','changed_definition','missing_report','preflight_conflict'])
+@pytest.mark.parametrize('damage',['new_head','new_start','scope','additional_reason','dirty','foreign_worktree','missing_terminal','private_hold','live_claim','live_lease','changed_definition','missing_report','preflight_conflict'])
 def test_uncertain_or_changed_candidate_still_blocks(native_replay_world,damage):
     from copy import deepcopy
     import shutil
@@ -119,7 +112,7 @@ def test_uncertain_or_changed_candidate_still_blocks(native_replay_world,damage)
     s._complaint_startup_preflight_pending=True
     s._reconciliation_task_context(d)
     reports,_=_journal(s.config.events_path)
-    item=deepcopy(next(r for r in reversed(reports) if r.get('type')=='worktree_reconciliation')['processed'][0])
+    item=deepcopy(w['maintenance_result']['worktree_reconciliation']['processed'][0])
     assert retained_replay_rejection(s,item,maintenance_result=w['maintenance_result']) is True
     native_raw=d.events_path.read_bytes();super_raw=s.config.events_path.read_bytes();board=s.config.todo_path.read_bytes()
     old=(w['leaf']/'out/task1.py').read_bytes();hold=w['state']/'watchdog/HOLD';foreign=None;pending=None;claim_path=None;lease_metadata=None
@@ -147,10 +140,6 @@ def test_uncertain_or_changed_candidate_still_blocks(native_replay_world,damage)
             foreign=w['leaf'].with_name('retained-original');w['leaf'].rename(foreign)
             subprocess.run(['git','clone','--quiet','--shared',str(w['root']),str(w['leaf'])],check=True)
             _git(w['leaf'],'checkout','-q','-b',w['branch'],w['head'])
-        elif damage=='queued_merge':
-            pending=d.merge_queue.enqueue(branch_name=w['branch'],task_id=w['task'].task_id,
-                canonical_task_id=w['identity'].canonical_task_cid,canonical_task_key=w['identity'].canonical_task_key,
-                commit_sha=w['head'],metadata={'synthetic_pending_effect':True},target_repository_id=d.merge_target_repository_id,target_branch='main')
         elif damage=='live_claim':
             metadata=d._build_implementation_task_claim_metadata(w['task'],1,daemon_native.utc_now())
             claim_path=d._implementation_task_claim_path(w['task'].task_id,canonical_task_cid=w['identity'].canonical_task_cid)
@@ -171,6 +160,131 @@ def test_uncertain_or_changed_candidate_still_blocks(native_replay_world,damage)
         if claim_path is not None:
             d._release_implementation_task_claim(claim_path,metadata)
         if lease_metadata is not None:d._release_implementation_lock(d._implementation_lock_path(),lease_metadata)
-        if pending is not None:
-            processing=d.merge_queue.claim_pending_request(pending,consumer_id='synthetic-refusal-test');assert processing is not None
-            d.merge_queue.complete(processing)
+
+
+
+@pytest.fixture(scope='module')
+def two_candidate_world(native_replay_world):
+    """Two actual Native rejected orphans for one current pending task."""
+    from dataclasses import replace
+    w=native_replay_world;d=w['daemon'];root=w['root']
+    branch='implementation/private-second-attempt-1';leaf=w['trees']/'workspace_second'
+    _git(root,'worktree','add','-q','-b',branch,str(leaf),w['baseline'])
+    (leaf/'out').mkdir();(leaf/'out/task1.py').write_text('VALUE = "second synthetic failed candidate"\n')
+    (leaf/'tests').mkdir();(leaf/'tests/test_retained.py').write_text('def test_retained_failure():\n assert False\n')
+    _git(leaf,'add','out/task1.py','tests/test_retained.py')
+    admitted=d._validate_implementation_patch(leaf,w['task'],baseline_ref=w['baseline'],allow_scope_adjudication=False)
+    assert admitted.accepted,d._compact_proposal_validation(admitted)
+    _git(leaf,'commit','-qm','Second synthetic retained candidate');head=_git(leaf,'rev-parse','HEAD')
+    config=replace(w['config'],worktree_reconciliation_max_merges=2)
+    supervisor=runner._validation_aware_supervisor_class(native.PortalImplementationSupervisor)(config)
+    key=supervisor._worktree_reconciliation_recovery_key(task_cid=w['identity'].canonical_task_cid,
+        baseline_ref=w['baseline'],candidate_commit=head,target_commit=w['baseline'],mode='pre_merge')
+    failed=d.reconcile_validated_worktree_candidate(worktree_path=leaf,branch_name=branch,task=w['task'],
+        baseline_ref=w['baseline'],candidate_commit=head,recovery_key=key)
+    assert failed['validation_result']['proposal_gate']['reason_codes']==['stale_proposal_replay']
+    return {**w,'supervisor':supervisor,'second':{'branch':branch,'path':leaf,'head':head,'key':key}}
+
+
+def test_two_closed_replay_orphans_of_same_task_allow_native_independent_selection(two_candidate_world):
+    w=two_candidate_world;s=w['supervisor'];s._complaint_startup_preflight_pending=True
+    s._complaint_startup_reconciliation_context=None
+    before=asdict(daemon_native.PortalTaskState.load(s.config.state_path))
+    refs=[_git(w['root'],'rev-parse',branch) for branch in (w['branch'],w['second']['branch'])]
+    result=s.run_once(include_refill=False)
+    items=result['worktree_reconciliation']['processed']
+    assert len(items)==2 and all(item['merged'] is False for item in items)
+    assert all(item['recovery_result']['validation_result']['proposal_gate']['reason_codes']==['stale_proposal_replay'] for item in items)
+    assert [_git(w['root'],'rev-parse',branch) for branch in (w['branch'],w['second']['branch'])]==refs
+    after=asdict(daemon_native.PortalTaskState.load(s.config.state_path))
+    assert all(after[k]==before[k] for k in ('implementation_attempts','implementation_attempts_by_cid','completed_task_ids'))
+    w['daemon'].run_once();selected=daemon_native.PortalTaskState.load(s.config.state_path)
+    assert selected.active_task_id=='CIMP-SYN-02' and selected.implementation_in_progress is False
+    w['batch_result']=result
+
+
+@pytest.mark.parametrize('damage',['unclosed_known','unclosed_unknown','paid_start','accepted_proposal','missing_second_terminal','unknown_second_item'])
+def test_batch_permission_requires_every_exact_scope_closed(two_candidate_world,damage):
+    from copy import deepcopy
+    from integrations.ipfs_accelerate.startup_rejected_candidate import retained_replay_rejection,_journal
+    w=two_candidate_world;s=w['supervisor'];d=w['daemon']
+    if 'batch_result' not in w:
+        s._complaint_startup_preflight_pending=True;s._complaint_startup_reconciliation_context=None
+        w['batch_result']=s.run_once(include_refill=False)
+    s._complaint_startup_preflight_pending=True;s._reconciliation_task_context(d)
+    maintenance=deepcopy(w['batch_result']);item=maintenance['worktree_reconciliation']['processed'][0]
+    if not retained_replay_rejection(s,item,maintenance_result=maintenance):
+        from integrations.ipfs_accelerate.startup_rejected_candidate import _proof,_scope
+        entries=maintenance['worktree_reconciliation']['processed'];scopes={_scope(entry['recovery_result']) for entry in entries}
+        for entry in entries:_proof(s,entry,d,scopes)
+        raise AssertionError('batch outer predicate failed')
+    raw=d.events_path.read_bytes();third=None
+    try:
+        rows,_=_journal(d.events_path)
+        if damage in {'unclosed_known','unclosed_unknown'}:
+            start=next(r for r in reversed(rows) if r.get('type')=='worktree_reconciliation_validation_started')
+            payload={k:v for k,v in start.items() if k not in {'type','sequence','event_id','previous_event_id','stream_id','snapshot_id','timestamp'}}
+            if damage=='unclosed_unknown':
+                payload.update(branch='implementation/private-unclosed',recovery_key='e'*40)
+            d._record_event('worktree_reconciliation_validation_started',payload)
+        elif damage=='paid_start':
+            d._record_event('implementation_started',{'task_id':w['task'].task_id,'attempt':2,
+                'branch':'implementation/new-private-paid-context','worktree_path':str(w['leaf']),
+                'baseline_ref':w['baseline']})
+        elif damage=='accepted_proposal':
+            third=w['trees']/'workspace_new_proposal';branch='implementation/private-new-accepted'
+            _git(w['root'],'worktree','add','-q','-b',branch,str(third),w['baseline'])
+            (third/'out').mkdir();(third/'out/task1.py').write_text('VALUE = "new accepted candidate"\n')
+            (third/'tests').mkdir();(third/'tests/test_retained.py').write_text('def test_retained_failure():\n assert False\n')
+            _git(third,'add','out/task1.py','tests/test_retained.py')
+            accepted=d._validate_implementation_patch(third,w['task'],baseline_ref=w['baseline'],allow_scope_adjudication=False)
+            assert accepted.accepted
+        elif damage=='missing_second_terminal':
+            lines=raw.splitlines(keepends=True)
+            seq=max(i for i,line in enumerate(lines) if json.loads(line).get('type')=='worktree_reconciliation_validation_finished')
+            d.events_path.write_bytes(b''.join(lines[:seq]))
+        else:
+            maintenance['worktree_reconciliation']['processed'][1]['recovery_result']['validation_result']['proposal_gate']['reason_codes'].append('path_outside_scope')
+        assert retained_replay_rejection(s,item,maintenance_result=maintenance) is False
+    finally:
+        d.events_path.write_bytes(raw)
+        if third is not None:
+            _git(w['root'],'worktree','remove','--force',str(third));_git(w['root'],'branch','-D','implementation/private-new-accepted')
+
+
+def test_actual_unknown_third_orphan_remains_globally_blocking(two_candidate_world):
+    from dataclasses import replace
+    w=two_candidate_world;root=w['root'];leaf=w['trees']/'workspace_unknown'
+    branch='implementation/private-unknown-task'
+    _git(root,'worktree','add','-q','-b',branch,str(leaf),w['baseline'])
+    (leaf/'unknown.txt').write_text('Synthetic unresolved task provenance.\n')
+    _git(leaf,'add','unknown.txt');_git(leaf,'commit','-qm','Synthetic unknown orphan')
+    config=replace(w['config'],worktree_reconciliation_max_merges=3)
+    s=runner._validation_aware_supervisor_class(native.PortalImplementationSupervisor)(config)
+    s._complaint_startup_preflight_pending=True;s._complaint_startup_reconciliation_context=None
+    try:
+        with pytest.raises(RuntimeError,match='startup candidate recovery remains unresolved'):
+            s.run_once(include_refill=False)
+        assert leaf.is_dir() and _git(root,'rev-parse',branch)
+    finally:
+        _git(root,'worktree','remove','--force',str(leaf));_git(root,'branch','-D',branch)
+
+
+def test_genuine_pending_effect_keeps_completed_batch_blocked(two_candidate_world):
+    from integrations.ipfs_accelerate.startup_rejected_candidate import retained_replay_rejection
+    w=two_candidate_world;s=w['supervisor'];d=w['daemon']
+    s._complaint_startup_preflight_pending=True;s._complaint_startup_reconciliation_context=None
+    result=s.run_once(include_refill=False)
+    s._complaint_startup_preflight_pending=True;s._reconciliation_task_context(d)
+    item=result['worktree_reconciliation']['processed'][0]
+    assert retained_replay_rejection(s,item,maintenance_result=result) is True
+    pending=d.merge_queue.enqueue(branch_name=w['branch'],task_id=w['task'].task_id,
+        canonical_task_id=w['identity'].canonical_task_cid,canonical_task_key=w['identity'].canonical_task_key,
+        commit_sha=w['head'],metadata={'synthetic_pending_effect':True},
+        target_repository_id=d.merge_target_repository_id,target_branch='main')
+    try:
+        assert retained_replay_rejection(s,item,maintenance_result=result) is False
+    finally:
+        # End of this disposable fixture: cancel does not create task-completion
+        # authority, unlike completing a synthetic pending merge for cleanup.
+        assert d.merge_queue.cancel(pending,reason='Synthetic refusal fixture cleanup') is not None
