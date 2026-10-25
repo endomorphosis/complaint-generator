@@ -33,6 +33,7 @@ CASE_PAGE_PATH = "/cases"
 ADMIN_API_PREFIX = "/api/admin"
 MESSAGE_INBOX_PATH = "/case-messages"
 MESSAGE_INBOX_SCRIPT_PATH = "/static/complaint_case_messages.js"
+GRANT_CONTROL_PATH = "/case-grants"
 RETIRED_EXACT_PATHS = frozenset({"/cookies", "/load_profile", "/create_profile", "/api/chat", "/api/chat/fallback"})
 AUTH_PATHS = frozenset("/api/complaint-workspace/auth/" + name for name in ("login", "logout", "rotate", "session"))
 INQUIRY_CONTRACT_PATHS = frozenset({
@@ -258,6 +259,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     if case_assignments is not None and not isinstance(case_assignments, CaseAssignmentService):
         raise CaseAccessError("case_assignments")
     mount_case_assignments(app)
+    _mount_grant_control(app)
     from .case_message_api import CaseMessageService, mount_case_messages
     if case_messages is not None and not isinstance(case_messages, CaseMessageService):
         raise CaseAccessError("case_messages")
@@ -356,6 +358,23 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     app.add_middleware(CaseRouteAuthorizationMiddleware, authorizer=authorizer, sessions=sessions,
                        case_handlers=case_handlers, extensions=extensions, json_body_limits=limits)
     return app
+
+
+def _mount_grant_control(app: Any) -> None:
+    """Serve the workspace document that owns collaborator grant controls.
+
+    The page does not authenticate by itself. Grant reads and changes use the
+    assignment API. WebSocket and SSE are not used.
+    """
+
+    from fastapi.responses import HTMLResponse
+
+    root = Path(__file__).resolve().parent.parent
+
+    @app.get(GRANT_CONTROL_PATH)
+    async def grant_control_page():
+        html = (root / "templates" / "workspace.html").read_text(encoding="utf-8")
+        return HTMLResponse(html, headers={"cache-control": "no-store"})
 
 
 def _mount_case_message_inbox(app: Any) -> None:
@@ -458,7 +477,7 @@ def _material_from_scope(scope: Dict[str, Any], body: bytes) -> Dict[str, Any]:
             payload = None
         if isinstance(payload, dict):
             material.update(payload)
-    for field in ("expected_revision", "expected_membership_revision"):
+    for field in ("expected_revision", "expected_membership_revision", "membership_version"):
         value = material.get(field)
         if isinstance(value, str) and value.strip().lstrip("-").isdigit():
             material[field] = int(value.strip())
@@ -494,6 +513,12 @@ def _check_actor_claims(scope: Dict[str, Any], body: bytes, principal_id: str) -
 
 
 def _required_action(path: str, method: str, material: Mapping[str, Any], extensions) -> str:
+    grant_id = material.get("membership_grant_id")
+    if isinstance(grant_id, str) and grant_id != "":
+        if "/inference" in path:
+            return "case.read" if method in {"GET", "HEAD"} else "case.review"
+        if path.rstrip("/").endswith("/intake-chat") and material.get("interview_action") == "resume":
+            return "case.read"
     if path.rstrip('/').endswith('/lawyer-reviews/share') or path.rstrip('/').endswith('/review-transitions'):
         return 'case.update'
     if _within_prefix(path, "/api/legal-research") and path.rstrip("/").endswith("/admissions"):
@@ -654,6 +679,41 @@ async def _send_json(send, status, payload):
     await send({"type": "http.response.body", "body": data, "more_body": False})
 
 
+def _enforce_live_participant_grant(scope: Dict[str, Any], actor: str, material: Mapping[str, Any], action: str) -> None:
+    """Apply the current membership grant on download, inference, resume, and other API use.
+
+    A request that names ``membership_grant_id`` is checked against the live
+    grant before case content handlers run. Owner requests are not narrowed by
+    the participant grant. ``membership_version`` is the membership revision;
+    it is separate from the authorizer's ``expected_membership_revision``.
+    """
+
+    from .case_assignment_api import CaseAssignmentError, CaseAssignmentService
+
+    grant_id = material.get("membership_grant_id")
+    if not isinstance(grant_id, str) or grant_id == "":
+        return
+    path = _path_of(scope)
+    if "/inference" in path:
+        surface = "inference"
+    elif path.rstrip("/").endswith("/intake-chat") and material.get("interview_action") == "resume":
+        surface = "browser_resume"
+    elif path.startswith("/api/documents") or action == "case.download":
+        surface = "download"
+    else:
+        surface = "api"
+    service = getattr(scope["app"].state, "case_assignments", None)
+    if not isinstance(service, CaseAssignmentService):
+        raise CaseAssignmentError("assignment_unavailable")
+    service.enforce_participant(
+        actor,
+        grant_id=grant_id,
+        surface=surface,
+        expected_version=material.get("membership_version"),
+        request_action=action,
+    )
+
+
 class CaseRouteAuthorizationMiddleware:
     def __init__(self, app: Any, *, authorizer, sessions, case_handlers, extensions, json_body_limits) -> None:
         self.app, self.authorizer, self.sessions = app, authorizer, sessions
@@ -664,6 +724,7 @@ class CaseRouteAuthorizationMiddleware:
     async def __call__(self, scope, receive, send):
         from .workspace_case_authority import (WorkspaceCaseAuthorityError,
             issue_workspace_case_authority, workspace_case_authority_scope)
+        from .case_assignment_api import CaseAssignmentError, assignment_http_status
         if scope.get("type") not in {"http", "websocket"}:
             await self.app(scope, receive, send)
             return
@@ -721,6 +782,7 @@ class CaseRouteAuthorizationMiddleware:
                 raise CaseAccessError("action_mismatch")
             material["actor_principal_id"], material["action"] = bound.principal_id, action
             decision = self.authorizer.authorize_request(boundary_for_path(path), material)
+            _enforce_live_participant_grant(scope, bound.principal_id, material, action)
             handlers = None
             workspace_authority = None
             if decision.permits_case_content:
@@ -742,6 +804,9 @@ class CaseRouteAuthorizationMiddleware:
             return
         except CaseAccessError as exc:
             await self._deny(scope, send, _status_for_denial(exc.code), exc.code)
+            return
+        except CaseAssignmentError as exc:
+            await self._deny(scope, send, assignment_http_status(exc.code), exc.code)
             return
         except WorkspaceCaseAuthorityError:
             await self._deny(scope, send, 403, "workspace_case_authorization_denied")

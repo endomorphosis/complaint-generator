@@ -5825,6 +5825,42 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                     </div>
                 </section>
 
+                <section id="owner-grant-control" data-task="CIMP-GUI-46">
+                    <h2>Collaborators and grants</h2>
+                    <p>Inspect the effective scope, expiry, and revocation for one participant. A grant change uses the current revision and an explicit confirmation. The same change is idempotent and audited. API, download, inference, and browser resume read the live grant. WebSocket and SSE are not used.</p>
+                    <div class="field-row">
+                        <div><label for="grant-id">Grant</label><input id="grant-id" type="text" autocomplete="off"></div>
+                        <div><label for="grant-revision">Current revision</label><input id="grant-revision" type="number" step="1"></div>
+                    </div>
+                    <div class="field-row">
+                        <div><label for="grant-scope">Scope</label><input id="grant-scope" type="text" value="case.read" autocomplete="off"></div>
+                        <div><label for="grant-expiry">Expiry</label><input id="grant-expiry" type="number" step="1"></div>
+                    </div>
+                    <div class="field-row">
+                        <div><label for="grant-idempotency">Idempotency key</label><input id="grant-idempotency" type="text" autocomplete="off"></div>
+                        <div><label for="grant-csrf">CSRF token</label><input id="grant-csrf" type="text" autocomplete="off"></div>
+                    </div>
+                    <label><input id="grant-revoke" type="checkbox"> Revoke this grant</label>
+                    <label><input id="grant-confirm" type="checkbox"> Confirm this grant change</label>
+                    <div class="button-row">
+                        <button type="button" id="grant-inspect">Inspect effective grant</button>
+                        <button type="button" id="grant-change">Change grant</button>
+                        <button type="button" id="grant-use-api">Use API</button>
+                        <button type="button" id="grant-use-download">Use download</button>
+                        <button type="button" id="grant-use-inference">Use inference</button>
+                        <button type="button" id="grant-use-resume">Resume in browser</button>
+                    </div>
+                    <p id="grant-status" role="status"></p>
+                    <dl id="grant-effective">
+                        <dt>State</dt><dd id="grant-state"></dd>
+                        <dt>Scope</dt><dd id="grant-effective-scope"></dd>
+                        <dt>Expiry</dt><dd id="grant-effective-expiry"></dd>
+                        <dt>Revision</dt><dd id="grant-effective-revision"></dd>
+                        <dt>Effective</dt><dd id="grant-effective-flag"></dd>
+                        <dt>Revoked</dt><dd id="grant-revoked"></dd>
+                        <dt>Audit</dt><dd id="grant-audit"></dd>
+                    </dl>
+                </section>
                 <section id="owner-review-sharing-link">
                     <h2>Share a version for lawyer review</h2>
                     <p>Open this case's review page to share the current version with an accepted assignment. A reviewer uses their own key grant.</p>
@@ -16610,6 +16646,77 @@ function extractComplaintOutputSignals(result) {
             setWorkspaceHydrationState(denied ? 'denied' : 'error');
             setStatus(bootstrapFailureStatus(error));
         });
+    </script>
+    <script>
+        (function () {
+            const statusNode = document.getElementById('grant-status');
+            if (!statusNode) return;
+            function text(id) {
+                const node = document.getElementById(id);
+                return node ? node.value.trim() : '';
+            }
+            function show(payload) {
+                document.getElementById('grant-state').textContent = payload.state || '';
+                document.getElementById('grant-effective-scope').textContent = Array.isArray(payload.scope) ? payload.scope.join(' ') : '';
+                document.getElementById('grant-effective-expiry').textContent = payload.expires_at == null ? '' : String(payload.expires_at);
+                document.getElementById('grant-effective-revision').textContent = payload.revision == null ? '' : String(payload.revision);
+                document.getElementById('grant-effective-flag').textContent = payload.effective === true ? 'yes' : 'no';
+                document.getElementById('grant-revoked').textContent = payload.revoked === true ? 'yes' : 'no';
+                const audit = Array.isArray(payload.audit) ? payload.audit : [];
+                document.getElementById('grant-audit').textContent = audit.map(function (item) {
+                    return item.operation + ' ' + item.from_revision + '->' + item.revision;
+                }).join('; ');
+                if (payload.revision != null) document.getElementById('grant-revision').value = String(payload.revision);
+                statusNode.textContent = payload.error || (payload.admitted === true ? 'admitted ' + payload.surface : (payload.change ? payload.change.operation : 'inspected'));
+            }
+            async function grantFetch(path, options) {
+                const headers = {accept: 'application/json'};
+                const csrf = text('grant-csrf');
+                if (csrf) headers['x-csrf-token'] = csrf;
+                const init = Object.assign({credentials: 'same-origin', headers: headers}, options || {});
+                if (init.body) headers['content-type'] = 'application/json';
+                const response = await fetch(path, init);
+                const payload = await response.json();
+                payload.error = payload.error || '';
+                show(payload);
+                return payload;
+            }
+            function grantPath(suffix) {
+                return '/api/cases/assignments/' + encodeURIComponent(text('grant-id')) + suffix;
+            }
+            document.getElementById('grant-inspect').addEventListener('click', function () {
+                grantFetch(grantPath(''), {method: 'GET'});
+            });
+            document.getElementById('grant-change').addEventListener('click', function () {
+                if (!document.getElementById('grant-confirm').checked) {
+                    statusNode.textContent = 'confirmation_required';
+                    return;
+                }
+                const body = {
+                    confirm_grant_change: true,
+                    expected_version: Number(text('grant-revision')),
+                    idempotency_key: text('grant-idempotency')
+                };
+                if (document.getElementById('grant-revoke').checked) body.revoke = true;
+                else {
+                    body.scope = text('grant-scope').split(/\s+/).filter(Boolean);
+                    if (text('grant-expiry')) body.expires_at = Number(text('grant-expiry'));
+                }
+                grantFetch(grantPath('/change'), {method: 'POST', body: JSON.stringify(body)});
+            });
+            function use(surface) {
+                return function () {
+                    grantFetch(grantPath('/use'), {method: 'POST', body: JSON.stringify({
+                        surface: surface,
+                        expected_version: Number(text('grant-revision'))
+                    })});
+                };
+            }
+            document.getElementById('grant-use-api').addEventListener('click', use('api'));
+            document.getElementById('grant-use-download').addEventListener('click', use('download'));
+            document.getElementById('grant-use-inference').addEventListener('click', use('inference'));
+            document.getElementById('grant-use-resume').addEventListener('click', use('browser_resume'));
+        }());
     </script>
 </body>
 </html>
