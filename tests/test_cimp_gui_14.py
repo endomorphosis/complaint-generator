@@ -11,7 +11,13 @@ rewritten, and this module does not claim WebSocket or SSE support.
 from __future__ import annotations
 
 import json
+import os
+import hashlib
+import time
+from contextvars import copy_context
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -25,6 +31,16 @@ from applications.case_routes import (
 from applications.complaint_mcp_protocol import tool_list_payload
 from applications.complaint_workspace import ComplaintWorkspaceService
 from applications.complaint_workspace_api import create_complaint_workspace_router
+from applications.browser_sessions import (BrowserSessionConfiguration, BrowserSessionService,
+    PrincipalStoreCredentialAdapter, SESSION_COOKIE)
+from applications.case_access import CaseActionAuthorizer
+from applications.case_directory import CaseDirectory, legacy_owner_only_binding
+from applications.case_routes import CaseHandlerRegistry, compose_case_routes
+from applications.principal_store import PrincipalStore
+from applications.complaint_workspace import WorkspaceAccess, WorkspaceAuthorizationDenied, workspace_access_scope
+from applications.workspace_case_authority import (WorkspaceCaseAuthority, WorkspaceCaseAuthorityError,
+    issue_workspace_case_authority, workspace_case_authority_scope)
+from integrations.private_storage import PrivateArtifactBinding, seal_private_artifact
 
 pytestmark = [
     pytest.mark.no_auto_llm,
@@ -371,3 +387,243 @@ def test_asgi_stream_forwards_exactly_one_start_and_all_original_chunks(path, st
 def test_asgi_single_body_preserves_non_success_unrelated_and_raw_responses(path, status, body):
     observed, expected = _asgi_response_messages(path, status, [(body, False)])
     assert observed == expected
+
+
+def _composed_case_world(tmp_path, *, legacy=False):
+    principals = PrincipalStore(tmp_path / "principals", key=os.urandom(32), key_id="principal-key")
+    owner = principals.register_from_request({})
+    stranger = principals.register_from_request({})
+    lawyer = principals.install_server_role(role="lawyer")
+    case_key = os.urandom(32)
+    cases = CaseDirectory(tmp_path / "cases", key=case_key, key_id="case-key")
+    if legacy:
+        legacy_payload = json.dumps({"user_id": owner.principal_id, "synthetic": True}).encode()
+        envelope = seal_private_artifact(legacy_payload, binding=legacy_owner_only_binding(owner.principal_id),
+            key=case_key, key_id="case-key")
+        case, _ = cases.adopt_owner_only_case(actor_principal_id=owner.principal_id, envelope=envelope)
+    else:
+        case = cases.create_case(actor_principal_id=owner.principal_id)
+    second = cases.create_case(actor_principal_id=owner.principal_id)
+    foreign = cases.create_case(actor_principal_id=stranger.principal_id)
+    authorizer = CaseActionAuthorizer(principals, cases)
+    clock = {"now": time.time()}
+    sessions = BrowserSessionService(BrowserSessionConfiguration(
+        adapter=PrincipalStoreCredentialAdapter(principals, {"synthetic-owner-credential": owner.principal_id,
+            "synthetic-stranger-credential": stranger.principal_id, "synthetic-lawyer-credential": lawyer.principal_id}),
+        signing_key=os.urandom(32), ttl_seconds=300), clock=lambda: clock["now"])
+    handlers = CaseHandlerRegistry()
+    services = {}
+    for selected in (case, second, foreign):
+        service = ComplaintWorkspaceService(root_dir=tmp_path / "workspaces" / selected.case_id)
+        # Operator fixture provisioning happens before any request. The app
+        # uses real browser sessions throughout, with no trusted-local router.
+        service.initialize_private_keys(protection="passphrase", passphrase=PASSPHRASE)
+        service.ensure_private_case_key(selected.tenant_id, selected.case_id)
+        handlers.bind(selected, mediator=service, workspace_service=service,
+            authorize_delegated=lambda _decision: True)
+        services[selected.case_id] = service
+    app = FastAPI()
+    compose_case_routes(app, authorizer=authorizer, browser_sessions=sessions, case_handlers=handlers,
+        include_review=False, include_document=False)
+    return SimpleNamespace(principals=principals, owner=owner, stranger=stranger, lawyer=lawyer,
+        cases=cases, case=case, second=second, foreign=foreign, authorizer=authorizer,
+        sessions=sessions, handlers=handlers, services=services, app=app, clock=clock)
+
+
+def _composed_headers(case, csrf=None):
+    headers = {"x-tenant-id": case.tenant_id, "x-case-id": case.case_id,
+        "x-resource-id": case.resource_id, "x-expected-revision": str(case.revision)}
+    if csrf is not None:
+        headers["x-csrf-token"] = csrf
+    return headers
+
+
+def _composed_login(client, credential="synthetic-owner-credential"):
+    login = client.post("/api/complaint-workspace/auth/login", json={"credential": credential})
+    assert login.status_code == 200
+    assert client.cookies.get(SESSION_COOKIE)
+    return login.json()["csrf_token"]
+
+
+def _composed_ciphertext_snapshot(service):
+    root = service._session_dir / "joined-revisions"
+    return {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in root.rglob("*") if path.is_file()}
+
+
+def test_composed_cookie_http_mcp_inquiry_uses_canonical_owner_and_read_only_session(tmp_path):
+    world = _composed_case_world(tmp_path)
+    case = world.case
+    assert case.tenant_id != world.owner.principal_id
+    with TestClient(world.app, base_url="https://testserver") as client:
+        denied = client.post("/api/complaint-workspace/intake-chat", headers=_composed_headers(case),
+            json={"message": NARRATIVE, "interview_action": "start"})
+        assert denied.status_code == 401
+        csrf = _composed_login(client)
+        no_csrf = client.post("/api/complaint-workspace/intake-chat", headers=_composed_headers(case),
+            json={"message": NARRATIVE, "interview_action": "start"})
+        assert no_csrf.status_code == 403
+        headers = _composed_headers(case, csrf)
+        started = client.post("/api/complaint-workspace/intake-chat", headers=headers,
+            json={"message": NARRATIVE, "question_id": "original_complaint", "interview_action": "start"})
+        assert started.status_code == 200, started.text
+        body = started.json()
+        inquiry = _assert_contract(body)
+        assert body["interview"]["graph"]["entity_count"] > 0
+        before = _fingerprint(body)
+        service = world.services[case.case_id]
+        ciphertext = _composed_ciphertext_snapshot(service)
+        assert ciphertext
+        assert any(path.is_file() and path.read_bytes().startswith(b"CGPE")
+            for path in (service._session_dir / "joined-revisions").rglob("*"))
+        session = client.get("/api/complaint-workspace/session", headers=_composed_headers(case))
+        assert session.status_code == 200, session.text
+        state = session.json()["session"]
+        assert state["user_id"] == case.tenant_id
+        assert state["case_id"] == case.case_id
+        graph = state["shared_interview"]
+        assert graph["knowledge_graph"]["entities"]
+        assert graph["dependency_graph"].get("nodes") or graph["dependency_graph"].get("requirements")
+        assert _composed_ciphertext_snapshot(service) == ciphertext
+        identity = client.get("/api/complaint-workspace/auth/session")
+        assert identity.status_code == 200
+        assert identity.json()["principal_id"] == world.owner.principal_id
+        stale = client.post("/api/complaint-workspace/mcp/call", headers=headers, json={
+            "tool_name": "complaint.run_intake_chat_turn", "arguments": {"message": "synthetic stale answer",
+                "question_id": inquiry["inquiry_id"], "expected_question_revision": inquiry["revision"] + 1,
+                "interview_action": "answer"}})
+        assert stale.status_code == 409, stale.text
+        assert _fingerprint(stale.json()) == before
+        answered = client.post("/api/complaint-workspace/mcp/rpc", headers=headers, json={
+            "jsonrpc": "2.0", "id": "composed-answer", "method": "tools/call", "params": {
+                "name": "complaint.run_intake_chat_turn", "arguments": {"message": ANSWER,
+                    "question_id": inquiry["inquiry_id"], "expected_question_revision": inquiry["revision"],
+                    "interview_action": "answer"}}})
+        assert answered.status_code == 200, answered.text
+        result = answered.json()["result"]
+        assert result["isError"] is False
+        updated = result["structuredContent"]
+        _assert_contract(updated)
+        assert updated["interview"]["answered_count"] == body["interview"]["answered_count"] + 1
+        assert updated["interview"]["session_revision"] == body["interview"]["session_revision"] + 1
+
+
+def test_composed_cross_actor_case_and_delegated_policy_cannot_use_owner_master(tmp_path):
+    world = _composed_case_world(tmp_path)
+    case = world.case
+    with TestClient(world.app, base_url="https://testserver") as client:
+        csrf = _composed_login(client)
+        headers = _composed_headers(case, csrf)
+        for damage in ({"user_id": case.tenant_id}, {"user_id": world.stranger.principal_id},
+                {"actor_principal_id": world.stranger.principal_id}):
+            denied = client.post("/api/complaint-workspace/intake-chat", headers=headers,
+                json={"message": NARRATIVE, "interview_action": "start", **damage})
+            assert denied.status_code == 403
+        wrong = _composed_headers(case)
+        wrong["x-resource-id"] = world.foreign.resource_id
+        assert client.get("/api/complaint-workspace/session", headers=wrong).status_code == 403
+        assert client.get("/api/complaint-workspace/session", headers=_composed_headers(world.foreign)).status_code == 403
+        _composed_login(client, "synthetic-stranger-credential")
+        assert client.get("/api/complaint-workspace/session", headers=_composed_headers(case)).status_code == 403
+        grant = world.authorizer.grant_assigned_lawyer(owner_principal_id=world.owner.principal_id,
+            lawyer_principal_id=world.lawyer.principal_id, case_id=case.case_id, resource_id=case.resource_id,
+            tenant_id=case.tenant_id, actions={"case.read"}, expected_case_revision=case.revision)
+        _composed_login(client, "synthetic-lawyer-credential")
+        delegated_headers = {**_composed_headers(case), "x-expected-membership-revision": str(grant.revision)}
+        denied = client.get("/api/complaint-workspace/session", headers=delegated_headers)
+        assert denied.status_code == 403, denied.text
+        assert not _composed_ciphertext_snapshot(world.services[case.case_id])
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_issued_case_authority_rejects_copies_wrong_scope_and_retained_handles(tmp_path, legacy):
+    world = _composed_case_world(tmp_path, legacy=legacy)
+    case = world.case
+    issued = world.sessions.login({"credential": "synthetic-owner-credential"})
+    decision = world.authorizer.authorize(boundary="http", actor_principal_id=world.owner.principal_id,
+        tenant_id=case.tenant_id, case_id=case.case_id, resource_id=case.resource_id,
+        action="case.update", expected_revision=case.revision)
+    authority = issue_workspace_case_authority(authorizer=world.authorizer, sessions=world.sessions,
+        token=issued.token, decision=decision, registry=world.handlers)
+    class SpoofedAuthority(WorkspaceCaseAuthority):
+        def __hash__(self):
+            return hash(authority)
+
+        def __eq__(self, other):
+            return other is authority
+
+    for fake in (replace(authority), SimpleNamespace(**authority.__dict__), SpoofedAuthority(**authority.__dict__)):
+        with pytest.raises(WorkspaceCaseAuthorityError):
+            with workspace_case_authority_scope(fake):
+                pytest.fail("unissued context admitted")
+    service = world.services[case.case_id]
+    binding = PrivateArtifactBinding(tenant_id=case.tenant_id, case_id=case.case_id,
+        principal_id=case.tenant_id, artifact_kind="session", revision="session-v1")
+    with workspace_case_authority_scope(authority), workspace_access_scope(
+            WorkspaceAccess.authenticated(world.owner.principal_id, case_id=case.case_id)):
+        provider = service.private_key_provider()
+        key_id, key = provider.resolve(binding)
+        assert isinstance(key_id, str) and len(key) == 32
+        with pytest.raises(WorkspaceAuthorizationDenied):
+            world.services[world.second.case_id].private_key_provider()
+        with workspace_access_scope(WorkspaceAccess.authenticated(world.stranger.principal_id, case_id=case.case_id)):
+            with pytest.raises(WorkspaceAuthorizationDenied):
+                service.private_key_provider()
+        with workspace_access_scope(WorkspaceAccess.authenticated(world.owner.principal_id, case_id=world.second.case_id)):
+            with pytest.raises(WorkspaceAuthorizationDenied):
+                service.private_key_provider()
+        copied = copy_context()
+    assert world.sessions.authenticate_token(issued.token).principal_id == world.owner.principal_id
+    with pytest.raises(WorkspaceAuthorizationDenied):
+        provider.resolve(binding)
+    other = world.second
+    other_decision = world.authorizer.authorize(boundary="http", actor_principal_id=world.owner.principal_id,
+        tenant_id=other.tenant_id, case_id=other.case_id, resource_id=other.resource_id,
+        action="case.update", expected_revision=other.revision)
+    other_authority = issue_workspace_case_authority(authorizer=world.authorizer, sessions=world.sessions,
+        token=issued.token, decision=other_decision, registry=world.handlers)
+    with workspace_case_authority_scope(other_authority), workspace_access_scope(
+            WorkspaceAccess.authenticated(world.owner.principal_id, case_id=other.case_id)):
+        with pytest.raises(WorkspaceAuthorizationDenied):
+            provider.resolve(binding)
+    with pytest.raises(WorkspaceAuthorizationDenied):
+        copied.run(provider.resolve, binding)
+    with pytest.raises(WorkspaceCaseAuthorityError):
+        authority.revalidate(actor_principal_id=world.owner.principal_id)
+    fresh = issue_workspace_case_authority(authorizer=world.authorizer, sessions=world.sessions,
+        token=issued.token, decision=decision, registry=world.handlers)
+    with workspace_case_authority_scope(fresh), workspace_access_scope(
+            WorkspaceAccess.authenticated(world.owner.principal_id, case_id=case.case_id)):
+        # The handle supplies no authority. A new real request may authorize
+        # it again for the same exact service and canonical case/resource.
+        assert provider.resolve(binding) == (key_id, key)
+    with pytest.raises(WorkspaceAuthorizationDenied):
+        provider.resolve(binding)
+
+
+@pytest.mark.parametrize("change", ["logout", "rotation", "expiry", "registry"])
+def test_live_session_revocation_rejects_an_already_issued_case_authority(tmp_path, change):
+    world = _composed_case_world(tmp_path)
+    case = world.case
+    issued = world.sessions.login({"credential": "synthetic-owner-credential"})
+    decision = world.authorizer.authorize(boundary="http", actor_principal_id=world.owner.principal_id,
+        tenant_id=case.tenant_id, case_id=case.case_id, resource_id=case.resource_id,
+        action="case.update", expected_revision=case.revision)
+    authority = issue_workspace_case_authority(authorizer=world.authorizer, sessions=world.sessions,
+        token=issued.token, decision=decision, registry=world.handlers)
+    service = world.services[case.case_id]
+    with workspace_case_authority_scope(authority), workspace_access_scope(
+            WorkspaceAccess.authenticated(world.owner.principal_id, case_id=case.case_id)):
+        provider = service.private_key_provider()
+        if change == "logout":
+            world.sessions.logout(issued.token, csrf_token=issued.csrf_token)
+        elif change == "rotation":
+            world.sessions.rotate(issued.token, csrf_token=issued.csrf_token)
+        elif change == "expiry":
+            world.clock["now"] += 301
+        else:
+            other = world.services[world.second.case_id]
+            world.handlers._bindings[(case.tenant_id, case.case_id, case.resource_id)] = (other, other, None, None)
+        with pytest.raises(WorkspaceAuthorizationDenied):
+            provider.resolve(PrivateArtifactBinding(tenant_id=case.tenant_id, case_id=case.case_id,
+                principal_id=case.tenant_id, artifact_kind="session", revision="session-v1"))
