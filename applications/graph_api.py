@@ -1,33 +1,80 @@
-"""Authorized read-only projection of one case's factual knowledge graph.
+"""Read one current encrypted case graph under live browser/case authority.
 
-The route is mounted by ``compose_case_routes``. Session and case-action checks
-run before this handler. The handler still refuses a path or query case id that
-does not match the authorized decision, and it reads the graph only through the
-bound case mediator. It does not create a mediator and does not claim
-WebSocket or SSE support.
+A mediator cache is not a private-read capability. The bound workspace decrypts
+the current session twice around the pure projection. Changed source, locked
+keys, or expired request authority refuse publication. This owner-key path does
+not issue delegated decryption authority or claim WebSocket/SSE support.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 
-from mediator.integrations.graph_tools import (
-    FactualGraphProjectionError,
-    project_authorized_factual_kg,
+from applications.complaint_workspace import (
+    ComplaintWorkspaceService, WorkspaceAccess, WorkspaceAuthorizationDenied,
+    WorkspacePersistenceError, workspace_access_scope,
 )
+from applications.workspace_case_authority import (
+    WorkspaceCaseAuthorityError, current_workspace_case_authority,
+)
+from complaint_phases.knowledge_graph import KnowledgeGraph
+from mediator.integrations.graph_tools import FactualGraphProjectionError, project_factual_kg
 
 TASK_ID = "CIMP-GUI-21"
 FACTUAL_GRAPH_PREFIX = "/api/graphs"
 
 
 def factual_graph_http_status(code: str) -> int:
+    if code == "graph_revision_changed":
+        return 409
     if code in {"graph_read_ungranted", "cross_case_id"}:
         return 403
-    if code in {"mediator_graph_hook_unavailable", "knowledge_graph_unavailable", "data_graph_owner_unavailable"}:
+    if code in {"mediator_graph_hook_unavailable", "knowledge_graph_unavailable", "data_graph_owner_unavailable",
+                "workspace_graph_read_unavailable", "private_graph_unavailable", "unlock_needed"}:
         return 503
     return 403
+
+
+def _read_snapshot(workspace, authority, actor, case_id):
+    """Use the public read-only session seam; never an in-memory mediator graph."""
+    decision = authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+    if authority.action != "case.read" or authority.case_id != case_id:
+        raise FactualGraphProjectionError("graph_read_ungranted")
+    response = workspace.get_session(actor, case_id=case_id)
+    state = response.get("session") if isinstance(response, dict) else None
+    if (not isinstance(state, dict) or state.get("case_id") != case_id
+            or state.get("user_id") != decision.canonical_owner_principal_id):
+        raise FactualGraphProjectionError("cross_case_id")
+    interview = state.get("shared_interview")
+    graph = interview.get("knowledge_graph") if isinstance(interview, dict) else None
+    if not isinstance(graph, dict) or not graph:
+        raise FactualGraphProjectionError("knowledge_graph_unavailable")
+    try:
+        identity = hashlib.sha256(json.dumps({
+            "owner": state["user_id"], "case_id": case_id,
+            "private_revision": state.get("private_revision"), "shared_interview": interview,
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
+        hydrated = KnowledgeGraph.from_dict(graph)
+    except (ValueError, TypeError, KeyError):
+        raise FactualGraphProjectionError("knowledge_graph_unavailable") from None
+    authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+    return hydrated, identity
+
+
+def _project_current(workspace, authority, actor, case_id):
+    with workspace_access_scope(WorkspaceAccess.authenticated(actor, case_id)):
+        graph, before = _read_snapshot(workspace, authority, actor, case_id)
+        payload = project_factual_kg(graph, case_id=case_id)
+        _current_graph, after = _read_snapshot(workspace, authority, actor, case_id)
+        if before != after:
+            raise FactualGraphProjectionError("graph_revision_changed")
+        authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+        return payload
 
 
 def mount_factual_graph_routes(app: Any) -> None:
@@ -55,16 +102,26 @@ def mount_factual_graph_routes(app: Any) -> None:
         if resolver is None:
             return _fail(FactualGraphProjectionError("mediator_graph_hook_unavailable"))
         try:
-            mediator, _workspace, _root = resolver()
+            _mediator, workspace, _root = resolver()
         except Exception:
             return _fail(FactualGraphProjectionError("mediator_graph_hook_unavailable"))
+        if not isinstance(workspace, ComplaintWorkspaceService):
+            return _fail(FactualGraphProjectionError("workspace_graph_read_unavailable"))
         try:
-            payload = project_authorized_factual_kg(
-                mediator,
-                case_id=authorized_case,
-                graph_read_granted=True,
-                requested_case_id=case_id,
-            )
+            principal = getattr(request.state, "browser_principal", None)
+            actor = getattr(principal, "principal_id", None)
+            authority = current_workspace_case_authority()
+            if not actor or authority is None:
+                raise FactualGraphProjectionError("graph_read_ungranted")
+            # ContextVars carry the real issued capability into the managed
+            # thread; concurrent logout/revoke can still complete on the loop.
+            payload = await run_in_threadpool(_project_current, workspace, authority, actor, authorized_case)
+            authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+        except (WorkspaceAuthorizationDenied, WorkspaceCaseAuthorityError):
+            return _fail(FactualGraphProjectionError("graph_read_ungranted"))
+        except WorkspacePersistenceError as exc:
+            code = "unlock_needed" if exc.code == "unlock_needed" else "private_graph_unavailable"
+            return _fail(FactualGraphProjectionError(code))
         except FactualGraphProjectionError as exc:
             return _fail(exc)
         payload["task_id"] = TASK_ID
