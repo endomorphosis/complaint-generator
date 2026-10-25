@@ -3006,6 +3006,85 @@ def _reselect_affected_pending(
     return pending, True
 
 
+_ADAPTIVE_NON_FACT_ANSWERS = {
+    "unknown": "unknown",
+    "i do not know": "unknown",
+    "i don't know": "unknown",
+    "i dont know": "unknown",
+    "idk": "unknown",
+    "not sure": "unknown",
+    "unsure": "unknown",
+    "deferred": "deferred",
+    "defer": "deferred",
+    "later": "deferred",
+    "not now": "deferred",
+    "ask me later": "deferred",
+}
+
+
+def _adaptive_non_fact_kind(message: Optional[str]) -> Optional[str]:
+    return _ADAPTIVE_NON_FACT_ANSWERS.get(str(message or "").strip().lower())
+
+
+def _preserve_adaptive_gap(state: Dict[str, Any], message: Optional[str], prior: Mapping[str, Any]) -> None:
+    """Keep an unknown or deferred answer as an open gap.
+
+    The answered inquiry is recorded on the shared projection. It does not
+    become a fact and it does not satisfy the graph target.
+    """
+
+    kind = _adaptive_non_fact_kind(message)
+    inquiry_id = str(prior.get("inquiry_id") or "")
+    if not kind or not inquiry_id:
+        return
+    projection = state.get("shared_interview")
+    if not isinstance(projection, dict):
+        return
+    marker = "user_answer_unknown" if kind == "unknown" else "user_answer_deferred"
+    reasons = [str(item) for item in (projection.get("unknown_reasons") or []) if str(item or "").strip()]
+    if marker not in reasons:
+        reasons.append(marker)
+    projection["unknown_reasons"] = reasons
+    gaps = [item for item in (projection.get("preserved_gaps") or []) if isinstance(item, dict)]
+    gaps.append({
+        "inquiry_id": inquiry_id,
+        "target_id": prior.get("target_id"),
+        "objective_id": prior.get("objective_id"),
+        "target_revision": prior.get("target_revision"),
+        "disposition": kind,
+        "preserved": True,
+        "creates_fact": False,
+        "satisfies_requirement": False,
+    })
+    projection["preserved_gaps"] = gaps[-32:]
+
+
+def _adaptive_inquiry_view(state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Pending question from the shared mediator, never the fixed intake list."""
+
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), Mapping) else None
+    inquiry_id = str((pending or {}).get("inquiry_id") or "")
+    pending_open = bool(inquiry_id)
+    fixed_ids = [str(question["id"]) for question in _INTAKE_QUESTIONS]
+    return {
+        "schema": "adaptive-inquiry-v1",
+        "source": "shared_mediator",
+        "pending": pending_open,
+        "inquiry_id": inquiry_id or None,
+        "revision": (pending or {}).get("revision") if pending_open else None,
+        "prompt": str((pending or {}).get("question") or "") if pending_open else "",
+        "objective_id": (pending or {}).get("objective_id") if pending_open else None,
+        "target_id": (pending or {}).get("target_id") if pending_open else None,
+        "target_revision": (pending or {}).get("target_revision") if pending_open else None,
+        "from_fixed_intake_fields": False,
+        "fixed_intake_question_ids": fixed_ids,
+        "unknown_reasons": [str(item) for item in (projection.get("unknown_reasons") or [])],
+        "preserved_gaps": [dict(item) for item in (projection.get("preserved_gaps") or []) if isinstance(item, Mapping)],
+        "legal_sufficiency": False,
+    }
+
+
 def _note_terminal_edit_controls(
     state: Dict[str, Any],
     *,
@@ -3096,6 +3175,7 @@ class ComplaintWorkspaceRequestHandlers:
             "next_question": self.workspace._next_question(answers),
             "review": self.workspace._build_review(state),
             "case_synopsis": self.workspace._build_case_synopsis(state),
+            "adaptive_inquiry": _adaptive_inquiry_view(state),
         }
 
     def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
@@ -3913,6 +3993,11 @@ class ComplaintWorkspaceService:
                 restored = mediator.transition_shared_interview(action="resume", session_projection=projection, **kwargs)
                 if restored.get("error"):
                     return restored
+            prior_pending = None
+            if graph_question or action == "answer":
+                current_projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+                current_pending = current_projection.get("pending_inquiry") if isinstance(current_projection.get("pending_inquiry"), dict) else None
+                prior_pending = dict(current_pending) if current_pending else None
             if action == "resume":
                 receipt = mediator.transition_shared_interview(action="resume", **kwargs)
             elif narrative_turn or action == "start":
@@ -4029,6 +4114,8 @@ class ComplaintWorkspaceService:
                     receipt["error"] = {"code": "provider_unavailable", "resumable": True,
                                         "router_failures": dict(snapshot["errors"]), "legal_sufficiency": False}
                 receipt["intake_router"] = deepcopy(state["intake_router"])
+            if prior_pending and receipt.get("status") != "refused":
+                _preserve_adaptive_gap(state, message, prior_pending)
             return receipt
         except Exception as exc:
             return {
@@ -6289,6 +6376,8 @@ class ComplaintWorkspaceService:
         payload["legal_sufficiency"] = False
         payload["core_facts_complete"] = False
         payload["filing_ready"] = False
+        payload["adaptive_inquiry"] = _adaptive_inquiry_view(state)
+        payload["gap_preserved"] = bool(payload["adaptive_inquiry"]["preserved_gaps"])
         return payload
 
     def _support_matrix(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
