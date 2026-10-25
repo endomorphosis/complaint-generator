@@ -54,6 +54,7 @@ def test_real_cached_mediator_cannot_bypass_current_workspace_key_lock(tmp_path)
         denied = client.get(path, headers=_composed_headers(world.case))
         assert denied.status_code == 503, denied.text
         assert denied.json()["error"] == "unlock_needed"
+        assert denied.json()["task_id"] == "CIMP-GUI-27"
         assert _composed_ciphertext_snapshot(service) == before
 
 

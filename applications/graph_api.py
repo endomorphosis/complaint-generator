@@ -766,7 +766,7 @@ def mount_law_dependency_graph_routes(app: Any) -> None:
     from applications.case_routes import _BOUND_HANDLERS
     from applications.workspace_case_authority import current_workspace_case_authority
 
-    def _fail(exc: LegalDependencyGraphError) -> JSONResponse:
+    def _fail(exc: LegalDependencyGraphError, *, task_id: str | None = None) -> JSONResponse:
         payload = {
             "error": exc.code,
             "status": "denied",
@@ -776,6 +776,8 @@ def mount_law_dependency_graph_routes(app: Any) -> None:
             "applied": False,
         }
         payload.update(exc.details)
+        if task_id is not None:
+            payload["task_id"] = task_id
         payload["error"] = exc.code
         payload["proof"] = False
         return JSONResponse(payload, status_code=legal_dependency_http_status(exc.code))
@@ -889,12 +891,12 @@ def mount_law_dependency_graph_routes(app: Any) -> None:
             payload = await run_in_threadpool(_project_current_law_graph, workspace, authority, actor, case_id)
             authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
         except (WorkspaceAuthorizationDenied, WorkspaceCaseAuthorityError):
-            return _fail(LegalDependencyGraphError("actor_not_permitted"))
+            return _fail(LegalDependencyGraphError("actor_not_permitted"), task_id=LAW_DEPENDENCY_TASK_ID)
         except WorkspacePersistenceError as exc:
             code = str(getattr(exc, "code", "") or "")
-            return _fail(LegalDependencyGraphError("unlock_needed" if code == "unlock_needed" else "legal_dependency_unavailable"))
+            return _fail(LegalDependencyGraphError("unlock_needed" if code == "unlock_needed" else "legal_dependency_unavailable"), task_id=LAW_DEPENDENCY_TASK_ID)
         except LegalDependencyGraphError as exc:
-            return _fail(exc)
+            return _fail(exc, task_id=LAW_DEPENDENCY_TASK_ID)
         return JSONResponse(payload)
 
     @app.post(FACTUAL_GRAPH_PREFIX + "/{case_id}/legal-dependency")
