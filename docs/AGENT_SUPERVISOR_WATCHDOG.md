@@ -33,6 +33,9 @@ It refuses conflicting or customized unit files, but can atomically upgrade the
 exact previous managed service for the same campaign. The timer persists across user
 manager restarts; unattended boot operation requires an existing lingering user
 manager. The installed service binds the expected plan ID and specification hash.
+The timer also checks 60 seconds after the service becomes inactive using a
+monotonic interval. This covers calendar gaps during clock changes without
+starting competing checks while recovery is still running.
 
 The installer captures a bounded executable PATH: the selected Python and Grok
 entrypoint directories, discovered Node/Docker/Git directories and system
@@ -40,7 +43,9 @@ executable directories. A Grok symlink keeps its entrypoint directory. This fixe
 background services that could not find Grok although interactive startup worked.
 It copies no credentials, sources no shell profiles, and leaves validation's
 separately sealed executable path unchanged. Missing Grok fails installation
-explicitly. Existing timer settings and campaign-specific drop-ins remain intact.
+explicitly. The exact previous calendar-only managed timer can be upgraded to
+include the monotonic interval. Custom timer settings and campaign-specific
+drop-ins remain intact.
 
 The service intentionally uses `KillMode=process`: Native's public `start`
 detaches its successor, but detachment does not escape a systemd cgroup. Ending
