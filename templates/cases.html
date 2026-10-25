@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cases</title>
+    <link id="case-shell-style" rel="stylesheet" href="/static/complaint_app_shell.css">
     <style>
         body { font-family: sans-serif; margin: 0; background: #f4f1ea; color: #1c2430; }
         main { max-width: 42rem; margin: 0 auto; padding: 1.5rem; }
@@ -14,7 +15,16 @@
     </style>
 </head>
 <body>
-<main>
+<a class="cg-skip-link" href="#case-context">Skip to current case</a>
+<div id="case-context" class="cg-case-context" role="region" aria-label="Current case" data-state="empty" tabindex="-1">
+    <span class="cg-case-context__label">Current case</span>
+    <strong id="case-context-value">No case selected</strong>
+</div>
+<div id="case-error-summary" class="cg-error-summary" role="alert" aria-labelledby="case-error-summary-title" tabindex="-1" hidden>
+    <h2 id="case-error-summary-title">Fix the following</h2>
+    <ul id="case-error-summary-list"></ul>
+</div>
+<main id="cases-main">
     <h1>Your cases</h1>
     <form id="case-login">
         <p>Sign in here to enable changes. Authentication is required again after reloading or leaving this page; credentials and CSRF remain in memory only.</p>
@@ -50,7 +60,9 @@
     </form>
     <section>
         <h2>Authorized cases</h2>
-        <ul id="case-list"></ul>
+        <p id="case-list-status" class="cg-state-loading" role="status" hidden></p>
+        <p id="case-list-empty" class="cg-state-empty">No cases are loaded yet.</p>
+        <ul id="case-list" data-state="empty"></ul>
     </section>
     <section id="selected-case" hidden>
         <h2>Selected case</h2>
@@ -73,6 +85,8 @@
         <ul id="notification-list"></ul>
     </section>
     <p id="case-error" role="alert"></p>
+    <p id="case-asset-status" class="cg-state-error" role="status" hidden></p>
+    <img id="case-external-asset" alt="" width="1" height="1">
 </main>
 <script>
 (function () {
@@ -86,6 +100,16 @@
         document.getElementById("gap-input").value = "";
     }
 
+    var errorFields = {
+        authentication_failed: "case-credential",
+        case_not_selected: "lawyer-select"
+    };
+
+    function setCaseContext(text, state) {
+        document.getElementById("case-context-value").textContent = text;
+        document.getElementById("case-context").dataset.state = state;
+    }
+
     function clearSelectionDisplay() {
         document.getElementById("selected-case").hidden = true;
         document.getElementById("selected-case-label").textContent = "";
@@ -93,10 +117,27 @@
         document.getElementById("directory-revision").textContent = "";
         document.getElementById("encrypted-revision").textContent = "";
         document.getElementById("envelope-sha256").textContent = "";
+        setCaseContext("No case selected", "empty");
     }
 
     function showError(text) {
         document.getElementById("case-error").textContent = text || "";
+        var summary = document.getElementById("case-error-summary");
+        var list = document.getElementById("case-error-summary-list");
+        if (!text) {
+            summary.hidden = true;
+            list.replaceChildren();
+            return;
+        }
+        var field = errorFields[text] || "case-error";
+        var item = document.createElement("li");
+        var link = document.createElement("a");
+        link.href = "#" + field;
+        link.textContent = text;
+        item.appendChild(link);
+        list.replaceChildren(item);
+        summary.hidden = false;
+        summary.focus();
     }
 
     async function api(path, options) {
@@ -113,14 +154,29 @@
         });
         var payload = await response.json();
         if (!response.ok) {
-            throw new Error(payload.error || "request_failed");
+            var detail = payload && (payload.error || payload.detail);
+            if (detail && typeof detail !== "string") detail = "";
+            throw new Error(detail || "request_failed");
         }
         return payload;
     }
 
     function renderCases(cases) {
         var list = document.getElementById("case-list");
+        var empty = document.getElementById("case-list-empty");
+        var status = document.getElementById("case-list-status");
         list.replaceChildren();
+        status.hidden = true;
+        status.textContent = "";
+        if (!cases.length) {
+            empty.hidden = false;
+            empty.textContent = "No cases yet.";
+            list.dataset.state = "empty";
+        } else {
+            empty.hidden = true;
+            empty.textContent = "";
+            list.dataset.state = "ready";
+        }
         cases.forEach(function (item) {
             var row = document.createElement("li");
             var button = document.createElement("button");
@@ -135,6 +191,7 @@
     function renderSelection(item) {
         document.getElementById("selected-case").hidden = false;
         document.getElementById("selected-case-label").textContent = item.label || item.case_id;
+        setCaseContext(item.label || item.case_id, "ready");
         document.getElementById("directory-revision").textContent = String(item.directory_revision);
         document.getElementById("encrypted-revision").textContent = String(item.encrypted_content_revision);
         document.getElementById("envelope-sha256").textContent = item.envelope_sha256 || "";
@@ -204,6 +261,14 @@
         document.getElementById("case-auth-status").textContent = "Signing in";
         showError("");
         renderCases([]);
+        document.getElementById("case-list-empty").hidden = true;
+        document.getElementById("case-list-status").hidden = false;
+        document.getElementById("case-list-status").textContent = "Loading your cases.";
+        document.getElementById("case-list").dataset.state = "loading";
+        while (window.__cimpGui53HoldLogin) {
+            await new Promise(function (resolve) { setTimeout(resolve, 40); });
+            if (ownGeneration !== generation) return;
+        }
         try {
             var issued = await api("/api/complaint-workspace/auth/login", {method: "POST", body: {credential: credential}});
             credential = "";
@@ -220,6 +285,11 @@
             if (ownGeneration === generation) {
                 csrf = "";
                 document.getElementById("case-auth-status").textContent = "Sign in required";
+                document.getElementById("case-list-status").hidden = true;
+                document.getElementById("case-list-status").textContent = "";
+                document.getElementById("case-list-empty").hidden = false;
+                document.getElementById("case-list-empty").textContent = "No cases are loaded yet.";
+                document.getElementById("case-list").dataset.state = "error";
                 showError(error.message);
             }
         }
@@ -450,6 +520,16 @@
             if (ownGeneration === generation && selected === caseId) showError(error.message);
         }
     });
+
+    var missingAsset = document.getElementById("case-external-asset");
+    missingAsset.addEventListener("error", function () {
+        missingAsset.removeAttribute("src");
+        var status = document.getElementById("case-asset-status");
+        status.hidden = false;
+        status.textContent = "Required mark did not load. No replacement image was inserted.";
+        document.body.dataset.missingAsset = "reported";
+    });
+    missingAsset.src = "/static/cimp-gui-53-mark-missing.png";
 
     window.clearTransientState = clearTransientState;
 })();
