@@ -3463,7 +3463,11 @@ def _pytest_instrument(command, arguments, *, pythonpath=()):
         raise ValueError("unsupported_behavioral_command")
     end = matches[0].end()
     import shlex
-    invocation = command[matches[0].start():end] + " " + shlex.join(arguments)
+    original_invocation = command[matches[0].start():end]
+    executable = original_invocation.split()[0] if original_invocation != "pytest" else "python"
+    # Do not let cwd precede the explicitly owned bootstrap directories. The
+    # canonical Native Python launcher preserves this interpreter flag.
+    invocation = executable + " -P -m pytest " + shlex.join(arguments)
     if pythonpath:
         # A retained task prefix may export its own PYTHONPATH. Bind the owned
         # plugin roots at the actual invocation, after that prefix, while
@@ -3780,9 +3784,15 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     if phase_source is None or not phase_source.is_file():
         raise ValueError("validation_bootstrap_source_unavailable")
     native_root = Path(native_source.__file__).resolve().parents[3]
-    bootstrap_roots = tuple(dict.fromkeys((root, phase_root, native_root)))
+    from . import validation_network as owned_network
+    from .validation_network import prepare_validation_network_guard, verify_validation_network_proof
+    network_guard = prepare_validation_network_guard(run, Path(owned_network.__file__).resolve().parents[2])
+    # This private, Host-created module precedes all candidate package roots.
+    # -P above also removes Python's otherwise implicit cwd precedence.
+    bootstrap_roots = tuple(dict.fromkeys((run, root, phase_root, native_root)))
     bootstrap_files = (phase_source, native_root / "ipfs_accelerate_py/__init__.py",
-                       native_root / "ipfs_accelerate_py/testing/pytest_ast_seal.py")
+                       native_root / "ipfs_accelerate_py/testing/pytest_ast_seal.py",
+                       *(Path(path) for path in network_guard["files"]))
     bootstrap_before = {str(path): _hash_file(path) for path in bootstrap_files}
     impacted = _impacted_behavioral_checks(root, (context or {}).get("changed_paths", ()))
     if task.get("id") == "CIMP-DUR-005" and _PRIVATE_REPLICA_ACCEPTANCE not in impacted:
@@ -3804,13 +3814,13 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         "tests/test_intake_release_gate.py" in extra and
         command.rstrip().endswith("python scripts/validate_complaint_intake.py --phase pre-admission"))
     before = _source_freeze(root, freeze_inputs)
-    artifacts, results = [], []
+    artifacts, results, network_proofs = [], [], []
     required, cases, imported = [], [], {}
     reason = ""
     def execute(mode):
         catalog, manifest = run / (mode + ".duckdb"), run / (mode + ".json")
         junit = run / "junit.xml"
-        options = (["-p", str(context["pytest_guard_plugin"])] if (context or {}).get("pytest_guard_plugin") else []) + ["-p", "integrations.ipfs_accelerate.improvement_plan", "-p", "ipfs_accelerate_py.testing.pytest_ast_seal",
+        options = ["-p", network_guard["module"]] + (["-p", str(context["pytest_guard_plugin"])] if (context or {}).get("pytest_guard_plugin") else []) + ["-p", "integrations.ipfs_accelerate.improvement_plan", "-p", "ipfs_accelerate_py.testing.pytest_ast_seal",
                    "--complaint-evidence-path=" + str(manifest)]
         options += ["--collect-only"] if mode == "collect" else ["--junitxml=" + str(junit), "-o", "junit_family=xunit2"]
         options += [p for p in impacted if p not in command.split()]
@@ -3834,6 +3844,17 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             raise TimeoutError("subprocess_timeout")
         if result.get("validation_python_launcher", {}).get("sealed") is not True:
             raise ValueError("sealed_execution_unavailable")
+        network_path = manifest.with_suffix(network_guard["proof_suffix"])
+        try:
+            proof = verify_validation_network_proof(network_path,
+                expected_plugin_sha256=network_guard["plugin_sha256"],
+                expected_policy_sha256=network_guard["policy_sha256"],
+                expected_exitstatus=result.get("returncode"))
+        except (OSError, ValueError, TypeError, KeyError):
+            raise ValueError("validation_network_guard_unavailable") from None
+        network_proofs.append({"mode": mode, "path": str(network_path),
+            "sha256": _hash_file(network_path), "proof": proof})
+        artifacts.append({"path": str(network_path), "sha256": _hash_file(network_path)})
         if not manifest.is_file():
             raise ValueError("missing_phase_manifest")
         guard_path = manifest.with_suffix(".guard.json")
@@ -3949,7 +3970,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         if any(imported.get(p) != h for p, h in collected_hashes.items()):
             raise ValueError("stale_source_hash")
     except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
-        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed"} else "host_measurement_unavailable"
+        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable"} else "host_measurement_unavailable"
     try:
         if replica_binding != _private_replica_acceptance_binding(root, task, impacted):
             reason = "trusted_replica_acceptance_changed"
@@ -3977,6 +3998,10 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                 "source_unchanged": before == after and bootstrap_before == bootstrap_after, "imported_sources": imported,
                 "validation_bootstrap": {"pythonpath_roots": list(map(str, bootstrap_roots)),
                                          "before": bootstrap_before, "after": bootstrap_after},
+                "kernel_network_guard": {"policy": network_guard["policy"],
+                    "policy_sha256": network_guard["policy_sha256"],
+                    "plugin_sha256": network_guard["plugin_sha256"],
+                    "proofs": network_proofs, "validation_children_only": True},
                 "task_contract_digest": _digest(contract), "results": results, "artifacts": artifacts,
                 "completion_authority": False, "run_path": str(run),
                 "lane_basis": "native_host_validation", "live_node_verified": False, "impacted_checks": impacted,
