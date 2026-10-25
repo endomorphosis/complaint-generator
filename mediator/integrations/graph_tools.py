@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import math
 import re
 import time
 from typing import Any, Dict, List, Set
@@ -512,7 +513,7 @@ class FactualGraphProjectionError(Exception):
 
 _PROJECTION_LIMITATIONS = (
     "projection_is_read_only",
-    "source_ids_are_immutable",
+    "verified_source_ids_are_immutable",
     "hypothesis_is_not_a_user_fact",
     "legal_text_is_not_a_user_fact",
     "retrieval_confidence_is_not_authority",
@@ -557,11 +558,14 @@ def _text_of(record: Dict[str, Any]) -> str:
 
 
 def _immutable_source_id(record: Dict[str, Any]) -> str:
+    envelope = _validated_assertion(record)
+    if envelope is not None:
+        return envelope.stable_id
     assertion = record.get("assertion") if isinstance(record.get("assertion"), dict) else {}
     provenance = record.get("provenance") if isinstance(record.get("provenance"), dict) else {}
     attributes = record.get("attributes") if isinstance(record.get("attributes"), dict) else {}
     for container in (assertion, provenance, attributes):
-        for key in ("immutable_source_id", "source_id"):
+        for key in ("immutable_source_id", "source_identity", "source_id", "message_id", "document_id"):
             value = container.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
@@ -635,27 +639,73 @@ _AUTHORITY = {
 }
 
 
-def _projection_item(kind: str, record: Dict[str, Any], *, case_id: str) -> Dict[str, Any]:
-    authority, confidence_role, user_fact = _AUTHORITY[kind]
-    assertion = record.get("assertion") if isinstance(record.get("assertion"), dict) else {}
+def _validated_assertion(record: Dict[str, Any]) -> Any:
+    """Recompute the typed source proof; a serialized success flag is no proof."""
+    from integrations.ipfs_datasets.types import user_assertion_from_mapping
+
+    raw = record.get("assertion")
+    if not isinstance(raw, dict) or not raw:
+        return None
+    try:
+        envelope = user_assertion_from_mapping(raw)
+        return envelope if envelope.is_asserted_user_fact else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _assertion_activity(record: Dict[str, Any], envelope: Any, states: Dict[str, Any]) -> str:
+    if envelope is None:
+        return "unverified"
+    if envelope.stable_id not in states:
+        return "active"
+    state = states[envelope.stable_id]
+    if not isinstance(state, dict):
+        return "unverified"
+    state_record = {"assertion": state.get("envelope")}
+    state_envelope = _validated_assertion(state_record)
+    if (state.get("stable_id") != envelope.stable_id
+            or state.get("entity_id") != str(record.get("id") or "")
+            or state_envelope is None
+            or state_envelope.stable_id != envelope.stable_id):
+        return "unverified"
+    status = state.get("status")
+    return status if isinstance(status, str) and status in {"active", "superseded", "retracted", "conflict"} else "unverified"
+
+
+def _projection_item(
+    kind: str, record: Dict[str, Any], *, case_id: str, states: Dict[str, Any]
+) -> Dict[str, Any]:
+    authority, confidence_role, _user_class = _AUTHORITY[kind]
+    envelope = _validated_assertion(record)
+    activity = _assertion_activity(record, envelope, states)
     confidence = record.get("confidence")
     try:
         parsed = None if confidence is None else float(confidence)
-    except (TypeError, ValueError):
+        if parsed is not None and not math.isfinite(parsed):
+            parsed = None
+    except (TypeError, ValueError, OverflowError):
         parsed = None
-    source_id = _immutable_source_id(record)
+    verified = envelope is not None
+    admitted = bool(kind == "user_statement" and verified and activity == "active")
     return {
         "kind": kind,
-        "immutable_source_id": source_id,
-        "source_id_mutable": False,
-        "text": _text_of(record),
+        # Older imported graph candidates can retain their display reference.
+        # Only a recomputed envelope grants immutable/asserted authority.
+        "immutable_source_id": envelope.stable_id if verified else _immutable_source_id(record),
+        "source_id_mutable": not verified,
+        "source_identity_verified": verified,
+        "assertion_id": envelope.stable_id if verified else "",
+        "source_identity": envelope.source_identity if verified else "",
+        "provenance_status": "verified" if verified else "unverified",
+        "activity_status": activity,
+        "text": envelope.source_span_text if verified else _text_of(record),
         "confidence": parsed,
         "confidence_role": confidence_role,
+        # Category labels describe the candidate's class. The two authority
+        # booleans below require current, independently recomputed source proof.
         "authority": authority,
-        "authority_is_user_fact": user_fact,
-        "admitted_user_fact": bool(user_fact and source_id and assertion.get("is_asserted_user_fact") is True) or (
-            kind == "user_statement" and bool(source_id)
-        ),
+        "authority_is_user_fact": admitted,
+        "admitted_user_fact": admitted,
         "case_id": case_id,
         "graph_entity_id": str(record.get("id") or ""),
         "owner_id": "ipfs_datasets_py",
@@ -665,15 +715,18 @@ def _projection_item(kind: str, record: Dict[str, Any], *, case_id: str) -> Dict
 def _entity_records(knowledge_graph: Any) -> List[Dict[str, Any]]:
     from complaint_phases.knowledge_graph import entity_to_graph_entity
 
-    entities = getattr(knowledge_graph, "entities", {}) or {}
-    records: List[Dict[str, Any]] = []
-    for entity in entities.values():
-        projected = entity_to_graph_entity(entity).as_dict()
-        records.append(projected)
-    return records
+    return [
+        entity_to_graph_entity(entity).as_dict()
+        for entity in knowledge_graph.entities.values()
+    ]
 
 
 def _revision_record(revision: Dict[str, Any]) -> Dict[str, Any]:
+    """Retain a legacy evidence candidate without certifying its provenance.
+
+    Actual supersede/retract/conflict entries are handled separately and never
+    relabeled as supporting evidence.
+    """
     source_id = str(revision.get("immutable_source_id") or revision.get("source_id") or "")
     return {
         "id": str(revision.get("revision_id") or revision.get("id") or ""),
@@ -696,60 +749,94 @@ def _revision_record(revision: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def project_authorized_factual_kg(
-    mediator: Any,
-    *,
-    case_id: str,
-    graph_read_granted: bool,
-    requested_case_id: str = "",
-) -> Dict[str, Any]:
-    """Project one authorized case graph through the mediator phase hook.
+def _revision_projection(revision: Dict[str, Any], states: Dict[str, Any]) -> Dict[str, Any]:
+    """Project correction metadata, excluding private original source documents."""
+    action = revision.get("action")
+    if not isinstance(action, str):
+        action = "unrecognized"
+    index = revision.get("revision_index")
+    result = {
+        "action": action if action in {"supersede", "retract", "conflict"} else "unrecognized",
+        "event_id": str(revision.get("event_id") or ""),
+        "revision_index": index if type(index) is int and index > 0 else None,
+        "provenance_status": "unverified",
+    }
+    if action in {"supersede", "retract"}:
+        previous = _validated_assertion({"assertion": revision.get("previous_envelope")})
+        current = _validated_assertion({"assertion": revision.get("new_envelope")})
+        bound = bool(previous is not None and current is not None
+            and revision.get("previous_stable_id") == previous.stable_id
+            and revision.get("new_stable_id") == current.stable_id)
+        result.update({
+            "previous_assertion_id": str(revision.get("previous_stable_id") or ""),
+            "new_assertion_id": str(revision.get("new_stable_id") or ""),
+            "previous_entity_id": str(revision.get("previous_entity_id") or ""),
+            "new_entity_id": str(revision.get("new_entity_id") or ""),
+            "provenance_status": "verified" if bound else "unverified",
+        })
+    elif action == "conflict":
+        ids = revision.get("stable_ids")
+        assertion_ids = [item for item in ids if isinstance(item, str)] if isinstance(ids, list) else []
+        verified = bool(assertion_ids) and all(
+            isinstance(states.get(item), dict)
+            and (envelope := _validated_assertion({"assertion": states[item].get("envelope")})) is not None
+            and envelope.stable_id == item
+            for item in assertion_ids
+        )
+        result.update(assertion_ids=assertion_ids, provenance_status="verified" if verified else "unverified")
+    return result
 
-    User statements, allegations, evidence revisions, and hypotheses stay in
-    separate authority classes. A missing grant, a foreign case id, or a
-    missing pinned Data owner fails closed. Legal text is withheld.
+
+def project_factual_kg(knowledge_graph: Any, *, case_id: str) -> Dict[str, Any]:
+    """Pure projection of a case-bound, freshly decrypted Root knowledge graph.
+
+    This function grants no access. Its caller must obtain the graph through
+    the live case/key authority and revalidate that authority before releasing
+    the result. It never opens a global catalog, constructs a mediator, reads
+    a cache, or initializes correction state.
     """
-    if graph_read_granted is not True:
-        raise FactualGraphProjectionError("graph_read_ungranted")
+    from complaint_phases.knowledge_graph import KnowledgeGraph
+    from integrations.ipfs_datasets.graphs import build_factual_graph_artifact
+
     bound_case = str(case_id or "").strip()
-    requested = str(requested_case_id or bound_case).strip()
-    if not bound_case or requested != bound_case:
+    if not bound_case:
         raise FactualGraphProjectionError("cross_case_id")
+    if not isinstance(knowledge_graph, KnowledgeGraph):
+        raise FactualGraphProjectionError("knowledge_graph_unavailable")
     owner = pinned_data_graph_owner()
     if owner["available"] is not True:
         raise FactualGraphProjectionError("data_graph_owner_unavailable")
-    phase_manager = getattr(mediator, "phase_manager", None)
-    if phase_manager is None or not hasattr(phase_manager, "get_phase_data"):
-        raise FactualGraphProjectionError("mediator_graph_hook_unavailable")
-    try:
-        from complaint_phases import ComplaintPhase
-
-        knowledge_graph = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "knowledge_graph")
-    except Exception as exc:
-        raise FactualGraphProjectionError("mediator_graph_hook_unavailable") from exc
-    if knowledge_graph is None or not hasattr(knowledge_graph, "entities"):
-        raise FactualGraphProjectionError("knowledge_graph_unavailable")
-    metadata = getattr(knowledge_graph, "metadata", {}) or {}
+    # Reuse the same typed Root/Data artifact owner as the encrypted factual
+    # revision protocol. Unlike factual_ledger(), this normalization is pure.
+    document = build_factual_graph_artifact(knowledge_graph)
+    metadata = knowledge_graph.metadata
     graph_case = str(metadata.get("case_id") or "")
     if graph_case and graph_case != bound_case:
         raise FactualGraphProjectionError("cross_case_id")
+    ledger = metadata.get("factual_ledger", {})
+    if not isinstance(ledger, dict):
+        raise FactualGraphProjectionError("factual_ledger_invalid")
+    states = ledger.get("assertion_states", {})
+    revisions = ledger.get("revisions", [])
+    conflicts = ledger.get("conflicts", [])
+    if (not isinstance(states, dict) or not isinstance(revisions, list)
+            or not isinstance(conflicts, list)
+            or any(not isinstance(item, dict) for item in revisions + conflicts)):
+        raise FactualGraphProjectionError("factual_ledger_invalid")
 
     buckets: Dict[str, List[Dict[str, Any]]] = {
-        "user_statements": [],
-        "evidence_revisions": [],
-        "allegations": [],
-        "hypotheses": [],
+        "user_statements": [], "evidence_revisions": [], "allegations": [], "hypotheses": [],
     }
-    withheld_legal = []
-    unresolved = []
-    denied_cross_case = []
-    seen_sources: Dict[str, str] = {}
-
+    withheld_legal, unresolved, denied_cross_case = [], [], []
     records = _entity_records(knowledge_graph)
-    ledger = knowledge_graph.factual_ledger() if hasattr(knowledge_graph, "factual_ledger") else {}
-    for revision in ledger.get("revisions") or []:
-        if isinstance(revision, dict):
+    correction_revisions = []
+    for revision in revisions:
+        if revision.get("action") is not None:
+            correction_revisions.append(_revision_projection(revision, states))
+        elif revision.get("immutable_source_id") or revision.get("source_id"):
             records.append(_revision_record(revision))
+        else:
+            correction_revisions.append(_revision_projection(revision, states))
 
     for record in records:
         record_case = _record_case_id(record)
@@ -757,36 +844,63 @@ def project_authorized_factual_kg(
             denied_cross_case.append(record_case)
             continue
         kind = _classify_projection(record)
-        source_id = _immutable_source_id(record)
+        candidate_source_id = _immutable_source_id(record)
         if kind == "legal_text":
-            withheld_legal.append({"immutable_source_id": source_id, "authority": "legal_text"})
+            withheld_legal.append({"immutable_source_id": candidate_source_id, "authority": "legal_text"})
             continue
-        if kind not in _AUTHORITY or not source_id:
-            unresolved.append({"kind": kind, "reason": "missing_immutable_source_id" if not source_id else "unclassified"})
+        if kind not in _AUTHORITY or not candidate_source_id:
+            unresolved.append({"kind": kind,
+                "reason": "missing_immutable_source_id" if not candidate_source_id else "unclassified"})
             continue
-        previous = seen_sources.get(source_id)
-        if previous is not None and previous != kind:
-            unresolved.append({"kind": kind, "immutable_source_id": source_id, "reason": "source_id_authority_conflict"})
-            continue
-        seen_sources[source_id] = kind
-        field = {
-            "user_statement": "user_statements",
-            "allegation": "allegations",
-            "evidence_revision": "evidence_revisions",
-            "hypothesis": "hypotheses",
-        }[kind]
-        buckets[field].append(_projection_item(kind, record, case_id=bound_case))
+        field = {"user_statement": "user_statements", "allegation": "allegations",
+            "evidence_revision": "evidence_revisions", "hypothesis": "hypotheses"}[kind]
+        buckets[field].append(_projection_item(kind, record, case_id=bound_case, states=states))
+
+    unresolved_conflicts = []
+    for conflict in conflicts:
+        if str(conflict.get("status") or "unresolved") == "unresolved":
+            item = _revision_projection({**conflict, "action": "conflict"}, states)
+            item["status"] = "unresolved"
+            unresolved_conflicts.append(item)
 
     return {
         "status": "projected",
         "case_id": bound_case,
-        "graph_id": str(metadata.get("graph_id") or ""),
-        "graph_version": str(metadata.get("graph_version") or ""),
+        "graph_id": document["graph_id"],
+        "graph_version": document["graph_version"],
+        "factual_artifact_schema": document["schema"],
         "data_graph_owner": owner,
         "read_only": True,
         **buckets,
+        "revisions": correction_revisions,
+        "unresolved_conflicts": unresolved_conflicts,
+        "invalidations": document["invalidations"],
         "withheld_legal_text": withheld_legal,
         "unresolved": unresolved,
         "denied_cross_case_ids": sorted(set(denied_cross_case)),
-        "limitations": list(_PROJECTION_LIMITATIONS),
+        "limitations": list(_PROJECTION_LIMITATIONS) + ["unverified_source_references_are_candidates_only"],
     }
+
+
+def project_authorized_factual_kg(
+    mediator: Any, *, case_id: str, graph_read_granted: bool, requested_case_id: str = ""
+) -> Dict[str, Any]:
+    """Compatibility hook for trusted local callers, with identical provenance rules.
+
+    HTTP reads use project_factual_kg only after decrypting the actual bound
+    workspace. A phase cache and this boolean do not authorize an HTTP read.
+    """
+    if graph_read_granted is not True:
+        raise FactualGraphProjectionError("graph_read_ungranted")
+    bound_case = str(case_id or "").strip()
+    if not bound_case or str(requested_case_id or bound_case).strip() != bound_case:
+        raise FactualGraphProjectionError("cross_case_id")
+    phase_manager = getattr(mediator, "phase_manager", None)
+    if phase_manager is None or not callable(getattr(phase_manager, "get_phase_data", None)):
+        raise FactualGraphProjectionError("mediator_graph_hook_unavailable")
+    try:
+        from complaint_phases import ComplaintPhase
+        graph = phase_manager.get_phase_data(ComplaintPhase.INTAKE, "knowledge_graph")
+    except Exception as exc:
+        raise FactualGraphProjectionError("mediator_graph_hook_unavailable") from exc
+    return project_factual_kg(graph, case_id=bound_case)
