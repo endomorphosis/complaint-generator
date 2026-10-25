@@ -21,6 +21,16 @@ def negotiated_protocol_version(params: Any) -> str:
     return DEFAULT_MCP_PROTOCOL_VERSION
 
 _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "complaint.dispatch_bounded_gui_inference": {
+        "type": "object", "additionalProperties": False,
+        "properties": {"purpose": {"type": "string"}, "inputs": {"type": "object"},
+                       "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 60}},
+        "required": ["purpose", "inputs"],
+    },
+    "complaint.admit_bounded_gui_inference": {
+        "type": "object", "additionalProperties": False,
+        "properties": {"invocation_id": {"type": "string"}}, "required": ["invocation_id"],
+    },
     "complaint.create_identity": {
         "type": "object",
         "properties": {},
