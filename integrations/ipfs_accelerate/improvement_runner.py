@@ -3824,7 +3824,8 @@ def _impacted_behavioral_checks(root, changed_paths):
 
 def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, Any], command: str, *,
                                runner, environment: dict, timeout_seconds: float = TIMEOUT_SECONDS,
-                               context: Mapping[str, Any] | None = None, declared_command: str | None = None):
+                               context: Mapping[str, Any] | None = None, declared_command: str | None = None,
+                               candidate_proposal=None):
     """Execute and measure an owned command; never accept serialized success.
 
     Independent collection freezes the required population. The actual command
@@ -3859,6 +3860,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         raise ValueError("validation_bootstrap_source_unavailable")
     native_root = Path(native_source.__file__).resolve().parents[3]
     from . import validation_network as owned_network
+    from . import python_global_preflight as owned_python_globals
     from .validation_network import prepare_validation_network_guard, verify_validation_network_proof
     network_guard = prepare_validation_network_guard(run, Path(owned_network.__file__).resolve().parents[2])
     # This private, Host-created module precedes all candidate package roots.
@@ -3866,7 +3868,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     bootstrap_roots = tuple(dict.fromkeys((run, root, phase_root, native_root)))
     bootstrap_files = (phase_source, native_root / "ipfs_accelerate_py/__init__.py",
                        native_root / "ipfs_accelerate_py/testing/pytest_ast_seal.py",
-                       *(Path(path) for path in network_guard["files"]))
+                       *(Path(path) for path in network_guard["files"]),
+                       Path(owned_python_globals.__file__).resolve())
     bootstrap_before = {str(path): _hash_file(path) for path in bootstrap_files}
     impacted = _impacted_behavioral_checks(root, (context or {}).get("changed_paths", ()))
     if task.get("id") == "CIMP-DUR-005" and _PRIVATE_REPLICA_ACCEPTANCE not in impacted:
@@ -3878,6 +3881,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     release_qualification_before = None
     release_qualification_after = None
     preserved_behavioral_definitions = None
+    python_global_preflight = None
     release_script = (task.get("id") == "CIMP-REL-03" and
         observation_command == "python scripts/validate_complaint_intake.py --phase pre-admission" and
         task.get("validation_commands") in (
@@ -3973,6 +3977,14 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             artifacts.append({"path": str(path), "sha256": _hash_file(path)})
         return result, observation, _read_catalog(catalog, repo_root=root)
     try:
+        if (context or {}).get("require_python_global_preflight") is True:
+            python_global_preflight = owned_python_globals.inspect_changed_python_globals(
+                root, candidate_proposal, expected_task_id=task["id"])
+            preflight_path = run / "python-global-preflight.json"
+            _atomic_json(preflight_path, python_global_preflight)
+            artifacts.append({"path": str(preflight_path), "sha256": _hash_file(preflight_path)})
+            if python_global_preflight.get("passed") is not True:
+                raise ValueError(python_global_preflight["reason"])
         preserved_behavioral_definitions = _preserve_existing_behavioral_definitions(
             root, [*extra, *impacted, *(context or {}).get("changed_paths", ())])
         replica_kit_before = _private_replica_kit_qualification(root, state_dir, task, before,
@@ -4072,7 +4084,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         if any(imported.get(p) != h for p, h in collected_hashes.items()):
             raise ValueError("stale_source_hash")
     except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
-        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable", *infrastructure_reasons} else "host_measurement_unavailable"
+        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable", "new_duplicate_python_module_global", "python_global_preflight_unavailable", *infrastructure_reasons} else "host_measurement_unavailable"
     try:
         if replica_binding != _private_replica_acceptance_binding(root, task, impacted):
             reason = "trusted_replica_acceptance_changed"
@@ -4094,6 +4106,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     measured = {"schema": "complaint-owned-behavioral-measurement@1", "reason": reason,
                 "infrastructure_failure": any(row.get("infrastructure_failure") is True for row in results),
                 "preserved_behavioral_definitions": preserved_behavioral_definitions,
+                "python_global_preflight": python_global_preflight,
                 "trusted_executor": {"module": str(getattr(runner, "__module__", "")), "qualname": str(getattr(runner, "__qualname__", "")),
                     "canonical_native_identity": runner is PortalImplementationDaemon._validation_command_runner,
                     "boundary": "trusted host code; returned sealed marker alone does not authenticate arbitrary callbacks"},
@@ -4174,7 +4187,9 @@ class EvidenceValidationScheduler:
             observed = measure_behavioral_command(root, self.state_dir / "evidence-runs", task, str(spec.command),
                 runner=delegate, environment=environment, timeout_seconds=timeout_seconds,
                 declared_command=task["validation_commands"][spec.ordinal] if spec.ordinal < len(task["validation_commands"]) else None,
-                context={"campaign_state_dir": str(self.state_dir.resolve()),
+                candidate_proposal=args[0] if method == "run_validated" else None,
+                context={"require_python_global_preflight": method == "run_validated",
+                         "campaign_state_dir": str(self.state_dir.resolve()),
                          "target_source_root": str(Path(__file__).resolve().parents[2]),
                          "task_id": native_task.task_id, "task_cid": str(getattr(native_task, "canonical_task_cid", "")),
                          "task_key": str(getattr(native_task, "canonical_task_key", "")),
@@ -4207,6 +4222,10 @@ class EvidenceValidationScheduler:
                      "process_tree_quiesced", "execution_deadline_exceeded") if key in result}
                 result.update(timed_out=False, infrastructure_failure=False,
                               error=failure_reason or "current_behavioral_evidence_required")
+            if failure_reason in {"new_duplicate_python_module_global", "python_global_preflight_unavailable"}:
+                detail = observed["host_measurement"].get("python_global_preflight") or {}
+                result["output"] = "Host Python global preflight: " + json.dumps(detail, sort_keys=True)[:8192]
+                result["preflight_only"] = True
             result.update(command=str(spec.command), raw_command=str(spec.raw_command or spec.command),
                           returncode=0 if receipt["admitted"] else rejected_status, behavioral_evidence=receipt)
             return result

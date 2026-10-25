@@ -482,11 +482,26 @@ def test_native_proposal_scheduler_actually_consumes_gate_before_acceptance(tmp_
     if skip:
         test = tmp_path / "tests/test_improvement_evidence_gate.py"
         test.write_text("import pytest\ndef test_required_case(): pytest.skip('synthetic required skip')\n")
-    proposal = ImplementationProposal(task_id=task["id"], accepted_plan_id="plan:synthetic", repository_id="repo:synthetic",
-        repository_tree_id="tree:synthetic", objective_id="objective:synthetic", baseline_id="baseline:synthetic",
+    # Use the real Native producer and exact Git baseline, not serialized
+    # synthetic repository/tree labels or sources unrelated to the worktree.
+    import hashlib
+    import subprocess
+    from ipfs_accelerate_py.agent_supervisor.proof.code_proof_obligations import collect_git_candidate_diff
+    output = tmp_path / task["targets"][0]
+    candidate = output.read_bytes()
+    output.write_text("def ready():\n    return False\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "out", "tests"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.invalid",
+                    "commit", "-qm", "Synthetic baseline"], check=True)
+    baseline = subprocess.check_output(["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True).strip()
+    common = Path(subprocess.check_output(["git", "-C", str(tmp_path), "rev-parse", "--path-format=absolute", "--git-common-dir"], text=True).strip()).resolve()
+    output.write_bytes(candidate)
+    repository = "repository:sha256:" + hashlib.sha256(str(common).encode()).hexdigest()
+    proposal = ImplementationProposal(task_id=task["id"], accepted_plan_id="plan:synthetic", repository_id=repository,
+        repository_tree_id=baseline, objective_id="objective:synthetic", baseline_id=baseline,
         context_id="context:owned-synthetic-attempt", replay_nonce="synthetic-attempt-1",
-        declared_paths=tuple(task["targets"]), candidate_diff=(CandidateDiffEntry(old_path=task["targets"][0], new_path=task["targets"][0],
-            change_kind=DiffChangeKind.MODIFY, before_source="def ready(): return False\n", after_source="def ready(): return True\n"),))
+        declared_paths=tuple(task["targets"]), candidate_diff=tuple(entry for entry in
+            collect_git_candidate_diff(tmp_path, base_revision=baseline) if entry.new_path in task["targets"]))
     accepted = validate_implementation_proposal(proposal, policy=ProposalValidationPolicy(allowed_paths=tuple(task["targets"])))
     assert accepted.accepted
     import shlex
