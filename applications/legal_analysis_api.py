@@ -43,7 +43,7 @@ def legal_analysis_http_status(code: str) -> int:
         return 401
     if code in {"legal_analysis_field", "legal_analysis_bounds", "client_case_authority"}:
         return 422
-    if code in {"canonical_compiler_unavailable", "definition_owner_unavailable", "legal_analysis_unavailable", "unlock_needed"}:
+    if code in {"canonical_compiler_unavailable", "definition_owner_unavailable", "legal_analysis_unavailable", "unlock_needed", "proof_producer_unavailable"}:
         return 503
     if code in {"revision_conflict", "legal_source_changed", "legal_source_unavailable"}:
         return 409
@@ -626,7 +626,10 @@ def _classify_trace_row(row: Mapping[str, Any], *, envelope_source: str, expecte
         status = "not_executed"
     elif status == "executed":
         status = "executed"
-    green = status == "executed" and not counterexample and not drifted and not timed_out and not prover_missing
+    reported_status = status
+    if status == "executed":
+        status = "not_executed"
+    green = False  # A caller label or engine name is not an issued proof observation.
     if status in _UNAVAILABLE_TRACE_STATUSES or status in {"degraded", "not_executed"}:
         green = False
     return {
@@ -634,10 +637,14 @@ def _classify_trace_row(row: Mapping[str, Any], *, envelope_source: str, expecte
         "statement": _bounded_text(row.get("statement"), limit=512, required=True),
         "source_span": _bounded_text(row.get("source_span"), limit=512, required=True),
         "source_identity": obligation_source,
-        "source_bound": bool(obligation_source and row.get("source_span")),
+        "source_bound": False,
+        "source_binding_status": "unverified_claim",
         "proof_status": status,
-        "engine_name": engine_name,
-        "engine_version": engine_version,
+        "reported_proof_status": reported_status,
+        "reported_engine_name": engine_name,
+        "reported_engine_version": engine_version,
+        "engine_name": "",
+        "engine_version": "",
         "counterexample": counterexample,
         "green_checkmark": green,
         "legal_sufficiency": False,
@@ -742,8 +749,9 @@ def project_proof_traces(case_file: Mapping[str, Any]) -> Dict[str, Any]:
             "source_drift": False,
             "limitations": ["No proof trace has been recorded. Absence is not a successful proof."],
         }
-    projected = dict(stored)
+    projected = deepcopy(stored)
     projected["task_id"] = PROOF_TRACE_TASK_ID
+    projected["engine_versions"] = []
     projected["legal_sufficiency"] = False
     projected["proof"] = False
     projected["executed_proof"] = False
@@ -756,11 +764,86 @@ def project_proof_traces(case_file: Mapping[str, Any]) -> Dict[str, Any]:
                 item["legal_sufficiency"] = False
                 item["executed_proof"] = False
                 item["governing_legal_authority"] = False
-                if item.get("proof_status") in _UNAVAILABLE_TRACE_STATUSES or item.get("proof_status") in {"degraded", "not_executed"}:
-                    item["green_checkmark"] = False
+                item["green_checkmark"] = False
+                item["source_bound"] = False
+                if item.get("proof_status") == "executed":
+                    item["reported_proof_status"] = "executed"
+                    item["proof_status"] = "not_executed"
+                item["engine_name"] = ""
+                item["engine_version"] = ""
                 if item.get("counterexample"):
                     item["green_checkmark"] = False
     return projected
+
+
+def project_current_case_proof_traces(analysis: Mapping[str, Any], *, source_text: str | None) -> Dict[str, Any]:
+    """Project the current owner's canonical IR without running any engine.
+
+    The workspace provides its freshly verified IR/source. The pinned proof
+    adapter has no configured checked substantive kernel; compiler execution,
+    serialized engine names and old display claims do not supply that backend.
+    """
+    if not isinstance(analysis, Mapping):
+        raise LegalAnalysisError("legal_analysis_unavailable")
+    source_current = analysis.get("source_current") is True
+    binding = analysis.get("source_binding")
+    binding = binding if isinstance(binding, Mapping) else {}
+    source_id = str(binding.get("content_hash") or "")
+    owned_text = source_text if isinstance(source_text, str) and len(source_text) <= 8192 else None
+    digest = source_id.removeprefix("sha256:")
+    source_current = bool(source_current and owned_text is not None
+        and hashlib.sha256(owned_text.encode()).hexdigest() == digest)
+    rows, invalid_rows = [], 0
+    candidates = analysis.get("typed_obligations")
+    if not isinstance(candidates, list) or len(candidates) > 32:
+        candidates = []
+    if source_current:
+        for item in candidates:
+            if not isinstance(item, Mapping):
+                invalid_rows += 1
+                continue
+            span = item.get("source_span")
+            span = span if isinstance(span, Mapping) else {}
+            start, end, unit = span.get("start"), span.get("end"), span.get("unit")
+            text = None
+            if type(start) is int and type(end) is int and 0 <= start < end:
+                if unit in {"character", "characters"} and end <= len(owned_text):
+                    text = owned_text[start:end]
+                elif unit in {"byte", "bytes", "utf-8-bytes"} and end <= len(owned_text.encode()):
+                    try:
+                        text = owned_text.encode()[start:end].decode()
+                    except UnicodeDecodeError:
+                        pass
+            bound = bool(text is not None and text == span.get("text") == item.get("statement"))
+            if not bound or not isinstance(item.get("obligation_id"), str) or not 1 <= len(item["obligation_id"]) <= 128:
+                invalid_rows += 1
+                continue
+            rows.append({"obligation_id": item["obligation_id"],
+                "statement": text, "source_span": f"{unit}:{start}-{end}",
+                "source_span_binding": deepcopy(dict(span)), "source_identity": source_id,
+                "source_bound": True, "proof_status": "not_executed",
+                "engine_name": "", "engine_version": "", "counterexample": "",
+                "green_checkmark": False, "executed_proof": False,
+                "governing_legal_authority": False, "legal_sufficiency": False,
+                "proof_verification": {"status": "unavailable", "checked_kernel_verified": False,
+                    "reason": "checked_kernel_backend_not_configured"}})
+    stale = analysis.get("status") == "stale" or (analysis.get("status") != "empty" and not source_current)
+    return {"task_id": PROOF_TRACE_TASK_ID, "operation": "read_current_case_proof_traces",
+        "status": "stale" if stale else "unavailable" if rows or invalid_rows else "empty",
+        "reason": "legal_case_sources_changed" if stale else "canonical_obligation_source_unbound"
+            if invalid_rows else "checked_kernel_backend_not_configured",
+        "source_identity": source_id, "source_current": source_current, "source_drift": stale,
+        "source_binding": deepcopy(dict(binding)), "obligations": rows,
+        "counterexamples": [], "engine_versions": [],
+        "proof_status_counts": {name: len(rows) if name == "not_executed" else 0 for name in _TRACE_STATUSES},
+        "compiler_execution_verified": analysis.get("current_execution_verified") is True,
+        "capabilities": {"read_only": True, "executes_engine": False, "executes_compiler": False,
+            "executes_model": False, "checked_kernel_backend_configured": False},
+        "proof": False, "executed_proof": False, "admitted_law": False,
+        "governing_legal_authority": False, "legal_sufficiency": False,
+        "limitations": ["Canonical IR compilation is not an executed substantive proof.",
+            "The pinned proof owner has no configured checked kernel; no green checkmark is authorized.",
+            "Client engine/status claims and old cached display rows are not proof provenance."]}
 
 
 def mount_legal_analysis_routes(app: Any) -> None:
@@ -881,40 +964,43 @@ def mount_legal_analysis_routes(app: Any) -> None:
         return await definition_apply(request, case_id, write=True)
 
 
-    # Preserve Native31 during independent backend qualification.
-    def _authorized(request, case_id):
-        authorized(request, case_id)
-        return _BOUND_HANDLERS.get()()[0]
+    def proof_fail(code):
+        return JSONResponse({"task_id": PROOF_TRACE_TASK_ID, "error": code, "status": "unavailable",
+            "obligations": [], "engine_versions": [], "counterexamples": [],
+            "proof_status_counts": {name: 0 for name in _TRACE_STATUSES},
+            "executed_proof": False, "proof": False, "legal_sufficiency": False,
+            "governing_legal_authority": False}, status_code=legal_analysis_http_status(code))
 
-    def _fail(exc):
-        return fail(exc.code)
+    def proof_read(workspace, authority, actor, case_id):
+        with workspace_access_scope(WorkspaceAccess.authenticated(actor, case_id)):
+            authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+            result = workspace.read_case_proof_traces(actor, case_id=case_id)
+            authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+            return result
 
-    @app.get(LEGAL_ANALYSIS_PREFIX + "/{case_id}/proof-traces")
+    @app.get(PROOF_TRACE_ROUTE)
     async def read_proof_traces(case_id: str, request: Request):
         try:
-            mediator = _authorized(request, case_id)
-            payload = project_proof_traces(_case_file_from_mediator(mediator))
+            workspace, authority, actor = authorized(request, case_id)
+            payload = await run_in_threadpool(proof_read, workspace, authority, actor, case_id)
+        except (WorkspaceAuthorizationDenied, WorkspaceCaseAuthorityError):
+            return proof_fail("legal_analysis_ungranted")
+        except WorkspacePersistenceError as exc:
+            return proof_fail("revision_conflict" if exc.code == "revision_conflict" else
+                "unlock_needed" if exc.code == "unlock_needed" else "legal_analysis_unavailable")
         except LegalAnalysisError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        payload["legal_sufficiency"] = False
-        payload["executed_proof"] = False
+            return proof_fail(exc.code)
         return JSONResponse(payload)
 
-
-    @app.post(LEGAL_ANALYSIS_PREFIX + "/{case_id}/proof-traces")
+    @app.post(PROOF_TRACE_ROUTE)
     async def record_proof_traces(case_id: str, request: Request):
         try:
-            mediator = _authorized(request, case_id)
-            body = await request.json()
-            if not isinstance(body, dict):
-                raise LegalAnalysisError("legal_analysis_field")
-            payload = record_case_proof_traces(mediator, body)
+            workspace, authority, actor = authorized(request, case_id)
+            authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+        except (WorkspaceAuthorizationDenied, WorkspaceCaseAuthorityError):
+            return proof_fail("legal_analysis_ungranted")
         except LegalAnalysisError as exc:
-            return _fail(exc)
-        payload["case_id"] = case_id
-        payload["legal_sufficiency"] = False
-        payload["executed_proof"] = False
-        payload["governing_legal_authority"] = False
-        return JSONResponse(payload)
-
+            return proof_fail(exc.code)
+        # No server-issued producer/job capability is configured. Client rows
+        # cannot turn a display status into a current executed proof.
+        return proof_fail("proof_producer_unavailable")

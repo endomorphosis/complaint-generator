@@ -9625,6 +9625,37 @@ class ComplaintWorkspaceService:
             "session_revision": snapshot["session_revision"], "read_only": True}
 
 
+    def read_case_proof_traces(self, user_id: Optional[str], *, case_id: str) -> Dict[str, Any]:
+        """Read current encrypted source/IR and project only verified provenance.
+
+        No compilation, proof engine, model, cache save or private CAS is
+        performed. The existing IR owner verifies current source/receipt
+        structure; compiler execution remains separate from checked proof.
+        """
+        from applications.legal_analysis_api import (current_case_legal_ir_source,
+            project_current_case_proof_traces, LegalAnalysisError)
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.read":
+            raise WorkspaceAuthorizationDenied()
+        snapshot = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        analysis = self.read_case_legal_analysis(user_id, case_id=case_id)
+        if (analysis.get("private_revision"), analysis.get("session_revision")) != (
+                snapshot["private_revision"], snapshot["session_revision"]):
+            raise WorkspacePersistenceError("Proof source changed during read.", code="revision_conflict", public_status="conflict")
+        text = None
+        if analysis.get("source_current") is True:
+            binding = analysis.get("source_binding") or {}
+            if binding.get("source_scope_sha256") != snapshot["source_scope_sha256"]:
+                raise WorkspacePersistenceError("Proof source scope changed.", code="revision_conflict", public_status="conflict")
+            text = current_case_legal_ir_source(snapshot["case_file"], binding.get("content_hash"), case_id=case_id)["text"]
+        result = project_current_case_proof_traces(analysis, source_text=text)
+        current = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        if (snapshot["source_identity"], snapshot["key_id"]) != (current["source_identity"], current["key_id"]):
+            raise WorkspacePersistenceError("Proof source changed during read.", code="revision_conflict", public_status="conflict")
+        authority.revalidate(actor_principal_id=snapshot["actor_principal_id"], workspace=self, require_owner=True)
+        return {**result, "case_id": case_id, "read_only": True,
+            "private_revision": snapshot["private_revision"], "session_revision": snapshot["session_revision"]}
+
     def attach_case_legal_analysis(self, user_id: Optional[str], *, case_id: str,
                                    request: Mapping[str, Any]) -> Dict[str, Any]:
         """Compile a current stored source and commit through the encrypted CAS.
