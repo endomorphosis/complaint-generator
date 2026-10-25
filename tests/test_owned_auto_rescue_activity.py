@@ -180,16 +180,60 @@ def test_primary_terminal_followed_by_real_native_thought_is_not_work_progress(t
         assert current["activity_verified"] is True and current["work_progress_verified"] is False,current
 
 
-def test_actual_native_rescue_status_is_live_without_asserting_work_or_validation(tmp_path,monkeypatch):
-    with _native_world(tmp_path,monkeypatch) as world:
-        result=runner.status(world["root"],world["spec"],world["campaign"])
-        closed={k:result.get(k) for k in ("status","healthy","native_read_errors","worker_liveness",
-            "auto_rescue_activity_verified","provider_progress_verified","validation_activity_verified")}
-        assert result["status"]=="active" and result["healthy"] is True,closed
-        assert result["auto_rescue_activity_verified"] is True,closed
-        assert result["provider_progress_verified"] is False and result["progress_verified"] is False
-        assert result["validation_activity_verified"] is False
-        assert result["scope_liveness"]["provider"]=="fresh" and result["scope_liveness"]["validation"]=="idle"
+def _status_in_owned_parent(tmp_path, mode):
+    """Actual session-leading parent argv, actual Native worker/repair child.
+
+    The parent is inert (not public start/Docker qualification). Its real
+    _run/owner-token argv satisfies the existing ownership reader unchanged.
+    """
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as runtime
+    native_root=Path(native.__file__).resolve().parents[3]
+    paths=[str(Path(runner.__file__).resolve().parents[2]),str(native_root),
+        str(native_root.parent/'ipfs_datasets_py'),str(native_root.parent/'ipfs_kit_py')]
+    worker=tmp_path/'worker.py';parent=tmp_path/'parent.py';output=tmp_path/'closed-status.json'
+    worker.write_text('import sys\nsys.path[:0]='+repr(paths)+'\n'+'''
+from pathlib import Path
+import json,time,pytest
+from tests.test_owned_auto_rescue_activity import _native_world
+from integrations.ipfs_accelerate import improvement_runner as runner
+from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as runtime
+def main():
+ with pytest.MonkeyPatch.context() as patch:
+  with _native_world(Path(sys.argv[1]),patch) as world:
+   if sys.argv[2]=='finished':
+    (world['workspace']/'release').touch();world['worker'].join(10)
+    assert not world['worker'].is_alive()
+    with world['log'].open('a') as log:
+     runtime.run_process_group_stream([sys.executable,'-I','-B','-c','import json; print(json.dumps(dict(type="tool_call")),flush=True)'],
+      cwd=world['workspace'],stdout=log,env={},inherit_environment=False,timeout_seconds=10)
+   value=runner.status(world['root'],world['spec'],world['campaign'])
+   allowed=('status','healthy','native_read_errors','worker_liveness','auto_rescue_activity_verified',
+    'provider_progress_verified','validation_activity_verified','progress_verified','scope_liveness')
+   closed={key:value.get(key) for key in allowed}
+   Path(sys.argv[3]).write_text(json.dumps(closed))
+if __name__=='__main__':main()
+''')
+    parent.write_text('import subprocess,sys\nraise SystemExit(subprocess.call(sys.argv[4:]))\n')
+    with (tmp_path/'child-output.log').open('w') as capture:
+        completed=runtime.run_process_group_stream([sys.executable,'-I','-B',str(parent),'_run','--owner-token',
+            'private-inert-fixture',sys.executable,'-I','-B',str(worker),str(tmp_path/'native'),mode,str(output)],
+            cwd=tmp_path,stdout=capture,env=dict(os.environ),inherit_environment=False,timeout_seconds=45)
+    assert completed.returncode==0, 'Inert Native worker failed; inspect its private child-output.log.'
+    return json.loads(output.read_text())
+
+
+@pytest.mark.parametrize('mode',['running','finished'])
+def test_actual_native_rescue_status_keeps_original_owned_parent_guard(tmp_path,mode):
+    result=_status_in_owned_parent(tmp_path,mode)
+    assert result['native_read_errors']=={},result
+    assert result['status']==('active' if mode=='running' else 'stalled'),result
+    assert result['healthy'] is (mode=='running'),result
+    assert result['auto_rescue_activity_verified'] is (mode=='running'),result
+    assert result['provider_progress_verified'] is False and result['progress_verified'] is False
+    assert result['validation_activity_verified'] is False
+    if mode=='running':
+        assert result['scope_liveness']['provider']=='fresh' and result['scope_liveness']['validation']=='idle'
 
 
 @pytest.mark.parametrize("damage",["cid","key","attempt","workspace","phase","hold","deadline"])
@@ -220,9 +264,6 @@ def test_real_native_finished_provider_and_later_validation_output_are_not_rescu
                 env={},inherit_environment=False,timeout_seconds=10)
         result=activity.observe(runner,world["root"],world["campaign"],world["body"],now_ts=time.time())
         assert result["activity_verified"] is False
-        status=runner.status(world["root"],world["spec"],world["campaign"])
-        assert status["status"]=="stalled" and status["healthy"] is False
-        assert status["provider_progress_verified"] is False
 
 
 @pytest.mark.parametrize("kind",["available_commands","watchdog_heartbeat","validation_activity"])

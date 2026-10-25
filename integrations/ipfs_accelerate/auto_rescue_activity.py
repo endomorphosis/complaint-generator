@@ -28,7 +28,7 @@ _REASONS = frozenset({"not_active_rescue", "rescue_held", "native_owner_unavaila
     "log_custody_invalid", "log_prefix_truncated", "log_prefix_changed", "log_custody_changed",
     "rescue_log_stale", "log_header_ambiguous", "log_header_unbound", "rescue_frame_incomplete",
     "rescue_marker_unbound", "rescue_terminal", "rescue_activity_unavailable", "native_binding_changed",
-    "bounded_native_rescue_activity", "rescue_observation_unavailable"})
+    "bounded_native_rescue_activity", "rescue_observation_unavailable", "native_state_unbound"})
 
 
 def summary(value):
@@ -150,6 +150,11 @@ def observe(runner, repo_root, campaign, state, *, now_ts):
         binding = runner._validation_activity_binding(Path(state.get("active_worktree_path") or ""),
             {"id": context["task_id"]}, context, now_ts=now_ts, owner_pid=owner.pid)
         _require(binding is not None, "native_binding_unavailable")
+        _require(type(state.get("active_attempt")) is int and state["active_attempt"] == binding["attempt"]
+                 and state.get("active_phase_started_at") == binding["phase_started_at"]
+                 and state.get("active_log_path") == state.get("last_implementation_log_path") == binding["log_path"]
+                 and native.ProcessBirthIdentity.from_dict(state.get("owner_process_birth")) == owner,
+                 "native_state_unbound")
         _require(native.read_process_command_argv(owner.pid) == identity.command
                  and native.supervised_child_identity_liveness(identity) is native.OwnerLiveness.ALIVE,
                  "native_owner_command_changed")
@@ -249,6 +254,6 @@ def observe(runner, repo_root, campaign, state, *, now_ts):
             frame_counts=dict(counts), last_frame_kind=last, reason="bounded_native_rescue_activity")
     except _Unavailable as exc:
         report["reason"] = str(exc)
-    except (OSError, ValueError, TypeError, KeyError, AttributeError, StopIteration):
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, StopIteration, RuntimeError):
         report["reason"] = "rescue_observation_unavailable"
     return report
