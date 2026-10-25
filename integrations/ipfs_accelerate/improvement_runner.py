@@ -3363,6 +3363,10 @@ def gate_task_completion(repo_root: Path, state_dir: Path, task: Mapping[str, An
     if not isinstance(observation, _MeasuredEvidence):
         observed["artifacts"] = _observed_artifacts(root, observation)
     receipt = assess_behavioral_evidence(task, observed, source_binding=binding, model_policy=model_policy)
+    if isinstance(observation, _MeasuredEvidence) and receipt.get("reason") == "existing_behavioral_definition_changed":
+        detail = observation["host_measurement"].get("behavioral_definition_diagnostic")
+        if isinstance(detail, dict) and detail.get("schema") == "complaint-behavioral-definition-diagnostic@1":
+            receipt["behavioral_definition_diagnostic"] = detail
     receipt["host_task_contract"] = observation.get("host_task_contract")
     receipt["facts_digest"] = _digest(dict(facts or {}))
     receipt["legal_data_version"] = legal_data_version
@@ -3677,6 +3681,28 @@ def _read_catalog(path, *, repo_root=None):
     return [n for n, _, _, _ in nodes], hashes
 
 
+class _BehavioralDefinitionError(ValueError):
+    """Keep the existing refusal while exposing finite repair locators only."""
+    def __init__(self, issues):
+        super().__init__("existing_behavioral_definition_changed")
+        projected = []
+        for issue in issues[:16]:
+            path = issue["path"]
+            safe_path = (isinstance(path, str) and len(path) <= 256
+                and re.fullmatch(r"tests/[A-Za-z0-9_./-]+\.py", path) is not None
+                and ".." not in Path(path).parts and Path(path).as_posix() == path)
+            name = issue["definition"]
+            safe_name = (isinstance(name, str) and len(name) <= 128
+                and (not name or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", name) is not None))
+            projected.append({"path": path if safe_path else "<unavailable>",
+                "definition": name if safe_name else "<unavailable>",
+                "change": issue["change"] if issue["change"] in {"changed", "missing", "duplicate",
+                    "parse_failed", "source_unavailable", "invalid_path"} else "unavailable"})
+        self.diagnostics = {"schema": "complaint-behavioral-definition-diagnostic@1",
+            "reason": "existing_behavioral_definition_changed", "issues": projected,
+            "truncated": len(issues) > 16, "candidate_executed": False, "completion_authority": False}
+
+
 def _preserve_existing_behavioral_definitions(root: Path, paths, *, trusted_root: Path | None = None):
     """Keep installed test/helper definitions when a task adds behavioral checks.
 
@@ -3690,20 +3716,23 @@ def _preserve_existing_behavioral_definitions(root: Path, paths, *, trusted_root
 
     installed = trusted_root if trusted_root is not None else Path(__file__).resolve().parents[2]
     records = []
+    relative = ""
+    def fail(change, definition=""):
+        raise _BehavioralDefinitionError([{"path": relative, "definition": definition, "change": change}])
     def definitions(body, prefix=()):
         rows = {}
         for node in body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 key = prefix + (node.name,)
                 if key in rows:
-                    raise ValueError("existing_behavioral_definition_changed")
+                    fail("duplicate", ".".join(key))
                 rows[key] = ast.dump(node, include_attributes=False)
             elif isinstance(node, ast.ClassDef):
                 key = prefix + (node.name,)
                 header = copy.deepcopy(node)
                 header.body = []
                 if key in rows:
-                    raise ValueError("existing_behavioral_definition_changed")
+                    fail("duplicate", ".".join(key))
                 rows[key] = ast.dump(header, include_attributes=False)
                 rows.update(definitions(node.body, key))
         return rows
@@ -3712,14 +3741,14 @@ def _preserve_existing_behavioral_definitions(root: Path, paths, *, trusted_root
         if not relative.startswith("tests/") or name.suffix != ".py":
             continue
         if name.is_absolute() or ".." in name.parts:
-            raise ValueError("existing_behavioral_definition_changed")
+            fail("invalid_path")
         baseline, candidate = installed / name, Path(root) / name
         if not baseline.exists() and not baseline.is_symlink():
             continue
         try:
             for path in (baseline, candidate):
                 if path.is_symlink() or path.resolve(strict=True) != path or not path.is_file():
-                    raise ValueError("existing_behavioral_definition_changed")
+                    fail("source_unavailable")
             original_bytes, candidate_bytes = baseline.read_bytes(), candidate.read_bytes()
             if original_bytes == candidate_bytes:
                 # Some legacy modules repeat a Python definition name. Exact
@@ -3735,10 +3764,15 @@ def _preserve_existing_behavioral_definitions(root: Path, paths, *, trusted_root
                 continue
             original = definitions(ast.parse(original_bytes).body)
             current = definitions(ast.parse(candidate_bytes).body)
-        except (OSError, SyntaxError, UnicodeError):
-            raise ValueError("existing_behavioral_definition_changed") from None
-        if any(current.get(name) != value for name, value in original.items()):
-            raise ValueError("existing_behavioral_definition_changed")
+        except SyntaxError:
+            fail("parse_failed")
+        except (OSError, UnicodeError):
+            fail("source_unavailable")
+        issues = [{"path": relative, "definition": ".".join(name),
+                   "change": "missing" if name not in current else "changed"}
+                  for name, value in original.items() if current.get(name) != value]
+        if issues:
+            raise _BehavioralDefinitionError(issues)
         records.append({"path": relative, "trusted_sha256": hashlib.sha256(original_bytes).hexdigest(),
                         "candidate_sha256": hashlib.sha256(candidate_bytes).hexdigest(),
                         "preserved_definition_count": len(original)})
@@ -3983,6 +4017,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     release_qualification_before = None
     release_qualification_after = None
     preserved_behavioral_definitions = None
+    behavioral_definition_diagnostic = None
     python_global_preflight = None
     release_script = (task.get("id") == "CIMP-REL-03" and
         observation_command == "python scripts/validate_complaint_intake.py --phase pre-admission" and
@@ -4186,6 +4221,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         if any(imported.get(p) != h for p, h in collected_hashes.items()):
             raise ValueError("stale_source_hash")
     except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
+        if isinstance(exc, _BehavioralDefinitionError):
+            behavioral_definition_diagnostic = exc.diagnostics
         reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable", "new_duplicate_python_module_global", "python_global_preflight_unavailable", *infrastructure_reasons} else "host_measurement_unavailable"
     try:
         if replica_binding != _private_replica_acceptance_binding(root, task, impacted):
@@ -4208,6 +4245,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     measured = {"schema": "complaint-owned-behavioral-measurement@1", "reason": reason,
                 "infrastructure_failure": any(row.get("infrastructure_failure") is True for row in results),
                 "preserved_behavioral_definitions": preserved_behavioral_definitions,
+                "behavioral_definition_diagnostic": behavioral_definition_diagnostic,
                 "python_global_preflight": python_global_preflight,
                 "trusted_executor": {"module": str(getattr(runner, "__module__", "")), "qualname": str(getattr(runner, "__qualname__", "")),
                     "canonical_native_identity": runner is PortalImplementationDaemon._validation_command_runner,
@@ -4327,6 +4365,10 @@ class EvidenceValidationScheduler:
             if failure_reason in {"new_duplicate_python_module_global", "python_global_preflight_unavailable"}:
                 detail = observed["host_measurement"].get("python_global_preflight") or {}
                 result["output"] = "Host Python global preflight: " + json.dumps(detail, sort_keys=True)[:8192]
+                result["preflight_only"] = True
+            if failure_reason == "existing_behavioral_definition_changed":
+                detail = observed["host_measurement"].get("behavioral_definition_diagnostic") or {}
+                result["output"] = "Host behavioral definition guard: " + json.dumps(detail, sort_keys=True)[:8192]
                 result["preflight_only"] = True
             result.update(command=str(spec.command), raw_command=str(spec.raw_command or spec.command),
                           returncode=0 if receipt["admitted"] else rejected_status, behavioral_evidence=receipt)
