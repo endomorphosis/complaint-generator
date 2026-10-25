@@ -5759,6 +5759,82 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                     </div>
                 </section>
 
+                <section id="legal-authority-admission" data-task="CIMP-GUI-26">
+                    <h2>Review and admit versioned legal authorities</h2>
+                    <p id="legal-admission-notice">An authorized case owner or assigned lawyer admits one exact source passage. Authority identity, jurisdiction, effective date, applicability, exceptions, and treatment state must match the stored version. A source mismatch, stale version, missing passage, or unauthorized reviewer stays unresolved and keeps its attribution.</p>
+                    <div class="field-row">
+                        <div>
+                            <label for="legal-admission-case-id">Case</label>
+                            <input id="legal-admission-case-id" type="text" autocomplete="off">
+                        </div>
+                        <div>
+                            <label for="legal-admission-decision">Review decision</label>
+                            <select id="legal-admission-decision">
+                                <option value="admit">admit</option>
+                                <option value="reject">reject</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div>
+                            <label for="legal-admission-identity">Authority identity</label>
+                            <input id="legal-admission-identity" type="text" autocomplete="off">
+                        </div>
+                        <div>
+                            <label for="legal-admission-version">Version</label>
+                            <input id="legal-admission-version" type="text" autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div>
+                            <label for="legal-admission-jurisdiction">Jurisdiction</label>
+                            <input id="legal-admission-jurisdiction" type="text" autocomplete="off">
+                        </div>
+                        <div>
+                            <label for="legal-admission-effective-date">Effective date</label>
+                            <input id="legal-admission-effective-date" type="text" autocomplete="off" placeholder="YYYY-MM-DD">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div>
+                            <label for="legal-admission-applicability">Applicability</label>
+                            <select id="legal-admission-applicability">
+                                <option value="applicable">applicable</option>
+                                <option value="limited">limited</option>
+                                <option value="inapplicable">inapplicable</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="legal-admission-treatment">Treatment state</label>
+                            <select id="legal-admission-treatment">
+                                <option value="good_law">good_law</option>
+                                <option value="distinguished">distinguished</option>
+                                <option value="questioned">questioned</option>
+                                <option value="overruled">overruled</option>
+                                <option value="superseded">superseded</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="legal-admission-exceptions">Exceptions</label>
+                        <input id="legal-admission-exceptions" type="text" autocomplete="off" placeholder="Separate exact exceptions with a vertical bar">
+                    </div>
+                    <div>
+                        <label for="legal-admission-hash">Content hash</label>
+                        <input id="legal-admission-hash" type="text" autocomplete="off">
+                    </div>
+                    <div>
+                        <label for="legal-admission-passage">Exact source passage</label>
+                        <textarea id="legal-admission-passage"></textarea>
+                    </div>
+                    <div class="status" id="legal-admission-display" data-admitted-law="false" data-status="empty">No authority review has been recorded.</div>
+                    <div class="list" id="legal-admission-attribution"></div>
+                    <div class="button-row">
+                        <button type="button" id="legal-admission-refresh">Show authority reviews</button>
+                        <button type="button" id="legal-admission-submit">Record authority review</button>
+                    </div>
+                </section>
+
                 <div class="button-row" id="workspace-privacy-actions">
                     <button type="button" id="workspace-clear-private-state">Clear private browser state</button>
                     <label for="workspace-switch-user-id">Switch to user</label>
@@ -6169,6 +6245,93 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         document.getElementById('legal-research-refresh').addEventListener('click', function () { refreshLegalResearch(); });
         document.getElementById('legal-research-run').addEventListener('click', function () { postLegalResearch(false); });
         document.getElementById('legal-research-cancel').addEventListener('click', function () { postLegalResearch(true); });
+
+        function legalAdmissionFields() {
+            const exceptions = document.getElementById('legal-admission-exceptions').value.split('|').map(function (item) {
+                return item.trim();
+            }).filter(function (item) { return item.length > 0; });
+            return {
+                caseId: document.getElementById('legal-admission-case-id').value.trim(),
+                decision: document.getElementById('legal-admission-decision').value,
+                authority_identity: document.getElementById('legal-admission-identity').value.trim(),
+                version: document.getElementById('legal-admission-version').value.trim(),
+                jurisdiction: document.getElementById('legal-admission-jurisdiction').value.trim(),
+                effective_date: document.getElementById('legal-admission-effective-date').value.trim(),
+                applicability: document.getElementById('legal-admission-applicability').value,
+                treatment_state: document.getElementById('legal-admission-treatment').value,
+                exceptions: exceptions,
+                content_hash: document.getElementById('legal-admission-hash').value.trim(),
+                source_passage: document.getElementById('legal-admission-passage').value
+            };
+        }
+
+        function renderLegalAdmission(payload) {
+            const node = document.getElementById('legal-admission-display');
+            const admitted = payload.admitted_law === true || payload.admitted_count > 0;
+            const row = payload.attribution ? payload : ((payload.admissions || [])[0] || {});
+            node.dataset.admittedLaw = (payload.admitted_law === true || row.admitted_law === true) ? 'true' : 'false';
+            node.dataset.status = payload.status || (admitted ? 'admitted' : 'unresolved');
+            node.textContent = 'Status ' + (payload.status || node.dataset.status)
+                + '. Reason ' + (payload.reason || 'none')
+                + '. Admitted law: ' + (payload.admitted_law === true ? 'true' : 'false') + '.';
+            const attribution = row.attribution || {};
+            document.getElementById('legal-admission-attribution').textContent = attribution.actor_principal_id
+                ? ('Reviewer ' + attribution.actor_principal_id + ' membership ' + (attribution.membership || 'unknown')
+                    + ' decision ' + (attribution.decision || 'unrecorded')
+                    + ' canonical_owner ' + (attribution.canonical_owner_principal_id || 'unset'))
+                : 'No admission or rejection attribution yet.';
+        }
+
+        function legalAdmissionUnavailable(message) {
+            const node = document.getElementById('legal-admission-display');
+            node.dataset.admittedLaw = 'false';
+            node.dataset.status = 'unresolved';
+            node.textContent = message || 'The authority review was not recorded.';
+        }
+
+        async function refreshLegalAdmissions() {
+            const fields = legalAdmissionFields();
+            if (!fields.caseId) {
+                legalAdmissionUnavailable('Enter a case id. No authority was admitted.');
+                return;
+            }
+            try {
+                const payload = await client._request('/api/legal-research/' + encodeURIComponent(fields.caseId) + '/admissions', {method: 'GET'});
+                renderLegalAdmission(payload);
+            } catch (_error) {
+                legalAdmissionUnavailable('Authority reviews could not be read. Nothing new was admitted.');
+            }
+        }
+
+        async function submitLegalAdmission() {
+            const fields = legalAdmissionFields();
+            if (!fields.caseId || !fields.source_passage || !fields.content_hash || !fields.version) {
+                legalAdmissionUnavailable('A case, exact passage, version, and content hash are required. Nothing was admitted.');
+                return;
+            }
+            const body = {
+                decision: fields.decision,
+                authority_identity: fields.authority_identity,
+                version: fields.version,
+                jurisdiction: fields.jurisdiction,
+                effective_date: fields.effective_date,
+                applicability: fields.applicability,
+                treatment_state: fields.treatment_state,
+                exceptions: fields.exceptions,
+                content_hash: fields.content_hash,
+                source_passage: fields.source_passage
+            };
+            try {
+                const payload = await client._request('/api/legal-research/' + encodeURIComponent(fields.caseId) + '/admissions',
+                    {method: 'POST', body: JSON.stringify(body)});
+                renderLegalAdmission(payload);
+            } catch (_error) {
+                legalAdmissionUnavailable('The authority review was refused or unresolved. Nothing was admitted.');
+            }
+        }
+
+        document.getElementById('legal-admission-refresh').addEventListener('click', function () { refreshLegalAdmissions(); });
+        document.getElementById('legal-admission-submit').addEventListener('click', function () { submitLegalAdmission(); });
 
         document.getElementById('consent-refresh').addEventListener('click', function () { refreshCaseProcessingConsent(); });
         document.getElementById('consent-choose-local').addEventListener('click', function () { submitCaseProcessingConsent('local_private'); });
