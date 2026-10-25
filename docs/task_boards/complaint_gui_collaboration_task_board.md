@@ -642,7 +642,7 @@ Implementation instructions:
 
 ## CIMP-GUI-22 Review contradictions and general factual edits
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
