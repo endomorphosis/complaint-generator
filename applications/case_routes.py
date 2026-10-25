@@ -377,6 +377,10 @@ def _check_actor_claims(scope: Dict[str, Any], body: bytes, principal_id: str) -
 def _required_action(path: str, method: str, material: Mapping[str, Any], extensions) -> str:
     if _within_prefix(path, "/api/legal-research") and path.rstrip("/").endswith("/admissions"):
         return "case.read" if method in {"GET", "HEAD"} else "case.review"
+    # Factual review writes the encrypted owner graph. Assigned-lawyer review
+    # authority is not an owner-key grant, so this route stays case.update.
+    if _within_prefix(path, "/api/graphs"):
+        return "case.read" if method in {"GET", "HEAD"} else "case.update"
     if path.startswith("/api/documents"):
         return "case.download" if method in {"GET", "HEAD"} else "case.update"
     if path.startswith("/api/claim-support"):
