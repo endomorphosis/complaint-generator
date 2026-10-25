@@ -9145,6 +9145,78 @@ class ComplaintWorkspaceService:
             expected_session_revision=expected_session_revision,
         )
 
+    def review_case_factual_graph(self, user_id: Optional[str], *, case_id: str,
+                                  updates: Mapping[str, Any]) -> Dict[str, Any]:
+        """Publish one factual review only under current owner/key/source CAS.
+
+        The graph route cannot save a decrypted DTO itself. The existing
+        private revision writer rechecks this issued capability immediately
+        before replacing the durable head, including after encryption/fsync.
+        """
+        from complaint_phases.knowledge_graph import KnowledgeGraph, FactualReviewError
+        from mediator.integrations.graph_tools import FactualGraphProjectionError
+        from integrations.private_storage import PrivateStorageError
+
+        authority = self._owner_case_authority()
+        if authority is None or authority.case_id != case_id or authority.action != "case.update":
+            raise FactualReviewError("actor_authority_required")
+        actor = authority.actor_principal_id
+        decision = authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        resolved = self._resolve_user_id(user_id)
+        self._check_access(resolved, ability="write", case_id=case_id)
+        state = self._load_state(resolved, case_id=case_id)
+        if state.get("user_id") != decision.canonical_owner_principal_id or state.get("case_id") != case_id:
+            raise FactualGraphProjectionError("cross_case_id")
+        shared = state.get("shared_interview")
+        payload = shared.get("knowledge_graph") if isinstance(shared, dict) else None
+        if not isinstance(payload, dict) or not payload:
+            raise FactualGraphProjectionError("knowledge_graph_unavailable")
+        graph = KnowledgeGraph.from_dict(deepcopy(payload))
+        # This existing identity binds the entire private shared interview,
+        # including its KG, pending question and private revision.
+        before = self._case_legal_context_identity(state)
+        _context, admitted_key_id, admitted_key = self._joined_key(resolved, case_id)
+
+        def revalidate_publication():
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(resolved, case_id)
+            if key_id != admitted_key_id or key != admitted_key:
+                raise FactualGraphProjectionError("graph_revision_changed")
+            current = self._load_state(resolved, case_id=case_id)
+            if before != self._case_legal_context_identity(current):
+                raise FactualGraphProjectionError("graph_revision_changed")
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(resolved, case_id)
+            if key_id != admitted_key_id or key != admitted_key:
+                raise FactualGraphProjectionError("graph_revision_changed")
+
+        result = graph.apply_factual_review(
+            actor_role="user", actor_principal_id=actor, authority_granted=True,
+            expected_revision=str(updates.get("expected_graph_revision") or ""),
+            action=str(updates.get("review_action") or ""),
+            text=updates.get("text") if isinstance(updates.get("text"), str) else "",
+            source_text=updates.get("source_text") if isinstance(updates.get("source_text"), str) else "",
+            message_id=str(updates.get("message_id") or ""),
+            target_stable_id=str(updates.get("target_stable_id") or ""),
+            proposal_id=str(updates.get("proposal_id") or ""),
+            origin=str(updates.get("origin") or "actor"),
+            event_id=str(updates.get("event_id") or ""), case_id=case_id,
+            record_class=str(updates.get("record_class") or ""),
+        )
+        revalidate_publication()
+        if result.get("graph_mutated") is True:
+            draft = deepcopy(state)
+            draft["shared_interview"]["knowledge_graph"] = graph.to_dict()
+            draft["updated_at"] = _utc_now()
+            try:
+                self._commit_joined_snapshot(draft, before_publish=revalidate_publication)
+            except PrivateStorageError as exc:
+                raise WorkspacePersistenceError("Factual review did not commit.",
+                    code=str(getattr(exc, "code", "") or "durability_unproven"), public_status="recoverable") from None
+            self._interview_mediators.pop((resolved, case_id), None)
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return {**result, "case_id": case_id, "task_id": "CIMP-GUI-22"}
+
     def _case_legal_context_state(self, user_id, case_id, *, action):
         """Resolve the live issued owner and its current encrypted workflow DTO."""
         authority = self._owner_case_authority()

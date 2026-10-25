@@ -97,66 +97,11 @@ def _json_object(raw: bytes) -> dict:
     return payload
 
 
-def _owner_graph_state(workspace, authority, actor, case_id):
-    """Load the encrypted graph without the read path's case.update save."""
-    decision = authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
-    if authority.action != "case.update" or authority.case_id != case_id or decision.membership != "owner":
-        raise FactualReviewError("actor_authority_required")
-    backend = getattr(getattr(workspace, "request_handlers", None), "workspace", None)
-    if backend is None or not hasattr(backend, "_load_state"):
-        raise FactualGraphProjectionError("workspace_graph_read_unavailable")
-    state = backend._load_state(decision.canonical_owner_principal_id, case_id=case_id)
-    if str(state.get("user_id") or "") != decision.canonical_owner_principal_id or state.get("case_id") != case_id:
-        raise FactualGraphProjectionError("cross_case_id")
-    interview = state.get("shared_interview")
-    graph_payload = interview.get("knowledge_graph") if isinstance(interview, dict) else None
-    if not isinstance(graph_payload, dict) or not graph_payload:
-        raise FactualGraphProjectionError("knowledge_graph_unavailable")
-    try:
-        identity = hashlib.sha256(json.dumps({
-            "owner": state["user_id"], "case_id": case_id,
-            "private_revision": state.get("private_revision"), "knowledge_graph": graph_payload,
-        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
-        hydrated = KnowledgeGraph.from_dict(graph_payload)
-    except (ValueError, TypeError, KeyError):
-        raise FactualGraphProjectionError("knowledge_graph_unavailable") from None
-    return backend, state, hydrated, identity
-
-
 def _review_current(workspace, authority, actor, case_id, body: dict):
-    """Review one proposal on the decrypted graph, then seal that session."""
-    decision = authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
+    """Delegate encrypted mutation and late publication checks to its owner."""
+    authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
     with workspace_access_scope(WorkspaceAccess.authenticated(actor, case_id)):
-        backend, state, graph, before = _owner_graph_state(workspace, authority, actor, case_id)
-        result = graph.apply_factual_review(
-            actor_role="user",
-            actor_principal_id=decision.actor_principal_id,
-            authority_granted=True,
-            expected_revision=str(body.get("expected_graph_revision") or ""),
-            action=str(body.get("review_action") or ""),
-            text=body.get("text") if isinstance(body.get("text"), str) else "",
-            source_text=body.get("source_text") if isinstance(body.get("source_text"), str) else "",
-            message_id=str(body.get("message_id") or ""),
-            target_stable_id=str(body.get("target_stable_id") or ""),
-            proposal_id=str(body.get("proposal_id") or ""),
-            origin=str(body.get("origin") or "actor"),
-            event_id=str(body.get("event_id") or ""),
-            case_id=case_id,
-            record_class=str(body.get("record_class") or ""),
-        )
-        _backend_again, _state_again, _graph_again, after = _owner_graph_state(workspace, authority, actor, case_id)
-        if before != after:
-            raise FactualGraphProjectionError("graph_revision_changed")
-        interview = state.get("shared_interview")
-        if not isinstance(interview, dict):
-            raise FactualGraphProjectionError("knowledge_graph_unavailable")
-        interview["knowledge_graph"] = graph.to_dict()
-        state["shared_interview"] = interview
-        backend._save_state(state)
-        authority.revalidate(actor_principal_id=actor, workspace=workspace, require_owner=True)
-        result["case_id"] = case_id
-        result["task_id"] = REVIEW_TASK_ID
-        return result
+        return workspace.review_case_factual_graph(actor, case_id=case_id, updates=body)
 
 
 def mount_factual_graph_routes(app: Any) -> None:
