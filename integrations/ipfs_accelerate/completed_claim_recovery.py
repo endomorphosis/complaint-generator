@@ -241,6 +241,13 @@ def completed_callback_proof(daemon, *, task_id, canonical_task_cid, attempt, wo
         and validation.get("selection", {}).get("scope") == "pre_merge"
         and not daemon._scope_adjudication_merge_binding_error(validation),
         "completed_claim_validation_unverified")
+    gate = validation.get("proposal_gate")
+    if isinstance(gate, dict):
+        _require(gate.get("accepted") is True
+            and gate.get("proposal_id") == accepted.get("proposal_id")
+            and gate.get("repository_tree_id") == accepted.get("repository_tree_id")
+            and gate.get("repository_tree_id") == start.get("baseline_ref"),
+            "completed_claim_proposal_queue_mismatch")
     merged = _one(segment, lambda row: row.get("type") == "merge_finished"
         and row.get("branch") == branch and row.get("target_branch") == target
         and row.get("merged") is True and row.get("attempted") is True
@@ -307,7 +314,9 @@ def completed_callback_proof(daemon, *, task_id, canonical_task_cid, attempt, wo
         (start, accepted, handoff, pooled, enqueue, merged, cleanup, todo)],
         "callback_event_id": todo["event_id"], "callback_sequence": todo["sequence"],
         "member_receipt": receipt, "finish_event_ids": [row["event_id"] for row in finishes],
-        "validation_proof": validation}
+        "validation_proof": validation, "repo_root": str(root),
+        "baseline_ref": start.get("baseline_ref"), "implementation_commit": candidate,
+        "proposal_id": accepted.get("proposal_id")}
 
 
 def review_completed_claim(daemon):
@@ -414,7 +423,8 @@ def observe_interrupted_completion(daemon, *, task_id, canonical_task_cid, journ
                 "completed_claim_task_not_unique")
     history = evidence.historical_queue_validation(Path(daemon.state_path).parent,
         proof["validation_proof"], task, journal_pin,
-        callback_sequence=proof["callback_sequence"], callback_event_id=proof["callback_event_id"])
+        callback_sequence=proof["callback_sequence"], callback_event_id=proof["callback_event_id"],
+        callback_binding=proof)
     return {"task_cid": canonical_task_cid, "event_id": proof["callback_event_id"],
         "event_kind": "todo_status_updated", "callback_commit": proof["callback_commit"],
         "member_receipt_digest": _digest(proof["member_receipt"]),

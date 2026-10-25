@@ -100,19 +100,16 @@ def world(tmp_path_factory):
     (lease.path / "tests").mkdir()
     (lease.path / "tests/test_synthetic.py").write_text("from pathlib import Path\n"
         "def test_synthetic_artifact():\n assert Path('result.txt').read_text() == 'synthetic local result\\n'\n")
-    git(lease.path, "add", "result.txt", "tests/test_synthetic.py")
-    git(lease.path, "commit", "-qm", "Synthetic implementation")
-    candidate = git(lease.path, "rev-parse", "HEAD")
-    emit("implementation_proposal_validated", {**common, "accepted": True, "proposal_id": "synthetic-local-only"})
-    emit("implementation_candidate_handoff_verified", {**common, "allowed": True,
-        "implementation_commit": candidate})
-    # Genuine Host measurement: sealed Native executor, independent collection,
-    # JUnit, fresh AST catalog and source freeze. No authored success receipt.
+    # Actual Native proposal admission, Host scheduler and queue compaction;
+    # the fixture's history is synthetic, but these producer shapes are real.
+    proposal = daemon._validate_implementation_patch(lease.path, task,
+        baseline_ref=baseline, allow_scope_adjudication=False)
+    assert proposal.accepted, proposal.to_dict()
     from integrations.ipfs_accelerate import improvement_runner as runner
-    from integrations.ipfs_accelerate.improvement_plan import canonical_model_policy
     from ipfs_accelerate_py.agent_supervisor.validation.validation_runtime import (
         build_validation_environment, validation_environment_for_runner)
-    import shlex
+    from ipfs_accelerate_py.agent_supervisor.validation.validation_scheduler import (
+        ValidationScheduler, build_declared_validation_plan_graph)
     executor = native.PortalImplementationDaemon._validation_command_runner
     environment = build_validation_environment(dict(os.environ))
     roots = [lease.path, Path(runner.__file__).resolve().parents[2], Path(native.__file__).resolve().parents[3],
@@ -122,28 +119,32 @@ def world(tmp_path_factory):
     command = "python -m pytest -q tests/test_synthetic.py"
     contract = {"id": task.task_id, "targets": ["result.txt", "tests/test_synthetic.py"],
                 "validation_commands": [command], "depends_on": []}
-    measured = runner.measure_behavioral_command(lease.path, state / "evidence-runs", contract,
-        "PYTHONPATH=" + shlex.quote(environment["PYTHONPATH"]) + " " + command,
-        runner=executor, environment=environment, timeout_seconds=90, declared_command=command)
-    admission = runner.gate_task_completion(lease.path, state / "host-gate", contract, measured,
-        model_policy=canonical_model_policy(), legal_data_version="synthetic-pinned-runtime")
-    assert admission["admitted"], admission.get("reason")
+    scheduler = runner.EvidenceValidationScheduler(ValidationScheduler(max_workers=1),
+        state_dir=state, spec={"tasks": [contract]}, defer_readiness=True)
+    scheduler.bind_task(task, lease.path)
+    commands, impact = build_declared_validation_plan_graph([command],
+        repository_tree_id=baseline, changed_paths=proposal.proposal.changed_paths)
+    validation = scheduler.run_validated(proposal, commands, workspace_path=lease.path,
+        target_commit=baseline, impact_graph=impact, scope="pre_merge",
+        runner=executor, environment=environment)
+    validation["proposal_gate"] = daemon._compact_proposal_validation(proposal)
+    (base / "synthetic-validation.json").write_text(json.dumps(validation, default=lambda x: x.to_dict()))
+    assert validation["passed"], validation
+    admission = validation["behavioral_evidence"][0]
+    git(lease.path, "add", "result.txt", "tests/test_synthetic.py")
+    git(lease.path, "commit", "-qm", "Synthetic implementation")
+    candidate = git(lease.path, "rev-parse", "HEAD")
+    emit("implementation_candidate_handoff_verified", {**common, "allowed": True,
+        "implementation_commit": candidate})
     released = lease.release()
     assert released["released"] and released["reason"] == "clean_prepared_workspace"
     emit("worktree_pool_lease_released", released)
-    metadata = {"schema": "ipfs_accelerate_py/agent-supervisor/merge-candidate@3",
-        "task": {"task_id": task.task_id}, "completion_task_cids": {task.task_id: identity.canonical_task_cid},
-        "repo_root": str(root), "todo_path": str(daemon.todo_path), "state_path": str(daemon.state_path),
-        "events_path": str(daemon.events_path), "implementation_commit": candidate, "baseline_ref": baseline,
-        "target_repository_id": daemon.merge_target_repository_id, "target_branch": "main",
-        "validation_proof": {"passed": True, "returncode": 0, "selection": {"scope": "pre_merge"},
-                             "behavioral_evidence": [admission], "synthetic_local_validation_only": True}}
-    request = daemon.merge_queue.enqueue(branch_name=branch, task_id=task.task_id,
-        canonical_task_id=identity.canonical_task_cid, canonical_task_key=identity.canonical_task_key,
-        commit_sha=candidate, metadata=metadata, target_repository_id=daemon.merge_target_repository_id,
-        target_branch="main")
-    emit("merge_candidate_enqueued", {**common, "branch": branch, "request_id": request.request_id,
-                                     "implementation_commit": candidate})
+    request, queued = daemon._enqueue_merge_candidate(branch_name=branch,
+        implementation_commit=candidate, baseline_ref=baseline, worktree_path=lease.path,
+        task=task, attempt=1, validation_result=validation, worktree_pool_handoff=True)
+    assert queued["queued"]
+    metadata = request.metadata
+    assert "behavioral_evidence" not in metadata["validation_proof"]
     git(root, "merge", "--no-ff", "--no-edit", branch)
     merged = git(root, "rev-parse", "HEAD")
     emit("merge_finished", {"branch": branch, "target_branch": "main", "merged": True,
@@ -407,3 +408,78 @@ def test_real_successful_finish_allows_cleanup_without_missing_finish_fallback(u
     assert result["reconciled"]
     assert not w["claim_path"].exists()
 
+
+
+@pytest.mark.parametrize("damage", ["missing", "task_cid", "task_key", "proposal", "baseline", "command", "targets", "contract_digest", "candidate_bytes"])
+def test_compact_queue_requires_exact_owned_host_contract_and_candidate(unchanged_world, damage):
+    from integrations.ipfs_accelerate import release_evidence as evidence
+    from integrations.ipfs_accelerate import improvement_plan as compiler
+    import hashlib
+    w = unchanged_world
+    path = w["state"] / "evidence" / w["task"].task_id / "completion.json"
+    raw = path.read_bytes()
+    measurement = Path(w["admission"]["measurement_record"]["path"])
+    measured_raw = measurement.read_bytes()
+    receipt = json.loads(raw)
+    try:
+        if damage == "missing":
+            path.unlink()
+        elif damage == "candidate_bytes":
+            # Even an internally consistent replacement seal cannot describe
+            # bytes different from the immutable queued Git candidate.
+            item = "result.txt"
+            replacement = hashlib.sha256(b"different synthetic candidate").hexdigest()
+            receipt["source_binding"]["files"][item]["sha256"] = replacement
+            measured = json.loads(measured_raw)
+            for frame in (measured["source_before"], measured["source_after"]):
+                frame["files"][item]["sha256"] = replacement
+            measured["observation_binding"]["source_binding"] = deepcopy(receipt["source_binding"])
+            measurement.write_text(json.dumps(measured))
+            receipt["host_measurement"] = measured
+            receipt["measurement_record"]["sha256"] = hashlib.sha256(measurement.read_bytes()).hexdigest()
+            path.write_text(json.dumps(receipt))
+        else:
+            context = receipt["host_task_contract"]["context"]
+            if damage in {"task_cid", "task_key"}: context[damage] += "wrong"
+            elif damage == "proposal": context["proposal_id"] = "f" * 64
+            elif damage == "baseline": context["repository_tree_id"] = "f" * 40
+            elif damage == "command": receipt["host_task_contract"]["declared_command"] = "python -m pytest -q tests/other.py"
+            elif damage == "targets": receipt["host_task_contract"]["task"]["targets"] = ["other.txt"]
+            elif damage == "contract_digest": receipt["task_contract_digest"] = "f" * 64
+            if damage != "contract_digest":
+                receipt["task_contract_digest"] = compiler._digest(receipt["host_task_contract"])
+            path.write_text(json.dumps(receipt))
+        with pytest.raises((ValueError, OSError)):
+            _observe(w)
+    finally:
+        path.write_bytes(raw)
+        measurement.write_bytes(measured_raw)
+
+
+@pytest.mark.parametrize("damage", ["proposal", "tree", "result_command", "timeout", "cache", "ordinal", "population"])
+def test_native_compact_summary_cannot_substitute_proposal_or_result(unchanged_world, damage):
+    from integrations.ipfs_accelerate import release_evidence as evidence
+    w = unchanged_world; d = w["daemon"]
+    binding = repair.completed_callback_proof(d, task_id=w["task"].task_id,
+        canonical_task_cid=w["identity"].canonical_task_cid, attempt=1,
+        workspace=str(w["workspace"]), branch=w["branch"])
+    value = deepcopy(binding["validation_proof"])
+    if damage == "proposal": value["proposal_gate"]["proposal_id"] = "f" * 64
+    elif damage == "tree": value["target_tree"] = "f" * 40
+    elif damage == "result_command": value["results"][0]["command"] = "python -m pytest -q tests/other.py"
+    elif damage == "timeout": value["results"][0]["timed_out"] = True
+    elif damage == "cache": value["results"][0]["cache_hit"] = True
+    elif damage == "ordinal": value["results"][0]["ordinal"] = True
+    else: value["results"] = []
+    with pytest.raises(ValueError):
+        evidence._compact_queue_host_measurements(w["state"], value, w["task"], binding)
+
+
+def test_full_modern_queue_seal_path_remains_compatible(unchanged_world):
+    from integrations.ipfs_accelerate import release_evidence as evidence
+    from ipfs_accelerate_py.agent_supervisor.runtime import event_log
+    w = unchanged_world
+    _, journal = evidence._journal(w["state"], event_log)
+    value = evidence.historical_queue_validation(w["state"], {"behavioral_evidence": [w["admission"]]},
+        w["task"], journal, callback_sequence=journal["last_sequence"], callback_event_id="synthetic-only")
+    assert value["status"] == "HISTORICAL" and value["native_finish_event_synthesized"] is False
