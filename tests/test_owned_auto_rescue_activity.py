@@ -221,6 +221,11 @@ def main():
     with world['log'].open('a') as log:
      runtime.run_process_group_stream([sys.executable,'-I','-B','-c','import json; print(json.dumps(dict(type="tool_call")),flush=True)'],
       cwd=world['workspace'],stdout=log,env={},inherit_environment=False,timeout_seconds=10)
+   if sys.argv[2].startswith('validation_'):
+    from tests.test_owned_validation_status import observe_actual_executor
+    closed=observe_actual_executor(world,sys.argv[2])
+    Path(sys.argv[3]).write_text(json.dumps(closed))
+    return
    value=runner.status(world['root'],world['spec'],world['campaign'])
    allowed=('status','healthy','native_read_errors','worker_liveness','auto_rescue_activity_verified','auto_rescue_activity_evidence',
     'provider_progress_verified','validation_activity_verified','progress_verified','scope_liveness')
