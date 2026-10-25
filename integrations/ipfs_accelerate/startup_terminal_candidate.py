@@ -33,6 +33,30 @@ def _events(path: Path, maximum: int):
     return rows
 
 
+def _worktree_custody(supervisor, daemon, path: Path, branch: str, commit: str) -> bool:
+    from .improvement_recovery import _owned_bytes
+    common = supervisor._verified_git_worktree_common_dir(path)
+    if common is None or common != supervisor._verified_git_worktree_common_dir(supervisor.config.repo_root):
+        return False
+    result = daemon._run_git(["rev-parse", "--absolute-git-dir"], cwd=path)
+    if result.returncode != 0:
+        return False
+    admin = Path(result.stdout.strip())
+    if not admin.is_absolute() or admin.resolve(strict=True) != admin:
+        return False
+    actual_head = daemon._run_git(["rev-parse", "--verify", "HEAD^{commit}"], cwd=path)
+    actual_branch = daemon._run_git(["symbolic-ref", "--quiet", "HEAD"], cwd=path)
+    if (actual_head.returncode != 0 or actual_head.stdout.strip() != commit
+            or actual_branch.returncode != 0 or actual_branch.stdout.strip() != "refs/heads/" + branch):
+        return False
+    pointer, backlink = _owned_bytes(path / ".git", 4096, legacy_group_write=True), _owned_bytes(admin / "gitdir", 4096, legacy_group_write=True)
+    if len(pointer) > 4096 or len(backlink) > 4096 or not pointer.startswith(b"gitdir: "):
+        return False
+    target = Path(pointer.decode().strip().removeprefix("gitdir: "))
+    target = target if target.is_absolute() else path / target
+    return target.resolve(strict=True) == admin and Path(backlink.decode().strip()).resolve(strict=True) == path / ".git"
+
+
 def _rescue_original(supervisor, daemon, candidate, records, events):
     branch, commit = str(candidate.get("branch") or ""), str(candidate.get("head") or "")
     path = Path(str(candidate.get("path") or ""))
@@ -41,10 +65,9 @@ def _rescue_original(supervisor, daemon, candidate, records, events):
             or not path.is_absolute() or path.parent != root or path.resolve(strict=True) != path
             or root.resolve(strict=True) != root or supervisor._git_status_short(path)):
         return None
-    matches = [row for row in records if row.get("worktree") == str(path)
-        and str(row.get("branch") or "").removeprefix("refs/heads/") == branch
-        and row.get("HEAD") == commit]
-    if len(matches) != 1:
+    matches = [row for row in records if row.get("worktree") == str(path)]
+    if (len(matches) != 1 or str(matches[0].get("branch") or "").removeprefix("refs/heads/") != branch
+            or matches[0].get("HEAD") != commit or not _worktree_custody(supervisor, daemon, path, branch, commit)):
         return None
     raw = daemon._run_git(["cat-file", "commit", commit], cwd=path)
     if raw.returncode != 0 or len(raw.stdout.encode()) > 65536:

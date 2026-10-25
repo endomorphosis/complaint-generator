@@ -17,16 +17,20 @@ from ipfs_accelerate_py.agent_supervisor.task_sources.persistent_task_queue impo
 pytestmark = [pytest.mark.no_auto_llm, pytest.mark.no_auto_network, pytest.mark.no_auto_heavy]
 
 
-def _world(tmp_path, monkeypatch, damage):
+def _world(tmp_path, monkeypatch, damage, *, linked_target=False):
     import subprocess
     root, worktrees, state = (tmp_path / n for n in ('repo','worktrees','state'))
     for p in (root,worktrees,state):p.mkdir(mode=0o700)
     monkeypatch.setenv('IPFS_ACCELERATE_AGENT_ORCHESTRATION_DIR',str(state/'control-plane'))
-    def git(*args,cwd=root):
-        return subprocess.run(['git',*args],cwd=cwd,check=True,capture_output=True,text=True).stdout.strip()
+    def git(*args,cwd=None):
+        return subprocess.run(['git',*args],cwd=cwd or root,check=True,capture_output=True,text=True).stdout.strip()
     git('init','-q','-b','main');git('config','user.name','Synthetic startup');git('config','user.email','synthetic@example.invalid')
     board=root/'board.md'; board.write_text('# Synthetic\n\n## CIMP-GUI-30 Old failed candidate\n\n- Status: ready\n- Completion: manual\n- Priority: P1\n- Track: ops\n- Outputs: out/task.py\n- Acceptance: Synthetic check.\n')
     (root/'out').mkdir();(root/'out/task.py').write_text('value = 0\n');git('add','.');git('commit','-qm','baseline');baseline=git('rev-parse','HEAD')
+    if linked_target:
+        git('checkout','-q','--detach',baseline)
+        linked=tmp_path/'linked-target';git('worktree','add','-q',str(linked),'main')
+        root,board=linked,linked/'board.md'
     daemon=object.__new__(daemon_native.PortalImplementationDaemon)
     daemon.task_source=None;daemon.todo_path=board;daemon.task_header_prefix='CIMP-';daemon.task_queue=PersistentTaskQueue();daemon.repo_root=root;daemon.implement=False
     task=daemon._load_tasks()[0];identity=daemon._identity_for_task(task)
@@ -90,3 +94,27 @@ def test_actual_preflight_conflict_only_completed_attested_task_is_nonblocking(t
     assert (w.leaf/'out/task.py').read_text()=='value = 1\n'
     assert w.daemon.task_queue.__dict__==queue_before
     for p,raw in before.items():assert (w.state/p).read_bytes()==raw
+
+
+def test_completed_conflict_recognition_keeps_linked_target_git_custody(tmp_path, monkeypatch):
+    w = _world(tmp_path, monkeypatch, None, linked_target=True)
+    refs = w.git('show-ref')
+    w.supervisor._run_forever_loop()
+    assert w.dispatched == [True]
+    assert w.seen[0]['processed'][0]['merge_result']['reason'] == 'preflight_merge_conflict'
+    assert w.git('show-ref') == refs and w.leaf.is_dir()
+
+
+def test_foreign_repository_at_registered_rescue_path_is_not_terminal_skip_authority(tmp_path, monkeypatch):
+    import subprocess
+    w = _world(tmp_path, monkeypatch, None)
+    retained = w.leaf.with_name('retained-original')
+    w.leaf.rename(retained)
+    subprocess.run(['git', 'clone', '--quiet', '--no-hardlinks', str(w.root), str(w.leaf)], check=True)
+    w.git('checkout', '-q', '-b', w.branch, w.candidate, cwd=w.leaf)
+    assert w.git('rev-parse', 'HEAD', cwd=w.leaf) == w.candidate
+    refs, candidate = w.git('show-ref'), (w.leaf/'out/task.py').read_bytes()
+    with pytest.raises(RuntimeError, match='candidate recovery remains unresolved'):
+        w.supervisor._run_forever_loop()
+    assert w.dispatched == [] and retained.is_dir()
+    assert w.git('show-ref') == refs and (w.leaf/'out/task.py').read_bytes() == candidate
