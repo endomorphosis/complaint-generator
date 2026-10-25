@@ -762,7 +762,7 @@ Implementation instructions:
 
 ## CIMP-GUI-26 Review and admit versioned legal authorities
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
