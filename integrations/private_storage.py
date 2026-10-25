@@ -3543,6 +3543,16 @@ _CASE_ROLES = (
     ("evaluation", "evaluation"),
     ("proof", "proof"),
 )
+# Complete case snapshots add the owners a later reader must see together.
+# A partial set is not published and is not treated as a new empty case.
+_COMPLETE_CASE_ROLES = _CASE_ROLES + (
+    ("knowledge_graph", "knowledge-graph"),
+    ("dependency_graph", "dependency-graph"),
+    ("inquiries", "inquiries"),
+    ("proof_references", "proof-references"),
+    ("grants", "grants"),
+    ("workflow_revisions", "workflow-revisions"),
+)
 _CASE_HEAD_NAME = "case-head"
 _CASE_GENERATIONS = "generations"
 _CASE_STAMP = "2026-01-01T00:00:00Z"
@@ -3727,6 +3737,8 @@ def _open_case_document(
         return None
     if not isinstance(document, dict) or document.get("schema") != _CASE_SCHEMA:
         return None
+    if document.get("complete") is True and not _complete_role_index(document.get("roles")):
+        return None
     if _opaque_ref(_manifest_bytes(document)) != manifest_hash:
         return None
     if document.get("parent_generation") in {None, ""}:
@@ -3853,6 +3865,18 @@ def _publish_iroh_cas(
     return int(snapshot.head.revision), str(snapshot.head.manifest_hash)
 
 
+def _complete_role_index(roles: Any) -> bool:
+    if not isinstance(roles, Mapping):
+        return False
+    for public_name, kind in _COMPLETE_CASE_ROLES:
+        slot = roles.get(public_name)
+        if not isinstance(slot, Mapping):
+            return False
+        if slot.get("kind") != kind or not slot.get("ref") or not slot.get("revision"):
+            return False
+    return True
+
+
 def publish_case_manifest(
     repository: str | Path,
     *,
@@ -3867,6 +3891,8 @@ def publish_case_manifest(
     private_names: Mapping[str, Any] | None = None,
     backend: str = "local",
     iroh_store: Any = None,
+    complete: bool = False,
+    fail_before_head: bool = False,
     fsync_file: Callable[[int], None] | None = None,
     fsync_directory: Callable[[int], None] | None = None,
 ) -> CaseManifestPublication:
@@ -3886,7 +3912,8 @@ def publish_case_manifest(
     names = dict(private_names or {})
     sealed_roles: dict[str, bytes] = {}
     role_index: dict[str, dict[str, str]] = {}
-    for public_name, kind in _CASE_ROLES:
+    role_table = _COMPLETE_CASE_ROLES if complete else _CASE_ROLES
+    for public_name, kind in role_table:
         body, revision = _role_payload(artifacts, public_name)
         envelope = _seal_role(body, kind=kind, revision=revision, **options)
         sealed_roles[public_name] = envelope
@@ -3961,6 +3988,10 @@ def publish_case_manifest(
             "iroh_manifest_hash": iroh_hash,
             "backend": backend,
         }
+        if complete:
+            document["complete"] = True
+            if not _complete_role_index(role_index):
+                raise PrivateRevisionError("case role is missing", code="role_missing", state="recoverable")
         manifest_hash = _opaque_ref(_manifest_bytes(document))
         manifest_envelope = _seal_role(
             _manifest_bytes(document),
@@ -3972,6 +4003,8 @@ def publish_case_manifest(
         verified = _open_case_document(root, generation, manifest_hash, **options)
         if verified != document:
             raise PrivateRevisionError("case manifest readback failed", code="readback_mismatch", state="recoverable")
+        if fail_before_head:
+            raise PrivateRevisionInterrupted("case-head", generation)
         _write_case_head(root, generation, manifest_hash, fsync_file=fsync_file, fsync_directory=fsync_directory)
         _append_generation(root, generation, manifest_hash, fsync_file=fsync_file, fsync_directory=fsync_directory)
         return CaseManifestPublication(
@@ -4023,9 +4056,17 @@ def read_case_manifest(
             "roles": {},
             "envelopes": {},
             "private_names": document.get("private_names") or {},
+            "complete": document.get("complete") is True,
             "minted_completion": False,
         }
-        for public_name, kind in _CASE_ROLES:
+        role_table = _COMPLETE_CASE_ROLES if document.get("complete") is True else _CASE_ROLES
+        if document.get("complete") is True and not _complete_role_index(document.get("roles")):
+            raise PrivateRevisionError(
+                "case manifest blob is missing or stale",
+                code="stale_head",
+                state="recoverable",
+            )
+        for public_name, kind in role_table:
             slot = (document.get("roles") or {}).get(public_name) or {}
             ref = str(slot.get("ref") or "")
             revision = str(slot.get("revision") or "")
@@ -4104,6 +4145,71 @@ def recover_case_manifest(
         if lock is not None:
             _release_lock(lock)
         process_lock.release()
+
+
+def replay_acknowledged_case_revision(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    generation: str,
+    manifest_hash: str,
+) -> CaseManifestPublication:
+    """Confirm an acknowledged generation without publishing a replacement.
+
+    Replay reads the current head. It does not seal a new manifest, move the
+    head backward, or create a case when the acknowledged blob is missing.
+    """
+
+    root = _case_root(repository)
+    before = _snapshot_bytes(root)
+    try:
+        acknowledged = _hex_generation(generation, "generation")
+        acknowledged_hash = _hex_generation(manifest_hash, "manifest_hash")
+        options = _case_options(tenant_id, case_id, principal_id, key, key_id)
+        if not (root / _CASE_HEAD_NAME).exists():
+            return CaseManifestPublication(
+                False, "recoverable", None, None, None, None, False, "local", "missing_repository",
+            )
+        try:
+            head_generation, head_hash = _case_head(root)
+        except PrivateRevisionError:
+            return CaseManifestPublication(
+                False, "recoverable", None, None, None, None, False, "local", "corrupt_manifest",
+            )
+        document = _chain_complete(root, acknowledged, acknowledged_hash, **options)
+        if document is None or (document.get("complete") is True and not _complete_role_index(document.get("roles"))):
+            return CaseManifestPublication(
+                False, "recoverable", head_generation or None, None, head_hash or None, None, False, "local", "stale_head",
+            )
+        if head_generation == acknowledged and head_hash == acknowledged_hash:
+            return CaseManifestPublication(
+                False,
+                "replayed",
+                acknowledged,
+                str(document.get("parent_generation") or "") or None,
+                acknowledged_hash,
+                str(document.get("parent_hash") or "") or None,
+                False,
+                str(document.get("backend") or "local"),
+            )
+        return CaseManifestPublication(
+            False,
+            "preserved",
+            head_generation,
+            str(document.get("parent_generation") or "") or None,
+            head_hash,
+            str(document.get("parent_hash") or "") or None,
+            False,
+            str(document.get("backend") or "local"),
+            "manifest_conflict",
+        )
+    finally:
+        if _snapshot_bytes(root) != before:
+            raise PrivateRevisionError("case manifest replay changed bytes", code="journal_mutated", state="recoverable")
 
 
 # Replica policy is explicit. Importing this module, publishing in local private
