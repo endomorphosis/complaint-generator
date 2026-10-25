@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ from applications.case_directory import (
     LEGACY_OWNER_ONLY_VERSION,
     MIGRATION_RULES,
     NAMESPACED_CASE_VERSION,
+    CaseDirectory,
     CaseDirectoryError,
     legacy_owner_only_binding,
 )
@@ -68,6 +70,30 @@ def _directory_bytes(tmp_path: Path) -> dict[str, bytes]:
     if not root.exists():
         return {}
     return {path.name: path.read_bytes() for path in root.iterdir() if path.is_file()}
+
+
+def test_new_directory_is_private_under_shared_umask_and_unsafe_existing_root_is_refused(tmp_path: Path) -> None:
+    key = os.urandom(32)
+    root = tmp_path / "new-private-directory"
+    previous = os.umask(0o002)
+    try:
+        directory = CaseDirectory(root, key=key, key_id=KEY_ID)
+        created = directory.create_case(actor_principal_id=ACTOR)
+        assert stat.S_IMODE(root.stat().st_mode) == 0o700
+        assert directory.list_cases(actor_principal_id=ACTOR) == (created,)
+        reopened = CaseDirectory(root, key=key, key_id=KEY_ID)
+        assert reopened.select_case(actor_principal_id=ACTOR, case_id=created.case_id) == created
+        unsafe = tmp_path / "existing-shared-directory"
+        unsafe.mkdir(mode=0o775)
+        os.chmod(unsafe, 0o775)
+        existing = CaseDirectory(unsafe, key=key, key_id=KEY_ID)
+        with pytest.raises(CaseDirectoryError) as refused:
+            existing.create_case(actor_principal_id=ACTOR)
+        assert refused.value.code == "unexpected_path"
+        assert stat.S_IMODE(unsafe.stat().st_mode) == 0o775
+        assert list(unsafe.iterdir()) == []
+    finally:
+        os.umask(previous)
 
 
 def test_two_cases_are_independent_and_ignore_user_id(tmp_path: Path) -> None:
