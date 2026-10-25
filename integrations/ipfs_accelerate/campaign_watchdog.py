@@ -18,6 +18,74 @@ def _digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+# These are the existing Native and watchdog ceilings. Qualification reads them;
+# it does not raise, extend, or refund them.
+_PRESERVED_BUDGETS = {
+    "startup_seconds": 90,
+    "stall_seconds": 180,
+    "implementation_timeout_seconds": 900,
+    "watchdog_action_deadline_ms": 1_200_000,
+    "max_recoveries_per_incident": 2,
+}
+
+
+def preserved_native_watchdog_budgets(runner):
+    """Return the finite Native/watchdog ceilings already used by this campaign.
+
+    A test double may supply the same startup and stall values. Missing timeout
+    evidence is read from the production runner module. Any other number is a
+    contract change, not a new budget.
+    """
+    from .improvement_runner import STARTUP_SECONDS, STALL_SECONDS, TIMEOUT_SECONDS
+    startup = getattr(runner, "STARTUP_SECONDS", STARTUP_SECONDS)
+    stall = getattr(runner, "STALL_SECONDS", STALL_SECONDS)
+    timeout = getattr(runner, "TIMEOUT_SECONDS", TIMEOUT_SECONDS)
+    budgets = {
+        "startup_seconds": startup,
+        "stall_seconds": stall,
+        "implementation_timeout_seconds": timeout,
+        "watchdog_action_deadline_ms": 1_200_000,
+        "max_recoveries_per_incident": 2,
+    }
+    if budgets != _PRESERVED_BUDGETS:
+        raise ValueError("watchdog_budget_changed")
+    if any(type(value) is not int or value <= 0 for value in budgets.values()):
+        raise ValueError("watchdog_budget_unbounded")
+    return dict(budgets)
+
+
+def _finite_deadline(value):
+    if isinstance(value, bool) or type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+        return None
+    return float(value)
+
+
+def _activity_deadline(evidence):
+    if not isinstance(evidence, dict):
+        return None
+    return _finite_deadline(evidence.get("deadline_at"))
+
+
+def _monitor_class(*, hold, state, recovery_permitted, source_stale, completed, idle_ready):
+    if completed:
+        return "complete"
+    if state == "complete":
+        return "completion_unverified"
+    if source_stale:
+        return "stale_source"
+    if hold == "cancelled":
+        return "cancelled_validation"
+    if hold in {"awaiting_user", "manual_hold", "paused"}:
+        return "intentional_user_wait"
+    if hold:
+        return "held"
+    if idle_ready and recovery_permitted:
+        return "idle_ready"
+    if state in {"stalled", "no_progress", "daemon_failed"} and recovery_permitted:
+        return "development_worker_stall"
+    return "in_progress"
+
+
 def _watchdog_executable_path(interpreter, environment=None):
     """Bind public executable locations without inheriting shell/cwd authority.
 
@@ -202,6 +270,8 @@ class ComplaintCampaignWatchdog:
             active = cid = ""
         provider = status.get("provider_execution_evidence") or {}
         validation = status.get("validation_activity_evidence") or {}
+        if not isinstance(validation, dict):
+            validation = {}
         progress = _digest({"pending": pending, "task": active, "cid": cid,
             "attempt": native.get("active_attempt", 0), "phase": phase,
             "provider": {k: provider.get(k) for k in ("frame_counts", "log_bytes", "provider_terminal_observed")},
@@ -235,6 +305,7 @@ class ComplaintCampaignWatchdog:
         # A live heartbeat can coexist with an orphaned claim or an idle
         # selector. Logical ready work distinguishes that mechanical block
         # from a task genuinely waiting for dependencies or user input.
+        idle_ready = False
         if (state in {"blocked", "running"} and not hold and pending
                 and status.get("board", {}).get("ready_task_ids")
                 and not active and not native.get("implementation_in_progress")
@@ -242,20 +313,42 @@ class ComplaintCampaignWatchdog:
                 and not status.get("validation_activity_verified")
                 and self.clock() >= grace_started + self.runner.STALL_SECONDS):
             state = "no_progress"
+            idle_ready = True
             permitted = bool(bound and not status.get("native_read_errors")
                 and not self.runner._claim_proof_conflict(native)
                 and status.get("worker_liveness") not in {"unknown", "pid_reuse"})
+        source_stale = bool(self.runner._claim_proof_conflict(native))
+        attempt = 0 if completed else int(native.get("active_attempt") or 0)
+        task_id = "" if completed else active
+        task_cid = "" if completed else cid
+        budgets = preserved_native_watchdog_budgets(self.runner)
         result = {"schema": "campaign-progress-observation@1", "scope": dict(self.scope),
             "status": "complete" if completed else state, "healthy": completed or status.get("healthy") is True,
             "completion_verified": completed, "manual_hold": bool(hold), "hold_reason": hold,
             "progress_verified": False if completed else bool(status.get("provider_progress_verified")
                 or status.get("validation_activity_verified")),
             "owner_binding_verified": bound, "recovery_permitted": permitted,
-            "pending_task_ids": pending, "active_task_id": "" if completed else active,
-            "active_task_cid": "" if completed else cid,
-            "attempt": 0 if completed else int(native.get("active_attempt") or 0),
+            "pending_task_ids": pending, "active_task_id": task_id,
+            "active_task_cid": task_cid,
+            "attempt": attempt,
             "progress_token": progress, "owner_token": owner,
             "grace_until_ms": int((grace_started + self.runner.STARTUP_SECONDS) * 1000)}
+        # Frozen Native observes an exact schema. These closed diagnostics are
+        # Host report metadata and confer no process, budget or task authority.
+        # The current runner has no browser-deadline producer; do not invent one.
+        self.latest_monitoring = {
+            "schema": "complaint-gui-monitoring@1",
+            "task_identity": {"task_id": task_id, "cid": task_cid, "attempt": attempt},
+            "browser_deadline_at": None,
+            "validator_deadline_at": (_activity_deadline(validation)
+                if status.get("validation_activity_verified") is True else None),
+            "monitor_class": _monitor_class(hold=hold, state=result["status"],
+                recovery_permitted=permitted, source_stale=source_stale,
+                completed=completed, idle_ready=idle_ready),
+            "source_stale": source_stale, "idle_ready": idle_ready and not completed,
+            "budgets": budgets, "paid_attempt_rearmed": False, "hold_bypassed": False,
+            "completion_authority": False,
+        }
         self.latest_observation = result
         return result
 
@@ -348,7 +441,8 @@ class ComplaintCampaignWatchdog:
     def run_once(self, *, stop_completed=False):
         from ipfs_accelerate_py.agent_supervisor.rescue.campaign_watchdog import (
             CampaignProgressWatchdog, CampaignProgressWatchdogPolicy)
-        policy = CampaignProgressWatchdogPolicy(deadline_ms=1_200_000)
+        budgets = preserved_native_watchdog_budgets(self.runner)
+        policy = CampaignProgressWatchdogPolicy(deadline_ms=budgets["watchdog_action_deadline_ms"])
         # Frozen SDK profiles have no activity-only observation field. Keep a
         # strictly owned, deadline-bound repair passive without calling its
         # recovery policy or changing its durable incident/work-progress state.
@@ -429,7 +523,8 @@ class ComplaintCampaignWatchdog:
             "last_action": self.last_action, "completion": self.latest_completion,
             "preflight": getattr(self, "latest_preflight", {}),
             "native_status": self.latest_status.get("status"), "activity_evidence":failure_evidence,
-            "initial_failure_capture":failure_capture}
+            "initial_failure_capture":failure_capture,
+            "monitoring": getattr(self, "latest_monitoring", {})}
         import stat
         self.directory.mkdir(mode=0o700, exist_ok=True)
         info = self.directory.lstat()
