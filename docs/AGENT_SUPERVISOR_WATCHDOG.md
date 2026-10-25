@@ -94,6 +94,23 @@ held. Temporary preflight unavailability waits without consuming another repair.
 Unknown or interrupted effects remain recorded as uncertain rather than being
 repeated blindly.
 
+An unexpected startup exit can leave public status at `stop_incomplete` before
+a new shutdown proof exists. Recovery requires the saved launch birth to be
+independently proved dead, a launch that was expected to run, and the current
+campaign binding. It then uses the same verified public stop and reconciliation
+sequence. Live, reused or unknown identities and operator holds remain refused.
+
+Measured validation explicitly loads a Host-owned, hash-pinned network bootstrap
+from its private evidence directory before candidate conftests or collection.
+Both collection and execution require before/after libc probes and an owned
+network-only proof. The Linux filter permits AF_UNIX sockets and socketpairs,
+denies other socket families and x32 socket bypasses, and synchronizes existing
+validation threads. Descendant browser/Node processes inherit it. The coordinator,
+provider and watchdog processes retain their own execution policies. Python and
+pytest startup remain governed by Native's trusted launcher; the plugin's kernel
+enforcement begins before conftests. Network proofs supplement source, AST,
+JUnit, process and completion evidence rather than replacing those checks.
+
 Place `HOLD` or `OPERATOR_STOP` in `CAMPAIGN_STATE/watchdog/` to prevent automatic
 recovery. A temporary maintenance hold prevents dispatch while candidates or
 source are reviewed; remove only the maintenance hold you created. Existing

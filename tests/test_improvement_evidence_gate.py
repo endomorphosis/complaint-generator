@@ -939,17 +939,32 @@ def test_real_sealed_pytest_bootstrap_survives_declared_pythonpath_export(tmp_pa
     decoy = declared / "ipfs_accelerate_py"
     decoy.mkdir(parents=True)
     (decoy / "__init__.py").write_text("raise RuntimeError('untrusted_native_bootstrap')\n")
+    (tmp_path / "complaint_owned_network_guard.py").write_text(
+        "raise RuntimeError('candidate_shadowed_owned_network_guard')\n")
     native_root = Path(native_source.__file__).resolve().parents[3]
     seal = native_root / "ipfs_accelerate_py/testing/pytest_ast_seal.py"
     test = tmp_path / "tests/test_improvement_evidence_gate.py"
     test.write_text("from pathlib import Path\n"
+        "import ctypes, errno, socket\n"
         "import integrations.ipfs_accelerate.improvement_plan as phase\n"
         "import integrations.ipfs_accelerate.campaign as campaign\n"
         "import ipfs_accelerate_py.testing.pytest_ast_seal as seal\n"
         "def test_actual_plugin_origins():\n"
         f" assert Path(phase.__file__).resolve() == Path({str(phase)!r})\n"
         f" assert Path(campaign.__file__).resolve() == Path({str(campaign)!r})\n"
-        f" assert Path(seal.__file__).resolve() == Path({str(seal)!r})\n")
+        f" assert Path(seal.__file__).resolve() == Path({str(seal)!r})\n"
+        " libc = ctypes.CDLL(None, use_errno=True)\n"
+        " for family in (socket.AF_INET, socket.AF_INET6):\n"
+        "  ctypes.set_errno(0)\n"
+        "  descriptor = libc.socket(family, socket.SOCK_STREAM, 0)\n"
+        "  if descriptor >= 0: libc.close(descriptor)\n"
+        "  assert descriptor == -1 and ctypes.get_errno() == errno.EPERM\n"
+        " left, right = socket.socketpair()\n"
+        " try:\n"
+        "  assert left.send(b'network-guard') == 13\n"
+        "  assert right.recv(13) == b'network-guard'\n"
+        " finally:\n"
+        "  left.close(); right.close()\n")
     # Reproduce the actual native scheduler's approved package-only environment
     # and the normalized task command's overwriting relative export.
     env["PYTHONPATH"] = str(Path(pytest.__file__).resolve().parents[1])
@@ -969,4 +984,9 @@ def test_real_sealed_pytest_bootstrap_survives_declared_pythonpath_export(tmp_pa
     assert measured["imported_sources"][str(campaign)] == hashlib.sha256(campaign_source.read_bytes()).hexdigest()
     assert all(result["original_command"] == command for result in measured["results"])
     assert all("-p complaint_fixture_guard" in result["executed_command"] for result in measured["results"])
+    assert all(" -P -m pytest " in result["executed_command"] for result in measured["results"])
+    network = measured["kernel_network_guard"]
+    assert network["validation_children_only"] is True
+    assert [row["mode"] for row in network["proofs"]] == ["collect", "run"]
+    assert all(Path(row["path"]).is_file() and row["sha256"] for row in network["proofs"])
     assert observed["completion_authority"] is False if "completion_authority" in observed else measured["completion_authority"] is False

@@ -1,6 +1,5 @@
 from pathlib import Path
 import asyncio
-import json
 from typing import Any, Dict, Optional
 from datetime import datetime, timezone
 
@@ -8,8 +7,8 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSo
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .case_routes import compose_case_routes
 from .dashboard_ui import attach_dashboard_ui_routes
-from .complaint_workspace_api import attach_complaint_workspace_routes
 from .document_ui import attach_document_ui_routes
 from .fastapi_compat import attach_router_routes
 from .site_ui import attach_core_site_ui_routes
@@ -219,36 +218,31 @@ def _initial_chat_payload(mediator: Any, *, hashed_username: Optional[str] = Non
 def attach_review_surface_chat_routes(app: FastAPI, mediator: Any) -> FastAPI:
     @app.post("/load_profile")
     async def load_profile(request: Request) -> JSONResponse:
-        payload = await request.json()
-        request_payload = payload.get("request") if isinstance(payload, dict) else {}
-        response_payload = {
-            "hashed_username": str(request_payload.get("hashed_username") or request.cookies.get("hashed_username") or ""),
-            "hashed_password": str(request_payload.get("hashed_password") or request.cookies.get("hashed_password") or ""),
-            "data": json.dumps({}),
-        }
-        if "username" in request_payload or "password" in request_payload:
-            return JSONResponse({"results": response_payload})
-        return JSONResponse(response_payload)
+        del request
+        return JSONResponse({"error": "legacy_route_retired"}, status_code=401)
+
+    @app.get("/cookies")
+    async def cookies(request: Request) -> JSONResponse:
+        del request
+        return JSONResponse({"error": "legacy_route_retired"}, status_code=401)
+
+    @app.post("/create_profile")
+    async def create_profile() -> JSONResponse:
+        return JSONResponse({"error": "legacy_route_retired"}, status_code=401)
 
     @app.post("/api/chat")
     async def post_chat(request: Request) -> JSONResponse:
+        if getattr(request.state, "case_authorization", None) is None and getattr(request.app.state, "case_route_composition", None):
+            return JSONResponse({"error": "authorizer_required"}, status_code=401)
         payload = await request.json()
         payload_dict = payload if isinstance(payload, dict) else {}
         message_text = str(payload_dict.get("message") or payload_dict.get("content") or "").strip()
         if not message_text:
             raise HTTPException(status_code=400, detail="message is required")
-        hashed_username = str(
-            payload_dict.get("hashed_username")
-            or payload_dict.get("sender")
-            or payload_dict.get("user_id")
-            or request.cookies.get("hashed_username")
-            or ""
-        ).strip()
         response_payload = await _process_chat_message_bounded(
             mediator,
             message_text,
             payload_dict,
-            hashed_username=hashed_username or None,
         )
         return JSONResponse({"messages": [response_payload], "context_attached": bool(payload_dict.get("chat_context"))})
 
@@ -258,9 +252,11 @@ def attach_review_surface_chat_routes(app: FastAPI, mediator: Any) -> FastAPI:
 
     @app.websocket("/api/chat")
     async def websocket_chat(websocket: WebSocket) -> None:
+        if getattr(websocket.state, "case_authorization", None) is None and getattr(websocket.app.state, "case_route_composition", None):
+            await websocket.close(code=1008)
+            return
         await websocket.accept()
-        hashed_username = str(websocket.cookies.get("hashed_username") or "").strip()
-        await websocket.send_json(_initial_chat_payload(mediator, hashed_username=hashed_username or None))
+        await websocket.send_json(_initial_chat_payload(mediator))
         try:
             while True:
                 payload = await websocket.receive_json()
@@ -271,12 +267,11 @@ def attach_review_surface_chat_routes(app: FastAPI, mediator: Any) -> FastAPI:
                 user_payload = _build_chat_payload(
                     message_text,
                     {
-                        "sender": payload_dict.get("sender") or hashed_username or "User:",
+                        "sender": payload_dict.get("sender") or "User:",
                         "message": message_text,
                         "question": message_text,
                     },
-                    sender=hashed_username or "User:",
-                    hashed_username=hashed_username or None,
+                    sender="User:",
                 )
                 await websocket.send_json(user_payload)
                 await websocket.send_json(
@@ -284,7 +279,6 @@ def attach_review_surface_chat_routes(app: FastAPI, mediator: Any) -> FastAPI:
                         mediator,
                         message_text,
                         payload_dict,
-                        hashed_username=hashed_username or None,
                     )
                 )
         except WebSocketDisconnect:
@@ -293,15 +287,28 @@ def attach_review_surface_chat_routes(app: FastAPI, mediator: Any) -> FastAPI:
     return app
 
 
-def create_review_dashboard_app() -> FastAPI:
+def create_review_dashboard_app(authorizer: Any = None, *, browser_sessions: Any = None,
+                                case_handlers: Any = None, json_body_limits: Any = None) -> FastAPI:
     app = FastAPI(title="Complaint Generator Review Dashboard")
     attach_static_asset_routes(app)
     attach_claim_support_review_ui_routes(app)
     attach_review_health_routes(app, "review-dashboard")
+    compose_case_routes(
+        app,
+        authorizer=authorizer,
+        mediator=None,
+        include_workspace=False,
+        include_review=False,
+        include_document=False,
+        browser_sessions=browser_sessions,
+        case_handlers=case_handlers,
+        json_body_limits=json_body_limits,
+    )
     return app
 
 
-def create_review_surface_app(mediator: Any) -> FastAPI:
+def create_review_surface_app(mediator: Any, authorizer: Any = None, workspace_service: Any = None,
+                              *, browser_sessions: Any = None, case_handlers: Any = None, json_body_limits: Any = None) -> FastAPI:
     app = FastAPI(title="Complaint Generator Review Surface")
     attach_static_asset_routes(app)
     attach_core_site_ui_routes(app)
@@ -309,11 +316,14 @@ def create_review_surface_app(mediator: Any) -> FastAPI:
     attach_claim_support_review_ui_routes(app)
     attach_document_ui_routes(app)
     attach_review_health_routes(app, "review-surface")
-    from .review_api import attach_claim_support_review_routes
-    from .document_api import attach_document_routes
-
-    attach_complaint_workspace_routes(app)
-    attach_claim_support_review_routes(app, mediator)
-    attach_document_routes(app, mediator)
     attach_review_surface_chat_routes(app, mediator)
+    compose_case_routes(
+        app,
+        authorizer=authorizer,
+        mediator=mediator,
+        workspace_service=workspace_service,
+        browser_sessions=browser_sessions,
+        case_handlers=case_handlers,
+        json_body_limits=json_body_limits,
+    )
     return app

@@ -211,6 +211,19 @@ class ComplaintCampaignWatchdog:
                 "maintenance", "selected", "starting", "stalled", "no_progress", "daemon_failed", "stopped",
                 "complete", "identity_mismatch", "state_error", "board_error", "stop_incomplete", "unknown"}:
             state = "unknown"
+        # A detached owner can exit during startup before it publishes a new
+        # shutdown proof. Public status correctly calls that stop_incomplete;
+        # it still needs the ordinary verified stop, rather than being left
+        # outside the watchdog's actionable failure set forever. Only a bound
+        # launch that was expected to run and whose recorded owner is proved
+        # dead qualifies. Operator stops and uncertain/reused/live PIDs retain
+        # their existing refusal semantics. Public stop still proves closure.
+        if (state == "stop_incomplete" and bound
+                and launch.get("status") in {"starting", "running"}
+                and status.get("owned_process_alive") is False
+                and status.get("worker_liveness") in {"dead", "absent"}
+                and self.runner._owner_liveness(launch.get("identity")) == "dead"):
+            state = "daemon_failed"
         permitted = bool(bound and pending and not hold and not status.get("native_read_errors")
             and not self.runner._claim_proof_conflict(native)
             and status.get("worker_liveness") not in {"unknown", "pid_reuse"}
@@ -356,7 +369,8 @@ class ComplaintCampaignWatchdog:
             "task_count": (self.latest_status.get("board") or {}).get("count"),
             "active_task_id": self.latest_observation.get("active_task_id"),
             "last_action": self.last_action, "completion": self.latest_completion,
-            "preflight": getattr(self, "latest_preflight", {})}
+            "preflight": getattr(self, "latest_preflight", {}),
+            "native_status": self.latest_status.get("status")}
         import stat
         self.directory.mkdir(mode=0o700, exist_ok=True)
         info = self.directory.lstat()

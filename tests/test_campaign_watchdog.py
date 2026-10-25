@@ -750,3 +750,132 @@ def test_timer_upgrade_rechecks_bytes_before_atomic_replacement(tmp_path, monkey
             command_runner=lambda *a, **kw: pytest.fail("raced timer enabled"))
     assert timer.read_text() == replacement
     assert (service.read_bytes(), service.stat().st_ino) == service_before
+
+
+def _dead_startup_adapter(tmp_path, monkeypatch, *, launch_status="starting"):
+    watcher, runner, view = _adapter(tmp_path, monkeypatch, state="stop_incomplete")
+    view.update(owned_process_alive=False, worker_liveness="dead")
+    launch = {"schema_version": "complaint-improvement-launcher@1", "started_at": 0,
+              "status": launch_status, "identity": {"pid": 99999999, "start_ticks": 1, "boot_id": "fixture-boot"}}
+    expected_birth = deepcopy(launch["identity"])
+    runner._owner_liveness = lambda birth: "dead" if birth == expected_birth else "missing"
+    monkeypatch.setattr(watcher, "_launch", lambda: (deepcopy(launch), True, "owner-1"))
+    return watcher, runner, view, launch
+
+
+@pytest.mark.parametrize("launch_status", ["starting", "running"])
+@pytest.mark.parametrize("worker_liveness", ["dead", "absent"])
+def test_bound_unexpected_dead_owner_gets_normal_recovery_without_claiming_closure(tmp_path, monkeypatch, launch_status, worker_liveness):
+    watcher, runner, view, _ = _dead_startup_adapter(tmp_path, monkeypatch, launch_status=launch_status)
+    view["worker_liveness"] = worker_liveness
+    runner.stop = lambda *a, **kw: pytest.fail("observation performed cleanup")
+    observed = watcher.observe()
+    assert observed["status"] == "daemon_failed" and observed["recovery_permitted"] is True
+    assert observed["completion_verified"] is False and observed["healthy"] is False
+    assert observed["manual_hold"] is False and observed["progress_verified"] is False
+    assert watcher.latest_status["status"] == view["status"] == "stop_incomplete"
+    assert "container_shutdown_verified" not in observed
+
+
+@pytest.mark.parametrize("exclusion", [
+    "manual_stopped", "manual_stop_incomplete", "unknown", "pid_reuse", "live", "owned_alive",
+    "owned_unknown", "foreign_scope", "read_error", "claim_conflict", "manual_hold", "cancelled",
+    "capacity_quarantine", "protected_incident", "awaiting_user", "launch_alive", "launch_unknown",
+    "launch_pid_reuse", "launch_birth_missing",
+])
+def test_dead_startup_recovery_does_not_override_manual_or_uncertain_ownership(tmp_path, monkeypatch, exclusion):
+    watcher, runner, view, launch = _dead_startup_adapter(tmp_path, monkeypatch)
+    if exclusion in {"manual_stopped", "manual_stop_incomplete"}:
+        launch["status"] = "stopped" if exclusion == "manual_stopped" else "stop_incomplete"
+    elif exclusion in {"unknown", "pid_reuse", "live"}:
+        view["worker_liveness"] = "alive" if exclusion == "live" else exclusion
+    elif exclusion == "owned_alive":
+        view["owned_process_alive"] = True
+    elif exclusion == "owned_unknown":
+        view.pop("owned_process_alive")
+    elif exclusion == "foreign_scope":
+        monkeypatch.setattr(watcher, "_launch", lambda: (deepcopy(launch), False, "foreign-owner"))
+    elif exclusion in {"launch_alive", "launch_unknown", "launch_pid_reuse"}:
+        runner._owner_liveness = lambda _: exclusion.removeprefix("launch_")
+    elif exclusion == "launch_birth_missing":
+        launch.pop("identity")
+    elif exclusion == "read_error":
+        view["native_read_errors"] = {"state": "fixture_unavailable"}
+    elif exclusion == "claim_conflict":
+        runner._claim_proof_conflict = lambda _: "fixture_claim_mismatch"
+    elif exclusion == "cancelled":
+        view["native_state"]["manual_cancellation"] = True
+    elif exclusion == "awaiting_user":
+        view["application_interview_state"] = "awaiting_user"
+    else:
+        view["native_state"][exclusion] = True
+    monkeypatch.setattr(watcher, "recover", lambda *_: pytest.fail("excluded owner dispatched recovery"))
+    observed = watcher.observe()
+    assert observed["recovery_permitted"] is False
+    result = watcher.run_once()
+    assert result["status"] in {"held", "refused"}
+    assert result["native_status"] == "stop_incomplete"
+
+
+@pytest.mark.parametrize("saved_owner_liveness", ["alive", "unknown", "pid_reuse", "missing", None])
+def test_absent_native_worker_never_substitutes_for_proved_dead_saved_launcher(tmp_path, monkeypatch, saved_owner_liveness):
+    watcher, runner, view, _ = _dead_startup_adapter(tmp_path, monkeypatch)
+    view["worker_liveness"] = "absent"
+    runner._owner_liveness = lambda _: saved_owner_liveness
+    monkeypatch.setattr(watcher, "recover", lambda *_: pytest.fail("unproved saved launcher dispatched recovery"))
+    assert watcher.observe()["recovery_permitted"] is False
+    assert watcher.run_once()["status"] == "refused"
+
+
+@pytest.mark.parametrize("stop_status", ["stop_incomplete", "stopped"])
+def test_dead_startup_uses_spaced_sdk_confirmation_and_public_stop_cas_before_restart(tmp_path, monkeypatch, stop_status):
+    from ipfs_accelerate_py.agent_supervisor.rescue import campaign_watchdog as native
+    watcher, runner, view, launch = _dead_startup_adapter(tmp_path, monkeypatch)
+    view["worker_liveness"] = "absent"  # Real post-reconciliation startup failure shape.
+    watcher.spec = {}
+    now = [1000.0]
+    watcher.clock = lambda: now[0]
+    actual_watchdog = native.CampaignProgressWatchdog
+    def deterministic_watchdog(*a, **kw):
+        return actual_watchdog(*a, **kw, clock_ms=lambda: int(now[0] * 1000))
+    monkeypatch.setattr(native, "CampaignProgressWatchdog", deterministic_watchdog)
+    monkeypatch.setattr(watcher, "_automatic_stop_matches", lambda *_: True)
+    paid = {"implementation_attempts": {"TASK-1": 3}, "protected_implementation_attempts": {"TASK-1": 3}}
+    before = deepcopy(paid)
+    monkeypatch.setattr(watcher, "_accounting", lambda: deepcopy(paid))
+    calls, stop_digests = [], []
+    expected_digest = module._digest(launch)
+    def stop(*a, **kw):
+        calls.append("stop")
+        stop_digests.append(kw.get("expected_launcher_sha256"))
+        if stop_status == "stopped":
+            launch["status"] = "stopped"
+            view["status"] = "stopped"
+        return {"status": stop_status}
+    runner.stop = stop
+    runner.recover_stalled_worker = lambda *_: calls.append("recover") or {"recovery": "reconciled"}
+    runner.doctor = lambda *_: _ready_preflight()
+    def start(*a, **kw):
+        calls.append("start")
+        launch["status"] = "starting"
+        view.update(status="active", healthy=True, provider_progress_verified=True,
+                    worker_liveness="alive", owned_process_alive=True)
+        view["native_state"].update(active_task_id="TASK-1", active_task_cid="current-cid", active_attempt=3)
+        return {"status": "starting"}
+    runner.start = start
+    assert watcher.run_once()["status"] == "confirming"
+    assert watcher.run_once()["status"] == "confirming" and calls == []
+    now[0] += 31
+    result = watcher.run_once()
+    assert stop_digests == [expected_digest]
+    if stop_status == "stop_incomplete":
+        assert result["status"] == "cooldown" and calls == ["stop"]
+        assert result["native_status"] == "stop_incomplete"
+        assert result["last_action"]["stop_status"] == "stop_incomplete"
+    else:
+        assert result["status"] == "recovered" and calls == ["stop", "recover", "start"]
+        assert result["last_action"]["stage"] == "verified_progress"
+    ledger = json.loads((watcher.directory / "campaign-progress-watchdog.json").read_text())
+    assert len(ledger["incidents"]) == 1
+    assert next(iter(ledger["incidents"].values()))["attempts"] == 1
+    assert paid == before

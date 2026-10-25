@@ -3,7 +3,7 @@ import json
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -1510,8 +1510,20 @@ def _annotate_review_links(payload: Dict[str, Any], *, mediator: Any, user_id: O
     )
 
 
+async def require_composed_document_authorizer(request: Request) -> None:
+    """When production composition is active, document and download handlers require its decision."""
+
+    from .case_routes import COMPOSITION_NAME
+
+    if getattr(request.app.state, "case_route_composition", None) != COMPOSITION_NAME:
+        raise HTTPException(status_code=401, detail="authorizer_required")
+    decision = getattr(request.state, "case_authorization", None)
+    if decision is None or not getattr(decision, "permits_case_content", False):
+        raise HTTPException(status_code=401, detail="authorizer_required")
+
+
 def create_document_router(mediator: Any) -> APIRouter:
-    router = APIRouter()
+    router = APIRouter(dependencies=[Depends(require_composed_document_authorizer)])
 
     @router.post("/api/documents/formal-complaint")
     async def build_formal_complaint_document(
@@ -1519,6 +1531,15 @@ def create_document_router(mediator: Any) -> APIRouter:
     ) -> Dict[str, Any]:
         if not request.output_formats:
             raise HTTPException(status_code=400, detail="At least one output format is required")
+        from .case_routes import case_download_root, CaseAccessError
+        try:
+            output_root = case_download_root()
+        except CaseAccessError:
+            raise HTTPException(status_code=503, detail="case_handler_unavailable") from None
+        if request.output_dir is not None or request.email_timeline_handoff_path or request.email_authority_enrichment_path:
+            raise HTTPException(status_code=403, detail="host_path_not_permitted")
+        if request.enable_agentic_optimization or request.optimization_llm_config:
+            raise HTTPException(status_code=403, detail="case_processing_not_configured")
         build_kwargs = dict(
             user_id=request.user_id,
             court_name=request.court_name,
@@ -1566,7 +1587,7 @@ def create_document_router(mediator: Any) -> APIRouter:
             optimization_persist_artifacts=request.optimization_persist_artifacts,
             email_timeline_handoff_path=request.email_timeline_handoff_path,
             email_authority_enrichment_path=request.email_authority_enrichment_path,
-            output_dir=request.output_dir,
+            output_dir=str(output_root),
             output_formats=request.output_formats,
         )
         if request.optimization_llm_config:
@@ -1577,40 +1598,23 @@ def create_document_router(mediator: Any) -> APIRouter:
 
     @router.get("/api/documents/download")
     async def download_generated_document(path: str = Query(...)) -> FileResponse:
+        from .case_routes import case_download_root, CaseAccessError
+        try:
+            root = case_download_root()
+        except CaseAccessError:
+            raise HTTPException(status_code=503, detail="case_handler_unavailable") from None
         file_path = Path(path).resolve()
+        if not file_path.is_relative_to(root):
+            raise HTTPException(status_code=403, detail="case_download_denied")
         if not file_path.exists() or not file_path.is_file():
             raise HTTPException(status_code=404, detail="Generated document not found")
-        if not _is_allowed_download_path(file_path):
-            raise HTTPException(status_code=403, detail="Requested path is outside the generated documents directory")
         return FileResponse(path=str(file_path), filename=file_path.name)
 
     @router.get("/api/documents/optimization-trace")
     async def retrieve_optimization_trace(cid: str = Query(...)) -> Dict[str, Any]:
-        trace_result = retrieve_bytes(cid)
-        status = str(trace_result.get("status") or "")
-        if status == "unavailable":
-            raise HTTPException(
-                status_code=503,
-                detail=trace_result.get("error") or "Optimization trace backend unavailable",
-            )
-        if status != "available":
-            error_text = str(trace_result.get("error") or "Optimization trace could not be retrieved")
-            status_code = 404 if "not found" in error_text.lower() or "unknown cid" in error_text.lower() else 502
-            raise HTTPException(status_code=status_code, detail=error_text)
-
-        data = trace_result.get("data")
-        payload_bytes = data if isinstance(data, (bytes, bytearray)) else bytes(str(data or ""), "utf-8")
-        try:
-            trace_payload = json.loads(payload_bytes.decode("utf-8")) if payload_bytes else {}
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise HTTPException(status_code=502, detail=f"Optimization trace is not valid JSON: {exc}") from exc
-
-        return {
-            "status": "available",
-            "cid": cid,
-            "size": int(trace_result.get("size") or len(payload_bytes)),
-            "trace": trace_payload,
-        }
+        # A caller-selected CID has no per-case provenance. Later private
+        # artifact routes may admit a scoped reference; this legacy path may not.
+        raise HTTPException(status_code=403, detail="trace_reference_not_bound")
 
     return router
 
