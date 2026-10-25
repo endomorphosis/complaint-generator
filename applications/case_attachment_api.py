@@ -14,6 +14,8 @@ import base64
 from typing import Any, Mapping
 
 from starlette.requests import Request
+from starlette.concurrency import run_in_threadpool
+from applications.browser_sessions import BrowserSessionError, BrowserSessionService, SESSION_COOKIE
 
 from integrations.private_collaboration import (
     BROWSER_KEY_FIELDS,
@@ -42,7 +44,7 @@ class CaseAttachmentService:
     def store(self) -> SharedAttachmentStore:
         return self._store
 
-    def store_attachment(self, actor_principal_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
+    def store_attachment(self, actor_principal_id: str, body: Mapping[str, Any], *, verify_access=None) -> dict[str, Any]:
         material = self._body(body)
         content = self._content(material)
         session = self._session(actor_principal_id)
@@ -58,7 +60,7 @@ class CaseAttachmentService:
                 media_type=str(material.get("media_type") or ""),
                 content=content,
                 idempotency_key=str(material.get("idempotency_key") or ""),
-                owner_session=session,
+                owner_session=session, verify_access=verify_access,
             )
         version = material.get("membership_version")
         return self._store.store(
@@ -75,6 +77,7 @@ class CaseAttachmentService:
             membership_grant_id=material.get("membership_grant_id") if isinstance(material.get("membership_grant_id"), str) else None,
             membership_version=version if type(version) is int else None,
             key_grant_id=material.get("key_grant_id") if isinstance(material.get("key_grant_id"), str) else None,
+            verify_access=verify_access,
         )
 
     def list_attachments(self, actor_principal_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
@@ -89,7 +92,7 @@ class CaseAttachmentService:
             membership_version=version if type(version) is int else None,
         )
 
-    def download_attachment(self, actor_principal_id: str, attachment_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
+    def download_attachment(self, actor_principal_id: str, attachment_id: str, body: Mapping[str, Any], *, verify_access=None) -> dict[str, Any]:
         material = self._body(body)
         session = self._session(actor_principal_id)
         version = material.get("membership_version")
@@ -102,7 +105,7 @@ class CaseAttachmentService:
                 resource_id=str(material.get("resource_id") or ""),
                 attachment_id=attachment_id,
                 owner_session=session,
-                role=role,
+                role=role, verify_access=verify_access,
             )
         return self._store.download(
             actor_principal_id=actor_principal_id,
@@ -114,7 +117,7 @@ class CaseAttachmentService:
             membership_grant_id=material.get("membership_grant_id") if isinstance(material.get("membership_grant_id"), str) else None,
             membership_version=version if type(version) is int else None,
             key_grant_id=material.get("key_grant_id") if isinstance(material.get("key_grant_id"), str) else None,
-            role=role,
+            role=role, verify_access=verify_access,
         )
 
     def _session(self, actor_principal_id: str) -> UserOwnedKeySession:
@@ -158,6 +161,22 @@ def mount_case_attachments(app: Any) -> None:
             raise SharedAttachmentError("unauthenticated")
         return actor
 
+    def _session_verifier(request):
+        sessions = getattr(request.app.state, "browser_sessions", None)
+        bound = getattr(request.state, "browser_principal", None)
+        token = request.cookies.get(SESSION_COOKIE)
+        if not isinstance(sessions, BrowserSessionService) or bound is None:
+            raise SharedAttachmentError("unauthenticated")
+        def verify():
+            try:
+                current = sessions.authenticate_token(token)
+            except BrowserSessionError as exc:
+                raise SharedAttachmentError("unauthenticated") from exc
+            if (current.principal_id != bound.principal_id or current.tenant_id != bound.tenant_id
+                    or current.generation != bound.generation):
+                raise SharedAttachmentError("unauthenticated")
+        return verify
+
     def _material(request: Any) -> Mapping[str, Any]:
         material = getattr(request.state, "case_catalog_material", None)
         return material if isinstance(material, dict) else {}
@@ -168,7 +187,11 @@ def mount_case_attachments(app: Any) -> None:
     @app.post("/api/cases/attachments")
     async def attachment_store(request: Request):
         try:
-            created = _service(request).store_attachment(_actor(request), _material(request))
+            verify = _session_verifier(request)
+            verify()
+            created = await run_in_threadpool(_service(request).store_attachment, _actor(request),
+                _material(request), verify_access=verify)
+            verify()
         except SharedAttachmentError as exc:
             return _fail(exc)
         return JSONResponse(created, status_code=201)
@@ -176,13 +199,22 @@ def mount_case_attachments(app: Any) -> None:
     @app.get("/api/cases/attachments")
     async def attachment_list(request: Request):
         try:
-            return JSONResponse(_service(request).list_attachments(_actor(request), _material(request)))
+            verify = _session_verifier(request)
+            verify()
+            payload = await run_in_threadpool(_service(request).list_attachments, _actor(request), _material(request))
+            verify()
+            return JSONResponse(payload)
         except SharedAttachmentError as exc:
             return _fail(exc)
 
     @app.post("/api/cases/attachments/{attachment_id}/download")
     async def attachment_download(attachment_id: str, request: Request):
         try:
-            return JSONResponse(_service(request).download_attachment(_actor(request), attachment_id, _material(request)))
+            verify = _session_verifier(request)
+            verify()
+            payload = await run_in_threadpool(_service(request).download_attachment, _actor(request),
+                attachment_id, _material(request), verify_access=verify)
+            verify()
+            return JSONResponse(payload)
         except SharedAttachmentError as exc:
             return _fail(exc)

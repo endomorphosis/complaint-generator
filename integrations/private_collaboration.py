@@ -1571,6 +1571,7 @@ class SharedAttachmentStore:
         membership_grant_id: str | None = None,
         membership_version: int | None = None,
         key_grant_id: str | None = None,
+        verify_access: Any = None,
     ) -> dict[str, Any]:
         assess_attachment_content(filename=filename, media_type=media_type, content=content)
         blob = bytes(content)
@@ -1592,7 +1593,6 @@ class SharedAttachmentStore:
             if existing is not None:
                 if existing.get("identity") != identity:
                     raise SharedAttachmentError("replay_mismatch")
-                return self._public_view(existing["record"])
         owner_case = self._owner_case(identity["actor_principal_id"], identity["case_id"])
         data_key: bytes | None = None
         try:
@@ -1630,6 +1630,33 @@ class SharedAttachmentStore:
                 key_id = grant.data_key_id
                 canonical = grant.canonical_owner_principal_id
                 grant_id = grant.key_grant_id
+            def revalidate() -> None:
+                if verify_access is not None:
+                    verify_access()
+                if owner_case is not None:
+                    current = self._owner_case(identity["actor_principal_id"], identity["case_id"])
+                    if (current is None or current.tenant_id != owner_case.tenant_id
+                            or current.resource_id != owner_case.resource_id or current.revision != owner_case.revision):
+                        raise SharedAttachmentError("revision_conflict")
+                    binding = PrivateArtifactBinding(tenant_id=current.tenant_id, case_id=current.case_id,
+                        artifact_kind=ATTACHMENT_KIND, revision=revision, principal_id=current.tenant_id)
+                    live_key_id, live_key = owner_session.provider().resolve(binding)
+                else:
+                    current_grant, _current_decision, live_key = self._grants._authorize_delegated(
+                        actor_principal_id=identity["actor_principal_id"], membership_grant_id=membership_grant_id,
+                        membership_version=membership_version, key_grant_id=key_grant_id,
+                        case_id=identity["case_id"], tenant_id=identity["tenant_id"], resource_id=identity["resource_id"],
+                        artifact_kind=ATTACHMENT_KIND, artifact_revision=revision,
+                        recipient_session=recipient_session, action=WRITE_ACTION)
+                    live_key_id = current_grant.data_key_id
+                if live_key_id != key_id or live_key != data_key:
+                    raise SharedAttachmentError("key_changed")
+                if verify_access is not None:
+                    verify_access()
+
+            revalidate()
+            if existing is not None:
+                return self._public_view(existing["record"])
             attachment_id = _opaque_id()
             bodies = {
                 "content": blob,
@@ -1660,7 +1687,11 @@ class SharedAttachmentStore:
                 }, sort_keys=True, separators=(",", ":")).encode("utf-8")
                 envelopes[role] = self._seal(payload, tenant_id=identity["tenant_id"], case_id=identity["case_id"],
                                               revision=revision, canonical=canonical, key=data_key, key_id=key_id)
-            cids = {role: self._commit_ciphertext(envelope) for role, envelope in envelopes.items()}
+            cids = {}
+            for role, envelope in envelopes.items():
+                revalidate()
+                cids[role] = self._commit_ciphertext(envelope)
+            revalidate()
             record = {
                 "attachment_id": attachment_id,
                 "tenant_id": identity["tenant_id"],
@@ -1669,7 +1700,7 @@ class SharedAttachmentStore:
                 "revision": revision,
                 "canonical_owner_principal_id": canonical,
                 "actor_principal_id": identity["actor_principal_id"],
-                "actor_is_encrypted_owner": False,
+                "actor_is_encrypted_owner": identity["actor_principal_id"] == canonical,
                 "byte_length": len(blob),
                 "content_cid": cids["content"],
                 "preview_cid": cids["preview"],
@@ -1679,6 +1710,7 @@ class SharedAttachmentStore:
                 "replicated_ciphertext_only": True,
             }
             with self._locked():
+                revalidate()
                 again = self._idem(key_name)
                 if again is not None:
                     if again.get("identity") != identity:
@@ -1689,6 +1721,8 @@ class SharedAttachmentStore:
             return self._public_view(record)
         except CaseResourceKeyGrantError as exc:
             raise SharedAttachmentError(exc.code) from exc
+        except PrivateKeyMaterialError as exc:
+            raise SharedAttachmentError("key_unavailable") from exc
         finally:
             if data_key is not None:
                 _zero(data_key)
@@ -1710,7 +1744,7 @@ class SharedAttachmentStore:
                  attachment_id: str, owner_session: UserOwnedKeySession | None = None,
                  recipient_session: UserOwnedKeySession | None = None, membership_grant_id: str | None = None,
                  membership_version: int | None = None, key_grant_id: str | None = None,
-                 role: str = "content") -> dict[str, Any]:
+                 role: str = "content", verify_access: Any = None) -> dict[str, Any]:
         if role not in {"content", "preview", "derived-index"}:
             raise SharedAttachmentError("attachment_role_mismatch")
         record = self._load_bound(actor_principal_id, tenant_id, case_id, resource_id, attachment_id)
@@ -1725,13 +1759,40 @@ class SharedAttachmentStore:
                                                membership_grant_id, membership_version, key_grant_id)
         except CaseResourceKeyGrantError as exc:
             raise SharedAttachmentError(exc.code) from exc
-        payload = self._payload(opened["data"], record, role)
+        except PrivateKeyMaterialError as exc:
+            raise SharedAttachmentError("key_unavailable") from exc
+        try:
+            payload = self._payload(opened["data"], record, role)
+            current = self._owner_case(actor, record["case_id"])
+            if current is not None:
+                if current.tenant_id != record["tenant_id"] or current.resource_id != record["resource_id"]:
+                    raise SharedAttachmentError("resource_mismatch")
+                key = owner_session.lookup_data_key(record["tenant_id"], record["case_id"], _artifact_key_id(envelope))
+                if key is None:
+                    raise SharedAttachmentError("key_unavailable")
+            else:
+                _grant, _decision, key = self._grants._authorize_delegated(
+                    actor_principal_id=actor, membership_grant_id=membership_grant_id,
+                    membership_version=membership_version, key_grant_id=key_grant_id,
+                    case_id=record["case_id"], tenant_id=record["tenant_id"], resource_id=record["resource_id"],
+                    artifact_kind=ATTACHMENT_KIND, artifact_revision=record["revision"],
+                    recipient_session=recipient_session, action=DOWNLOAD_ACTION, artifact_key_id=_artifact_key_id(envelope))
+            _zero(key)
+            if verify_access is not None:
+                verify_access()
+        except CaseResourceKeyGrantError as exc:
+            raise SharedAttachmentError(exc.code) from exc
+        except PrivateKeyMaterialError as exc:
+            raise SharedAttachmentError("key_unavailable") from exc
         view = self._public_view(record)
         view["role"] = role
         view["filename"] = payload["filename"]
         view["media_type"] = payload["media_type"]
         view["content_base64"] = payload["body_b64"]
         view["delivered_after_grant_recheck"] = True
+        view["uploaded_by_principal_id"] = record["actor_principal_id"]
+        view["actor_principal_id"] = opened["actor_principal_id"]
+        view["key_grant_id"] = opened["key_grant_id"]
         view["actor_is_encrypted_owner"] = opened["actor_is_encrypted_owner"]
         view["canonical_owner_principal_id"] = opened["canonical_owner_principal_id"]
         return view
@@ -1784,7 +1845,8 @@ class SharedAttachmentStore:
             raise SharedAttachmentError("case_mismatch")
         if record["resource_id"] != _label(resource, "resource_id"):
             raise SharedAttachmentError("resource_mismatch")
-        if record["canonical_owner_principal_id"] == actor_id:
+        if (record["canonical_owner_principal_id"] == actor_id
+                and not self._verified_legacy_owner(actor_id, record)):
             raise SharedAttachmentError("owner_impersonation")
         return record
 
@@ -1802,10 +1864,12 @@ class SharedAttachmentStore:
             ("resource_id", record["resource_id"]),
             ("revision", record["revision"]),
             ("canonical_owner_principal_id", record["canonical_owner_principal_id"]),
+            ("actor_principal_id", record["actor_principal_id"]),
         ):
             if payload.get(field) != expected:
                 raise SharedAttachmentError("binding_mismatch")
-        if payload.get("actor_principal_id") == payload.get("canonical_owner_principal_id"):
+        if (payload.get("actor_principal_id") == payload.get("canonical_owner_principal_id")
+                and not self._verified_legacy_owner(payload["actor_principal_id"], record)):
             raise SharedAttachmentError("owner_impersonation")
         if not isinstance(payload.get("filename"), str) or not isinstance(payload.get("body_b64"), str):
             raise SharedAttachmentError("malformed")
@@ -1848,9 +1912,17 @@ class SharedAttachmentStore:
 
     def _owner_case(self, actor: str, case_id: str):
         try:
+            principal = self._grants._active(actor)
+            self._grants._reject_admin(principal)
             return self._grants._select(actor, case_id)
         except CaseResourceKeyGrantError:
             return None
+
+    def _verified_legacy_owner(self, actor: str, record: Mapping[str, Any]) -> bool:
+        case = self._owner_case(actor, record["case_id"])
+        return bool(case is not None and case.owner_principal_id == actor
+                    and case.tenant_id == actor == record["canonical_owner_principal_id"]
+                    and case.tenant_id == record["tenant_id"] and case.resource_id == record["resource_id"])
 
     def _public_view(self, record: Mapping[str, Any]) -> dict[str, Any]:
         private = ("filename", "media_type", "content_sha256", "tokens", "preview", "body_b64", "content_base64")
@@ -1864,7 +1936,7 @@ class SharedAttachmentStore:
             "revision": record["revision"],
             "canonical_owner_principal_id": record["canonical_owner_principal_id"],
             "actor_principal_id": record["actor_principal_id"],
-            "actor_is_encrypted_owner": False,
+            "actor_is_encrypted_owner": self._verified_legacy_owner(record["actor_principal_id"], record),
             "byte_length": record["byte_length"],
             "content_cid": record["content_cid"],
             "preview_cid": record["preview_cid"],
