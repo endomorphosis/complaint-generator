@@ -1482,7 +1482,7 @@ Implementation instructions:
 
 ## CIMP-GUI-50 Build minimal operational user and role administration
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
