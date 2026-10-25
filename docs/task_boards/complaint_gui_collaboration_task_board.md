@@ -552,7 +552,7 @@ Implementation instructions:
 
 ## CIMP-GUI-19 Render finite interview outcomes without false support
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
