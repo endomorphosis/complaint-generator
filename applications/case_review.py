@@ -19,8 +19,11 @@ from typing import Any, Dict, Mapping, MutableMapping
 from starlette.requests import Request
 
 TASK_ID = "CIMP-GUI-32"
+REVIEW_TRANSITION_TASK_ID = "CIMP-GUI-47"
 LAWYER_REVIEW_ROUTE = "/api/legal-analysis/{case_id}/lawyer-reviews"
 LAWYER_WORKSPACE_ROUTE = "/api/legal-analysis/{case_id}/lawyer-workspace"
+REVIEW_ITEMS_ROUTE = "/api/legal-analysis/{case_id}/review-items"
+REVIEW_TRANSITIONS_ROUTE = "/api/legal-analysis/{case_id}/review-transitions"
 _TEMPLATE = Path(__file__).resolve().parents[1] / "templates" / "lawyer_workspace.html"
 _BODY_CAP = 65536
 _HUMAN = "human_legal_review"
@@ -28,6 +31,14 @@ _MODEL = "model_suggestion"
 _MACHINE = "machine_proof"
 _KINDS = (_HUMAN, _MODEL, _MACHINE)
 _DECISIONS = {"approved", "rejected", "withheld"}
+_REVIEW_ITEM_TYPES = {"review_task", "review_comment", "review_proposal"}
+_REVIEW_CREATE = {
+    "create_task": "review_task",
+    "create_comment": "review_comment",
+    "create_proposal": "review_proposal",
+}
+_REVIEW_TARGETS = {"fact", "answer", "legal_admission", "draft_revision"}
+_REVIEW_STATE_KEYS = ("facts", "answers", "legal_admissions", "draft_revisions")
 _SOURCE_UNBOUND = "source-unbound"
 _FACTS_UNBOUND = "facts-unbound"
 _PROOF_UNBOUND = "proof-unbound"
@@ -44,8 +55,10 @@ def case_review_http_status(code: str) -> int:
         return 401
     if code in {"lawyer_review_field", "lawyer_review_bounds"}:
         return 422
-    if code in {"stale_revision", "stale_approval", "replay_mismatch"}:
+    if code in {"stale_revision", "stale_approval", "replay_mismatch", "stale_review_revision", "stale_target_revision"}:
         return 409
+    if code in {"review_field", "review_bounds"}:
+        return 422
     return 403
 
 
@@ -362,6 +375,258 @@ def submit_lawyer_review(mediator: Any, body: Mapping[str, Any], *, actor_princi
     return projected
 
 
+def _review_items(case_file: MutableMapping[str, Any]) -> list:
+    stored = case_file.get("collaborative_review_items")
+    if not isinstance(stored, list):
+        stored = []
+        case_file["collaborative_review_items"] = stored
+    return stored
+
+
+def _review_service(mediator: Any):
+    service = getattr(mediator, "workflow_service", None)
+    if service is not None and hasattr(service, "apply_authorized_review_transition"):
+        return service
+    from mediator.workflow_service import WorkflowActionService
+
+    service = WorkflowActionService(mediator)
+    mediator.workflow_service = service
+    return service
+
+
+def _state_view(case_file: Mapping[str, Any]) -> Dict[str, Any]:
+    state = case_file.get("review_case_state")
+    if not isinstance(state, dict):
+        state = {}
+    return {key: state.get(key) if isinstance(state.get(key), dict) else {} for key in _REVIEW_STATE_KEYS}
+
+
+def project_collaborative_reviews(case_file: Mapping[str, Any]) -> Dict[str, Any]:
+    """Project typed review items separately from case-state targets."""
+
+    items = [dict(item) for item in case_file.get("collaborative_review_items") or [] if isinstance(item, dict)]
+    state = case_file.get("review_case_state") if isinstance(case_file.get("review_case_state"), dict) else {}
+    support = [dict(item) for item in state.get("downstream_support") or [] if isinstance(item, dict)]
+    grouped = {kind: [item for item in items if item.get("item_type") == kind] for kind in sorted(_REVIEW_ITEM_TYPES)}
+    return {
+        "task_id": REVIEW_TRANSITION_TASK_ID,
+        "operation": "project_collaborative_reviews",
+        "status": "visible" if items or state else "empty",
+        "item_types": sorted(_REVIEW_ITEM_TYPES),
+        "items": items,
+        "review_tasks": grouped["review_task"],
+        "review_comments": grouped["review_comment"],
+        "review_proposals": grouped["review_proposal"],
+        "dissent": [item for item in items if item.get("operation") == "dissent"],
+        "acceptance_history": list(state.get("acceptance_history") or []),
+        "review_revision": int(state.get("review_revision") or 0) if type(state.get("review_revision")) is int else 0,
+        "facts": _state_view(case_file)["facts"],
+        "answers": _state_view(case_file)["answers"],
+        "legal_admissions": _state_view(case_file)["legal_admissions"],
+        "draft_revisions": _state_view(case_file)["draft_revisions"],
+        "downstream_support": support,
+        "comments_update_case_state": False,
+        "tasks_update_case_state": False,
+        "unaccepted_proposals_update_case_state": False,
+        "governing_legal_authority": False,
+        "legal_sufficiency": False,
+        "limitations": [
+            "Review tasks, comments, and proposals have explicit item types.",
+            "Only an authorized accepted review_proposal updates facts, answers, legal admissions, or draft revisions.",
+            "Concurrent acceptance uses the expected review revision and expected target revision.",
+            "Dissent and prior target history are preserved.",
+            "Downstream support for a replaced revision is invalidated and retained.",
+            "Acceptance is not governing law or legal sufficiency.",
+            "WebSocket and SSE transports are not supported.",
+        ],
+    }
+
+
+def _snapshot_targets(case_file: Mapping[str, Any]) -> str:
+    return json.dumps(_state_view(case_file), sort_keys=True, default=str)
+
+
+def submit_collaborative_review(mediator: Any, body: Mapping[str, Any], *, actor_principal_id: str,
+                                canonical_owner_principal_id: str, case_id: str, membership: str,
+                                authorized: bool) -> Dict[str, Any]:
+    """Record a typed review item. This path does not change case state."""
+
+    if membership not in {"assigned-lawyer", "owner"}:
+        raise CaseReviewError("lawyer_assignment_required")
+    if not isinstance(body, Mapping) or len(json.dumps(body, default=str)) > _BODY_CAP:
+        raise CaseReviewError("review_bounds")
+    operation = _text(body.get("operation"), limit=40, required=True)
+    if operation not in set(_REVIEW_CREATE) | {"dissent", "bind_support"}:
+        raise CaseReviewError("review_field")
+    case_file = _case_file(mediator)
+    before = _snapshot_targets(case_file)
+    items = _review_items(case_file)
+    request_id = _text(body.get("request_id"), limit=80, required=True)
+    for existing in items:
+        if isinstance(existing, dict) and existing.get("request_id") == request_id:
+            if existing.get("operation") != operation:
+                raise CaseReviewError("replay_mismatch")
+            projected = project_collaborative_reviews(case_file)
+            projected["record"] = dict(existing)
+            projected["replayed"] = True
+            return projected
+    if actor_principal_id == canonical_owner_principal_id:
+        raise CaseReviewError("actor_is_not_canonical_owner")
+    record: Dict[str, Any] = {
+        "task_id": REVIEW_TRANSITION_TASK_ID,
+        "request_id": request_id,
+        "operation": operation,
+        "actor_principal_id": actor_principal_id,
+        "canonical_owner_principal_id": canonical_owner_principal_id,
+        "actor_is_canonical_owner": False,
+        "membership": membership,
+        "case_id": case_id,
+        "updates_case_state": False,
+    }
+    if operation in _REVIEW_CREATE:
+        item_type = _REVIEW_CREATE[operation]
+        record["item_type"] = item_type
+        record["item_id"] = _digest("review-item", request_id + "\n" + item_type + "\n" + actor_principal_id)
+        record["body"] = _text(body.get("body"), limit=2000, required=True)
+        if item_type == "review_proposal":
+            target_kind = _text(body.get("target_kind"), limit=40, required=True)
+            if target_kind not in _REVIEW_TARGETS:
+                raise CaseReviewError("review_field")
+            record["target_kind"] = target_kind
+            record["target_id"] = _text(body.get("target_id"), limit=80, required=True)
+            record["proposed_text"] = _text(body.get("proposed_text"), limit=2000, required=True)
+            record["status"] = "proposed"
+        elif item_type == "review_task":
+            record["title"] = _text(body.get("title"), limit=200, required=True)
+            record["status"] = "open"
+        else:
+            record["proposal_id"] = _text(body.get("proposal_id"), limit=80, required=False)
+            record["status"] = "comment"
+    elif operation == "dissent":
+        proposal_id = _text(body.get("proposal_id"), limit=80, required=True)
+        proposal = next((item for item in items if item.get("item_id") == proposal_id and item.get("item_type") == "review_proposal"), None)
+        if proposal is None:
+            raise CaseReviewError("proposal_required")
+        record["item_type"] = "review_comment"
+        record["item_id"] = _digest("review-dissent", request_id + "\n" + proposal_id)
+        record["proposal_id"] = proposal_id
+        record["body"] = _text(body.get("body"), limit=2000, required=True)
+        record["dissent"] = True
+        record["status"] = "dissent"
+    else:
+        service = _review_service(mediator)
+        receipt = service.register_review_downstream_support(
+            case_id=case_id,
+            support_id=_text(body.get("support_id"), limit=80, required=True),
+            depends_on_kind=_text(body.get("depends_on_kind"), limit=40, required=True),
+            depends_on_id=_text(body.get("depends_on_id"), limit=80, required=True),
+            depends_on_revision=body.get("depends_on_revision"),
+            request_id=request_id,
+        )
+        if receipt.get("status") != "bound":
+            code = (receipt.get("error") or {}).get("code") or "review_field"
+            raise CaseReviewError(str(code))
+        record["item_type"] = "downstream_support_binding"
+        record["item_id"] = _digest("review-support", request_id)
+        record["support_id"] = body.get("support_id")
+        record["status"] = "support_bound"
+        record["body"] = "Downstream support is bound to the current target revision."
+    if _snapshot_targets(case_file) != before:
+        raise CaseReviewError("review_state_mutated")
+    items.append(record)
+    projected = project_collaborative_reviews(case_file)
+    projected["record"] = dict(record)
+    projected["replayed"] = False
+    return projected
+
+
+def accept_review_transition(mediator: Any, body: Mapping[str, Any], *, actor_principal_id: str,
+                             canonical_owner_principal_id: str, case_id: str, membership: str,
+                             authorized: bool) -> Dict[str, Any]:
+    """Accept one proposal into case state when the caller and revisions match."""
+
+    if not authorized or membership not in {"assigned-lawyer", "owner"}:
+        raise CaseReviewError("actor_not_permitted")
+    if not isinstance(body, Mapping) or len(json.dumps(body, default=str)) > _BODY_CAP:
+        raise CaseReviewError("review_bounds")
+    if _text(body.get("operation"), limit=40, required=True) != "accept":
+        raise CaseReviewError("not_an_accepted_transition")
+    case_file = _case_file(mediator)
+    items = _review_items(case_file)
+    request_id = _text(body.get("request_id"), limit=80, required=True)
+    proposal_id = _text(body.get("proposal_id"), limit=80, required=True)
+    proposal = next((item for item in items if item.get("item_id") == proposal_id), None)
+    if proposal is None:
+        raise CaseReviewError("proposal_required")
+    if proposal.get("item_type") != "review_proposal":
+        raise CaseReviewError("not_an_accepted_transition")
+    replacement = _text(body.get("replacement"), limit=2000, required=True)
+    if replacement != str(proposal.get("proposed_text") or ""):
+        raise CaseReviewError("proposal_mismatch")
+    target_kind = _text(body.get("target_kind"), limit=40, required=True)
+    target_id = _text(body.get("target_id"), limit=80, required=True)
+    if target_kind != proposal.get("target_kind") or target_id != proposal.get("target_id"):
+        raise CaseReviewError("proposal_mismatch")
+    for existing in items:
+        if existing.get("request_id") == request_id and existing.get("operation") == "accept":
+            projected = project_collaborative_reviews(case_file)
+            projected["record"] = dict(existing)
+            projected["replayed"] = True
+            projected["applied"] = False
+            return projected
+    dissent_ids = [item.get("item_id") for item in items if item.get("dissent") is True and item.get("proposal_id") == proposal_id]
+    service = _review_service(mediator)
+    receipt = service.apply_authorized_review_transition(
+        case_id=case_id,
+        actor_principal_id=actor_principal_id,
+        canonical_owner_principal_id=canonical_owner_principal_id,
+        authorized=True,
+        item_type="review_proposal",
+        item_id=proposal_id,
+        target_kind=target_kind,
+        target_id=target_id,
+        replacement=replacement,
+        expected_review_revision=body.get("expected_review_revision"),
+        expected_target_revision=body.get("expected_target_revision"),
+        request_id=request_id,
+    )
+    if receipt.get("status") != "applied":
+        code = (receipt.get("error") or {}).get("code") or "review_field"
+        raise CaseReviewError(str(code))
+    record = {
+        "task_id": REVIEW_TRANSITION_TASK_ID,
+        "request_id": request_id,
+        "operation": "accept",
+        "item_type": "review_proposal",
+        "item_id": _digest("review-accept", request_id + "\n" + proposal_id),
+        "proposal_id": proposal_id,
+        "actor_principal_id": actor_principal_id,
+        "canonical_owner_principal_id": canonical_owner_principal_id,
+        "actor_is_canonical_owner": False,
+        "membership": membership,
+        "case_id": case_id,
+        "target_kind": target_kind,
+        "target_id": target_id,
+        "target_revision": receipt["acceptance"]["target_revision"],
+        "review_revision": receipt["review_revision"],
+        "preserved_dissent_ids": dissent_ids,
+        "invalidated_support_ids": list(receipt.get("invalidated_support_ids") or []),
+        "updates_case_state": True,
+        "status": "accepted",
+        "governing_legal_authority": False,
+        "legal_sufficiency": False,
+    }
+    items.append(record)
+    projected = project_collaborative_reviews(case_file)
+    projected["record"] = record
+    projected["applied"] = True
+    projected["replayed"] = False
+    for dissent_id in dissent_ids:
+        if not any(item.get("item_id") == dissent_id for item in projected["dissent"]):
+            raise CaseReviewError("dissent_lost")
+    return projected
+
+
 def render_lawyer_workspace(projection: Mapping[str, Any]) -> str:
     """Fill the lawyer workspace template. The page does not treat stale rows as current."""
 
@@ -463,4 +728,60 @@ def mount_lawyer_review_routes(app: Any) -> None:
         payload["case_id"] = case_id
         payload["promotes_changed_law"] = False
         payload["promotes_changed_facts"] = False
+        return JSONResponse(payload)
+
+    def _review_actor(request: Request, case_id: str, *, write: bool):
+        mediator, decision, _revision = _authorized(request, case_id, write=write)
+        return mediator, decision
+
+    @app.get(REVIEW_ITEMS_ROUTE)
+    async def read_review_items(case_id: str, request: Request):
+        try:
+            mediator, _decision = _review_actor(request, case_id, write=False)
+            payload = project_collaborative_reviews(_case_file(mediator))
+        except CaseReviewError as exc:
+            return _fail(exc)
+        payload["case_id"] = case_id
+        return JSONResponse(payload)
+
+    @app.post(REVIEW_ITEMS_ROUTE)
+    async def write_review_item(case_id: str, request: Request):
+        try:
+            mediator, decision = _review_actor(request, case_id, write=True)
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise CaseReviewError("review_field")
+            payload = submit_collaborative_review(
+                mediator,
+                body,
+                actor_principal_id=str(getattr(decision, "actor_principal_id", "") or ""),
+                canonical_owner_principal_id=str(getattr(decision, "canonical_owner_principal_id", "") or ""),
+                case_id=case_id,
+                membership=str(getattr(decision, "membership", "") or ""),
+                authorized=str(getattr(decision, "action", "") or "") == "case.review",
+            )
+        except CaseReviewError as exc:
+            return _fail(exc)
+        payload["case_id"] = case_id
+        return JSONResponse(payload)
+
+    @app.post(REVIEW_TRANSITIONS_ROUTE)
+    async def write_review_transition(case_id: str, request: Request):
+        try:
+            mediator, decision = _review_actor(request, case_id, write=True)
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise CaseReviewError("review_field")
+            payload = accept_review_transition(
+                mediator,
+                body,
+                actor_principal_id=str(getattr(decision, "actor_principal_id", "") or ""),
+                canonical_owner_principal_id=str(getattr(decision, "canonical_owner_principal_id", "") or ""),
+                case_id=case_id,
+                membership=str(getattr(decision, "membership", "") or ""),
+                authorized=str(getattr(decision, "action", "") or "") == "case.review",
+            )
+        except CaseReviewError as exc:
+            return _fail(exc)
+        payload["case_id"] = case_id
         return JSONResponse(payload)
