@@ -852,7 +852,7 @@ Implementation instructions:
 
 ## CIMP-GUI-29 Attach canonical legal IR and source obligations
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
