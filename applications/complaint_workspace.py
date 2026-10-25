@@ -10344,6 +10344,31 @@ class ComplaintWorkspaceService:
             ledger = state.get("canonical_review_acceptances") or {}
             if not isinstance(ledger, dict):
                 raise CaseReviewStoreError("review_integrity")
+            def deliver(receipt, *, replayed):
+                # A valid earlier commit is never rolled back by a delivery
+                # refusal. Re-open current material and reprove both key
+                # owners, review CAS and browser authority after projection.
+                with private_revision_source_scope(self.joined_revision_repository(canonical, case_id)):
+                    _context, key_id, key = self._joined_key(canonical, case_id)
+                    current = self._load_state(canonical, case_id=case_id)
+                    saved = (current.get("canonical_review_acceptances") or {}).get(request_id)
+                    if not isinstance(saved, dict) or _canonical_review_sha(saved) != _canonical_review_sha(receipt):
+                        raise CaseReviewStoreError("stale_revision")
+                    graph = KnowledgeGraph.from_dict(current["shared_interview"]["knowledge_graph"])
+                    current_result = (graph_revision_token(graph) == receipt["result_graph_revision"]
+                        and current["shared_interview"]["session_revision"] == receipt["result_session_revision"]
+                        and current["private_revision"] == receipt["result_private_revision"])
+                    response = {**deepcopy(receipt), "applied": False if replayed else True,
+                        "replayed": replayed, "historically_applied": True, "current_result": current_result,
+                        "current_private_revision": current["private_revision"]}
+                    review_service.reprove_proposal_for_owner(actor, case_id=case_id, proposal_id=proposal_id,
+                        authority=authority, expected_review_revision=expected_review_revision,
+                        expected_record_sha256=receipt["proposal_record_sha256"])
+                    _context, current_key_id, current_key = self._joined_key(canonical, case_id)
+                    if (key_id, key) != (current_key_id, current_key):
+                        raise CaseReviewStoreError("revision_conflict")
+                    authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+                    return response
             existing = ledger.get(request_id)
             if existing is not None:
                 if (not isinstance(existing, dict) or existing.get("request_sha256") != fingerprint
@@ -10355,23 +10380,7 @@ class ComplaintWorkspaceService:
                     raise CaseReviewStoreError("review_integrity")
                 # Lost-response replay can outlive its own source revision,
                 # but cannot outlive changed authority or a changed proposal.
-                identity = self._case_legal_context_identity(state)
-                with private_revision_source_scope(self.joined_revision_repository(canonical, case_id)):
-                    current = self._load_state(canonical, case_id=case_id)
-                    if self._case_legal_context_identity(current) != identity:
-                        raise CaseReviewStoreError("stale_revision")
-                    review_service.reprove_proposal_for_owner(actor, case_id=case_id, proposal_id=proposal_id,
-                        authority=authority, expected_review_revision=expected_review_revision,
-                        expected_record_sha256=existing["proposal_record_sha256"])
-                    authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
-                    self._joined_key(canonical, case_id)
-                    graph = KnowledgeGraph.from_dict(current["shared_interview"]["knowledge_graph"])
-                    current_result = (graph_revision_token(graph) == existing["result_graph_revision"]
-                        and current["shared_interview"]["session_revision"] == existing["result_session_revision"]
-                        and current["private_revision"] == existing["result_private_revision"])
-                    return {**deepcopy(existing), "applied": False, "replayed": True,
-                        "historically_applied": True, "current_result": current_result,
-                        "current_private_revision": current["private_revision"]}
+                return deliver(existing, replayed=True)
             if any(isinstance(row, dict) and row.get("proposal_id") == proposal_id for row in ledger.values()):
                 raise CaseReviewStoreError("proposal_already_accepted")
             if (state.get("private_revision") != expected_private_revision
@@ -10406,9 +10415,7 @@ class ComplaintWorkspaceService:
                 _review_acceptance=context)
             if result.get("status") != "applied" or not isinstance(result.get("review_acceptance"), dict):
                 raise CaseReviewStoreError(str((result.get("error") or {}).get("code") or "review_transition_refused"))
-            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
-            return {**result["review_acceptance"], "replayed": False,
-                "historically_applied": True, "current_result": True}
+            return deliver(result["review_acceptance"], replayed=False)
         except WorkspaceAuthorizationDenied:
             raise CaseReviewStoreError("lawyer_review_ungranted") from None
         except (WorkspacePersistenceError, PrivateStorageError) as exc:
