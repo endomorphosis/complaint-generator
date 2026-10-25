@@ -1122,7 +1122,7 @@ Implementation instructions:
 
 ## CIMP-GUI-38 Verify ciphertext durability through Kit owners
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
