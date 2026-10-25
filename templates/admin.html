@@ -18,7 +18,7 @@
 <body data-admin-transport="http" data-websocket="unsupported" data-sse="unsupported" data-case-content="withheld">
 <main>
     <h1>Operational administration</h1>
-    <p id="transport-notice" class="notice">Account changes use ordinary HTTP requests. WebSocket and server-sent events are not used. This screen lists least-privilege account fields only. It does not decrypt or enumerate case narratives, messages, evidence, keys, or summaries. Audit history is a separate right from account administration. Signing in again is required after a reload because the CSRF token is kept in memory only.</p>
+    <p id="transport-notice" class="notice">Account changes use ordinary HTTP requests. WebSocket and server-sent events are not used. This screen lists least-privilege account fields only. It does not decrypt or enumerate case narratives, messages, evidence, keys, or summaries. Audit history is a separate right from account administration. Operations inspection shows case counts, assignment status, and storage or worker states without opening owner envelopes. Incident handling does not impersonate a case owner and does not grant case content. Signing in again is required after a reload because the CSRF token is kept in memory only.</p>
     <form id="admin-login">
         <label for="admin-credential">Credential</label>
         <input id="admin-credential" type="password" autocomplete="current-password" required>
@@ -55,6 +55,32 @@
             <button type="submit">Provision account</button>
         </form>
     </section>
+    <section id="operations-panel" hidden>
+        <h2>Operations</h2>
+        <button id="load-operations" type="button">Load operations</button>
+        <dl id="operations-counts"></dl>
+        <p id="operations-diagnostics" class="notice"></p>
+        <form id="operations-incident">
+            <label for="incident-scope">Incident scope</label>
+            <select id="incident-scope">
+                <option value="assignment">assignment</option>
+                <option value="storage">storage</option>
+                <option value="worker">worker</option>
+                <option value="support">support</option>
+            </select>
+            <label for="incident-code">Diagnostic code</label>
+            <select id="incident-code">
+                <option value="assignment_backlog">assignment_backlog</option>
+                <option value="storage_unresolved">storage_unresolved</option>
+                <option value="worker_stalled">worker_stalled</option>
+                <option value="support_unobserved">support_unobserved</option>
+                <option value="readback_mismatch">readback_mismatch</option>
+                <option value="backend_unavailable">backend_unavailable</option>
+            </select>
+            <button type="submit">Record incident</button>
+        </form>
+        <p id="incident-result" role="status"></p>
+    </section>
     <section id="audit-panel" hidden>
         <h2>Audit</h2>
         <button id="load-audit" type="button">Load audit</button>
@@ -90,6 +116,7 @@
             csrf = "";
             $("admin-auth-status").textContent = "Signed out";
             $("directory").hidden = true;
+            $("operations-panel").hidden = true;
             $("audit-panel").hidden = true;
         }
         if (!response.ok) throw new Error(payload.error || "request_failed");
@@ -142,6 +169,47 @@
         });
         $("admin-limitations").textContent = (payload.limitations || []).join(" ");
         $("audit-panel").hidden = false;
+        $("operations-panel").hidden = false;
+    }
+
+    function renderOperations(payload) {
+        var counts = $("operations-counts");
+        counts.replaceChildren();
+        var caseCounts = payload.case_counts || {};
+        var assignment = (payload.assignment_status || {}).counts || {};
+        var storage = payload.storage || {};
+        var workers = payload.workers || {};
+        var rows = [
+            ["Sealed owner indexes", caseCounts.sealed_owner_indexes],
+            ["Assigned cases", caseCounts.assigned_case_count],
+            ["Exact case count", caseCounts.exact_case_count_available],
+            ["Envelopes opened", caseCounts.envelopes_opened],
+            ["Pending assignments", assignment.pending],
+            ["Accepted assignments", assignment.accepted],
+            ["Storage readiness", storage.readiness],
+            ["Durable receipts", storage.durable_count],
+            ["Unresolved receipts", storage.unresolved_count],
+            ["Worker state", workers.state],
+            ["Worker queue", workers.queue_depth],
+            ["Case content granted", payload.case_content_granted],
+            ["Owner impersonated", payload.impersonated_case_owner]
+        ];
+        rows.forEach(function (pair) {
+            var term = document.createElement("dt");
+            term.textContent = pair[0];
+            var detail = document.createElement("dd");
+            detail.textContent = pair[1] === null || pair[1] === undefined ? "unobserved" : String(pair[1]);
+            counts.appendChild(term);
+            counts.appendChild(detail);
+        });
+        var codes = (payload.support_diagnostics || []).map(function (item) {
+            return item.code + ":" + item.count;
+        });
+        $("operations-diagnostics").textContent = codes.join(" ");
+    }
+
+    function loadOperations() {
+        return call("GET", "/api/admin/operations").then(renderOperations);
     }
 
     function loadAccounts() {
@@ -165,7 +233,8 @@
               signedIn = true;
               $("admin-auth-status").textContent = "Signed in";
               $("directory").hidden = false;
-              return loadAccounts();
+              $("operations-panel").hidden = false;
+              return loadAccounts().then(loadOperations);
           }).catch(function (error) { setError(error.message || "login_failed"); });
     });
 
@@ -182,6 +251,29 @@
         call("POST", "/api/admin/accounts", { account_kind: $("account-kind").value })
             .then(loadAccounts)
             .catch(function (error) { setError(error.message); });
+    });
+
+    $("load-operations").addEventListener("click", function () {
+        setError("");
+        loadOperations().catch(function (error) { setError(error.message); });
+    });
+
+    $("operations-incident").addEventListener("submit", function (event) {
+        event.preventDefault();
+        setError("");
+        call("POST", "/api/admin/operations/incidents", {
+            scope: $("incident-scope").value,
+            code: $("incident-code").value
+        }).then(function (payload) {
+            var incident = payload.incident || {};
+            $("incident-result").textContent = [
+                incident.code,
+                incident.scope,
+                "impersonated=" + incident.impersonated_case_owner,
+                "content=" + incident.case_content_granted
+            ].join(" ");
+            renderOperations(payload);
+        }).catch(function (error) { setError(error.message); });
     });
 
     $("load-audit").addEventListener("click", function () {

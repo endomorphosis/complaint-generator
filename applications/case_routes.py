@@ -329,6 +329,9 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
         raise CaseAccessError("operational_admin")
     mount_operational_admin(app)
     app.state.operational_admin = operational_admin
+    from .case_directory import CaseDirectory
+    directory = getattr(case_catalog, "_cases", None)
+    app.state.case_directory = directory if isinstance(directory, CaseDirectory) else None
     app.state.case_authorizer = authorizer
     app.state.browser_sessions = sessions
     app.state.case_handlers = case_handlers
