@@ -755,6 +755,42 @@ def _chromium_title_argv(argv: tuple[str, ...], chromium: PinnedExecutable, prof
     return argv
 
 
+def _chromium_process_argv(argv: tuple[str, ...], chromium: PinnedExecutable) -> tuple[str, ...]:
+    """Tokenize only after the caller has proved the actual executable."""
+    if (not argv or any(type(part) is not str or "\0" in part for part in argv)
+            or sum(len(part) for part in argv) > 65536):
+        raise BrowserCapabilityError("Chromium process arguments are invalid")
+    if len(argv) == 1 and argv[0] != chromium.path:
+        try:
+            argv = tuple(shlex.split(argv[0], posix=True))
+        except ValueError as exc:
+            raise BrowserCapabilityError("Chromium process title is malformed") from exc
+    if not argv or argv[0] != chromium.path:
+        raise BrowserCapabilityError("Chromium executable does not match the pin")
+    return argv
+
+
+def _chromium_role_argv(argv: tuple[str, ...], chromium: PinnedExecutable, profile: Path) -> tuple[str, tuple[str, ...]]:
+    """Classify a kernel-pinned process; this never proves browser custody."""
+    argv = _chromium_process_argv(argv, chromium)
+    if any(token in part for part in argv for token in _FORBIDDEN_ARGV_TOKENS):
+        raise BrowserCapabilityError("Chromium opened a TCP debugging port")
+    profiles = [part for part in argv if part.startswith("--user-data-dir")]
+    if profiles and profiles != ["--user-data-dir=" + str(profile)]:
+        raise BrowserCapabilityError("Chromium profile does not match the owned profile")
+    pipe_flags = [part for part in argv if part.startswith(_REQUIRED_CHROMIUM_ARG)]
+    if pipe_flags not in ([], [_REQUIRED_CHROMIUM_ARG]):
+        raise BrowserCapabilityError("Chromium CDP pipe arguments are invalid")
+    roles = [part for part in argv if part.startswith("--type")]
+    if not roles:
+        return "browser", argv
+    if len(roles) != 1 or roles[0] not in {
+        "--type=zygote", "--type=renderer", "--type=gpu-process", "--type=utility",
+    }:
+        raise BrowserCapabilityError("Chromium child role is unqualified")
+    return roles[0].split("=", 1)[1], argv
+
+
 def _assert_process_custody(node: PinnedExecutable, chromium: PinnedExecutable, profile: Path) -> None:
     table = _process_table()
     owner_pid = os.getpid()
@@ -783,13 +819,12 @@ def _assert_process_custody(node: PinnedExecutable, chromium: PinnedExecutable, 
         if parent != owner_pid:
             raise BrowserCapabilityError("Pinned Node is not owned by this validator")
         node_births[pid], node_chains[pid] = birth, chain
-    chromium_ok = False
-    for pid, (_ppid, argv, _exe) in table.items():
-        if str(profile) not in "\n".join(argv):
-            continue
+    records = {}
+
+    def joined(pid, argv):
         birth = _pinned_process(pid, chromium)
-        # Do not infer ownership from a process title. Every edge to the
-        # actual pinned Node driver is joined by current kernel births.
+        # Only current kernel edges join a Chromium process to our actual
+        # driver. A process title and a reused PID cannot supply that proof.
         chain = {pid: birth}
         parent = birth[0]
         while parent not in node_births and parent not in chain and len(chain) < 128:
@@ -797,16 +832,59 @@ def _assert_process_custody(node: PinnedExecutable, chromium: PinnedExecutable, 
             parent = chain[parent][0]
         if parent not in node_births:
             raise BrowserCapabilityError("Chromium is not owned by the pinned Node driver")
-        normalized = _chromium_title_argv(argv, chromium, profile)
-        if any(part.startswith("--type=") for part in normalized):
-            raise BrowserCapabilityError("Chromium profile belongs to a child rather than the browser")
-        chain.update(node_chains[parent])
-        chain[owner_pid] = owner_birth
+        role, normalized = _chromium_role_argv(argv, chromium, profile)
+        return {"birth": birth, "chain": chain, "node": parent,
+                "role": role, "argv": argv, "normalized": normalized}
+
+    # Locate the selected profile's unique browser root. Other disjoint
+    # contexts under this validator's Node are outside this profile's claim.
+    for pid, (_ppid, argv, _exe) in table.items():
+        if str(profile) not in "\n".join(argv):
+            continue
+        _pinned_process(pid, chromium)
+        normalized = _chromium_process_argv(argv, chromium)
+        profiles = [part for part in normalized if part.startswith("--user-data-dir")]
+        if (len(profiles) == 1 and profiles[0].startswith("--user-data-dir=")
+                and profiles[0] != "--user-data-dir=" + str(profile)):
+            continue  # A distinct well-formed profile is not this root claim.
+        if profiles:
+            records[pid] = joined(pid, argv)
+    roots = [pid for pid, row in records.items() if row["role"] == "browser"]
+    if not node_births or len(roots) != 1:
+        raise BrowserCapabilityError("Pinned Node or unique Chromium browser was not observed")
+    root = roots[0]
+    root_record = records[root]
+    # Preserve the original root contract, including its unique profile,
+    # exact CDP pipe and TCP refusal. Child classification cannot satisfy it.
+    _chromium_title_argv(root_record["argv"], chromium, profile)
+
+    # Inspect every pinned Chromium descendant of the proved root, including
+    # children that omit the profile flag or supply a different one. The table
+    # is only a negative prefilter; actual births rederive every admitted edge.
+    for pid, (_ppid, argv, _exe) in table.items():
+        if pid == root:
+            continue
+        cursor, seen = pid, set()
+        while cursor in table and cursor not in seen and cursor != root and len(seen) < 128:
+            seen.add(cursor)
+            cursor = table[cursor][0]
+        if cursor != root or _exe != chromium.path:
+            continue
+        birth = _process_birth(pid)
+        if birth[3] != chromium.path:
+            continue  # Non-browser helpers confer no Chromium custody.
+        if pid not in records:
+            records[pid] = joined(pid, argv)
+
+    for pid, row in records.items():
+        if pid != root:
+            if (row["role"] == "browser" or root not in row["chain"]
+                    or row["chain"][root] != root_record["birth"]
+                    or row["node"] != root_record["node"]):
+                raise BrowserCapabilityError("Chromium child is not owned through the pinned browser root")
+        chain = {**row["chain"], **node_chains[row["node"]], owner_pid: owner_birth}
         if any(_process_birth(member) != identity for member, identity in chain.items()):
             raise BrowserCapabilityError("Browser ancestry changed during verification")
-        chromium_ok = True
-    if not node_births or not chromium_ok:
-        raise BrowserCapabilityError("Pinned Node or Chromium process was not observed")
 
 
 def await_owned_browser_cleanup(pids: set[int], *, deadline_seconds: float = OWNED_BROWSER_CLEANUP_SECONDS) -> dict[str, Any]:

@@ -76,3 +76,33 @@ def test_actual_profile_child_keeps_unique_root_custody(tmp_path):
     with _real_profile_child(tmp_path) as (node,chromium,profile,children):
         assert any(row['pipe_count']==0 for row in children)
         browser._assert_process_custody(node,chromium,profile)
+
+
+@pytest.mark.parametrize('extra', [
+    ['--remote-debugging-port=9222'], ['--remote-debugging-port','9222'],
+    ['--remote-debugging-address=127.0.0.1'], ['--user-data-dir=/foreign'],
+    ['--user-data-dir','/foreign'], ['--type=unknown'], ['--type=renderer','--type=utility'],
+    ['--type'], ['--remote-debugging-pipe=extra'],
+])
+def test_child_argument_policy_refuses_unqualified_flags(tmp_path,extra):
+    # Pure parser controls confer no process ownership or browser qualification.
+    pin=browser.PinnedExecutable('synthetic-chromium','/synthetic/chrome','0'*64,('/synthetic/chrome',))
+    with pytest.raises(browser.BrowserCapabilityError):
+        browser._chromium_role_argv((pin.path,'--type=renderer',*extra),pin,tmp_path)
+
+
+@pytest.mark.parametrize('role',['zygote','renderer','gpu-process','utility'])
+def test_child_profile_may_be_absent_but_supplied_profile_is_exact(tmp_path,role):
+    pin=browser.PinnedExecutable('synthetic-chromium','/synthetic/chrome','0'*64,('/synthetic/chrome',))
+    for profile in [[],['--user-data-dir='+str(tmp_path)]]:
+        label,_=browser._chromium_role_argv((pin.path,'--type='+role,*profile),pin,tmp_path)
+        assert label==role
+    with pytest.raises(browser.BrowserCapabilityError):
+        browser._chromium_role_argv((pin.path,'--type='+role,'--user-data-dir='+str(tmp_path)+'-other'),pin,tmp_path)
+
+
+def test_root_parser_still_requires_unique_pipe_and_profile(tmp_path):
+    pin=browser.PinnedExecutable('synthetic-chromium','/synthetic/chrome','0'*64,('/synthetic/chrome',))
+    for extra in [[],['--user-data-dir='+str(tmp_path)],['--remote-debugging-pipe']]:
+        with pytest.raises(browser.BrowserCapabilityError):
+            browser._chromium_title_argv((pin.path,*extra),pin,tmp_path)
