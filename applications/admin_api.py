@@ -115,6 +115,9 @@ ADMIN_LIMITATIONS = (
     "incident_handling_does_not_impersonate_case_owner",
     "incident_handling_does_not_grant_case_content",
     "support_diagnostics_are_bounded_codes",
+    "audit_export_requires_purpose_current_grant_and_explicit_fields",
+    "private_audit_exports_stay_encrypted_until_explicit_user_decryption",
+    "direct_audit_download_is_denied",
 )
 
 
@@ -149,6 +152,7 @@ class OperationalAdminService:
         storage: Any = None,
         assignments: Any = None,
         workers: Callable[[], Sequence[Mapping[str, Any]]] | None = None,
+        case_audit: Any = None,
     ) -> None:
         if not isinstance(principals, PrincipalStore) or not isinstance(sessions, BrowserSessionService):
             raise OperationalAdminError("authority_owners")
@@ -157,6 +161,9 @@ class OperationalAdminService:
         if not isinstance(audit_principal_ids, Sequence) or isinstance(audit_principal_ids, (str, bytes)):
             raise OperationalAdminError("authority_owners")
         if workers is not None and not callable(workers):
+            raise OperationalAdminError("authority_owners")
+        from applications.case_audit import CaseAuditStore
+        if case_audit is not None and not isinstance(case_audit, CaseAuditStore):
             raise OperationalAdminError("authority_owners")
         self._principals = principals
         self._sessions = sessions
@@ -167,6 +174,7 @@ class OperationalAdminService:
         self._assignments = assignments
         self._workers = workers
         self._audit_readers = {str(item) for item in audit_principal_ids}
+        self._case_audit = case_audit
         self._events: list[dict[str, Any]] = []
         self._incidents: list[dict[str, Any]] = []
 
@@ -408,6 +416,56 @@ class OperationalAdminService:
             "case_content": None,
             "limitations": list(ADMIN_LIMITATIONS),
         }
+
+    def export_audit(
+        self,
+        actor_principal_id: str,
+        session_roles: Sequence[str],
+        body: Mapping[str, Any],
+        *,
+        verify_access: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        """Export operational audit rows through the sealed case-audit owner.
+
+        A role claim in the body is forged. The current audit-right grant is
+        the actor's roster revision. Case content is not opened.
+        """
+
+        from applications.case_audit import CaseAuditError, CaseAuditStore
+
+        if not isinstance(body, Mapping):
+            raise OperationalAdminError("request_body")
+        self._reject_content_request(body)
+        if any(name in body for name in ("role", "roles", "staff_role", "is_admin", "is_staff", "is_lawyer")):
+            raise OperationalAdminError("forged_role")
+        actor = self._require_admin(actor_principal_id, session_roles)
+        if actor.principal_id not in self._audit_readers:
+            raise OperationalAdminError("audit_right_required")
+        store = self._case_audit
+        if not isinstance(store, CaseAuditStore):
+            raise OperationalAdminError("audit_export_unavailable")
+        # Bind the authenticated caller even for in-process callers. A second
+        # admin's public identifier is not authority to export that actor's rows.
+        material = dict(body)
+        if material.get("actor_principal_id") != actor.principal_id:
+            raise OperationalAdminError("unauthenticated")
+        def admit() -> None:
+            if verify_access is not None:
+                if verify_access() is False:
+                    raise OperationalAdminError("unauthenticated")
+            current = self._require_admin(actor_principal_id, session_roles)
+            if current.revision != actor.revision or current.principal_id not in self._audit_readers:
+                raise OperationalAdminError("audit_right_required")
+        try:
+            return store.export_operational_from_request(
+                material,
+                session_roles=tuple(actor.roles),
+                events=tuple(self._events),
+                audit_reader=True,
+                verify_access=admit,
+            )
+        except CaseAuditError as exc:
+            raise OperationalAdminError(exc.code) from exc
 
     def _least(self, record: PrincipalRecord) -> dict[str, Any]:
         view = {
@@ -760,7 +818,7 @@ def admin_http_status(code: str) -> int:
         return 401
     if code == "revision_conflict":
         return 409
-    if code == "admin_unavailable":
+    if code in {"admin_unavailable", "audit_export_unavailable"}:
         return 503
     if code == "missing_principal":
         return 404
@@ -773,6 +831,8 @@ def mount_operational_admin(app: Any) -> None:
     """Mount the directory page and API. Session checks run in case route composition."""
 
     from fastapi.responses import HTMLResponse, JSONResponse
+    from starlette.concurrency import run_in_threadpool
+    from applications.case_audit import CaseAuditError, audit_export_session_verifier
 
     root_page = __import__("pathlib").Path(__file__).resolve().parent.parent / "templates" / "admin.html"
 
@@ -880,3 +940,22 @@ def mount_operational_admin(app: Any) -> None:
             return JSONResponse(_service(request).audit_log(actor, roles))
         except OperationalAdminError as exc:
             return _fail(exc)
+
+    @app.post(ADMIN_API_PREFIX + "/audit/export")
+    async def admin_audit_export(request: Request):
+        try:
+            actor, roles = _actor(request)
+            verify = audit_export_session_verifier(request)
+            payload = await run_in_threadpool(_service(request).export_audit, actor, roles,
+                                             _material(request), verify_access=verify)
+            verify()
+            return JSONResponse(payload)
+        except CaseAuditError as exc:
+            return _fail(OperationalAdminError(exc.code))
+        except OperationalAdminError as exc:
+            return _fail(exc)
+
+    @app.get(ADMIN_API_PREFIX + "/audit/exports/{export_id}")
+    async def admin_audit_export_download(export_id: str):
+        del export_id
+        return JSONResponse({"error": "direct_download_denied"}, status_code=403)

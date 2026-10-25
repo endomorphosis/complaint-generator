@@ -23,6 +23,7 @@ from starlette.requests import Request
 
 from .browser_sessions import BrowserSessionError, BrowserSessionService, SESSION_COOKIE, browser_session_http_status
 from .case_access import BOUNDARIES, CaseAccessError, CaseActionAuthorizer
+from .case_audit import path_targets_audit_download
 from .case_directory import CaseNamespace
 
 CASE_ROUTE_KINDS = ("case", "graph", "message", "admin")
@@ -31,6 +32,8 @@ PROTECTED_PREFIXES = ("/api/complaint-workspace", "/api/claim-support", "/api/do
 CASE_CATALOG_PREFIX = "/api/cases"
 CASE_PAGE_PATH = "/cases"
 ADMIN_API_PREFIX = "/api/admin"
+AUDIT_EXPORT_PATH = "/api/cases/audit-exports"
+ADMIN_AUDIT_EXPORT_PATH = "/api/admin/audit/export"
 MESSAGE_INBOX_PATH = "/case-messages"
 MESSAGE_INBOX_SCRIPT_PATH = "/static/complaint_case_messages.js"
 GRANT_CONTROL_PATH = "/case-grants"
@@ -219,7 +222,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
                         case_consent: Any = None, gui_inference_transport: Any = None,
                         gui_inference_route: Any = None,
                         operational_admin: Any = None, case_reviews: Any = None,
-                        case_notifications: Any = None) -> Any:
+                        case_notifications: Any = None, case_audit: Any = None) -> Any:
     """Mount the same fail-closed boundary in every production app variant.
 
     Historical mediator/workspace arguments grant no ambient case access.
@@ -339,10 +342,15 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
             raise CaseAccessError(code)
     mount_lawyer_review_routes(app)
     from .admin_api import OperationalAdminService, mount_operational_admin
+    from .case_audit import CaseAuditStore
     if operational_admin is not None and not isinstance(operational_admin, OperationalAdminService):
         raise CaseAccessError("operational_admin")
+    if case_audit is not None and not isinstance(case_audit, CaseAuditStore):
+        raise CaseAccessError("case_audit")
     mount_operational_admin(app)
+    _mount_case_audit_exports(app)
     app.state.operational_admin = operational_admin
+    app.state.case_audit = case_audit
     from .case_directory import CaseDirectory
     directory = getattr(case_catalog, "_cases", None)
     app.state.case_directory = directory if isinstance(directory, CaseDirectory) else None
@@ -370,6 +378,50 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     app.add_middleware(CaseRouteAuthorizationMiddleware, authorizer=authorizer, sessions=sessions,
                        case_handlers=case_handlers, extensions=extensions, json_body_limits=limits)
     return app
+
+
+def _mount_case_audit_exports(app: Any) -> None:
+    """Case-scoped audit export. Direct file reads are not this route."""
+
+    from fastapi.responses import JSONResponse
+    from starlette.concurrency import run_in_threadpool
+
+    from .case_audit import CaseAuditError, CaseAuditStore, audit_export_session_verifier
+
+    def _store(request: Any) -> CaseAuditStore:
+        store = getattr(request.app.state, "case_audit", None)
+        if not isinstance(store, CaseAuditStore):
+            raise CaseAuditError("audit_export_unavailable")
+        return store
+
+    def _actor(request: Any) -> Any:
+        principal = getattr(request.state, "browser_principal", None)
+        actor = getattr(principal, "principal_id", None)
+        roles = getattr(principal, "roles", None)
+        if not isinstance(actor, str) or actor == "" or not isinstance(roles, tuple):
+            raise CaseAuditError("unauthenticated")
+        return principal
+
+    @app.post(AUDIT_EXPORT_PATH)
+    async def export_case_audit(request: Request):
+        try:
+            principal = _actor(request)
+            material = getattr(request.state, "case_catalog_material", None)
+            body = dict(material) if isinstance(material, dict) else {}
+            body["actor_principal_id"] = principal.principal_id
+            verify = audit_export_session_verifier(request)
+            payload = await run_in_threadpool(_store(request).export_from_request, body,
+                                             session_roles=principal.roles, verify_access=verify)
+            verify()
+        except CaseAuditError as exc:
+            status = 503 if exc.code == "audit_export_unavailable" else 403
+            return JSONResponse({"error": exc.code}, status_code=status)
+        return JSONResponse(payload)
+
+    @app.get(AUDIT_EXPORT_PATH + "/{export_id}")
+    async def download_case_audit_export(export_id: str):
+        del export_id
+        return JSONResponse({"error": "direct_download_denied"}, status_code=403)
 
 
 def _mount_grant_control(app: Any) -> None:
@@ -749,6 +801,9 @@ class CaseRouteAuthorizationMiddleware:
             await self.app(scope, receive, send)
             return
         path = _path_of(scope)
+        if scope.get("method") in {"GET", "HEAD"} and path_targets_audit_download(path, (scope.get("query_string") or b"").decode("latin1")):
+            await self._deny(scope, send, 403, "direct_download_denied")
+            return
         if path in RETIRED_EXACT_PATHS:
             await self._deny(scope, send, 401, "legacy_route_retired")
             return
@@ -861,6 +916,8 @@ class CaseRouteAuthorizationMiddleware:
                 material = _material_from_scope(scope, body)
                 if material.get("trusted_local") is True or material.get("trust") == "trusted_local" or "trusted_local" in material:
                     raise CaseAccessError("trusted_local_not_production")
+                if path == AUDIT_EXPORT_PATH and any(name in material for name in ("role", "roles", "staff_role", "is_admin", "is_staff", "is_lawyer")):
+                    raise CaseAccessError("forged_role")
                 if any(name in material for name in PRIVILEGE_BODY_FIELDS):
                     raise CaseAccessError("request_cannot_mint_authority")
             else:
@@ -893,6 +950,7 @@ class CaseRouteAuthorizationMiddleware:
 
         from .case_access import PRIVILEGE_BODY_FIELDS
 
+        path = _path_of(scope)
         body, inbound = b"", receive
         try:
             await self.sessions.bind_http(_credential_request(scope), allow_anonymous=False)
@@ -903,6 +961,8 @@ class CaseRouteAuthorizationMiddleware:
             material = _material_from_scope(scope, body)
             if material.get("trusted_local") is True or material.get("trust") == "trusted_local" or "trusted_local" in material:
                 raise CaseAccessError("trusted_local_not_production")
+            if path == ADMIN_AUDIT_EXPORT_PATH and any(name in material for name in ("role", "roles", "staff_role", "is_admin", "is_staff", "is_lawyer")):
+                raise CaseAccessError("forged_role")
             if any(name in material for name in PRIVILEGE_BODY_FIELDS):
                 raise CaseAccessError("request_cannot_mint_authority")
         except BrowserSessionError as exc:
