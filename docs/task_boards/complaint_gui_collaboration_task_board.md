@@ -1302,7 +1302,7 @@ Implementation instructions:
 
 ## CIMP-GUI-44 Build the user and lawyer conversation inbox
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
