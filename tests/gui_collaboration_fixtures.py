@@ -298,6 +298,106 @@ def proof_body(*, status: str) -> dict:
     }
 
 
+def owner_lawyer_journey_world(tmp_path: Path, *, previous=None):
+    """Real shared owners; empty invitations/reviews, or fresh encrypted readers.
+
+    Case/key provisioning is an operator fixture action. The test performs the
+    intake, invitation, acceptance, sharing, messages and review through the
+    mounted app. Reopening constructs fresh services/wallets at the same roots;
+    it never copies the decrypted case, mediator, or a rendered response.
+    """
+    import time
+    from applications.case_api import CaseCatalog
+    from applications.case_access import CaseActionAuthorizer
+    from applications.case_assignment_api import CaseAssignmentService
+    from applications.case_consent_api import CaseConsentService
+    from applications.case_membership import CaseMembershipStore
+    from applications.case_message_api import CaseMessageService
+    from applications.case_messages import CaseMessageStore
+    from applications.case_review_store import CaseReviewService
+    from applications.case_routes import CaseHandlerRegistry
+    from applications.complaint_workspace import ComplaintWorkspaceService
+    from applications.browser_sessions import PrincipalStoreCredentialAdapter
+    from applications.review_ui import attach_static_asset_routes
+    from applications.site_ui import attach_core_site_ui_routes
+    from integrations.private_collaboration import CaseResourceKeyGrantStore
+    from tests.test_cimp_gui_14 import PASSPHRASE
+
+    # These keys are authored, in-memory operator fixture configuration. No
+    # browser receives them, and no production key/profile is inspected.
+    if previous is None:
+        keys = {name: os.urandom(32) for name in
+                ('principals', 'cases', 'memberships', 'grants', 'messages', 'consent', 'cookies')}
+        now = {'t': int(time.time())}
+    else:
+        keys, now = previous.fixture_keys, previous.now
+    clock = lambda: now['t']
+    if previous is None:
+        principals = PrincipalStore(tmp_path/'principals', key=keys['principals'], key_id='journey-principals')
+        cases = CaseDirectory(tmp_path/'cases', key=keys['cases'], key_id='journey-cases')
+        authorizer = CaseActionAuthorizer(principals, cases)
+    else:
+        # Cold scope is the workspace, wallets and encrypted domain stores,
+        # not a claim that process-local operator policy became durable.
+        principals, cases, authorizer = previous.principals, previous.cases, previous.authorizer
+    catalog = CaseCatalog(cases, authorizer, key=keys['cases'], key_id='journey-cases')
+    if previous is None:
+        owner = principals.register_from_request({})
+        lawyer = principals.install_server_role(role='lawyer')
+        stranger = principals.register_from_request({})
+        created = catalog.create(owner.principal_id, {'label':'owner-lawyer-journey'})
+        case = cases.select_case(actor_principal_id=owner.principal_id, case_id=created['case_id'])
+    else:
+        owner, lawyer, stranger = previous.owner, previous.lawyer, previous.stranger
+        case = cases.select_case(actor_principal_id=owner.principal_id, case_id=previous.case.case_id)
+    service_root = tmp_path/'workspace'
+    service = ComplaintWorkspaceService(root_dir=service_root)
+    if previous is None:
+        service.initialize_private_keys(protection='passphrase', passphrase=PASSPHRASE)
+        service.ensure_private_case_key(case.tenant_id, case.case_id)
+    else:
+        assert service.unlock_private_keys(passphrase=PASSPHRASE)['unlocked'] is True
+    owner_keys = UserOwnedKeySession(service_root/'private-keys')
+    owner_keys.unlock_passphrase(PASSPHRASE)
+    recipient = UserOwnedKeySession(tmp_path/'recipient-keys')
+    if previous is None:
+        recipient.create(protection='passphrase', passphrase='synthetic-recipient-password')
+    else:
+        recipient.unlock_passphrase('synthetic-recipient-password')
+    wallets = {owner.principal_id:owner_keys, lawyer.principal_id:recipient}
+    memberships = CaseMembershipStore(tmp_path/'memberships', key=keys['memberships'], key_id='journey-memberships',
+        principals=principals, cases=cases, clock=clock)
+    grants = CaseResourceKeyGrantStore(tmp_path/'grants', key=keys['grants'], key_id='journey-grants',
+        principals=principals, cases=cases, memberships=memberships)
+    assignments = CaseAssignmentService(principals=principals, cases=cases, memberships=memberships,
+        key_grants=grants, sessions=wallets, clock=clock)
+    messages = CaseMessageStore(tmp_path/'messages', key=keys['messages'], key_id='journey-messages',
+        principals=principals, cases=cases, memberships=memberships, clock=clock)
+    reviews = CaseReviewService(tmp_path/'reviews', cases=cases, authorizer=authorizer,
+        memberships=memberships, grants=grants, sessions=wallets)
+    reviews.bind_case(case, service)
+    handlers = CaseHandlerRegistry()
+    handlers.bind(case, mediator=service, workspace_service=service, authorize_delegated=reviews.authorize_bound)
+    sessions = BrowserSessionService(BrowserSessionConfiguration(
+        adapter=PrincipalStoreCredentialAdapter(principals, {
+            'synthetic-owner-credential':owner.principal_id,
+            'synthetic-lawyer-credential':lawyer.principal_id,
+            'synthetic-stranger-credential':stranger.principal_id}),
+        signing_key=keys['cookies'], ttl_seconds=1800), clock=clock)
+    consent = CaseConsentService(tmp_path/'consent', cases=cases, key=keys['consent'], key_id='journey-consent', clock=clock)
+    app = FastAPI()
+    compose_case_routes(app, authorizer=authorizer, browser_sessions=sessions, case_handlers=handlers,
+        case_catalog=catalog, case_assignments=assignments, case_messages=CaseMessageService(messages),
+        case_reviews=reviews, case_consent=consent, include_review=False, include_document=False)
+    attach_static_asset_routes(app)
+    attach_core_site_ui_routes(app)
+    return SimpleNamespace(app=app, service=service, service_root=service_root, root=tmp_path,
+        case=case, journey_case=case, principals=principals, cases=cases, authorizer=authorizer,
+        owner=owner, lawyer=lawyer, stranger=stranger, sessions=sessions, memberships=memberships,
+        grants=grants, assignments=assignments, messages=messages, reviews=reviews, recipient=recipient,
+        owner_keys=owner_keys, consent=consent, now=now, fixture_keys=keys)
+
+
 def workflow_case(*, corrupt_snapshot: bool = False) -> dict:
     if corrupt_snapshot:
         return {
