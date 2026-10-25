@@ -102,3 +102,35 @@ def test_review_operation_id_cannot_replay_different_context_fields(tmp_path):
     changed["jurisdiction"] = "different-explicit-scope"
     with pytest.raises(LegalResearchError, match="legal_research_revision_conflict"):
         review_versioned_authority(mediator, object(), authority, changed, membership="owner")
+
+
+def test_reviewed_source_manifest_reverifies_actual_prepared_record_and_claim_join(tmp_path):
+    from applications.legal_research_api import verified_reviewed_source_records
+    mediator, case_file, authority, acquisition, candidate = _real_source(tmp_path)
+    _index_acquired_passages(case_file, acquisition)
+    scope = "a" * 64
+    result = review_versioned_authority(mediator, object(), authority, _unknown_review(candidate),
+        membership="owner", canonical_owner_principal_id="synthetic-canonical-owner", source_scope_sha256=scope)
+    assert result["source_status"] == "source_admitted"
+    actual = verified_reviewed_source_records(case_file, source_scope_sha256=scope)
+    assert set(actual) == {"termination"}
+    assert actual["termination"] == [result["source_admission"]["record"]]
+    assert actual["termination"][0]["content"] == candidate["source_text"]
+    actual["termination"][0]["content"] = "edited returned copy"
+    assert verified_reviewed_source_records(case_file, source_scope_sha256=scope)["termination"][0]["content"] == candidate["source_text"]
+    for changed in ("scope", "record", "canonical", "claim", "latest"):
+        draft = deepcopy(case_file)
+        entry = next(iter(draft["legal_source_passage_index"].values()))
+        if changed == "scope":
+            entry["source_admission"]["source_scope_sha256"] = "b" * 64
+        elif changed == "record":
+            entry["reviewed_source_record"]["content"] += " forged law"
+        elif changed == "canonical":
+            entry["canonical_source"]["source_text"] += " substituted source"
+        elif changed == "claim":
+            entry["source_admission"]["claim_record_ids"] = {"termination": [99999999]}
+        else:
+            draft["legal_authority_admissions"].append({"content_hash": candidate["retrieval"]["content_hash"], "source_status": "not_admitted"})
+        with pytest.raises(LegalResearchError, match="legal_research_revision_conflict"):
+            verified_reviewed_source_records(draft, source_scope_sha256=scope)
+    assert verified_reviewed_source_records({}, source_scope_sha256=scope) == {}

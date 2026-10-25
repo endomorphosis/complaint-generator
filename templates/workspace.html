@@ -5799,6 +5799,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                         <div>
                             <label for="legal-admission-applicability">Applicability</label>
                             <select id="legal-admission-applicability">
+                                <option value="unknown">Unknown case applicability</option>
                                 <option value="applicable">applicable</option>
                                 <option value="limited">limited</option>
                                 <option value="inapplicable">inapplicable</option>
@@ -5807,6 +5808,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                         <div>
                             <label for="legal-admission-treatment">Treatment state</label>
                             <select id="legal-admission-treatment">
+                                <option value="unknown">Unknown treatment</option>
                                 <option value="good_law">good_law</option>
                                 <option value="distinguished">distinguished</option>
                                 <option value="questioned">questioned</option>
@@ -5816,7 +5818,13 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                         </div>
                     </div>
                     <div>
-                        <label for="legal-admission-exceptions">Exceptions</label>
+                        <label for="legal-admission-exceptions-state">Source exception information</label>
+                        <select id="legal-admission-exceptions-state">
+                            <option value="unknown">Unknown</option>
+                            <option value="listed">Use the listed source exceptions</option>
+                            <option value="none">Source explicitly lists no exceptions</option>
+                        </select>
+                        <label for="legal-admission-exceptions">Listed exceptions</label>
                         <input id="legal-admission-exceptions" type="text" autocomplete="off" placeholder="Separate exact exceptions with a vertical bar">
                     </div>
                     <div>
@@ -6303,7 +6311,8 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                 effective_date: document.getElementById('legal-admission-effective-date').value.trim(),
                 applicability: document.getElementById('legal-admission-applicability').value,
                 treatment_state: document.getElementById('legal-admission-treatment').value,
-                exceptions: exceptions,
+                exceptions: document.getElementById('legal-admission-exceptions-state').value === 'unknown' ? null
+                    : (document.getElementById('legal-admission-exceptions-state').value === 'none' ? [] : exceptions),
                 content_hash: document.getElementById('legal-admission-hash').value.trim(),
                 source_passage: document.getElementById('legal-admission-passage').value
             };
@@ -6317,7 +6326,10 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             node.dataset.status = payload.status || (admitted ? 'admitted' : 'unresolved');
             node.textContent = 'Status ' + (payload.status || node.dataset.status)
                 + '. Reason ' + (payload.reason || 'none')
-                + '. Admitted law: ' + (payload.admitted_law === true ? 'true' : 'false') + '.';
+                + '. Source status: ' + (row.source_status || 'not_admitted')
+                + '. Case applicability: ' + (row.governing_applicability || 'unknown')
+                + '. Admitted law: ' + (payload.admitted_law === true ? 'true' : 'false')
+                + '. Source storage is not a proof of governing law or legal sufficiency.';
             const attribution = row.attribution || {};
             document.getElementById('legal-admission-attribution').textContent = attribution.actor_principal_id
                 ? ('Reviewer ' + attribution.actor_principal_id + ' membership ' + (attribution.membership || 'unknown')

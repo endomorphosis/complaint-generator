@@ -1,9 +1,8 @@
 """Versioned-source review against actual local acquisition and Mediator contracts.
 
 Source storage admission is distinct from applicability to a case and from a
-proof. Actual Data candidates remain unknown. The HTTP cases below qualify
-cookie/CSRF/case-action attribution only; encrypted Workspace publication and
-live delegated-key checks require their separate composed-owner integration.
+proof. Actual Data candidates remain unknown. The HTTP case uses real cookie/case/key/encrypted Workspace publication.
+An assigned lawyer without an explicit resource-key capability is refused.
 """
 from pathlib import Path
 from types import SimpleNamespace
@@ -74,86 +73,48 @@ def test_owner_review_uses_real_source_contract_and_unknowns_stay_unresolved(tmp
     assert all(row["proof"] is False for row in projected["admissions"])
 
 
-def _world(tmp_path):
-    principals = PrincipalStore(tmp_path / "principals", key=os.urandom(32), key_id="principal-key")
-    owner = principals.register_from_request({})
-    lawyer = principals.install_server_role(role="lawyer")
-    stranger = principals.register_from_request({})
-    cases = CaseDirectory(tmp_path / "cases", key=os.urandom(32), key_id="case-key")
-    case = cases.create_case(actor_principal_id=owner.principal_id)
-    authorizer = CaseActionAuthorizer(principals, cases)
-    sessions = BrowserSessionService(BrowserSessionConfiguration(
-        adapter=PrincipalStoreCredentialAdapter(principals, {
-            "synthetic-owner-credential": owner.principal_id,
-            "synthetic-lawyer-credential": lawyer.principal_id,
-            "synthetic-stranger-credential": stranger.principal_id,
-        }), signing_key=os.urandom(32), ttl_seconds=300))
-    mediator, case_file, _authority, acquisition, candidate = _real_source(tmp_path / "real-mediator")
-    _index_acquired_passages(case_file, acquisition)
-    handlers = CaseHandlerRegistry()
-    # This public-source-only fixture isolates the case-policy layer. It makes
-    # no claim to qualify an encrypted resource grant or delegated decryption.
-    handlers.bind(case, mediator=mediator, workspace_service=SimpleNamespace(case_id=case.case_id),
-        authorize_delegated=lambda decision: decision.membership == "assigned-lawyer"
-            and decision.actor_principal_id == lawyer.principal_id)
-    app = FastAPI()
-    compose_case_routes(app, authorizer=authorizer, browser_sessions=sessions, case_handlers=handlers,
-        include_workspace=False, include_review=False, include_document=False)
-    return SimpleNamespace(owner=owner, lawyer=lawyer, case=case, app=app, mediator=mediator,
-        authorizer=authorizer, candidate=candidate, case_file=case_file)
-
-
-def _headers(case, csrf=None, membership=None):
-    headers = {"x-tenant-id": case.tenant_id, "x-case-id": case.case_id,
-        "x-resource-id": case.resource_id, "x-expected-revision": str(case.revision)}
-    if csrf is not None:
-        headers["x-csrf-token"] = csrf
-    if membership is not None:
-        headers["x-expected-membership-revision"] = str(membership)
-    return headers
-
-
-def _login(client, credential):
-    response = client.post("/api/complaint-workspace/auth/login", json={"credential": credential})
-    assert response.status_code == 200
-    return response.json()["csrf_token"]
-
-
-def test_http_owner_and_assigned_lawyer_keep_unknown_source_unresolved_and_stranger_denied(tmp_path):
+def test_http_owner_keeps_unknown_source_unresolved_and_no_role_grants_owner_key(tmp_path):
+    from tests.test_gui25_26_private_owner_http import _world, _login, _headers, _start_case, _choose, _acquire
     world = _world(tmp_path)
     case = world.case
     path = f"/api/legal-research/{case.case_id}/admissions"
-    body = _unknown_review(world.candidate)
     grant = world.authorizer.grant_assigned_lawyer(owner_principal_id=world.owner.principal_id,
         lawyer_principal_id=world.lawyer.principal_id, case_id=case.case_id, resource_id=case.resource_id,
         tenant_id=case.tenant_id, actions={"case.read", "case.review"}, expected_case_revision=case.revision)
     with TestClient(world.app, base_url="https://testserver") as client:
-        assert client.get(path, headers=_headers(case)).status_code == 401
-        csrf = _login(client, "synthetic-owner-credential")
-        assert client.post(path, headers=_headers(case), json=body).status_code == 403
-        saved = client.post(path, headers=_headers(case, csrf), json=body)
+        assert client.get(path, headers=_headers(world)).status_code == 401
+        csrf = _login(client)
+        _start_case(client, world, csrf)
+        generation = _choose(client, world, csrf)
+        acquired = _acquire(client, world, csrf, generation)
+        source = next(row for row in acquired["source_version_receipts"] if row["kind"] == "candidate")
+        body = {"decision": "admit", "source_passage": source["source_passage"],
+            "authority_identity": source["authority_identity"], "jurisdiction": source["jurisdiction"],
+            "effective_date": source["effective_date"], "version": source["version"], "content_hash": source["content_hash"],
+            "applicability": source["stated_applicability"], "treatment_state": source["treatment_state"],
+            "exceptions": source["exceptions"], "operation_id": "synthetic-http-review"}
+        assert client.post(path, headers=_headers(world), json=body).status_code == 403
+        saved = client.post(path, headers=_headers(world, csrf), json=body)
         assert saved.status_code == 200
         result = saved.json()
         assert result["status"] == "unresolved" and result["reason"] == "source_metadata_unresolved"
+        assert result["source_status"] == "source_admitted"
         assert result["admitted_law"] is False and result["proof"] is False
         assert result["attribution"]["actor_principal_id"] == world.owner.principal_id
         assert result["attribution"]["canonical_owner_principal_id"] == case.tenant_id
         assert world.owner.principal_id != case.tenant_id
-        listed = client.get(path, headers=_headers(case))
+        listed = client.get(path, headers=_headers(world))
         assert listed.status_code == 200 and listed.json()["admitted_count"] == 0
-        csrf = _login(client, "synthetic-lawyer-credential")
-        rejected = client.post(path, headers=_headers(case, csrf, grant.revision),
-            json={**body, "operation_id": "synthetic-lawyer-rejection", "decision": "reject"})
-        assert rejected.status_code == 200
-        assert rejected.json()["reason"] == "rejected"
-        assert rejected.json()["attribution"]["membership"] == "assigned-lawyer"
-        assert rejected.json()["attribution"]["actor_principal_id"] == world.lawyer.principal_id
-        csrf = _login(client, "synthetic-stranger-credential")
-        stranger = client.post(path, headers=_headers(case, csrf),
-            json={**body, "operation_id": "synthetic-stranger"})
-        assert stranger.status_code == 403
-    assert len(world.case_file["legal_authority_admissions"]) == 2
-    assert all(row["admitted_law"] is False for row in world.case_file["legal_authority_admissions"])
+        assert listed.json()["source_admitted_count"] == 1
+        issued = client.post("/api/complaint-workspace/auth/login", json={"credential": "synthetic-lawyer-credential"})
+        assert issued.status_code == 200
+        headers = {**_headers(world, issued.json()["csrf_token"]), "x-expected-membership-revision": str(grant.revision)}
+        # A policy assignment is not possession of the owner's encryption key.
+        denied = client.post(path, headers=headers, json={**body, "operation_id": "synthetic-lawyer-review"})
+        assert denied.status_code == 403
+        issued = client.post("/api/complaint-workspace/auth/login", json={"credential": "synthetic-stranger-credential"})
+        assert issued.status_code == 200
+        assert client.post(path, headers=_headers(world, issued.json()["csrf_token"]), json=body).status_code == 403
 
 
 def test_workspace_collects_explicit_authority_review_fields():
