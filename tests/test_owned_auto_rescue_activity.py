@@ -208,7 +208,7 @@ def main():
      runtime.run_process_group_stream([sys.executable,'-I','-B','-c','import json; print(json.dumps(dict(type="tool_call")),flush=True)'],
       cwd=world['workspace'],stdout=log,env={},inherit_environment=False,timeout_seconds=10)
    value=runner.status(world['root'],world['spec'],world['campaign'])
-   allowed=('status','healthy','native_read_errors','worker_liveness','auto_rescue_activity_verified',
+   allowed=('status','healthy','native_read_errors','worker_liveness','auto_rescue_activity_verified','auto_rescue_activity_evidence',
     'provider_progress_verified','validation_activity_verified','progress_verified','scope_liveness')
    closed={key:value.get(key) for key in allowed}
    Path(sys.argv[3]).write_text(json.dumps(closed))
