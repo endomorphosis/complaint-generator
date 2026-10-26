@@ -27,7 +27,7 @@ def _stamp(value):
 
 
 @contextmanager
-def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
+def _native_world(tmp_path, monkeypatch, *, frame_kind="thought", setup_seconds=0):
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as runtime
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import portal_task_state_control_plane as plane
@@ -56,7 +56,7 @@ def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
     tasks = daemon._load_tasks(); daemon._register_task_identities(tasks)
     task = next(task for task in tasks if task.task_id == "CIMP-GUI-60")
     identity = daemon._identity_for_task(task)
-    now = time.time(); started = _stamp(now)
+    now = time.time(); started = _stamp(now - setup_seconds)
     lease = daemon._build_implementation_lock_metadata(task, 1, started)
     claim = daemon._build_implementation_task_claim_metadata(task, 1, started)
     lease_path = daemon._implementation_lock_path()
@@ -74,15 +74,16 @@ def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
             cwd=workspace, stdout=handle, env={}, inherit_environment=False, timeout_seconds=10)
     daemon._record_event("implementation_started", {"task_id": task.task_id, "attempt": 1,
         "worktree_path": str(workspace), "log_path": str(log), "execution_mode": "model-assisted"})
+    validation_started = _stamp(time.time())
     state = native.PortalTaskState()
     for key, value in {"active_task_id":task.task_id,"active_task_cid":identity.canonical_task_cid,
         "active_task_key":identity.canonical_task_key,"active_attempt":1,"implementation_in_progress":True,
-        "active_phase":"validating","active_task_started_at":_stamp(now-300),"active_phase_started_at":started,
+        "active_phase":"validating","active_task_started_at":_stamp(now-setup_seconds-3 if setup_seconds else now-300),"active_phase_started_at":validation_started,
         "active_worktree_path":str(workspace),"active_log_path":str(log),
         "last_implementation_task_id":task.task_id,"last_implementation_task_cid":identity.canonical_task_cid,
         "last_implementation_task_key":identity.canonical_task_key,"last_implementation_started_at":started,
         "last_implementation_worktree_path":str(workspace),"last_implementation_log_path":str(log),
-        "heartbeat_at":started,"last_progress_at":started}.items():
+        "heartbeat_at":validation_started,"last_progress_at":validation_started}.items():
         setattr(state,key,value)
     state.implementation_attempts={task.task_id:1};state.implementation_attempts_by_cid={identity.canonical_task_cid:1}
     target,_ = catalog_path(runner,campaign);plane.bind_task_state_control_plane(daemon.state_path,str(target))
@@ -162,6 +163,25 @@ def test_actual_native_rescue_producer_has_owned_bounded_activity(tmp_path,monke
         assert result["deadline_at"] <= runner._event_timestamp({"timestamp":world["body"]["active_task_started_at"]})+runner.TIMEOUT_SECONDS
         assert result["provider_birth"]["parent_pid"]==os.getpid()
         assert result["completion_authority"] is False
+
+
+def test_actual_rescue_deadline_starts_after_checkout_not_at_selection(tmp_path, monkeypatch):
+    """Real Native repair after a synthetic 51-second setup, with actual births."""
+    with _native_world(tmp_path, monkeypatch, frame_kind="tool_call", setup_seconds=51) as world:
+        result = activity.observe(runner, world["root"], world["campaign"], world["body"], now_ts=time.time())
+        assert result["activity_verified"] is True, result
+        old_start = runner._event_timestamp({"timestamp": world["body"]["last_implementation_started_at"]})
+        rows = [json.loads(line) for line in world["daemon"].events_path.read_text().splitlines()]
+        primary = next(row for row in rows if row["type"] == "implementation_started")
+        actual_start = runner._event_timestamp(primary)
+        phase_start = runner._event_timestamp({"timestamp": world["body"]["active_phase_started_at"]})
+        assert result["deadline_at"] == min(actual_start, phase_start) + runner.TIMEOUT_SECONDS
+        assert result["deadline_at"] > old_start + runner.TIMEOUT_SECONDS + 40
+        first_deadline = result["deadline_at"]
+        time.sleep(.05)
+        fresh = activity.observe(runner, world["root"], world["campaign"], world["body"], now_ts=time.time())
+        assert fresh["activity_verified"] is True and fresh["deadline_at"] == first_deadline
+        assert fresh["log_bytes"] >= result["log_bytes"]
 
 
 def test_actual_growing_stdout_preserves_complete_owned_prefix(tmp_path,monkeypatch):
