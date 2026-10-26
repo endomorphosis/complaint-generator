@@ -325,9 +325,16 @@ def test_live_routes_separate_stale_header_from_authenticated_inquiry(tmp_path, 
         desktop_shot = page.screenshot(full_page=False)
         assert _png_size(desktop_shot) == (DESKTOP["width"], DESKTOP["height"])
 
-        assert page.locator("#evidence-title").count() == 1
-        page.fill("#evidence-title", "Synthetic unsaved safety email")
-        assert page.locator("#evidence-title").input_value() == "Synthetic unsaved safety email"
+        page.click('[data-tab-target="evidence"]')
+        page.locator('[data-tab-panel="evidence"]').wait_for(state="visible")
+        evidence_title = page.locator("#evidence-title")
+        assert evidence_title.count() == 1
+        assert evidence_title.is_visible() and evidence_title.is_enabled()
+        evidence_title.fill("Synthetic unsaved safety email")
+        assert evidence_title.input_value() == "Synthetic unsaved safety email"
+        page.click('[data-tab-target="draft"]')
+        page.locator('[data-tab-panel="draft"]').wait_for(state="visible")
+        assert page.locator("#draft-status").is_visible()
         assert "No draft generated" in page.locator("#draft-status").text_content()
 
         sealed = [path for path in world.service._session_dir.rglob("*") if path.is_file() and path.read_bytes().startswith(ENVELOPE_MAGIC)]
