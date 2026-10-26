@@ -344,14 +344,14 @@ def test_live_routes_bind_authenticated_inquiry_to_current_case(tmp_path, monkey
             not desktop["summaryHidden"] and "access denied" in desktop["summaryText"].lower())
         header_stale = desktop["header"] == "No case selected"
         header_matches_case = any(value in desktop["header"] for value in (
-            world.case.case_id, world.case.tenant_id, world.owner.principal_id, "owner-lawyer-journey"))
+            world.case.case_id, world.case.tenant_id, "owner-lawyer-journey"))
         if header_stale:
             # Characterize the known unrefreshed page. The real backend and
             # inquiry assertions above remain required for this legacy state.
             assert desktop["headerState"] in {"empty", "error"}
             assert desktop["hydrated"] in {"denied", "error"}
         else:
-            assert header_matches_case, "Current header must identify the actual authorized case or owner"
+            assert header_matches_case, "Current header must identify the actual authorized case"
         if not header_stale and not access_denied:
             assert desktop["headerState"] == "ready"
             assert desktop["hydrated"] in {"ready", "partial"}
