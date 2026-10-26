@@ -43,6 +43,7 @@ def historical(tmp_path):
     key = "f" * 64
     terminal = prompt_workflow_cid({"fixture_terminal": True})
     task_cid = prompt_workflow_cid({"fixture_task": True})
+    task_key = "task/v1/" + hashlib.sha256(b"fixture_task").hexdigest()
     argv = ["/usr/bin/python", str(root / "scripts/run_complaint_improvement_supervisor.py"), "_run",
         "--repo-root", str(root), "--spec", str(root / "spec.json"), "--state-dir", str(state),
         "--owner-token", "fixture_token", "--merge-target", "fixture_branch"]
@@ -74,19 +75,19 @@ def historical(tmp_path):
     event_path = state / "complaint_intake_events.jsonl"
     append_jsonl_event(event_path, "task_selected", {"task_id": "CIMP-UX-01", "timestamp": _iso(130)})
     start = append_jsonl_event(event_path, "implementation_started", {"task_id": "CIMP-UX-01", "attempt": 2,
-        "canonical_task_cid": task_cid, "worktree_path": str(workspace), "board_namespace": "fixture_board.md",
+        "canonical_task_cid": task_cid, "canonical_task_key": task_key, "worktree_path": str(workspace), "board_namespace": "fixture_board.md",
         "timestamp": _iso(140), "branch": "fixture_branch", "baseline_ref": "fixture_baseline",
         "log_path": str(log), "execution_mode": "model-assisted", "command": command})
     append_jsonl_event(event_path, "implementation_finished", {"task_id": "CIMP-UX-01", "attempt": 2,
-        "canonical_task_cid": task_cid, "worktree_path": str(workspace), "timestamp": _iso(180)})
+        "canonical_task_cid": task_cid, "canonical_task_key": task_key, "board_namespace": "fixture_board.md", "worktree_path": str(workspace), "timestamp": _iso(180)})
     runner = SimpleNamespace(_event_timestamp=_event_timestamp,
         _full_launch_record=lambda _: True, _campaign_tuple_matches=lambda *args: True,
         _shutdown_verified=lambda *args: True, _owner_liveness=lambda _: "dead",
         recorded_worktree_root=lambda *args: (workroot, None), owns_process=lambda _: True,
         _native_modules=lambda _: (None, SimpleNamespace(parse_task_file=lambda *args, **kwargs: [
-            SimpleNamespace(task_id="CIMP-UX-01", canonical_task_cid=task_cid)])), TASK_PREFIX="## CIMP-")
+            SimpleNamespace(task_id="CIMP-UX-01", canonical_task_cid=task_cid, canonical_task_key=task_key)])), TASK_PREFIX="## CIMP-")
     watcher = SimpleNamespace(root=root, state=state, spec_path=root / "spec.json", spec=spec, scope=scope,
-        runner=runner, artifacts=SimpleNamespace(board_relative="fixture_board.md", board_namespace="fixture_board.md"),
+        runner=runner, artifacts=SimpleNamespace(board_relative="fixture_board.md", board_namespace="fixture-campaign-slug"),
         _launch=lambda: ({"fixture_current_owner": True}, True, "c" * 64))
     context = {"scope": scope, "incident_key": key, "terminal_cid": terminal,
         "recovery_ordinal": 1, "action_receipt_cid": prompt_workflow_cid({"fixture_action": True}),
@@ -109,7 +110,7 @@ def test_private_closed_owner_and_hash_chained_actual_log_metadata_produce_close
     assert before == {str(p): p.read_bytes() for p in historical.state.rglob("*") if p.is_file()}
 
 
-@pytest.mark.parametrize("damage", ["archive", "owner_alive", "owner_unknown", "scope", "incident", "current_unowned", "event_hash", "partial_event", "log_header", "log_command", "missing_usage", "log_outside", "log_time"])
+@pytest.mark.parametrize("damage", ["archive", "owner_alive", "owner_unknown", "scope", "incident", "current_unowned", "event_hash", "partial_event", "log_header", "log_command", "missing_usage", "log_outside", "log_time", "event_namespace_slug", "task_key"])
 def test_unowned_stale_or_tampered_historical_work_never_produces_proof(historical, damage):
     verifier = historical.verifier()
     if damage == "archive":
@@ -142,6 +143,20 @@ def test_unowned_stale_or_tampered_historical_work_never_produces_proof(historic
         historical.log.symlink_to(preserved)
     elif damage == "log_time":
         os.utime(historical.log, (201, 201))
+    elif damage in {"event_namespace_slug", "task_key"}:
+        from ipfs_accelerate_py.agent_supervisor.runtime.event_log import _event_identity
+        values = [json.loads(line) for line in historical.event_path.read_text().splitlines()]
+        previous = ""
+        for value in values:
+            if value["type"] in {"implementation_started", "implementation_finished"}:
+                if damage == "event_namespace_slug":
+                    value["board_namespace"] = "fixture-campaign-slug"
+                else:
+                    value["canonical_task_key"] = "task/v1/" + "0" * 64
+            value["previous_event_id"] = previous
+            value["event_id"] = _event_identity(value)
+            previous = value["event_id"]
+        historical.event_path.write_text("\n".join(json.dumps(value) for value in values) + "\n")
     with pytest.raises(ValueError):
         verifier(historical.context)
 

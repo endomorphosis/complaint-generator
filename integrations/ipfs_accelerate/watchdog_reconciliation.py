@@ -176,13 +176,16 @@ class ClosedRestartProof:
         events = _events(raw_events)
         tasks = runner._native_modules(watcher.root)[1].parse_task_file(
             watcher.root / watcher.artifacts.board_relative, task_header_prefix=runner.TASK_PREFIX)
-        task_cids = {task.task_id: task.canonical_task_cid for task in tasks}
+        task_identities = {task.task_id: (task.canonical_task_cid, task.canonical_task_key) for task in tasks}
+        # Native's legacy-markdown event namespace is the board filename.
+        # Host's campaign slug remains a separate plan/spec scope binding.
+        native_board = Path(watcher.artifacts.board_relative).name
         candidates = []
         for index, start in enumerate(events):
             stamp = runner._event_timestamp(start)
             if (start.get("type") != "implementation_started" or stamp is None or not started <= stamp <= stopped
-                    or start.get("canonical_task_cid") != task_cids.get(start.get("task_id"))
-                    or start.get("board_namespace") != watcher.artifacts.board_namespace
+                    or (start.get("canonical_task_cid"), start.get("canonical_task_key")) != task_identities.get(start.get("task_id"))
+                    or start.get("board_namespace") != native_board
                     or start.get("execution_mode") != "model-assisted"):
                 continue
             workspace = Path(str(start.get("worktree_path") or ""))
@@ -191,6 +194,8 @@ class ClosedRestartProof:
             finish = next((event for event in events[index + 1:] if event.get("type") == "implementation_finished"
                 and event.get("task_id") == start["task_id"] and event.get("attempt") == start["attempt"]
                 and event.get("canonical_task_cid") == start["canonical_task_cid"]
+                and event.get("canonical_task_key") == start["canonical_task_key"]
+                and event.get("board_namespace") == native_board
                 and event.get("worktree_path") == start["worktree_path"]), None)
             if finish is None:
                 continue
