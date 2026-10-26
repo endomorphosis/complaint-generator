@@ -436,7 +436,12 @@ class ComplaintCampaignWatchdog:
             if view["manual_hold"] or view["status"] in {"daemon_failed", "state_error", "identity_mismatch", "stop_incomplete"}:
                 break
             time.sleep(min(2, max(0, until - self.clock())))
-        return RecoveryActionObservation(False, tuple(effects), reason="restart_waiting_for_verified_progress", partial=True)
+        # Stop/reconciliation/start have already proved both local effects.
+        # A slow semantic-health observation is not an uncertain side effect;
+        # Native still records the failed health check and spends this ordinal.
+        # Marking it partial would permanently quarantine this incident even
+        # when the same restarted lane later produces verified work.
+        return RecoveryActionObservation(False, tuple(effects), reason="restart_waiting_for_verified_progress")
 
     def run_once(self, *, stop_completed=False):
         from ipfs_accelerate_py.agent_supervisor.rescue.campaign_watchdog import (
