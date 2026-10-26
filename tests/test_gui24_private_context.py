@@ -182,8 +182,8 @@ def test_real_crypto_late_refusal_terminally_aborts_and_recovery_never_publishes
         csrf = _start(client, world.case)
         repository = service.joined_revision_repository(world.case.tenant_id, world.case.case_id)
         head = (repository / "head.cgpe").read_bytes()
-        cache_key = (world.case.tenant_id, world.case.case_id)
-        cached = service._interview_mediators[cache_key]
+        initial_cache = dict(service._interview_mediators)
+        assert initial_cache == {}
         monkeypatch.setattr(private_storage, "_seal_role", seal_then_wait)
         monkeypatch.setattr(private_storage, "_fsync_file", head_fsync_then_wait)
         results, errors = [], []
@@ -218,7 +218,7 @@ def test_real_crypto_late_refusal_terminally_aborts_and_recovery_never_publishes
         assert "Synthetic refused private forum" not in results[0].text
         assert (repository / "head.cgpe").read_bytes() == head
         assert list(repository.glob(".*.tmp")) == []
-        assert service._interview_mediators[cache_key] is cached
+        assert service._interview_mediators == initial_cache
         decisions = [json.loads(line) for line in (repository / "wal" / "transaction-decisions.jsonl").read_text().splitlines()]
         intent = [item for item in decisions if item["kind"] == "intent"][-1]
         transaction = intent["transaction_id"]
@@ -234,6 +234,7 @@ def test_real_crypto_late_refusal_terminally_aborts_and_recovery_never_publishes
         observed = client.get(f"/api/legal-context/{world.case.case_id}", headers=_composed_headers(world.case))
         assert observed.status_code == 200, observed.text
         assert observed.json()["context_revision"] == 0 and observed.json()["forum"] == "unknown"
+        assert service._interview_mediators == initial_cache
 
 
 def test_actual_intake_write_wins_cas_without_publishing_stale_legal_context(tmp_path, monkeypatch):
