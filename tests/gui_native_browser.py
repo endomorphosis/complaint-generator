@@ -302,11 +302,36 @@ def _process_table() -> dict[int, tuple[int, tuple[str, ...], str]]:
 
 
 def _matching_pids(needles: Sequence[str]) -> set[int]:
+    """Inventory matching descendants of this validator, never sibling drivers."""
+    table = _process_table()
+    owner_pid = os.getpid()
+    owner_birth = _process_birth(owner_pid)
     found: set[int] = set()
-    for pid, (_ppid, cmdline, exe) in _process_table().items():
+    for pid, (_ppid, cmdline, exe) in table.items():
         text = "\n".join((*cmdline, exe))
-        if any(needle and needle in text for needle in needles):
-            found.add(pid)
+        if pid == owner_pid or not any(needle and needle in text for needle in needles):
+            continue
+        # Shared Playwright argv is only a prefilter. Another validator may
+        # run the same pinned executable and must stay outside our cleanup set.
+        cursor, seen = pid, set()
+        while cursor != owner_pid and cursor in table and cursor not in seen and len(seen) < 128:
+            seen.add(cursor)
+            cursor = table[cursor][0]
+        if cursor != owner_pid:
+            continue
+        chain = {}
+        cursor = pid
+        while cursor != owner_pid:
+            if cursor in chain or len(chain) >= 128:
+                raise BrowserCapabilityError("Browser inventory ancestry is invalid")
+            chain[cursor] = _process_birth(cursor)
+            cursor = chain[cursor][0]
+        if (any(_process_birth(member) != birth for member, birth in chain.items())
+                or _process_birth(owner_pid) != owner_birth):
+            raise BrowserCapabilityError("Browser inventory ancestry changed during verification")
+        found.add(pid)
+    if _process_birth(owner_pid) != owner_birth:
+        raise BrowserCapabilityError("Browser inventory owner changed during verification")
     return found
 
 
