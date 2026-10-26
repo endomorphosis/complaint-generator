@@ -1,0 +1,436 @@
+(function () {
+    "use strict";
+
+    var TASKS = [
+        ["overview", "Overview"],
+        ["mediator", "Mediator"],
+        ["evidence", "Evidence"],
+        ["facts", "Facts and timeline"],
+        ["legal", "Legal requirements"],
+        ["draft", "Draft"],
+        ["team", "Team/messages"]
+    ];
+
+    var state = {
+        authenticated: false,
+        principalId: "",
+        roles: [],
+        relationship: "none",
+        caseId: "",
+        caseLabel: "",
+        privacy: "Privacy state is unavailable until you sign in",
+        stage: "Sign-in required",
+        next: "Sign in",
+        nextKind: "sign-in",
+        session: null,
+        assignment: null,
+        gaps: []
+    };
+    var refreshToken = 0;
+    var refreshTimer = 0;
+
+    function text(value) {
+        return value === undefined || value === null ? "" : String(value);
+    }
+
+    function ordinaryFlow() {
+        var params = new URLSearchParams(window.location.search || "");
+        var query = text(params.get("shell_mode") || params.get("app_shell_mode")).toLowerCase();
+        if (query === "operator" || query === "client") return query !== "operator";
+        var bodyMode = document.body && document.body.dataset ? text(document.body.dataset.workspaceShellMode) : "";
+        if (bodyMode === "operator") return false;
+        try {
+            if (window.localStorage && window.localStorage.getItem("complaintGenerator.shellMode") === "operator") return false;
+        } catch (error) {
+            return true;
+        }
+        return true;
+    }
+
+    function applyAudience() {
+        document.body.dataset.caseTaskFlow = ordinaryFlow() ? "ordinary" : "operator";
+        if (document.body.dataset.caseTaskFlow !== "ordinary") return;
+        var nodes = document.querySelectorAll("a, button, summary, span, h2, h3");
+        Array.prototype.forEach.call(nodes, function (node) {
+            if (node.closest("#complaint-case-shell")) return;
+            var sample = text(node.textContent).replace(/\s+/g, " ").trim();
+            if (sample.length > 160) return;
+            if (/\b(CLI|MCP|SDK playground|UX Audit|debug panel|Developer tools)\b/i.test(sample)) {
+                node.setAttribute("data-case-shell-diagnostic", "true");
+            }
+        });
+        ["integrations", "ux-review"].forEach(function (name) {
+            var panel = document.querySelector('[data-tab-panel="' + name + '"]');
+            if (panel) panel.setAttribute("data-case-shell-diagnostic", "true");
+        });
+    }
+
+    function shellHost() {
+        return document.getElementById("complaint-case-shell");
+    }
+
+    function mount() {
+        var host = shellHost();
+        if (!host || host.dataset.mounted === "true") return host;
+        host.dataset.mounted = "true";
+        host.className = "case-shell";
+        host.setAttribute("aria-label", "Case workspace");
+        var nav = TASKS.map(function (item) {
+            return '<button type="button" class="case-shell__task" data-case-task="' + item[0] + '">' + item[1] + "</button>";
+        }).join("");
+        var panels = TASKS.map(function (item) {
+            return '<section class="case-shell__panel" data-case-panel="' + item[0] + '" hidden><h3>' + item[1] + '</h3><div class="case-shell__panel-body"></div></section>';
+        }).join("");
+        host.innerHTML = ''
+            + '<p class="case-shell__access"><a href="/cases">My cases</a> <a href="/cases#notifications">Inbox</a> <a href="#complaint-case-shell-privacy">Account/privacy</a></p>'
+            + '<div class="case-shell__identity">'
+            + '<p><span>Case</span> <strong id="complaint-case-shell-case" data-bound="empty">No case selected</strong></p>'
+            + '<p><span>Actor</span> <strong id="complaint-case-shell-actor" data-relationship="none">Not signed in</strong></p>'
+            + '<p><span>Privacy</span> <strong id="complaint-case-shell-privacy">Privacy state is unavailable until you sign in</strong></p>'
+            + '<p><span>Stage</span> <strong id="complaint-case-shell-stage">Sign-in required</strong></p>'
+            + '<button type="button" id="complaint-case-shell-next">Sign in</button>'
+            + "</div>"
+            + '<nav id="complaint-case-shell-nav" aria-label="Case tasks">' + nav + "</nav>"
+            + '<div id="complaint-case-shell-panels">' + panels + "</div>";
+        host.querySelector("#complaint-case-shell-nav").addEventListener("click", function (event) {
+            var button = event.target.closest("[data-case-task]");
+            if (!button) return;
+            showTask(button.getAttribute("data-case-task"));
+        });
+        host.querySelector("#complaint-case-shell-next").addEventListener("click", runNext);
+        showTask("overview");
+        return host;
+    }
+
+    function showTask(name) {
+        var host = shellHost();
+        if (!host) return;
+        Array.prototype.forEach.call(host.querySelectorAll("[data-case-task]"), function (button) {
+            var on = button.getAttribute("data-case-task") === name;
+            button.setAttribute("aria-current", on ? "page" : "false");
+        });
+        Array.prototype.forEach.call(host.querySelectorAll("[data-case-panel]"), function (panel) {
+            panel.hidden = panel.getAttribute("data-case-panel") !== name;
+        });
+        fillPanel(name);
+        var tab = {mediator: "intake", evidence: "evidence", draft: "draft", legal: "review", facts: "review"}[name];
+        if (tab) {
+            var existing = document.querySelector('.tab-button[data-tab-target="' + tab + '"]');
+            if (existing && existing.getAttribute("data-case-shell-diagnostic") !== "true") existing.click();
+        }
+        var anchor = {mediator: "adaptive-inquiry", evidence: "evidence-title", draft: "draft-status", team: "assignments"}[name];
+        var node = anchor ? document.getElementById(anchor) : null;
+        if (node && name !== "overview") node.scrollIntoView({block: "nearest"});
+    }
+
+    function fillPanel(name) {
+        var host = shellHost();
+        var panel = host && host.querySelector('[data-case-panel="' + name + '"] .case-shell__panel-body');
+        if (!panel) return;
+        if (name === "overview") {
+            panel.textContent = state.caseId ? "This case is " + (state.caseLabel || state.caseId) + ". Stage: " + state.stage + "." : "No case is selected for this actor.";
+        } else if (name === "mediator") {
+            var pending = pendingInquiry();
+            panel.textContent = pending ? "Current question: " + text(pending.prompt || "A server question is pending.") : "No actionable mediator question is loaded.";
+        } else if (name === "evidence") {
+            panel.textContent = "Evidence stays in the case evidence workspace. Receipt is not proof.";
+        } else if (name === "facts") {
+            var questions = state.session && Array.isArray(state.session.questions) ? state.session.questions.length : 0;
+            panel.textContent = questions ? ("The interview has " + questions + " recorded questions. Gaps: " + (state.gaps.join("; ") || "none listed.")) : "No factual timeline is loaded for this actor.";
+        } else if (name === "legal") {
+            var matrix = supportMatrix();
+            panel.textContent = matrix.length ? ("Review support items: " + matrix.map(function (item) { return text(item.label || item.element || "item"); }).join("; ") + ". These are not admitted governing law.") : "No admitted legal requirements are available.";
+        } else if (name === "draft") {
+            var draft = state.session && state.session.session && state.session.session.draft;
+            panel.textContent = draft ? "A draft exists on the canonical session." : "No draft is stored for this case.";
+        } else if (name === "team") {
+            panel.textContent = state.assignment ? ("Assignment " + text(state.assignment.state) + " as " + text(state.assignment.party) + ".") : "No assignment is visible for this actor.";
+        }
+    }
+
+    function supportMatrix() {
+        var review = state.session && state.session.review;
+        var matrix = review && review.support_matrix;
+        return Array.isArray(matrix) ? matrix : [];
+    }
+
+    function pendingInquiry() {
+        var session = state.session && state.session.session;
+        var shared = session && session.shared_interview;
+        if (!shared || typeof shared !== "object") return null;
+        var pending = shared.pending_inquiry || shared.pending;
+        if (!pending || typeof pending !== "object") return null;
+        if (pending.pending === false) return null;
+        return pending.inquiry_id || pending.prompt ? pending : null;
+    }
+
+    async function readJson(path) {
+        var response = await fetch(path, {credentials: "same-origin", headers: {accept: "application/json"}});
+        var payload = null;
+        try { payload = await response.json(); } catch (error) { payload = null; }
+        return {ok: response.ok, status: response.status, body: payload};
+    }
+
+    function allowedCase(record) {
+        return record && text(record.case_id) && record.plaintext_available !== false;
+    }
+
+    function pickAssignment(rows, principalId) {
+        var visible = (rows || []).filter(function (row) {
+            return row && (row.party === "recipient" || row.member_principal_id === principalId) && (row.state === "accepted" || row.state === "pending");
+        });
+        visible.sort(function (a, b) {
+            if (a.state === b.state) return text(a.case_id).localeCompare(text(b.case_id));
+            return a.state === "accepted" ? -1 : 1;
+        });
+        return visible[0] || null;
+    }
+
+    function derive(actor, catalog, assignments, workspaceSession) {
+        var next = {
+            authenticated: Boolean(actor && actor.authenticated),
+            principalId: actor && actor.principal_id ? text(actor.principal_id) : "",
+            roles: actor && Array.isArray(actor.roles) ? actor.roles.map(text) : [],
+            relationship: "none",
+            caseId: "",
+            caseLabel: "",
+            privacy: "Privacy state is unavailable until you sign in",
+            stage: "Sign-in required",
+            next: "Sign in",
+            nextKind: "sign-in",
+            session: workspaceSession,
+            assignment: null,
+            gaps: []
+        };
+        if (!next.authenticated) return next;
+        var cases = catalog && Array.isArray(catalog.cases) ? catalog.cases : [];
+        var selectedId = catalog && catalog.selected_case_id ? text(catalog.selected_case_id) : "";
+        var owned = cases.filter(allowedCase);
+        var selected = owned.find(function (item) { return item.case_id === selectedId; }) || null;
+        var clientCase = window.workspaceClient && window.workspaceClient.caseContext;
+        if (!selected && clientCase && clientCase.case_id) {
+            selected = owned.find(function (item) { return item.case_id === clientCase.case_id; }) || null;
+        }
+        var assignment = pickAssignment(assignments && assignments.assignments, next.principalId);
+        var lockedNode = document.getElementById("workspace-locked-state");
+        var lockedVisible = Boolean(lockedNode && !lockedNode.hidden);
+        if (selected) {
+            next.relationship = "owner";
+            next.caseId = text(selected.case_id);
+            next.caseLabel = text(selected.label || selected.case_id);
+            next.gaps = Array.isArray(selected.unresolved_gaps) ? selected.unresolved_gaps.map(text) : [];
+            next.privacy = "Local private is the default";
+        } else if (assignment && assignment.case_id) {
+            next.relationship = "reviewer";
+            next.assignment = assignment;
+            next.caseId = text(assignment.case_id);
+            next.caseLabel = "Assigned case";
+            if (assignment.state === "pending") {
+                next.privacy = "Locked until you accept the assignment";
+            } else if (assignment.key_grant === "admitted") {
+                next.privacy = "Key grant admitted for this assignment";
+            } else {
+                next.privacy = "Locked until a key grant is admitted";
+            }
+        } else {
+            next.privacy = "Local private is the default";
+            next.stage = "No case selected";
+            next.next = "Select a case";
+            next.nextKind = "select";
+            return next;
+        }
+        if (lockedVisible) {
+            next.privacy = "Locked until the private key is available";
+            next.stage = "Locked";
+            next.next = "Unlock the case";
+            next.nextKind = "unlock";
+            return next;
+        }
+        if (next.relationship === "reviewer" && assignment.state === "pending") {
+            next.stage = "Assignment pending";
+            next.next = "Accept the assignment";
+            next.nextKind = "accept";
+            return next;
+        }
+        if (next.relationship === "reviewer") {
+            next.stage = "Assigned review";
+            next.next = "Open the assigned review";
+            next.nextKind = "review";
+            return next;
+        }
+        var pending = pendingInquiryFrom(workspaceSession);
+        var draft = workspaceSession && workspaceSession.session && workspaceSession.session.draft;
+        var overview = workspaceSession && workspaceSession.review && workspaceSession.review.overview || {};
+        var evidenceCount = Number(overview.testimony_items || 0) + Number(overview.document_items || 0);
+        if (pending) {
+            next.stage = "Mediator question";
+            next.next = "Answer the current question";
+            next.nextKind = "mediator";
+        } else if (draft) {
+            next.stage = "Draft";
+            next.next = "Continue the draft";
+            next.nextKind = "draft";
+        } else if (evidenceCount > 0) {
+            next.stage = "Evidence";
+            next.next = "Review evidence";
+            next.nextKind = "evidence";
+        } else {
+            next.stage = "Overview";
+            next.next = "Open the mediator";
+            next.nextKind = "mediator";
+        }
+        return next;
+    }
+
+    function pendingInquiryFrom(sessionPayload) {
+        var previous = state.session;
+        state.session = sessionPayload;
+        var found = pendingInquiry();
+        state.session = previous;
+        return found;
+    }
+
+    function paint() {
+        var host = shellHost();
+        if (!host) return;
+        var caseNode = document.getElementById("complaint-case-shell-case");
+        var actorNode = document.getElementById("complaint-case-shell-actor");
+        var privacyNode = document.getElementById("complaint-case-shell-privacy");
+        var stageNode = document.getElementById("complaint-case-shell-stage");
+        var nextNode = document.getElementById("complaint-case-shell-next");
+        caseNode.textContent = state.caseId ? (state.caseLabel || state.caseId) : "No case selected";
+        caseNode.dataset.bound = state.caseId ? "case" : "empty";
+        caseNode.dataset.caseId = state.caseId;
+        var actorLabel = state.relationship === "owner" ? "Owner" : (state.relationship === "reviewer" ? "Assigned reviewer" : (state.authenticated ? "Signed in" : "Not signed in"));
+        actorNode.textContent = actorLabel;
+        actorNode.dataset.relationship = state.relationship;
+        actorNode.dataset.principalId = state.principalId;
+        actorNode.dataset.roles = state.roles.join(",");
+        privacyNode.textContent = state.privacy;
+        stageNode.textContent = state.stage;
+        nextNode.textContent = state.next;
+        nextNode.dataset.kind = state.nextKind;
+        host.dataset.state = state.authenticated ? (state.caseId ? "ready" : "empty") : "signed-out";
+        var legacy = document.getElementById("workspace-case-context-value");
+        var legacyHost = document.getElementById("workspace-case-context");
+        if (legacy && state.caseId) {
+            legacy.textContent = caseNode.textContent;
+            if (legacyHost) legacyHost.dataset.state = "ready";
+        }
+        var active = host.querySelector("[data-case-task][aria-current='page']");
+        fillPanel(active ? active.getAttribute("data-case-task") : "overview");
+    }
+
+    async function refresh() {
+        var token = ++refreshToken;
+        mount();
+        applyAudience();
+        try {
+            var actor = await readJson("/api/complaint-workspace/auth/session");
+            if (token !== refreshToken) return;
+            if (!actor.ok) {
+                state = derive(null, null, null, null);
+                paint();
+                return;
+            }
+            var catalog = await readJson("/api/cases/session");
+            var assignments = await readJson("/api/cases/assignments");
+            if (token !== refreshToken) return;
+            var catalogBody = catalog.ok ? catalog.body : {cases: [], selected_case_id: ""};
+            var assignmentBody = assignments.ok ? assignments.body : {assignments: []};
+            var preview = derive(actor.body, catalogBody, assignmentBody, null);
+            var workspaceSession = null;
+            if (preview.caseId && preview.relationship === "owner") {
+                var match = (catalogBody.cases || []).find(function (item) { return item.case_id === preview.caseId; });
+                if (match && match.tenant_id) {
+                    var sessionUrl = "/api/complaint-workspace/session?user_id=" + encodeURIComponent(match.tenant_id) + "&case_id=" + encodeURIComponent(match.case_id);
+                    var sessionResponse = await fetch(sessionUrl, {
+                        credentials: "same-origin",
+                        headers: {
+                            accept: "application/json",
+                            "x-tenant-id": match.tenant_id,
+                            "x-case-id": match.case_id,
+                            "x-resource-id": text(match.resource_id)
+                        }
+                    });
+                    if (sessionResponse.ok) {
+                        try { workspaceSession = await sessionResponse.json(); } catch (error) { workspaceSession = null; }
+                    }
+                }
+            }
+            if (token !== refreshToken) return;
+            state = derive(actor.body, catalogBody, assignmentBody, workspaceSession);
+            paint();
+        } catch (error) {
+            if (token !== refreshToken) return;
+            state.stage = "Workspace could not be read";
+            state.next = "Retry";
+            state.nextKind = "overview";
+            paint();
+        }
+    }
+
+    function scheduleRefresh() {
+        window.clearTimeout(refreshTimer);
+        refreshTimer = window.setTimeout(function () { refresh(); }, 30);
+    }
+
+    function runNext() {
+        var kind = state.nextKind;
+        if (kind === "sign-in") {
+            var credential = document.getElementById("case-credential");
+            if (credential) credential.focus();
+            else window.location.assign("/cases");
+            return;
+        }
+        if (kind === "select") {
+            var choice = document.querySelector("#case-list button, #complaint-case-shell-case");
+            if (choice && choice.focus) choice.focus();
+            showTask("overview");
+            return;
+        }
+        if (kind === "accept") {
+            var accept = Array.prototype.find.call(document.querySelectorAll("#assignment-list button"), function (button) {
+                return button.textContent.trim() === "Accept scope";
+            });
+            if (accept) accept.click();
+            else showTask("team");
+            return;
+        }
+        if (kind === "review" || kind === "unlock") {
+            showTask("team");
+            var assignments = document.getElementById("assignments") || document.getElementById("workspace-locked-state");
+            if (assignments) assignments.focus && assignments.focus();
+            return;
+        }
+        if (kind === "evidence") showTask("evidence");
+        else if (kind === "draft") showTask("draft");
+        else showTask("mediator");
+    }
+
+    mount();
+    applyAudience();
+    window.complaintCaseShell = {
+        refresh: refresh,
+        scheduleRefresh: scheduleRefresh,
+        showTask: showTask,
+        snapshot: function () {
+            return {
+                case: document.getElementById("complaint-case-shell-case").textContent.trim(),
+                caseId: document.getElementById("complaint-case-shell-case").dataset.caseId || "",
+                actor: document.getElementById("complaint-case-shell-actor").textContent.trim(),
+                relationship: document.getElementById("complaint-case-shell-actor").dataset.relationship,
+                principalId: document.getElementById("complaint-case-shell-actor").dataset.principalId || "",
+                privacy: document.getElementById("complaint-case-shell-privacy").textContent.trim(),
+                stage: document.getElementById("complaint-case-shell-stage").textContent.trim(),
+                next: document.getElementById("complaint-case-shell-next").textContent.trim(),
+                nextCount: document.querySelectorAll("#complaint-case-shell-next").length
+            };
+        }
+    };
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", scheduleRefresh);
+    } else {
+        scheduleRefresh();
+    }
+})();
