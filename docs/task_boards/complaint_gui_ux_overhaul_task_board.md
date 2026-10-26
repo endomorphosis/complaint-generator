@@ -37,7 +37,7 @@ Implementation instructions:
 
 ## CIMP-UX-02 Inventory current SDK APIs, mediator owners, and compatibility gaps
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
