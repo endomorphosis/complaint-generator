@@ -264,7 +264,10 @@ def test_live_routes_separate_stale_header_from_authenticated_inquiry(tmp_path, 
         issued = _login_fetch(page, "synthetic-owner-credential")
         assert issued["principal_id"] == world.owner.principal_id
         page.evaluate(
-            "payload => window.workspaceClient.setCaseContext(payload)",
+            """async payload => {
+                window.workspaceClient.setCaseContext(payload);
+                await window.workspaceClient.bootstrapWorkspace(payload.tenant_id);
+            }""",
             _case_payload(world),
         )
         page.fill("#adaptive-narrative", NARRATIVE)
