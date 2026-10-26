@@ -269,8 +269,41 @@ def test_live_routes_separate_stale_header_from_authenticated_inquiry(tmp_path, 
         )
         page.fill("#adaptive-narrative", NARRATIVE)
         page.wait_for_function("() => typeof window.workspaceClient?.runIntakeChatTurn === 'function'")
-        with page.expect_response(_is_intake_turn) as started:
-            page.click("#adaptive-enter-narrative")
+        observed_posts = []
+
+        def record_post(response):
+            if response.request.method != "POST":
+                return
+            path = response.url.split("?")[0]
+            if "/api/complaint-workspace/" not in path:
+                return
+            try:
+                posted = response.request.post_data_json or {}
+            except (ValueError, TypeError):
+                posted = {}
+            params = posted.get("params") or {}
+            arguments = params.get("arguments") or {}
+            observed_posts.append({"path": path, "status": response.status,
+                "tool": params.get("name", ""), "action": arguments.get("interview_action", "")})
+
+        page.on("response", record_post)
+        try:
+            with page.expect_response(_is_intake_turn) as started:
+                page.click("#adaptive-enter-narrative")
+        except Exception as error:
+            state = page.evaluate("""() => ({
+                hydrated: document.body.dataset.workspaceHydrated || '',
+                privateInactive: workspacePrivacyInactive,
+                sdkActive: window.workspaceClient._privacyActive,
+                actorConfigured: Boolean(window.workspaceClient.activePrincipalId),
+                caseConfigured: Boolean(window.workspaceClient.caseContext),
+                requestCurrent: adaptiveRequestCurrent(adaptiveRequestCapture()),
+                narrativePresent: Boolean(document.getElementById('adaptive-narrative').value.trim())
+            })""")
+            raise AssertionError({"inquiry_response_missing": True,
+                "current_state": state, "actual_posts": observed_posts[-8:]}) from error
+        finally:
+            page.remove_listener("response", record_post)
         assert started.value.status == 200, started.value.text()
         started_body = _intake_payload(started.value)
         assert started_body.get("isError") is not True
