@@ -879,3 +879,82 @@ def test_dead_startup_uses_spaced_sdk_confirmation_and_public_stop_cas_before_re
     assert len(ledger["incidents"]) == 1
     assert next(iter(ledger["incidents"].values()))["attempts"] == 1
     assert paid == before
+
+
+@pytest.mark.parametrize("after_restart", ["starting", "manual_hold", "daemon_failed"])
+def test_proved_restart_effects_are_not_uncertain_when_health_is_pending(tmp_path, monkeypatch, after_restart):
+    """A finite health observation never changes already proved effect custody."""
+    watcher, runner, view = _adapter(tmp_path, monkeypatch)
+    now = [1000.0]
+    watcher.clock = lambda: now[0]
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+    watcher.observe()
+    calls = []
+    accounting = {"implementation_attempts": {"TASK-1": 2}}
+    monkeypatch.setattr(watcher, "_accounting", lambda: deepcopy(accounting))
+    runner.stop = lambda *_, **kw: calls.append("stop") or {"status": "stopped"}
+    runner.recover_stalled_worker = lambda *_: calls.append("recover") or {"recovery": "reconciled"}
+    runner.doctor = lambda *_: calls.append("doctor") or {"status": "ready"}
+    def start(*_, **kw):
+        calls.append("start")
+        view.update(status="starting" if after_restart == "manual_hold" else after_restart,
+            healthy=False, provider_progress_verified=False)
+        if after_restart == "manual_hold":
+            view["native_state"]["manual_hold"] = True
+        return {"status": "starting"}
+    runner.start = start
+    result = watcher.recover(SimpleNamespace(deadline_at_ms=2_000_000))
+    assert not result.succeeded and not result.healthy
+    assert result.reason == "restart_waiting_for_verified_progress"
+    assert result.observed_effects == ("old_lane_fenced", "lane_restarted")
+    assert result.partial is False
+    assert calls == ["stop", "recover", "doctor", "start"]
+    assert now[0] <= 1090.0
+    assert accounting == {"implementation_attempts": {"TASK-1": 2}}
+    if after_restart == "manual_hold":
+        assert watcher.observe()["manual_hold"] is True
+
+
+def test_health_pending_restart_retains_native_ordinal_without_uncertainty(tmp_path, monkeypatch):
+    """Use Native's real durable finite controller across a slow semantic start."""
+    from ipfs_accelerate_py.agent_supervisor.rescue.campaign_watchdog import (
+        CampaignProgressWatchdog, CampaignProgressWatchdogPolicy,
+    )
+    watcher, runner, view = _adapter(tmp_path, monkeypatch)
+    now = [1000.0]
+    watcher.clock = lambda: now[0]
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+    accounting = {"implementation_attempts": {"TASK-1": 2}}
+    monkeypatch.setattr(watcher, "_accounting", lambda: deepcopy(accounting))
+    calls = []
+    runner.stop = lambda *_, **kw: calls.append("stop") or {"status": "stopped"}
+    runner.recover_stalled_worker = lambda *_: calls.append("recover") or {"recovery": "reconciled"}
+    runner.doctor = lambda *_: calls.append("doctor") or {"status": "ready"}
+    def start(*_, **kw):
+        calls.append("start")
+        view.update(status="starting", healthy=False, provider_progress_verified=False)
+        return {"status": "starting"}
+    runner.start = start
+    def native():
+        return CampaignProgressWatchdog(watcher.directory, repository_root=watcher.root,
+            scope=watcher.scope, observe=watcher.observe, recover=watcher.recover,
+            policy=CampaignProgressWatchdogPolicy(deadline_ms=1_200_000),
+            clock_ms=lambda: int(now[0] * 1000))
+    assert native().run_once()["status"] == "confirming"
+    now[0] += 31
+    result = native().run_once()
+    assert result["status"] == "cooldown" and result["reason"] == "recovery_not_yet_healthy"
+    ledger = json.loads(native().state_path.read_text())
+    entry = next(iter(ledger["incidents"].values()))
+    assert entry["phase"] == "finished" and entry["attempts"] == 1
+    assert entry["terminal_cid"] == result["terminal_cid"]
+    assert accounting == {"implementation_attempts": {"TASK-1": 2}}
+    assert calls == ["stop", "recover", "doctor", "start"]
+    view.update(status="stalled")
+    now[0] += 61
+    retry = native().run_once()
+    assert retry["status"] == "confirming"
+    assert retry["reason"] == "failure_confirmation_pending"
+    unchanged = json.loads(native().state_path.read_text())
+    assert next(iter(unchanged["incidents"].values()))["attempts"] == 1
+    assert calls == ["stop", "recover", "doctor", "start"]
