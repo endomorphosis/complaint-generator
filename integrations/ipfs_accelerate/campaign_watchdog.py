@@ -277,6 +277,17 @@ class ComplaintCampaignWatchdog:
             "provider": {k: provider.get(k) for k in ("frame_counts", "log_bytes", "provider_terminal_observed")},
             "validation": {k: validation.get(k) for k in ("activity_id", "binding_sha256", "type")}})
         state = str(status.get("status") or "unknown")
+        retry = status.get("retry_cooldown_evidence") or {}
+        retry_cooldown = (bound and not hold and not self.runner._claim_proof_conflict(native)
+            and not status.get("native_read_errors") and status.get("healthy") is True
+            and state == "retry_cooldown" and status.get("retry_cooldown_verified") is True
+            and retry.get("verified") is True and _finite_deadline(retry.get("retry_at")) is not None
+            and self.clock() < retry["retry_at"] and not active
+            and not native.get("implementation_in_progress"))
+        if retry_cooldown:
+            # Native's frozen observation schema has no scheduler-only status.
+            # The Host reports it below without claiming semantic work progress.
+            state = "running"
         if state not in {"waiting_for_user", "manual_hold", "paused", "cancelled", "capacity_quarantine",
                 "protected_incident", "budget_exhausted", "blocked", "active", "post_provider", "running",
                 "maintenance", "selected", "starting", "stalled", "no_progress", "daemon_failed", "stopped",
@@ -306,7 +317,7 @@ class ComplaintCampaignWatchdog:
         # selector. Logical ready work distinguishes that mechanical block
         # from a task genuinely waiting for dependencies or user input.
         idle_ready = False
-        if (state in {"blocked", "running"} and not hold and pending
+        if (state in {"blocked", "running"} and not retry_cooldown and not hold and pending
                 and status.get("board", {}).get("ready_task_ids")
                 and not active and not native.get("implementation_in_progress")
                 and not status.get("provider_progress_verified")
@@ -345,10 +356,13 @@ class ComplaintCampaignWatchdog:
             "monitor_class": _monitor_class(hold=hold, state=result["status"],
                 recovery_permitted=permitted, source_stale=source_stale,
                 completed=completed, idle_ready=idle_ready),
+            "retry_cooldown": retry if retry_cooldown else None,
             "source_stale": source_stale, "idle_ready": idle_ready and not completed,
             "budgets": budgets, "paid_attempt_rearmed": False, "hold_bypassed": False,
             "completion_authority": False,
         }
+        if retry_cooldown and not hold and not source_stale:
+            self.latest_monitoring["monitor_class"] = "bounded_native_retry_cooldown"
         self.latest_observation = result
         return result
 
@@ -463,6 +477,26 @@ class ComplaintCampaignWatchdog:
             status=self.latest_status, preflight=getattr(self,"latest_preflight",{}), observed_at=self.clock())
         rescue = self.latest_status.get("auto_rescue_activity_evidence")
         rescue = rescue if type(rescue) is dict else {}
+        retry = self.latest_status.get("retry_cooldown_evidence")
+        retry = retry if type(retry) is dict else {}
+        passive_retry = (first.get("owner_binding_verified") is True
+            and first.get("healthy") is True and first.get("status") == "running"
+            and first.get("manual_hold") is False and not first.get("hold_reason")
+            and first.get("completion_verified") is False and first.get("pending_task_ids")
+            and not first.get("active_task_id") and not first.get("active_task_cid")
+            and not first.get("attempt") and first.get("recovery_permitted") is False
+            and self.latest_status.get("status") == "retry_cooldown"
+            and self.latest_status.get("retry_cooldown_verified") is True
+            and self.latest_status.get("owned_process_alive") is True
+            and self.latest_status.get("worker_liveness") == "alive"
+            and not self.latest_status.get("native_read_errors")
+            and self.latest_monitoring.get("source_stale") is False
+            and first.get("progress_verified") is False
+            and retry.get("verified") is True and retry.get("progress_verified") is False
+            and type(retry.get("task_ids")) is list and retry["task_ids"]
+            and set(retry["task_ids"]) <= set(first["pending_task_ids"])
+            and _finite_deadline(retry.get("retry_at")) is not None
+            and self.clock() < retry["retry_at"])
         passive_rescue = (first.get("owner_binding_verified") is True
             and first.get("healthy") is True and first.get("status") == "active"
             and first.get("manual_hold") is False and not first.get("hold_reason")
@@ -478,7 +512,14 @@ class ComplaintCampaignWatchdog:
             and rescue.get("reason") == "bounded_native_rescue_activity"
             and type(rescue.get("deadline_at")) in (int,float) and math.isfinite(rescue["deadline_at"])
             and self.clock() < rescue["deadline_at"])
-        if passive_rescue:
+        if passive_retry:
+            # A fixed Native selection deadline is not a new grace lease. Do
+            # not enter recovery policy or rewrite its incident ledger here.
+            result = {"schema":"campaign-progress-watchdog-result@1", "scope":dict(self.scope),
+                "status":"cooldown", "reason":"bounded_native_retry_cooldown", "retry_at":retry["retry_at"],
+                "progress_verified":False, "completion_authority":False,
+                "provider_calls_by_watchdog":0, "attempt_refunded":False}
+        elif passive_rescue:
             result = {"schema":"campaign-progress-watchdog-result@1", "scope":dict(self.scope),
                 "status":"healthy", "reason":"bounded_native_rescue_activity", "progress_verified":False,
                 "completion_authority":False,"provider_calls_by_watchdog":0,"attempt_refunded":False}

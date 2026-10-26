@@ -1848,6 +1848,12 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     except (OSError, ValueError, TypeError) as error:
         selected_root, root_binding, worktree_error = None, None, str(error)
     shutdown_verified = _shutdown_verified(record, shutdown, repo_root, state_dir) and worktree_error is None
+    from .retry_cooldown_activity import observe as observe_retry_cooldown
+    retry_cooldown = (observe_retry_cooldown(sys.modules[__name__], repo_root, state_dir,
+        record, native_state, heartbeat, board, spec=spec, artifacts=artifacts,
+        current_state=current_state, now_ts=now)
+        if owned and current_state and not board.get("read_error")
+        and not provider_progress and not validation_evidence else {"verified": False})
     if not owned:
         if identity and process_identity(identity.get("pid")):
             health = "identity_mismatch"
@@ -1861,6 +1867,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "heartbeat_identity_mismatch"
     elif heartbeat_age is not None and heartbeat_age > 120:
         health = "stalled"
+    elif retry_cooldown.get("verified") is True:
+        health = "retry_cooldown"
     elif (board["count"] and board["completed"] == board["count"]
             and not native_execution_unsettled and canonical_activity_evidence is None
             and not rescue_active and startup_activity is None):
@@ -1957,7 +1965,7 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         attempt_age is not None and attempt_age > STALL_SECONDS
     )
     healthy = bool(identity_ok and heartbeat_fresh and activity_ok and health in {
-        "active", "post_provider", "running", "maintenance", "waiting_for_user", "selected", "complete",
+        "active", "post_provider", "running", "maintenance", "waiting_for_user", "selected", "complete", "retry_cooldown",
     })
     return {"status": health, "healthy": healthy, "owned_process_alive": owned,
             "worker_liveness": worker_liveness,
@@ -1987,6 +1995,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
             "provider_execution_evidence": provider_evidence,
             "auto_rescue_activity_verified": rescue_active,
             "auto_rescue_activity_evidence": rescue_activity,
+            "retry_cooldown_verified": health == "retry_cooldown" and retry_cooldown.get("verified") is True,
+            "retry_cooldown_evidence": retry_cooldown,
             "startup_activity_verified": startup_activity is not None,
             "startup_activity_evidence": startup_activity,
             "validation_activity_verified": bool(owned and validation_evidence),
