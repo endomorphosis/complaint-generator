@@ -4,9 +4,10 @@ Chromium is the inherited pinned binary. HTTP is the same-origin pipe into
 the composed ASGI handlers. Cases are new synthetic encrypted workspaces.
 A canned mockApi and a diagnostic-only mount are not the subject.
 
-The measured workspace can authenticate and run a real pending inquiry while
-the header still says "No case selected" and the access-denied status remains.
-That split is recorded as defect UX-01. It is not baseline UX success.
+The immutable source-bound screenshots record the original UX-01 split:
+a real pending inquiry beside a stale case header or access-denied status.
+The current live journey proves actual case/auth/inquiry bindings and accepts
+a corrected coherent header without requiring that historical defect to stay.
 """
 from __future__ import annotations
 
@@ -241,7 +242,7 @@ def test_baseline_screenshots_bind_source_runtime_viewport_actor_and_state():
     assert {row["viewport"]["width"] for row in manifest["screenshots"]} == {MOBILE["width"], DESKTOP["width"]}
 
 
-def test_live_routes_separate_stale_header_from_authenticated_inquiry(tmp_path, monkeypatch):
+def test_live_routes_bind_authenticated_inquiry_to_current_case(tmp_path, monkeypatch):
     world = _arm_admin(owner_lawyer_journey_world(tmp_path / "world"))
     with _browser(tmp_path, monkeypatch, world.app) as (open_page, bridge, node, chromium, denial):
         page = open_page("owner", DESKTOP)
@@ -323,18 +324,50 @@ def test_live_routes_separate_stale_header_from_authenticated_inquiry(tmp_path, 
         assert NARRATIVE not in desktop["prompt"]
         assert desktop["diagnosticMounts"] == 0
 
-        access_denied = "access denied" in desktop["status"].lower() or "access denied" in desktop["summaryText"].lower()
+        actual_session = page.evaluate("async () => await window.workspaceClient.getSession()")["session"]
+        assert actual_session["user_id"] == world.case.tenant_id
+        assert actual_session["shared_interview"]["pending_inquiry"]["inquiry_id"] == inquiry["inquiry_id"]
+        actor = page.evaluate("""async () => {
+            const response = await fetch('/api/complaint-workspace/auth/session', {credentials: 'same-origin'});
+            return {status: response.status, body: await response.json()};
+        }""")
+        assert actor["status"] == 200 and actor["body"]["authenticated"] is True
+        assert actor["body"]["principal_id"] == world.owner.principal_id
+        current_case = page.evaluate("() => window.workspaceClient.caseContext")
+        assert current_case["tenant_id"] == world.case.tenant_id
+        assert current_case["case_id"] == world.case.case_id
+        assert current_case["resource_id"] == world.case.resource_id
+        assert page.locator("#workspace-case-context").is_visible()
+        assert page.locator("#workspace-status").is_visible()
+
+        access_denied = "access denied" in desktop["status"].lower() or (
+            not desktop["summaryHidden"] and "access denied" in desktop["summaryText"].lower())
         header_stale = desktop["header"] == "No case selected"
-        defect = {
-            "id": "UX-01",
-            "source_commit": SOURCE_COMMIT,
+        header_matches_case = any(value in desktop["header"] for value in (
+            world.case.case_id, world.case.tenant_id, world.owner.principal_id, "owner-lawyer-journey"))
+        if header_stale:
+            # Characterize the known unrefreshed page. The real backend and
+            # inquiry assertions above remain required for this legacy state.
+            assert desktop["headerState"] in {"empty", "error"}
+            assert desktop["hydrated"] in {"denied", "error"}
+        else:
+            assert header_matches_case, "Current header must identify the actual authorized case or owner"
+        if not header_stale and not access_denied:
+            assert desktop["headerState"] == "ready"
+            assert desktop["hydrated"] in {"ready", "partial"}
+            assert desktop["summaryHidden"] is True
+
+        observation = {
+            "id": "UX-01-current-observation",
+            "historical_baseline_source_commit": SOURCE_COMMIT,
+            "current_workspace_source_sha256": hashlib.sha256((ROOT / "templates" / "workspace.html").read_bytes()).hexdigest(),
             "runtime": {"node_sha256": node.sha256, "chromium_sha256": chromium.sha256, "transport": "pinned_pipe_asgi"},
             "inherited_af_unix_only": denial["af_unix_only"],
             "viewport": DESKTOP,
             "actor": "owner",
-            "principal_id": issued["principal_id"],
+            "principal_id": actor["body"]["principal_id"],
+            "case_id": current_case["case_id"],
             "state": "authenticated_pending_inquiry_with_measured_header",
-            "authenticated_inquiry": True,
             "inquiry_id": desktop["inquiryId"],
             "header": desktop["header"],
             "header_state": desktop["headerState"],
@@ -342,13 +375,12 @@ def test_live_routes_separate_stale_header_from_authenticated_inquiry(tmp_path, 
             "summary_text": desktop["summaryText"],
             "hydrated": desktop["hydrated"],
             "header_stale_no_case_selected": header_stale,
+            "header_matches_current_case": header_matches_case,
             "access_denied_visible": access_denied,
-            "baseline_ux_success": False,
+            "known_legacy_defect_observed": header_stale or access_denied,
+            "completion_authority": False,
         }
-        assert header_stale or access_denied, defect
-        assert defect["baseline_ux_success"] is False
-        assert defect["authenticated_inquiry"] is True
-        assert defect["header_stale_no_case_selected"] or defect["access_denied_visible"]
+        (tmp_path / "current-case-observation.json").write_text(json.dumps(observation, indent=2) + "\n")
 
         page.set_viewport_size(MOBILE)
         mobile = _header_snapshot(page)
