@@ -973,8 +973,9 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
         if root_binding is not None:
             argv.extend(["--worktree-root", str(selected_root)])
         log_path = state_dir / "launcher.log"
-        from .improvement_plan import load_spec
-        policy = load_spec(spec_path)["execution_policy"]
+        from .improvement_plan import load_spec, source_generation
+        launch_spec = load_spec(spec_path)
+        policy = launch_spec["execution_policy"]
         refusal = watchdog_refusal()
         if refusal is not None:
             return refusal
@@ -995,6 +996,7 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
                   "status": "starting", "repo_root": str(repo_root), "spec_path": str(spec_path),
                   "state_dir": str(state_dir), "merge_target": check["merge_target"],
                   "board_path": prepared["board_path"], "plan_id": check["native_plan_id"],
+                  "source_generation": source_generation(launch_spec),
                   "provider": "grok_cli", "model": MODEL, "allow_fallback": False}
         if root_binding is not None:
             record.update(worktree_root=str(selected_root), worktree_root_binding=root_binding)
