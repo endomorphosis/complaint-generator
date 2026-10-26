@@ -10,6 +10,8 @@ Development-provider permission does not authorize a real complaint's egress. Te
 
 Keep the SDK pins and active specification stable during execution. A capability gap requires a bounded measured compatibility decision, not silent fallback or a floating update. Admins have operations metadata only by default; complaint analysis requires a separate case/key grant. Notes, labels, conversations and model suggestions require explicit adoption before becoming evidence or accepted answers. A user-marked deadline is an attributed reminder, not a derived legal deadline.
 
+The qualified supervisor repair promotes only the Accelerate pin from its initial baseline at a verified stopped boundary. See [watchdog recovery qualification](complaint_gui_ux_overhaul_watchdog_recovery.md) for the exact revision, measured defects, validation and preserved accounting. Report this promoted pin in subsequent SDK inventories; keep the specification and historical baseline unchanged.
+
 ## Author, ingest and start
 
 Use a new canonical UID-owned0700state directory and an empty dedicated0700worktree root outside both source and state. Prefer a filesystem with space for the observed cold-checkout estimate plus overhead; the runtime checks capacity again before execution. Use a named local integration branch and commit the specification, generated plan/board, screenshots, contracts and required source before launch. Native workers check out `HEAD`.
