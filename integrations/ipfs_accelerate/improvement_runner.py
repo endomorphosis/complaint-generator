@@ -1740,6 +1740,15 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     # Native selection sets active_task_id before an attempt or worker exists.
     # Only the execution flag identifies an active implementation/validation.
     active = bool(native_state.get("implementation_in_progress"))
+    # Native clears these current execution/selection fields on settlement.
+    # Inspect the raw row: stale timestamps must not hide an unfinished claim.
+    # Lane owner births and last_implementation_* survive legitimate settlement.
+    native_execution_unsettled = any(native_state.get(key) for key in (
+        "implementation_in_progress", "active_task_id", "active_task_key", "active_task_cid",
+        "active_task_title", "active_task_track", "active_task_started_at", "active_attempt",
+        "active_phase", "active_phase_started_at", "active_phase_detail", "active_log_path",
+        "active_worktree_path", "active_branch", "active_provider_runner",
+    ))
     try:
         since_start = max(0.0, now - float(record.get("started_at", now)))
     except (TypeError, ValueError):
@@ -1846,12 +1855,14 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "board_error"
     elif native_state.get("read_error") or heartbeat.get("read_error"):
         health = "state_error"
-    elif board["count"] and board["completed"] == board["count"]:
-        health = "complete"
     elif heartbeat_age is not None and heartbeat_owner != identity.get("pid"):
         health = "heartbeat_identity_mismatch"
     elif heartbeat_age is not None and heartbeat_age > 120:
         health = "stalled"
+    elif (board["count"] and board["completed"] == board["count"]
+            and not native_execution_unsettled and canonical_activity_evidence is None
+            and not rescue_active and startup_activity is None):
+        health = "complete"
     elif canonical_activity_evidence is not None:
         # The exact canonical executor has its existing fixed validation
         # deadline. Its pulse/finalization proof never renews the provider.
