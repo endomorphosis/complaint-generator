@@ -6,21 +6,21 @@
     <title>Unified Complaint Workspace</title>
     <style>
         :root {
-            --bg: #e8dcc9;
-            --bg-deep: #f6efe4;
-            --ink: #182229;
-            --muted: #58656e;
-            --panel: rgba(255, 252, 247, 0.95);
-            --line: rgba(24, 34, 41, 0.1);
-            --accent: #8d3d17;
-            --accent-strong: #6f2a0f;
-            --accent-soft: #fce9d8;
-            --accent-wash: rgba(141, 61, 23, 0.08);
-            --panel-strong: rgba(255, 248, 241, 0.98);
-            --good: #166534;
-            --warn: #b45309;
-            --shadow: 0 20px 50px rgba(24, 34, 41, 0.12);
-            --shadow-strong: 0 28px 64px rgba(24, 34, 41, 0.16);
+            --bg: var(--cx-color-canvas, #f6f3ee);
+            --bg-deep: var(--cx-color-canvas-deep, #fbf8f4);
+            --ink: var(--cx-color-ink, #1c1917);
+            --muted: var(--cx-color-muted, #44403c);
+            --panel: var(--cx-color-panel, #fffcf8);
+            --line: var(--cx-color-line, #d6d3d1);
+            --accent: var(--cx-color-accent, #7c2d12);
+            --accent-strong: var(--cx-color-accent-strong, #6b240f);
+            --accent-soft: var(--cx-color-accent-soft, #ffedd5);
+            --accent-wash: var(--cx-color-accent-wash, rgba(124, 45, 18, 0.08));
+            --panel-strong: var(--cx-color-panel-strong, #fffaf5);
+            --good: var(--cx-color-good, #14532d);
+            --warn: var(--cx-color-warn, #9a3412);
+            --shadow: var(--cx-shadow-panel, 0 12px 32px rgba(28, 25, 23, 0.08));
+            --shadow-strong: var(--cx-shadow-panel-strong, 0 18px 40px rgba(28, 25, 23, 0.12));
             --workspace-sticky-interaction-offset: 460px;
         }
 
@@ -105,11 +105,11 @@
         }
 
         .hero h1 {
-            margin: 0 0 10px;
-            font-size: clamp(2.7rem, 5vw, 5rem);
-            line-height: 0.9;
-            letter-spacing: -0.04em;
-            max-width: 10ch;
+            margin: 0 0 var(--cx-space-3, 12px);
+            font-size: var(--cx-font-display, 2.25rem);
+            line-height: var(--cx-leading-tight, 1.25);
+            letter-spacing: -0.02em;
+            max-width: 20ch;
         }
 
         .hero p {
@@ -3403,17 +3403,19 @@
         }
     </style>
     <link id="workspace-shell-style" rel="stylesheet" href="/static/complaint_app_shell.css">
+    <link id="complaint-experience-tokens" rel="stylesheet" href="/static/complaint_experience_tokens.css">
 </head>
-<body data-workspace-hydrated="booting" data-complaint-shell="off">
+<body class="cx-app" data-workspace-hydrated="booting" data-complaint-shell="off">
     <a class="cg-skip-link" href="#workspace-main">Skip to workspace</a>
     <div id="workspace-case-context" class="cg-case-context" role="region" aria-label="Current case" data-state="empty" tabindex="-1">
         <span class="cg-case-context__label">Current case</span>
         <strong id="workspace-case-context-value">No case selected</strong>
     </div>
-    <div id="workspace-error-summary" class="cg-error-summary" role="alert" aria-labelledby="workspace-error-summary-title" tabindex="-1" hidden>
+    <div id="workspace-error-summary" class="cg-error-summary cx-status cx-status--error" role="alert" aria-labelledby="workspace-error-summary-title" tabindex="-1" hidden>
         <h2 id="workspace-error-summary-title">Workspace needs attention</h2>
         <ul id="workspace-error-summary-list"></ul>
     </div>
+    <p id="workspace-locked-state" class="cx-status cx-status--locked" role="status" hidden>Case content stays locked until this browser session unlocks the private key. Locked content is not replaced with a new case.</p>
     <div class="shell" id="workspace-main" tabindex="-1">
         <section class="topbar" aria-label="Workspace identity">
             <div class="brand-lockup">
@@ -3428,11 +3430,11 @@
         </section>
         <section class="hero">
             <span class="eyebrow">Complaint Operations Workspace</span>
-            <h1>Unified Complaint Workspace</h1>
-            <p>Start with the clearest version of the story, save the strongest support you already have, and move into a formal complaint only when the record is ready. The same session stays connected across the browser, package, CLI, MCP tools, and SDK.</p>
+            <h1 class="cx-display">Unified Complaint Workspace</h1>
+            <p class="cx-lede">Start with the clearest version of the story, save the strongest support you already have, and move into a formal complaint only when the record is ready. The same session stays connected across the browser, package, CLI, MCP tools, and SDK.</p>
             <div class="hero-grid">
                 <div class="hero-panel">
-                    <h2>Start with the next calm, useful step</h2>
+                    <h2 class="cx-title">Start with the next calm, useful step</h2>
                     <p class="muted">Start with names and timing, then what was reported, what happened after, and how the situation affected the complainant. Review and Builder stay gated until the case record is coherent enough to use them safely.</p>
                     <div class="surface-nav-group">
                         <div class="surface-links" data-surface-nav="primary" aria-label="Complaint Generator Navigation">
@@ -6292,11 +6294,20 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             context.textContent = text && !/loading/i.test(text) ? text : 'No case selected';
         }
 
+        function publishWorkspaceLockState(message) {
+            const locked = document.getElementById('workspace-locked-state');
+            if (!locked) return;
+            const text = String(message || '');
+            const isLocked = /private key|passphrase|wallet is locked|key is locked|remains locked/i.test(text);
+            locked.hidden = !isLocked;
+        }
+
         function publishWorkspaceErrorSummary(state) {
             const summary = document.getElementById('workspace-error-summary');
             const list = document.getElementById('workspace-error-summary-list');
             const status = document.getElementById('workspace-status');
             if (!summary || !list) return;
+            publishWorkspaceLockState(status ? status.textContent : '');
             if (state !== 'error' && state !== 'denied') {
                 if (state === 'ready' || state === 'partial') {
                     summary.hidden = true;
