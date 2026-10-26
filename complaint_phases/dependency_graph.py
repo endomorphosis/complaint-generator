@@ -1247,7 +1247,8 @@ class DependencyGraph:
     
     @classmethod
     def from_dict(cls, data: dict) -> 'DependencyGraph':
-        """Deserialize from dictionary."""
+        """Deserialize without changing the caller's versioned projection."""
+        data = deepcopy(data)
         graph = cls()
         graph.metadata = data['metadata']
         
