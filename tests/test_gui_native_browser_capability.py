@@ -343,3 +343,79 @@ def test_bridge_propagates_actual_asgi_failure_inside_running_loop() -> None:
             bridge.handle(BrowserHttpRequest("GET", f"{SAME_ORIGIN}/health", headers=[]))
 
     asyncio.run(exercise())
+
+
+def test_actual_failed_asgi_route_aborts_browser_fetch_and_preserves_error(tmp_path: Path, monkeypatch) -> None:
+    """A real app error must settle fetch and remain an error for the validator."""
+    from fastapi import FastAPI
+    from fastapi.responses import HTMLResponse
+    from tests import gui_native_browser as browser
+
+    assert browser.probe_inherited_network_denial()["af_unix_only"]
+    application = FastAPI()
+    original_error = TypeError("synthetic ASGI route failure")
+
+    @application.get("/")
+    async def document():
+        return HTMLResponse("<!doctype html><title>actual error delivery</title>")
+
+    @application.get("/actual-error")
+    async def actual_error():
+        raise original_error
+
+    bridge = browser.SameOriginAsgiBridge(application)
+    node, chromium = browser.pin_executables()
+    profile = tmp_path / "actual-error-browser-profile"
+    profile.mkdir(mode=0o700)
+    monkeypatch.setenv("PLAYWRIGHT_NODEJS_PATH", node.path)
+    playwright, context = None, None
+    observed = set()
+    try:
+        playwright = browser._load_sync_playwright()().start()
+        context = browser._launch_context(playwright, chromium.path, profile, bridge)
+        browser._assert_process_custody(node, chromium, profile)
+        observed |= browser._with_descendants(browser._matching_pids((str(profile), node.argv[1])))
+        page = context.pages[0] if context.pages else context.new_page()
+        page.goto(browser.SAME_ORIGIN + "/", wait_until="domcontentloaded")
+        errors = []
+
+        def record_error(failure):
+            # Playwright preserves the type but prefixes the API call name.
+            assert type(failure) is type(original_error)
+            assert "synthetic ASGI route failure" in str(failure)
+            errors.append(type(failure))
+
+        def read_after_error(operation):
+            try:
+                return operation()
+            except TypeError as failure:
+                record_error(failure)
+                return operation()
+
+        try:
+            page.evaluate("""() => {
+                window.failedRouteState = 'pending';
+                fetch('/actual-error').then(
+                    () => { window.failedRouteState = 'fulfilled'; },
+                    () => { window.failedRouteState = 'rejected'; });
+            }""")
+        except TypeError as failure:
+            record_error(failure)
+        read_after_error(lambda: page.wait_for_function(
+            "window.failedRouteState !== 'pending'", timeout=5000))
+        assert read_after_error(lambda: page.evaluate("window.failedRouteState")) == "rejected"
+        assert errors == [TypeError]
+        assert bridge.same_origin_paths == ["/"]
+        assert bridge.asgi_calls == 2
+    finally:
+        try:
+            if context is not None:
+                try:
+                    context.close()
+                except TypeError as failure:
+                    assert "synthetic ASGI route failure" in str(failure)
+                    context.close()
+        finally:
+            if playwright is not None:
+                playwright.stop()
+            assert browser._wait_for_cleanup(observed)["cleaned"]

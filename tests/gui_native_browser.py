@@ -1122,14 +1122,23 @@ def _launch_context(playwright: Any, chromium: str, profile: Path, bridge: SameO
         buffer = getattr(request, "post_data_buffer", None)
         if buffer:
             body = bytes(buffer)
-        result = bridge.handle(BrowserHttpRequest(
-            method=request.method,
-            url=request.url,
-            headers=_browser_header_pairs(request),
-            body=body,
-            resource_type=str(getattr(request, "resource_type", "") or ""),
-        ))
-        _fulfill(route, result)
+        try:
+            result = bridge.handle(BrowserHttpRequest(
+                method=request.method,
+                url=request.url,
+                headers=_browser_header_pairs(request),
+                body=body,
+                resource_type=str(getattr(request, "resource_type", "") or ""),
+            ))
+            _fulfill(route, result)
+        except BaseException:
+            # A raised ASGI error must fail the validator and settle the real
+            # intercepted request. Leaving it open can strand browser fetch.
+            try:
+                route.abort("failed")
+            except Exception:
+                pass  # Preserve the original error if the route already closed.
+            raise
 
     context.route("**/*", intercept)
     websocket = getattr(context, "route_web_socket", None)
