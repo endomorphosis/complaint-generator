@@ -20,9 +20,10 @@ The new SDK method reconciles only an exact receipt-proven restart whose effects
 
 ## Validation and operation
 
-- The repaired baseline test passed both real Chromium/ASGI cases with zero skips under the inherited network restriction and AST seals.
+- The two-case baseline suite, including its real Chromium/ASGI journey, passed with zero skips under the inherited network restriction and AST seals.
 - The restart-health adapter passed 101 focused Host tests; cooldown reporting passed 142 focused Host tests in its isolated component.
 - The SDK reconciliation change passed 62 new and existing focused Native tests, including preservation of the second recovery ordinal and refusal of a third.
+- The retained-closure proof adapter and restart watchdog passed 119 focused Host tests. The parser also verified the actual retained event chain, task revision and Grok log framing without invoking a provider.
 - All four local SDK documentation gates passed on the published integration. GitHub's documentation job did not start because the account is locked for billing; local results are not a GitHub CI success.
 
 Use the explicit root, specification and original state paths with the public `status`, `watchdog`, `stop`, `recover` and `start` commands described in the operator guide. Preserve the dedicated timer and ledger. A legacy uncertain restart is reconciled only through the public receipt-verification API with its privately retained closure manifest. Do not edit the ledger, delete a claim, reset an attempt or replace the campaign state to bypass a refusal.
