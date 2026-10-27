@@ -25,8 +25,11 @@
         session: null,
         assignment: null,
         gaps: [],
-        catalog: []
+        catalog: [],
+        binding: null
     };
+    var PRESENTATION_MODES = ["chat-only", "chat-plus-context", "full-workspace"];
+    var presentationMode = "full-workspace";
     var PRIMARY = {overview: true, mediator: true, evidence: true, draft: true};
     var refreshToken = 0;
     var refreshTimer = 0;
@@ -109,6 +112,18 @@
             + '<label class="case-shell__switch" for="complaint-case-shell-catalog">Switch case <select id="complaint-case-shell-catalog"></select></label>'
             + '<button type="button" id="complaint-case-shell-next">Sign in</button>'
             + "</div>"
+            + '<div id="complaint-presentation-modes" role="radiogroup" aria-label="Workspace view">'
+            + '<button type="button" role="radio" data-presentation-mode="chat-only" aria-checked="false">Chat</button>'
+            + '<button type="button" role="radio" data-presentation-mode="chat-plus-context" aria-checked="false">Chat and context</button>'
+            + '<button type="button" role="radio" data-presentation-mode="full-workspace" aria-checked="true">Full workspace</button>'
+            + "</div>"
+            + '<p id="complaint-presentation-status" role="status">Full workspace uses the same encrypted session.</p>'
+            + '<aside id="complaint-presentation-context" hidden aria-label="Selected case context">'
+            + '<h3>Selected context</h3>'
+            + '<p id="complaint-presentation-inquiry"></p>'
+            + '<p id="complaint-presentation-evidence"></p>'
+            + '<p id="complaint-presentation-draft"></p>'
+            + "</aside>"
             + '<div class="case-shell__body">'
             + '<nav id="complaint-case-shell-nav" aria-label="Case tasks">' + nav
             + '<details id="complaint-case-shell-more" class="case-shell__more"><summary>More</summary></details>'
@@ -132,7 +147,13 @@
         host.querySelector("#complaint-case-shell-next").addEventListener("click", runNext);
         host.querySelector("#complaint-entry-begin").addEventListener("click", beginComplaint);
         host.querySelector("#complaint-entry-check-key").addEventListener("click", checkPrivateKeyAccessAndResume);
+        host.querySelector("#complaint-presentation-modes").addEventListener("click", function (event) {
+            var button = event.target.closest("[data-presentation-mode]");
+            if (!button) return;
+            setPresentationMode(button.getAttribute("data-presentation-mode"));
+        });
         showTask("overview");
+        applyPresentation();
         applyViewport();
         return host;
     }
@@ -184,7 +205,7 @@
             var field = document.getElementById(id);
             if (field) field.value = "";
         });
-        ["unresolved-gaps", "selected-case-label"].forEach(function (id) {
+        ["unresolved-gaps", "selected-case-label", "complaint-presentation-inquiry", "complaint-presentation-evidence", "complaint-presentation-draft"].forEach(function (id) {
             var node = document.getElementById(id);
             if (!node) return;
             if (node.tagName === "UL" || node.tagName === "OL") node.replaceChildren();
@@ -432,7 +453,8 @@
             assignment: null,
             gaps: [],
             catalog: [],
-            entry: "continue"
+            entry: "continue",
+            binding: null
         };
         var cases = catalog && Array.isArray(catalog.cases) ? catalog.cases : [];
         next.catalog = cases.filter(allowedCase).map(function (item) {
@@ -454,6 +476,12 @@
             next.relationship = "owner";
             next.caseId = text(selected.case_id);
             next.caseLabel = text(selected.label || selected.case_id);
+            next.binding = {
+                tenant_id: text(selected.tenant_id),
+                case_id: text(selected.case_id),
+                resource_id: text(selected.resource_id),
+                directory_revision: selected.directory_revision
+            };
             next.gaps = contentState === "available" && Array.isArray(selected.unresolved_gaps) ? selected.unresolved_gaps.map(text) : [];
             next.privacy = "Local private is the default";
         } else if (assignment && assignment.case_id) {
@@ -578,8 +606,139 @@
         }
         renderCatalog(state.catalog, state.caseId);
         paintEntry();
+        applyPresentation();
         var active = host.querySelector("[data-case-task][aria-current='page']");
         fillPanel(active ? active.getAttribute("data-case-task") : "overview");
+    }
+
+    function applyPresentation() {
+        document.documentElement.dataset.workspacePresentation = presentationMode;
+        var host = shellHost();
+        if (host) host.dataset.presentation = presentationMode;
+        Array.prototype.forEach.call(document.querySelectorAll("[data-presentation-mode]"), function (button) {
+            var on = button.getAttribute("data-presentation-mode") === presentationMode;
+            button.setAttribute("aria-checked", on ? "true" : "false");
+        });
+        var context = document.getElementById("complaint-presentation-context");
+        if (context) context.hidden = presentationMode !== "chat-plus-context";
+    }
+
+    function presentationLabel(mode) {
+        if (mode === "chat-only") return "Chat";
+        if (mode === "chat-plus-context") return "Chat and context";
+        return "Full workspace";
+    }
+
+    function continuityDom() {
+        var pending = document.getElementById("adaptive-pending");
+        var draft = document.getElementById("draft-body");
+        var title = document.getElementById("draft-title");
+        var list = document.getElementById("evidence-list");
+        var host = shellHost();
+        return {
+            sessionKey: host ? (host.dataset.sessionKey || "") : "",
+            inquiryId: pending ? (pending.dataset.inquiryId || "") : "",
+            inquiryRevision: pending ? (pending.dataset.revision || "") : "",
+            evidenceId: list ? (list.dataset.selectedId || "") : "",
+            draftTitle: title ? title.value : "",
+            draftBody: draft ? draft.value : ""
+        };
+    }
+
+    function sameContinuity(first, second) {
+        return first.sessionKey === second.sessionKey && first.inquiryId === second.inquiryId
+            && first.inquiryRevision === second.inquiryRevision && first.evidenceId === second.evidenceId
+            && first.draftTitle === second.draftTitle && first.draftBody === second.draftBody;
+    }
+
+    function paintPresentationContext() {
+        var inquiry = document.getElementById("complaint-presentation-inquiry");
+        var evidence = document.getElementById("complaint-presentation-evidence");
+        var draft = document.getElementById("complaint-presentation-draft");
+        if (!inquiry || !evidence || !draft) return;
+        var kind = entryKind();
+        var blocked = presentationMode !== "chat-plus-context" || kind === "missing-key" || kind === "denied" || kind === "unavailable" || !state.authenticated;
+        if (blocked) {
+            inquiry.textContent = "";
+            evidence.textContent = "";
+            draft.textContent = "";
+            return;
+        }
+        var pending = document.getElementById("adaptive-pending");
+        inquiry.textContent = pending && pending.dataset.inquiryId
+            ? ("Inquiry " + pending.dataset.inquiryId + " revision " + (pending.dataset.revision || ""))
+            : "No pending inquiry is loaded.";
+        var list = document.getElementById("evidence-list");
+        var selectedId = list ? (list.dataset.selectedId || "") : "";
+        var button = selectedId && list ? list.querySelector('[data-evidence-id="' + selectedId.replace(/"/g, "") + '"]') : null;
+        evidence.textContent = button ? ("Selected evidence: " + text(button.innerText).replace(/\s+/g, " ").trim()) : "No evidence item is selected.";
+        var body = document.getElementById("draft-body");
+        var title = document.getElementById("draft-title");
+        draft.textContent = body && body.value
+            ? ("Draft: " + (title && title.value ? title.value + ". " : "") + body.value)
+            : "No draft is loaded.";
+    }
+
+    async function setPresentationMode(mode) {
+        var status = document.getElementById("complaint-presentation-status");
+        if (PRESENTATION_MODES.indexOf(mode) === -1) {
+            if (status) status.textContent = "That workspace view is not available.";
+            return false;
+        }
+        var kind = entryKind();
+        var blocked = kind === "missing-key" || kind === "denied" || kind === "unavailable" || !state.authenticated;
+        var before = continuityDom();
+        var focused = document.activeElement && document.activeElement.id;
+        var client = window.workspaceClient;
+        var serverBefore = null;
+        if (!blocked && client && typeof client.readCanonicalSession === "function" && state.binding && state.binding.case_id) {
+            try {
+                serverBefore = await client.readCanonicalSession(state.binding);
+            } catch (error) {
+                if (status) status.textContent = "The workspace session could not be read. The view stayed on " + presentationLabel(presentationMode) + ".";
+                return false;
+            }
+        }
+        var previous = presentationMode;
+        presentationMode = mode;
+        applyPresentation();
+        paintPresentationContext();
+        var after = continuityDom();
+        if (!sameContinuity(before, after)) {
+            presentationMode = previous;
+            applyPresentation();
+            paintPresentationContext();
+            if (status) status.textContent = "The view stayed on " + presentationLabel(previous) + " because the open case changed.";
+            return false;
+        }
+        if (serverBefore) {
+            try {
+                var serverAfter = await client.readCanonicalSession(state.binding);
+                if (JSON.stringify(serverBefore.continuity) !== JSON.stringify(serverAfter.continuity)) {
+                    presentationMode = previous;
+                    applyPresentation();
+                    paintPresentationContext();
+                    if (status) status.textContent = "The encrypted session changed. The view stayed on " + presentationLabel(previous) + ".";
+                    return false;
+                }
+            } catch (error) {
+                presentationMode = previous;
+                applyPresentation();
+                paintPresentationContext();
+                if (status) status.textContent = "The workspace session could not be confirmed. The view stayed on " + presentationLabel(previous) + ".";
+                return false;
+            }
+        }
+        if (focused && focused !== document.activeElement.id) {
+            var node = document.getElementById(focused);
+            if (node && node.getClientRects && node.getClientRects().length && node.focus) node.focus();
+        }
+        if (status) {
+            status.textContent = blocked
+                ? "The view changed without opening case content."
+                : (presentationLabel(mode) + " uses the same encrypted session.");
+        }
+        return true;
     }
 
     function renderCatalog(cases, selectedId) {
@@ -777,6 +936,12 @@
             }
             paint();
             finished();
+            if (content.session && state.relationship === "owner" && content.contentState === "available"
+                    && document.getElementById("draft-body")
+                    && typeof window.renderCanonicalComplaintSession === "function") {
+                window.renderCanonicalComplaintSession(content.session);
+                paintPresentationContext();
+            }
         } catch (error) {
             if (error && error.name === "AbortError") return;
             if (token !== refreshToken) return;
@@ -845,6 +1010,17 @@
         else showTask("mediator");
     }
 
+    document.addEventListener("click", function (event) {
+        var button = event.target.closest && event.target.closest("[data-evidence-id]");
+        var list = document.getElementById("evidence-list");
+        if (!button || !list || !list.contains(button)) return;
+        list.dataset.selectedId = button.getAttribute("data-evidence-id") || "";
+        Array.prototype.forEach.call(list.querySelectorAll("[data-evidence-id]"), function (node) {
+            node.setAttribute("aria-pressed", node === button ? "true" : "false");
+        });
+        if (presentationMode === "chat-plus-context") paintPresentationContext();
+    });
+
     mount();
     applyAudience();
     window.complaintCaseShell = {
@@ -853,6 +1029,8 @@
         scheduleRefresh: scheduleRefresh,
         showTask: showTask,
         applyViewport: applyViewport,
+        setPresentationMode: setPresentationMode,
+        binding: function () { return state.binding; },
         clearPlaintext: clearPagePlaintext,
         snapshot: function () {
             return {

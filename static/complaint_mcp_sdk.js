@@ -1316,6 +1316,51 @@ class ComplaintMcpClient {
         if (state.inflight) return state.inflight;
         return state.view;
     }
+
+    projectCanonicalContinuity(payload) {
+        const source = payload && typeof payload === 'object' ? payload : {};
+        const session = source.session && typeof source.session === 'object' ? source.session : {};
+        const shared = session.shared_interview && typeof session.shared_interview === 'object' ? session.shared_interview : {};
+        const pending = shared.pending_inquiry && typeof shared.pending_inquiry === 'object' ? shared.pending_inquiry : {};
+        const review = source.review && typeof source.review === 'object' ? source.review : {};
+        const evidence = []
+            .concat(Array.isArray(review.testimony) ? review.testimony : [])
+            .concat(Array.isArray(review.documents) ? review.documents : []);
+        const draft = session.draft && typeof session.draft === 'object'
+            ? session.draft
+            : (source.draft && typeof source.draft === 'object' ? source.draft : {});
+        const inquiryRevision = Number.isSafeInteger(pending.revision) ? pending.revision : null;
+        return {
+            transport: 'complaint-workspace-session',
+            user_id: typeof session.user_id === 'string' ? session.user_id : '',
+            case_id: typeof session.case_id === 'string' ? session.case_id : '',
+            private_revision: session.private_revision === undefined || session.private_revision === null ? null : session.private_revision,
+            session_revision: shared.session_revision === undefined || shared.session_revision === null ? null : shared.session_revision,
+            inquiry_id: typeof pending.inquiry_id === 'string' ? pending.inquiry_id : '',
+            inquiry_revision: inquiryRevision,
+            evidence_ids: evidence.map((item) => item && item.id ? String(item.id) : '').filter(Boolean).sort(),
+            draft_title: typeof draft.title === 'string' ? draft.title : '',
+            draft_body: typeof draft.body === 'string' ? draft.body : '',
+            draft_updated_at: typeof draft.updated_at === 'string' ? draft.updated_at : '',
+        };
+    }
+
+    async readCanonicalSession(binding) {
+        const url = new URL(`${this.baseUrl}/session`, this.origin);
+        const headers = {accept: 'application/json'};
+        const caseId = binding && typeof binding.case_id === 'string' ? binding.case_id : '';
+        if (caseId) {
+            url.searchParams.set('case_id', caseId);
+            headers['x-case-id'] = caseId;
+            if (typeof binding.tenant_id === 'string' && binding.tenant_id) headers['x-tenant-id'] = binding.tenant_id;
+            if (typeof binding.resource_id === 'string' && binding.resource_id) headers['x-resource-id'] = binding.resource_id;
+            if (Number.isSafeInteger(binding.directory_revision) && binding.directory_revision >= 1) {
+                headers['x-expected-revision'] = String(binding.directory_revision);
+            }
+        }
+        const payload = await this._request(url.toString(), {method: 'GET', headers});
+        return {continuity: this.projectCanonicalContinuity(payload)};
+    }
 }
 
 
