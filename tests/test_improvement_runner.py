@@ -1410,6 +1410,8 @@ def test_public_native_loop_resource_hold_cannot_reach_run_once(tmp_path, monkey
 
 def test_public_native_loop_capacity_observation_allows_one_ordinary_pass(tmp_path, monkeypatch):
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon_runner as native_loop
+    from tests.test_worktree_capacity_admission import _world as pinned_git_world
+    repo = pinned_git_world(tmp_path)
     calls, closed, checks = [], [], []
     class InertDaemon:
         def run_once(self):
@@ -1423,7 +1425,7 @@ def test_public_native_loop_capacity_observation_allows_one_ordinary_pass(tmp_pa
         state_path=tmp_path / 'native-state.json', strategy_path=tmp_path / 'strategy.json',
         events_path=tmp_path / 'events.jsonl')
     native_loop.run_portal_implementation_daemon_loop(InertDaemon(), context,
-        logger=runner._LOGGER, hooks=(runner._resource_admission_hook(tmp_path, tmp_path / 'state', tmp_path / 'worktrees', {}),))
+        logger=runner._LOGGER, hooks=(runner._resource_admission_hook(repo, tmp_path / 'state', tmp_path / 'worktrees', {}),))
     assert len(checks) == 1 and calls == [True] and closed == [True]
     assert not context.events_path.exists() and not context.state_path.exists()
 
