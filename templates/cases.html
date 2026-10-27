@@ -103,7 +103,6 @@
     function retireCatalogRequest() {
         if (catalogRequest) {
             catalogRequest.abort();
-            window.__caseSelectAborted = true;
         }
         catalogRequest = new AbortController();
         return catalogRequest.signal;
@@ -126,6 +125,8 @@
 
     function clearSelectionDisplay() {
         document.getElementById("selected-case").hidden = true;
+        delete document.getElementById("selected-case").dataset.actorPrincipalId;
+        delete document.getElementById("selected-case").dataset.caseId;
         document.getElementById("selected-case-label").textContent = "";
         document.getElementById("unresolved-gaps").replaceChildren();
         document.getElementById("directory-revision").textContent = "";
@@ -166,7 +167,7 @@
             headers: headers,
             body: options && options.body ? JSON.stringify(options.body) : undefined,
             credentials: "same-origin",
-            signal: options && options.signal
+            signal: (options && options.signal) || (catalogRequest && catalogRequest.signal) || undefined
         });
         var payload = await response.json();
         if (!response.ok) {
@@ -206,6 +207,8 @@
 
     function renderSelection(item) {
         document.getElementById("selected-case").hidden = false;
+        document.getElementById("selected-case").dataset.actorPrincipalId = item.actor_principal_id || "";
+        document.getElementById("selected-case").dataset.caseId = item.case_id || "";
         document.getElementById("selected-case-label").textContent = item.label || item.case_id;
         setCaseContext(item.label || item.case_id, "ready");
         document.getElementById("directory-revision").textContent = String(item.directory_revision);
@@ -591,6 +594,12 @@
     });
 
     window.complaintCasesSelect = selectCase;
+    window.retireComplaintCaseRequests = function () {
+        ++generation;
+        retireCatalogRequest();
+        selected = null;
+        contentRevision = null;
+    };
     window.clearTransientState = clearTransientState;
 })();
 </script>

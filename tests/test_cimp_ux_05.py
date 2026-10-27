@@ -7,7 +7,9 @@ owns. Viewport changes must not open another interview.
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
+from integrations.private_storage import PrivateArtifactBinding, seal_private_artifact
 from tests import gui_native_browser as browser
 from tests.gui_collaboration_fixtures import owner_lawyer_journey_world
 from tests.test_cimp_gui_14 import PASSPHRASE
@@ -264,6 +266,14 @@ def test_refresh_of_same_binding_keeps_unsaved_draft(tmp_path, monkeypatch):
 def test_logout_lock_and_revocation_clear_rendered_plaintext(tmp_path, monkeypatch):
     world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch)
     try:
+        # Bind an actual encrypted synthetic artifact through the operator
+        # fixture, then use the real membership/key-grant/content HTTP routes.
+        binding = PrivateArtifactBinding(tenant_id=world.case.tenant_id, case_id=world.case.case_id,
+            principal_id=world.case.tenant_id, artifact_kind="ux05-note", revision="1")
+        key_id, key = world.owner_keys.provider().resolve(binding)
+        envelope = seal_private_artifact(SECRET.encode(), binding=binding, key=key, key_id=key_id)
+        world.assignments.bind_artifact(case_id=world.case.case_id, artifact_kind="ux05-note",
+            artifact_revision="1", envelope=envelope)
         page.goto(browser.SAME_ORIGIN + "/cases", wait_until="domcontentloaded")
         _sign_in(page, "synthetic-owner-credential")
         page.click("#case-list button")
@@ -290,21 +300,74 @@ def test_logout_lock_and_revocation_clear_rendered_plaintext(tmp_path, monkeypat
         assert SECRET not in page.locator("#complaint-case-shell").inner_text()
 
         assert world.service.unlock_private_keys(passphrase=PASSPHRASE)["unlocked"] is True
+        page.click("#case-list button")
+        page.wait_for_function("() => document.getElementById('selected-case').hidden === false")
+        _shell_ready(page)
         page.fill("#assignment-expires", str(world.now["t"] + 3600))
         page.click("#invite-lawyer button[type=submit]")
         page.wait_for_selector("#assignment-list [data-state='pending']")
         _sign_in(page, "synthetic-lawyer-credential")
         page.locator("#assignment-list button", has_text="Accept scope").click()
         page.wait_for_function("() => document.getElementById('complaint-case-shell-actor').dataset.relationship === 'reviewer'")
-        page.fill("#case-draft", SECRET)
-        listed = world.assignments.list_assignments(world.owner.principal_id)
-        grant = next(item for item in listed["assignments"] if item["state"] == "accepted")
-        world.assignments.remove(world.owner.principal_id, grant["grant_id"], {"expected_version": grant["version"]})
-        page.evaluate("() => window.complaintCaseShell.refresh()")
-        page.wait_for_function("() => document.getElementById('complaint-case-shell-actor').dataset.relationship !== 'reviewer'")
-        _shell_ready(page)
-        assert page.input_value("#case-draft") == ""
-        assert SECRET not in page.locator("#complaint-case-shell").inner_text()
-        assert "Assigned case" not in page.locator("#complaint-case-shell-case").inner_text()
+        assert page.locator("#selected-case").is_hidden()  # A reviewer has no owner catalog draft.
+        with TestClient(world.app, base_url=browser.SAME_ORIGIN) as owner_client:
+            login = owner_client.post("/api/complaint-workspace/auth/login", json={"credential":"synthetic-owner-credential"})
+            assert login.status_code == 200
+            headers = {"x-csrf-token":login.json()["csrf_token"]}
+            listed = owner_client.get("/api/cases/assignments")
+            assert listed.status_code == 200
+            grant = next(item for item in listed.json()["assignments"] if item["state"] == "accepted")
+            admitted = owner_client.post("/api/cases/assignments/" + grant["grant_id"] + "/key-grant",
+                headers=headers, json={"artifact_kind":"ux05-note", "artifact_revision":"1", "idempotency_key":"ux05-admit-key"})
+            assert admitted.status_code == 201 and admitted.json()["plaintext_available"] is False
+            _sign_in(page, "synthetic-lawyer-credential")
+            with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith("/content")) as opened:
+                page.locator("#assignment-list button", has_text="Open content").click()
+            assert opened.value.status == 200
+            assert opened.value.json()["text"] == SECRET
+            assert opened.value.json()["actor_is_encrypted_owner"] is False
+            assert opened.value.json()["canonical_owner_principal_id"] == world.case.tenant_id
+            page.wait_for_function("() => document.getElementById('assignment-content').textContent === " + repr(SECRET))
+            # Hold a second real response before its body is read, revoke via
+            # the actual owner route, then release it after this view refreshes.
+            page.evaluate("""() => {
+                const original = window.fetch.bind(window);
+                let armed = true;
+                window.__revokedRead = {aborted: false, bodyError: null};
+                window.fetch = async function (input, options) {
+                    const path = new URL(typeof input === 'string' ? input : input.url, location.origin).pathname;
+                    if (armed && path.endsWith('/content') && options.method === 'POST') {
+                        armed = false;
+                        window.__revokedRead.signal = options.signal;
+                        options.signal.addEventListener('abort', () => {window.__revokedRead.aborted = true;}, {once: true});
+                        const response = await original(input, options);
+                        const json = response.json.bind(response);
+                        response.json = async function () {
+                            try {return await json();}
+                            catch (error) {window.__revokedRead.bodyError = error.name; throw error;}
+                        };
+                        await new Promise(resolve => {window.__releaseRevokedRead = resolve;});
+                        return response;
+                    }
+                    return original(input, options);
+                };
+                Array.from(document.querySelectorAll('#assignment-list button'))
+                    .find(button => button.textContent === 'Open content').click();
+            }""")
+            page.wait_for_function("() => typeof window.__releaseRevokedRead === 'function'")
+            removed = owner_client.post("/api/cases/assignments/" + grant["grant_id"] + "/remove",
+                headers=headers, json={"expected_version":grant["version"]})
+            assert removed.status_code == 200 and removed.json()["state"] == "removed"
+            page.evaluate("() => window.complaintCaseShell.refresh()")
+            page.wait_for_function("() => document.getElementById('complaint-case-shell-actor').dataset.relationship !== 'reviewer'")
+            _shell_ready(page)
+            assert page.locator("#assignment-content").inner_text() == ""
+            assert page.evaluate("() => window.__revokedRead.aborted && window.__revokedRead.signal.aborted") is True
+            page.evaluate("() => window.__releaseRevokedRead()")
+            page.wait_for_function("() => window.__revokedRead.bodyError === 'AbortError'")
+            assert page.locator("#assignment-content").inner_text() == ""
+            assert page.input_value("#case-draft") == ""
+            assert SECRET not in page.locator("#complaint-case-shell").inner_text()
+            assert "Assigned case" not in page.locator("#complaint-case-shell-case").inner_text()
     finally:
         _close(playwright, context, node, profile, observed)

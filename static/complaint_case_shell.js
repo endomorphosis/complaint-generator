@@ -156,18 +156,26 @@
             else node.textContent = "";
         });
         var selectedCase = document.getElementById("selected-case");
-        if (selectedCase) selectedCase.hidden = true;
+        if (selectedCase) {
+            selectedCase.hidden = true;
+            delete selectedCase.dataset.actorPrincipalId;
+            delete selectedCase.dataset.caseId;
+        }
     }
 
     function noteBoundary(principalId, caseId, access) {
         var actorChanged = committed.principalId && committed.principalId !== principalId;
         var caseChanged = committed.caseId && committed.caseId !== caseId;
         var closed = access === "locked" || access === "revoked" || access === "logged-out";
-        // A case switch drops the previous panels immediately. The catalog render
-        // owns the newly selected draft, so only lock, logout, and revocation
-        // blank the case fields after they were already on screen.
-        if (closed) clearPagePlaintext(false);
-        else if (actorChanged || caseChanged) clearPagePlaintext(true);
+        var fields = document.getElementById("selected-case");
+        // Preserve only fields already rendered from this actor/case's real
+        // catalog response. A refresh can discover a change from another view.
+        var currentFields = Boolean(fields && principalId && caseId
+            && fields.dataset.actorPrincipalId === principalId && fields.dataset.caseId === caseId);
+        if (closed || ((actorChanged || caseChanged) && !currentFields)) {
+            if (typeof window.retireComplaintCaseRequests === "function") window.retireComplaintCaseRequests();
+            clearPagePlaintext(false);
+        } else if (actorChanged || caseChanged) clearPagePlaintext(true);
         committed.principalId = principalId || "";
         committed.caseId = caseId || "";
         committed.access = access || "";
