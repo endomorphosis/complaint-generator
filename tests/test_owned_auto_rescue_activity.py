@@ -160,7 +160,9 @@ def test_actual_native_rescue_producer_has_owned_bounded_activity(tmp_path,monke
         assert result["activity_verified"] is True,json.dumps(result,sort_keys=True)
         assert result["work_progress_verified"] is (kind in activity._WORK)
         assert result["reason"]=="bounded_native_rescue_activity"
-        assert result["deadline_at"] <= runner._event_timestamp({"timestamp":world["body"]["active_task_started_at"]})+runner.TIMEOUT_SECONDS
+        primary = next(json.loads(line) for line in world["daemon"].events_path.read_text().splitlines()
+                       if json.loads(line).get("type") == "implementation_started")
+        assert result["deadline_at"] <= runner._event_timestamp(primary) + runner.TIMEOUT_SECONDS
         assert result["provider_birth"]["parent_pid"]==os.getpid()
         assert result["completion_authority"] is False
 
@@ -286,10 +288,26 @@ def test_real_native_producer_cannot_cross_current_scope_or_deadline(tmp_path,mo
         elif damage=="workspace":state["active_worktree_path"]=str(world["root"])
         elif damage=="phase":state["active_phase"]="implementing"
         elif damage=="hold":state["manual_hold"]=True
-        else:now=runner._event_timestamp({"timestamp":state["active_task_started_at"]})+runner.TIMEOUT_SECONDS+.01
+        else:
+            primary = next(json.loads(line) for line in world["daemon"].events_path.read_text().splitlines()
+                           if json.loads(line).get("type") == "implementation_started")
+            now = runner._event_timestamp(primary) + runner.TIMEOUT_SECONDS + .01
         result=activity.observe(runner,world["root"],world["campaign"],state,now_ts=now)
         assert result["activity_verified"] is False and result["work_progress_verified"] is False
         assert result["reason"] in activity._REASONS
+
+
+@pytest.mark.parametrize("kind", ["implementation_started", "implementation_finished"])
+def test_later_start_or_terminal_cannot_renew_the_same_provider_window(tmp_path, monkeypatch, kind):
+    with _native_world(tmp_path, monkeypatch, setup_seconds=51) as world:
+        first = activity.observe(runner, world["root"], world["campaign"], world["body"], now_ts=time.time())
+        assert first["activity_verified"] is True
+        world["daemon"]._record_event(kind, {"task_id": world["task"].task_id, "attempt": 1,
+            "worktree_path": str(world["workspace"]), "log_path": str(world["log"]),
+            "execution_mode": "model-assisted"})
+        refused = activity.observe(runner, world["root"], world["campaign"], world["body"], now_ts=time.time())
+        assert refused["activity_verified"] is False and refused["work_progress_verified"] is False
+        assert refused["reason"] in {"primary_start_unbound", "attempt_finished"}
 
 
 def test_real_native_finished_provider_and_later_validation_output_are_not_rescue_activity(tmp_path,monkeypatch):

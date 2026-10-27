@@ -173,12 +173,6 @@ def observe(runner, repo_root, campaign, state, *, now_ts):
         start_times = [runner._event_timestamp({"timestamp": state.get(key)})
             for key in ("active_task_started_at", "last_implementation_started_at")]
         _require(all(value is not None for value in start_times), "provider_deadline_unavailable")
-        deadline = min(binding["phase_deadline"], *(value + runner.TIMEOUT_SECONDS for value in start_times))
-        report["deadline_at"] = deadline
-        # This is the conservative existing Host cap, not a fabricated copy
-        # of Native's unpersisted absolute monotonic provider deadline.
-        report["deadline_basis"] = "existing_host_caps_and_native_timestamps"
-        _require(now_ts < deadline, "provider_deadline_expired")
         from .improvement_recovery import _owned_bytes
         from ipfs_accelerate_py.agent_supervisor.todo_daemon.current_incident_adjudication import _event_rows
         event_path = campaign / (runner.STATE_PREFIX + "_events.jsonl")
@@ -190,10 +184,23 @@ def observe(runner, repo_root, campaign, state, *, now_ts):
                 "canonical_task_key": binding["canonical_task_key"], "attempt": binding["attempt"]}
         def joined(row):
             return all(row.get(key) == value for key, value in same.items())
+        primary_time = runner._event_timestamp(primary)
+        exact_starts = [row for row in rows if row.get("type") == "implementation_started"
+                        and joined(row) and row.get("worktree_path") == binding["workspace"]
+                        and row.get("log_path") == binding["log_path"]]
         _require(joined(primary) and primary.get("execution_mode") == "model-assisted"
                  and primary.get("worktree_path") == binding["workspace"]
                  and primary.get("log_path") == binding["log_path"]
-                 and runner._event_timestamp(primary) >= start_times[1], "primary_start_unbound")
+                 and len(exact_starts) == 1 and primary_time is not None
+                 and start_times[0] <= start_times[1] <= primary_time <= now_ts + 2, "primary_start_unbound")
+        # Native creates its fixed provider deadline after checkout and this
+        # execution-start event. Selection/log-header times precede setup.
+        # The phase cap and existing 900-second ceiling remain unchanged;
+        # duplicate starts cannot renew this conservative observation window.
+        deadline = min(binding["phase_deadline"], primary_time + runner.TIMEOUT_SECONDS)
+        report["deadline_at"] = deadline
+        report["deadline_basis"] = "canonical_native_execution_event_and_phase_cap"
+        _require(now_ts < deadline, "provider_deadline_expired")
         subsequent = rows[index+1:]
         _require(not any(row.get("type") == "implementation_finished" and joined(row) for row in subsequent),
                  "attempt_finished")
@@ -212,7 +219,7 @@ def observe(runner, repo_root, campaign, state, *, now_ts):
                  and ready["base_prompt_id"] != ready["rescue_prompt_id"], "rescue_start_unbound")
         event_time, prepared_time = runner._event_timestamp(born), runner._event_timestamp(ready)
         _require(event_time is not None and prepared_time is not None
-                 and start_times[1] <= prepared_time <= event_time <= now_ts + 2,
+                 and primary_time <= prepared_time <= event_time <= now_ts + 2,
                  "rescue_time_unbound")
         _require(not any(row.get("type") in {"implementation_auto_rescue_provider_failed",
                 "implementation_auto_rescue_provider_blocked"}
