@@ -521,7 +521,15 @@ def create_complaint_workspace_router(
         user_id: Optional[str] = None,
         case_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return workspace.get_session(user_id, case_id=case_id)
+        try:
+            return workspace.get_session(user_id, case_id=case_id)
+        except WorkspacePersistenceError as error:
+            # The real case/key owner supplies this error. Do not expose its
+            # exception text, paths, ciphertext, or partial session payload.
+            code = str(error.code or "")
+            public = code if code in {"unlock_needed", "key_unavailable", "revision_conflict"} else "private_session_unavailable"
+            return JSONResponse(status_code=409 if public == "revision_conflict" else 503,
+                content={"status": "unavailable", "error": public, "session_readable": False})
 
     @router.post("/api/complaint-workspace/identity")
     async def create_identity() -> Dict[str, Any]:
