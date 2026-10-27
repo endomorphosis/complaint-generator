@@ -175,8 +175,11 @@ def test_modes_keep_the_same_session_inquiry_evidence_and_draft(tmp_path, monkey
             ("chat-plus-context", True, True),
             ("full-workspace", False, True),
         ):
-            switched = page.evaluate("""async (mode) => window.complaintCaseShell.setPresentationMode(mode)""", mode)
-            assert switched is True
+            page.locator('[data-presentation-mode="' + mode + '"]').click()
+            label = {"chat-only": "Chat", "chat-plus-context": "Chat and context", "full-workspace": "Full workspace"}[mode]
+            page.wait_for_function("""({mode, label}) => document.documentElement.dataset.workspacePresentation === mode
+                && document.getElementById('complaint-presentation-status').textContent === label + ' uses the same encrypted session.'""",
+                arg={"mode": mode, "label": label})
             current = _view(page)
             assert current["mode"] == mode
             assert current["sessionKey"] == before["sessionKey"]
@@ -186,7 +189,14 @@ def test_modes_keep_the_same_session_inquiry_evidence_and_draft(tmp_path, monkey
             assert current["draft"] == DRAFT_BODY + UNSAVED
             assert current["title"] == DRAFT_TITLE
             assert page.locator("#complaint-presentation-context").is_visible() is context_visible
-            assert page.locator("[data-tab-panel='intake']").is_visible() is intake_visible
+            visibility = page.evaluate("""() => {
+                const intake = document.querySelector('[data-tab-panel="intake"]');
+                return {mode: document.documentElement.dataset.workspacePresentation,
+                    display: getComputedStyle(intake).display, hidden: intake.hidden,
+                    active: intake.classList.contains('is-active'),
+                    activeTabs: Array.from(document.querySelectorAll('[data-tab-panel].is-active')).map(node => node.dataset.tabPanel)};
+            }""")
+            assert page.locator("[data-tab-panel='intake']").is_visible() is intake_visible, visibility
             if mode != "full-workspace":
                 assert page.locator("[data-tab-panel='draft']").is_hidden()
                 assert page.locator("[data-tab-panel='evidence']").is_hidden()
