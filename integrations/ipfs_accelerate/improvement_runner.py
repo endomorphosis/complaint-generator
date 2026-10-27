@@ -3776,6 +3776,11 @@ def gate_task_completion(repo_root: Path, state_dir: Path, task: Mapping[str, An
         detail = observation["host_measurement"].get("behavioral_definition_diagnostic")
         if isinstance(detail, dict) and detail.get("schema") == "complaint-behavioral-definition-diagnostic@1":
             receipt["behavioral_definition_diagnostic"] = detail
+    if isinstance(observation, _MeasuredEvidence) and receipt.get("reason") in {
+            "synthetic_browser_http_response", "browser_http_preflight_unavailable"}:
+        detail = observation["host_measurement"].get("browser_http_preflight")
+        if isinstance(detail, dict) and detail.get("schema") == "complaint-browser-http-preflight@1":
+            receipt["browser_http_preflight"] = detail
     receipt["host_task_contract"] = observation.get("host_task_contract")
     receipt["facts_digest"] = _digest(dict(facts or {}))
     receipt["legal_data_version"] = legal_data_version
@@ -4370,7 +4375,7 @@ def _impacted_behavioral_checks(root, changed_paths):
 def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, Any], command: str, *,
                                runner, environment: dict, timeout_seconds: float = TIMEOUT_SECONDS,
                                context: Mapping[str, Any] | None = None, declared_command: str | None = None,
-                               candidate_proposal=None):
+                               candidate_proposal=None, campaign_spec: Mapping[str, Any] | None = None):
     """Execute and measure an owned command; never accept serialized success.
 
     Independent collection freezes the required population. The actual command
@@ -4391,7 +4396,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     observation_command = declared_command or command
     contract = {"task": dict(task), "context": dict(context or {}), "command": command, "declared_command": observation_command}
     extra = _task_outputs(task)
-    freeze_inputs = _task_freeze_inputs(task, context=context)
+    freeze_inputs = _task_freeze_inputs(task, context=context, spec=campaign_spec)
     start = time.monotonic()
     original_command = command
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native_source
@@ -4406,6 +4411,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     native_root = Path(native_source.__file__).resolve().parents[3]
     from . import validation_network as owned_network
     from . import python_global_preflight as owned_python_globals
+    from . import browser_http_preflight as owned_browser_http
     from .validation_network import prepare_validation_network_guard, verify_validation_network_proof
     network_guard = prepare_validation_network_guard(run, Path(owned_network.__file__).resolve().parents[2])
     # This private, Host-created module precedes all candidate package roots.
@@ -4414,7 +4420,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     bootstrap_files = (phase_source, native_root / "ipfs_accelerate_py/__init__.py",
                        native_root / "ipfs_accelerate_py/testing/pytest_ast_seal.py",
                        *(Path(path) for path in network_guard["files"]),
-                       Path(owned_python_globals.__file__).resolve())
+                       Path(owned_python_globals.__file__).resolve(),
+                       Path(owned_browser_http.__file__).resolve())
     bootstrap_before = {str(path): _hash_file(path) for path in bootstrap_files}
     impacted = _impacted_behavioral_checks(root, (context or {}).get("changed_paths", ()))
     if task.get("id") == "CIMP-DUR-005" and _PRIVATE_REPLICA_ACCEPTANCE not in impacted:
@@ -4428,6 +4435,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     preserved_behavioral_definitions = None
     behavioral_definition_diagnostic = None
     python_global_preflight = None
+    browser_http_preflight = None
     release_script = (task.get("id") == "CIMP-REL-03" and
         observation_command == "python scripts/validate_complaint_intake.py --phase pre-admission" and
         task.get("validation_commands") in (
@@ -4523,6 +4531,28 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             artifacts.append({"path": str(path), "sha256": _hash_file(path)})
         return result, observation, _read_catalog(catalog, repo_root=root)
     try:
+        browser_http_preflight = owned_browser_http.inspect_complaint_browser_http(
+            root, task, observation_command, campaign_spec=campaign_spec)
+        if browser_http_preflight is not None:
+            # Only an applicable preflight that read the immutable bytes adds
+            # this campaign's spec to the Host bootstrap freeze. Other Native
+            # campaigns do not depend on availability of the UX specification.
+            if browser_http_preflight.get("spec_sha256") == owned_browser_http.SPEC_SHA256:
+                browser_spec = owned_browser_http._SOURCE_ROOT / owned_browser_http.SPEC_RELATIVE
+                try:
+                    browser_spec_hash = _hash_file(browser_spec)
+                except OSError:
+                    browser_spec_hash = ""
+                if browser_spec_hash != owned_browser_http.SPEC_SHA256:
+                    browser_http_preflight.update(passed=False, reason="browser_http_preflight_unavailable")
+                else:
+                    bootstrap_files = (*bootstrap_files, browser_spec)
+                    bootstrap_before[str(browser_spec)] = browser_spec_hash
+            browser_preflight_path = run / "browser-http-preflight.json"
+            _atomic_json(browser_preflight_path, browser_http_preflight)
+            artifacts.append({"path": str(browser_preflight_path), "sha256": _hash_file(browser_preflight_path)})
+            if browser_http_preflight.get("passed") is not True:
+                raise ValueError(browser_http_preflight["reason"])
         if (context or {}).get("require_python_global_preflight") is True:
             python_global_preflight = owned_python_globals.inspect_changed_python_globals(
                 root, candidate_proposal, expected_task_id=task["id"])
@@ -4632,7 +4662,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
         if isinstance(exc, _BehavioralDefinitionError):
             behavioral_definition_diagnostic = exc.diagnostics
-        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable", "new_duplicate_python_module_global", "python_global_preflight_unavailable", *infrastructure_reasons} else "host_measurement_unavailable"
+        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable", "new_duplicate_python_module_global", "python_global_preflight_unavailable", "synthetic_browser_http_response", "browser_http_preflight_unavailable", *infrastructure_reasons} else "host_measurement_unavailable"
     try:
         if replica_binding != _private_replica_acceptance_binding(root, task, impacted):
             reason = "trusted_replica_acceptance_changed"
@@ -4656,6 +4686,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                 "preserved_behavioral_definitions": preserved_behavioral_definitions,
                 "behavioral_definition_diagnostic": behavioral_definition_diagnostic,
                 "python_global_preflight": python_global_preflight,
+                "browser_http_preflight": browser_http_preflight,
                 "trusted_executor": {"module": str(getattr(runner, "__module__", "")), "qualname": str(getattr(runner, "__qualname__", "")),
                     "canonical_native_identity": runner is PortalImplementationDaemon._validation_command_runner,
                     "boundary": "trusted host code; returned sealed marker alone does not authenticate arbitrary callbacks"},
@@ -4737,6 +4768,7 @@ class EvidenceValidationScheduler:
                 runner=delegate, environment=environment, timeout_seconds=timeout_seconds,
                 declared_command=task["validation_commands"][spec.ordinal] if spec.ordinal < len(task["validation_commands"]) else None,
                 candidate_proposal=args[0] if method == "run_validated" else None,
+                campaign_spec=self.spec,
                 context={"require_python_global_preflight": method == "run_validated",
                          "campaign_state_dir": str(self.state_dir.resolve()),
                          "target_source_root": str(Path(__file__).resolve().parents[2]),
@@ -4778,6 +4810,10 @@ class EvidenceValidationScheduler:
             if failure_reason == "existing_behavioral_definition_changed":
                 detail = observed["host_measurement"].get("behavioral_definition_diagnostic") or {}
                 result["output"] = "Host behavioral definition guard: " + json.dumps(detail, sort_keys=True)[:8192]
+                result["preflight_only"] = True
+            if failure_reason in {"synthetic_browser_http_response", "browser_http_preflight_unavailable"}:
+                detail = observed["host_measurement"].get("browser_http_preflight") or {}
+                result["output"] = "Host complaint browser HTTP preflight: " + json.dumps(detail, sort_keys=True)[:8192]
                 result["preflight_only"] = True
             result.update(command=str(spec.command), raw_command=str(spec.raw_command or spec.command),
                           returncode=0 if receipt["admitted"] else rejected_status, behavioral_evidence=receipt)
