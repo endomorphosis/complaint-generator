@@ -7683,6 +7683,14 @@ __all__ = [
     "DURABILITY_STATES",
     "verify_ciphertext_durability",
     "CiphertextDurabilityError",
+    "PRIVATE_RECORD_KINDS",
+    "MAX_BOUND_RECOVERY_ATTEMPTS",
+    "BoundPrivateRecordError",
+    "commit_private_bound_record",
+    "stage_interrupted_bound_record",
+    "open_private_bound_record",
+    "recover_private_bound_records",
+    "qualify_content_address",
 ]
 
 
@@ -7852,4 +7860,659 @@ def verify_ciphertext_durability(kit: Any, envelope: bytes) -> dict[str, Any]:
         "queued_replication_is_durable": False,
         "local_commit_is_durable": False,
         "code": "" if matched else "readback_mismatch",
+    }
+
+
+# Evidence, annotations, classification revisions, and linkage records share one
+# bound ciphertext path. Kit AES-GCM associated data proves the caller key and
+# binding. Kit replica observations and WAL acknowledgement rules decide
+# durability. A content hash, a queued acknowledgement, a local file, and a
+# caller success flag are not remote durability and are not encryption.
+
+PRIVATE_RECORD_KINDS = (
+    "evidence",
+    "annotation",
+    "classification_revision",
+    "linkage",
+)
+MAX_BOUND_RECOVERY_ATTEMPTS = 3
+_MAX_BOUND_PLAINTEXT = 256 * 1024
+_RECORD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,63}$")
+_FORBIDDEN_BOUND_RECEIPT = frozenset({
+    "success",
+    "cid",
+    "plaintext",
+    "key",
+    "data_key",
+    "master_key",
+    "private_key",
+    "wrapped_key",
+})
+
+
+class BoundPrivateRecordError(PrivateStorageError):
+    """A bound private record could not be sealed, qualified, or recovered."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code, code=code)
+
+
+def qualify_content_address(digest: str) -> dict[str, Any]:
+    """A content hash is an address, not an encrypted or durable record."""
+
+    if not isinstance(digest, str) or not digest.strip():
+        raise BoundPrivateRecordError("content_address_rejected")
+    return {
+        "encrypted": False,
+        "local_durable": False,
+        "remote_durable": False,
+        "counts_toward_desired": False,
+        "queued_can_claim_committed": False,
+        "content_address_is_encryption": False,
+        "plaintext_fallback": False,
+        "code": "content_address_is_not_encryption",
+    }
+
+
+def _require_record_id(record_id: str) -> str:
+    if not isinstance(record_id, str) or _RECORD_ID_RE.fullmatch(record_id) is None:
+        raise BoundPrivateRecordError("record_id_rejected")
+    return record_id
+
+
+def _require_record_kind(kind: str, binding: PrivateArtifactBinding) -> str:
+    if kind not in PRIVATE_RECORD_KINDS:
+        raise BoundPrivateRecordError("record_kind_rejected")
+    if not isinstance(binding, PrivateArtifactBinding) or binding.artifact_kind != kind:
+        raise BoundPrivateRecordError("binding_kind_mismatch")
+    return kind
+
+
+def _bound_root(root: str | Path) -> Path:
+    path = Path(root)
+    if path.is_symlink():
+        raise BoundPrivateRecordError("symlink_rejected")
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
+    for name in ("journal", "objects", "staging"):
+        child = path / name
+        if child.is_symlink():
+            raise BoundPrivateRecordError("symlink_rejected")
+        child.mkdir(exist_ok=True)
+        os.chmod(child, 0o700)
+    return path
+
+
+def _journal_path(root: Path, record_id: str) -> Path:
+    return root / "journal" / record_id
+
+
+def _staging_path(root: Path, record_id: str) -> Path:
+    return root / "staging" / record_id
+
+
+def _object_path(root: Path, content_ref: str) -> Path:
+    if "/" in content_ref or content_ref.startswith("."):
+        raise BoundPrivateRecordError("content_ref_rejected")
+    return root / "objects" / content_ref
+
+
+def _write_private_file(path: Path, payload: bytes) -> None:
+    if path.is_symlink():
+        raise BoundPrivateRecordError("symlink_rejected")
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+    os.chmod(path, 0o600)
+    directory = path.parent
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _read_private_file(path: Path) -> bytes | None:
+    if not path.exists() or path.is_symlink() or not path.is_file():
+        return None
+    return path.read_bytes()
+
+
+def _content_ref(envelope: bytes) -> str:
+    return "ct." + hashlib.sha256(envelope).hexdigest()
+
+
+def _load_journal(path: Path) -> dict[str, Any] | None:
+    raw = _read_private_file(path)
+    if raw is None:
+        return None
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BoundPrivateRecordError("journal_malformed") from exc
+    if not isinstance(document, dict):
+        raise BoundPrivateRecordError("journal_malformed")
+    return document
+
+
+def _store_journal(path: Path, document: Mapping[str, Any]) -> None:
+    _write_private_file(path, json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
+def _binding_document(binding: PrivateArtifactBinding) -> dict[str, str]:
+    return {
+        "tenant_id": binding.tenant_id,
+        "case_id": binding.case_id,
+        "artifact_kind": binding.artifact_kind,
+        "revision": binding.revision,
+        "principal_id": binding.principal_id,
+    }
+
+
+def _binding_from_document(document: Mapping[str, Any]) -> PrivateArtifactBinding:
+    try:
+        return PrivateArtifactBinding(
+            tenant_id=str(document["tenant_id"]),
+            case_id=str(document["case_id"]),
+            artifact_kind=str(document["artifact_kind"]),
+            revision=str(document["revision"]),
+            principal_id=str(document["principal_id"]),
+        )
+    except (KeyError, TypeError, PrivateArtifactBindingError) as exc:
+        raise BoundPrivateRecordError("journal_malformed") from exc
+
+
+def _prove_kit_authenticated_encryption(
+    plaintext: bytes,
+    *,
+    key: bytes,
+    key_id: str,
+    binding: PrivateArtifactBinding,
+) -> None:
+    """Round-trip Kit AES-GCM with the caller key and binding. Do not persist it."""
+
+    if not isinstance(key_id, str) or not key_id.strip():
+        raise BoundPrivateRecordError("ambient_key_rejected")
+    _prefer_vendored_kit()
+    try:
+        from datetime import datetime, timezone
+
+        from ipfs_kit_py.mcp.enterprise.encryption import (
+            EncryptionAlgorithm,
+            EncryptionKey,
+            EncryptionManager,
+            KeyManager,
+            KeyStorageType,
+            KeyType,
+        )
+    except Exception as exc:
+        raise BoundPrivateRecordError("kit_encryption_unavailable") from exc
+    manager_key = KeyManager(storage_type=KeyStorageType.MEMORY)
+    manager_key._key_metadata[key_id] = EncryptionKey(
+        id=key_id,
+        type=KeyType.DATA,
+        algorithm=EncryptionAlgorithm.AES_256_GCM,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    manager_key._store_key_material(key_id, bytes(key))
+    try:
+        encrypted = EncryptionManager(manager_key).encrypt(
+            plaintext,
+            key_id=key_id,
+            algorithm=EncryptionAlgorithm.AES_256_GCM,
+            additional_authenticated_data=canonical_associated_data(binding),
+        )
+        opened = EncryptionManager(manager_key).decrypt(encrypted)
+    except Exception as exc:
+        raise BoundPrivateRecordError("kit_encryption_failed") from exc
+    finally:
+        manager_key._key_cache.pop(key_id, None)
+    if opened != plaintext or encrypted.to_dict().get("original_size") != len(plaintext):
+        raise BoundPrivateRecordError("kit_encryption_failed")
+    del encrypted
+
+
+def _queued_cannot_claim_committed() -> bool:
+    _prefer_vendored_kit()
+    from ipfs_kit_py.core.wal.contracts import (
+        WALAcknowledgementError,
+        WALAcknowledgementMode,
+        WALRecordState,
+        assert_ack_allows_state,
+    )
+
+    try:
+        assert_ack_allows_state(WALAcknowledgementMode.QUEUED, WALRecordState.COMMITTED)
+    except WALAcknowledgementError:
+        return True
+    return False
+
+
+def _kit_inventory(content_size: int, *, remote_backend: Any | None):
+    _prefer_vendored_kit()
+    from ipfs_kit_py.core.replication.contracts import (
+        BackendCapability,
+        BackendInventory,
+        ConsistencyLevel,
+        EncryptionLevel,
+        ReplicaPolicy as KitReplicaPolicy,
+        RetentionLevel,
+    )
+    from ipfs_kit_py.core.replication.placement import plan_placement
+
+    local = BackendCapability(
+        backend_id="local-primary",
+        failure_domain="local-host",
+        available_bytes=max(content_size, 1),
+        durable=True,
+        encryption=EncryptionLevel.CUSTOMER_MANAGED,
+        consistency=ConsistencyLevel.STRONG,
+        retention=RetentionLevel.RETAINED,
+        localities=("local",),
+    )
+    capabilities = [local]
+    remote_id = None
+    if remote_backend is not None:
+        remote_id = getattr(remote_backend, "provider_id", None) or "remote-replica"
+        domain = getattr(remote_backend, "failure_domain", None) or "remote-domain"
+        capabilities.append(BackendCapability(
+            backend_id=str(remote_id),
+            failure_domain=str(domain),
+            available_bytes=max(content_size, 1),
+            durable=True,
+            encryption=EncryptionLevel.CUSTOMER_MANAGED,
+            consistency=ConsistencyLevel.STRONG,
+            retention=RetentionLevel.RETAINED,
+            localities=("remote",),
+        ))
+    desired = len(capabilities)
+    policy = KitReplicaPolicy(
+        policy_id="cimp-ux-57-private-evidence",
+        min_replicas=1,
+        desired_replicas=desired,
+        max_replicas=desired,
+        critical_replicas=desired,
+        required_consistency=ConsistencyLevel.READ_YOUR_WRITES,
+        required_encryption=EncryptionLevel.CUSTOMER_MANAGED,
+        required_retention=RetentionLevel.RETAINED,
+    )
+    inventory = BackendInventory(snapshot_id="cimp-ux-57-snapshot", capabilities=tuple(capabilities))
+    return policy, inventory, plan_placement, remote_id
+
+
+def _observation(replica_id: str, content_ref: str, backend_id: str, *, verified: bool):
+    _prefer_vendored_kit()
+    from ipfs_kit_py.core.replication.contracts import ReplicaObservation, ReplicaState, assert_legal_replica_transition
+
+    if verified:
+        chain = (
+            ReplicaState.PLANNED,
+            ReplicaState.PENDING,
+            ReplicaState.QUEUED,
+            ReplicaState.COPYING,
+            ReplicaState.COPIED,
+            ReplicaState.VERIFYING,
+            ReplicaState.VERIFIED,
+        )
+        for previous, following in zip(chain, chain[1:]):
+            assert_legal_replica_transition(previous, following)
+        return ReplicaObservation(
+            replica_id=replica_id,
+            content_ref=content_ref,
+            backend_id=backend_id,
+            state=ReplicaState.VERIFIED,
+            durable=True,
+            integrity_verified=True,
+        )
+    return ReplicaObservation(
+        replica_id=replica_id,
+        content_ref=content_ref,
+        backend_id=backend_id,
+        state=ReplicaState.QUEUED,
+        durable=False,
+        integrity_verified=False,
+    )
+
+
+def _receipt(
+    *,
+    record_id: str,
+    kind: str,
+    key_id: str,
+    local_durable: bool,
+    remote_durable: bool,
+    counts_toward_desired: bool,
+    placement_intents: int,
+    recovery_attempts: int,
+    phase: str,
+    code: str,
+) -> dict[str, Any]:
+    if not _queued_cannot_claim_committed():
+        raise BoundPrivateRecordError("queued_claimed_committed")
+    receipt = {
+        "record_id": record_id,
+        "kind": kind,
+        "key_id": key_id,
+        "phase": phase,
+        "local_durable": local_durable,
+        "remote_durable": remote_durable,
+        "counts_toward_desired": counts_toward_desired,
+        "placement_intents": placement_intents,
+        "recovery_attempts": recovery_attempts,
+        "queued_can_claim_committed": False,
+        "local_write_is_remote_durable": False,
+        "content_address_is_encryption": False,
+        "plaintext_fallback": False,
+        "code": code,
+    }
+    leaked = _FORBIDDEN_BOUND_RECEIPT.intersection(receipt)
+    if leaked:
+        raise BoundPrivateRecordError("receipt_leaked")
+    return receipt
+
+
+def _seal_bound_record(
+    plaintext: bytes,
+    *,
+    kind: str,
+    binding: PrivateArtifactBinding,
+    key: bytes,
+    key_id: str,
+) -> tuple[bytes, str]:
+    _require_record_kind(kind, binding)
+    if not isinstance(plaintext, (bytes, bytearray)) or not plaintext or len(plaintext) > _MAX_BOUND_PLAINTEXT:
+        raise BoundPrivateRecordError("plaintext_rejected")
+    if not isinstance(key_id, str) or not key_id.strip() or len(key_id) > 80:
+        raise BoundPrivateRecordError("ambient_key_rejected")
+    _prove_kit_authenticated_encryption(bytes(plaintext), key=key, key_id=key_id, binding=binding)
+    envelope = seal_private_artifact(bytes(plaintext), binding=binding, key=key, key_id=key_id)
+    if plaintext in envelope:
+        raise BoundPrivateRecordError("plaintext_fallback")
+    return envelope, _content_ref(envelope)
+
+
+def stage_interrupted_bound_record(
+    root: str | Path,
+    *,
+    record_id: str,
+    kind: str,
+    plaintext: bytes,
+    binding: PrivateArtifactBinding,
+    key: bytes,
+    key_id: str,
+) -> dict[str, Any]:
+    """Seal and stage a record without publishing it. Recovery is still bounded."""
+
+    record_id = _require_record_id(record_id)
+    directory = _bound_root(root)
+    journal = _journal_path(directory, record_id)
+    if journal.exists():
+        raise BoundPrivateRecordError("record_exists")
+    envelope, content_ref = _seal_bound_record(
+        plaintext, kind=kind, binding=binding, key=key, key_id=key_id,
+    )
+    _write_private_file(_staging_path(directory, record_id), envelope)
+    _store_journal(journal, {
+        "record_id": record_id,
+        "kind": kind,
+        "key_id": key_id,
+        "content_ref": content_ref,
+        "attempts": 0,
+        "phase": "staged",
+        "binding": _binding_document(binding),
+    })
+    return _receipt(
+        record_id=record_id,
+        kind=kind,
+        key_id=key_id,
+        local_durable=False,
+        remote_durable=False,
+        counts_toward_desired=False,
+        placement_intents=0,
+        recovery_attempts=0,
+        phase="staged",
+        code="staged_not_durable",
+    )
+
+
+def _publish_local(root: Path, record_id: str, content_ref: str) -> bool:
+    staged = _read_private_file(_staging_path(root, record_id))
+    if staged is None or _content_ref(staged) != content_ref:
+        return False
+    destination = _object_path(root, content_ref)
+    _write_private_file(destination, staged)
+    published = _read_private_file(destination)
+    return published == staged
+
+
+def _qualify_remote(remote_backend: Any, content_ref: str, envelope: bytes) -> bool:
+    if remote_backend is None:
+        return False
+    put = getattr(remote_backend, "put", None)
+    get = getattr(remote_backend, "get", None)
+    if not callable(put) or not callable(get):
+        raise BoundPrivateRecordError("remote_backend_rejected")
+    try:
+        acknowledgement = put(content_ref, envelope)
+    except Exception as exc:
+        raise BoundPrivateRecordError("remote_unavailable") from exc
+    _reject_public_gateway(acknowledgement if not isinstance(acknowledgement, (bytes, bytearray)) else "")
+    try:
+        loaded = get(content_ref)
+    except Exception as exc:
+        raise BoundPrivateRecordError("remote_unavailable") from exc
+    if isinstance(loaded, str):
+        _reject_public_gateway(loaded)
+        return False
+    return isinstance(loaded, (bytes, bytearray)) and bytes(loaded) == envelope
+
+
+def commit_private_bound_record(
+    root: str | Path,
+    *,
+    record_id: str,
+    kind: str,
+    plaintext: bytes,
+    binding: PrivateArtifactBinding,
+    key: bytes,
+    key_id: str,
+    remote_backend: Any | None = None,
+) -> dict[str, Any]:
+    """Seal, publish, and qualify one bound record. Remote durability needs readback."""
+
+    record_id = _require_record_id(record_id)
+    directory = _bound_root(root)
+    journal = _journal_path(directory, record_id)
+    if journal.exists():
+        raise BoundPrivateRecordError("record_exists")
+    envelope, content_ref = _seal_bound_record(
+        plaintext, kind=kind, binding=binding, key=key, key_id=key_id,
+    )
+    _write_private_file(_staging_path(directory, record_id), envelope)
+    document = {
+        "record_id": record_id,
+        "kind": kind,
+        "key_id": key_id,
+        "content_ref": content_ref,
+        "attempts": 1,
+        "phase": "staged",
+        "binding": _binding_document(binding),
+    }
+    _store_journal(journal, document)
+    local_ok = _publish_local(directory, record_id, content_ref)
+    remote_ok = False
+    placement_intents = 0
+    counts = False
+    code = "readback_mismatch"
+    if local_ok:
+        document["phase"] = "verified"
+        _store_journal(journal, document)
+        try:
+            policy, inventory, plan_placement, remote_id = _kit_inventory(
+                len(envelope), remote_backend=remote_backend,
+            )
+        except BoundPrivateRecordError:
+            raise
+        except Exception as exc:
+            raise BoundPrivateRecordError("kit_durability_unavailable") from exc
+        local_observation = _observation("replica-local", content_ref, "local-primary", verified=True)
+        if not local_observation.counts_toward_desired:
+            raise BoundPrivateRecordError("local_observation_rejected")
+        if remote_backend is None:
+            plan = plan_placement(
+                content_id=content_ref,
+                content_size_bytes=len(envelope),
+                policy=policy,
+                inventory=inventory,
+                replicas=(local_observation,),
+            )
+            placement_intents = len(plan.intents)
+            counts = placement_intents == 0 and local_observation.counts_toward_desired
+            code = "" if counts else "placement_incomplete"
+        else:
+            try:
+                remote_ok = _qualify_remote(remote_backend, content_ref, envelope)
+            except BoundPrivateRecordError:
+                remote_ok = False
+                code = "remote_unavailable"
+            remote_observation = _observation(
+                "replica-remote",
+                content_ref,
+                str(remote_id),
+                verified=remote_ok,
+            )
+            plan = plan_placement(
+                content_id=content_ref,
+                content_size_bytes=len(envelope),
+                policy=policy,
+                inventory=inventory,
+                replicas=(local_observation, remote_observation),
+            )
+            placement_intents = len(plan.intents)
+            counts = remote_ok and remote_observation.counts_toward_desired and placement_intents == 0
+            if code != "remote_unavailable":
+                code = "" if counts else "remote_unverified"
+    return _receipt(
+        record_id=record_id,
+        kind=kind,
+        key_id=key_id,
+        local_durable=local_ok,
+        remote_durable=bool(remote_ok and local_ok),
+        counts_toward_desired=bool(counts and local_ok),
+        placement_intents=placement_intents,
+        recovery_attempts=1,
+        phase="verified" if local_ok else "staged",
+        code=code,
+    )
+
+
+def open_private_bound_record(
+    root: str | Path,
+    *,
+    record_id: str,
+    binding: PrivateArtifactBinding,
+    key: bytes,
+) -> bytes:
+    """Open a published record. A missing or staged object is not plaintext."""
+
+    record_id = _require_record_id(record_id)
+    directory = _bound_root(root)
+    document = _load_journal(_journal_path(directory, record_id))
+    if document is None or document.get("phase") != "verified":
+        raise BoundPrivateRecordError("record_unavailable")
+    expected = _binding_from_document(document.get("binding") or {})
+    if _binding_document(expected) != _binding_document(binding):
+        raise BoundPrivateRecordError("binding_mismatch")
+    content_ref = str(document.get("content_ref") or "")
+    envelope = _read_private_file(_object_path(directory, content_ref))
+    if envelope is None:
+        raise BoundPrivateRecordError("record_unavailable")
+    try:
+        return open_private_artifact(
+            envelope,
+            binding=binding,
+            key=key,
+            expected_key_id=str(document.get("key_id") or ""),
+        )
+    except PrivateKeyMaterialError as exc:
+        raise BoundPrivateRecordError("key_unavailable") from exc
+    except PrivateArtifactIntegrityError as exc:
+        raise BoundPrivateRecordError("authentication_failed") from exc
+
+
+def recover_private_bound_records(
+    root: str | Path,
+    *,
+    key: bytes,
+    bindings: Mapping[str, PrivateArtifactBinding],
+    max_attempts: int = MAX_BOUND_RECOVERY_ATTEMPTS,
+) -> dict[str, Any]:
+    """Promote staged ciphertext within a fixed attempt budget. Never invent bytes."""
+
+    if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or not 1 <= max_attempts <= 8:
+        raise BoundPrivateRecordError("recovery_bound_rejected")
+    directory = _bound_root(root)
+    promoted: list[str] = []
+    exhausted: list[str] = []
+    unavailable: list[str] = []
+    for path in sorted((directory / "journal").iterdir()):
+        if not path.is_file() or path.is_symlink():
+            continue
+        document = _load_journal(path)
+        if document is None:
+            continue
+        record_id = str(document.get("record_id") or "")
+        if document.get("phase") == "verified":
+            continue
+        attempts = document.get("attempts")
+        if isinstance(attempts, bool) or not isinstance(attempts, int):
+            raise BoundPrivateRecordError("journal_malformed")
+        if attempts >= max_attempts:
+            exhausted.append(record_id)
+            continue
+        attempts += 1
+        document["attempts"] = attempts
+        binding = bindings.get(record_id)
+        content_ref = str(document.get("content_ref") or "")
+        staged = _read_private_file(_staging_path(directory, record_id))
+        matched = staged is not None and _content_ref(staged) == content_ref
+        if binding is None or not matched or attempts > max_attempts:
+            _store_journal(path, document)
+            if attempts >= max_attempts:
+                exhausted.append(record_id)
+            else:
+                unavailable.append(record_id)
+            continue
+        stored = _binding_from_document(document.get("binding") or {})
+        if _binding_document(stored) != _binding_document(binding):
+            _store_journal(path, document)
+            unavailable.append(record_id)
+            continue
+        _write_private_file(_object_path(directory, content_ref), staged)
+        published = _read_private_file(_object_path(directory, content_ref))
+        if published != staged:
+            _store_journal(path, document)
+            unavailable.append(record_id)
+            continue
+        document["phase"] = "verified"
+        _store_journal(path, document)
+        try:
+            open_private_bound_record(directory, record_id=record_id, binding=binding, key=key)
+        except BoundPrivateRecordError:
+            document["phase"] = "staged"
+            _store_journal(path, document)
+            unavailable.append(record_id)
+            continue
+        promoted.append(record_id)
+    return {
+        "promoted": promoted,
+        "exhausted": exhausted,
+        "unavailable": unavailable,
+        "max_attempts": max_attempts,
+        "plaintext_fallback": False,
+        "queued_can_claim_committed": False,
     }
