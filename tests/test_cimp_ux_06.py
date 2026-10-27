@@ -21,8 +21,8 @@ NARRATIVE = "On March 1 the office denied the request for the two-bedroom vouche
 CACHE_QUESTION = "browser-cache-question-ux06-must-not-appear"
 
 
-def _open(tmp_path, monkeypatch):
-    world = owner_lawyer_journey_world(tmp_path / "world")
+def _open(tmp_path, monkeypatch, *, world=None):
+    world = world or owner_lawyer_journey_world(tmp_path / "world")
     denial = browser.probe_inherited_network_denial()
     if not denial["af_unix_only"]:
         raise browser.BrowserCapabilityError("inherited AF_UNIX-only denial is not active")
@@ -226,5 +226,94 @@ def test_unavailable_catalog_is_explicit_and_opens_no_replacement_case(tmp_path,
         listed = page.locator("#case-list button").all_inner_texts()
         assert any("owner-lawyer-journey" in label for label in listed)
         assert page.evaluate("() => typeof window.mockApi") == "undefined"
+    finally:
+        _close(playwright, context, node, profile, observed)
+
+
+def test_actual_catalog_failure_after_actor_change_scrubs_and_fences_previous_view(tmp_path, monkeypatch):
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch)
+    catalog = world.app.state.case_catalog
+    try:
+        page.goto(browser.SAME_ORIGIN + "/cases", wait_until="domcontentloaded")
+        assert _sign_in(page, "synthetic-owner-credential").status == 200
+        page.wait_for_function("principal => document.getElementById('complaint-case-shell-actor').dataset.principalId === principal",
+            arg=world.owner.principal_id)
+        page.click("#case-list button")
+        _shell_ready(page)
+        page.wait_for_function("() => !document.getElementById('selected-case').hidden")
+        page.fill("#case-draft", "ux06-previous-owner-private-draft")
+        page.fill("#gap-input", "ux06-previous-owner-private-gap")
+        # Delay delivery of an actual owner's save response, without replacing
+        # its handler, cookie, response, or body. The new actor must retire it.
+        page.evaluate("""() => {
+            const original = window.fetch.bind(window);
+            let armed = true;
+            window.__ux06OldRead = {aborted: false, bodyError: null};
+            window.fetch = async function (input, options) {
+                const path = new URL(typeof input === 'string' ? input : input.url, location.origin).pathname;
+                if (armed && path.endsWith('/transient') && options.method === 'POST') {
+                    armed = false;
+                    window.__ux06OldRead.signal = options.signal;
+                    options.signal.addEventListener('abort', () => {window.__ux06OldRead.aborted = true;}, {once:true});
+                    const response = await original(input, options);
+                    const json = response.json.bind(response);
+                    response.json = async function () {
+                        try {return await json();}
+                        catch (error) {window.__ux06OldRead.bodyError = error.name; throw error;}
+                    };
+                    await new Promise(resolve => {window.__ux06Release = resolve;});
+                    return response;
+                }
+                return original(input, options);
+            };
+            document.getElementById('save-draft').click();
+        }""")
+        page.wait_for_function("() => typeof window.__ux06Release === 'function'")
+        changed = page.evaluate("""async () => {
+            const response = await fetch('/api/complaint-workspace/auth/login', {method:'POST',credentials:'same-origin',
+                headers:{'content-type':'application/json'},body:JSON.stringify({credential:'synthetic-stranger-credential'})});
+            return {status:response.status, body:await response.json()};
+        }""")
+        assert changed["status"] == 200 and changed["body"]["principal_id"] == world.stranger.principal_id
+        world.app.state.case_catalog = None  # Real missing capability in this private app only.
+        with page.expect_response(lambda response: response.request.method == "GET"
+                and response.url.endswith("/api/cases/session")) as unavailable:
+            page.evaluate("() => window.complaintCaseShell.refresh()")
+        assert unavailable.value.status == 503
+        assert unavailable.value.json()["error"] == "case_catalog_unavailable"
+        _shell_ready(page)
+        assert page.input_value("#case-draft") == ""
+        assert page.input_value("#gap-input") == ""
+        assert page.locator("#selected-case").is_hidden()
+        assert page.locator("#complaint-entry").get_attribute("data-entry") == "unavailable"
+        assert page.evaluate("() => window.__ux06OldRead.aborted && window.__ux06OldRead.signal.aborted") is True
+        page.evaluate("() => window.__ux06Release()")
+        page.wait_for_function("() => window.__ux06OldRead.bodyError === 'AbortError'")
+        assert "ux06-previous-owner" not in page.locator("body").inner_text()
+        actual = page.evaluate("""async () => {
+            const response = await fetch('/api/complaint-workspace/auth/session', {credentials:'same-origin'});
+            return {status:response.status, body:await response.json()};
+        }""")
+        assert actual["status"] == 200 and actual["body"]["principal_id"] == world.stranger.principal_id
+    finally:
+        world.app.state.case_catalog = catalog
+        page.evaluate("() => {if (window.__ux06Release) window.__ux06Release();}")
+        _close(playwright, context, node, profile, observed)
+
+
+def test_existing_case_without_pending_is_continue_instead_of_first_run(tmp_path, monkeypatch):
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch)
+    try:
+        page.goto(browser.SAME_ORIGIN + "/cases", wait_until="domcontentloaded")
+        assert _sign_in(page, "synthetic-owner-credential").status == 200
+        page.wait_for_function("principal => document.getElementById('complaint-case-shell-actor').dataset.principalId === principal",
+            arg=world.owner.principal_id)
+        page.click("#case-list button")
+        page.wait_for_function("() => document.getElementById('complaint-case-shell-case').dataset.bound === 'case'")
+        _shell_ready(page)
+        assert page.locator("#complaint-entry").get_attribute("data-entry") == "continue"
+        assert page.locator("#complaint-entry-begin").is_hidden()
+        assert page.locator("#complaint-entry-title").inner_text() == "Continue this case"
+        assert page.locator("#complaint-case-shell-case").get_attribute("data-case-id") == world.case.case_id
     finally:
         _close(playwright, context, node, profile, observed)
