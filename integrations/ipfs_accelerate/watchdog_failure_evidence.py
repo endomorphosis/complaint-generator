@@ -31,6 +31,13 @@ _LIVENESS = frozenset({"alive", "dead", "absent", "pid_reuse", "unknown", "missi
 _PREFLIGHT_FLAGS = ("grok_binary_present", "auth_material_present", "private_runtime_ready",
     "worktree_capacity_sufficient", "resource_capacity_ready")
 _FRAME_KINDS = ("usage", "tool_call", "tool_call_update", "thought", "text")
+# Exact codes from the bounded metadata readers, never exception messages.
+# State-only codes cannot be attributed to an unrelated file reader.
+_FILE_READ_ERRORS = frozenset({"size_limit", "not_object", "JSONDecodeError", "UnicodeDecodeError",
+    "OSError", "PermissionError", "IsADirectoryError", "NotADirectoryError", "BlockingIOError",
+    "TimeoutError", "ValueError"})
+_STATE_READ_ERRORS = _FILE_READ_ERRORS | frozenset({"native_state_read_timeout", "native_state_reader_failed",
+    "PortalTaskStateControlPlaneError"})
 
 
 def _encoded(value):
@@ -45,6 +52,19 @@ def _counts(value):
     value = value if type(value) is dict else {}
     return {key:value[key] for key in _FRAME_KINDS
         if type(value.get(key)) is int and 0 <= value[key] < 1_000_000_000}
+
+
+def _read_errors(value):
+    if type(value) is not dict:
+        return {}
+    result = {}
+    # Iterate only this closed set, regardless of the supplied mapping size.
+    for source in ("launcher", "state", "heartbeat", "strategy"):
+        code = value.get(source)
+        allowed = _STATE_READ_ERRORS if source == "state" else _FILE_READ_ERRORS
+        if type(code) is str and len(code) <= 64 and code in allowed:
+            result[source] = code
+    return result
 
 
 def _snapshot(scope, observation, status, preflight, observed_at):
@@ -79,7 +99,11 @@ def _snapshot(scope, observation, status, preflight, observed_at):
     reason = "dependency_unavailable" if dependency_hold else rescue["reason"]
     failure_class = "dependency_unavailable" if dependency_hold else state
     key_body = {"scope":scope,"binding":binding,"failure_class":failure_class,"reason":reason}
-    key = hashlib.sha256(_encoded(key_body)).hexdigest()
+    read_errors = _read_errors(status.get("native_read_errors"))
+    # Preserve old keys/records when no closed diagnosis exists. A newly
+    # diagnosed cause can be retained without overwriting an earlier opaque
+    # state_error with the same empty claim. The archive remains capped.
+    key = hashlib.sha256(_encoded({**key_body, **({"native_read_errors":read_errors} if read_errors else {})})).hexdigest()
     provider = status.get("provider_execution_evidence")
     provider = provider if type(provider) is dict else {}
     validation = status.get("validation_activity_evidence")
@@ -88,6 +112,8 @@ def _snapshot(scope, observation, status, preflight, observed_at):
         "provider_terminal_observed":provider.get("provider_terminal_observed") is True,
         **{k:status.get(k) is True for k in ("owned_process_alive","claim_progress_verified",
             "provider_progress_verified","validation_activity_verified","auto_rescue_activity_verified")}}
+    if read_errors:
+        evidence["native_read_errors"] = read_errors
     if _number(validation.get("deadline_at")):
         evidence["validation_deadline_at"] = validation["deadline_at"]
     if _number(status.get("native_heartbeat_age_seconds")):
@@ -178,7 +204,8 @@ def _closed_existing(value, expected):
     required = {'auto_rescue','provider_frame_counts','provider_terminal_observed','owned_process_alive',
         'claim_progress_verified','provider_progress_verified','validation_activity_verified',
         'auto_rescue_activity_verified','worker_liveness','native_status'}
-    optional = {'validation_deadline_at','native_heartbeat_age_seconds'}
+    numeric_optional = {'validation_deadline_at','native_heartbeat_age_seconds'}
+    optional = numeric_optional | {'native_read_errors'}
     if type(evidence) is not dict or set(evidence)-required-optional or required-set(evidence):
         return False
     if (evidence['auto_rescue']!=rescue_summary(evidence['auto_rescue'])
@@ -186,8 +213,15 @@ def _closed_existing(value, expected):
             or type(evidence['worker_liveness']) is not str or evidence['worker_liveness'] not in _LIVENESS
             or type(evidence['native_status']) is not str or evidence['native_status'] not in _FAILURES):
         return False
+    if 'native_read_errors' in evidence:
+        errors = evidence['native_read_errors']
+        if (type(errors) is not dict or not errors or errors != _read_errors(errors)
+                or errors != expected['activity_evidence'].get('native_read_errors')):
+            return False
+    elif 'native_read_errors' in expected['activity_evidence']:
+        return False
     return (all(type(evidence[k]) is bool for k in required-{'auto_rescue','provider_frame_counts','worker_liveness','native_status'})
-        and all(_number(evidence[k]) for k in optional&set(evidence)))
+        and all(_number(evidence[k]) for k in numeric_optional&set(evidence)))
 
 
 def capture(directory, *, scope, observation, status, preflight, observed_at):
