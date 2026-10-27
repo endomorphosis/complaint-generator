@@ -1742,7 +1742,7 @@ Implementation instructions:
 
 ## CIMP-UX-57 Qualify durable private evidence and annotation storage
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
