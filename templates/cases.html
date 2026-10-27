@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cases</title>
     <link id="case-shell-style" rel="stylesheet" href="/static/complaint_app_shell.css">
+    <link id="complaint-case-shell-style" rel="stylesheet" href="/static/complaint_case_shell.css">
     <style>
         body { font-family: sans-serif; margin: 0; background: #f4f1ea; color: #1c2430; }
         main { max-width: 42rem; margin: 0 auto; padding: 1.5rem; }
@@ -20,6 +21,7 @@
     <span class="cg-case-context__label">Current case</span>
     <strong id="case-context-value">No case selected</strong>
 </div>
+<section id="complaint-case-shell" data-state="loading"></section>
 <div id="case-error-summary" class="cg-error-summary" role="alert" aria-labelledby="case-error-summary-title" tabindex="-1" hidden>
     <h2 id="case-error-summary-title">Fix the following</h2>
     <ul id="case-error-summary-list"></ul>
@@ -88,6 +90,7 @@
     <p id="case-asset-status" class="cg-state-error" role="status" hidden></p>
     <img id="case-external-asset" alt="" width="1" height="1">
 </main>
+<script src="/static/complaint_case_shell.js"></script>
 <script>
 (function () {
     var selected = null;
@@ -118,6 +121,7 @@
         document.getElementById("encrypted-revision").textContent = "";
         document.getElementById("envelope-sha256").textContent = "";
         setCaseContext("No case selected", "empty");
+        if (window.complaintCaseShell) window.complaintCaseShell.scheduleRefresh();
     }
 
     function showError(text) {
@@ -204,6 +208,7 @@
             gaps.appendChild(row);
         });
         contentRevision = item.encrypted_content_revision;
+        if (window.complaintCaseShell) window.complaintCaseShell.scheduleRefresh();
         if (item.transient && typeof item.transient.draft === "string") {
             document.getElementById("case-draft").value = item.transient.draft;
         }
@@ -280,6 +285,7 @@
             await loadAssignments(ownGeneration);
             await loadNotifications(ownGeneration);
             if (ownGeneration === generation) showError("");
+            if (window.complaintCaseShell) window.complaintCaseShell.scheduleRefresh();
         } catch (error) {
             credential = "";
             if (ownGeneration === generation) {
@@ -354,6 +360,7 @@
             }
             list.appendChild(row);
         });
+        if (window.complaintCaseShell) window.complaintCaseShell.scheduleRefresh();
     }
 
     async function loadAssignments(ownGeneration) {

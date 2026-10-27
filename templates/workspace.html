@@ -3404,6 +3404,7 @@
     </style>
     <link id="workspace-shell-style" rel="stylesheet" href="/static/complaint_app_shell.css">
     <link id="complaint-experience-tokens" rel="stylesheet" href="/static/complaint_experience_tokens.css">
+    <link id="complaint-case-shell-style" rel="stylesheet" href="/static/complaint_case_shell.css">
 </head>
 <body class="cx-app" data-workspace-hydrated="booting" data-complaint-shell="off">
     <a class="cg-skip-link" href="#workspace-main">Skip to workspace</a>
@@ -3416,6 +3417,7 @@
         <ul id="workspace-error-summary-list"></ul>
     </div>
     <p id="workspace-locked-state" class="cx-status cx-status--locked" role="status" hidden>Case content stays locked until this browser session unlocks the private key. Locked content is not replaced with a new case.</p>
+    <section id="complaint-case-shell" data-state="loading"></section>
     <div class="shell" id="workspace-main" tabindex="-1">
         <section class="topbar" aria-label="Workspace identity">
             <div class="brand-lockup">
@@ -6170,6 +6172,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
 
     <script src="/static/complaint_app_shell.js"></script>
     <script src="/static/complaint_mcp_sdk.js"></script>
+    <script src="/static/complaint_case_shell.js"></script>
     <script src="/static/complaint_graph_view.js"></script>
     <script>
         const { ComplaintMcpClient } = window.ComplaintMcpSdk;
@@ -6290,6 +6293,11 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             const context = document.getElementById('workspace-case-context-value');
             const identity = document.getElementById('workflow-user-id');
             if (!context) return;
+            const shellCase = document.getElementById('complaint-case-shell-case');
+            if (shellCase && shellCase.dataset.bound === 'case' && shellCase.textContent.trim()) {
+                context.textContent = shellCase.textContent.trim();
+                return;
+            }
             const text = identity && identity.textContent ? identity.textContent.trim() : '';
             context.textContent = text && !/loading/i.test(text) ? text : 'No case selected';
         }
@@ -6335,6 +6343,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             }
             publishWorkspaceCaseContext();
             publishWorkspaceErrorSummary(state);
+            if (window.complaintCaseShell) window.complaintCaseShell.scheduleRefresh();
         }
 
         function setStatus(message) {

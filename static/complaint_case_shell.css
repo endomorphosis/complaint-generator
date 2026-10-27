@@ -1,0 +1,109 @@
+.case-shell {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    margin: 0;
+    padding: var(--cx-space-4, 16px);
+    background: var(--cx-color-panel, #fffcf8);
+    color: var(--cx-color-ink, #1c1917);
+    border-bottom: 1px solid var(--cx-color-line, #d6d3d1);
+    font-family: "Public Sans", "Segoe UI", sans-serif;
+    font-size: 1rem;
+    line-height: 1.5;
+}
+
+.case-shell__access,
+.case-shell__identity,
+.case-shell__identity p {
+    margin: 0 0 8px;
+}
+
+.case-shell__access a,
+.case-shell__task {
+    color: var(--cx-color-accent-strong, #6b240f);
+}
+
+.case-shell__identity {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    align-items: end;
+}
+
+.case-shell__identity span {
+    display: block;
+    font-size: 0.8rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--cx-color-muted, #44403c);
+}
+
+.case-shell__identity strong {
+    display: block;
+    font-size: 1.05rem;
+    overflow-wrap: anywhere;
+}
+
+#complaint-case-shell-next,
+.case-shell__task {
+    font: inherit;
+    min-height: 44px;
+    border: 1px solid var(--cx-color-accent-strong, #6b240f);
+    border-radius: 8px;
+    background: var(--cx-color-panel, #fffcf8);
+    padding: 8px 12px;
+}
+
+#complaint-case-shell-next {
+    background: var(--cx-color-accent, #7c2d12);
+    color: #fffaf5;
+    justify-self: start;
+}
+
+.case-shell__task[aria-current="page"] {
+    background: var(--cx-color-accent-soft, #ffedd5);
+}
+
+#complaint-case-shell-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.case-shell__panel {
+    margin-top: 8px;
+    padding: 12px;
+    border: 1px solid var(--cx-color-line, #d6d3d1);
+    border-radius: 8px;
+    background: var(--cx-color-canvas, #f6f3ee);
+}
+
+.case-shell :focus-visible {
+    outline: 3px solid var(--cx-color-accent-strong, #6b240f);
+    outline-offset: 2px;
+}
+
+body[data-case-task-flow="ordinary"] [data-case-shell-diagnostic="true"] {
+    display: none !important;
+}
+
+@media (max-width: 720px) {
+    .case-shell__identity {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 320px) {
+    .case-shell {
+        padding: 12px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .case-shell,
+    .case-shell * {
+        scroll-behavior: auto;
+        transition: none;
+    }
+}
