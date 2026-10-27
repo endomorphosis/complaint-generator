@@ -166,10 +166,16 @@ def test_modes_keep_the_same_session_inquiry_evidence_and_draft(tmp_path, monkey
         }""", {"evidenceId": evidence_id, "draft": DRAFT_BODY + UNSAVED})
         before_keys = page.evaluate("() => Object.keys(localStorage).sort()")
         before = _view(page)
+        client_handle = page.evaluate_handle('() => window.workspaceClient')
+        before_epoch = client_handle.evaluate('client => client._privacyEpoch')
+        server_before = page.evaluate("""async () => (await window.workspaceClient.readCanonicalSession(window.complaintCaseShell.binding())).continuity""")
         assert before["mode"] == "full-workspace"
         assert before["revision"] == str(revision)
         assert before["evidenceId"] == evidence_id
         assert before["draft"] == DRAFT_BODY + UNSAVED
+        page.evaluate('() => window.complaintCaseShell.refresh()')
+        refreshed = _view(page)
+        assert refreshed['draft'] == before['draft'] and refreshed['evidenceId'] == evidence_id
         for mode, context_visible, intake_visible in (
             ("chat-only", False, True),
             ("chat-plus-context", True, True),
@@ -188,6 +194,7 @@ def test_modes_keep_the_same_session_inquiry_evidence_and_draft(tmp_path, monkey
             assert current["evidenceId"] == evidence_id
             assert current["draft"] == DRAFT_BODY + UNSAVED
             assert current["title"] == DRAFT_TITLE
+            assert client_handle.evaluate('(client, expected) => client === window.workspaceClient && client._privacyEpoch === expected', before_epoch)
             assert page.locator("#complaint-presentation-context").is_visible() is context_visible
             visibility = page.evaluate("""() => {
                 const intake = document.querySelector('[data-tab-panel="intake"]');
@@ -216,6 +223,7 @@ def test_modes_keep_the_same_session_inquiry_evidence_and_draft(tmp_path, monkey
         assert evidence_id in continuity["evidence_ids"]
         assert continuity["draft_body"] == DRAFT_BODY
         assert continuity["draft_title"] == DRAFT_TITLE
+        assert continuity == server_before
         stored = page.evaluate("() => Object.entries(localStorage).map(([key, value]) => key + '=' + value).join('\\n')")
         assert DRAFT_BODY not in stored
         assert inquiry_id not in stored
@@ -260,5 +268,91 @@ def test_unknown_mode_and_locked_case_do_not_invent_a_session(tmp_path, monkeypa
         assert inquiry_id not in stored
         assert DRAFT_BODY not in stored
         assert page.evaluate("() => typeof window.localComplaintStore") == "undefined"
+    finally:
+        _close(playwright, context, node, profile, observed)
+
+
+def test_loaded_case_uses_the_actual_mcp_conversation_transport(tmp_path, monkeypatch):
+    world = owner_lawyer_journey_world(tmp_path / 'world')
+    inquiry_id, _revision, _evidence_id = _seed(world)
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch, world=world)
+    try:
+        _sign_in(page)
+        _workspace(page, inquiry_id)
+        actual = page.evaluate("""async tenant => {
+            try {
+                const result = await window.workspaceClient.runIntakeChatTurn(tenant, '', '', {interview_action:'status'});
+                return {ok:true, result, caseContext:window.workspaceClient.caseContext};
+            } catch (error) {return {ok:false, status:error.status, code:error.code, caseContext:window.workspaceClient.caseContext};}
+        }""", world.case.tenant_id)
+        assert actual['ok'], actual
+        assert actual['result']['session']['shared_interview']['pending_inquiry']['inquiry_id'] == inquiry_id
+    finally:
+        _close(playwright, context, node, profile, observed)
+
+
+@pytest.mark.parametrize('boundary', ['key-lock', 'logout', 'actor-change'])
+def test_loaded_canonical_case_is_retired_after_actual_access_boundary(tmp_path, monkeypatch, boundary):
+    world = owner_lawyer_journey_world(tmp_path / 'world')
+    inquiry_id, _revision, _evidence_id = _seed(world)
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch, world=world)
+    try:
+        _sign_in(page)
+        _workspace(page, inquiry_id)
+        before = page.evaluate("""async () => {
+            const read = await window.workspaceClient.readCanonicalSession(window.complaintCaseShell.binding());
+            return {read: read.continuity, alias: window.complaintCanonicalSession && window.complaintCanonicalSession.session.draft.body};
+        }""")
+        assert before['read']['inquiry_id'] == inquiry_id and before['read']['draft_body'] == DRAFT_BODY
+        assert before['alias'] == DRAFT_BODY
+        page.locator('.tab-button[data-tab-target="draft"]').click()
+        page.fill('#draft-body', DRAFT_BODY + ' Unsaved before the actual access change.')
+        assert page.locator('#draft-body').get_attribute('data-user-edited') == 'true'
+
+        if boundary == 'key-lock':
+            # Trusted local key-owner lifecycle; there is no browser unlock API.
+            world.service.lock_private_keys()
+            world.owner_keys.lock()
+        else:
+            changed = page.evaluate("""async (boundary) => {
+                if (boundary === 'actor-change') {
+                    const response = await fetch('/api/complaint-workspace/auth/login', {method:'POST', credentials:'same-origin',
+                        headers:{'content-type':'application/json'}, body:JSON.stringify({credential:'synthetic-stranger-credential'})});
+                    return {status:response.status, body:await response.json()};
+                }
+                const session = await fetch('/api/complaint-workspace/auth/session', {credentials:'same-origin'});
+                const auth = await session.json();
+                const response = await fetch('/api/complaint-workspace/auth/logout', {method:'POST', credentials:'same-origin',
+                    headers:{'x-csrf-token':auth.csrf_token || window.workspaceClient.csrfToken}});
+                return {status:response.status, body:await response.json()};
+            }""", boundary)
+            assert changed['status'] == 200
+            if boundary == 'actor-change':
+                assert changed['body']['principal_id'] == world.stranger.principal_id
+
+        with page.expect_response(lambda response: response.request.method == 'GET'
+                and '/api/complaint-workspace/session?case_id=' in response.url) as refused:
+            denial = page.evaluate("""async () => {
+                try {
+                    await window.workspaceClient.readCanonicalSession(window.complaintCaseShell.binding());
+                    return {resolved:true};
+                } catch (error) {return {resolved:false, status:error.status, code:error.code};}
+            }""")
+        actual = refused.value
+        assert denial['resolved'] is False and denial['status'] == actual.status
+        if boundary == 'key-lock':
+            assert actual.status == 503 and actual.json()['error'] in {'unlock_needed', 'key_unavailable'}
+        else:
+            assert actual.status in {401, 403}
+        page.evaluate('() => window.complaintCaseShell.refresh()')
+        page.wait_for_function("() => document.getElementById('complaint-case-shell').getAttribute('aria-busy') === 'false'")
+        assert page.input_value('#draft-body') == ''
+        assert DRAFT_BODY not in page.locator('body').inner_text()
+        retired = page.evaluate("""() => ({
+            aliasRetired: window.complaintCanonicalSession == null,
+            aliasText: JSON.stringify(window.complaintCanonicalSession || null),
+            entry: document.getElementById('complaint-entry').dataset.entry
+        })""")
+        assert retired['aliasRetired'] and DRAFT_BODY not in retired['aliasText'], retired
     finally:
         _close(playwright, context, node, profile, observed)
