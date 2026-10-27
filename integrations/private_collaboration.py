@@ -38,11 +38,13 @@ from applications.case_directory import CaseDirectory, CaseDirectoryError
 from applications.case_membership import CaseMembershipError, CaseMembershipStore
 from applications.principal_store import PrincipalStore, PrincipalStoreError
 from integrations.private_storage import (
+    BoundPrivateRecordError,
     PrivateArtifactBinding,
     PrivateArtifactIntegrityError,
     PrivateKeyMaterialError,
     UserOwnedKeySession,
     assert_access_matches_binding,
+    commit_private_bound_record,
     open_private_artifact,
     parse_private_envelope,
     seal_private_artifact,
@@ -2071,3 +2073,53 @@ class _FileLock:
             fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
             self._handle.close()
             self._handle = None
+
+
+def commit_linkage_record(
+    root: str | Path,
+    *,
+    actor_principal_id: str,
+    evidence_id: str,
+    annotation_id: str,
+    binding: PrivateArtifactBinding,
+    key: bytes,
+    key_id: str,
+    record_id: str,
+    remote_backend: Any | None = None,
+) -> dict[str, Any]:
+    """Seal a linkage record for an explicit actor. Role labels do not authorize it."""
+
+    if not isinstance(actor_principal_id, str) or not actor_principal_id.strip():
+        raise CaseResourceKeyGrantError("ambient_actor_rejected")
+    if binding.artifact_kind != "linkage" or binding.principal_id != actor_principal_id:
+        raise CaseResourceKeyGrantError("actor_binding_mismatch")
+    for label, code in ((evidence_id, "evidence_id_rejected"), (annotation_id, "annotation_id_rejected")):
+        if not isinstance(label, str) or not label.strip() or label != label.strip() or len(label) > 80:
+            raise CaseResourceKeyGrantError(code)
+    if evidence_id == annotation_id:
+        raise CaseResourceKeyGrantError("linkage_identity_rejected")
+    body = json.dumps(
+        {
+            "kind": "linkage",
+            "actor_principal_id": actor_principal_id,
+            "evidence_id": evidence_id,
+            "annotation_id": annotation_id,
+            "case_id": binding.case_id,
+            "revision": binding.revision,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    try:
+        return commit_private_bound_record(
+            root,
+            record_id=record_id,
+            kind="linkage",
+            plaintext=body,
+            binding=binding,
+            key=key,
+            key_id=key_id,
+            remote_backend=remote_backend,
+        )
+    except BoundPrivateRecordError as exc:
+        raise CaseResourceKeyGrantError(str(exc)) from exc
