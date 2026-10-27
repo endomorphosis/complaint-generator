@@ -46,3 +46,20 @@ def test_sealed_upload_does_not_disclose_cached_evidence_after_key_lock(tmp_path
         assert denied.json()["items"] == []
         assert "evidence_id" not in denied.json() and ORIGINAL not in denied.text
         assert backend._blobs == before
+
+
+@pytest.mark.parametrize("generation", ["2", "-1", "1.0", "invalid", "9" * 21])
+def test_status_query_cannot_borrow_another_or_malformed_upload_generation(tmp_path, generation):
+    world, backend = _ready(tmp_path)
+    with TestClient(world.app, base_url="https://testserver") as client:
+        csrf = _composed_login(client)
+        _, _, sealed = _upload(client, world.case, csrf)
+        assert sealed["upload_generation"] == 1
+        response = client.get("/api/cases/evidence/uploads/status",
+            headers=_composed_headers(world.case, csrf), params={
+                "tenant_id": world.case.tenant_id, "case_id": world.case.case_id,
+                "resource_id": world.case.resource_id, "expected_revision": world.case.revision,
+                "upload_id": sealed["upload_id"], "upload_generation": generation})
+        assert response.status_code == 409
+        assert response.json()["error"] == "upload_stale"
+        assert ORIGINAL not in response.text and "evidence_id" not in response.json()
