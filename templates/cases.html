@@ -194,6 +194,7 @@
             empty.hidden = true;
             empty.textContent = "";
             list.dataset.state = "ready";
+            list.dataset.readyBadge = "false";
         }
         cases.forEach(function (item) {
             var row = document.createElement("li");
@@ -259,6 +260,7 @@
         var token = csrf;
         retireCatalogRequest();
         csrf = "";
+        window.complaintPageCsrf = "";
         selected = null;
         contentRevision = null;
         clearTransientState();
@@ -312,6 +314,7 @@
         document.getElementById("assignment-content").textContent = "";
         document.getElementById("lawyer-select").replaceChildren();
         document.getElementById("case-auth-status").textContent = "Signing in";
+        window.complaintEntryHold = "";
         showError("");
         renderCases([]);
         document.getElementById("case-list-empty").hidden = true;
@@ -328,6 +331,7 @@
             if (ownGeneration !== generation) return;
             if (typeof issued.csrf_token !== "string" || !issued.csrf_token) throw new Error("authentication_failed");
             csrf = issued.csrf_token;
+            window.complaintPageCsrf = csrf;
             document.getElementById("case-auth-status").textContent = "Signed in";
             await loadSession(ownGeneration);
             await loadAssignments(ownGeneration);
@@ -342,9 +346,20 @@
                 document.getElementById("case-list-status").hidden = true;
                 document.getElementById("case-list-status").textContent = "";
                 document.getElementById("case-list-empty").hidden = false;
-                document.getElementById("case-list-empty").textContent = "No cases are loaded yet.";
+                document.getElementById("case-list-empty").textContent = error.message === "authentication_failed"
+                    ? "Sign-in was denied. No case was opened."
+                    : "No cases are loaded yet.";
                 document.getElementById("case-list").dataset.state = "error";
+                document.getElementById("case-list").dataset.readyBadge = "false";
                 showError(error.message);
+                var entry = document.getElementById("complaint-entry");
+                if (entry && error.message === "authentication_failed") {
+                    window.complaintEntryHold = "denied";
+                    entry.dataset.entry = "denied";
+                    entry.dataset.readyBadge = "false";
+                    document.getElementById("complaint-entry-title").textContent = "This session is denied";
+                    document.getElementById("complaint-entry-boundary").textContent = "Sign-in was denied. No replacement case was opened.";
+                }
             }
         }
     });
@@ -593,6 +608,11 @@
     document.getElementById("case-logout").addEventListener("click", function () {
         logout();
     });
+
+    if (window.location.hash === "#create-case") {
+        var beginLabel = document.getElementById("case-label");
+        if (beginLabel) beginLabel.focus();
+    }
 
     window.complaintCasesSelect = selectCase;
     window.retireComplaintCaseRequests = function () {
