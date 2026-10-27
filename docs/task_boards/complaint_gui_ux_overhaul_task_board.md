@@ -1990,7 +1990,7 @@ Implementation instructions:
 
 ## CIMP-UX-65 Qualify genuine new-campaign ingestion and startup observations
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
