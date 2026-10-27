@@ -192,7 +192,7 @@ def test_owner_and_reviewer_share_the_case_shell(tmp_path, monkeypatch):
         page.wait_for_function("() => document.getElementById('complaint-case-shell-stage').textContent === 'Locked'")
         locked = _shell(page)
         assert locked["privacy"] == "Locked until the private key is available"
-        assert locked["next"] == "Unlock the case"
+        assert locked["next"] == "Check private key access"
         assert locked["caseId"] == world.case.case_id
         assert page.locator("#adaptive-narrative").input_value() == ""
         assert page.get_attribute("#adaptive-pending", "data-pending") != "true"

@@ -1,8 +1,8 @@
-"""First-run, sign-in, unlock, and cold-resume entry.
+"""First-run, sign-in, actual key-access checks, and cold-resume entry.
 
 A new person can see how to name a complaint. An existing owner selects the
-real case and, once the private key is available, resumes the server's pending
-question. A denied sign-in, a missing key, and an unavailable catalog stay
+real case and, after a trusted local key owner unlocks outside the GUI, resumes
+the saved server question. A denied sign-in, a missing key, and an unavailable catalog stay
 explicit. The browser does not invent a case, show a ready badge, rebuild the
 question from storage, or hide a consent grant.
 """
@@ -55,7 +55,13 @@ def _sign_in(page, credential):
     with page.expect_response(lambda response: response.request.method == "POST"
             and response.url.endswith("/api/complaint-workspace/auth/login")) as login:
         page.click("#case-login button[type=submit]")
-    return login.value
+    response = login.value
+    if response.status == 200:
+        page.wait_for_function("principal => document.getElementById('complaint-case-shell-actor').dataset.principalId === principal",
+            arg=response.json()["principal_id"])
+    else:
+        page.wait_for_function("() => document.getElementById('case-error').textContent === 'authentication_failed'")
+    return response
 
 
 def _shell_ready(page):
@@ -77,7 +83,9 @@ def _pending_question(world):
         question = pending.get("question") or pending.get("prompt")
         assert question and question != CACHE_QUESTION
         assert NARRATIVE not in question
-        return pending["inquiry_id"], question
+        consent = client.get("/api/cases/" + world.case.case_id + "/processing-consent")
+        assert consent.status_code == 200
+        return pending["inquiry_id"], question, started.json()["session"], consent.json()
 
 
 def _lock(world):
@@ -85,7 +93,8 @@ def _lock(world):
     world.owner_keys.lock()
 
 
-def _unlock(world):
+def _unlock_by_trusted_local_owner(world):
+    """Explicit external lifecycle: this is never a browser unlock operation."""
     assert world.service.unlock_private_keys(passphrase=PASSPHRASE)["unlocked"] is True
     world.owner_keys.unlock_passphrase(PASSPHRASE)
 
@@ -100,7 +109,8 @@ def test_new_user_can_identify_and_begin_a_complaint(tmp_path, monkeypatch):
         assert page.locator("#workspace-begin-complaint").inner_text() == "Begin a complaint"
         assert page.locator("#complaint-entry").get_attribute("data-entry") == "first-run"
         assert page.locator("#complaint-entry").get_attribute("data-ready-badge") == "false"
-        assert page.locator("#complaint-entry-consent-remote").is_checked() is False
+        assert page.locator("#complaint-entry input[type=password]").count() == 0
+        assert "does not grant remote processing" in page.locator("#complaint-entry-consent").inner_text()
         page.click("#workspace-begin-complaint")
         page.wait_for_url("**/cases#create-case")
         assert page.locator("#case-label").is_visible()
@@ -130,16 +140,26 @@ def test_new_user_can_identify_and_begin_a_complaint(tmp_path, monkeypatch):
         _close(playwright, context, node, profile, observed)
 
 
-def test_owner_selects_unlocks_and_resumes_the_pending_question(tmp_path, monkeypatch):
-    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch)
+def test_local_owner_lifecycle_then_real_gui_probe_resumes_cold_persisted_inquiry(tmp_path, monkeypatch):
+    seed = owner_lawyer_journey_world(tmp_path / "world")
+    inquiry_id, question, saved, consent_before = _pending_question(seed)
+    _lock(seed)
+    # New workspace and wallet objects read the same encrypted roots. Neither
+    # a decrypted session nor a rendered response is copied to this reader.
+    cold = owner_lawyer_journey_world(tmp_path / "world", previous=seed)
+    assert cold.service is not seed.service and cold.owner_keys is not seed.owner_keys
+    _lock(cold)
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch, world=cold)
     try:
-        inquiry_id, question = _pending_question(world)
-        _lock(world)
         opened = page.goto(browser.SAME_ORIGIN + "/cases", wait_until="domcontentloaded")
         assert opened.status == 200
         page.evaluate("""(cached) => {
             localStorage.setItem('complaint-entry-question', cached);
             sessionStorage.setItem('complaint-entry-question', cached);
+            localStorage.setItem('complaint-entry-passphrase', 'obsolete-fixture-secret');
+            sessionStorage.setItem('complaint-entry-passphrase', 'obsolete-fixture-secret');
+            localStorage.setItem('ux06-unrelated-setting', 'preserved');
+            sessionStorage.setItem('ux06-unrelated-setting', 'preserved');
         }""", CACHE_QUESTION)
         _sign_in(page, "synthetic-owner-credential")
         page.click("#case-list button")
@@ -159,14 +179,23 @@ def test_owner_selects_unlocks_and_resumes_the_pending_question(tmp_path, monkey
         }""")]
         posted = []
         page.on("request", lambda request: posted.append((request.method, request.url, request.post_data or "")))
-        page.fill("#complaint-entry-passphrase", PASSPHRASE)
-        page.click("#complaint-entry-unlock button[type=submit]")
+        assert page.locator("#complaint-entry input[type=password]").count() == 0
+        with page.expect_response(lambda response: response.request.method == "GET"
+                and '/api/complaint-workspace/session?case_id=' in response.url) as locked:
+            page.click("#complaint-entry-check-key")
+        assert locked.value.status == 503
+        assert locked.value.json()["error"] == "unlock_needed"
+        assert locked.value.json()["session_readable"] is False
+        assert locked.value.request.header_value("x-case-id") == world.case.case_id
+        assert locked.value.request.header_value("x-tenant-id") == world.case.tenant_id
         page.wait_for_function("""() => {
-            const result = document.getElementById('complaint-entry-unlock-result').textContent;
-            return result.includes('still missing') && result.includes('unavailable');
+            const result = document.getElementById('complaint-entry-key-result').textContent;
+            return result.includes('still locked') && result.includes('authorized local key owner');
         }""")
         assert all(PASSPHRASE not in body for _method, _url, body in posted)
         assert CACHE_QUESTION not in page.evaluate("() => JSON.stringify({...localStorage, ...sessionStorage})")
+        assert page.evaluate("() => [localStorage.getItem('complaint-entry-passphrase'), sessionStorage.getItem('complaint-entry-passphrase')]") == [None, None]
+        assert page.evaluate("() => [localStorage.getItem('ux06-unrelated-setting'), sessionStorage.getItem('ux06-unrelated-setting')]") == ['preserved', 'preserved']
         still = [item["case_id"] for item in page.evaluate("""async () => {
             const response = await fetch('/api/cases', {credentials: 'same-origin', headers: {accept: 'application/json'}});
             const body = await response.json();
@@ -174,8 +203,15 @@ def test_owner_selects_unlocks_and_resumes_the_pending_question(tmp_path, monkey
         }""")]
         assert still == before
         assert page.locator("#complaint-entry").get_attribute("data-entry") == "missing-key"
-        _unlock(world)
-        page.click("#complaint-entry-unlock button[type=submit]")
+        _unlock_by_trusted_local_owner(world)
+        with page.expect_response(lambda response: response.request.method == "GET"
+                and '/api/complaint-workspace/session?case_id=' in response.url) as opened:
+            page.click("#complaint-entry-check-key")
+        assert opened.value.status == 200
+        resumed = opened.value.json()["session"]
+        assert resumed["shared_interview"]["pending_inquiry"] == saved["shared_interview"]["pending_inquiry"]
+        assert resumed.get("draft") == saved.get("draft")
+        assert resumed["shared_interview"]["knowledge_graph"] == saved["shared_interview"]["knowledge_graph"]
         page.wait_for_function("""(inquiryId) => {
             const entry = document.getElementById('complaint-entry');
             const question = document.getElementById('complaint-entry-question');
@@ -183,8 +219,12 @@ def test_owner_selects_unlocks_and_resumes_the_pending_question(tmp_path, monkey
         }""", arg=str(inquiry_id))
         assert page.locator("#complaint-entry-question").inner_text() == question
         assert CACHE_QUESTION not in page.locator("#complaint-case-shell").inner_text()
-        assert page.locator("#complaint-entry-consent-remote").is_checked() is False
-        assert page.locator("#complaint-entry").get_attribute("data-consent") == "visible-not-granted"
+        assert page.locator("#complaint-entry").get_attribute("data-consent") == "not-modified"
+        consent_after = page.evaluate("""async caseId => {
+            const response = await fetch('/api/cases/' + encodeURIComponent(caseId) + '/processing-consent', {credentials:'same-origin'});
+            return {status:response.status, body:await response.json()};
+        }""", world.case.case_id)
+        assert consent_after["status"] == 200 and consent_after["body"] == consent_before
         consent_posts = [item for item in posted if "processing-consent" in item[1] and item[0] == "POST"]
         assert consent_posts == []
         page.locator("[data-case-panel='mediator']").wait_for(state="visible")
@@ -195,6 +235,7 @@ def test_owner_selects_unlocks_and_resumes_the_pending_question(tmp_path, monkey
 
 def test_unavailable_catalog_is_explicit_and_opens_no_replacement_case(tmp_path, monkeypatch):
     world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch)
+    catalog = world.app.state.case_catalog
     try:
         opened = page.goto(browser.SAME_ORIGIN + "/cases", wait_until="domcontentloaded")
         assert opened.status == 200
@@ -204,19 +245,12 @@ def test_unavailable_catalog_is_explicit_and_opens_no_replacement_case(tmp_path,
         page.wait_for_function("() => document.getElementById('complaint-case-shell-case').dataset.bound === 'case'")
         case_id = page.locator("#complaint-case-shell-case").get_attribute("data-case-id")
         assert case_id == world.case.case_id
-        page.evaluate("""() => {
-            const original = window.fetch.bind(window);
-            window.fetch = function (input, options) {
-                const raw = typeof input === 'string' ? input : input.url;
-                const path = new URL(raw, location.origin).pathname;
-                if (path === '/api/cases/session') {
-                    return Promise.resolve(new Response(JSON.stringify({error: 'catalog_unavailable'}),
-                        {status: 503, headers: {'content-type': 'application/json'}}));
-                }
-                return original(input, options);
-            };
-        }""")
-        page.evaluate("() => window.complaintCaseShell.refresh()")
+        before = world.cases.list_cases(actor_principal_id=world.owner.principal_id)
+        world.app.state.case_catalog = None
+        with page.expect_response(lambda response: response.request.method == 'GET'
+                and response.url.endswith('/api/cases/session')) as unavailable:
+            page.evaluate("() => window.complaintCaseShell.refresh()")
+        assert unavailable.value.status == 503 and unavailable.value.json()['error'] == 'case_catalog_unavailable'
         page.wait_for_function("() => document.getElementById('complaint-entry').dataset.entry === 'unavailable'")
         assert page.locator("#complaint-case-shell").get_attribute("data-ready-badge") == "false"
         assert page.locator("#complaint-case-shell").get_attribute("data-state") != "ready"
@@ -224,9 +258,11 @@ def test_unavailable_catalog_is_explicit_and_opens_no_replacement_case(tmp_path,
         assert "unavailable" in page.locator("#complaint-entry-title").inner_text().lower()
         assert page.locator("#complaint-case-shell-case").get_attribute("data-bound") == "empty"
         listed = page.locator("#case-list button").all_inner_texts()
-        assert any("owner-lawyer-journey" in label for label in listed)
+        assert listed == []
+        assert world.cases.list_cases(actor_principal_id=world.owner.principal_id) == before
         assert page.evaluate("() => typeof window.mockApi") == "undefined"
     finally:
+        world.app.state.case_catalog = catalog
         _close(playwright, context, node, profile, observed)
 
 

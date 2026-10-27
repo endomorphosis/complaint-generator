@@ -91,18 +91,15 @@
             + '<p class="case-shell__access"><a href="/cases">My cases</a> <a href="/cases#notifications">Inbox</a> <a href="#complaint-case-shell-privacy">Account/privacy</a></p>'
             + '<section id="complaint-entry" data-entry="first-run" data-ready-badge="false" data-browser-cache="ignored" data-consent="visible-not-granted" aria-labelledby="complaint-entry-title">'
             + '<h2 id="complaint-entry-title">Begin a complaint</h2>'
-            + '<p id="complaint-entry-detail">A new complaint starts from your own account of what happened. Sign in, name the case, and continue. An existing case is chosen from the catalog, then unlocked, then resumed at the server question.</p>'
+            + '<p id="complaint-entry-detail">Sign in and choose the case from the catalog. If its keys are locked, an authorized local key owner must unlock them before this page can resume the saved server question.</p>'
             + '<p id="complaint-entry-boundary" role="status">Sign in to begin or to open a case you already have.</p>'
             + '<p id="complaint-entry-question" hidden></p>'
-            + '<p id="complaint-entry-consent">Remote processing is not consented. Local processing stays the default until a purpose-scoped choice is recorded. Opening or unlocking a case does not grant that choice.</p>'
-            + '<label for="complaint-entry-consent-remote"><input id="complaint-entry-consent-remote" type="checkbox"> Keep remote processing unselected until I record it separately</label>'
+            + '<p id="complaint-entry-consent">This page does not grant remote processing. Purpose-scoped choices stay with the case privacy controls.</p>'
             + '<p><button type="button" id="complaint-entry-begin">Begin a complaint</button></p>'
-            + '<form id="complaint-entry-unlock">'
-            + '<label for="complaint-entry-passphrase">Private key passphrase</label>'
-            + '<input id="complaint-entry-passphrase" type="password" autocomplete="current-password">'
-            + '<button type="submit">Unlock and resume</button>'
-            + '<p id="complaint-entry-unlock-result" role="status"></p>'
-            + '</form>'
+            + '<div id="complaint-entry-key-access">'
+            + '<button type="button" id="complaint-entry-check-key">Check private key access / resume</button>'
+            + '<p id="complaint-entry-key-result" role="status"></p>'
+            + '</div>'
             + '</section>'
             + '<div class="case-shell__identity">'
             + '<p><span>Case</span> <strong id="complaint-case-shell-case" data-bound="empty">No case selected</strong></p>'
@@ -134,13 +131,7 @@
         });
         host.querySelector("#complaint-case-shell-next").addEventListener("click", runNext);
         host.querySelector("#complaint-entry-begin").addEventListener("click", beginComplaint);
-        host.querySelector("#complaint-entry-unlock").addEventListener("submit", function (event) {
-            event.preventDefault();
-            unlockAndResume();
-        });
-        var consentBox = host.querySelector("#complaint-entry-consent-remote");
-        consentBox.checked = false;
-        consentBox.addEventListener("change", function () { consentBox.dataset.userSet = "true"; });
+        host.querySelector("#complaint-entry-check-key").addEventListener("click", checkPrivateKeyAccessAndResume);
         showTask("overview");
         applyViewport();
         return host;
@@ -161,6 +152,15 @@
         });
     }
 
+    function forgetEntryCache() {
+        ["localStorage", "sessionStorage"].forEach(function (name) {
+            try {
+                var storage = window[name];
+                ["complaint-entry-passphrase", "complaint-entry-question"].forEach(function (key) { storage.removeItem(key); });
+            } catch (error) { /* An unavailable browser store is never a case record. */ }
+        });
+    }
+
     function clearPagePlaintext(keepFields) {
         var host = shellHost();
         if (host) {
@@ -171,6 +171,15 @@
         var assignment = document.getElementById("assignment-content");
         if (assignment) assignment.textContent = "";
         if (keepFields) return;
+        forgetEntryCache();
+        var question = document.getElementById("complaint-entry-question");
+        if (question) {
+            question.textContent = "";
+            question.hidden = true;
+            question.dataset.inquiryId = "";
+        }
+        var keyResult = document.getElementById("complaint-entry-key-result");
+        if (keyResult) keyResult.textContent = "";
         ["case-draft", "gap-input"].forEach(function (id) {
             var field = document.getElementById(id);
             if (field) field.value = "";
@@ -189,6 +198,33 @@
         }
     }
 
+    function retireUnverifiedView(clearCatalog) {
+        if (typeof window.retireComplaintCaseRequests === "function") window.retireComplaintCaseRequests();
+        clearPagePlaintext(false);
+        if (clearCatalog) {
+            ["case-list", "assignment-list", "notification-list"].forEach(function (id) {
+                var node = document.getElementById(id);
+                if (node) node.replaceChildren();
+            });
+            var list = document.getElementById("case-list");
+            if (list && list.dataset.state !== "error") list.dataset.state = "unavailable";
+            var empty = document.getElementById("case-list-empty");
+            if (empty) {
+                empty.hidden = false;
+                empty.textContent = "The case catalog must be read again for this account.";
+            }
+            var badge = document.getElementById("notification-badge");
+            if (badge) badge.textContent = "0";
+        }
+        if (typeof window.resetPrivateWorkspaceView === "function"
+                && ["ready", "partial"].indexOf(document.body.dataset.workspaceHydrated) !== -1) {
+            retiringWorkspace = true;
+            try {
+                window.resetPrivateWorkspaceView("unavailable", "Private case access changed or could not be verified. Reload to reconnect.");
+            } finally { retiringWorkspace = false; }
+        }
+    }
+
     function noteBoundary(principalId, caseId, access) {
         var actorChanged = committed.principalId && committed.principalId !== principalId;
         var caseChanged = committed.caseId && committed.caseId !== caseId;
@@ -199,8 +235,9 @@
         var currentFields = Boolean(fields && principalId && caseId
             && fields.dataset.actorPrincipalId === principalId && fields.dataset.caseId === caseId);
         if (closed || ((actorChanged || caseChanged) && !currentFields)) {
-            if (typeof window.retireComplaintCaseRequests === "function") window.retireComplaintCaseRequests();
-            clearPagePlaintext(false);
+            var catalog = document.getElementById("case-list");
+            retireUnverifiedView(access === "logged-out" || (actorChanged && catalog
+                && catalog.dataset.actorPrincipalId !== principalId));
         } else if (actorChanged || caseChanged) clearPagePlaintext(true);
         committed.principalId = principalId || "";
         committed.caseId = caseId || "";
@@ -277,7 +314,7 @@
         if (window.complaintEntryHold === "denied" && !state.authenticated) return "denied";
         if (state.entry) return state.entry;
         if (!state.authenticated) return "first-run";
-        if (state.nextKind === "unlock") return "missing-key";
+        if (state.nextKind === "check-key") return "missing-key";
         if (state.nextKind === "denied") return "denied";
         if (state.nextKind === "unavailable" || state.nextKind === "retry" || state.nextKind === "reconnect") return "unavailable";
         if (!state.caseId) return state.catalog.length ? "select" : "first-run";
@@ -294,12 +331,12 @@
         var boundary = document.getElementById("complaint-entry-boundary");
         var question = document.getElementById("complaint-entry-question");
         var begin = document.getElementById("complaint-entry-begin");
-        var unlock = document.getElementById("complaint-entry-unlock");
+        var keyAccess = document.getElementById("complaint-entry-key-access");
         var pending = kind === "resume" ? pendingInquiry() : null;
         var copy = {
             "first-run": ["Begin a complaint", "Name the case and start with what happened. No legal theory is required first, and no empty case is created until you submit the case form."],
             "select": ["Choose the case to resume", "Pick the case from the catalog. The page does not open a blank replacement case."],
-            "missing-key": ["Private key is missing", "This case stays locked. The pending question is not reconstructed from the browser, and a missing key does not open another case."],
+            "missing-key": ["Private key access is locked", "An authorized local key owner must unlock the private keys outside this page. Then check access here to resume the saved server question. This page never receives a passphrase or opens a replacement case."],
             "denied": ["This session is denied", "The account cannot open case content. No replacement case is shown as ready."],
             "unavailable": ["This capability is unavailable", "The case catalog or private session could not be read. Nothing was replaced with an empty case."],
             "resume": ["Resume the pending question", "The question below is the current server inquiry for the selected case."],
@@ -314,7 +351,7 @@
         entry.dataset.entry = kind;
         entry.dataset.readyBadge = "false";
         entry.dataset.browserCache = "ignored";
-        entry.dataset.consent = "visible-not-granted";
+        entry.dataset.consent = "not-modified";
         entry.dataset.caseId = state.caseId || "";
         title.textContent = pair[0];
         detail.textContent = pair[1];
@@ -323,9 +360,7 @@
         question.textContent = pending ? inquiryText(pending) : "";
         question.dataset.inquiryId = pending ? text(pending.inquiry_id) : "";
         begin.hidden = kind !== "first-run";
-        unlock.hidden = kind !== "missing-key" && kind !== "resume";
-        var consentBox = document.getElementById("complaint-entry-consent-remote");
-        if (consentBox && consentBox.dataset.userSet !== "true") consentBox.checked = false;
+        keyAccess.hidden = kind !== "missing-key" && kind !== "resume";
     }
 
     function beginComplaint() {
@@ -339,26 +374,18 @@
         window.location.assign("/cases#create-case");
     }
 
-    async function unlockAndResume() {
-        var field = document.getElementById("complaint-entry-passphrase");
-        var result = document.getElementById("complaint-entry-unlock-result");
-        var passphrase = field ? field.value : "";
-        if (field) field.value = "";
-        try {
-            window.localStorage.removeItem("complaint-entry-passphrase");
-            window.localStorage.removeItem("complaint-entry-question");
-        } catch (error) { /* Browser storage is not the complaint record. */ }
-        if (passphrase) {
-            if (result) result.textContent = "This browser cannot unlock a private key. The passphrase was not sent or stored. Checking the current key session.";
-        } else if (result) {
-            result.textContent = "Checking whether the private key is available.";
-        }
-        await refresh();
+    async function checkPrivateKeyAccessAndResume() {
+        forgetEntryCache();
+        var checking = refresh();
+        var token = refreshToken;
+        await checking;
+        if (token !== refreshToken) return;
+        var result = document.getElementById("complaint-entry-key-result");
         var pending = pendingInquiry();
         if (result && entryKind() === "missing-key") {
-            result.textContent = "The private key is still missing. Unlock from this browser is unavailable, and no replacement case was opened.";
+            result.textContent = "Private key access is still locked. An authorized local key owner must unlock it outside this page. No replacement case was opened.";
         } else if (result && pending) {
-            result.textContent = "The case is unlocked. The pending question is the server inquiry.";
+            result.textContent = "Private key access is available. The pending question was read from this case's saved server inquiry.";
         }
         if (pending) showTask("mediator");
     }
@@ -401,7 +428,7 @@
             assignment: null,
             gaps: [],
             catalog: [],
-            entry: "first-run"
+            entry: "continue"
         };
         var cases = catalog && Array.isArray(catalog.cases) ? catalog.cases : [];
         next.catalog = cases.filter(allowedCase).map(function (item) {
@@ -450,8 +477,8 @@
             next.gaps = [];
             next.privacy = "Locked until the private key is available";
             next.stage = "Locked";
-            next.next = "Unlock the case";
-            next.nextKind = "unlock";
+            next.next = "Check private key access";
+            next.nextKind = "check-key";
             next.entry = "missing-key";
             return next;
         }
@@ -691,6 +718,7 @@
                 return;
             }
             if (!catalog.ok) {
+                retireUnverifiedView(true);
                 state = derive(actor.body, {cases: [], selected_case_id: ""}, {assignments: []}, null, "unavailable");
                 state.entry = "unavailable";
                 state.catalog = [];
@@ -749,6 +777,7 @@
             if (error && error.name === "AbortError") return;
             if (token !== refreshToken) return;
             // A failed refresh must not retain another actor's case or content.
+            retireUnverifiedView(true);
             state = derive(null, null, null, null);
             state.entry = "unavailable";
             state.stage = "Workspace could not be read";
@@ -773,7 +802,7 @@
             window.location.reload();
             return;
         }
-        if (kind === "retry") {
+        if (kind === "retry" || kind === "unavailable") {
             refresh();
             return;
         }
@@ -797,10 +826,8 @@
             else showTask("team");
             return;
         }
-        if (kind === "unlock" || kind === "missing-key") {
-            var passphrase = document.getElementById("complaint-entry-passphrase");
-            if (passphrase) passphrase.focus();
-            unlockAndResume();
+        if (kind === "check-key" || kind === "missing-key") {
+            checkPrivateKeyAccessAndResume();
             return;
         }
         if (kind === "review") {

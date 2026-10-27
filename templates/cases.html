@@ -179,8 +179,9 @@
         return payload;
     }
 
-    function renderCases(cases) {
+    function renderCases(cases, principalId) {
         var list = document.getElementById("case-list");
+        list.dataset.actorPrincipalId = principalId || "";
         var empty = document.getElementById("case-list-empty");
         var status = document.getElementById("case-list-status");
         list.replaceChildren();
@@ -260,7 +261,6 @@
         var token = csrf;
         retireCatalogRequest();
         csrf = "";
-        window.complaintPageCsrf = "";
         selected = null;
         contentRevision = null;
         clearTransientState();
@@ -287,7 +287,7 @@
     async function loadSession(ownGeneration) {
         var session = await api("/api/cases/session");
         if (ownGeneration !== generation) return;
-        renderCases(session.cases || []);
+        renderCases(session.cases || [], session.actor_principal_id);
         if (session.selected_case_id) {
             selected = session.selected_case_id;
             var current = (session.cases || []).find(function (item) { return item.case_id === selected; });
@@ -331,7 +331,6 @@
             if (ownGeneration !== generation) return;
             if (typeof issued.csrf_token !== "string" || !issued.csrf_token) throw new Error("authentication_failed");
             csrf = issued.csrf_token;
-            window.complaintPageCsrf = csrf;
             document.getElementById("case-auth-status").textContent = "Signed in";
             await loadSession(ownGeneration);
             await loadAssignments(ownGeneration);
@@ -374,7 +373,7 @@
             document.getElementById("case-label").value = "";
             var listed = await api("/api/cases");
             if (ownGeneration !== generation) return;
-            renderCases(listed.cases || []);
+            renderCases(listed.cases || [], listed.actor_principal_id);
             if (window.complaintCaseShell) window.complaintCaseShell.scheduleRefresh();
             showError("");
         } catch (error) {
