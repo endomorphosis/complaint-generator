@@ -353,3 +353,44 @@ def test_existing_case_without_pending_is_continue_instead_of_first_run(tmp_path
         assert page.locator("#complaint-case-shell-case").get_attribute("data-case-id") == world.case.case_id
     finally:
         _close(playwright, context, node, profile, observed)
+
+
+def test_real_private_session_unavailable_retires_same_owner_case_fields(tmp_path, monkeypatch):
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch)
+    registry = world.app.state.case_handlers
+    key = (world.case.tenant_id, world.case.case_id, world.case.resource_id)
+    binding = None
+    try:
+        page.goto(browser.SAME_ORIGIN + "/cases", wait_until="domcontentloaded")
+        assert _sign_in(page, "synthetic-owner-credential").status == 200
+        page.click("#case-list button")
+        page.wait_for_function("() => !document.getElementById('selected-case').hidden")
+        _shell_ready(page)
+        assert page.locator("#complaint-entry").get_attribute("data-entry") == "continue"
+        page.fill("#case-draft", "ux06-unverified-private-session-draft")
+        page.fill("#gap-input", "ux06-unverified-private-session-gap")
+        # Withdraw the actual operator binding only in this owned app. The
+        # unchanged middleware produces the real non-key session-read failure.
+        binding = registry._bindings.pop(key)
+        with page.expect_response(lambda response: response.request.method == "GET"
+                and '/api/complaint-workspace/session?case_id=' in response.url) as unavailable:
+            page.evaluate("() => window.complaintCaseShell.refresh()")
+        assert unavailable.value.status == 503
+        assert unavailable.value.json()["error"] == "case_handler_unavailable"
+        _shell_ready(page)
+        assert page.locator("#complaint-entry").get_attribute("data-entry") == "unavailable"
+        assert page.input_value("#case-draft") == ""
+        assert page.input_value("#gap-input") == ""
+        assert page.locator("#selected-case").is_hidden()
+        catalog = page.evaluate("""async () => {
+            const response = await fetch('/api/cases/session', {credentials:'same-origin'});
+            return {status:response.status, body:await response.json()};
+        }""")
+        assert catalog["status"] == 200
+        assert catalog["body"]["actor_principal_id"] == world.owner.principal_id
+        assert catalog["body"]["selected_case_id"] == world.case.case_id
+        assert page.locator("#complaint-case-shell-case").get_attribute("data-case-id") == world.case.case_id
+    finally:
+        if binding is not None:
+            registry._bindings[key] = binding
+        _close(playwright, context, node, profile, observed)
