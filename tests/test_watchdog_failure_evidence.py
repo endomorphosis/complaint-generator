@@ -96,6 +96,7 @@ def test_foreign_or_aliased_capture_files_are_refused_without_overwrite(tmp_path
         return
     if damage=='world_directory':
         directory.mkdir(mode=0o755)
+        directory.chmod(0o755)  # Exercise the unsafe mode even under private umask 077.
         assert evidence.capture(directory,**inputs)['status']=='capture_unavailable' and list(directory.iterdir())==[]
         return
     result=evidence.capture(directory,**inputs)
