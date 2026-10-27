@@ -1430,7 +1430,9 @@ def _campaign_scope_liveness(native_state: Mapping[str, Any], *, phase: str, int
     if not claim_id:
         claim = "absent"
     elif (attempt_age is not None and attempt_age > TIMEOUT_SECONDS
-            and not (canonical_validation_active and active and not interview_hold
+            # A verified repair keeps Native's original execution-event and
+            # phase deadlines; its earlier selection clock is not expiry.
+            and not ((canonical_validation_active or provider_repair) and active and not interview_hold
                      and phase.startswith("valid") and worker_liveness == "alive")):
         claim = "expired"
     elif worker_liveness in {"dead", "pid_reuse"}:

@@ -240,7 +240,7 @@ def main():
  with pytest.MonkeyPatch.context() as patch:
   with _native_world(Path(sys.argv[1]),patch,setup_seconds=float(sys.argv[4]),
        selection_seconds=float(sys.argv[5]) if sys.argv[5] else None) as world:
-   if sys.argv[2]=='finished':
+   if sys.argv[2] in {'finished','dead_clock_window'}:
     (world['workspace']/'release').touch();world['worker'].join(10)
     assert not world['worker'].is_alive()
     with world['log'].open('a') as log:
@@ -257,11 +257,16 @@ def main():
      original_claim=world['claim_path'].read_bytes()
      claim=json.loads(original_claim);claim['canonical_task_cid']='explicit-synthetic-foreign-cid'
      world['claim_path'].write_text(json.dumps(claim))
-    if sys.argv[2] in {'execution_expired','phase_expired'}:
+    if sys.argv[2]=='paused_clock_window':
+     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+     state=native.PortalTaskState.load(world['daemon'].state_path)
+     state.active_phase='paused'
+     state.save(world['daemon'].state_path)
+    if sys.argv[2] in {'execution_deadline','execution_expired','phase_expired'}:
      primary=next(json.loads(line) for line in world['daemon'].events_path.read_text().splitlines()
                   if json.loads(line).get('type')=='implementation_started')
-     if sys.argv[2]=='execution_expired':
-      observed_now=runner._event_timestamp(primary)+runner.TIMEOUT_SECONDS+.01
+     if sys.argv[2] in {'execution_deadline','execution_expired'}:
+      observed_now=runner._event_timestamp(primary)+runner.TIMEOUT_SECONDS+(0 if sys.argv[2]=='execution_deadline' else .01)
       # Simulate validation beginning near the actual execution deadline:
       # its separate phase cap is still open when the provider cap expires.
       from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
@@ -312,6 +317,7 @@ def test_actual_native_rescue_status_keeps_original_owned_parent_guard(tmp_path,
 @pytest.mark.parametrize('mode,expected_status,expected_reason',[
     ('running_clock_window','active','bounded_native_rescue_activity'),
     ('foreign_clock_window','stalled','native_binding_unavailable'),
+    ('execution_deadline','stalled','provider_deadline_expired'),
     ('execution_expired','stalled','provider_deadline_expired'),
     ('phase_expired','stalled','native_binding_unavailable'),
 ])
@@ -323,9 +329,24 @@ def test_actual_public_status_uses_verified_rescue_clock_and_preserves_refusals(
     assert result['status']==expected_status,result
     assert result['healthy'] is (mode=='running_clock_window'),result
     assert result['auto_rescue_activity_verified'] is (mode=='running_clock_window'),result
+    # Selection/header clocks may precede checkout. A re-proved Native repair
+    # remains bounded by the original execution event and validation phase,
+    # even after the earlier selection clock has crossed 900 seconds.
+    assert result['scope_liveness']['claim']==('held' if mode=='running_clock_window' else 'expired'),result
     assert result['auto_rescue_activity_evidence']['reason']==expected_reason,result
     assert result['provider_progress_verified'] is False and result['progress_verified'] is False
     assert result['validation_activity_verified'] is False
+
+
+@pytest.mark.parametrize('mode',['paused_clock_window','dead_clock_window'])
+def test_expired_selection_cannot_borrow_paused_or_finished_rescue(tmp_path,mode):
+    result=_status_in_owned_parent(tmp_path,mode,setup_seconds=51,selection_seconds=901)
+    assert result['native_read_errors']=={},result
+    assert result['status']=='stalled' and result['healthy'] is False,result
+    assert result['scope_liveness']['claim']=='expired',result
+    assert result['auto_rescue_activity_verified'] is False,result
+    assert result['provider_progress_verified'] is False and result['progress_verified'] is False,result
+    assert result['validation_activity_verified'] is False,result
 
 
 @pytest.mark.parametrize("damage",["cid","key","attempt","workspace","phase","hold","deadline"])
