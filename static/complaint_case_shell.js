@@ -124,8 +124,11 @@
     }
 
     function applyViewport() {
-        var width = window.innerWidth || document.documentElement.clientWidth || 0;
-        var mode = width >= 1100 ? "desktop" : (width >= 768 ? "tablet" : "mobile");
+        // Match the CSS breakpoints. innerWidth can drop below the layout
+        // viewport when a scrollbar is present, which would mis-label tablet.
+        var desktop = window.matchMedia("(min-width: 1100px)").matches;
+        var tablet = window.matchMedia("(min-width: 768px)").matches;
+        var mode = desktop ? "desktop" : (tablet ? "tablet" : "mobile");
         document.documentElement.dataset.caseViewport = mode;
         var more = document.getElementById("complaint-case-shell-more");
         var showSecondary = mode !== "mobile" || (more && more.open);
