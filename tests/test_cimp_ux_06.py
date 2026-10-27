@@ -266,9 +266,12 @@ def test_unavailable_catalog_is_explicit_and_opens_no_replacement_case(tmp_path,
         _close(playwright, context, node, profile, observed)
 
 
-def test_actual_catalog_failure_after_actor_change_scrubs_and_fences_previous_view(tmp_path, monkeypatch):
+@pytest.mark.parametrize('race', ['request-pending', 'json-completed'])
+def test_actual_catalog_failure_after_actor_change_scrubs_and_fences_previous_view(tmp_path, monkeypatch, race):
     world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch)
     catalog = world.app.state.case_catalog
+    pending = {}
+    failed_requests = []
     try:
         page.goto(browser.SAME_ORIGIN + "/cases", wait_until="domcontentloaded")
         assert _sign_in(page, "synthetic-owner-credential").status == 200
@@ -279,32 +282,57 @@ def test_actual_catalog_failure_after_actor_change_scrubs_and_fences_previous_vi
         page.wait_for_function("() => !document.getElementById('selected-case').hidden")
         page.fill("#case-draft", "ux06-previous-owner-private-draft")
         page.fill("#gap-input", "ux06-previous-owner-private-gap")
-        # Delay delivery of an actual owner's save response, without replacing
-        # its handler, cookie, response, or body. The new actor must retire it.
-        page.evaluate("""() => {
+        page.on('requestfailed', lambda request: failed_requests.append(
+            {'url': request.url, 'error': request.failure}) if request.url.endswith('/transient') else None)
+        if race == 'request-pending':
+            # Hold a real intercepted HTTP request before forwarding it. The
+            # browser, rather than this route, must produce the abort failure.
+            def hold_actual_request(route):
+                pending['route'] = route
+                page.evaluate('() => {window.__ux06PendingRoute = true;}')
+
+            page.route('**/api/cases/*/transient', hold_actual_request)
+        # The other mode fully reads actual server JSON, then defers only its
+        # return to the caller. A buffered body is never claimed to be aborted.
+        page.evaluate("""race => {
             const original = window.fetch.bind(window);
             let armed = true;
-            window.__ux06OldRead = {aborted: false, bodyError: null};
+            window.__ux06OldRead = {aborted: false, fetchError: null, jsonError: null,
+                responseReceived: false, jsonRead: false, returned: false};
             window.fetch = async function (input, options) {
                 const path = new URL(typeof input === 'string' ? input : input.url, location.origin).pathname;
                 if (armed && path.endsWith('/transient') && options.method === 'POST') {
                     armed = false;
                     window.__ux06OldRead.signal = options.signal;
                     options.signal.addEventListener('abort', () => {window.__ux06OldRead.aborted = true;}, {once:true});
-                    const response = await original(input, options);
+                    let response;
+                    try {response = await original(input, options);}
+                    catch (error) {window.__ux06OldRead.fetchError = error.name; throw error;}
+                    window.__ux06OldRead.responseReceived = true;
+                    window.__ux06OldRead.responseStatus = response.status;
+                    if (race === 'request-pending') return response;
                     const json = response.json.bind(response);
                     response.json = async function () {
-                        try {return await json();}
-                        catch (error) {window.__ux06OldRead.bodyError = error.name; throw error;}
+                        let payload;
+                        try {payload = await json();}
+                        catch (error) {window.__ux06OldRead.jsonError = error.name; throw error;}
+                        window.__ux06OldRead.jsonRead = true;
+                        await new Promise(resolve => {window.__ux06Release = resolve;});
+                        window.__ux06OldRead.returned = true;
+                        return payload;
                     };
-                    await new Promise(resolve => {window.__ux06Release = resolve;});
                     return response;
                 }
                 return original(input, options);
             };
             document.getElementById('save-draft').click();
-        }""")
-        page.wait_for_function("() => typeof window.__ux06Release === 'function'")
+        }""", race)
+        if race == 'request-pending':
+            page.wait_for_function('() => window.__ux06PendingRoute === true')
+        else:
+            page.wait_for_function("() => window.__ux06OldRead.jsonRead && typeof window.__ux06Release === 'function'")
+            assert page.evaluate('() => window.__ux06OldRead.responseStatus') == 200
+        assert page.evaluate('() => window.__ux06OldRead.signal instanceof AbortSignal && !window.__ux06OldRead.signal.aborted')
         changed = page.evaluate("""async () => {
             const response = await fetch('/api/complaint-workspace/auth/login', {method:'POST',credentials:'same-origin',
                 headers:{'content-type':'application/json'},body:JSON.stringify({credential:'synthetic-stranger-credential'})});
@@ -323,8 +351,21 @@ def test_actual_catalog_failure_after_actor_change_scrubs_and_fences_previous_vi
         assert page.locator("#selected-case").is_hidden()
         assert page.locator("#complaint-entry").get_attribute("data-entry") == "unavailable"
         assert page.evaluate("() => window.__ux06OldRead.aborted && window.__ux06OldRead.signal.aborted") is True
-        page.evaluate("() => window.__ux06Release()")
-        page.wait_for_function("() => window.__ux06OldRead.bodyError === 'AbortError'")
+        if race == 'request-pending':
+            page.wait_for_function("() => window.__ux06OldRead.fetchError === 'AbortError'")
+            assert page.evaluate('() => window.__ux06OldRead.responseReceived') is False
+            assert len(failed_requests) == 1 and failed_requests[0]['error'] == 'net::ERR_ABORTED'
+            pending['route'].fallback()
+            pending['released'] = True
+        else:
+            assert page.evaluate('() => window.__ux06OldRead.jsonError') is None
+            page.evaluate('() => window.__ux06Release()')
+            page.wait_for_function('() => window.__ux06OldRead.returned === true')
+            assert failed_requests == []
+            assert page.evaluate('() => window.__ux06OldRead.jsonRead && window.__ux06OldRead.jsonError === null')
+        assert page.input_value('#case-draft') == ''
+        assert page.input_value('#gap-input') == ''
+        assert page.locator('#selected-case').is_hidden()
         assert "ux06-previous-owner" not in page.locator("body").inner_text()
         actual = page.evaluate("""async () => {
             const response = await fetch('/api/complaint-workspace/auth/session', {credentials:'same-origin'});
@@ -333,6 +374,8 @@ def test_actual_catalog_failure_after_actor_change_scrubs_and_fences_previous_vi
         assert actual["status"] == 200 and actual["body"]["principal_id"] == world.stranger.principal_id
     finally:
         world.app.state.case_catalog = catalog
+        if 'route' in pending and not pending.get('released'):
+            pending['route'].fallback()
         page.evaluate("() => {if (window.__ux06Release) window.__ux06Release();}")
         _close(playwright, context, node, profile, observed)
 

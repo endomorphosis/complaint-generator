@@ -163,14 +163,17 @@
             headers["content-type"] = "application/json";
             headers["x-csrf-token"] = csrf;
         }
+        var signal = (options && options.signal) || (catalogRequest && catalogRequest.signal) || undefined;
         var response = await fetch(path, {
             method: (options && options.method) || "GET",
             headers: headers,
             body: options && options.body ? JSON.stringify(options.body) : undefined,
             credentials: "same-origin",
-            signal: (options && options.signal) || (catalogRequest && catalogRequest.signal) || undefined
+            signal: signal
         });
         var payload = await response.json();
+        // A retired actor or case must not apply a body that arrived late.
+        if (signal && signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
         if (!response.ok) {
             var detail = payload && (payload.error || payload.detail);
             if (detail && typeof detail !== "string") detail = "";
