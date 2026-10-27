@@ -9,6 +9,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import json
 import threading
+import hmac
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -17,6 +18,7 @@ import pytest
 from applications.case_message_api import CaseMessageService
 from applications.case_routes import compose_case_routes
 from integrations.evidence_workspace import EvidenceWorkspace, MemoryByteBackend
+from integrations.private_storage import UserOwnedKeySession, PrivateArtifactBinding, PrivateArtifactIntegrityError
 from tests.gui_collaboration_fixtures import owner_lawyer_journey_world
 from tests.test_cimp_gui_14 import PASSPHRASE, _composed_headers, _composed_login
 from tests.test_cimp_ux_13 import _receive, ORIGINAL, SOURCE
@@ -117,9 +119,13 @@ def _retire(world, mode):
         if mode == "lock_unlock":
             state = world.owner_keys.unlock_passphrase(PASSPHRASE)
             assert state["unlocked"] is True
-    elif mode == "rekey":
-        old_id = world.owner_keys.ensure_data_key(world.case.tenant_id, world.case.case_id)
-        changed = world.owner_keys.rotate_case_grant_data_key(world.case.tenant_id, world.case.case_id,
+    elif mode in {"rekey", "other_handle_rekey"}:
+        session = world.owner_keys
+        if mode == "other_handle_rekey":
+            session = UserOwnedKeySession(world.owner_keys.directory)
+            assert session.unlock_passphrase(PASSPHRASE)["unlocked"] is True
+        old_id = session.ensure_data_key(world.case.tenant_id, world.case.case_id)
+        changed = session.rotate_case_grant_data_key(world.case.tenant_id, world.case.case_id,
             resource_id=world.case.resource_id, expected_data_key_id=old_id,
             operation_id="private-real-key-rotation")
         assert changed["rotated"] is True
@@ -128,7 +134,7 @@ def _retire(world, mode):
         raise AssertionError("unknown private test retirement mode")
 
 
-@pytest.mark.parametrize("retirement", ["lock_unlock", "rekey"])
+@pytest.mark.parametrize("retirement", ["lock_unlock", "rekey", "other_handle_rekey"])
 def test_actual_http_catalog_retires_changed_key_scope_during_read(tmp_path, retirement):
     world, app, backend = _actual_world(tmp_path)
     with TestClient(app, base_url="https://testserver") as client:
@@ -155,7 +161,7 @@ def test_actual_http_catalog_retires_changed_key_scope_during_read(tmp_path, ret
         assert rows == [], observed
 
 
-@pytest.mark.parametrize("retirement", ["lock", "lock_unlock", "rekey"])
+@pytest.mark.parametrize("retirement", ["lock", "lock_unlock", "rekey", "other_handle_rekey"])
 def test_actual_http_catalog_does_not_publish_after_late_key_retirement(tmp_path, retirement):
     world, app, backend = _actual_world(tmp_path)
     with TestClient(app, base_url="https://testserver") as client:
@@ -182,4 +188,104 @@ def test_actual_http_catalog_does_not_publish_after_late_key_retirement(tmp_path
             "actual_ciphertext_read": backend.ciphertext_read, "completion_authority": False}
         (tmp_path / "closed_observation.json").write_text(json.dumps(observed, sort_keys=True))
         assert response.status_code == 503, observed
+        assert pointers[0].read_bytes() == before, observed
+
+
+
+def test_actual_http_boundary_rechecks_key_after_service_thread_returns(tmp_path, monkeypatch):
+    world, app, _backend = _actual_world(tmp_path)
+    service = app.state.evidence_workspace
+    actual_list = service.list_catalog
+    entered, release = threading.Event(), threading.Event()
+    def held_actual_list(*args, **kwargs):
+        result = actual_list(*args, **kwargs)
+        assert len(result["items"]) == 1
+        entered.set()
+        if not release.wait(10):
+            raise AssertionError("private test actual service return gate timed out")
+        return result
+    with TestClient(app, base_url="https://testserver") as client:
+        csrf = _composed_login(client)
+        assert _receive(client, world.case, csrf).status_code == 201
+        monkeypatch.setattr(service, "list_catalog", held_actual_list)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(client.get, "/api/cases/evidence",
+                headers=_composed_headers(world.case, csrf))
+            try:
+                assert entered.wait(10)
+                assert not pending.done()
+                assert world.owner_keys.lock()["unlocked"] is False
+            finally:
+                release.set()
+            response = pending.result(timeout=10)
+        assert response.status_code == 503
+        assert response.json()["items"] == []
+        assert response.json()["operation_succeeded"] is False
+
+
+def test_actual_key_session_epoch_changes_only_for_explicit_lifetimes(tmp_path):
+    world, _app, _backend = _actual_world(tmp_path)
+    session, case = world.owner_keys, world.case
+    epoch = session.session_epoch
+    key_id = session.ensure_data_key(case.tenant_id, case.case_id)
+    key = session.lookup_data_key(case.tenant_id, case.case_id, key_id)
+    binding = PrivateArtifactBinding(tenant_id=case.tenant_id, case_id=case.case_id,
+        principal_id=case.tenant_id, artifact_kind="private-test", revision="one")
+    for _ in range(3):
+        current_id, current_key = session.provider().resolve(binding)
+        assert current_id == key_id
+        assert hmac.compare_digest(current_key, key)
+        assert session.session_epoch == epoch
+    assert session.unlock_passphrase(PASSPHRASE)["unlocked"] is True
+    assert session.session_epoch > epoch
+    epoch = session.session_epoch
+    assert session.lock()["unlocked"] is False
+    assert session.session_epoch > epoch
+    epoch = session.session_epoch
+    assert session.lock()["unlocked"] is False
+    assert session.session_epoch > epoch
+    epoch = session.session_epoch
+    with pytest.raises(PrivateArtifactIntegrityError):
+        session.unlock_passphrase("synthetic incorrect passphrase")
+    assert session.unlocked is False
+    assert session.session_epoch > epoch
+    epoch = session.session_epoch
+    assert session.unlock_passphrase(PASSPHRASE)["unlocked"] is True
+    assert session.session_epoch > epoch
+
+
+
+def test_actual_http_does_not_publish_if_api_scope_retired_before_worker_starts(tmp_path, monkeypatch):
+    world, app, _backend = _actual_world(tmp_path)
+    service = app.state.evidence_workspace
+    actual_receive = service.receive
+    entered, release = threading.Event(), threading.Event()
+    def held_before_actual_receive(*args, **kwargs):
+        entered.set()
+        if not release.wait(10):
+            raise AssertionError("private test actual worker entry gate timed out")
+        return actual_receive(*args, **kwargs)
+    with TestClient(app, base_url="https://testserver") as client:
+        csrf = _composed_login(client)
+        assert _receive(client, world.case, csrf).status_code == 201
+        pointers = list((tmp_path / "evidence-root").glob("*/pointer.json"))
+        assert len(pointers) == 1
+        before = pointers[0].read_bytes()
+        monkeypatch.setattr(service, "receive", held_before_actual_receive)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(_receive, client, world.case, csrf,
+                idempotency_key="private-stale-api-capture")
+            try:
+                assert entered.wait(10)
+                assert not pending.done()
+                _retire(world, "lock_unlock")
+            finally:
+                release.set()
+            response = pending.result(timeout=10)
+        assert response.status_code == 503
+        assert response.json()["items"] == []
+        observed = {"http_status": response.status_code,
+            "pointer_changed_after_retirement": pointers[0].read_bytes() != before,
+            "completion_authority": False}
+        (tmp_path / "closed_observation.json").write_text(json.dumps(observed, sort_keys=True))
         assert pointers[0].read_bytes() == before, observed

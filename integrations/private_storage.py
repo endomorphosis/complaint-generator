@@ -1150,6 +1150,7 @@ class UserOwnedKeySession:
         self._recipient_wrap: tuple[str, bytes] | None = None
         self._case_grant_state = {"schema": "case-grant-key-state@1", "resources": {}, "rotations": {}}
         self._operation_lock = threading.RLock()
+        self._session_epoch = 0
         self._operation_depth = 0
         self._store_lock_fd: int | None = None
         self._store_directory_fd: int | None = None
@@ -1159,6 +1160,16 @@ class UserOwnedKeySession:
     @property
     def unlocked(self) -> bool:
         return self._master is not None
+
+    @property
+    def session_epoch(self) -> int:
+        """Volatile session lifetime, without key material or access authority.
+
+        Explicit create/unlock and every lock retire an earlier operation.
+        Ordinary authenticated key-store refreshes preserve this lifetime.
+        """
+        with self._operation_lock:
+            return self._session_epoch
 
     def public_state(self) -> dict[str, Any]:
         document = self._document
@@ -1254,6 +1265,7 @@ class UserOwnedKeySession:
         self._document = document
         self._master = master
         self._master_id = master_id
+        self._session_epoch += 1
         return self.public_state()
 
     @_key_session_operation(authenticate=False)
@@ -1277,6 +1289,7 @@ class UserOwnedKeySession:
             self.lock()
             raise PrivateArtifactIntegrityError(exc.reason) from None
         self._install_master(document, master)
+        self._session_epoch += 1
         return self.public_state()
 
     @_key_session_operation(authenticate=False)
@@ -1318,10 +1331,12 @@ class UserOwnedKeySession:
             self.lock()
             raise PrivateArtifactIntegrityError(exc.reason) from None
         self._install_master(document, master)
+        self._session_epoch += 1
         return self.public_state()
 
     def lock(self) -> dict[str, Any]:
         with self._operation_lock:
+            self._session_epoch += 1
             if self._master is not None:
                 self._master = bytes(DATA_KEY_BYTES)
                 self._master = None
