@@ -113,7 +113,7 @@ def test_evidence_annotation_classification_and_link_round_trip(tmp_path: Path) 
     _assert_no_secret(tmp_path)
 
 
-def test_remote_readback_is_durable_and_queue_without_bytes_is_not(tmp_path: Path) -> None:
+def test_unqualified_remote_echo_queue_or_error_does_not_claim_durability(tmp_path: Path) -> None:
     store = EvidenceAnnotationStore(tmp_path / "verified")
     remote = _Remote(readback=True)
     receipt = store.put_evidence(
@@ -125,10 +125,10 @@ def test_remote_readback_is_durable_and_queue_without_bytes_is_not(tmp_path: Pat
         remote_backend=remote,
     )
     assert receipt["local_durable"] is True
-    assert receipt["remote_durable"] is True
-    assert receipt["counts_toward_desired"] is True
-    assert remote.seen[0].startswith(b"CGPE")
-    assert SECRET not in remote.seen[0]
+    assert receipt["remote_durable"] is False
+    assert receipt["counts_toward_desired"] is False
+    assert receipt["code"] == "remote_unqualified"
+    assert remote.seen == []
 
     queued = EvidenceAnnotationStore(tmp_path / "queued")
     blind = _Remote(readback=False)
@@ -142,7 +142,8 @@ def test_remote_readback_is_durable_and_queue_without_bytes_is_not(tmp_path: Pat
     )
     assert blind_receipt["local_durable"] is True
     assert blind_receipt["remote_durable"] is False
-    assert blind_receipt["code"] == "remote_unverified"
+    assert blind_receipt["code"] == "remote_unqualified"
+    assert blind.seen == []
     assert blind_receipt["local_write_is_remote_durable"] is False
 
     down = EvidenceAnnotationStore(tmp_path / "down")
@@ -155,7 +156,7 @@ def test_remote_readback_is_durable_and_queue_without_bytes_is_not(tmp_path: Pat
         remote_backend=_Remote(readback=False, explode=True),
     )
     assert failed["remote_durable"] is False
-    assert failed["code"] == "remote_unavailable"
+    assert failed["code"] == "remote_unqualified"
     assert down.read(record_id="evidence-down", binding=_binding("evidence"), key=KEY) == SECRET
 
 

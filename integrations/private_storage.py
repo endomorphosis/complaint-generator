@@ -7879,9 +7879,9 @@ def verify_ciphertext_durability(kit: Any, envelope: bytes) -> dict[str, Any]:
 
 
 # Evidence, annotations, classification revisions, and linkage records share one
-# bound ciphertext path. Kit AES-GCM associated data proves the caller key and
-# binding. Kit replica observations and WAL acknowledgement rules decide
-# durability. A content hash, a queued acknowledgement, a local file, and a
+# bound ciphertext path. Actual Kit AES-GCM output preserves the Host header
+# and associated data. Actual Kit filesystem commits and verified disk readback
+# qualify local durability; no remote producer is currently qualified here. A content hash, a queued acknowledgement, a local file, and a
 # caller success flag are not remote durability and are not encryption.
 
 PRIVATE_RECORD_KINDS = (
@@ -8041,14 +8041,14 @@ def _binding_from_document(document: Mapping[str, Any]) -> PrivateArtifactBindin
         raise BoundPrivateRecordError("journal_malformed") from exc
 
 
-def _prove_kit_authenticated_encryption(
+def _seal_kit_bound_envelope(
     plaintext: bytes,
     *,
     key: bytes,
     key_id: str,
     binding: PrivateArtifactBinding,
-) -> None:
-    """Round-trip Kit AES-GCM with the caller key and binding. Do not persist it."""
+) -> bytes:
+    """Use actual Kit AES-GCM output in the existing opaque Host envelope."""
 
     if not isinstance(key_id, str) or not key_id.strip():
         raise BoundPrivateRecordError("ambient_key_rejected")
@@ -8066,6 +8066,10 @@ def _prove_kit_authenticated_encryption(
         )
     except Exception as exc:
         raise BoundPrivateRecordError("kit_encryption_unavailable") from exc
+    key_bytes = _require_data_key(key)
+    key_id_raw = _require_key_id(key_id)
+    header = ENVELOPE_MAGIC + bytes((SCHEMA_VERSION, len(key_id_raw))) + key_id_raw
+    associated = _envelope_associated_data(binding, header)
     manager_key = KeyManager(storage_type=KeyStorageType.MEMORY)
     manager_key._key_metadata[key_id] = EncryptionKey(
         id=key_id,
@@ -8073,22 +8077,31 @@ def _prove_kit_authenticated_encryption(
         algorithm=EncryptionAlgorithm.AES_256_GCM,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
-    manager_key._store_key_material(key_id, bytes(key))
+    manager_key._store_key_material(key_id, key_bytes)
     try:
         encrypted = EncryptionManager(manager_key).encrypt(
             plaintext,
             key_id=key_id,
             algorithm=EncryptionAlgorithm.AES_256_GCM,
-            additional_authenticated_data=canonical_associated_data(binding),
+            additional_authenticated_data=associated,
         )
         opened = EncryptionManager(manager_key).decrypt(encrypted)
     except Exception as exc:
         raise BoundPrivateRecordError("kit_encryption_failed") from exc
     finally:
         manager_key._key_cache.pop(key_id, None)
-    if opened != plaintext or encrypted.to_dict().get("original_size") != len(plaintext):
+        manager_key._key_metadata.pop(key_id, None)
+    nonce, ciphertext, tag = encrypted.initialization_vector, encrypted.encrypted_data, encrypted.auth_tag
+    if (opened != plaintext or not isinstance(nonce, bytes) or len(nonce) != NONCE_BYTES
+            or not isinstance(ciphertext, bytes) or len(ciphertext) != len(plaintext)
+            or not isinstance(tag, bytes) or len(tag) != TAG_BYTES
+            or encrypted.additional_authenticated_data != associated):
         raise BoundPrivateRecordError("kit_encryption_failed")
-    del encrypted
+    # Persist no rich Kit object, original-size field, key, or binding metadata.
+    envelope = header + nonce + ciphertext + tag
+    if open_private_artifact(envelope, binding=binding, key=key_bytes, expected_key_id=key_id) != plaintext:
+        raise BoundPrivateRecordError("kit_encryption_failed")
+    return envelope
 
 
 def _queued_cannot_claim_committed() -> bool:
@@ -8106,91 +8119,6 @@ def _queued_cannot_claim_committed() -> bool:
         return True
     return False
 
-
-def _kit_inventory(content_size: int, *, remote_backend: Any | None):
-    _prefer_vendored_kit()
-    from ipfs_kit_py.core.replication.contracts import (
-        BackendCapability,
-        BackendInventory,
-        ConsistencyLevel,
-        EncryptionLevel,
-        ReplicaPolicy as KitReplicaPolicy,
-        RetentionLevel,
-    )
-    from ipfs_kit_py.core.replication.placement import plan_placement
-
-    local = BackendCapability(
-        backend_id="local-primary",
-        failure_domain="local-host",
-        available_bytes=max(content_size, 1),
-        durable=True,
-        encryption=EncryptionLevel.CUSTOMER_MANAGED,
-        consistency=ConsistencyLevel.STRONG,
-        retention=RetentionLevel.RETAINED,
-        localities=("local",),
-    )
-    capabilities = [local]
-    remote_id = None
-    if remote_backend is not None:
-        remote_id = getattr(remote_backend, "provider_id", None) or "remote-replica"
-        domain = getattr(remote_backend, "failure_domain", None) or "remote-domain"
-        capabilities.append(BackendCapability(
-            backend_id=str(remote_id),
-            failure_domain=str(domain),
-            available_bytes=max(content_size, 1),
-            durable=True,
-            encryption=EncryptionLevel.CUSTOMER_MANAGED,
-            consistency=ConsistencyLevel.STRONG,
-            retention=RetentionLevel.RETAINED,
-            localities=("remote",),
-        ))
-    desired = len(capabilities)
-    policy = KitReplicaPolicy(
-        policy_id="cimp-ux-57-private-evidence",
-        min_replicas=1,
-        desired_replicas=desired,
-        max_replicas=desired,
-        critical_replicas=desired,
-        required_consistency=ConsistencyLevel.READ_YOUR_WRITES,
-        required_encryption=EncryptionLevel.CUSTOMER_MANAGED,
-        required_retention=RetentionLevel.RETAINED,
-    )
-    inventory = BackendInventory(snapshot_id="cimp-ux-57-snapshot", capabilities=tuple(capabilities))
-    return policy, inventory, plan_placement, remote_id
-
-
-def _observation(replica_id: str, content_ref: str, backend_id: str, *, verified: bool):
-    _prefer_vendored_kit()
-    from ipfs_kit_py.core.replication.contracts import ReplicaObservation, ReplicaState, assert_legal_replica_transition
-
-    if verified:
-        chain = (
-            ReplicaState.PLANNED,
-            ReplicaState.PENDING,
-            ReplicaState.QUEUED,
-            ReplicaState.COPYING,
-            ReplicaState.COPIED,
-            ReplicaState.VERIFYING,
-            ReplicaState.VERIFIED,
-        )
-        for previous, following in zip(chain, chain[1:]):
-            assert_legal_replica_transition(previous, following)
-        return ReplicaObservation(
-            replica_id=replica_id,
-            content_ref=content_ref,
-            backend_id=backend_id,
-            state=ReplicaState.VERIFIED,
-            durable=True,
-            integrity_verified=True,
-        )
-    return ReplicaObservation(
-        replica_id=replica_id,
-        content_ref=content_ref,
-        backend_id=backend_id,
-        state=ReplicaState.QUEUED,
-        durable=False,
-        integrity_verified=False,
-    )
 
 
 def _receipt(
@@ -8243,8 +8171,7 @@ def _seal_bound_record(
         raise BoundPrivateRecordError("plaintext_rejected")
     if not isinstance(key_id, str) or not key_id.strip() or len(key_id) > 80:
         raise BoundPrivateRecordError("ambient_key_rejected")
-    _prove_kit_authenticated_encryption(bytes(plaintext), key=key, key_id=key_id, binding=binding)
-    envelope = seal_private_artifact(bytes(plaintext), binding=binding, key=key, key_id=key_id)
+    envelope = _seal_kit_bound_envelope(bytes(plaintext), key=key, key_id=key_id, binding=binding)
     if plaintext in envelope:
         raise BoundPrivateRecordError("plaintext_fallback")
     return envelope, _content_ref(envelope)
@@ -8294,36 +8221,74 @@ def stage_interrupted_bound_record(
     )
 
 
+def _bound_kit_types():
+    _prefer_vendored_kit()
+    try:
+        from ipfs_kit_py.assurance.local_durable import LiveLocalFilesystemAdapter, LiveLocalResult
+        from ipfs_kit_py.core.operation_contracts import DurabilityMode, OperationState
+    except Exception as exc:
+        raise BoundPrivateRecordError("kit_durability_unavailable") from exc
+    return LiveLocalFilesystemAdapter, LiveLocalResult, DurabilityMode, OperationState
+
+
+def _read_kit_bound_envelope(root: Path, content_ref: str) -> bytes:
+    adapter_type, result_type, _durability_mode, states = _bound_kit_types()
+    adapter = None
+    try:
+        # The private content reference is a path locator, never a public CID.
+        _object_path(root, content_ref)
+        adapter = adapter_type.reopen(root)
+        result = adapter.get(content_ref, deadline=time.monotonic() + 5.0)
+        if (type(result) is not result_type or result.state is not states.ACCEPTED
+                or not result.success or _content_ref(result.data) != content_ref
+                or result.resulting_content_cid != adapter_type.content_cid(result.data)):
+            raise BoundPrivateRecordError("record_unavailable")
+        return result.data
+    except BoundPrivateRecordError:
+        raise
+    except Exception as exc:
+        raise BoundPrivateRecordError("record_unavailable") from exc
+    finally:
+        if adapter is not None:
+            adapter.close()
+
+
 def _publish_local(root: Path, record_id: str, content_ref: str) -> bool:
     staged = _read_private_file(_staging_path(root, record_id))
     if staged is None or _content_ref(staged) != content_ref:
         return False
-    destination = _object_path(root, content_ref)
-    _write_private_file(destination, staged)
-    published = _read_private_file(destination)
-    return published == staged
-
-
-def _qualify_remote(remote_backend: Any, content_ref: str, envelope: bytes) -> bool:
-    if remote_backend is None:
-        return False
-    put = getattr(remote_backend, "put", None)
-    get = getattr(remote_backend, "get", None)
-    if not callable(put) or not callable(get):
-        raise BoundPrivateRecordError("remote_backend_rejected")
+    adapter_type, result_type, durability_mode, states = _bound_kit_types()
+    adapter = None
     try:
-        acknowledgement = put(content_ref, envelope)
-    except Exception as exc:
-        raise BoundPrivateRecordError("remote_unavailable") from exc
-    _reject_public_gateway(acknowledgement if not isinstance(acknowledgement, (bytes, bytearray)) else "")
-    try:
-        loaded = get(content_ref)
-    except Exception as exc:
-        raise BoundPrivateRecordError("remote_unavailable") from exc
-    if isinstance(loaded, str):
-        _reject_public_gateway(loaded)
+        adapter = adapter_type(root)
+        deadline = time.monotonic() + 5.0
+        committed = adapter.put(content_ref, staged, deadline=deadline)
+        result = committed.canonical_result
+        durability = result.durability
+        if (type(committed) is not result_type or committed.state is not states.COMMITTED
+                or not committed.success or durability is None
+                or durability.mode is not durability_mode.BACKEND_DURABLE
+                or not durability.backend_ack_id or not result.effect_evidence
+                or set(durability.effect_evidence_ids) != {effect.evidence_id for effect in result.effect_evidence}
+                or any(effect.backend_id != adapter.backend_id for effect in result.effect_evidence)):
+            return False
+        expected_cid = adapter_type.content_cid(staged)
+        for observed in (committed, adapter.get(content_ref, deadline=deadline), adapter.digest(content_ref, deadline=deadline)):
+            if (type(observed) is not result_type or not observed.success
+                    or observed.resulting_content_cid != expected_cid):
+                return False
+            if observed is not committed and observed.data != staged:
+                return False
+    except Exception:
         return False
-    return isinstance(loaded, (bytes, bytearray)) and bytes(loaded) == envelope
+    finally:
+        if adapter is not None:
+            adapter.close()
+    # A fresh actual adapter reconstructs bytes and digest sidecar from disk.
+    try:
+        return _read_kit_bound_envelope(root, content_ref) == staged
+    except BoundPrivateRecordError:
+        return False
 
 
 def commit_private_bound_record(
@@ -8337,7 +8302,7 @@ def commit_private_bound_record(
     key_id: str,
     remote_backend: Any | None = None,
 ) -> dict[str, Any]:
-    """Seal, publish, and qualify one bound record. Remote durability needs readback."""
+    """Qualify a Kit local commit. Arbitrary remote byte echoes stay unqualified."""
 
     record_id = _require_record_id(record_id)
     directory = _bound_root(root)
@@ -8359,66 +8324,25 @@ def commit_private_bound_record(
     }
     _store_journal(journal, document)
     local_ok = _publish_local(directory, record_id, content_ref)
-    remote_ok = False
-    placement_intents = 0
-    counts = False
-    code = "readback_mismatch"
     if local_ok:
         document["phase"] = "verified"
         _store_journal(journal, document)
-        try:
-            policy, inventory, plan_placement, remote_id = _kit_inventory(
-                len(envelope), remote_backend=remote_backend,
-            )
-        except BoundPrivateRecordError:
-            raise
-        except Exception as exc:
-            raise BoundPrivateRecordError("kit_durability_unavailable") from exc
-        local_observation = _observation("replica-local", content_ref, "local-primary", verified=True)
-        if not local_observation.counts_toward_desired:
-            raise BoundPrivateRecordError("local_observation_rejected")
-        if remote_backend is None:
-            plan = plan_placement(
-                content_id=content_ref,
-                content_size_bytes=len(envelope),
-                policy=policy,
-                inventory=inventory,
-                replicas=(local_observation,),
-            )
-            placement_intents = len(plan.intents)
-            counts = placement_intents == 0 and local_observation.counts_toward_desired
-            code = "" if counts else "placement_incomplete"
-        else:
-            try:
-                remote_ok = _qualify_remote(remote_backend, content_ref, envelope)
-            except BoundPrivateRecordError:
-                remote_ok = False
-                code = "remote_unavailable"
-            remote_observation = _observation(
-                "replica-remote",
-                content_ref,
-                str(remote_id),
-                verified=remote_ok,
-            )
-            plan = plan_placement(
-                content_id=content_ref,
-                content_size_bytes=len(envelope),
-                policy=policy,
-                inventory=inventory,
-                replicas=(local_observation, remote_observation),
-            )
-            placement_intents = len(plan.intents)
-            counts = remote_ok and remote_observation.counts_toward_desired and placement_intents == 0
-            if code != "remote_unavailable":
-                code = "" if counts else "remote_unverified"
+    # No remote producer with an authenticated durability contract is installed
+    # on this API. A queued acknowledgement, put/get echo, caller capability,
+    # or even a second local adapter cannot establish a remote replica. Do not
+    # invoke an unqualified backend or synthesize VERIFIED observations for it.
+    remote_requested = remote_backend is not None
+    code = "remote_unqualified" if remote_requested else ""
+    if not local_ok:
+        code = "readback_mismatch"
     return _receipt(
         record_id=record_id,
         kind=kind,
         key_id=key_id,
         local_durable=local_ok,
-        remote_durable=bool(remote_ok and local_ok),
-        counts_toward_desired=bool(counts and local_ok),
-        placement_intents=placement_intents,
+        remote_durable=False,
+        counts_toward_desired=bool(local_ok and not remote_requested),
+        placement_intents=0,
         recovery_attempts=1,
         phase="verified" if local_ok else "staged",
         code=code,
@@ -8443,9 +8367,7 @@ def open_private_bound_record(
     if _binding_document(expected) != _binding_document(binding):
         raise BoundPrivateRecordError("binding_mismatch")
     content_ref = str(document.get("content_ref") or "")
-    envelope = _read_private_file(_object_path(directory, content_ref))
-    if envelope is None:
-        raise BoundPrivateRecordError("record_unavailable")
+    envelope = _read_kit_bound_envelope(directory, content_ref)
     try:
         return open_private_artifact(
             envelope,
@@ -8507,9 +8429,7 @@ def recover_private_bound_records(
             _store_journal(path, document)
             unavailable.append(record_id)
             continue
-        _write_private_file(_object_path(directory, content_ref), staged)
-        published = _read_private_file(_object_path(directory, content_ref))
-        if published != staged:
+        if not _publish_local(directory, record_id, content_ref):
             _store_journal(path, document)
             unavailable.append(record_id)
             continue
