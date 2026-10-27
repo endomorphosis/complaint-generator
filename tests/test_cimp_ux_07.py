@@ -356,3 +356,69 @@ def test_loaded_canonical_case_is_retired_after_actual_access_boundary(tmp_path,
         assert retired['aliasRetired'] and DRAFT_BODY not in retired['aliasText'], retired
     finally:
         _close(playwright, context, node, profile, observed)
+
+
+def test_title_only_dirty_draft_survives_same_verified_case_refresh(tmp_path, monkeypatch):
+    world = owner_lawyer_journey_world(tmp_path / 'world')
+    inquiry_id, _revision, _evidence_id = _seed(world)
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch, world=world)
+    try:
+        _sign_in(page)
+        _workspace(page, inquiry_id)
+        page.locator('[data-case-task="draft"]').click()
+        edited = DRAFT_TITLE + ' — unsaved title only'
+        page.fill('#draft-title', edited)
+        assert page.input_value('#draft-body') == DRAFT_BODY
+        page.evaluate('() => window.complaintCaseShell.refresh()')
+        assert page.input_value('#draft-title') == edited
+        assert page.input_value('#draft-body') == DRAFT_BODY
+        actual = page.evaluate("""async () => (await window.workspaceClient.readCanonicalSession(window.complaintCaseShell.binding())).continuity""")
+        assert actual['draft_title'] == DRAFT_TITLE and actual['draft_body'] == DRAFT_BODY
+    finally:
+        _close(playwright, context, node, profile, observed)
+
+
+@pytest.mark.parametrize('boundary', ['key-lock', 'actor-change'])
+def test_mode_read_denial_retires_current_private_view_without_manual_refresh(tmp_path, monkeypatch, boundary):
+    world = owner_lawyer_journey_world(tmp_path / 'world')
+    inquiry_id, _revision, _evidence_id = _seed(world)
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch, world=world)
+    try:
+        _sign_in(page)
+        _workspace(page, inquiry_id)
+        control = page.evaluate("""async () => (await window.workspaceClient.readCanonicalSession(window.complaintCaseShell.binding())).continuity""")
+        assert control['draft_body'] == DRAFT_BODY
+        page.evaluate("""() => {
+            window.__observedModeFailure = null;
+            const status = document.getElementById('complaint-presentation-status');
+            const observer = new MutationObserver(() => {
+                if (!status.textContent.startsWith('The workspace session could not')) return;
+                window.__observedModeFailure = {
+                    aliasRetired: window.complaintCanonicalSession == null,
+                    draft: document.getElementById('draft-body').value,
+                    entry: document.getElementById('complaint-entry').dataset.entry
+                };
+                observer.disconnect();
+            });
+            observer.observe(status, {subtree:true, childList:true, characterData:true});
+        }""")
+        if boundary == 'key-lock':
+            world.service.lock_private_keys()
+            world.owner_keys.lock()
+        else:
+            changed = page.evaluate("""async () => {
+                const response = await fetch('/api/complaint-workspace/auth/login', {method:'POST',credentials:'same-origin',
+                    headers:{'content-type':'application/json'}, body:JSON.stringify({credential:'synthetic-stranger-credential'})});
+                return {status:response.status, body:await response.json()};
+            }""")
+            assert changed['status'] == 200 and changed['body']['principal_id'] == world.stranger.principal_id
+        with page.expect_response(lambda response: response.request.method == 'GET'
+                and '/api/complaint-workspace/session?case_id=' in response.url) as actual:
+            page.locator('[data-presentation-mode="chat-plus-context"]').click()
+        assert actual.value.status == (503 if boundary == 'key-lock' else 403)
+        page.wait_for_function('() => window.__observedModeFailure !== null')
+        observed_failure = page.evaluate('() => window.__observedModeFailure')
+        assert observed_failure['aliasRetired'] and observed_failure['draft'] == '', observed_failure
+        assert DRAFT_BODY not in page.locator('body').inner_text()
+    finally:
+        _close(playwright, context, node, profile, observed)
