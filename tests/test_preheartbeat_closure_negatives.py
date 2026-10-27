@@ -19,19 +19,21 @@ from tests.test_preheartbeat_shutdown import stopped_before_heartbeat, _REAL_INV
 pytestmark = [pytest.mark.no_auto_llm, pytest.mark.no_auto_network, pytest.mark.no_auto_heavy]
 
 
-def test_second_genuine_public_stop_retains_readonly_restart_eligibility(
-        stopped_before_heartbeat, docker, monkeypatch):
-    """A second public stop must not erase the original launch's provenance."""
+@pytest.mark.parametrize('stop_count', [2, 3])
+def test_repeated_genuine_public_stop_retains_readonly_restart_eligibility(
+        stopped_before_heartbeat, docker, monkeypatch, stop_count):
+    """Repeated public stops must retain the original launch's provenance."""
     f = stopped_before_heartbeat
     before = _bytes(f)
     monkeypatch.setattr(shutdown, '_native_runtime', lambda: docker[1])
-    stopped = runner.stop(f.state, timeout=.2)
-    assert stopped['status'] == 'stopped' and stopped['signalled'] is False
-    assert stopped['container_shutdown']['quiesced'] is True and not docker[0].effects
-    record = json.loads((f.state / 'launcher.json').read_bytes())
-    proof = json.loads((f.state / shutdown.RECEIPT_NAME).read_bytes())
-    assert runner._shutdown_verified(record, proof, f.repo, f.state)
-    assert record['identity'] == f.record['identity'] and record['started_at'] == f.record['started_at']
+    for _ in range(stop_count - 1):
+        stopped = runner.stop(f.state, timeout=.2)
+        assert stopped['status'] == 'stopped' and stopped['signalled'] is False
+        assert stopped['container_shutdown']['quiesced'] is True and not docker[0].effects
+        record = json.loads((f.state / 'launcher.json').read_bytes())
+        proof = json.loads((f.state / shutdown.RECEIPT_NAME).read_bytes())
+        assert runner._shutdown_verified(record, proof, f.repo, f.state)
+        assert record['identity'] == f.record['identity'] and record['started_at'] == f.record['started_at']
     # Only ordinary stop's two existing receipts may change. In particular,
     # old heartbeat, Native events, task state and counters are preserved.
     after_stop = _bytes(f)
