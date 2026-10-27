@@ -680,6 +680,20 @@
             : "No draft is loaded.";
     }
 
+    function presentationReadIsCurrent(guard) {
+        return guard.token === refreshToken && guard.principalId === state.principalId
+            && guard.caseId === state.caseId && guard.binding === state.binding
+            && guard.client === window.workspaceClient && guard.epoch === guard.client._privacyEpoch;
+    }
+
+    async function retireFailedPresentationRead(error, guard) {
+        if ([401, 403, 409, 503].indexOf(error && error.status) === -1 || !presentationReadIsCurrent(guard)) return;
+        // A fresh refused read cannot keep a previously decrypted case open.
+        // Re-derive the actual locked/denied/unavailable state through its owner.
+        retireUnverifiedView(true);
+        await refresh();
+    }
+
     async function setPresentationMode(mode) {
         var status = document.getElementById("complaint-presentation-status");
         if (PRESENTATION_MODES.indexOf(mode) === -1) {
@@ -691,11 +705,15 @@
         var before = continuityDom();
         var focused = document.activeElement && document.activeElement.id;
         var client = window.workspaceClient;
+        var readGuard = {token: refreshToken, principalId: state.principalId,
+            caseId: state.caseId, binding: state.binding, client: client, epoch: client && client._privacyEpoch};
         var serverBefore = null;
         if (!blocked && client && typeof client.readCanonicalSession === "function" && state.binding && state.binding.case_id) {
             try {
                 serverBefore = await client.readCanonicalSession(state.binding);
             } catch (error) {
+                if (!presentationReadIsCurrent(readGuard)) return false;
+                await retireFailedPresentationRead(error, readGuard);
                 if (status) status.textContent = "The workspace session could not be read. The view stayed on " + presentationLabel(presentationMode) + ".";
                 return false;
             }
@@ -723,9 +741,11 @@
                     return false;
                 }
             } catch (error) {
+                if (!presentationReadIsCurrent(readGuard)) return false;
                 presentationMode = previous;
                 applyPresentation();
                 paintPresentationContext();
+                await retireFailedPresentationRead(error, readGuard);
                 if (status) status.textContent = "The workspace session could not be confirmed. The view stayed on " + presentationLabel(previous) + ".";
                 return false;
             }

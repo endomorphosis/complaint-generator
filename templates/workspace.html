@@ -16780,6 +16780,11 @@ function extractComplaintOutputSignals(result) {
             renderDraftReadiness(workspaceSession || {});
             renderCaptionPreview();
         });
+        document.getElementById('draft-title').addEventListener('input', () => {
+            document.getElementById('draft-body').dataset.userEdited = 'true';
+            renderDraftReadiness(workspaceSession || {});
+            renderCaptionPreview();
+        });
         document.getElementById('draft-body').addEventListener('input', () => {
             document.getElementById('draft-body').dataset.userEdited = 'true';
             renderDraftReadiness(workspaceSession || {});
