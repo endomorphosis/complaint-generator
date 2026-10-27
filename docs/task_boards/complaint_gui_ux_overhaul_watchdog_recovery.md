@@ -20,6 +20,14 @@ The new SDK method reconciles only an exact receipt-proven restart whose effects
 
 ## Validation and operation
 
+### Default pending-claim recovery, 2026-10-27
+
+After three genuine task completions, a stopped worker retained task 65's nonterminal claim. The earlier SDK could clean terminal claims but did not ship the pending-claim API; the watchdog preserved its exhausted two-recovery limit and stopped. The exact reviewed successor `b5264d9c6a98264ea9dfd1a8f0aa64c8de3824ec` adds the upstream pending-claim module and two public Native facades to `bb61167173140d3d503d2d3a661bd203129f185c`. It passed 80 focused Native tests with zero skips. It makes the existing Host recovery path available by default, without per-campaign helper configuration.
+
+This API requires a verified stopped launcher and dead worker, exact current task/CID/ordinal, terminal worktree lifecycle and authenticated shutdown history, unchanged protected paths and task state, settled merge queue, fresh container closure, and source/claim CAS checks. It preserves the unknown provider outcome and consumed attempt, appends a recovery receipt, and releases only the proven abandoned claim. It grants no completion, refund or new-attempt authority. The three completed tasks and the watchdog's exhausted recovery history remain intact; any operator resume follows the code repair and normal recovery.
+
+The completed inventory task's historical JSON remains unchanged. Its current-runtime tests now observe actual SDK revision visibility and actual effects/refusals instead of requiring capabilities to remain unavailable. That maintenance passed 24 tests and does not reopen or reset the completed task.
+
 - The two-case baseline suite, including its real Chromium/ASGI journey, passed with zero skips under the inherited network restriction and AST seals.
 - The restart-health adapter passed 101 focused Host tests; cooldown reporting passed 142 focused Host tests in its isolated component.
 - The SDK reconciliation change passed 62 new and existing focused Native tests, including preservation of the second recovery ordinal and refusal of a third.
