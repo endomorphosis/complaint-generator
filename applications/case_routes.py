@@ -219,6 +219,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
                         case_messages: Any = None,
                         case_attachments: Any = None,
                         case_storage: Any = None,
+                        evidence_workspace: Any = None,
                         case_consent: Any = None, gui_inference_transport: Any = None,
                         gui_inference_route: Any = None,
                         operational_admin: Any = None, case_reviews: Any = None,
@@ -276,6 +277,11 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     if case_storage is not None and not isinstance(case_storage, CaseStorageService):
         raise CaseAccessError("case_storage")
     mount_case_storage(app)
+    from .evidence_workspace_api import mount_evidence_workspace
+    from integrations.evidence_workspace import EvidenceWorkspace
+    if evidence_workspace is not None and not isinstance(evidence_workspace, EvidenceWorkspace):
+        raise CaseAccessError("evidence_workspace")
+    mount_evidence_workspace(app)
     if case_messages is not None and case_attachments is not None:
         case_attachments.bind_message_admission(case_messages.store)
         case_messages.bind_attachments(case_attachments)
@@ -362,6 +368,7 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
     app.state.case_messages = case_messages
     app.state.case_attachments = case_attachments
     app.state.case_storage = case_storage
+    app.state.evidence_workspace = evidence_workspace
     app.state.durability_readiness_boundary = durability_readiness_boundary()
     app.state.case_consent = case_consent
     from .case_review_store import CaseReviewService
