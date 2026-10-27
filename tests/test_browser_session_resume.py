@@ -159,7 +159,7 @@ def test_real_browser_bridge_resumes_cookie_and_current_csrf(tmp_path, monkeypat
           const issued = await login.json();
           const resumed = await fetch('/api/complaint-workspace/auth/session', {credentials:'same-origin'});
           const body = await resumed.json();
-          return {login:login.status, resumed:resumed.status, equal:JSON.stringify(issued)===JSON.stringify(body),
+          return {login:login.status, resumed:resumed.status, equal:Object.keys(issued).length===Object.keys(body).length && Object.entries(issued).every(([k,v]) => JSON.stringify(v)===JSON.stringify(body[k])),
             cache:resumed.headers.get('cache-control'), setCookie:resumed.headers.get('set-cookie')};
         }""")
         assert result == {"login": 200, "resumed": 200, "equal": True,

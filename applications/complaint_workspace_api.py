@@ -510,11 +510,16 @@ def create_complaint_workspace_router(
         return response
 
     @router.get("/api/complaint-workspace/auth/session")
-    async def read_browser_session(http_request: Request) -> Dict[str, Any]:
+    async def read_browser_session(http_request: Request) -> JSONResponse:
         bound = getattr(http_request.state, "browser_principal", None)
         if bound is None:
             raise HTTPException(status_code=401, detail="session_required")
-        return bound.public_view()
+        try:
+            resumed = sessions.resume_http(http_request, bound=bound)
+        except BrowserSessionError as error:
+            raise _browser_session_http_error(error) from None
+        return JSONResponse(resumed, headers={"Cache-Control": "private, no-store",
+            "Pragma": "no-cache", "Expires": "0"})
 
     @router.get("/api/complaint-workspace/session")
     async def get_session(
