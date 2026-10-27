@@ -305,7 +305,7 @@ def test_loaded_canonical_case_is_retired_after_actual_access_boundary(tmp_path,
         }""")
         assert before['read']['inquiry_id'] == inquiry_id and before['read']['draft_body'] == DRAFT_BODY
         assert before['alias'] == DRAFT_BODY
-        page.locator('.tab-button[data-tab-target="draft"]').click()
+        page.locator('[data-case-task="draft"]').click()
         page.fill('#draft-body', DRAFT_BODY + ' Unsaved before the actual access change.')
         assert page.locator('#draft-body').get_attribute('data-user-edited') == 'true'
 
