@@ -310,7 +310,7 @@ def test_logout_lock_and_revocation_clear_rendered_plaintext(tmp_path, monkeypat
         page.locator("#assignment-list button", has_text="Accept scope").click()
         page.wait_for_function("() => document.getElementById('complaint-case-shell-actor').dataset.relationship === 'reviewer'")
         assert page.locator("#selected-case").is_hidden()  # A reviewer has no owner catalog draft.
-        with TestClient(world.app, base_url=browser.SAME_ORIGIN) as owner_client:
+        with TestClient(world.app, base_url="https://testserver") as owner_client:
             login = owner_client.post("/api/complaint-workspace/auth/login", json={"credential":"synthetic-owner-credential"})
             assert login.status_code == 200
             headers = {"x-csrf-token":login.json()["csrf_token"]}
