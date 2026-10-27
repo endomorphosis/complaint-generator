@@ -235,7 +235,6 @@ from pathlib import Path
 import json,time,pytest
 from tests.test_owned_auto_rescue_activity import _native_world
 from integrations.ipfs_accelerate import improvement_runner as runner
-from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
 from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as runtime
 def main():
  with pytest.MonkeyPatch.context() as patch:
@@ -265,6 +264,7 @@ def main():
       observed_now=runner._event_timestamp(primary)+runner.TIMEOUT_SECONDS+.01
       # Simulate validation beginning near the actual execution deadline:
       # its separate phase cap is still open when the provider cap expires.
+      from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
       state=native.PortalTaskState.load(world['daemon'].state_path)
       from tests.test_owned_auto_rescue_activity import _stamp
       state.active_phase_started_at=_stamp(observed_now-10)
