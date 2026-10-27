@@ -22,6 +22,7 @@ from applications.case_directory import CaseDirectory, CaseDirectoryError, CaseN
 
 from integrations.private_storage import (
     PrivateStorageError,
+    KitLocalCiphertextBackend,
     PrivateArtifactBinding,
     UserOwnedKeySession,
     retrieve_private_artifact,
@@ -132,6 +133,7 @@ class EvidenceWorkspace:
         self._directory = directory
         self._sessions = dict(sessions)
         self._backend = backend
+        self._backend_name = KitLocalCiphertextBackend.backend_name if type(backend) is KitLocalCiphertextBackend else "evidence-memory"
         self._root = Path(root)
         self._root.mkdir(parents=True, exist_ok=True)
         os.chmod(self._root, 0o700)
@@ -315,7 +317,7 @@ class EvidenceWorkspace:
                 key=data_key,
                 key_id=key_id,
                 backend=self._backend,
-                backend_name="evidence-memory",
+                backend_name=self._backend_name,
                 pin_content=False,
             )
         except PrivateStorageError as exc:
@@ -346,7 +348,7 @@ class EvidenceWorkspace:
                 key=data_key,
                 key_id=key_id,
                 backend=self._backend,
-                backend_name="evidence-memory",
+                backend_name=self._backend_name,
             )
             payload = opened.get("data")
             verified = isinstance(payload, (bytes, bytearray)) and _digest(bytes(payload)) == current["integrity_sha256"]
@@ -536,19 +538,22 @@ class EvidenceWorkspace:
         cid = pointer.get("cid")
         if not isinstance(cid, str) or cid == "":
             raise EvidenceWorkspaceError("ciphertext_unavailable")
-        opened = retrieve_private_artifact(
-            cid,
-            access=_Access(trust="authenticated", principal_id=case.tenant_id, case_id=case.case_id),
-            tenant_id=case.tenant_id,
-            case_id=case.case_id,
-            artifact_kind=_KIND_CATALOG,
-            revision=f"catalog-{pointer.get('revision')}",
-            principal_id=case.tenant_id,
-            key=data_key,
-            key_id=key_id,
-            backend=self._backend,
-            backend_name="evidence-memory",
-        )
+        try:
+            opened = retrieve_private_artifact(
+                cid,
+                access=_Access(trust="authenticated", principal_id=case.tenant_id, case_id=case.case_id),
+                tenant_id=case.tenant_id,
+                case_id=case.case_id,
+                artifact_kind=_KIND_CATALOG,
+                revision=f"catalog-{pointer.get('revision')}",
+                principal_id=case.tenant_id,
+                key=data_key,
+                key_id=key_id,
+                backend=self._backend,
+                backend_name=self._backend_name,
+            )
+        except PrivateStorageError as exc:
+            raise EvidenceWorkspaceError("ciphertext_unavailable") from exc
         self._verify_scope(scope)
         data = opened.get("data")
         if not isinstance(data, (bytes, bytearray)):
@@ -573,7 +578,7 @@ class EvidenceWorkspace:
             key=data_key,
             key_id=key_id,
             backend=self._backend,
-            backend_name="evidence-memory",
+            backend_name=self._backend_name,
             pin_content=False,
         )
         self._verify_scope(scope)
