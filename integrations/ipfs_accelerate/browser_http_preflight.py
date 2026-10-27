@@ -1,9 +1,10 @@
-"""Reject one known synthetic-browser-HTTP construct in the immutable UX plan.
+"""Reject known synthetic-browser-HTTP constructs in the immutable UX plan.
 
 This is a bounded source preflight, not a JavaScript interpreter or a general
 no-mocking proof. Python AST selects literal scripts actually submitted to
 browser evaluation methods. Comment/string-aware tokens then recognize direct
-window/globalThis/self.fetch function replacements constructing new Response.
+window/globalThis/self.fetch function replacements constructing new Response
+or new DOMException with a literal second argument naming AbortError.
 Aliases, assembled scripts, template interpolations and indirect helpers are
 outside this narrow check.
 Actual ASGI transport, unit fixtures and real-response instrumentation remain
@@ -157,8 +158,30 @@ def _replacement_body(tokens, start):
     return index, end
 
 
-def _synthetic_lines(script):
-    tokens, found, replacements = _tokens(script), [], 0
+def _abort_error_name(tokens, start, end):
+    """Recognize the literal name argument, skipping the first argument's groups."""
+    groups = []
+    for index in range(start + 3, end):
+        token = tokens[index]
+        if token.kind == 'string': continue
+        value = token.value
+        if value in {'(', '[', '{'}:
+            groups.append({'(': ')', '[': ']', '{': '}'}[value])
+        elif value in {')', ']', '}'}:
+            if not groups: return False
+            if groups.pop() != value: raise _Unavailable('script_uninspectable')
+        elif value == ',' and not groups:
+            # DOMException(message, name): an AbortError mentioned only in the
+            # message, a nested argument or a different error name is ordinary.
+            return (index + 2 < end and tokens[index + 1].kind == 'string'
+                and tokens[index + 1].value == 'AbortError'
+                and tokens[index + 2].kind == 'punctuation'
+                and tokens[index + 2].value in {')', ','})
+    return False
+
+
+def _synthetic_findings(script):
+    tokens, found, replacements, abort_constructors = _tokens(script), [], 0, 0
     for index, token in enumerate(tokens):
         if token.kind != 'name' or token.value not in {'window', 'globalThis', 'self'}: continue
         following = tokens[index + 1:index + 5]
@@ -176,8 +199,14 @@ def _synthetic_lines(script):
             group = tokens[cursor:cursor + 3]
             if ([t.value for t in group] == ['new', 'Response', '(']
                     and all(t.kind == 'name' for t in group[:2])):
-                found.append(group[0].line)
-                if len(found) >= 16: return sorted(set(found))
+                found.append((group[0].line, 'fetch_replacement_constructs_response'))
+            elif ([t.value for t in group] == ['new', 'DOMException', '(']
+                    and all(t.kind == 'name' for t in group[:2])):
+                abort_constructors += 1
+                if abort_constructors > 64: raise _Unavailable('constructor_bound')
+                if _abort_error_name(tokens, cursor, span[1]):
+                    found.append((group[0].line, 'fetch_replacement_constructs_abort_error'))
+            if len(found) >= 16: return sorted(set(found))
     return sorted(set(found))
 
 
@@ -207,7 +236,7 @@ def inspect_complaint_browser_http(root, task, declared_command, *, campaign_spe
     result = {'schema': 'complaint-browser-http-preflight@1', 'passed': False,
               'reason': 'browser_http_preflight_unavailable', 'findings': [], 'files': [],
               'candidate_executed': False, 'completion_authority': False,
-              'scope': 'pinned UX campaign; direct fetch replacement Response constructor only'}
+              'scope': 'pinned UX campaign; direct fetch replacement Response or AbortError constructor only'}
     try:
         trusted = _candidate_bytes(_SOURCE_ROOT, SPEC_RELATIVE)
         if trusted is None or hashlib.sha256(trusted).hexdigest() != SPEC_SHA256:
@@ -232,9 +261,9 @@ def inspect_complaint_browser_http(root, task, declared_command, *, campaign_spe
             if data is None: raise _Unavailable('declared_test_unavailable')
             result['files'].append({'path': relative, 'sha256': hashlib.sha256(data).hexdigest()})
             for script, offset, end_line in _browser_scripts(data.decode('utf8', errors='strict')):
-                for line in _synthetic_lines(script):
+                for line, code in _synthetic_findings(script):
                     result['findings'].append({'path': relative, 'line': min(offset + line, end_line),
-                        'code': 'fetch_replacement_constructs_response'})
+                        'code': code})
                     if len(result['findings']) >= 16: break
                 if len(result['findings']) >= 16: break
         result['passed'] = not result['findings']
