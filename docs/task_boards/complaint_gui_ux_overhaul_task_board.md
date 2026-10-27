@@ -130,7 +130,7 @@ Implementation instructions:
 
 ## CIMP-UX-05 Make navigation and case switching responsive and state-safe
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
