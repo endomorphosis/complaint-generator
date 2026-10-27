@@ -3405,6 +3405,33 @@
     <link id="workspace-shell-style" rel="stylesheet" href="/static/complaint_app_shell.css">
     <link id="complaint-experience-tokens" rel="stylesheet" href="/static/complaint_experience_tokens.css">
     <link id="complaint-case-shell-style" rel="stylesheet" href="/static/complaint_case_shell.css">
+    <style id="complaint-presentation-style">
+        html[data-workspace-presentation="chat-only"] [data-tab-panel="intake"],
+        html[data-workspace-presentation="chat-plus-context"] [data-tab-panel="intake"],
+        html[data-workspace-presentation="full-workspace"] [data-tab-panel="intake"] {
+            display: block;
+        }
+        html[data-workspace-presentation="chat-only"] [data-tab-panel]:not([data-tab-panel="intake"]),
+        html[data-workspace-presentation="chat-plus-context"] [data-tab-panel]:not([data-tab-panel="intake"]) {
+            display: none !important;
+        }
+        #complaint-presentation-context[hidden] {
+            display: none !important;
+        }
+        #complaint-presentation-context {
+            margin-top: 12px;
+            padding: 12px 14px;
+            border: 1px solid var(--cx-color-line, #d6d3d1);
+            border-radius: 12px;
+            background: var(--cx-color-panel, #fffcf8);
+        }
+        #complaint-presentation-modes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 8px 0;
+        }
+    </style>
 </head>
 <body class="cx-app" data-workspace-hydrated="booting" data-complaint-shell="off">
     <a class="cg-skip-link" href="#workspace-main">Skip to workspace</a>
@@ -6247,6 +6274,42 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         window.workspaceClient = client;
         let workspaceUserId = new URLSearchParams(window.location.search).get('user_id') || null;
         let workspaceSession = null;
+        let canonicalSessionScope = '';
+        window.renderCanonicalComplaintSession = function (payload, binding, actorSession) {
+            if (workspacePrivacyInactive || !payload || !payload.session || !document.getElementById('draft-body')) return false;
+            if (!binding || !['tenant_id', 'case_id', 'resource_id'].every(name => typeof binding[name] === 'string' && binding[name])
+                    || !actorSession || actorSession.authenticated !== true || typeof actorSession.principal_id !== 'string'
+                    || !actorSession.principal_id || payload.session.user_id !== binding.tenant_id
+                    || (payload.session.case_id && payload.session.case_id !== binding.case_id)) return false;
+            const scope = JSON.stringify([actorSession.principal_id, binding.tenant_id, binding.case_id,
+                binding.resource_id, binding.directory_revision, actorSession.generation, actorSession.csrf_token || '']);
+            const sameScope = canonicalSessionScope === scope;
+            if (!sameScope) {
+                if (typeof actorSession.csrf_token === 'string' && actorSession.csrf_token) client.setBrowserSession(actorSession);
+                client.setCaseContext({tenant_id: binding.tenant_id, case_id: binding.case_id,
+                    resource_id: binding.resource_id, expected_revision: binding.directory_revision});
+            }
+            canonicalSessionScope = scope;
+            window.complaintCanonicalSession = payload;
+            const draftNode = document.getElementById('draft-body');
+            const titleNode = document.getElementById('draft-title');
+            const keepDraft = sameScope && draftNode.dataset.userEdited === 'true';
+            const keptBody = keepDraft ? draftNode.value : '';
+            const keptTitle = keepDraft && titleNode ? titleNode.value : '';
+            workspaceSession = payload;
+            workspaceUserId = binding.tenant_id;
+            renderWorkspace(payload);
+            if (keepDraft) {
+                draftNode.value = keptBody;
+                if (titleNode) titleNode.value = keptTitle;
+                draftNode.dataset.userEdited = 'true';
+            }
+            if (['booting', 'loading', 'denied', 'error'].includes(document.body.dataset.workspaceHydrated)) {
+                setWorkspaceHydrationState('partial');
+                setStatus('Your case is open. Some tools may still be unavailable.');
+            }
+            return true;
+        };
         let activeWorkspaceTab = 'intake';
         let activeIntakeQuestionIndex = 0;
         let intakeShowAllFields = false;
@@ -8885,12 +8948,17 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     </div>
                 `;
             }
+            const selectedId = container.dataset.selectedId || '';
             if (!items.length) {
                 container.innerHTML = '<div class="item">No evidence saved yet.</div>';
+                if (selectedId) delete container.dataset.selectedId;
                 return;
             }
+            const known = new Set(items.map((item) => String(item.id || '')));
+            if (selectedId && !known.has(selectedId)) delete container.dataset.selectedId;
+            const activeId = container.dataset.selectedId || '';
             container.innerHTML = items.map((item) => `
-                <div class="item">
+                <button type="button" class="item" data-evidence-id="${escapeHtml(String(item.id || ''))}" aria-pressed="${String(item.id || '') === activeId ? 'true' : 'false'}">
                     <strong>${escapeHtml(item.title)}</strong>
                     <div class="chip-row">
                         <span class="chip">${escapeHtml(item.kind)}</span>
@@ -8898,7 +8966,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                         ${((item.attachment_names || [])).map((name) => `<span class="chip">${escapeHtml(String(name))}</span>`).join('')}
                     </div>
                     <p>${escapeHtml(item.content)}</p>
-                </div>
+                </button>
             `).join('');
         }
 
@@ -14598,6 +14666,8 @@ function extractComplaintOutputSignals(result) {
             clearDefinitionCorrespondenceView();
             removePrivateWorkspaceStorage();
             workspaceSession = null;
+            window.complaintCanonicalSession = null;
+            canonicalSessionScope = '';
             adaptiveInquiryState = null;
             workspaceCapabilities = null;
             workspaceToolingContract = null;
@@ -16710,7 +16780,13 @@ function extractComplaintOutputSignals(result) {
             renderDraftReadiness(workspaceSession || {});
             renderCaptionPreview();
         });
+        document.getElementById('draft-title').addEventListener('input', () => {
+            document.getElementById('draft-body').dataset.userEdited = 'true';
+            renderDraftReadiness(workspaceSession || {});
+            renderCaptionPreview();
+        });
         document.getElementById('draft-body').addEventListener('input', () => {
+            document.getElementById('draft-body').dataset.userEdited = 'true';
             renderDraftReadiness(workspaceSession || {});
             renderDraftPlaceholderResolver();
             renderDraftExportIntegrity(workspaceSession || {});
@@ -17012,8 +17088,9 @@ function extractComplaintOutputSignals(result) {
         client.bootstrapWorkspace(workspaceUserId).then(async (bootstrap) => {
             if (bootstrapPrivacyEpoch !== workspacePrivacyEpoch || workspacePrivacyInactive) return;
             setWorkspaceHydrationState('loading');
-            workspaceUserId = bootstrap.did;
-            workspaceSession = bootstrap.session;
+            workspaceUserId = window.complaintCanonicalSession && canonicalSessionScope
+                ? window.complaintCanonicalSession.session.user_id : bootstrap.did;
+            if (!window.complaintCanonicalSession) workspaceSession = bootstrap.session;
             workspaceSessionTools = bootstrap.tools || [];
             latestSdkToolActivity = client.getLastToolCall ? client.getLastToolCall() : loadLastSdkToolActivity();
             sdkPrimitiveSnapshot = {
@@ -17025,7 +17102,7 @@ function extractComplaintOutputSignals(result) {
                 questions: [],
                 claim_elements: [],
             };
-            renderWorkspace(bootstrap.session);
+            if (!window.complaintCanonicalSession) renderWorkspace(bootstrap.session);
             hydrateGmailImportUser();
             document.getElementById('packaged-docket-manifest-path').value = loadLatestPackagedDocketManifestPreference() || document.getElementById('packaged-docket-manifest-path').value;
             document.getElementById('docket-dataset-path').value = loadLatestPackagedDocketManifestPreference() || document.getElementById('docket-dataset-path').value;
@@ -17043,7 +17120,7 @@ function extractComplaintOutputSignals(result) {
                 refreshMikeIntegrationStatus(true),
             ]);
             if (bootstrapPrivacyEpoch !== workspacePrivacyEpoch || workspacePrivacyInactive) return;
-            if (workspaceSession) {
+            if (!window.complaintCanonicalSession && workspaceSession) {
                 renderWorkspace(workspaceSession);
             }
             const failedLoad = followOnLoads.find((result) => result.status === 'rejected');
@@ -17056,6 +17133,11 @@ function extractComplaintOutputSignals(result) {
             setWorkspaceHydrationState('ready');
         }).catch((error) => {
             if (bootstrapPrivacyEpoch !== workspacePrivacyEpoch || workspacePrivacyInactive) return;
+            if (window.complaintCanonicalSession && canonicalSessionScope) {
+                setWorkspaceHydrationState('partial');
+                setStatus('Your case is open. Some tools may still be unavailable.');
+                return;
+            }
             console.error(error && error.stack ? error.stack : error);
             const denied = Boolean(error && error.authorizationDenied);
             setWorkspaceHydrationState(denied ? 'denied' : 'error');

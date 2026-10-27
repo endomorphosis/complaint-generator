@@ -171,10 +171,16 @@ def test_login_uses_server_roles_and_cookie_policy(tmp_path: Path) -> None:
     assert complainant["generation"] == 1
     assert "lawyer" not in complainant["roles"]
 
+    cookie = client.cookies.get(SESSION_COOKIE)
+    bound = sessions.authenticate_token(cookie)
+    assert "csrf_token" not in bound.public_view()
     whoami = client.get("/api/complaint-workspace/auth/session")
     assert whoami.status_code == 200
     assert whoami.json()["principal_id"] == complainant_id
-    assert "csrf_token" not in whoami.json()
+    assert whoami.json() == complainant
+    assert client.cookies.get(SESSION_COOKIE) == cookie
+    assert sessions.authenticate_token(cookie) == bound
+    assert _cookie_headers(whoami) == []
 
     # A browser session is not a private-case key grant and is not trusted-local.
     workspace = client.get("/api/complaint-workspace/session")

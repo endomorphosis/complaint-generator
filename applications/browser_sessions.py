@@ -19,6 +19,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional, Protocol
+from urllib.parse import urlsplit
 
 from .principal_store import PrincipalStore, PrincipalStoreError
 
@@ -262,6 +263,24 @@ class BrowserSessionService:
         _record_id, record = self._open_token(token or "")
         return _bound(record)
 
+    def resume(self, token: str, *, bound: BoundBrowserSession) -> dict[str, Any]:
+        """Read the current transport token after reauthenticating its binding.
+
+        This does not issue, rotate, or extend a session. Keep CSRF out of the
+        ordinary principal projection, which is used beyond this owned read.
+        """
+        _record_id, record = self._open_token(token)
+        current = _bound(record)
+        if type(bound) is not BoundBrowserSession or current != bound:
+            raise BrowserSessionError("authentication_failed")
+        return {**current.public_view(), "csrf_token": record.csrf_token}
+
+    def resume_http(self, request: Any, *, bound: BoundBrowserSession) -> dict[str, Any]:
+        """Expose the existing CSRF token only through a same-origin read."""
+        _require_resume_origin(request)
+        token = str(request.cookies.get(SESSION_COOKIE) or "")
+        return self.resume(token, bound=bound)
+
     async def bind_http(self, request: Any, *, allow_anonymous: bool) -> Optional[BoundBrowserSession]:
         """Resolve one HTTP request. Anonymous is only the login route.
 
@@ -440,6 +459,36 @@ def _bound(record: _Record) -> BoundBrowserSession:
         absolute_expires_at=int(record.absolute_expires_at),
         generation=record.generation,
     )
+
+
+def _require_resume_origin(request: Any) -> None:
+    # Fetch metadata is supplemental: browsers may omit it, and non-browser
+    # clients still authenticate with the actual signed cookie. Never treat
+    # caller-supplied Forwarded headers as authority for the request origin.
+    sites = request.headers.getlist("sec-fetch-site")
+    if len(sites) > 1 or (sites and sites[0] not in {"same-origin", "none"}):
+        raise BrowserSessionError("csrf_rejected")
+    origins = request.headers.getlist("origin")
+    if not origins:
+        return
+    if len(origins) != 1:
+        raise BrowserSessionError("csrf_rejected")
+    try:
+        origin = urlsplit(origins[0])
+        target = urlsplit(str(request.url))
+        if (origin.scheme.lower() not in {"http", "https"} or not origin.hostname
+                or origin.username is not None or origin.password is not None
+                or origin.path or origin.query or origin.fragment):
+            raise ValueError("invalid origin")
+
+        def authority(parts):
+            scheme = parts.scheme.lower()
+            return scheme, parts.hostname.lower(), (parts.port if parts.port is not None else (443 if scheme == "https" else 80))
+
+        if authority(origin) != authority(target):
+            raise ValueError("different origin")
+    except (ValueError, AttributeError):
+        raise BrowserSessionError("csrf_rejected") from None
 
 
 def _opaque(value: str) -> bool:
