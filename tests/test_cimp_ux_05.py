@@ -131,7 +131,7 @@ def test_viewports_keep_one_interview_and_reflow_at_320(tmp_path, monkeypatch):
             page.click("#save-draft")
         assert saved.value.status == 200
         page.evaluate("""() => {
-            window.__caseSelectAborted = false;
+            window.__heldSelect = {aborted: false, bodyError: null};
             const original = window.fetch.bind(window);
             let armed = true;
             window.fetch = async function (input, options) {
@@ -140,7 +140,16 @@ def test_viewports_keep_one_interview_and_reflow_at_320(tmp_path, monkeypatch):
                 const path = new URL(raw, location.origin).pathname;
                 if (armed && method === 'POST' && path.endsWith('/select')) {
                     armed = false;
+                    window.__heldSelect.signal = options.signal;
+                    options.signal.addEventListener('abort', () => {
+                        window.__heldSelect.aborted = true;
+                    }, {once: true});
                     const response = await original(input, options);
+                    const json = response.json.bind(response);
+                    response.json = async function () {
+                        try { return await json(); }
+                        catch (error) { window.__heldSelect.bodyError = error.name; throw error; }
+                    };
                     await new Promise(resolve => { window.__releaseHeldSelect = resolve; });
                     return response;
                 }
@@ -149,11 +158,13 @@ def test_viewports_keep_one_interview_and_reflow_at_320(tmp_path, monkeypatch):
             window.complaintCasesSelect(document.getElementById('complaint-case-shell-case').dataset.caseId);
         }""")
         page.wait_for_function("() => typeof window.__releaseHeldSelect === 'function'")
-        page.evaluate("() => { window.__caseSelectAborted = false; }")
+        assert page.evaluate("() => window.__heldSelect.signal instanceof AbortSignal")
+        assert page.evaluate("() => window.__heldSelect.signal.aborted") is False
         page.select_option("#complaint-case-shell-catalog", label="second-catalog-case")
-        page.wait_for_function("() => window.__caseSelectAborted === true")
+        page.wait_for_function("() => window.__heldSelect.aborted && window.__heldSelect.signal.aborted")
         assert page.input_value("#case-draft") == ""
         page.evaluate("() => window.__releaseHeldSelect()")
+        page.wait_for_function("() => window.__heldSelect.bodyError === 'AbortError'")
         page.wait_for_function("""() => {
             const selected = document.getElementById('complaint-case-shell-catalog');
             return selected.options[selected.selectedIndex] && selected.options[selected.selectedIndex].textContent === 'second-catalog-case';
@@ -168,6 +179,84 @@ def test_viewports_keep_one_interview_and_reflow_at_320(tmp_path, monkeypatch):
         labels = [item["label"] for item in catalog["cases"]]
         assert "second-catalog-case" in labels
         assert catalog["selected_case_id"] != world.case.case_id
+    finally:
+        _close(playwright, context, node, profile, observed)
+
+
+@pytest.mark.parametrize("transition", ["actor", "case"])
+def test_refresh_discovered_boundary_clears_previous_rendered_plaintext(tmp_path, monkeypatch, transition):
+    """A real HTTP change elsewhere must retire this view's previous fields."""
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch)
+    try:
+        page.goto(browser.SAME_ORIGIN + "/cases", wait_until="domcontentloaded")
+        issued = _sign_in(page, "synthetic-owner-credential")
+        page.click("#case-list button")
+        page.wait_for_function("() => document.getElementById('complaint-case-shell-case').dataset.bound === 'case'")
+        _shell_ready(page)
+        page.fill("#case-draft", SECRET)
+        page.fill("#gap-input", "ux05-private-gap")
+        assert page.locator("#selected-case").is_visible()
+        if transition == "actor":
+            changed = page.evaluate("""async () => {
+                const response = await fetch('/api/complaint-workspace/auth/login', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'content-type': 'application/json'},
+                    body: JSON.stringify({credential: 'synthetic-stranger-credential'})
+                });
+                return {status: response.status, body: await response.json()};
+            }""")
+            assert changed["status"] == 200 and changed["body"]["principal_id"] == world.stranger.principal_id
+        else:
+            changed = page.evaluate("""async csrf => {
+                const options = {method: 'POST', credentials: 'same-origin',
+                    headers: {'content-type': 'application/json', 'x-csrf-token': csrf}};
+                const created = await fetch('/api/cases', {...options, body: JSON.stringify({label: 'other-view-case'})});
+                const record = await created.json();
+                if (created.status !== 201) return {status: created.status, body: record};
+                const selected = await fetch('/api/cases/' + encodeURIComponent(record.case_id) + '/select',
+                    {...options, body: '{}'});
+                return {status: selected.status, body: await selected.json()};
+            }""", issued["csrf_token"])
+            assert changed["status"] == 200 and changed["body"]["case_id"] != world.case.case_id
+        # The HTTP operation above did not invoke this document's local
+        # login/select handlers, which would have cleared the fields already.
+        assert page.input_value("#case-draft") == SECRET
+        assert page.input_value("#gap-input") == "ux05-private-gap"
+        page.evaluate("() => window.complaintCaseShell.refresh()")
+        _shell_ready(page)
+        assert page.input_value("#case-draft") == ""
+        assert page.input_value("#gap-input") == ""
+        assert page.locator("#selected-case").is_hidden()
+        assert page.locator("#selected-case-label").inner_text() == ""
+        current = page.evaluate("""async () => {
+            const auth = await fetch('/api/complaint-workspace/auth/session', {credentials: 'same-origin'});
+            const catalog = await fetch('/api/cases/session', {credentials: 'same-origin'});
+            return {auth: await auth.json(), catalog: await catalog.json()};
+        }""")
+        expected_actor = world.stranger.principal_id if transition == "actor" else world.owner.principal_id
+        assert current["auth"]["principal_id"] == expected_actor
+        assert current["catalog"]["actor_principal_id"] == expected_actor
+        if transition == "case":
+            assert current["catalog"]["selected_case_id"] == changed["body"]["case_id"]
+    finally:
+        _close(playwright, context, node, profile, observed)
+
+
+def test_refresh_of_same_binding_keeps_unsaved_draft(tmp_path, monkeypatch):
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch)
+    try:
+        page.goto(browser.SAME_ORIGIN + "/cases", wait_until="domcontentloaded")
+        _sign_in(page, "synthetic-owner-credential")
+        page.click("#case-list button")
+        page.wait_for_function("() => document.getElementById('complaint-case-shell-case').dataset.bound === 'case'")
+        _shell_ready(page)
+        page.fill("#case-draft", SECRET)
+        page.fill("#gap-input", "ux05-current-unsaved-gap")
+        page.evaluate("() => window.complaintCaseShell.refresh()")
+        _shell_ready(page)
+        assert page.input_value("#case-draft") == SECRET
+        assert page.input_value("#gap-input") == "ux05-current-unsaved-gap"
+        assert page.locator("#selected-case").is_visible()
     finally:
         _close(playwright, context, node, profile, observed)
 
