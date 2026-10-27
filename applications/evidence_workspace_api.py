@@ -553,4 +553,12 @@ def _upload_status(request: Request, actor: str, body: Mapping[str, Any], *, ver
     upload_id = body.get("upload_id")
     if not isinstance(upload_id, str):
         raise EvidenceWorkspaceError("upload_id")
-    return _view(_session_for(request, actor, body, upload_id=upload_id))
+    # Query parameters arrive as text; mutation bodies retain their strict
+    # integer contract. A converted selector still has to match the live
+    # upload generation and canonical case revision below.
+    material = dict(body)
+    generation = material.get("upload_generation")
+    if (isinstance(generation, str) and 0 < len(generation) <= 20
+            and generation.isascii() and generation.isdecimal()):
+        material["upload_generation"] = int(generation)
+    return _view(_session_for(request, actor, material, upload_id=upload_id))

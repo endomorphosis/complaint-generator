@@ -24,7 +24,7 @@ def test_sealed_upload_does_not_disclose_cached_evidence_after_key_lock(tmp_path
                 return client.get(path, headers=_composed_headers(world.case, csrf), params=body)
             return _post(client, path, world.case, csrf, body)
         visible = invoke()
-        assert visible.status_code == 200
+        assert visible.status_code == 200, visible.text
         assert visible.json()["evidence"]["original_filename"] == ORIGINAL
         before = dict(backend._blobs)
         if retirement == "before_request":
