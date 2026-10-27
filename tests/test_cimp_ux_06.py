@@ -294,6 +294,11 @@ def test_actual_catalog_failure_after_actor_change_scrubs_and_fences_previous_vi
                     const response = await original(input, options);
                     const json = response.json.bind(response);
                     response.json = async function () {
+                        if (options.signal && options.signal.aborted) {
+                            const error = new DOMException("The operation was aborted.", "AbortError");
+                            window.__ux06OldRead.bodyError = error.name;
+                            throw error;
+                        }
                         try {return await json();}
                         catch (error) {window.__ux06OldRead.bodyError = error.name; throw error;}
                     };
