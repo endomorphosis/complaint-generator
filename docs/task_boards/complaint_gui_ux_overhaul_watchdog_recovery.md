@@ -36,6 +36,8 @@ The Host rescue observer uses the same bound execution-start event, and public s
 
 The case-shell repair also passed five focused API/browser checks and three adjacent browser checks. It binds responses to the current authenticated actor, selected case and context generation, verifies actual private-session access, and clears stale private content after identity changes or typed key failures. These code qualifications do not complete task 4: its genuine Native validation and completion callback remain required.
 
+The final combined Host qualification at `317cd7329cdbb40fd9228717b0790bf4ff346308`, with the exact `4141b053` SDK pin, passed 98 tests with zero failures, errors or skips. It covers real owned Native rescue observations, public status, watchdog refusal/accounting, and both source-pinned companion and actual default Native loader admission. The controller recorded clean source before and after, unchanged file hashes and HEAD, kernel network restrictions and AST seals. The 42 loader cases are included in these 98, not an additional total. The SDK fixes are reachable on official `origin/main` through ordinary merge `5cf8bec95186de8bab066c4914f1164d63893cf4`; all four local documentation gates passed, without claiming remote CI success.
+
 The completed inventory task's historical JSON remains unchanged. Its current-runtime tests now observe actual SDK revision visibility and actual effects/refusals instead of requiring capabilities to remain unavailable. That maintenance passed 24 tests and does not reopen or reset the completed task.
 
 - The two-case baseline suite, including its real Chromium/ASGI journey, passed with zero skips under the inherited network restriction and AST seals.
