@@ -8,6 +8,8 @@ question from storage, or hide a consent grant.
 """
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -31,13 +33,26 @@ def _open(tmp_path, monkeypatch, *, world=None):
     monkeypatch.setenv("PLAYWRIGHT_NODEJS_PATH", node.path)
     profile = tmp_path / "ux06-profile"
     profile.mkdir(mode=0o700)
-    playwright = browser._load_sync_playwright()().start()
-    context = browser._launch_context(playwright, chromium.path, profile, bridge)
-    browser._assert_process_custody(node, chromium, profile)
-    observed = set(browser._with_descendants(browser._matching_pids((str(profile), node.argv[1]))))
-    page = context.pages[0] if context.pages else context.new_page()
-    page.set_default_timeout(20000)
-    page.set_viewport_size({"width": 1440, "height": 1000})
+    observed = set()
+
+    def verify_startup_cleanup():
+        observed.update(browser._with_descendants(browser._matching_pids((str(profile), node.argv[1]))))
+        cleanup = browser._wait_for_cleanup(observed)
+        assert cleanup['cleaned'] and cleanup['remaining_pids'] == [], 'failed startup left owned browser processes'
+
+    with ExitStack() as startup:
+        startup.callback(verify_startup_cleanup)
+        playwright = browser._load_sync_playwright()().start()
+        startup.callback(playwright.stop)
+        observed.update(browser._with_descendants(browser._matching_pids((node.argv[1],))))
+        context = browser._launch_context(playwright, chromium.path, profile, bridge)
+        startup.callback(context.close)
+        observed.update(browser._with_descendants(browser._matching_pids((str(profile), node.argv[1]))))
+        browser._assert_process_custody(node, chromium, profile)
+        page = context.pages[0] if context.pages else context.new_page()
+        page.set_default_timeout(20000)
+        page.set_viewport_size({"width": 1440, "height": 1000})
+        startup.pop_all()
     return world, page, playwright, context, node, profile, observed
 
 
