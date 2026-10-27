@@ -7698,6 +7698,7 @@ __all__ = [
     "DURABILITY_STATES",
     "verify_ciphertext_durability",
     "CiphertextDurabilityError",
+    "KitLocalCiphertextBackend",
     "PRIVATE_RECORD_KINDS",
     "MAX_BOUND_RECOVERY_ATTEMPTS",
     "BoundPrivateRecordError",
@@ -8253,16 +8254,14 @@ def _read_kit_bound_envelope(root: Path, content_ref: str) -> bytes:
             adapter.close()
 
 
-def _publish_local(root: Path, record_id: str, content_ref: str) -> bool:
-    staged = _read_private_file(_staging_path(root, record_id))
-    if staged is None or _content_ref(staged) != content_ref:
-        return False
+def _commit_kit_ciphertext(root: Path, content_ref: str, payload: bytes, *, create: bool) -> str:
+    """Require an actual Kit local commit and verified disk reconstruction."""
     adapter_type, result_type, durability_mode, states = _bound_kit_types()
     adapter = None
     try:
-        adapter = adapter_type(root)
+        adapter = adapter_type(root) if create else adapter_type.reopen(root)
         deadline = time.monotonic() + 5.0
-        committed = adapter.put(content_ref, staged, deadline=deadline)
+        committed = adapter.put(content_ref, payload, deadline=deadline)
         result = committed.canonical_result
         durability = result.durability
         if (type(committed) is not result_type or committed.state is not states.COMMITTED
@@ -8271,24 +8270,105 @@ def _publish_local(root: Path, record_id: str, content_ref: str) -> bool:
                 or not durability.backend_ack_id or not result.effect_evidence
                 or set(durability.effect_evidence_ids) != {effect.evidence_id for effect in result.effect_evidence}
                 or any(effect.backend_id != adapter.backend_id for effect in result.effect_evidence)):
-            return False
-        expected_cid = adapter_type.content_cid(staged)
+            raise BoundPrivateRecordError("kit_durability_unproven")
+        expected_cid = adapter_type.content_cid(payload)
         for observed in (committed, adapter.get(content_ref, deadline=deadline), adapter.digest(content_ref, deadline=deadline)):
             if (type(observed) is not result_type or not observed.success
                     or observed.resulting_content_cid != expected_cid):
-                return False
-            if observed is not committed and observed.data != staged:
-                return False
-    except Exception:
-        return False
+                raise BoundPrivateRecordError("kit_durability_unproven")
+            if observed is not committed and observed.data != payload:
+                raise BoundPrivateRecordError("kit_durability_unproven")
+    except BoundPrivateRecordError:
+        raise
+    except Exception as exc:
+        raise BoundPrivateRecordError("kit_durability_unproven") from exc
     finally:
         if adapter is not None:
             adapter.close()
-    # A fresh actual adapter reconstructs bytes and digest sidecar from disk.
-    try:
-        return _read_kit_bound_envelope(root, content_ref) == staged
-    except BoundPrivateRecordError:
+    if _read_kit_bound_envelope(root, content_ref) != payload:
+        raise BoundPrivateRecordError("kit_durability_unproven")
+    return expected_cid
+
+
+def _publish_local(root: Path, record_id: str, content_ref: str) -> bool:
+    staged = _read_private_file(_staging_path(root, record_id))
+    if staged is None or _content_ref(staged) != content_ref:
         return False
+    try:
+        _commit_kit_ciphertext(root, content_ref, staged, create=True)
+        return True
+    except BoundPrivateRecordError as exc:
+        if exc.code == "kit_durability_unavailable":
+            raise
+        return False
+
+
+class KitLocalCiphertextBackend:
+    """Explicit local Kit byte owner for already sealed Host artifacts.
+
+    The existing EvidenceWorkspace owns catalog, versions, authorization and
+    keys. This adapter adds no catalog, wallet, fallback, network pin or remote
+    claim. Its required root stores only opaque envelopes and Kit metadata.
+    """
+
+    backend_name = "kit-local-ciphertext"
+
+    def __init__(self, root: str | Path, *, create: bool = True) -> None:
+        self._root = Path(root)
+        self._closed = False
+        if self._root.is_symlink():
+            raise BoundPrivateRecordError("symlink_rejected")
+        if create:
+            self._root.mkdir(parents=True, exist_ok=True)
+            os.chmod(self._root, 0o700)
+        adapter_type, _result_type, _durability_mode, _states = _bound_kit_types()
+        try:
+            adapter = adapter_type(self._root) if create else adapter_type.reopen(self._root)
+            adapter.close()
+        except Exception as exc:
+            raise BoundPrivateRecordError("kit_durability_unavailable") from exc
+
+    @classmethod
+    def reopen(cls, root: str | Path) -> "KitLocalCiphertextBackend":
+        return cls(root, create=False)
+
+    @staticmethod
+    def _locator(cid: str) -> str:
+        # Kit's raw CIDv1 uses sha2-256. Derive its private path rather than
+        # assuming the CID itself is a filesystem locator or keeping a map in RAM.
+        try:
+            if not isinstance(cid, str) or not cid.startswith("b"):
+                raise ValueError("not a raw CID")
+            encoded = cid[1:]
+            raw = base64.b32decode(encoded.upper() + "=" * ((-len(encoded)) % 8))
+            canonical = "b" + base64.b32encode(raw).decode("ascii").rstrip("=").lower()
+            if len(raw) != 36 or raw[:4] != b"\x01\x55\x12\x20" or canonical != cid:
+                raise ValueError("unsupported CID")
+        except Exception as exc:
+            raise BoundPrivateRecordError("content_ref_rejected") from exc
+        return "ct." + raw[4:].hex()
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise BoundPrivateRecordError("kit_durability_unavailable")
+
+    def add(self, data: bytes, pin: bool = True) -> dict[str, Any]:
+        self._require_open()
+        if not isinstance(data, bytes):
+            raise BoundPrivateRecordError("ciphertext_required")
+        parse_private_envelope(data)
+        cid = _commit_kit_ciphertext(self._root, _content_ref(data), data, create=False)
+        # A genuine local commit never implies an IPFS pin or remote replica.
+        return {"cid": cid, "status": "available", "pinned": False}
+
+    def cat(self, cid: str) -> bytes:
+        self._require_open()
+        payload = _read_kit_bound_envelope(self._root, self._locator(cid))
+        parse_private_envelope(payload)
+        return payload
+
+    def close(self) -> None:
+        self._closed = True
 
 
 def commit_private_bound_record(

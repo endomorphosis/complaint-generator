@@ -398,6 +398,11 @@ def _select_declared_operation(registry: Any, action: str) -> str | None:
 def _is_local_byte_operation(backend: Any, action: str) -> bool:
     if isinstance(backend, LocalCacheIPFSBackend):
         return True
+    # This concrete Host adapter executes the actual Kit local filesystem owner.
+    # Caller flags and a live_provider label do not classify arbitrary backends.
+    from integrations.private_storage import KitLocalCiphertextBackend
+    if type(backend) is KitLocalCiphertextBackend:
+        return True
     if _is_service_router(backend):
         operation_id = _select_declared_operation(backend.registry, action)
         return bool(operation_id and operation_id.startswith("storage.local-durable."))
