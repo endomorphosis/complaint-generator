@@ -30,7 +30,7 @@ import sys
 import tempfile
 import threading
 import time
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -1718,6 +1718,242 @@ def observe_separate_campaign(repo_root: Path, spec_path: Path, state_dir: Path)
             "tasks": historical_tasks, "read_error": historical_error,
         },
     }
+
+
+_HISTORICAL_CAMPAIGN_RELATIVES = (
+    "docs/task_boards/complaint_intake_improvement_spec.json",
+    "docs/task_boards/complaint_intake_formal_work_plan.json",
+    "docs/task_boards/complaint_intake_task_board.md",
+    "docs/task_boards/complaint_mediator_grounding_spec.json",
+    "docs/task_boards/complaint_mediator_grounding_formal_work_plan.json",
+    "docs/task_boards/complaint_mediator_grounding_task_board.md",
+    "docs/task_boards/complaint_gui_collaboration_spec.json",
+    "docs/task_boards/complaint_gui_collaboration_formal_work_plan.json",
+    "docs/task_boards/complaint_gui_collaboration_task_board.md",
+)
+_HISTORICAL_NAMESPACES = frozenset({
+    "complaint-intake-improvement", "complaint-mediator-grounding", "complaint-gui-collaboration",
+})
+_PRESERVED_STATE_NAMES = ("budget.json", "receipts.jsonl", "accounting.json")
+_BOUNDED_PHASES = frozenset({"implementing", "validating"})
+
+
+def _snapshot_paths(paths: Sequence[Path]) -> dict[str, str | None]:
+    digest: dict[str, str | None] = {}
+    for path in paths:
+        key = str(path)
+        try:
+            if path.is_symlink() or not path.is_file():
+                digest[key] = None
+            else:
+                digest[key] = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            digest[key] = None
+    return digest
+
+
+def _daemon_birth_owned(record: Mapping[str, Any], state_dir: Path) -> bool:
+    """A daemon birth counts only as this launcher's live child, not as a bare PID."""
+    heartbeat = _read_json(state_dir / f"{STATE_PREFIX}_supervisor_status.json")
+    identity = record.get("identity") if isinstance(record.get("identity"), dict) else {}
+    pid = heartbeat.get("daemon_pid")
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1 or pid == identity.get("pid"):
+        return False
+    current = process_identity(pid)
+    if not current or current.get("ppid") != identity.get("pid"):
+        return False
+    if heartbeat.get("daemon_start_ticks") != current.get("start_ticks") or heartbeat.get("daemon_boot_id") != current.get("boot_id"):
+        return False
+    argv = current.get("argv") or []
+    return str(state_dir) in argv and any(part == "implementation_daemon" or part.endswith("implementation_daemon") for part in argv)
+
+
+def _bounded_provider_validation(repo_root: Path, state_dir: Path, task_cids: Mapping[str, str],
+                                 native_tasks: Sequence[Any]) -> dict[str, Any]:
+    """Provider or validation work is bounded only while a real phase is inside the campaign caps."""
+    state_path = state_dir / f"{STATE_PREFIX}_task_state.json"
+    if not state_path.is_file() or state_path.is_symlink():
+        native_state, source = {}, {"source": "absent", "completion_authority": False}
+    else:
+        native_state, source = _read_native_state(repo_root, state_path)
+    attempt = native_state.get("active_attempt")
+    phase = str(native_state.get("active_phase") or "")
+    task_id = native_state.get("active_task_id")
+    age = _timestamp_age(native_state.get("active_phase_started_at"), time.time())
+    known = isinstance(task_id, str) and task_cids.get(task_id) == native_state.get("active_task_cid")
+    declared = next((task for task in native_tasks if task.task_id == task_id), None)
+    commands = list(getattr(declared, "validation", ()) or ()) if declared is not None else []
+    within_attempt = type(attempt) is int and 1 <= attempt <= 3
+    within_time = age is not None and 0 <= age < float(TIMEOUT_SECONDS)
+    active = bool(native_state.get("implementation_in_progress") is True and phase in _BOUNDED_PHASES and known
+                  and within_attempt and within_time and commands)
+    return {
+        "active": active,
+        "phase": phase,
+        "attempt": attempt if type(attempt) is int else None,
+        "task_id": task_id if isinstance(task_id, str) else None,
+        "phase_age_seconds": age,
+        "attempt_cap": 3,
+        "timeout_seconds": TIMEOUT_SECONDS,
+        "validation_commands": commands,
+        "native_state_source": source,
+        "completion_authority": False,
+    }
+
+
+def qualify_new_campaign_startup(repo_root: Path, spec_path: Path, state_dir: Path, *,
+                                 worktree_root: Path) -> dict[str, Any]:
+    """Observe a new campaign's published bindings without treating readiness as execution.
+
+    Ingestion, a live PID, and a ready doctor report do not execute provider or
+    validation work. Execution is admitted only for an owned launcher birth, its
+    daemon child, and a bounded in-progress provider or validation phase. This
+    read does not rewrite historical campaigns, task status, receipts, or budgets.
+    """
+
+    from .improvement_plan import campaign_observation_binding
+
+    started = Path.cwd()
+    repo_root = Path(repo_root).resolve()
+    spec_path = Path(spec_path).resolve()
+    state_dir = Path(state_dir).resolve()
+    worktree_root = Path(worktree_root).resolve()
+    import_root = Path(__file__).resolve().parents[2]
+    if str(import_root) not in sys.path:
+        sys.path.insert(0, str(import_root))
+    try:
+        _native_modules(import_root)
+        spec, artifacts = _campaign_spec(repo_root, spec_path)
+        binding = campaign_observation_binding(spec)
+        plan_path = repo_root / artifacts.plan_relative
+        board_path = repo_root / artifacts.board_relative
+        historical_paths = [repo_root / relative for relative in _HISTORICAL_CAMPAIGN_RELATIVES]
+        preserved_paths = [state_dir / name for name in _PRESERVED_STATE_NAMES]
+        watched = [*historical_paths, *preserved_paths, board_path, plan_path, spec_path]
+        before = _snapshot_paths(watched)
+        locations = {
+            "repository": repo_root, "spec": spec_path, "plan": plan_path,
+            "board": board_path, "state": state_dir, "worktree": worktree_root,
+        }
+        distinct_paths = len({path.resolve() for path in locations.values()}) == len(locations)
+        outside = (not state_dir.is_relative_to(repo_root) and not repo_root.is_relative_to(state_dir)
+                   and not worktree_root.is_relative_to(repo_root) and not repo_root.is_relative_to(worktree_root)
+                   and not worktree_root.is_relative_to(state_dir) and not state_dir.is_relative_to(worktree_root))
+        historical_collision = (artifacts.board_namespace in _HISTORICAL_NAMESPACES
+                                or bool(set(artifacts.protected_paths) & set(_HISTORICAL_CAMPAIGN_RELATIVES))
+                                or artifacts == DEFAULT_ARTIFACTS)
+        identities_independent = bool(distinct_paths and outside and not historical_collision
+                                      and binding["distinct_from_historical_intake"])
+        worktree_error = None
+        worktree_identity = None
+        try:
+            worktree_identity = _worktree_directory(worktree_root, repo_root, state_dir)
+        except (OSError, ValueError) as exc:
+            worktree_error = type(exc).__name__
+            identities_independent = False
+        publisher: dict[str, Any] = {"bound": False, "plan_id": None, "source_generation": None, "task_ids": []}
+        try:
+            document = json.loads(plan_path.read_text(encoding="utf-8"))
+            from ipfs_accelerate_py.agent_supervisor.planning.formal_planning_contracts import FormalWorkPlan
+            restored = FormalWorkPlan.from_dict(document)
+            metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+            published_ids = {task.task_id for task in restored.tasks}
+            publisher = {
+                "bound": (restored.plan_id == document.get("plan_id") == binding["plan_id"]
+                          and metadata.get("spec_sha256") == binding["source_generation"]
+                          and restored.events == () and published_ids == {task["id"] for task in spec["tasks"]}),
+                "plan_id": document.get("plan_id"),
+                "source_generation": metadata.get("spec_sha256"),
+                "task_ids": sorted(published_ids),
+                "event_count": len(restored.events),
+            }
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            publisher["error"] = type(exc).__name__
+        identity_error = None
+        native_tasks: list[Any] = []
+        try:
+            _, daemon = _native_modules(import_root)
+            native_tasks = list(daemon.parse_task_file(board_path, task_header_prefix=TASK_PREFIX))
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            identity_error = type(exc).__name__
+        task_cids = {task.task_id: task.canonical_task_cid for task in native_tasks}
+        task_bindings = {
+            task.task_id: {
+                "canonical_task_cid": task.canonical_task_cid,
+                "canonical_task_key": task.canonical_task_key,
+                "depends_on": list(task.depends_on),
+                "validation": list(task.validation),
+                "status": task.status,
+            }
+            for task in native_tasks
+        }
+        expected = {task["id"]: task for task in spec["tasks"]}
+        tasks_match_publisher = bool(publisher["bound"] and set(task_cids) == set(expected)
+                                     and all(task_bindings[task_id]["depends_on"] == list(expected[task_id]["depends_on"])
+                                             and task_bindings[task_id]["validation"] == list(expected[task_id]["validation_commands"])
+                                             for task_id in expected))
+        record = _read_json(state_dir / "launcher.json")
+        plan_bound = record.get("plan_id") == binding["plan_id"]
+        generation_bound = record.get("source_generation") == binding["source_generation"]
+        launcher_birth = bool(owns_process(record) and plan_bound and generation_bound
+                              and _campaign_tuple_matches(record, repo_root, spec_path, state_dir))
+        if launcher_birth and worktree_identity is not None:
+            try:
+                recorded_root, recorded_binding = recorded_worktree_root(record, state_dir)
+                launcher_birth = recorded_root == worktree_root and recorded_binding is not None
+            except (OSError, ValueError, TypeError):
+                launcher_birth = False
+        elif worktree_identity is None:
+            launcher_birth = False
+        daemon_birth = _daemon_birth_owned(record, state_dir) if launcher_birth else False
+        bounded = _bounded_provider_validation(repo_root, state_dir, task_cids, native_tasks)
+        pid = (record.get("identity") or {}).get("pid") if isinstance(record.get("identity"), dict) else None
+        pid_alive = process_identity(pid) is not None if type(pid) is int else False
+        doctor_report: dict[str, Any]
+        try:
+            doctor_report = doctor(repo_root, spec_path, state_dir, worktree_root=worktree_root)
+        except Exception as exc:
+            doctor_report = {"status": "not_ready", "error": type(exc).__name__, "paid_calls": 0, "execution_started": False}
+        doctor_ready = doctor_report.get("status") == "ready"
+        after = _snapshot_paths(watched)
+        preserved = before == after
+        markdown_completed = sorted(task_id for task_id, item in task_bindings.items() if item["status"] == "completed")
+        execution_admitted = bool(identities_independent and publisher["bound"] and tasks_match_publisher
+                                  and launcher_birth and daemon_birth and bounded["active"] and preserved
+                                  and worktree_error is None)
+        return {
+            "schema": "complaint-new-campaign-startup-observation@1",
+            "identities_independent": identities_independent,
+            "identity_scopes": {name: str(path) for name, path in locations.items()},
+            "worktree_identity": worktree_identity,
+            "worktree_error": worktree_error,
+            "binding": binding,
+            "publisher": publisher,
+            "publisher_bound": bool(publisher["bound"] and tasks_match_publisher),
+            "task_bindings": task_bindings,
+            "task_cids": task_cids,
+            "identity_error": identity_error,
+            "plan_bound": bool(plan_bound),
+            "source_generation_bound": bool(generation_bound),
+            "ingestion_is_execution": False,
+            "tasks_completed_by_ingestion": 0,
+            "pid_alive": pid_alive,
+            "pid_alive_is_execution": False,
+            "launcher_birth": launcher_birth,
+            "daemon_birth": daemon_birth,
+            "doctor_ready": doctor_ready,
+            "doctor_ready_is_execution": False,
+            "doctor_status": doctor_report.get("status"),
+            "paid_calls": 0,
+            "bounded_work": bounded,
+            "execution_admitted": execution_admitted,
+            "markdown_completed_task_ids": markdown_completed,
+            "markdown_status_grants_execution": False,
+            "historical_and_budget_unchanged": preserved,
+            "completion_authority": False,
+        }
+    finally:
+        os.chdir(started)
 
 
 def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
