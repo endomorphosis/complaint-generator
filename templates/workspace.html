@@ -4281,6 +4281,16 @@
                                     <label for="evidence-attachment">Attach Evidence File</label>
                                     <input id="evidence-attachment" type="file">
                                     <div class="helper-text">Attach the supporting file when you have it so the saved evidence record carries the uploaded file name forward.</div>
+                                    <section id="evidence-private-upload" data-state="empty" aria-label="Private evidence upload">
+                                        <p id="evidence-upload-status">Choose a file to upload through the private case store. Nothing is saved until ingestion finishes.</p>
+                                        <progress id="evidence-upload-progress" max="100" value="0">0%</progress>
+                                        <div class="button-row">
+                                            <button class="primary" id="evidence-upload-start" type="button">Upload privately</button>
+                                            <button class="secondary" id="evidence-upload-cancel" type="button">Cancel upload</button>
+                                            <button class="secondary" id="evidence-upload-retry" type="button">Retry upload</button>
+                                        </div>
+                                        <p id="evidence-upload-ingestion" data-ingestion="">Ingestion has not started.</p>
+                                    </section>
                                 </div>
                             </div>
                             <div class="evidence-save-block" aria-label="Save evidence item">
@@ -6180,6 +6190,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
     <script src="/static/complaint_mcp_sdk.js"></script>
     <script src="/static/complaint_case_shell.js"></script>
     <script src="/static/complaint_graph_view.js"></script>
+    <script src="/static/complaint_evidence.js"></script>
     <script>
         const { ComplaintMcpClient } = window.ComplaintMcpSdk;
         const operationSurfaceAttempts = {graph: 0, research: 0, collaboration: 0};
