@@ -55,6 +55,14 @@ class BrowserCapabilityError(RuntimeError):
     """The browser capability is missing or the custody check failed."""
 
 
+class _VanishedBrowserProcess(BrowserCapabilityError):
+    """A known proc metadata read failed after this numeric PID disappeared."""
+
+    def __init__(self, pid: int):
+        super().__init__("Browser process identity vanished during verification")
+        self.pid = pid
+
+
 @dataclass(frozen=True)
 class PinnedExecutable:
     role: str
@@ -302,6 +310,10 @@ def _process_table() -> dict[int, tuple[int, tuple[str, ...], str]]:
 
 
 def _matching_pids(needles: Sequence[str]) -> set[int]:
+    return _retry_vanished_process_census(_matching_pids_once, needles)
+
+
+def _matching_pids_once(needles: Sequence[str]) -> set[int]:
     """Inventory matching descendants of this validator, never sibling drivers."""
     table = _process_table()
     owner_pid = os.getpid()
@@ -732,25 +744,71 @@ def _load_sync_playwright() -> Any:
         sys.path[:] = saved_path
 
 
+def _numeric_pid_absent(pid: int) -> bool:
+    """Unknown, inaccessible, live, reused and zombie PIDs are never absence."""
+    if type(pid) is not int or pid <= 0:
+        return False
+    try:
+        (Path('/proc') / str(pid)).lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _vanished_proc_metadata(pid: int, path: Path, error: BaseException) -> bool:
+    """Recognize only disappearance at an actual known proc read site."""
+    if (type(pid) is not int or pid <= 0
+            or not isinstance(error, (FileNotFoundError, ProcessLookupError))
+            or error.errno not in {errno.ENOENT, errno.ESRCH}
+            or path not in {Path('/proc') / str(pid) / leaf for leaf in ('stat', 'status', 'exe')}):
+        return False
+    # A descriptor read may lack filename; it is still bound to this known
+    # proc operation. An unrelated named failure cannot borrow that binding.
+    if error.filename is not None:
+        try:
+            if os.fsdecode(error.filename) != str(path):
+                return False
+        except TypeError:
+            return False
+    return _numeric_pid_absent(pid)
+
+
 def _process_birth(pid: int) -> tuple[int, int, tuple[int, ...], str]:
     """Read the kernel identity used to join an observed browser to its driver."""
+    metadata_path = Path('/proc')
     try:
         proc = Path("/proc") / str(pid)
-        fields = (proc / "stat").read_bytes().rsplit(b")", 1)[1].split()
+        metadata_path = proc / 'stat'
+        fields = metadata_path.read_bytes().rsplit(b")", 1)[1].split()
         ppid, birth = int(fields[1]), int(fields[19])
-        rows = (proc / "status").read_text().splitlines()
+        metadata_path = proc / 'status'
+        rows = metadata_path.read_text().splitlines()
         uid = tuple(map(int, next(row for row in rows if row.startswith("Uid:")).split()[1:]))
-        exe = os.readlink(proc / "exe")
+        metadata_path = proc / 'exe'
+        exe = os.readlink(metadata_path)
         if birth <= 0 or uid != (os.getuid(),) * 4:
             raise ValueError("foreign or missing process identity")
         return ppid, birth, uid, exe
     except (OSError, ValueError, IndexError, StopIteration) as exc:
+        if _vanished_proc_metadata(pid, metadata_path, exc):
+            raise _VanishedBrowserProcess(pid) from exc
         raise BrowserCapabilityError("Browser process identity could not be verified") from exc
 
 
 def _pinned_process(pid: int, pin: PinnedExecutable) -> tuple[int, int, tuple[int, ...], str]:
     before = _process_birth(pid)
-    if before[3] != pin.path or _sha256_file(Path("/proc") / str(pid) / "exe") != pin.sha256:
+    if before[3] != pin.path:
+        raise BrowserCapabilityError("Browser executable does not match the pin")
+    metadata_path = Path('/proc') / str(pid) / 'exe'
+    try:
+        digest = _sha256_file(metadata_path)
+    except OSError as exc:
+        if _vanished_proc_metadata(pid, metadata_path, exc):
+            raise _VanishedBrowserProcess(pid) from exc
+        raise BrowserCapabilityError("Browser executable identity could not be verified") from exc
+    if digest != pin.sha256:
         raise BrowserCapabilityError("Browser executable does not match the pin")
     if _process_birth(pid) != before:
         raise BrowserCapabilityError("Browser process birth changed during verification")
@@ -817,6 +875,22 @@ def _chromium_role_argv(argv: tuple[str, ...], chromium: PinnedExecutable, profi
 
 
 def _assert_process_custody(node: PinnedExecutable, chromium: PinnedExecutable, profile: Path) -> None:
+    return _retry_vanished_process_census(_assert_process_custody_once, node, chromium, profile)
+
+
+def _retry_vanished_process_census(proof, *arguments):
+    """Rebuild the complete proof at most three times for proved PID exit races."""
+    for attempt in range(3):
+        try:
+            return proof(*arguments)
+        except _VanishedBrowserProcess as exc:
+            # Recheck immediately before restarting: reappearance or unknown
+            # numeric PID state never permits a retry or reuse of partial proof.
+            if attempt == 2 or not _numeric_pid_absent(exc.pid):
+                raise
+
+
+def _assert_process_custody_once(node: PinnedExecutable, chromium: PinnedExecutable, profile: Path) -> None:
     table = _process_table()
     owner_pid = os.getpid()
     owner_birth = _process_birth(owner_pid)
