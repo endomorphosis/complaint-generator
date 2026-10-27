@@ -1753,42 +1753,168 @@ def _snapshot_paths(paths: Sequence[Path]) -> dict[str, str | None]:
 
 
 def _daemon_birth_owned(record: Mapping[str, Any], state_dir: Path) -> bool:
-    """A daemon birth counts only as this launcher's live child, not as a bare PID."""
-    heartbeat = _read_json(state_dir / f"{STATE_PREFIX}_supervisor_status.json")
-    identity = record.get("identity") if isinstance(record.get("identity"), dict) else {}
-    pid = heartbeat.get("daemon_pid")
-    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1 or pid == identity.get("pid"):
+    """Observe Native's managed birth and exact command, never heartbeat PID fields alone."""
+    try:
+        from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as native
+        heartbeat = _read_validation_watchdog_authority(state_dir / f"{STATE_PREFIX}_supervisor_status.json")
+        identity_path = state_dir / f"{STATE_PREFIX}_managed_daemon.identity.json"
+        if heartbeat is None or _read_validation_watchdog_authority(identity_path) is None:
+            return False
+        parent = record.get("identity") or {}
+        pid = heartbeat.get("daemon_pid")
+        if (type(pid) is not int or pid <= 1 or heartbeat.get("status") != "running"
+                or heartbeat.get("supervisor_pid") != parent.get("pid")
+                or heartbeat.get("daemon_pid_alive") is False
+                or (age := _timestamp_age(heartbeat.get("updated_at"), time.time())) is None
+                or not 0 <= age <= 120):
+            return False
+        child = native.load_supervised_child_identity(identity_path)
+        current = process_identity(pid)
+        scope = {"repo_root": record["repo_root"], "state_dir": str(state_dir), "state_prefix": STATE_PREFIX,
+                 "todo_path": record["board_path"], "daemon_entrypoint": str(Path(__file__).resolve())}
+        if (child is None or not current or current.get("ppid") != parent.get("pid")
+                or child.process_birth.pid != pid or child.process_birth.parent_pid != parent.get("pid")
+                or native.read_process_birth(pid) != child.process_birth
+                or native.supervised_child_identity_liveness(child) is not native.OwnerLiveness.ALIVE
+                or dict(child.owner_scope) != scope
+                or native.read_process_command_argv(pid) != child.command):
+            return False
+        # Native's ordinary wrapper command has an exact entrypoint and one
+        # occurrence of each campaign option. A python -c marker is not a daemon.
+        command = tuple(child.command)
+        if len(command) < 2 or command[1] != scope["daemon_entrypoint"]:
+            return False
+        for option, value in (("--state-dir", str(state_dir)), ("--state-prefix", STATE_PREFIX),
+                              ("--todo-path", record["board_path"])):
+            if [command[i + 1] for i, part in enumerate(command[:-1]) if part == option] != [value]:
+                return False
+        return native.read_process_birth(pid) == child.process_birth
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return False
-    current = process_identity(pid)
-    if not current or current.get("ppid") != identity.get("pid"):
-        return False
-    if heartbeat.get("daemon_start_ticks") != current.get("start_ticks") or heartbeat.get("daemon_boot_id") != current.get("boot_id"):
-        return False
-    argv = current.get("argv") or []
-    return str(state_dir) in argv and any(part == "implementation_daemon" or part.endswith("implementation_daemon") for part in argv)
+
+
+def _startup_provider_evidence(repo_root: Path, state_dir: Path, record: Mapping[str, Any],
+                               state: Mapping[str, Any], *, now: float) -> dict[str, Any] | None:
+    """Join Native's current claim, live provider process and owned work frames."""
+    from types import SimpleNamespace
+    from .improvement_recovery import _owned_bytes
+    try:
+        daemon, native, _ = _validation_activity_modules()
+        binding = _attempt_binding(state)
+        owner = native.load_supervised_child_identity(state_dir / f"{STATE_PREFIX}_managed_daemon.identity.json")
+        if owner is None:
+            return None
+        expected = {"task_id": binding["task_id"], "canonical_task_cid": binding["task_cid"],
+                    "canonical_task_key": state.get("active_task_key"), "attempt": binding["attempt"]}
+        claim_path = daemon.PortalImplementationDaemon._implementation_task_claim_path(
+            SimpleNamespace(repo_root=repo_root), binding["task_id"], canonical_task_cid=binding["task_cid"])
+        claim = _read_validation_watchdog_authority(claim_path)
+        lease = _read_validation_watchdog_authority(state_dir / "implementation.lock")
+        if (claim is None or lease is None or not expected["canonical_task_key"]
+                or claim.get("kind") != native.IMPLEMENTATION_TASK_CLAIM_LOCK_KIND
+                or claim.get("lease_role") != native.IMPLEMENTATION_DISPATCH_INTENT_LEASE_ROLE
+                or lease.get("kind") != "implementation" or lease.get("lease_role") == "supervisor_maintenance"
+                or native.ProcessBirthIdentity.from_dict(claim.get("owner_process_birth")) != owner.process_birth
+                or not native.checkout_lock_repository_matches(claim, repo_root)
+                or claim.get("dispatch_authority_cid") != daemon.PortalImplementationDaemon._implementation_dispatch_authority_cid(claim)
+                or any(not value.get("lease_id") or value.get("pid") != owner.process_birth.pid
+                       or value.get("state_dir") != str(state_dir)
+                       or any(value.get(key) != item for key, item in expected.items()) for value in (claim, lease))
+                or claim.get("state_path") != str(state_dir / f"{STATE_PREFIX}_task_state.json")
+                or lease.get("repo_root") != str(repo_root)):
+            return None
+        started = float(record["started_at"])
+        event_path = state_dir / f"{STATE_PREFIX}_events.jsonl"
+        log_evidence = _owned_attempt_log_evidence(event_path, state_dir, binding, started_at=started, now=now)
+        if not log_evidence or not log_evidence.get("progress_fresh") or log_evidence.get("provider_terminal_observed"):
+            return None
+        rows = [json.loads(line) for line in _owned_bytes(event_path, MAX_EVENT_HISTORY_BYTES,
+                                                        legacy_group_write=True).splitlines()]
+        primary = next(row for row in reversed(rows) if row.get("type") == "implementation_started")
+        command = primary.get("command")
+        event_time = _event_timestamp(primary)
+        if (not _event_matches_attempt(primary, binding, started_at=started, require_log=True)
+                or not isinstance(command, list) or not command or not all(type(item) is str and item for item in command)
+                or event_time is None or not 0 <= now - event_time < float(TIMEOUT_SECONDS)):
+            return None
+        workspace = Path(binding["worktree"])
+        selected_root, _ = recorded_worktree_root(record, state_dir)
+        if workspace.resolve(strict=True) != workspace or workspace == selected_root or not workspace.is_relative_to(selected_root):
+            return None
+        log_info = Path(binding["log_prefix"]).lstat()
+        boot_time = next(int(line.split()[1]) for line in Path("/proc/stat").read_text().splitlines() if line.startswith("btime "))
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            birth = native.read_process_birth(int(entry.name))
+            if (birth is None or birth.parent_pid != owner.process_birth.pid or birth.boot_id != owner.process_birth.boot_id
+                    or native.read_process_command_argv(birth.pid) != tuple(command)):
+                continue
+            born_at = boot_time + birth.start_time_ticks / os.sysconf("SC_CLK_TCK")
+            if (not event_time - 2 <= born_at <= now or entry.stat().st_uid != os.getuid()
+                    or Path(os.readlink(entry / "cwd")) != workspace
+                    or os.getsid(birth.pid) != birth.pid or os.getpgid(birth.pid) != birth.pid):
+                continue
+            if any((info.st_dev, info.st_ino) != (log_info.st_dev, log_info.st_ino)
+                   for info in ((entry / "fd" / str(number)).stat() for number in (1, 2))):
+                continue
+            if native.read_process_birth(birth.pid) == birth and native.read_process_birth(owner.process_birth.pid) == owner.process_birth:
+                return {"source": "owned_native_provider_and_work_frames", "task_id": expected["task_id"],
+                        "task_cid": expected["canonical_task_cid"], "attempt": expected["attempt"],
+                        "owner_birth": owner.process_birth.to_dict(), "provider_birth": birth.to_dict(),
+                        "deadline_at": event_time + TIMEOUT_SECONDS, "completion_authority": False}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, StopIteration):
+        return None
+    return None
 
 
 def _bounded_provider_validation(repo_root: Path, state_dir: Path, task_cids: Mapping[str, str],
                                  native_tasks: Sequence[Any]) -> dict[str, Any]:
-    """Provider or validation work is bounded only while a real phase is inside the campaign caps."""
-    state_path = state_dir / f"{STATE_PREFIX}_task_state.json"
-    if not state_path.is_file() or state_path.is_symlink():
-        native_state, source = {}, {"source": "absent", "completion_authority": False}
-    else:
-        native_state, source = _read_native_state(repo_root, state_path)
+    """Observe real current work; phase metadata alone cannot grant execution."""
+    native_state, source = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
+    now = time.time()
     attempt = native_state.get("active_attempt")
     phase = str(native_state.get("active_phase") or "")
     task_id = native_state.get("active_task_id")
-    age = _timestamp_age(native_state.get("active_phase_started_at"), time.time())
+    age = _timestamp_age(native_state.get("active_phase_started_at"), now)
     known = isinstance(task_id, str) and task_cids.get(task_id) == native_state.get("active_task_cid")
     declared = next((task for task in native_tasks if task.task_id == task_id), None)
     commands = list(getattr(declared, "validation", ()) or ()) if declared is not None else []
-    within_attempt = type(attempt) is int and 1 <= attempt <= 3
-    within_time = age is not None and 0 <= age < float(TIMEOUT_SECONDS)
-    active = bool(native_state.get("implementation_in_progress") is True and phase in _BOUNDED_PHASES and known
-                  and within_attempt and within_time and commands)
+    bounded = bool(native_state.get("implementation_in_progress") is True and phase in _BOUNDED_PHASES and known
+                   and type(attempt) is int and 1 <= attempt <= 3
+                   and age is not None and 0 <= age < float(TIMEOUT_SECONDS) and commands
+                   and declared.canonical_task_key == native_state.get("active_task_key")
+                   and not any(native_state.get(key) for key in
+                               ("manual_hold", "manual_cancellation", "capacity_quarantine", "protected_incident")))
+    evidence = None
+    record = _read_json(state_dir / "launcher.json")
+    if bounded and owns_process(record) and _daemon_birth_owned(record, state_dir):
+        if phase == "validating":
+            from .reconciliation_activity import evidence as executor_evidence
+            evidence = executor_evidence(sys.modules[__name__], repo_root, state_dir, record, native_state, now_ts=now)
+            if evidence is None:
+                from .auto_rescue_activity import observe
+                rescue = observe(sys.modules[__name__], repo_root, state_dir, native_state, now_ts=now)
+                if rescue.get("activity_verified") is True and rescue.get("work_progress_verified") is True:
+                    evidence = rescue
+        else:
+            evidence = _startup_provider_evidence(repo_root, state_dir, record, native_state, now=now)
+    # A racing settlement/new attempt cannot borrow the previous work proof.
+    if evidence is not None:
+        current, _ = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
+        keys = ("implementation_in_progress", "active_task_id", "active_task_cid", "active_task_key", "active_attempt",
+                "active_phase", "active_phase_started_at", "active_log_path", "active_worktree_path")
+        final_age = _timestamp_age(current.get("active_phase_started_at"), time.time())
+        deadline = evidence.get("deadline_at")
+        if (any(current.get(key) != native_state.get(key) for key in keys)
+                or final_age is None or not 0 <= final_age < float(TIMEOUT_SECONDS)
+                or type(deadline) not in (int, float) or not math.isfinite(deadline) or time.time() >= deadline
+                or not _daemon_birth_owned(record, state_dir)):
+            evidence = None
     return {
-        "active": active,
+        "active": bool(bounded and evidence is not None),
+        "phase_metadata_bounded": bounded,
+        "work_evidence": evidence,
         "phase": phase,
         "attempt": attempt if type(attempt) is int else None,
         "task_id": task_id if isinstance(task_id, str) else None,
@@ -1888,7 +2014,13 @@ def qualify_new_campaign_startup(repo_root: Path, spec_path: Path, state_dir: Pa
             for task in native_tasks
         }
         expected = {task["id"]: task for task in spec["tasks"]}
-        tasks_match_publisher = bool(publisher["bound"] and set(task_cids) == set(expected)
+        try:
+            from .improvement_plan import _require_matching_projection
+            _require_matching_projection(board_path.read_text(encoding="utf-8"), spec, binding["plan_id"], repo_root)
+            semantic_match = True
+        except (OSError, ValueError, TypeError, KeyError):
+            semantic_match = False
+        tasks_match_publisher = bool(publisher["bound"] and semantic_match and set(task_cids) == set(expected)
                                      and all(task_bindings[task_id]["depends_on"] == list(expected[task_id]["depends_on"])
                                              and task_bindings[task_id]["validation"] == list(expected[task_id]["validation_commands"])
                                              for task_id in expected))
