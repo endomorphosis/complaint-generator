@@ -99,7 +99,7 @@ Implementation instructions:
 
 ## CIMP-UX-04 Build a shared case-centred application shell
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
