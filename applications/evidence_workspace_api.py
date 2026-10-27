@@ -172,13 +172,24 @@ def mount_evidence_workspace(app: Any) -> None:
         status = 200 if catalog.get("error") in {None, ""} else 503
         return JSONResponse(catalog, status_code=status, headers=_NO_STORE_HEADERS)
 
+    async def _call_upload(request: Request, operation):
+        # Cached upload projections carry decrypted filenames too. Keep the
+        # original key lifetime across thread dispatch and the HTTP response,
+        # just as the catalog owner does for a fresh ciphertext operation.
+        verify = _verify(request)
+        verify()
+        service, actor, material = _service(request), _actor(request), _material(request)
+        verify_key = await run_in_threadpool(service.key_scope_verifier, actor, material)
+        verify()
+        payload = await run_in_threadpool(operation, request, actor, material, verify_request=verify_key)
+        await run_in_threadpool(verify_key)
+        verify()
+        return payload
+
     @app.post("/api/cases/evidence/uploads")
     async def begin_evidence_upload(request: Request):
         try:
-            verify = _verify(request)
-            verify()
-            payload = await run_in_threadpool(_begin_upload, request, _actor(request), _material(request))
-            verify()
+            payload = await _call_upload(request, _begin_upload)
         except EvidenceWorkspaceError as exc:
             return _fail(exc)
         code = 200 if payload.get("resumed") else 201
@@ -187,10 +198,7 @@ def mount_evidence_workspace(app: Any) -> None:
     @app.post("/api/cases/evidence/uploads/chunk")
     async def receive_evidence_chunk(request: Request):
         try:
-            verify = _verify(request)
-            verify()
-            payload = await run_in_threadpool(_accept_chunk, request, _actor(request), _material(request))
-            verify()
+            payload = await _call_upload(request, _accept_chunk)
         except EvidenceWorkspaceError as exc:
             return _fail(exc)
         return JSONResponse(payload, status_code=200, headers=_NO_STORE_HEADERS)
@@ -198,10 +206,7 @@ def mount_evidence_workspace(app: Any) -> None:
     @app.post("/api/cases/evidence/uploads/complete")
     async def complete_evidence_upload(request: Request):
         try:
-            verify = _verify(request)
-            verify()
-            payload = await run_in_threadpool(_complete_upload, request, _actor(request), _material(request))
-            verify()
+            payload = await _call_upload(request, _complete_upload)
         except EvidenceWorkspaceError as exc:
             return _fail(exc)
         code = 200 if payload.get("idempotent_replay") else 201
@@ -210,10 +215,7 @@ def mount_evidence_workspace(app: Any) -> None:
     @app.post("/api/cases/evidence/uploads/cancel")
     async def cancel_evidence_upload(request: Request):
         try:
-            verify = _verify(request)
-            verify()
-            payload = await run_in_threadpool(_cancel_upload, request, _actor(request), _material(request))
-            verify()
+            payload = await _call_upload(request, _cancel_upload)
         except EvidenceWorkspaceError as exc:
             return _fail(exc)
         return JSONResponse(payload, status_code=200, headers=_NO_STORE_HEADERS)
@@ -221,10 +223,7 @@ def mount_evidence_workspace(app: Any) -> None:
     @app.post("/api/cases/evidence/uploads/retry")
     async def retry_evidence_upload(request: Request):
         try:
-            verify = _verify(request)
-            verify()
-            payload = await run_in_threadpool(_retry_upload, request, _actor(request), _material(request))
-            verify()
+            payload = await _call_upload(request, _retry_upload)
         except EvidenceWorkspaceError as exc:
             return _fail(exc)
         code = 200 if payload.get("upload_state") == "sealed" else 201
@@ -233,10 +232,7 @@ def mount_evidence_workspace(app: Any) -> None:
     @app.get("/api/cases/evidence/uploads/status")
     async def evidence_upload_status(request: Request):
         try:
-            verify = _verify(request)
-            verify()
-            payload = await run_in_threadpool(_upload_status, request, _actor(request), _material(request))
-            verify()
+            payload = await _call_upload(request, _upload_status)
         except EvidenceWorkspaceError as exc:
             return _fail(exc)
         return JSONResponse(payload, status_code=200, headers=_NO_STORE_HEADERS)
@@ -375,7 +371,9 @@ def _session_for(request: Request, actor: str, body: Mapping[str, Any], *, uploa
     return found
 
 
-def _begin_upload(request: Request, actor: str, body: Mapping[str, Any]) -> dict[str, Any]:
+def _begin_upload(request: Request, actor: str, body: Mapping[str, Any], *, verify_request=None) -> dict[str, Any]:
+    if verify_request is not None:
+        verify_request()
     revision = _preflight(request, actor, body)
     service = request.app.state.evidence_workspace
     declared = _declared_length(body.get("byte_length"))
@@ -430,7 +428,9 @@ def _decode_chunk(encoded: Any) -> bytes:
     return payload
 
 
-def _accept_chunk(request: Request, actor: str, body: Mapping[str, Any]) -> dict[str, Any]:
+def _accept_chunk(request: Request, actor: str, body: Mapping[str, Any], *, verify_request=None) -> dict[str, Any]:
+    if verify_request is not None:
+        verify_request()
     _reject_ambient(body)
     upload_id = body.get("upload_id")
     if not isinstance(upload_id, str) or not upload_id.startswith("up-"):
@@ -460,7 +460,9 @@ def _accept_chunk(request: Request, actor: str, body: Mapping[str, Any]) -> dict
     return _view(session)
 
 
-def _complete_upload(request: Request, actor: str, body: Mapping[str, Any]) -> dict[str, Any]:
+def _complete_upload(request: Request, actor: str, body: Mapping[str, Any], *, verify_request=None) -> dict[str, Any]:
+    if verify_request is not None:
+        verify_request()
     _reject_ambient(body)
     upload_id = body.get("upload_id")
     if not isinstance(upload_id, str):
@@ -489,7 +491,9 @@ def _complete_upload(request: Request, actor: str, body: Mapping[str, Any]) -> d
         "media_type": session["media_type"],
         "content_base64": base64.b64encode(payload).decode("ascii"),
         "idempotency_key": session["idempotency_key"],
-    })
+    }, verify_request=verify_request)
+    if verify_request is not None:
+        verify_request()
     _wipe(session)
     session["state"] = "sealed"
     session["accepted"] = int(session["declared"])
@@ -498,7 +502,9 @@ def _complete_upload(request: Request, actor: str, body: Mapping[str, Any]) -> d
     return _view(session, record=record)
 
 
-def _cancel_upload(request: Request, actor: str, body: Mapping[str, Any]) -> dict[str, Any]:
+def _cancel_upload(request: Request, actor: str, body: Mapping[str, Any], *, verify_request=None) -> dict[str, Any]:
+    if verify_request is not None:
+        verify_request()
     _reject_ambient(body)
     upload_id = body.get("upload_id")
     if not isinstance(upload_id, str):
@@ -517,7 +523,9 @@ def _cancel_upload(request: Request, actor: str, body: Mapping[str, Any]) -> dic
     return view
 
 
-def _retry_upload(request: Request, actor: str, body: Mapping[str, Any]) -> dict[str, Any]:
+def _retry_upload(request: Request, actor: str, body: Mapping[str, Any], *, verify_request=None) -> dict[str, Any]:
+    if verify_request is not None:
+        verify_request()
     _reject_ambient(body)
     upload_id = body.get("upload_id")
     if not isinstance(upload_id, str):
@@ -538,7 +546,9 @@ def _retry_upload(request: Request, actor: str, body: Mapping[str, Any]) -> dict
     return _view(session)
 
 
-def _upload_status(request: Request, actor: str, body: Mapping[str, Any]) -> dict[str, Any]:
+def _upload_status(request: Request, actor: str, body: Mapping[str, Any], *, verify_request=None) -> dict[str, Any]:
+    if verify_request is not None:
+        verify_request()
     _reject_ambient(body)
     upload_id = body.get("upload_id")
     if not isinstance(upload_id, str):
