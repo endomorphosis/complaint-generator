@@ -120,6 +120,7 @@ def mount_evidence_workspace(app: Any) -> None:
             "legal": legal_qualities(),
             "receipt_establishes_legal_quality": False,
             "operation_succeeded": False,
+            "items": [],
             "allowed_ingestion_statuses": list(INGESTION_STATUSES),
         }
         return JSONResponse(body, status_code=evidence_http_status(code), headers=_NO_STORE_HEADERS)
@@ -129,7 +130,11 @@ def mount_evidence_workspace(app: Any) -> None:
         try:
             verify = _verify(request)
             verify()
-            record = await run_in_threadpool(_service(request).receive, _actor(request), _material(request))
+            service, actor, material = _service(request), _actor(request), _material(request)
+            verify_key = await run_in_threadpool(service.key_scope_verifier, actor, material)
+            verify()
+            record = await run_in_threadpool(service.receive, actor, material, verify_request=verify_key)
+            await run_in_threadpool(verify_key)
             verify()
         except EvidenceWorkspaceError as exc:
             return _fail(exc)
@@ -140,7 +145,11 @@ def mount_evidence_workspace(app: Any) -> None:
         try:
             verify = _verify(request)
             verify()
-            record = await run_in_threadpool(_service(request).transition, _actor(request), _material(request))
+            service, actor, material = _service(request), _actor(request), _material(request)
+            verify_key = await run_in_threadpool(service.key_scope_verifier, actor, material)
+            verify()
+            record = await run_in_threadpool(service.transition, actor, material, verify_request=verify_key)
+            await run_in_threadpool(verify_key)
             verify()
         except EvidenceWorkspaceError as exc:
             return _fail(exc)
@@ -152,7 +161,11 @@ def mount_evidence_workspace(app: Any) -> None:
         try:
             verify = _verify(request)
             verify()
-            catalog = await run_in_threadpool(_service(request).list_catalog, _actor(request), _material(request))
+            service, actor, material = _service(request), _actor(request), _material(request)
+            verify_key = await run_in_threadpool(service.key_scope_verifier, actor, material)
+            verify()
+            catalog = await run_in_threadpool(service.list_catalog, actor, material, verify_request=verify_key)
+            await run_in_threadpool(verify_key)
             verify()
         except EvidenceWorkspaceError as exc:
             return _fail(exc)
