@@ -26,9 +26,27 @@ _REAL_INVENTORY = shutdown._complete_process_inventory
 
 
 @pytest.fixture
-def stopped_before_heartbeat(campaign, docker, monkeypatch):
+def stopped_before_heartbeat(campaign, docker, monkeypatch, request):
     fixture = campaign
     monkeypatch.setattr(runner, 'process_identity', _REAL_PROCESS_IDENTITY)
+    first_ever = getattr(request, 'param', None)
+    old = None
+    if first_ever is not None:
+        for name in ['complaint_intake_supervisor_status.json','complaint_intake_events.jsonl',
+                     'complaint_intake_supervisor_events.jsonl']:
+            (fixture.state/name).unlink(missing_ok=True)
+            if first_ever == 'empty' and name.endswith('.jsonl'):(fixture.state/name).write_bytes(b'')
+    else:
+        old = _missing_marker_heartbeat(fixture.state, fixture.record, None)
+        old.update(status='stopped', supervisor_pid=1073741824, updated_at=stamp(time.time()-5),
+            supervisor_pid_alive=False, daemon_pid_alive=False, active_worker_count=0, active_worker_pids=[],
+            worker_descendant_count=0, managed_daemon_cleanup={'quiesced':True,'pid':1073741825,
+                'pid_path':str(fixture.state/'complaint_intake_managed_daemon.pid'),
+                'identity_path':str(fixture.state/'complaint_intake_managed_daemon.identity.json'), 'remaining_pid':None})
+        runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', old)
+        (fixture.state/'complaint_intake_supervisor.pid').write_text('1073741824\n')
+        (fixture.state/'complaint_intake_supervisor_events.jsonl').write_text(json.dumps({
+            'type':'supervisor_signal_shutdown','timestamp':old['updated_at']})+'\n')
     script = fixture.repo / 'scripts/run_complaint_improvement_supervisor.py'
     script.parent.mkdir(parents=True)
     script.write_text('import time\ntime.sleep(30)\n')
@@ -40,16 +58,6 @@ def stopped_before_heartbeat(campaign, docker, monkeypatch):
         record = {**deepcopy(fixture.record), 'identity':identity, 'status':'starting', 'started_at':time.time()}
         runner._atomic_json(fixture.state / 'launcher.json', record)
         starting = (fixture.state / 'launcher.json').read_bytes()
-        old = _missing_marker_heartbeat(fixture.state, record, None)
-        old.update(status='stopped', supervisor_pid=1073741824, updated_at=stamp(record['started_at']-5),
-            supervisor_pid_alive=False, daemon_pid_alive=False, active_worker_count=0, active_worker_pids=[],
-            worker_descendant_count=0, managed_daemon_cleanup={'quiesced':True,'pid':1073741825,
-                'pid_path':str(fixture.state/'complaint_intake_managed_daemon.pid'),
-                'identity_path':str(fixture.state/'complaint_intake_managed_daemon.identity.json'), 'remaining_pid':None})
-        runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', old)
-        (fixture.state/'complaint_intake_supervisor.pid').write_text('1073741824\n')
-        (fixture.state/'complaint_intake_supervisor_events.jsonl').write_text(json.dumps({
-            'type':'supervisor_signal_shutdown','timestamp':old['updated_at']})+'\n')
         stopped = runner.stop(fixture.state, timeout=.2)
         process.wait(timeout=3)
         assert stopped['status']=='stopped' and stopped['signalled'] is True and stopped['remaining_pids']==[]
@@ -85,14 +93,11 @@ def test_normal_public_stop_before_heartbeat_has_fresh_readonly_closure(stopped_
     assert scans==[f.record['identity']['start_ticks']]*2 and _bytes(f)==before
 
 
-@pytest.mark.parametrize('empty_streams',[False,True])
-def test_first_ever_stopped_launch_without_heartbeat_requires_fresh_closure(stopped_before_heartbeat,monkeypatch,empty_streams):
+@pytest.mark.parametrize('stopped_before_heartbeat',['absent','empty'],indirect=True)
+def test_first_ever_stopped_launch_without_heartbeat_requires_fresh_closure(stopped_before_heartbeat,monkeypatch):
     f=stopped_before_heartbeat
-    for name in ['complaint_intake_supervisor_status.json','complaint_intake_supervisor.pid',
-                 'complaint_intake_events.jsonl','complaint_intake_supervisor_events.jsonl']:
-        (f.state/name).unlink()
-        if empty_streams and name.endswith('.jsonl'):(f.state/name).write_bytes(b'')
-    before=_bytes(f);monkeypatch.setattr(shutdown,'_complete_process_inventory',lambda cutoff:[])
+    assert f.heartbeat is None
+    before=_bytes(f);monkeypatch.setattr(shutdown,'_complete_process_inventory',_REAL_INVENTORY)
     result=shutdown._parent_closed(f.state,f.record,f.context,False)
     assert result['historical_heartbeat_only'] is False and result['observations']==2
     assert _bytes(f)==before
@@ -100,7 +105,7 @@ def test_first_ever_stopped_launch_without_heartbeat_requires_fresh_closure(stop
 
 @pytest.mark.parametrize('damage',['wrong_receipt_owner','starting_hash','stopped_time','starting_status',
     'wrong_hb_repo','running_hb','newer_hb','current_hb_owner','active_worker','pid_marker','identity_marker',
-    'current_supervisor_marker','task_event','supervisor_event','malformed_event','absent_hb_old_event'])
+    'current_supervisor_marker','task_event','supervisor_event','malformed_event','absent_hb_old_event','removed_old_history'])
 def test_preheartbeat_closure_refuses_mixed_scope_or_postlaunch_evidence(stopped_before_heartbeat,monkeypatch,damage):
     f=stopped_before_heartbeat;record=deepcopy(f.record);hb=deepcopy(f.heartbeat)
     receipt=json.loads((f.state/shutdown.RECEIPT_NAME).read_text())
@@ -120,6 +125,7 @@ def test_preheartbeat_closure_refuses_mixed_scope_or_postlaunch_evidence(stopped
         name='complaint_intake_events.jsonl' if damage=='task_event' else 'complaint_intake_supervisor_events.jsonl'
         with (f.state/name).open('a') as out:out.write(json.dumps({'type':'selection_or_maintenance','timestamp':stamp(record['started_at']+.1)})+'\n')
     elif damage=='malformed_event':(f.state/'complaint_intake_events.jsonl').write_text('{\n')
+    elif damage=='removed_old_history':(f.state/'complaint_intake_events.jsonl').unlink()
     runner._atomic_json(f.state/'launcher.json',record)
     runner._atomic_json(f.state/shutdown.RECEIPT_NAME,receipt)
     runner._atomic_json(f.state/'complaint_intake_supervisor_status.json',hb)
