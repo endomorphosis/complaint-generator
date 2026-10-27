@@ -26,6 +26,16 @@ After three genuine task completions, a stopped worker retained task 65's nonter
 
 This API requires a verified stopped launcher and dead worker, exact current task/CID/ordinal, terminal worktree lifecycle and authenticated shutdown history, unchanged protected paths and task state, settled merge queue, fresh container closure, and source/claim CAS checks. It preserves the unknown provider outcome and consumed attempt, appends a recovery receipt, and releases only the proven abandoned claim. It grants no completion, refund or new-attempt authority. The three completed tasks and the watchdog's exhausted recovery history remain intact; any operator resume follows the code repair and normal recovery.
 
+The public recovery succeeded on 2026-10-27 with reason `quiesced_pending_task_claim_released` and receipt ID `sha256:d35841a383e8411294b3afc0a5f4c695baa7b39b2ad3070ea8b3d20c840c5afe`. It released the abandoned task 65 claim and implementation lock, while preserving the task's consumed first attempt, all three completed tasks, and the watchdog's two consumed recovery ordinals. This receipt establishes reconciliation, not task completion or a running campaign.
+
+### Execution-clock correction, 2026-10-27
+
+The next reviewed Accelerate pin is `4141b0535f62c2ef6d7cf5ad849825a8a6d557b8`, a descendant of the pending-claim fix. Native now anchors its execution budget to the unique, current, owned `implementation_started` event after checkout preparation. It validates the task identity, attempt, leases, daemon birth, event chain, workspace and log, and falls back to the existing clock when that evidence is unavailable. The existing 180-second setup limit, 900-second execution limit and 30-second grace remain unchanged. Replayed, foreign, duplicate, future, terminal or late-start evidence cannot extend the budget.
+
+The Host rescue observer uses the same bound execution-start event, and public status checks that verified rescue deadline before the earlier selection-age guard. Continued output cannot move the fixed deadline. The historical task 4 timing included approximately 51 seconds of checkout preparation; a retained reproduction proves the earlier clock can expire prematurely, though the exact historical branch was not retained. The Native correction passed 26 focused tests, and the combined Host observer/status correction passed 47 tests, both with zero skips, unchanged source, kernel network restrictions and AST seals.
+
+The case-shell repair also passed five focused API/browser checks and three adjacent browser checks. It binds responses to the current authenticated actor, selected case and context generation, verifies actual private-session access, and clears stale private content after identity changes or typed key failures. These code qualifications do not complete task 4: its genuine Native validation and completion callback remain required.
+
 The completed inventory task's historical JSON remains unchanged. Its current-runtime tests now observe actual SDK revision visibility and actual effects/refusals instead of requiring capabilities to remain unavailable. That maintenance passed 24 tests and does not reopen or reset the completed task.
 
 - The two-case baseline suite, including its real Chromium/ASGI journey, passed with zero skips under the inherited network restriction and AST seals.
