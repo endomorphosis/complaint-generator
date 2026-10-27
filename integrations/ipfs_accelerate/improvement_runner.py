@@ -746,6 +746,14 @@ def _resource_admission_hook(repo_root: Path, state_dir: Path, worktree_root: Pa
         try:
             _require_resource_capacity(repo_root, state_dir, worktree_root, environment,
                                        stage="before_native_pass")
+            cold_checkout = _worktree_capacity(repo_root, worktree_root)
+            if cold_checkout.get("sufficient") is not True:
+                raise CampaignResourceHold({"schema": "complaint-campaign-resource-admission@1",
+                    "ready": False, "reason": "cold_checkout_capacity_insufficient"
+                        if cold_checkout.get("sufficient") is False else "cold_checkout_capacity_unavailable",
+                    "stage": "before_native_pass", "worktree_capacity": cold_checkout,
+                    "paid_dispatch": False, "accounting_changed": False, "attempt_refunded": False,
+                    "capacity_reserved": False, "live_wait_or_lease_claimed": False})
         except DaemonHookTimeoutError:
             raise CampaignResourceHold({"schema": "complaint-campaign-resource-admission@1",
                 "ready": False, "reason": "resource_observation_timed_out", "stage": "before_native_pass",
