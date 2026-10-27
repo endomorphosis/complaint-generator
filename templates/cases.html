@@ -15,7 +15,7 @@
         .gap { margin: 0.2rem 0; }
     </style>
 </head>
-<body>
+<body class="case-catalog-page">
 <a class="cg-skip-link" href="#case-context">Skip to current case</a>
 <div id="case-context" class="cg-case-context" role="region" aria-label="Current case" data-state="empty" tabindex="-1">
     <span class="cg-case-context__label">Current case</span>
@@ -33,6 +33,7 @@
         <label for="case-credential">Credential</label>
         <input id="case-credential" type="password" autocomplete="current-password" required>
         <button type="submit">Sign in</button>
+        <button id="case-logout" type="button">Log out</button>
         <span id="case-auth-status" role="status">Sign in required</span>
     </form>
     <p id="membership-notice" class="notice">Newly created cases are owner-only until you invite a lawyer. A lawyer role alone does not open a case. The recipient must accept the exact scope. Content stays closed until that membership is accepted and a key grant is admitted. Pending, declined, expired, and removed assignments stay visible to both parties. This screen does not send external messages.</p>
@@ -97,6 +98,15 @@
     var contentRevision = null;
     var csrf = "";
     var generation = 0;
+    var catalogRequest = null;
+
+    function retireCatalogRequest() {
+        if (catalogRequest) {
+            catalogRequest.abort();
+        }
+        catalogRequest = new AbortController();
+        return catalogRequest.signal;
+    }
 
     function clearTransientState() {
         document.getElementById("case-draft").value = "";
@@ -115,6 +125,8 @@
 
     function clearSelectionDisplay() {
         document.getElementById("selected-case").hidden = true;
+        delete document.getElementById("selected-case").dataset.actorPrincipalId;
+        delete document.getElementById("selected-case").dataset.caseId;
         document.getElementById("selected-case-label").textContent = "";
         document.getElementById("unresolved-gaps").replaceChildren();
         document.getElementById("directory-revision").textContent = "";
@@ -154,7 +166,8 @@
             method: (options && options.method) || "GET",
             headers: headers,
             body: options && options.body ? JSON.stringify(options.body) : undefined,
-            credentials: "same-origin"
+            credentials: "same-origin",
+            signal: (options && options.signal) || (catalogRequest && catalogRequest.signal) || undefined
         });
         var payload = await response.json();
         if (!response.ok) {
@@ -194,6 +207,8 @@
 
     function renderSelection(item) {
         document.getElementById("selected-case").hidden = false;
+        document.getElementById("selected-case").dataset.actorPrincipalId = item.actor_principal_id || "";
+        document.getElementById("selected-case").dataset.caseId = item.case_id || "";
         document.getElementById("selected-case-label").textContent = item.label || item.case_id;
         setCaseContext(item.label || item.case_id, "ready");
         document.getElementById("directory-revision").textContent = String(item.directory_revision);
@@ -216,13 +231,15 @@
 
     async function selectCase(caseId) {
         var ownGeneration = ++generation;
+        var signal = retireCatalogRequest();
         selected = caseId;
         contentRevision = null;
         clearTransientState();
         clearSelectionDisplay();
+        if (window.complaintCaseShell) window.complaintCaseShell.clearPlaintext();
         showError("");
         try {
-            var item = await api("/api/cases/" + encodeURIComponent(caseId) + "/select", {method: "POST", body: {}});
+            var item = await api("/api/cases/" + encodeURIComponent(caseId) + "/select", {method: "POST", body: {}, signal: signal});
             if (ownGeneration !== generation || selected !== caseId) return;
             if (item.plaintext_available === false) {
                 showError("key_grant_required");
@@ -231,8 +248,37 @@
             renderSelection(item);
             showError("");
         } catch (error) {
+            if (error && error.name === "AbortError") return;
             if (ownGeneration === generation && selected === caseId) showError(error.message);
         }
+    }
+
+    async function logout() {
+        var ownGeneration = ++generation;
+        var token = csrf;
+        retireCatalogRequest();
+        csrf = "";
+        selected = null;
+        contentRevision = null;
+        clearTransientState();
+        clearSelectionDisplay();
+        document.getElementById("assignment-content").textContent = "";
+        document.getElementById("assignment-list").replaceChildren();
+        document.getElementById("notification-list").replaceChildren();
+        document.getElementById("notification-badge").textContent = "0";
+        document.getElementById("case-auth-status").textContent = "Sign in required";
+        renderCases([]);
+        if (window.complaintCaseShell) window.complaintCaseShell.clearPlaintext();
+        try {
+            await fetch("/api/complaint-workspace/auth/logout", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {"x-csrf-token": token, "accept": "application/json"}
+            });
+        } catch (error) {
+            /* The rendered case is already gone; a failed logout stays signed-out in the page. */
+        }
+        if (ownGeneration === generation && window.complaintCaseShell) window.complaintCaseShell.scheduleRefresh();
     }
 
     async function loadSession(ownGeneration) {
@@ -250,6 +296,7 @@
     document.getElementById("case-login").addEventListener("submit", async function (event) {
         event.preventDefault();
         var ownGeneration = ++generation;
+        retireCatalogRequest();
         var credential = document.getElementById("case-credential").value;
         document.getElementById("case-credential").value = "";
         csrf = "";
@@ -312,6 +359,7 @@
             var listed = await api("/api/cases");
             if (ownGeneration !== generation) return;
             renderCases(listed.cases || []);
+            if (window.complaintCaseShell) window.complaintCaseShell.scheduleRefresh();
             showError("");
         } catch (error) {
             if (ownGeneration === generation) showError(error.message);
@@ -395,6 +443,9 @@
             if (ownGeneration !== generation) return;
             if (suffix === "/content") {
                 document.getElementById("assignment-content").textContent = result.plaintext_available ? (result.text || "") : "";
+            }
+            if (suffix === "/remove" || suffix === "/decline" || result.revoked === true || result.plaintext_available === false) {
+                document.getElementById("assignment-content").textContent = "";
             }
             await loadAssignments(ownGeneration);
             await loadNotifications(ownGeneration);
@@ -538,6 +589,17 @@
     });
     missingAsset.src = "/static/cimp-gui-53-mark-missing.png";
 
+    document.getElementById("case-logout").addEventListener("click", function () {
+        logout();
+    });
+
+    window.complaintCasesSelect = selectCase;
+    window.retireComplaintCaseRequests = function () {
+        ++generation;
+        retireCatalogRequest();
+        selected = null;
+        contentRevision = null;
+    };
     window.clearTransientState = clearTransientState;
 })();
 </script>

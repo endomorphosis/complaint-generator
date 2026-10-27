@@ -24,11 +24,15 @@
         nextKind: "sign-in",
         session: null,
         assignment: null,
-        gaps: []
+        gaps: [],
+        catalog: []
     };
+    var PRIMARY = {overview: true, mediator: true, evidence: true, draft: true};
     var refreshToken = 0;
     var refreshTimer = 0;
     var retiringWorkspace = false;
+    var activeController = null;
+    var committed = {principalId: "", caseId: "", access: ""};
 
     function text(value) {
         return value === undefined || value === null ? "" : String(value);
@@ -77,7 +81,8 @@
         host.className = "case-shell";
         host.setAttribute("aria-label", "Case workspace");
         var nav = TASKS.map(function (item) {
-            return '<button type="button" class="case-shell__task" data-case-task="' + item[0] + '">' + item[1] + "</button>";
+            var tier = PRIMARY[item[0]] ? "primary" : "secondary";
+            return '<button type="button" class="case-shell__task" data-case-task="' + item[0] + '" data-tier="' + tier + '">' + item[1] + "</button>";
         }).join("");
         var panels = TASKS.map(function (item) {
             return '<section class="case-shell__panel" data-case-panel="' + item[0] + '" hidden><h3>' + item[1] + '</h3><div class="case-shell__panel-body"></div></section>';
@@ -89,10 +94,24 @@
             + '<p><span>Actor</span> <strong id="complaint-case-shell-actor" data-relationship="none">Not signed in</strong></p>'
             + '<p><span>Privacy</span> <strong id="complaint-case-shell-privacy">Privacy state is unavailable until you sign in</strong></p>'
             + '<p><span>Stage</span> <strong id="complaint-case-shell-stage">Sign-in required</strong></p>'
+            + '<label class="case-shell__switch" for="complaint-case-shell-catalog">Switch case <select id="complaint-case-shell-catalog"></select></label>'
             + '<button type="button" id="complaint-case-shell-next">Sign in</button>'
             + "</div>"
-            + '<nav id="complaint-case-shell-nav" aria-label="Case tasks">' + nav + "</nav>"
-            + '<div id="complaint-case-shell-panels">' + panels + "</div>";
+            + '<div class="case-shell__body">'
+            + '<nav id="complaint-case-shell-nav" aria-label="Case tasks">' + nav
+            + '<details id="complaint-case-shell-more" class="case-shell__more"><summary>More</summary></details>'
+            + "</nav>"
+            + '<div id="complaint-case-shell-panels">' + panels + "</div>"
+            + "</div>";
+        host.querySelector("#complaint-case-shell-catalog").addEventListener("change", function (event) {
+            var caseId = event.target.value;
+            if (!caseId || caseId === state.caseId) return;
+            // Drop the previous case's rendered text before the catalog request returns.
+            clearPagePlaintext();
+            committed.caseId = "";
+            if (typeof window.complaintCasesSelect === "function") window.complaintCasesSelect(caseId);
+        });
+        host.querySelector("#complaint-case-shell-more").addEventListener("toggle", applyViewport);
         host.querySelector("#complaint-case-shell-nav").addEventListener("click", function (event) {
             var button = event.target.closest("[data-case-task]");
             if (!button) return;
@@ -100,7 +119,66 @@
         });
         host.querySelector("#complaint-case-shell-next").addEventListener("click", runNext);
         showTask("overview");
+        applyViewport();
         return host;
+    }
+
+    function applyViewport() {
+        var width = window.innerWidth || document.documentElement.clientWidth || 0;
+        var mode = width >= 1100 ? "desktop" : (width >= 768 ? "tablet" : "mobile");
+        document.documentElement.dataset.caseViewport = mode;
+        var more = document.getElementById("complaint-case-shell-more");
+        var showSecondary = mode !== "mobile" || (more && more.open);
+        if (more && mode !== "mobile") more.open = false;
+        Array.prototype.forEach.call(document.querySelectorAll(".case-shell__task[data-tier='secondary']"), function (button) {
+            button.hidden = !showSecondary;
+        });
+    }
+
+    function clearPagePlaintext(keepFields) {
+        var host = shellHost();
+        if (host) {
+            Array.prototype.forEach.call(host.querySelectorAll(".case-shell__panel-body"), function (node) {
+                node.textContent = "";
+            });
+        }
+        var assignment = document.getElementById("assignment-content");
+        if (assignment) assignment.textContent = "";
+        if (keepFields) return;
+        ["case-draft", "gap-input"].forEach(function (id) {
+            var field = document.getElementById(id);
+            if (field) field.value = "";
+        });
+        ["unresolved-gaps", "selected-case-label"].forEach(function (id) {
+            var node = document.getElementById(id);
+            if (!node) return;
+            if (node.tagName === "UL" || node.tagName === "OL") node.replaceChildren();
+            else node.textContent = "";
+        });
+        var selectedCase = document.getElementById("selected-case");
+        if (selectedCase) {
+            selectedCase.hidden = true;
+            delete selectedCase.dataset.actorPrincipalId;
+            delete selectedCase.dataset.caseId;
+        }
+    }
+
+    function noteBoundary(principalId, caseId, access) {
+        var actorChanged = committed.principalId && committed.principalId !== principalId;
+        var caseChanged = committed.caseId && committed.caseId !== caseId;
+        var closed = access === "locked" || access === "revoked" || access === "logged-out";
+        var fields = document.getElementById("selected-case");
+        // Preserve only fields already rendered from this actor/case's real
+        // catalog response. A refresh can discover a change from another view.
+        var currentFields = Boolean(fields && principalId && caseId
+            && fields.dataset.actorPrincipalId === principalId && fields.dataset.caseId === caseId);
+        if (closed || ((actorChanged || caseChanged) && !currentFields)) {
+            if (typeof window.retireComplaintCaseRequests === "function") window.retireComplaintCaseRequests();
+            clearPagePlaintext(false);
+        } else if (actorChanged || caseChanged) clearPagePlaintext(true);
+        committed.principalId = principalId || "";
+        committed.caseId = caseId || "";
+        committed.access = access || "";
     }
 
     function showTask(name) {
@@ -165,8 +243,8 @@
         return pending.inquiry_id || pending.prompt ? pending : null;
     }
 
-    async function readJson(path, headers) {
-        var response = await fetch(path, {credentials: "same-origin", headers: Object.assign({accept: "application/json"}, headers || {})});
+    async function readJson(path, headers, signal) {
+        var response = await fetch(path, {credentials: "same-origin", signal: signal, headers: Object.assign({accept: "application/json"}, headers || {})});
         var payload = null;
         try { payload = await response.json(); } catch (error) { payload = null; }
         return {ok: response.ok, status: response.status, body: payload};
@@ -201,10 +279,14 @@
             nextKind: "sign-in",
             session: workspaceSession,
             assignment: null,
-            gaps: []
+            gaps: [],
+            catalog: []
         };
-        if (!next.authenticated) return next;
         var cases = catalog && Array.isArray(catalog.cases) ? catalog.cases : [];
+        next.catalog = cases.filter(allowedCase).map(function (item) {
+            return {case_id: text(item.case_id), label: text(item.label || item.case_id)};
+        });
+        if (!next.authenticated) return next;
         var selectedId = catalog && catalog.selected_case_id ? text(catalog.selected_case_id) : "";
         var owned = cases.filter(allowedCase);
         var selected = owned.find(function (item) { return item.case_id === selectedId; }) || null;
@@ -239,6 +321,8 @@
             return next;
         }
         if (next.relationship === "owner" && contentState === "locked") {
+            next.session = null;
+            next.gaps = [];
             next.privacy = "Locked until the private key is available";
             next.stage = "Locked";
             next.next = "Unlock the case";
@@ -324,8 +408,30 @@
             legacy.textContent = state.caseId ? caseNode.textContent : "No case selected";
             if (legacyHost) legacyHost.dataset.state = state.caseId ? "ready" : "empty";
         }
+        renderCatalog(state.catalog, state.caseId);
         var active = host.querySelector("[data-case-task][aria-current='page']");
         fillPanel(active ? active.getAttribute("data-case-task") : "overview");
+    }
+
+    function renderCatalog(cases, selectedId) {
+        var select = document.getElementById("complaint-case-shell-catalog");
+        if (!select) return;
+        var rows = Array.isArray(cases) ? cases : [];
+        var signature = rows.map(function (item) { return item.case_id; }).join("|") + "#" + (selectedId || "");
+        if (select.dataset.signature === signature) return;
+        select.dataset.signature = signature;
+        select.replaceChildren();
+        var placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = rows.length ? "Switch case" : "No cases in the catalog";
+        select.appendChild(placeholder);
+        rows.forEach(function (item) {
+            var option = document.createElement("option");
+            option.value = item.case_id;
+            option.textContent = item.label || item.case_id;
+            select.appendChild(option);
+        });
+        select.value = selectedId && rows.some(function (item) { return item.case_id === selectedId; }) ? selectedId : "";
     }
 
     function sameActor(first, current) {
@@ -341,6 +447,8 @@
     }
 
     function invalidate() {
+        if (activeController) activeController.abort();
+        activeController = new AbortController();
         ++refreshToken;
         state = derive(null, null, null, null);
         paint();
@@ -376,7 +484,13 @@
             shared.session_revision === undefined ? null : shared.session_revision]);
     }
 
-    async function privateSession(record) {
+    function boundaryAccess(contentState, assignment) {
+        if (contentState === "locked") return "locked";
+        if (assignment && (assignment.state === "removed" || assignment.revoked === true || assignment.key_grant === "revoked")) return "revoked";
+        return contentState || "";
+    }
+
+    async function privateSession(record, signal) {
         if (window.workspaceClient && window.workspaceClient._privacyActive === false) {
             return {contentState: "disconnected", session: null};
         }
@@ -388,7 +502,7 @@
         // The cookie supplies the actor; the case headers select its canonical
         // storage owner. A tenant user_id query would be a forged actor claim.
         var path = "/api/complaint-workspace/session?case_id=" + encodeURIComponent(record.case_id);
-        var before = await readJson(path, headers);
+        var before = await readJson(path, headers, signal);
         if (isLocked(before)) return {contentState: "locked", session: null};
         if (!before.ok || !before.body || !before.body.session
                 || before.body.session.user_id !== record.tenant_id) {
@@ -396,7 +510,7 @@
         }
         // Reopen through the actual key/authorization owner before publishing
         // plaintext. A changed key or persisted revision retires the first read.
-        var after = await readJson(path, headers);
+        var after = await readJson(path, headers, signal);
         if (isLocked(after)) return {contentState: "locked", session: null};
         if (!after.ok || !after.body || !after.body.session
                 || after.body.session.user_id !== record.tenant_id
@@ -411,18 +525,20 @@
         applyAudience();
         invalidate();
         var token = refreshToken;
+        var signal = activeController ? activeController.signal : undefined;
         var context = currentContext();
         try {
-            var actor = await readJson("/api/complaint-workspace/auth/session");
+            var actor = await readJson("/api/complaint-workspace/auth/session", null, signal);
             if (token !== refreshToken) return;
             if (!actor.ok) {
+                noteBoundary("", "", "logged-out");
                 state = derive(null, null, null, null);
                 paint();
                 finished();
                 return;
             }
-            var catalog = await readJson("/api/cases/session");
-            var assignments = await readJson("/api/cases/assignments");
+            var catalog = await readJson("/api/cases/session", null, signal);
+            var assignments = await readJson("/api/cases/assignments", null, signal);
             if (token !== refreshToken) return;
             if ((catalog.ok && catalog.body.actor_principal_id !== actor.body.principal_id)
                     || (assignments.ok && assignments.body.actor_principal_id !== actor.body.principal_id)) {
@@ -435,11 +551,11 @@
             var content = {contentState: "unavailable", session: null};
             if (preview.caseId && preview.relationship === "owner") {
                 var match = (catalogBody.cases || []).find(function (item) { return item.case_id === preview.caseId; });
-                if (match && match.tenant_id) content = await privateSession(match);
+                if (match && match.tenant_id) content = await privateSession(match, signal);
             }
             if (token !== refreshToken) return;
-            var currentActor = await readJson("/api/complaint-workspace/auth/session");
-            var currentCatalog = await readJson("/api/cases/session");
+            var currentActor = await readJson("/api/complaint-workspace/auth/session", null, signal);
+            var currentCatalog = await readJson("/api/cases/session", null, signal);
             if (token !== refreshToken) return;
             if (!currentActor.ok || !sameActor(actor.body, currentActor.body) || context !== currentContext()
                     || currentCatalog.ok !== catalog.ok
@@ -459,9 +575,19 @@
                 if (token !== refreshToken) return;
             }
             state = derive(currentActor.body, catalogBody, assignmentBody, content.session, content.contentState);
+            var access = boundaryAccess(content.contentState, state.assignment);
+            if (committed.access === "reviewer" && state.relationship !== "reviewer") access = "revoked";
+            noteBoundary(state.principalId, state.caseId, access);
+            if (state.caseId && state.relationship === "owner") committed.access = access === "locked" ? "locked" : "owner";
+            else if (state.relationship === "reviewer") committed.access = "reviewer";
+            var sessionNode = shellHost();
+            if (sessionNode) {
+                sessionNode.dataset.sessionKey = content.session ? sessionIdentity(content.session) : "";
+            }
             paint();
             finished();
         } catch (error) {
+            if (error && error.name === "AbortError") return;
             if (token !== refreshToken) return;
             // A failed refresh must not retain another actor's case or content.
             state = derive(null, null, null, null);
@@ -528,6 +654,8 @@
         invalidate: invalidate,
         scheduleRefresh: scheduleRefresh,
         showTask: showTask,
+        applyViewport: applyViewport,
+        clearPlaintext: clearPagePlaintext,
         snapshot: function () {
             return {
                 case: document.getElementById("complaint-case-shell-case").textContent.trim(),
@@ -542,6 +670,7 @@
             };
         }
     };
+    window.addEventListener("resize", applyViewport);
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", scheduleRefresh);
     } else {

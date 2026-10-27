@@ -1,7 +1,39 @@
+.case-catalog-page {
+    overflow-wrap: anywhere;
+}
+
+.case-catalog-page,
+.case-catalog-page * {
+    box-sizing: border-box;
+}
+
+.case-catalog-page main,
+.case-catalog-page form,
+.case-catalog-page section,
+.case-catalog-page fieldset,
+.case-catalog-page ul {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.case-catalog-page fieldset label,
+.case-catalog-page .case-shell__switch {
+    display: block;
+}
+
+.case-catalog-page input,
+.case-catalog-page select,
+.case-catalog-page textarea,
+.case-catalog-page button {
+    max-width: 100%;
+}
+
 .case-shell {
     position: sticky;
     top: 0;
     z-index: 20;
+    box-sizing: border-box;
+    max-width: 100%;
     margin: 0;
     padding: var(--cx-space-4, 16px);
     background: var(--cx-color-panel, #fffcf8);
@@ -64,11 +96,32 @@
     background: var(--cx-color-accent-soft, #ffedd5);
 }
 
+.case-shell__body {
+    display: block;
+    min-width: 0;
+}
+
+.case-shell__switch select {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    font: inherit;
+}
+
 #complaint-case-shell-nav {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     margin: 8px 0;
+    min-width: 0;
+}
+
+.case-shell__more {
+    flex: 1 1 100%;
+}
+
+.case-shell__task[hidden] {
+    display: none;
 }
 
 .case-shell__panel {
@@ -88,7 +141,35 @@ body[data-case-task-flow="ordinary"] [data-case-shell-diagnostic="true"] {
     display: none !important;
 }
 
-@media (max-width: 720px) {
+@media (min-width: 1100px) {
+    .case-shell__body {
+        display: grid;
+        grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+    }
+
+    #complaint-case-shell-nav {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .case-shell__more {
+        display: none;
+    }
+}
+
+@media (min-width: 768px) and (max-width: 1099px) {
+    .case-shell__identity {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .case-shell__more {
+        display: none;
+    }
+}
+
+@media (max-width: 767px) {
     .case-shell__identity {
         grid-template-columns: 1fr;
     }
@@ -96,7 +177,12 @@ body[data-case-task-flow="ordinary"] [data-case-shell-diagnostic="true"] {
 
 @media (max-width: 320px) {
     .case-shell {
-        padding: 12px;
+        padding: 8px;
+    }
+
+    .case-shell__task,
+    #complaint-case-shell-next {
+        flex: 1 1 100%;
     }
 }
 
