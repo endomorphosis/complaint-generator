@@ -228,8 +228,11 @@
     function noteBoundary(principalId, caseId, access) {
         var actorChanged = committed.principalId && committed.principalId !== principalId;
         var caseChanged = committed.caseId && committed.caseId !== caseId;
-        var closed = access === "locked" || access === "revoked" || access === "logged-out"
-            || access === "unavailable" || access === "disconnected";
+        // Reviewers use the grant owner rather than the owner-only private
+        // session probe; its unattempted default is not a reviewer failure.
+        var privateUnavailable = state.relationship === "owner"
+            && (access === "unavailable" || access === "disconnected");
+        var closed = access === "locked" || access === "revoked" || access === "logged-out" || privateUnavailable;
         var fields = document.getElementById("selected-case");
         // Preserve only fields already rendered from this actor/case's real
         // catalog response. A refresh can discover a change from another view.
