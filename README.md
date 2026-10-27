@@ -195,6 +195,11 @@ stay in their existing epoch; `status` and `stop` use the recorded launch root.
 `doctor` reports free bytes and, when local pinned Git trees are available,
 refuses a filesystem smaller than their tracked-file cold-checkout lower bound.
 That bound excludes filesystem overhead and future generated artifacts.
+Resource admission also checks free bytes/inodes and the readonly flag of the
+standard rootful containerd metadata directory, `/var/lib/containerd`, separately
+from worker storage and Docker's data root. The standard directory must exist;
+custom, rootless and external containerd locations are not discovered by this
+check. These observations neither reserve capacity nor verify daemon permissions.
 `stop` terminates only the campaign's owned process tree. Runtime files live
 outside the repository and retain process birth identities. The campaign pins
 Grok 4.7 with low reasoning through `ipfs_accelerate_py.llm_router`, allows up to

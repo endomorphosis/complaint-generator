@@ -21,6 +21,14 @@ pytestmark = [pytest.mark.no_auto_llm, pytest.mark.no_auto_network, pytest.mark.
 
 
 @pytest.fixture(autouse=True)
+def private_containerd_metadata(tmp_path, monkeypatch):
+    # Real fixture directory/capacity, replacing only fixed-path discovery.
+    metadata = tmp_path / "containerd_metadata"
+    metadata.mkdir(mode=0o700)
+    monkeypatch.setattr(runner, "_containerd_metadata_directory", lambda: metadata)
+
+
+@pytest.fixture(autouse=True)
 def restore_cwd(monkeypatch):
     monkeypatch.chdir(ROOT)
 
@@ -1345,7 +1353,7 @@ def test_absent_resource_locations_use_owned_ancestor_without_creation(tmp_path,
     monkeypatch.setattr(runner.os, 'statvfs', lambda path: checked.append(Path(path)) or _capacity_metadata())
     monkeypatch.setattr(runner.os, 'access', lambda *a, **k: True)
     observed = runner._resource_capacity(root, state, worktrees, {'HOME': str(home), 'TMPDIR': str(temporary)})
-    assert observed['ready'] is True and len(checked) == 5
+    assert observed['ready'] is True and len(checked) == 6
     assert observed['roles']['state']['filesystem_path'] == str(tmp_path)
     assert not state.parent.exists() and not worktrees.parent.exists() and not temporary.parent.exists()
     assert observed['capacity_reserved'] is False
@@ -1443,9 +1451,9 @@ def test_native_resource_alarm_stops_remaining_filesystem_observations(tmp_path,
         {'HOME': str(paths['home']), 'TMPDIR': str(paths['temporary'])})
     assert calls == [paths['repository']]
     assert observed['ready'] is False and observed['reason'] == 'resource_observation_timed_out'
-    assert len(observed['roles']) == 5 and all(row['ready'] is False for row in observed['roles'].values())
+    assert len(observed['roles']) == 6 and all(row['ready'] is False for row in observed['roles'].values())
     assert all(observed['roles'][name]['reason'] == 'unobserved_after_timeout'
-        for name in ('state', 'worktrees', 'home', 'temporary'))
+        for name in ('state', 'worktrees', 'home', 'temporary', 'containerd_metadata'))
     assert observed['paid_dispatch'] is False and observed['live_wait_or_lease_claimed'] is False
 
 

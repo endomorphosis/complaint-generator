@@ -38,7 +38,10 @@ def _world(tmp_path, *, available=True):
     return repo
 
 
-def _observed_roles_ready(monkeypatch):
+def _observed_roles_ready(monkeypatch, tmp_path):
+    metadata = tmp_path / "containerd_metadata"
+    metadata.mkdir(mode=0o700)
+    monkeypatch.setattr(runner, "_containerd_metadata_directory", lambda: metadata)
     # The first role sample is healthy; a later worktree sample may differ.
     # No policy floor is lowered and filesystem ownership/access stay real.
     monkeypatch.setattr(runner.os, "statvfs", lambda _path: SimpleNamespace(
@@ -84,7 +87,7 @@ def _run(tmp_path, repo, *, admitted):
 @pytest.mark.parametrize("capacity", ["insufficient", "unavailable"])
 def test_actual_native_pass_refuses_cold_checkout_without_selection(tmp_path, monkeypatch, capacity):
     repo = _world(tmp_path, available=capacity != "unavailable")
-    _observed_roles_ready(monkeypatch)
+    _observed_roles_ready(monkeypatch, tmp_path)
     monkeypatch.setattr(runner.shutil, "disk_usage", lambda _: SimpleNamespace(free=1))
     observed = runner._worktree_capacity(repo, tmp_path / "worktrees")
     assert observed["sufficient"] is (False if capacity == "insufficient" else None)
@@ -93,7 +96,7 @@ def test_actual_native_pass_refuses_cold_checkout_without_selection(tmp_path, mo
 
 def test_actual_native_pass_accepts_observed_space_for_exact_pinned_trees(tmp_path, monkeypatch):
     repo = _world(tmp_path)
-    _observed_roles_ready(monkeypatch)
+    _observed_roles_ready(monkeypatch, tmp_path)
     monkeypatch.setattr(runner.shutil, "disk_usage", lambda _: SimpleNamespace(free=1_000_000))
     observed = runner._worktree_capacity(repo, tmp_path / "worktrees")
     assert observed["sufficient"] is True

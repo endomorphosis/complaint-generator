@@ -669,6 +669,15 @@ class CampaignResourceHold(RuntimeError):
         super().__init__("campaign_resource_hold:" + str(observation.get("reason", "unavailable")))
 
 
+def _containerd_metadata_directory() -> Path:
+    """Native's standard rootful containerd metadata location, independently of DockerRootDir.
+
+    This does not discover custom/rootless/external daemon configurations.
+    An absent standard directory is unavailable, never an ancestor substitute.
+    """
+    return Path("/var/lib/containerd")
+
+
 def _resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
                        environment: Mapping[str, str]) -> dict[str, Any]:
     """Observe each storage role without creating paths or reserving capacity.
@@ -678,7 +687,8 @@ def _resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
     """
     paths = {"repository": repo_root, "state": state_dir, "worktrees": worktree_root,
              "home": Path(environment.get("HOME") or Path.home()),
-             "temporary": Path(environment.get("TMPDIR") or tempfile.gettempdir())}
+             "temporary": Path(environment.get("TMPDIR") or tempfile.gettempdir()),
+             "containerd_metadata": _containerd_metadata_directory()}
     roles = {}
     timed_out = False
     for role, raw_path in paths.items():
@@ -688,8 +698,10 @@ def _resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
             if not path.is_absolute() or path.resolve(strict=False) != path:
                 raise ValueError("resource path is not canonical")
             probe = path
-            while not probe.exists() and probe != probe.parent:
-                probe = probe.parent
+            daemon_metadata = role == "containerd_metadata"
+            if not daemon_metadata:
+                while not probe.exists() and probe != probe.parent:
+                    probe = probe.parent
             info = probe.stat()
             if not stat.S_ISDIR(info.st_mode) or (probe != path and info.st_uid != os.getuid()):
                 raise ValueError("absent resource path lacks an owned existing directory")
@@ -698,12 +710,18 @@ def _resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
             if any(type(value) is not int or value < 0 for value in fields) or fields[1] == 0 or fields[3] == 0:
                 raise ValueError("resource capacity metadata is unavailable")
             free_bytes, free_inodes = fields[0] * fields[1], fields[2]
-            writable = (not available.f_flag & os.ST_RDONLY
-                        and os.access(probe, os.W_OK | os.X_OK, effective_ids=True))
+            # Rootful containerd writes its root-owned0700 metadata directory.
+            # Operator access is irrelevant there; observe filesystem capacity
+            # and its readonly flag without claiming daemon permission proof.
+            writable = (not available.f_flag & os.ST_RDONLY and (daemon_metadata
+                        or os.access(probe, os.W_OK | os.X_OK, effective_ids=True)))
             ready = bool(writable and free_bytes >= RESOURCE_MIN_FREE_BYTES and free_inodes >= RESOURCE_MIN_FREE_INODES)
             row.update(filesystem_path=str(probe), free_bytes=free_bytes, free_inodes=free_inodes,
                        writable_observed=bool(writable), ready=ready,
                        reason="observed_capacity_ready" if ready else "local_capacity_insufficient")
+            if daemon_metadata:
+                row.update(path_source="standard_rootful_containerd",
+                           write_access_scope="filesystem_flag_for_rootful_daemon")
         except TimeoutError:
             # Native's hook alarm is an OSError subclass. Stop this observation
             # immediately; swallowing it and proceeding would lose its bound.
