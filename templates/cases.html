@@ -179,8 +179,9 @@
         return payload;
     }
 
-    function renderCases(cases) {
+    function renderCases(cases, principalId) {
         var list = document.getElementById("case-list");
+        list.dataset.actorPrincipalId = principalId || "";
         var empty = document.getElementById("case-list-empty");
         var status = document.getElementById("case-list-status");
         list.replaceChildren();
@@ -194,6 +195,7 @@
             empty.hidden = true;
             empty.textContent = "";
             list.dataset.state = "ready";
+            list.dataset.readyBadge = "false";
         }
         cases.forEach(function (item) {
             var row = document.createElement("li");
@@ -285,7 +287,7 @@
     async function loadSession(ownGeneration) {
         var session = await api("/api/cases/session");
         if (ownGeneration !== generation) return;
-        renderCases(session.cases || []);
+        renderCases(session.cases || [], session.actor_principal_id);
         if (session.selected_case_id) {
             selected = session.selected_case_id;
             var current = (session.cases || []).find(function (item) { return item.case_id === selected; });
@@ -312,6 +314,7 @@
         document.getElementById("assignment-content").textContent = "";
         document.getElementById("lawyer-select").replaceChildren();
         document.getElementById("case-auth-status").textContent = "Signing in";
+        window.complaintEntryHold = "";
         showError("");
         renderCases([]);
         document.getElementById("case-list-empty").hidden = true;
@@ -342,9 +345,20 @@
                 document.getElementById("case-list-status").hidden = true;
                 document.getElementById("case-list-status").textContent = "";
                 document.getElementById("case-list-empty").hidden = false;
-                document.getElementById("case-list-empty").textContent = "No cases are loaded yet.";
+                document.getElementById("case-list-empty").textContent = error.message === "authentication_failed"
+                    ? "Sign-in was denied. No case was opened."
+                    : "No cases are loaded yet.";
                 document.getElementById("case-list").dataset.state = "error";
+                document.getElementById("case-list").dataset.readyBadge = "false";
                 showError(error.message);
+                var entry = document.getElementById("complaint-entry");
+                if (entry && error.message === "authentication_failed") {
+                    window.complaintEntryHold = "denied";
+                    entry.dataset.entry = "denied";
+                    entry.dataset.readyBadge = "false";
+                    document.getElementById("complaint-entry-title").textContent = "This session is denied";
+                    document.getElementById("complaint-entry-boundary").textContent = "Sign-in was denied. No replacement case was opened.";
+                }
             }
         }
     });
@@ -359,7 +373,7 @@
             document.getElementById("case-label").value = "";
             var listed = await api("/api/cases");
             if (ownGeneration !== generation) return;
-            renderCases(listed.cases || []);
+            renderCases(listed.cases || [], listed.actor_principal_id);
             if (window.complaintCaseShell) window.complaintCaseShell.scheduleRefresh();
             showError("");
         } catch (error) {
@@ -593,6 +607,11 @@
     document.getElementById("case-logout").addEventListener("click", function () {
         logout();
     });
+
+    if (window.location.hash === "#create-case") {
+        var beginLabel = document.getElementById("case-label");
+        if (beginLabel) beginLabel.focus();
+    }
 
     window.complaintCasesSelect = selectCase;
     window.retireComplaintCaseRequests = function () {

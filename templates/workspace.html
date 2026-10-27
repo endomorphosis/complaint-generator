@@ -3416,7 +3416,13 @@
         <h2 id="workspace-error-summary-title">Workspace needs attention</h2>
         <ul id="workspace-error-summary-list"></ul>
     </div>
-    <p id="workspace-locked-state" class="cx-status cx-status--locked" role="status" hidden>Case content stays locked until this browser session unlocks the private key. Locked content is not replaced with a new case.</p>
+    <p id="workspace-locked-state" class="cx-status cx-status--locked" role="status" hidden>Case content stays locked until an authorized local key owner unlocks the private keys outside this page. Check access or reload afterward. Locked content is not replaced with a new case.</p>
+    <section id="workspace-entry-guide" aria-labelledby="workspace-entry-guide-title">
+        <h2 id="workspace-entry-guide-title">Begin a complaint</h2>
+        <p>A new complaint starts from your own account of what happened. No legal theory is chosen first, and no empty case is created from this page.</p>
+        <p><a id="workspace-begin-complaint" href="/cases#create-case">Begin a complaint</a></p>
+        <p>If you already have a case, open <a href="/cases">My cases</a>, sign in, and choose that case. An authorized local key owner must unlock locked keys outside this page; checking private key access then resumes the saved question. Missing keys, denied sessions, and unavailable capabilities stay visible. Browser storage is not a complaint record, and this page grants no remote processing consent.</p>
+    </section>
     <section id="complaint-case-shell" data-state="loading"></section>
     <div class="shell" id="workspace-main" tabindex="-1">
         <section class="topbar" aria-label="Workspace identity">
