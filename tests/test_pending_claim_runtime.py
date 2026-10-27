@@ -1,8 +1,10 @@
 """Host source admission and custody invariants, using private synthetic roots.
 
-The small companion fixture exercises the loader protocol only. It is not a
-Native release receipt or evidence that an actual campaign claim was released.
-The SDK's own tests qualify its real review/reconcile implementation.
+The companion protocol has its own explicitly synthetic, committed SDK tree;
+it never assumes the installed Native API is absent. Separate tests admit the
+actual current pinned Native module without a companion configuration. Neither
+fixture is evidence that an actual campaign claim was released. The SDK's own
+tests qualify its real review/reconcile implementation.
 """
 from copy import deepcopy
 import hashlib
@@ -28,6 +30,44 @@ def _git(root, *args):
     return subprocess.check_output(["git", *args], cwd=root).decode().strip()
 
 
+def _protocol_sdk(tmp_path, monkeypatch):
+    """Real Git/source custody for an explicitly synthetic companion owner.
+
+    Production source verification is unchanged. Minimal committed modules
+    provide only the loader's identity protocol, not Native adjudication.
+    """
+    sdk = tmp_path / "synthetic-runtime-sdk"; sdk.mkdir()
+    parent_name = runtime.MODULE.rsplit(".", 1)[0]
+    names = [parent_name, native.__name__,
+        parent_name + ".current_incident_adjudication",
+        parent_name + ".portal_task_state_control_plane",
+        "ipfs_accelerate_py.agent_supervisor.merge.worktree_lifecycle",
+        "ipfs_accelerate_py.agent_supervisor.merge.checkout_lock",
+        "ipfs_accelerate_py.agent_supervisor.merge.merge_queue",
+        "ipfs_accelerate_py.agent_supervisor.merge.workspace_quarantine",
+        "ipfs_accelerate_py.agent_supervisor.runtime.grok_cli_runner",
+        "ipfs_accelerate_py.agent_supervisor.proof.code_proof_obligations",
+        "ipfs_accelerate_py.agent_supervisor.validation.proposal_validation"]
+    paths = {}
+    for name in names:
+        path = sdk / (name.replace(".", "/") + ("/__init__.py" if name == parent_name else ".py"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('"""Synthetic loader protocol fixture; no Native effects."""\nSYNTHETIC_PROTOCOL_ONLY = True\n')
+        paths[name] = path
+    _git(sdk, "init", "-q"); _git(sdk, "add", ".")
+    _git(sdk, "-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.invalid",
+         "commit", "-qm", "Synthetic companion-mode source owner")
+    modules = {}
+    for name, path in paths.items():
+        spec = importlib.util.spec_from_file_location(name, path,
+            submodule_search_locations=[str(path.parent)] if name == parent_name else None)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        monkeypatch.setitem(sys.modules, name, module)
+        modules[name] = module
+    return sdk, modules[native.__name__], modules[parent_name]
+
+
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     from tests.test_improvement_recovery import _spec_text
@@ -47,7 +87,9 @@ def world(tmp_path, monkeypatch):
          "add", runtime.RELATIVE)
     _git(helper_root, "-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.invalid",
          "commit", "-qm", "Synthetic loader fixture")
-    sdk = Path(native.__file__).resolve().parents[3]
+    # Build the plan using the real SDK before installing the deliberately
+    # limited protocol modules for this fixture's optional companion branch.
+    sdk, protocol_native, parent = _protocol_sdk(tmp_path, monkeypatch)
     config = {"schema": runtime.SCHEMA, "repo_root": str(root), "state_dir": str(state),
               "spec_path": str(spec), "spec_sha256": hashlib.sha256(spec.read_bytes()).hexdigest(),
               "plan_id": plan_id, "plan_path": str(plan), "plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
@@ -57,27 +99,25 @@ def world(tmp_path, monkeypatch):
               "helper_sha256": hashlib.sha256(helper.read_bytes()).hexdigest()}
     path = state / runtime.CONFIG_NAME
     path.write_text(json.dumps(config)); path.chmod(0o600)
-    parent = __import__(runtime.MODULE.rsplit(".", 1)[0], fromlist=["x"])
     monkeypatch.delitem(sys.modules, runtime.MODULE, raising=False)
     monkeypatch.delattr(parent, "pending_task_claim_recovery", raising=False)
     yield SimpleNamespace(root=root, spec=spec, state=state, plan=plan, helper=helper,
-        helper_root=helper_root, config=config, config_path=path, parent=parent, record={"plan_id": plan_id})
+        helper_root=helper_root, config=config, config_path=path, parent=parent,
+        native=protocol_native, record={"plan_id": plan_id})
     sys.modules.pop(runtime.MODULE, None)
     if hasattr(parent, "pending_task_claim_recovery"):
         delattr(parent, "pending_task_claim_recovery")
 
 
 def _load(w):
-    return runtime.load_runtime(w.root, w.spec, w.state, w.record, native)
+    return runtime.load_runtime(w.root, w.spec, w.state, w.record, w.native)
 
 
 def test_source_pinned_loader_uses_true_canonical_identity_without_changing_native(world):
-    # The genuine SDK CLI module applies its own accepted-package bootstrap
-    # on first import. Establish that normal SDK state before measuring the
-    # companion loader; never restore paths to conceal Native behavior.
-    importlib.import_module('ipfs_accelerate_py.agent_supervisor.runtime.grok_cli_runner')
+    # This measures only the explicitly synthetic companion protocol. Actual
+    # current Native default admission has separate, unmodified-source tests.
     old_path = list(sys.path); old_package_path = list(world.parent.__path__)
-    old_native = sys.modules[native.__name__]
+    old_native = sys.modules[world.native.__name__]
     module, proof = _load(world)
     assert module.__name__ == runtime.MODULE
     assert module.__file__ == str(world.helper) == module.__spec__.origin
@@ -86,7 +126,7 @@ def test_source_pinned_loader_uses_true_canonical_identity_without_changing_nati
     assert proof["mode"] == "pinned_companion" and proof["sha256"] == world.config["helper_sha256"]
     assert list(sys.path) == old_path and list(world.parent.__path__) == old_package_path
     assert str(world.helper_root) not in sys.path
-    assert sys.modules[native.__name__] is old_native
+    assert sys.modules[world.native.__name__] is old_native is world.native
     assert _load(world)[0] is module
 
 
@@ -134,14 +174,14 @@ def test_source_and_campaign_changes_are_detected(world, change):
 
 def test_missing_configuration_and_missing_native_facade_fail_closed(world):
     world.config_path.unlink()
-    assert not (Path(native.__file__).resolve().parents[3] / runtime.RELATIVE).exists()
+    assert not (Path(world.native.__file__).resolve().parents[3] / runtime.RELATIVE).exists()
     with pytest.raises(ValueError, match="runtime_unavailable"): _load(world)
 
 
 def test_optional_unavailable_runtime_preserves_default_refusal_without_touching_claim(world):
     world.config_path.unlink()
     claim = world.state / "synthetic-claim.json"; claim.write_bytes(b'{"kept":true}')
-    result = runtime.reconcile_pending_claim(world.root, world.spec, world.state, world.record, native,
+    result = runtime.reconcile_pending_claim(world.root, world.spec, world.state, world.record, world.native,
         SimpleNamespace(state_path=world.state / 'state.json'), 'CIMP-OPS-03')
     assert result['reconciled'] is False and result['blocked'] is True
     assert result['reason'] == 'pending_claim_runtime_unavailable'
@@ -194,7 +234,7 @@ def test_native_bound_facades_are_preferred_to_module_functions(world, monkeypat
     module = SimpleNamespace(review=lambda *_a, **_kw: pytest.fail('module bypassed native facade'),
         reconcile=lambda *_a, **_kw: pytest.fail('module bypassed native facade'))
     monkeypatch.setattr(runtime, 'load_runtime', lambda *_: (module, {'mode': 'native'}))
-    assert runtime.reconcile_pending_claim(world.root, world.spec, world.state, world.record, native,
+    assert runtime.reconcile_pending_claim(world.root, world.spec, world.state, world.record, world.native,
         FacadeProtocol(), 'task')['reconciled'] is True
     assert calls == [('review', 'task'), ('reconcile', {'task_id': 'task'})]
 
@@ -217,9 +257,9 @@ def test_claim_release_cannot_hide_any_native_state_change(world, monkeypatch, c
     daemon = SimpleNamespace(state_path=world.state / "state.json")
     if changed_field:
         with pytest.raises(ValueError, match="native_state_changed"):
-            runtime.reconcile_pending_claim(world.root, world.spec, world.state, world.record, native, daemon, "CIMP-OPS-03")
+            runtime.reconcile_pending_claim(world.root, world.spec, world.state, world.record, world.native, daemon, "CIMP-OPS-03")
     else:
-        result = runtime.reconcile_pending_claim(world.root, world.spec, world.state, world.record, native, daemon, "CIMP-OPS-03")
+        result = runtime.reconcile_pending_claim(world.root, world.spec, world.state, world.record, world.native, daemon, "CIMP-OPS-03")
         assert result["reconciled"] and result["completion_authority"] is False
     assert calls == [{"task_id": "CIMP-OPS-03"}] and not claim.exists()
 
@@ -233,8 +273,69 @@ def test_runtime_reproof_prevents_changed_config_between_review_and_reconcile(wo
     monkeypatch.setattr(module, "review", review)
     monkeypatch.setattr(module, "reconcile", lambda *_a, **_kw: pytest.fail("changed config admitted"))
     with pytest.raises(ValueError, match="unsafe_config"):
-        runtime.reconcile_pending_claim(world.root, world.spec, world.state, world.record, native,
+        runtime.reconcile_pending_claim(world.root, world.spec, world.state, world.record, world.native,
                                         SimpleNamespace(state_path=world.state / 'state.json'), 'CIMP-OPS-03')
+
+
+@pytest.fixture
+def actual_native(tmp_path):
+    """Actual current SDK and source verification; no review/release effect."""
+    sdk = Path(native.__file__).resolve().parents[3]
+    product = Path(runtime.__file__).resolve().parents[2]
+    commit = _git(sdk, "rev-parse", "HEAD")
+    assert commit == _git(product, "rev-parse", "HEAD:external/ipfs_accelerate_py")
+    assert (sdk / runtime.RELATIVE).is_file()
+    root = tmp_path / "host"; root.mkdir()
+    state = tmp_path / "state"; state.mkdir(mode=0o700)
+    spec = root / "spec.json"; spec.write_text('{}')
+    return SimpleNamespace(root=root, state=state, spec=spec, sdk=sdk, commit=commit)
+
+
+def _actual_load(w):
+    return runtime.load_runtime(w.root, w.spec, w.state, {}, native)
+
+
+def test_actual_pinned_native_runtime_is_admitted_without_companion_configuration(actual_native):
+    w = actual_native
+    assert not (w.state / runtime.CONFIG_NAME).exists()
+    module, binding = _actual_load(w)
+    path = w.sdk / runtime.RELATIVE
+    assert binding["mode"] == "native" and binding["commit"] == w.commit
+    assert binding["path"] == module.__file__ == module.__spec__.origin == str(path)
+    assert binding["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert binding["blob_oid"] == _git(w.sdk, "rev-parse", "HEAD:" + runtime.RELATIVE)
+    assert sys.modules[runtime.MODULE] is module
+    assert callable(module.review) and callable(module.reconcile)
+    assert callable(native.PortalImplementationDaemon.review_quiesced_pending_task_claim)
+    assert callable(native.PortalImplementationDaemon.reconcile_quiesced_pending_task_claim)
+    assert all(row["commit"] == w.commit and Path(row["path"]).is_relative_to(w.sdk)
+        for row in binding["native_sources"].values())
+    assert not (w.state / runtime.CONFIG_NAME).exists()
+
+
+def test_actual_native_runtime_does_not_execute_an_obsolete_companion_config(actual_native):
+    path = actual_native.state / runtime.CONFIG_NAME
+    original = b'{"obsolete_companion":"not_admitted"}\n'
+    path.write_bytes(original); path.chmod(0o600)
+    module, binding = _actual_load(actual_native)
+    assert binding["mode"] == "native" and "config_sha256" not in binding
+    assert Path(module.__file__) == actual_native.sdk / runtime.RELATIVE
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("damage", ["state_mode", "foreign_module"])
+def test_actual_native_runtime_refuses_unsafe_state_or_a_foreign_cached_module(actual_native, monkeypatch, damage):
+    if damage == "state_mode":
+        actual_native.state.chmod(0o750)
+        reason = "private_state_required"
+    else:
+        foreign = SimpleNamespace(__file__="/explicit-synthetic-foreign.py")
+        monkeypatch.setitem(sys.modules, runtime.MODULE, foreign)
+        reason = "native_facade_origin_changed"
+    with pytest.raises(ValueError, match=reason):
+        _actual_load(actual_native)
+    if damage == "foreign_module":
+        assert sys.modules[runtime.MODULE] is foreign
 
 
 def test_recovery_checkout_lease_uses_campaign_namespace_and_rejects_alias(tmp_path, monkeypatch):
