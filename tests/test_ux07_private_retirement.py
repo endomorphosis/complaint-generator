@@ -8,6 +8,25 @@ from tests.test_cimp_ux_07 import _seed, _open, _close, _sign_in, _workspace, DR
 pytestmark = [pytest.mark.no_auto_llm, pytest.mark.no_auto_network, pytest.mark.no_auto_heavy]
 
 
+def test_loaded_case_uses_the_actual_mcp_conversation_transport(tmp_path, monkeypatch):
+    world = owner_lawyer_journey_world(tmp_path / 'world')
+    inquiry_id, _revision, _evidence_id = _seed(world)
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch, world=world)
+    try:
+        _sign_in(page)
+        _workspace(page, inquiry_id)
+        actual = page.evaluate("""async tenant => {
+            try {
+                const result = await window.workspaceClient.runIntakeChatTurn(tenant, '', '', {interview_action:'status'});
+                return {ok:true, result, caseContext:window.workspaceClient.caseContext};
+            } catch (error) {return {ok:false, status:error.status, code:error.code, caseContext:window.workspaceClient.caseContext};}
+        }""", world.case.tenant_id)
+        assert actual['ok'], actual
+        assert actual['result']['session']['shared_interview']['pending_inquiry']['inquiry_id'] == inquiry_id
+    finally:
+        _close(playwright, context, node, profile, observed)
+
+
 @pytest.mark.parametrize('boundary', ['key-lock', 'logout', 'actor-change'])
 def test_loaded_canonical_case_is_retired_after_actual_access_boundary(tmp_path, monkeypatch, boundary):
     world = owner_lawyer_journey_world(tmp_path / 'world')
