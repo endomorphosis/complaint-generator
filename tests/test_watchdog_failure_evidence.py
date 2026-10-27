@@ -96,6 +96,7 @@ def test_foreign_or_aliased_capture_files_are_refused_without_overwrite(tmp_path
         return
     if damage=='world_directory':
         directory.mkdir(mode=0o755)
+        directory.chmod(0o755)  # Exercise the unsafe mode even under private umask 077.
         assert evidence.capture(directory,**inputs)['status']=='capture_unavailable' and list(directory.iterdir())==[]
         return
     result=evidence.capture(directory,**inputs)
@@ -262,3 +263,114 @@ def test_zero_ordinal_cannot_borrow_a_different_native_body_or_boolean_attempt(t
     else:inputs['observation']['attempt']=False
     assert evidence.capture(tmp_path/'watchdog',**inputs)=={'status':'capture_unavailable'}
     assert not (tmp_path/'watchdog').exists()
+
+
+@pytest.mark.parametrize('body,expected', [
+    (b'[]','not_object'), (b'{','JSONDecodeError'),
+    (b'\xff','UnicodeDecodeError'), (b'12345','size_limit'),
+])
+def test_actual_json_reader_codes_are_retained_without_private_file_bodies(tmp_path,body,expected):
+    from integrations.ipfs_accelerate import improvement_runner as runner
+    path=tmp_path/'SECRET-private-metadata.json';path.write_bytes(body)
+    result=runner._read_json(path,limit=4 if expected=='size_limit' else 100)
+    assert result['read_error']==expected
+    inputs=_inputs();inputs['observation']['status']=inputs['status']['status']='state_error'
+    inputs['status']['native_read_errors']={'heartbeat':result['read_error']}
+    captured=evidence.capture(tmp_path/'watchdog',**inputs)
+    assert captured['status']=='captured'
+    raw=_records(tmp_path/'watchdog')[0].read_bytes();record=json.loads(raw)
+    assert record['activity_evidence']['native_read_errors']=={'heartbeat':expected}
+    assert 'SECRET' not in raw.decode() and str(path) not in raw.decode()
+    assert record['observation']['progress_verified'] is False and record['completion_authority'] is False
+
+
+def test_actual_bounded_native_reader_timeout_is_retained_without_effects(tmp_path):
+    from integrations.ipfs_accelerate import improvement_runner as runner
+    state=tmp_path/'isolated-state';state.mkdir(mode=0o700)
+    before=list(state.iterdir())
+    payload,source=runner._read_native_state(Path(runner.__file__).resolve().parents[2],
+        state/'uncreated_state.json',timeout_seconds=0.0001)
+    assert payload=={'read_error':'native_state_read_timeout'} and source['source']=='unavailable'
+    assert list(state.iterdir())==before
+    inputs=_inputs();inputs['observation'].update(status='state_error',active_task_id='',active_task_cid='',attempt=0)
+    inputs['status'].update(status='state_error',native_state={},native_read_errors={'state':payload['read_error']})
+    result=evidence.capture(tmp_path/'watchdog',**inputs)
+    assert result['status']=='captured'
+    record=json.loads(_records(tmp_path/'watchdog')[0].read_bytes())
+    assert record['activity_evidence']['native_read_errors']=={'state':'native_state_read_timeout'}
+    assert record['binding']=={'task_id':None,'task_cid':None,'attempt':0,'phase':'unknown'}
+
+
+@pytest.mark.parametrize('diagnostic', [
+    None, ['SECRET-freeform'],
+    {'SECRET-foreign-source':'native_state_read_timeout'},
+    {'state':'TimeoutError: SECRET-private-path'}, {'state':'SECRETForeignError'},
+    {'state':{'message':'SECRET-private-body'}}, {'state':True},
+    {'heartbeat':'native_state_read_timeout'}, {'launcher':'PortalTaskStateControlPlaneError'},
+])
+def test_foreign_or_freeform_read_diagnostics_are_omitted(tmp_path,diagnostic):
+    inputs=_inputs();inputs['observation']['status']=inputs['status']['status']='state_error'
+    inputs['status']['native_read_errors']=diagnostic
+    result=evidence.capture(tmp_path/'watchdog',**inputs)
+    assert result['status']=='captured'
+    raw=_records(tmp_path/'watchdog')[0].read_bytes()
+    assert 'native_read_errors' not in json.loads(raw)['activity_evidence']
+    assert 'SECRET' not in raw.decode()
+
+
+def test_closed_diagnostics_distinguish_causes_without_replacing_historical_first_failure(tmp_path):
+    inputs=_inputs();inputs['observation']['status']=inputs['status']['status']='state_error'
+    directory=tmp_path/'watchdog'
+    old=evidence.capture(directory,**inputs);assert old['status']=='captured'
+    old_path=directory/'failure-evidence'/old['record'];old_bytes=old_path.read_bytes()
+    inputs['status']['native_read_errors']={'state':'native_state_reader_failed',
+        'strategy':'not_object','SECRET-source':'SECRET-message'}
+    current=evidence.capture(directory,**inputs);assert current['status']=='captured' and current['record']!=old['record']
+    path=directory/'failure-evidence'/current['record'];raw=path.read_bytes()
+    assert json.loads(raw)['activity_evidence']['native_read_errors']=={
+        'state':'native_state_reader_failed','strategy':'not_object'}
+    inputs['observed_at']=2000
+    assert evidence.capture(directory,**inputs)=={'status':'already_captured','record':current['record']}
+    inputs['status']['native_read_errors']={'state':'PortalTaskStateControlPlaneError'}
+    other=evidence.capture(directory,**inputs)
+    assert other['status']=='captured' and other['record'] not in {old['record'],current['record']}
+    inputs['status']['native_read_errors']={'SECRET-source':'SECRET-message'}
+    assert evidence.capture(directory,**inputs)=={'status':'already_captured','record':old['record']}
+    assert old_path.read_bytes()==old_bytes and path.read_bytes()==raw and 'SECRET' not in raw.decode()
+
+
+@pytest.mark.parametrize('damage',['missing','empty','foreign_source','freeform','wrong_source','other_valid_cause'])
+def test_retained_read_diagnostics_are_exact_closed_identity_without_overwrite(tmp_path,damage):
+    inputs=_inputs();inputs['observation']['status']=inputs['status']['status']='state_error'
+    inputs['status']['native_read_errors']={'state':'native_state_read_timeout'}
+    directory=tmp_path/'watchdog';result=evidence.capture(directory,**inputs)
+    assert result['status']=='captured'
+    path=directory/'failure-evidence'/result['record'];record=json.loads(path.read_bytes())
+    if damage=='missing':record['activity_evidence'].pop('native_read_errors')
+    else:
+        record['activity_evidence']['native_read_errors']={
+            'empty':{}, 'foreign_source':{'SECRET-source':'TimeoutError'},
+            'freeform':{'state':'TimeoutError: SECRET-private-message'},
+            'wrong_source':{'heartbeat':'native_state_read_timeout'},
+            'other_valid_cause':{'state':'native_state_reader_failed'},
+        }[damage]
+    path.write_text(json.dumps(record));path.chmod(0o600);original=path.read_bytes()
+    assert evidence.capture(directory,**inputs)=={'status':'capture_unavailable'}
+    assert path.read_bytes()==original
+
+
+def test_host_state_error_retains_actual_code_without_promoting_progress_or_recovery(tmp_path,monkeypatch):
+    from integrations.ipfs_accelerate import improvement_runner as runner
+    from tests.test_campaign_watchdog import _adapter
+    path=tmp_path/'SECRET-private-heartbeat.json';path.write_text('{')
+    failure=runner._read_json(path)
+    watcher,_,view=_adapter(tmp_path,monkeypatch,state='state_error')
+    view['native_read_errors']={'heartbeat':failure['read_error']}
+    monkeypatch.setattr(watcher,'recover',lambda *_:pytest.fail('read error dispatched recovery'))
+    report=watcher.run_once()
+    assert report['status']=='refused' and report['reason']=='recovery_not_authorized_or_no_pending_work'
+    assert report['initial_failure_capture']['status']=='captured'
+    record=json.loads(_records(watcher.directory)[0].read_bytes())
+    assert record['activity_evidence']['native_read_errors']=={'heartbeat':'JSONDecodeError'}
+    assert record['observation']['progress_verified'] is False and record['observation']['recovery_permitted'] is False
+    assert not (watcher.directory/'campaign-progress-watchdog.json').exists()
