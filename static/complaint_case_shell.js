@@ -28,6 +28,7 @@
     };
     var refreshToken = 0;
     var refreshTimer = 0;
+    var retiringWorkspace = false;
 
     function text(value) {
         return value === undefined || value === null ? "" : String(value);
@@ -164,8 +165,8 @@
         return pending.inquiry_id || pending.prompt ? pending : null;
     }
 
-    async function readJson(path) {
-        var response = await fetch(path, {credentials: "same-origin", headers: {accept: "application/json"}});
+    async function readJson(path, headers) {
+        var response = await fetch(path, {credentials: "same-origin", headers: Object.assign({accept: "application/json"}, headers || {})});
         var payload = null;
         try { payload = await response.json(); } catch (error) { payload = null; }
         return {ok: response.ok, status: response.status, body: payload};
@@ -186,7 +187,7 @@
         return visible[0] || null;
     }
 
-    function derive(actor, catalog, assignments, workspaceSession) {
+    function derive(actor, catalog, assignments, workspaceSession, contentState) {
         var next = {
             authenticated: Boolean(actor && actor.authenticated),
             principalId: actor && actor.principal_id ? text(actor.principal_id) : "",
@@ -212,13 +213,11 @@
             selected = owned.find(function (item) { return item.case_id === clientCase.case_id; }) || null;
         }
         var assignment = pickAssignment(assignments && assignments.assignments, next.principalId);
-        var lockedNode = document.getElementById("workspace-locked-state");
-        var lockedVisible = Boolean(lockedNode && !lockedNode.hidden);
         if (selected) {
             next.relationship = "owner";
             next.caseId = text(selected.case_id);
             next.caseLabel = text(selected.label || selected.case_id);
-            next.gaps = Array.isArray(selected.unresolved_gaps) ? selected.unresolved_gaps.map(text) : [];
+            next.gaps = contentState === "available" && Array.isArray(selected.unresolved_gaps) ? selected.unresolved_gaps.map(text) : [];
             next.privacy = "Local private is the default";
         } else if (assignment && assignment.case_id) {
             next.relationship = "reviewer";
@@ -239,11 +238,19 @@
             next.nextKind = "select";
             return next;
         }
-        if (lockedVisible) {
+        if (next.relationship === "owner" && contentState === "locked") {
             next.privacy = "Locked until the private key is available";
             next.stage = "Locked";
             next.next = "Unlock the case";
             next.nextKind = "unlock";
+            return next;
+        }
+        if (next.relationship === "owner" && (contentState === "unavailable" || contentState === "disconnected")) {
+            next.session = null;
+            next.privacy = contentState === "disconnected" ? "Private workspace is disconnected" : "Private case content is unavailable";
+            next.stage = contentState === "disconnected" ? "Disconnected" : "Unavailable";
+            next.next = contentState === "disconnected" ? "Reconnect to the case" : "Retry the case";
+            next.nextKind = contentState === "disconnected" ? "reconnect" : "retry";
             return next;
         }
         if (next.relationship === "reviewer" && assignment.state === "pending") {
@@ -313,70 +320,176 @@
         host.dataset.state = state.authenticated ? (state.caseId ? "ready" : "empty") : "signed-out";
         var legacy = document.getElementById("workspace-case-context-value");
         var legacyHost = document.getElementById("workspace-case-context");
-        if (legacy && state.caseId) {
-            legacy.textContent = caseNode.textContent;
-            if (legacyHost) legacyHost.dataset.state = "ready";
+        if (legacy) {
+            legacy.textContent = state.caseId ? caseNode.textContent : "No case selected";
+            if (legacyHost) legacyHost.dataset.state = state.caseId ? "ready" : "empty";
         }
         var active = host.querySelector("[data-case-task][aria-current='page']");
         fillPanel(active ? active.getAttribute("data-case-task") : "overview");
     }
 
+    function sameActor(first, current) {
+        return Boolean(first && current && first.authenticated === true && current.authenticated === true
+            && first.principal_id && first.principal_id === current.principal_id
+            && first.tenant_id === current.tenant_id && first.generation === current.generation
+            && first.expires_at === current.expires_at
+            && JSON.stringify(first.roles || []) === JSON.stringify(current.roles || []));
+    }
+
+    function currentContext() {
+        return JSON.stringify(window.workspaceClient && window.workspaceClient.caseContext || null);
+    }
+
+    function invalidate() {
+        ++refreshToken;
+        state = derive(null, null, null, null);
+        paint();
+        var host = shellHost();
+        if (host) {
+            host.dataset.refreshState = "loading";
+            host.setAttribute("aria-busy", "true");
+        }
+    }
+
+    function finished() {
+        var host = shellHost();
+        if (host) {
+            host.dataset.refreshState = "settled";
+            host.setAttribute("aria-busy", "false");
+        }
+    }
+
+    function rejected(token) {
+        if (token !== refreshToken) return;
+        invalidate();
+        scheduleRefresh();
+    }
+
+    function isLocked(response) {
+        return Boolean(response && !response.ok && response.body && ["unlock_needed", "key_unavailable"].indexOf(response.body.error) !== -1);
+    }
+
+    function sessionIdentity(payload) {
+        var session = payload && payload.session || {};
+        var shared = session.shared_interview || {};
+        return JSON.stringify([session.user_id, session.case_id || "", session.private_revision || "",
+            shared.session_revision === undefined ? null : shared.session_revision]);
+    }
+
+    async function privateSession(record) {
+        if (window.workspaceClient && window.workspaceClient._privacyActive === false) {
+            return {contentState: "disconnected", session: null};
+        }
+        if (!Number.isSafeInteger(record.directory_revision) || record.directory_revision < 1) {
+            return {contentState: "unavailable", session: null};
+        }
+        var headers = {"x-tenant-id": record.tenant_id, "x-case-id": record.case_id,
+            "x-resource-id": text(record.resource_id), "x-expected-revision": text(record.directory_revision)};
+        // The cookie supplies the actor; the case headers select its canonical
+        // storage owner. A tenant user_id query would be a forged actor claim.
+        var path = "/api/complaint-workspace/session?case_id=" + encodeURIComponent(record.case_id);
+        var before = await readJson(path, headers);
+        if (isLocked(before)) return {contentState: "locked", session: null};
+        if (!before.ok || !before.body || !before.body.session
+                || before.body.session.user_id !== record.tenant_id) {
+            return {contentState: "unavailable", session: null};
+        }
+        // Reopen through the actual key/authorization owner before publishing
+        // plaintext. A changed key or persisted revision retires the first read.
+        var after = await readJson(path, headers);
+        if (isLocked(after)) return {contentState: "locked", session: null};
+        if (!after.ok || !after.body || !after.body.session
+                || after.body.session.user_id !== record.tenant_id
+                || sessionIdentity(before.body) !== sessionIdentity(after.body)) {
+            return {contentState: "unavailable", session: null};
+        }
+        return {contentState: "available", session: after.body};
+    }
+
     async function refresh() {
-        var token = ++refreshToken;
         mount();
         applyAudience();
+        invalidate();
+        var token = refreshToken;
+        var context = currentContext();
         try {
             var actor = await readJson("/api/complaint-workspace/auth/session");
             if (token !== refreshToken) return;
             if (!actor.ok) {
                 state = derive(null, null, null, null);
                 paint();
+                finished();
                 return;
             }
             var catalog = await readJson("/api/cases/session");
             var assignments = await readJson("/api/cases/assignments");
             if (token !== refreshToken) return;
+            if ((catalog.ok && catalog.body.actor_principal_id !== actor.body.principal_id)
+                    || (assignments.ok && assignments.body.actor_principal_id !== actor.body.principal_id)) {
+                rejected(token);
+                return;
+            }
             var catalogBody = catalog.ok ? catalog.body : {cases: [], selected_case_id: ""};
             var assignmentBody = assignments.ok ? assignments.body : {assignments: []};
             var preview = derive(actor.body, catalogBody, assignmentBody, null);
-            var workspaceSession = null;
+            var content = {contentState: "unavailable", session: null};
             if (preview.caseId && preview.relationship === "owner") {
                 var match = (catalogBody.cases || []).find(function (item) { return item.case_id === preview.caseId; });
-                if (match && match.tenant_id) {
-                    var sessionUrl = "/api/complaint-workspace/session?user_id=" + encodeURIComponent(match.tenant_id) + "&case_id=" + encodeURIComponent(match.case_id);
-                    var sessionResponse = await fetch(sessionUrl, {
-                        credentials: "same-origin",
-                        headers: {
-                            accept: "application/json",
-                            "x-tenant-id": match.tenant_id,
-                            "x-case-id": match.case_id,
-                            "x-resource-id": text(match.resource_id)
-                        }
-                    });
-                    if (sessionResponse.ok) {
-                        try { workspaceSession = await sessionResponse.json(); } catch (error) { workspaceSession = null; }
-                    }
-                }
+                if (match && match.tenant_id) content = await privateSession(match);
             }
             if (token !== refreshToken) return;
-            state = derive(actor.body, catalogBody, assignmentBody, workspaceSession);
+            var currentActor = await readJson("/api/complaint-workspace/auth/session");
+            var currentCatalog = await readJson("/api/cases/session");
+            if (token !== refreshToken) return;
+            if (!currentActor.ok || !sameActor(actor.body, currentActor.body) || context !== currentContext()
+                    || currentCatalog.ok !== catalog.ok
+                    || (currentCatalog.ok && (currentCatalog.body.actor_principal_id !== actor.body.principal_id
+                        || currentCatalog.body.selected_case_id !== catalogBody.selected_case_id))) {
+                rejected(token);
+                return;
+            }
+            if (content.contentState === "locked" && document.body.dataset.workspaceHydrated !== "locked"
+                    && typeof window.resetPrivateWorkspaceView === "function") {
+                // The existing workspace privacy boundary retires its cached
+                // view only after this authenticated owner reports a real lock.
+                retiringWorkspace = true;
+                try {
+                    window.resetPrivateWorkspaceView("locked", "Private keys remain locked. Reload after unlocking to reconnect.");
+                } finally { retiringWorkspace = false; }
+                if (token !== refreshToken) return;
+            }
+            state = derive(currentActor.body, catalogBody, assignmentBody, content.session, content.contentState);
             paint();
+            finished();
         } catch (error) {
             if (token !== refreshToken) return;
+            // A failed refresh must not retain another actor's case or content.
+            state = derive(null, null, null, null);
             state.stage = "Workspace could not be read";
             state.next = "Retry";
-            state.nextKind = "overview";
+            state.nextKind = "retry";
             paint();
+            finished();
         }
     }
 
     function scheduleRefresh() {
+        if (retiringWorkspace) return;
         window.clearTimeout(refreshTimer);
+        invalidate();
         refreshTimer = window.setTimeout(function () { refresh(); }, 30);
     }
 
     function runNext() {
         var kind = state.nextKind;
+        if (kind === "reconnect") {
+            window.location.reload();
+            return;
+        }
+        if (kind === "retry") {
+            refresh();
+            return;
+        }
         if (kind === "sign-in") {
             var credential = document.getElementById("case-credential");
             if (credential) credential.focus();
@@ -412,6 +525,7 @@
     applyAudience();
     window.complaintCaseShell = {
         refresh: refresh,
+        invalidate: invalidate,
         scheduleRefresh: scheduleRefresh,
         showTask: showTask,
         snapshot: function () {
