@@ -238,7 +238,8 @@
             if (badge) badge.textContent = "0";
         }
         if (typeof window.resetPrivateWorkspaceView === "function"
-                && ["ready", "partial"].indexOf(document.body.dataset.workspaceHydrated) !== -1) {
+                && (["ready", "partial"].indexOf(document.body.dataset.workspaceHydrated) !== -1
+                    || window.complaintCanonicalSession)) {
             retiringWorkspace = true;
             try {
                 window.resetPrivateWorkspaceView("unavailable", "Private case access changed or could not be verified. Reload to reconnect.");
@@ -939,7 +940,7 @@
             if (content.session && state.relationship === "owner" && content.contentState === "available"
                     && document.getElementById("draft-body")
                     && typeof window.renderCanonicalComplaintSession === "function") {
-                window.renderCanonicalComplaintSession(content.session);
+                window.renderCanonicalComplaintSession(content.session, state.binding, currentActor.body);
                 paintPresentationContext();
             }
         } catch (error) {
