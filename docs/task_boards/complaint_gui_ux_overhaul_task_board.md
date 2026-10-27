@@ -409,7 +409,7 @@ Implementation instructions:
 
 ## CIMP-UX-14 Implement private evidence upload with observable progress
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
