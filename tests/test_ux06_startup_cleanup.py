@@ -1,6 +1,4 @@
 """A failed custody assertion must close the actual private browser resources."""
-from pathlib import Path
-
 import pytest
 
 from tests import gui_native_browser as browser
