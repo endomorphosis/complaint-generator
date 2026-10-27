@@ -27,7 +27,7 @@ def _stamp(value):
 
 
 @contextmanager
-def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
+def _native_world(tmp_path, monkeypatch, *, frame_kind="thought", setup_seconds=0, selection_seconds=None):
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as runtime
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import portal_task_state_control_plane as plane
@@ -56,7 +56,7 @@ def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
     tasks = daemon._load_tasks(); daemon._register_task_identities(tasks)
     task = next(task for task in tasks if task.task_id == "CIMP-GUI-60")
     identity = daemon._identity_for_task(task)
-    now = time.time(); started = _stamp(now)
+    now = time.time(); started = _stamp(now - setup_seconds)
     lease = daemon._build_implementation_lock_metadata(task, 1, started)
     claim = daemon._build_implementation_task_claim_metadata(task, 1, started)
     lease_path = daemon._implementation_lock_path()
@@ -74,15 +74,16 @@ def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
             cwd=workspace, stdout=handle, env={}, inherit_environment=False, timeout_seconds=10)
     daemon._record_event("implementation_started", {"task_id": task.task_id, "attempt": 1,
         "worktree_path": str(workspace), "log_path": str(log), "execution_mode": "model-assisted"})
+    validation_started = _stamp(time.time())
     state = native.PortalTaskState()
     for key, value in {"active_task_id":task.task_id,"active_task_cid":identity.canonical_task_cid,
         "active_task_key":identity.canonical_task_key,"active_attempt":1,"implementation_in_progress":True,
-        "active_phase":"validating","active_task_started_at":_stamp(now-300),"active_phase_started_at":started,
+        "active_phase":"validating","active_task_started_at":_stamp(now-selection_seconds if selection_seconds is not None else now-setup_seconds-3 if setup_seconds else now-300),"active_phase_started_at":validation_started,
         "active_worktree_path":str(workspace),"active_log_path":str(log),
         "last_implementation_task_id":task.task_id,"last_implementation_task_cid":identity.canonical_task_cid,
         "last_implementation_task_key":identity.canonical_task_key,"last_implementation_started_at":started,
         "last_implementation_worktree_path":str(workspace),"last_implementation_log_path":str(log),
-        "heartbeat_at":started,"last_progress_at":started}.items():
+        "heartbeat_at":validation_started,"last_progress_at":validation_started}.items():
         setattr(state,key,value)
     state.implementation_attempts={task.task_id:1};state.implementation_attempts_by_cid={identity.canonical_task_cid:1}
     target,_ = catalog_path(runner,campaign);plane.bind_task_state_control_plane(daemon.state_path,str(target))
@@ -94,7 +95,7 @@ def _native_world(tmp_path, monkeypatch, *, frame_kind="thought"):
         "state_dir":str(campaign),"spec_path":str(spec),"board_path":str(root/artifacts.board_relative),
         "plan_id":runner._requested_plan_id(spec),"provider":"grok_cli","model":runner.MODEL,"allow_fallback":False,
         "identity":parent,"argv":parent["argv"],"status":"running","owner_token":"private-inert-fixture",
-        "started_at":now-400}
+        "started_at":now-max(400,(selection_seconds or 0)+100)}
     runner._atomic_json(campaign/"launcher.json",launcher)
     runner._atomic_json(campaign/(runner.STATE_PREFIX+"_supervisor_status.json"),{
         "status":"running","supervisor_pid":parent["pid"],"daemon_pid":os.getpid(),
@@ -159,9 +160,30 @@ def test_actual_native_rescue_producer_has_owned_bounded_activity(tmp_path,monke
         assert result["activity_verified"] is True,json.dumps(result,sort_keys=True)
         assert result["work_progress_verified"] is (kind in activity._WORK)
         assert result["reason"]=="bounded_native_rescue_activity"
-        assert result["deadline_at"] <= runner._event_timestamp({"timestamp":world["body"]["active_task_started_at"]})+runner.TIMEOUT_SECONDS
+        primary = next(json.loads(line) for line in world["daemon"].events_path.read_text().splitlines()
+                       if json.loads(line).get("type") == "implementation_started")
+        assert result["deadline_at"] <= runner._event_timestamp(primary) + runner.TIMEOUT_SECONDS
         assert result["provider_birth"]["parent_pid"]==os.getpid()
         assert result["completion_authority"] is False
+
+
+def test_actual_rescue_deadline_starts_after_checkout_not_at_selection(tmp_path, monkeypatch):
+    """Real Native repair after a synthetic 51-second setup, with actual births."""
+    with _native_world(tmp_path, monkeypatch, frame_kind="tool_call", setup_seconds=51) as world:
+        result = activity.observe(runner, world["root"], world["campaign"], world["body"], now_ts=time.time())
+        assert result["activity_verified"] is True, result
+        old_start = runner._event_timestamp({"timestamp": world["body"]["last_implementation_started_at"]})
+        rows = [json.loads(line) for line in world["daemon"].events_path.read_text().splitlines()]
+        primary = next(row for row in rows if row["type"] == "implementation_started")
+        actual_start = runner._event_timestamp(primary)
+        phase_start = runner._event_timestamp({"timestamp": world["body"]["active_phase_started_at"]})
+        assert result["deadline_at"] == min(actual_start, phase_start) + runner.TIMEOUT_SECONDS
+        assert result["deadline_at"] > old_start + runner.TIMEOUT_SECONDS + 40
+        first_deadline = result["deadline_at"]
+        time.sleep(.05)
+        fresh = activity.observe(runner, world["root"], world["campaign"], world["body"], now_ts=time.time())
+        assert fresh["activity_verified"] is True and fresh["deadline_at"] == first_deadline
+        assert fresh["log_bytes"] >= result["log_bytes"]
 
 
 def test_actual_growing_stdout_preserves_complete_owned_prefix(tmp_path,monkeypatch):
@@ -194,11 +216,13 @@ def test_primary_terminal_followed_by_real_native_thought_is_not_work_progress(t
         assert current["activity_verified"] is True and current["work_progress_verified"] is False,current
 
 
-def _status_in_owned_parent(tmp_path, mode):
+def _status_in_owned_parent(tmp_path, mode, *, setup_seconds=0, selection_seconds=None):
     """Actual session-leading parent argv, actual Native worker/repair child.
 
     The parent is inert (not public start/Docker qualification). Its real
     _run/owner-token argv satisfies the existing ownership reader unchanged.
+    Selection/header ages are explicit synthetic metadata; execution and
+    rescue events, process births and streams come from actual Native owners.
     """
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as runtime
@@ -214,7 +238,8 @@ from integrations.ipfs_accelerate import improvement_runner as runner
 from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as runtime
 def main():
  with pytest.MonkeyPatch.context() as patch:
-  with _native_world(Path(sys.argv[1]),patch) as world:
+  with _native_world(Path(sys.argv[1]),patch,setup_seconds=float(sys.argv[4]),
+       selection_seconds=float(sys.argv[5]) if sys.argv[5] else None) as world:
    if sys.argv[2]=='finished':
     (world['workspace']/'release').touch();world['worker'].join(10)
     assert not world['worker'].is_alive()
@@ -226,7 +251,35 @@ def main():
     closed=observe_actual_executor(world,sys.argv[2])
     Path(sys.argv[3]).write_text(json.dumps(closed))
     return
-   value=runner.status(world['root'],world['spec'],world['campaign'])
+   original_claim=None
+   try:
+    if sys.argv[2]=='foreign_clock_window':
+     original_claim=world['claim_path'].read_bytes()
+     claim=json.loads(original_claim);claim['canonical_task_cid']='explicit-synthetic-foreign-cid'
+     world['claim_path'].write_text(json.dumps(claim))
+    if sys.argv[2] in {'execution_expired','phase_expired'}:
+     primary=next(json.loads(line) for line in world['daemon'].events_path.read_text().splitlines()
+                  if json.loads(line).get('type')=='implementation_started')
+     if sys.argv[2]=='execution_expired':
+      observed_now=runner._event_timestamp(primary)+runner.TIMEOUT_SECONDS+.01
+      # Simulate validation beginning near the actual execution deadline:
+      # its separate phase cap is still open when the provider cap expires.
+      from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
+      state=native.PortalTaskState.load(world['daemon'].state_path)
+      from tests.test_owned_auto_rescue_activity import _stamp
+      state.active_phase_started_at=_stamp(observed_now-10)
+      state.save(world['daemon'].state_path)
+     else:
+      observed_now=runner._event_timestamp({'timestamp':world['body']['active_phase_started_at']})+runner.TIMEOUT_SECONDS+.01
+     # Only the observation clock is controlled, never Native's monotonic
+     # provider budget, child birth, event timestamp or progress flags.
+     with pytest.MonkeyPatch.context() as clock:
+      clock.setattr(runner.time,'time',lambda:observed_now)
+      value=runner.status(world['root'],world['spec'],world['campaign'])
+    else:
+     value=runner.status(world['root'],world['spec'],world['campaign'])
+   finally:
+    if original_claim is not None:world['claim_path'].write_bytes(original_claim)
    allowed=('status','healthy','native_read_errors','worker_liveness','auto_rescue_activity_verified','auto_rescue_activity_evidence',
     'provider_progress_verified','validation_activity_verified','progress_verified','scope_liveness')
    closed={key:value.get(key) for key in allowed}
@@ -236,7 +289,8 @@ if __name__=='__main__':main()
     parent.write_text('import subprocess,sys\nraise SystemExit(subprocess.call(sys.argv[4:]))\n')
     with (tmp_path/'child-output.log').open('w') as capture:
         completed=runtime.run_process_group_stream([sys.executable,'-I','-B',str(parent),'_run','--owner-token',
-            'private-inert-fixture',sys.executable,'-I','-B',str(worker),str(tmp_path/'native'),mode,str(output)],
+            'private-inert-fixture',sys.executable,'-I','-B',str(worker),str(tmp_path/'native'),mode,str(output),
+            str(setup_seconds),str(selection_seconds) if selection_seconds is not None else ''],
             cwd=tmp_path,stdout=capture,env=dict(os.environ),inherit_environment=False,timeout_seconds=45)
     assert completed.returncode==0, 'Inert Native worker failed; inspect its private child-output.log.'
     return json.loads(output.read_text())
@@ -255,6 +309,25 @@ def test_actual_native_rescue_status_keeps_original_owned_parent_guard(tmp_path,
         assert result['scope_liveness']['provider']=='fresh' and result['scope_liveness']['validation']=='idle'
 
 
+@pytest.mark.parametrize('mode,expected_status,expected_reason',[
+    ('running_clock_window','active','bounded_native_rescue_activity'),
+    ('foreign_clock_window','stalled','native_binding_unavailable'),
+    ('execution_expired','stalled','provider_deadline_expired'),
+    ('phase_expired','stalled','native_binding_unavailable'),
+])
+def test_actual_public_status_uses_verified_rescue_clock_and_preserves_refusals(
+    tmp_path,mode,expected_status,expected_reason,
+):
+    result=_status_in_owned_parent(tmp_path,mode,setup_seconds=51,selection_seconds=901)
+    assert result['native_read_errors']=={},result
+    assert result['status']==expected_status,result
+    assert result['healthy'] is (mode=='running_clock_window'),result
+    assert result['auto_rescue_activity_verified'] is (mode=='running_clock_window'),result
+    assert result['auto_rescue_activity_evidence']['reason']==expected_reason,result
+    assert result['provider_progress_verified'] is False and result['progress_verified'] is False
+    assert result['validation_activity_verified'] is False
+
+
 @pytest.mark.parametrize("damage",["cid","key","attempt","workspace","phase","hold","deadline"])
 def test_real_native_producer_cannot_cross_current_scope_or_deadline(tmp_path,monkeypatch,damage):
     from copy import deepcopy
@@ -266,10 +339,26 @@ def test_real_native_producer_cannot_cross_current_scope_or_deadline(tmp_path,mo
         elif damage=="workspace":state["active_worktree_path"]=str(world["root"])
         elif damage=="phase":state["active_phase"]="implementing"
         elif damage=="hold":state["manual_hold"]=True
-        else:now=runner._event_timestamp({"timestamp":state["active_task_started_at"]})+runner.TIMEOUT_SECONDS+.01
+        else:
+            primary = next(json.loads(line) for line in world["daemon"].events_path.read_text().splitlines()
+                           if json.loads(line).get("type") == "implementation_started")
+            now = runner._event_timestamp(primary) + runner.TIMEOUT_SECONDS + .01
         result=activity.observe(runner,world["root"],world["campaign"],state,now_ts=now)
         assert result["activity_verified"] is False and result["work_progress_verified"] is False
         assert result["reason"] in activity._REASONS
+
+
+@pytest.mark.parametrize("kind", ["implementation_started", "implementation_finished"])
+def test_later_start_or_terminal_cannot_renew_the_same_provider_window(tmp_path, monkeypatch, kind):
+    with _native_world(tmp_path, monkeypatch, setup_seconds=51) as world:
+        first = activity.observe(runner, world["root"], world["campaign"], world["body"], now_ts=time.time())
+        assert first["activity_verified"] is True
+        world["daemon"]._record_event(kind, {"task_id": world["task"].task_id, "attempt": 1,
+            "worktree_path": str(world["workspace"]), "log_path": str(world["log"]),
+            "execution_mode": "model-assisted"})
+        refused = activity.observe(runner, world["root"], world["campaign"], world["body"], now_ts=time.time())
+        assert refused["activity_verified"] is False and refused["work_progress_verified"] is False
+        assert refused["reason"] in {"primary_start_unbound", "attempt_finished"}
 
 
 def test_real_native_finished_provider_and_later_validation_output_are_not_rescue_activity(tmp_path,monkeypatch):

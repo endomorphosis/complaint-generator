@@ -1877,10 +1877,12 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         # The exact canonical executor has its existing fixed validation
         # deadline. Its pulse/finalization proof never renews the provider.
         health = "active"
+    elif rescue_active:
+        # Selection can precede checkout. The exact owned repair has already
+        # proved its unique execution-event deadline and unchanged phase cap.
+        health = "active"
     elif active and attempt_age is not None and attempt_age > TIMEOUT_SECONDS:
         health = "stalled"
-    elif rescue_active:
-        health = "active"  # Exact live repair inside the original provider cap.
     elif startup_activity is not None:
         health = "maintenance"  # Liveness only, within Native's fixed window/handoff.
     elif heartbeat_age is not None and startup_maintenance:
