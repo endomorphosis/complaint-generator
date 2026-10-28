@@ -422,3 +422,81 @@ def test_mode_read_denial_retires_current_private_view_without_manual_refresh(tm
         assert DRAFT_BODY not in page.locator('body').inner_text()
     finally:
         _close(playwright, context, node, profile, observed)
+
+
+def test_keyboard_radio_modes_preserve_actual_case_and_unsaved_work(tmp_path, monkeypatch):
+    world = owner_lawyer_journey_world(tmp_path / 'world')
+    inquiry_id, revision, evidence_id = _seed(world)
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch, world=world)
+    try:
+        _sign_in(page)
+        _workspace(page, inquiry_id)
+        page.evaluate("""({evidenceId, body}) => {
+            document.querySelector('.tab-button[data-tab-target="evidence"]').click();
+            document.querySelector('#evidence-list button[data-evidence-id="' + evidenceId + '"]').click();
+            const draft = document.getElementById('draft-body');
+            draft.value = body;
+            draft.dispatchEvent(new Event('input', {bubbles:true}));
+        }""", {'evidenceId':evidence_id, 'body':DRAFT_BODY + UNSAVED})
+        before = _view(page)
+        continuity = page.evaluate("""async () =>
+            (await window.workspaceClient.readCanonicalSession(window.complaintCaseShell.binding())).continuity""")
+        client = page.evaluate_handle('() => window.workspaceClient')
+        epoch = client.evaluate('value => value._privacyEpoch')
+        group = page.locator('#complaint-presentation-modes')
+        page.locator('[data-presentation-mode="full-workspace"]').focus()
+        for key, mode in [('ArrowRight','chat-only'), ('ArrowRight','chat-plus-context'),
+                ('ArrowDown','full-workspace'), ('ArrowLeft','chat-plus-context'),
+                ('ArrowUp','chat-only'), ('ArrowLeft','full-workspace'),
+                ('Home','chat-only'), ('End','full-workspace')]:
+            page.keyboard.press(key)
+            page.wait_for_function("""mode =>
+                document.documentElement.dataset.workspacePresentation === mode
+                && document.activeElement.dataset.presentationMode === mode""", arg=mode, timeout=5000)
+            current = _view(page)
+            assert current == {**before, 'mode':mode}
+            assert current['inquiryId'] == inquiry_id and current['revision'] == str(revision)
+            assert current['evidenceId'] == evidence_id and current['draft'] == DRAFT_BODY + UNSAVED
+            assert group.locator('[aria-checked="true"]').count() == 1
+            assert group.locator('[tabindex="0"]').count() == 1
+            assert group.locator('[aria-checked="true"][tabindex="0"]').get_attribute('data-presentation-mode') == mode
+            assert client.evaluate('(value, epoch) => value === window.workspaceClient && value._privacyEpoch === epoch', epoch)
+        page.keyboard.press('Tab')
+        assert not page.evaluate("() => document.getElementById('complaint-presentation-modes').contains(document.activeElement)")
+        page.keyboard.press('Shift+Tab')
+        assert page.evaluate("() => document.activeElement.dataset.presentationMode") == 'full-workspace'
+        after = page.evaluate("""async () =>
+            (await window.workspaceClient.readCanonicalSession(window.complaintCaseShell.binding())).continuity""")
+        assert after == continuity and after['draft_body'] == DRAFT_BODY
+        stored = page.evaluate("() => Object.entries(localStorage).map(pair => pair.join('=')).join('\\n')")
+        assert DRAFT_BODY not in stored and inquiry_id not in stored
+    finally:
+        _close(playwright, context, node, profile, observed)
+
+
+def test_keyboard_mode_controls_do_not_open_a_locked_case(tmp_path, monkeypatch):
+    world = owner_lawyer_journey_world(tmp_path / 'world')
+    inquiry_id, _revision, _evidence_id = _seed(world)
+    world.service.lock_private_keys()
+    world.owner_keys.lock()
+    world, page, playwright, context, node, profile, observed = _open(tmp_path, monkeypatch, world=world)
+    try:
+        _sign_in(page)
+        page.goto(browser.SAME_ORIGIN + '/workspace', wait_until='domcontentloaded')
+        page.wait_for_function("""() => document.getElementById('complaint-entry').dataset.entry === 'missing-key'
+            && document.getElementById('complaint-case-shell').getAttribute('aria-busy') === 'false'""")
+        page.locator('[data-presentation-mode="full-workspace"]').focus()
+        page.keyboard.press('ArrowLeft')
+        page.wait_for_function("""() => document.documentElement.dataset.workspacePresentation === 'chat-plus-context'
+            && document.activeElement.dataset.presentationMode === 'chat-plus-context'""", timeout=5000)
+        assert page.locator('#complaint-presentation-status').inner_text() == 'The view changed without opening case content.'
+        assert page.locator('#complaint-presentation-context').is_visible()
+        assert page.locator('#complaint-entry-question').inner_text() == ''
+        assert page.input_value('#draft-body') == ''
+        assert DRAFT_BODY not in page.locator('body').inner_text()
+        assert inquiry_id not in page.locator('#complaint-presentation-context').inner_text()
+        page.keyboard.press('Space')
+        assert page.evaluate("() => document.documentElement.dataset.workspacePresentation") == 'chat-plus-context'
+        assert page.locator('#complaint-presentation-modes [aria-checked="true"]').count() == 1
+    finally:
+        _close(playwright, context, node, profile, observed)
