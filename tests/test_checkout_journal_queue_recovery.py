@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from dataclasses import asdict
 import json
 import inspect
+import hashlib
 import os
 from pathlib import Path
 import signal
@@ -24,6 +25,10 @@ ROOT = Path(__file__).resolve().parents[1]
 def git(root, *args):
     return subprocess.run(["git", *args], cwd=root, capture_output=True,
                           text=True, check=True).stdout.strip()
+
+
+def launcher_digest(record):
+    return hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def _synthetic_argv(builder):
@@ -166,18 +171,6 @@ def campaign(tmp_path, monkeypatch):
         "schema": "complaint-improvement-container-shutdown@1", "status": "stopped", "quiesced": True,
         "completion_authority": False, "provider_callback_settled": False, "attempt_refunded": False, "containers": []})
     monkeypatch.setattr(runner, "process_identity", lambda _pid: None)
-    # Replace only the spawned observation transport: re-executing the private
-    # pytest driver after campaign environment scrubbing cannot recreate its
-    # kernel-guard manifest. The payload and authority are the actual active
-    # Native control-plane port, never an authored JSON mirror.
-    from ipfs_accelerate_py.agent_supervisor.todo_daemon import portal_task_state_control_plane as plane
-    def read_native(_root, path, **_kwargs):
-        payload = plane.read_task_state_payload(path)
-        authority = plane.task_state_authority_file(path)
-        assert payload is not None and authority != path
-        return payload, {"source": "native_control_plane", "authority_path": str(authority),
-                         "completion_authority": False}
-    monkeypatch.setattr(runner, "_read_native_state", read_native)
     inventories = []
     monkeypatch.setattr(runner, "_observe_campaign_containers", lambda *a: inventories.append(True) or True)
     monkeypatch.setattr(runner, "_validate_board", lambda *a: {"count": 1, "completed": 1,
@@ -211,10 +204,12 @@ def test_public_recovery_settles_before_real_writer_guard_then_reconciles(campai
     monkeypatch.setattr(queues, "hold_merge_queue_settlement", observe_writer)
     monkeypatch.setattr(queues.MergeQueue, "completed_requests", observe_read)
     monkeypatch.setattr(native.PortalImplementationDaemon, "reconcile_quiesced_active_attempt", observe_reconcile)
-    result = runner.recover_stalled_worker(w["root"], w["spec"], w["state"])
+    result = runner.recover_stalled_worker(w["root"], w["spec"], w["state"],
+        expected_launcher_sha256=launcher_digest(w["record"]))
     assert result.get("reconciled") is True, result
+    assert not w["lock"].exists(), "the genuine common Native journal was left behind"
     assert phases[0] == "typed_read" and phases[-1] == "guarded_reconcile"
-    assert not w["lock"].exists() and len(w["inventories"]) >= 3
+    assert len(w["inventories"]) >= 3
     after = asdict(native.PortalTaskState.load(w["daemon"].state_path))
     assert after["implementation_attempts"] == before["implementation_attempts"] == {"CIMP-OPS-03": 3}
     assert after["implementation_attempts_by_cid"] == before["implementation_attempts_by_cid"]
@@ -264,6 +259,37 @@ def test_settlement_cannot_refresh_unrelated_recovery_evidence(campaign, monkeyp
                         change_after_genuine_settlement)
     monkeypatch.setattr(native.PortalImplementationDaemon, "reconcile_quiesced_active_attempt",
                         lambda self: pytest.fail("changed prephase evidence reached guarded Native mutation"))
-    result = runner.recover_stalled_worker(w["root"], w["spec"], w["state"])
+    result = runner.recover_stalled_worker(w["root"], w["spec"], w["state"],
+        expected_launcher_sha256=launcher_digest(w["record"]))
     assert changed and result.get("reconciled") is False, result
+    assert not result["paid_dispatch"] and not result["attempt_refunded"] and not result["selection_performed"]
+
+
+def test_queue_writer_change_at_guard_admission_refuses_before_native_mutation(campaign, monkeypatch):
+    w = campaign; reads = []; changed = []
+    read = queues.read_merge_queue_settlement
+    guard = queues.hold_merge_queue_settlement
+    def observe_read(*args, **kwargs):
+        reads.append(True)
+        try: return read(*args, **kwargs)
+        finally: reads.pop()
+    @contextmanager
+    def change_before_guard(*args, **kwargs):
+        # Convenience snapshots acquire this same guard. Change the actual
+        # database only at the later retained guard admission boundary.
+        if not reads and not changed:
+            assert not w["lock"].exists(), "typed common settlement must already be complete"
+            (w["state"] / "merge-queue/merge_queue.duckdb").touch()
+            changed.append(True)
+        with guard(*args, **kwargs) as receipt:
+            yield receipt
+    monkeypatch.setattr(queues, "read_merge_queue_settlement", observe_read)
+    monkeypatch.setattr(queues, "hold_merge_queue_settlement", change_before_guard)
+    monkeypatch.setattr(native.PortalImplementationDaemon, "reconcile_quiesced_active_attempt",
+        lambda self: pytest.fail("a changed writer snapshot reached Native mutation"))
+    before = asdict(native.PortalTaskState.load(w["daemon"].state_path))
+    result = runner.recover_stalled_worker(w["root"], w["spec"], w["state"],
+        expected_launcher_sha256=launcher_digest(w["record"]))
+    assert changed and result["reason"] == "merge_queue_changed_before_reconciliation", result
+    assert asdict(native.PortalTaskState.load(w["daemon"].state_path)) == before
     assert not result["paid_dispatch"] and not result["attempt_refunded"] and not result["selection_performed"]

@@ -2931,6 +2931,8 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
                 lock_timeout_seconds=0.01))
             if not queue.get("settled"):
                 return _refusal("merge_queue_unsettled", observed)
+            if queue != queue_before:
+                return _refusal("merge_queue_changed_before_reconciliation", observed)
             _parent_closed(state_dir, record, context, False)
             fence = _fence_owned_tree(record)
             containers = _read_json(state_dir / "container_shutdown.json")
