@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import tempfile
 from typing import Any, Mapping, Sequence
 
@@ -352,7 +353,49 @@ def _atomic_create(path: Path, content: str) -> bool:
 
 
 def _atomic_write(path: Path, content: str) -> None:
+    """Publish changed bytes without replacing an unchanged protected file.
+
+    Only a stable, canonical, owned document can take the no-write path.
+    Other leaf types retain atomic replacement without opening their target.
+    """
+    path = Path(path).absolute()
+    if path.parent.resolve(strict=False) != path.parent:
+        raise ValueError("plan artifact parent traverses an alias")
     path.parent.mkdir(parents=True, exist_ok=True)
+    expected = content.encode("utf-8")
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        before = None
+    if (before is not None and stat.S_ISREG(before.st_mode)
+            and before.st_uid == os.getuid() and before.st_nlink == 1
+            and stat.S_IMODE(before.st_mode) in {0o600, 0o640, 0o644, 0o660, 0o664}
+            and before.st_size == len(expected)
+            and path.resolve(strict=True) == path
+            and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_NONBLOCK")):
+        fields = ("st_dev", "st_ino", "st_mode", "st_nlink", "st_uid", "st_gid",
+                  "st_size", "st_mtime_ns", "st_ctime_ns")
+
+        def identity(value):
+            return tuple(getattr(value, field) for field in fields)
+
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_NOATIME", 0))
+        try:
+            if identity(os.fstat(fd)) != identity(before):
+                raise ValueError("plan artifact changed while opening")
+            data = bytearray()
+            while len(data) <= len(expected):
+                chunk = os.read(fd, min(1024 * 1024, len(expected) + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            if (identity(os.fstat(fd)) != identity(before) or identity(path.lstat()) != identity(before)
+                    or path.resolve(strict=True) != path):
+                raise ValueError("plan artifact changed while comparing")
+            if data == expected:
+                return
+        finally:
+            os.close(fd)
     fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -404,8 +447,8 @@ def generate(spec_path: Path | str, repo_root: Path | str) -> dict[str, Any]:
         # parse before any artifact write so a drifted active board is neither
         # rewritten nor given an ingestion receipt.
         _require_matching_projection(existing, spec, plan.plan_id, root)
-    # The board is not touched at all when it already exists, so a concurrent
-    # daemon can keep changing its statuses without a compiler overwrite race.
+    # Keep both existing board state and identical formal-plan identity intact;
+    # Native crash fences observe inode/mode/timestamps as well as content.
     _atomic_write(plan_path, json.dumps(document, indent=2, sort_keys=True) + "\n")
     receipt = {
         "schema_version": "complaint-generator/improvement-plan-ingestion@1",

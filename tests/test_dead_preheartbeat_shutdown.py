@@ -45,8 +45,26 @@ def dead_before_heartbeat(campaign, docker, monkeypatch):
     child = subprocess.Popen(f.record['argv'], cwd=f.repo, start_new_session=True,
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        identity = _REAL_IDENTITY(child.pid)
-        assert identity and identity['session'] == identity['process_group'] == child.pid
+        # /proc cmdline can be briefly empty while exec publishes the child's
+        # address space. Capture the actual registered argv before retaining
+        # this real birth as historical shutdown evidence.
+        deadline = time.monotonic() + 1.0
+        while True:
+            assert child.poll() is None, 'inert parent exited before argv registration'
+        deadline = time.monotonic() + 2
+        while True:
+            identity = _REAL_IDENTITY(child.pid)
+            if (identity and identity.get('argv') == f.record['argv']
+                    and identity['session'] == identity['process_group'] == child.pid):
+                break
+            assert child.poll() is None, 'inert parent exited before publishing its argv'
+            assert time.monotonic() < deadline, 'inert parent did not publish its exact argv'
+            time.sleep(.01)
+            if (identity and identity.get('argv') == f.record['argv']
+                    and identity.get('session') == identity.get('process_group') == child.pid):
+                break
+            assert time.monotonic() < deadline, 'inert parent argv registration timed out'
+            time.sleep(.005)
         record = {**deepcopy(f.record), 'identity': identity, 'status': 'starting', 'started_at': time.time()}
         runner._atomic_json(f.state/'launcher.json', record)
         child.terminate(); child.wait(timeout=3)

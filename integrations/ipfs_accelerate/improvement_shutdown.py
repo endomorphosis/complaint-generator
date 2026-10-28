@@ -751,7 +751,13 @@ def _preflight_without_daemon(heartbeat: Mapping[str, Any], record: Mapping[str,
         return False
     completed = status == 'agentic_maintenance_completed'
     outcome = 'completed' if completed else 'failed'
-    expected_phase = 'supervisor_check_event' if completed else 'worktree_reconciliation'
+    expected_phase = heartbeat.get('last_agentic_maintenance_phase') if completed else 'worktree_reconciliation'
+    # Native returns a blocked protected-path guard as a completed maintenance
+    # pass, before the Host rejects startup. It has not assigned a new managed
+    # run or spawned a daemon. Its exact terminal receipt and all ordinary
+    # absence/custody checks are still required below.
+    if completed and expected_phase not in {'supervisor_check_event', 'implementation_protected_path_guard'}:
+        raise ValueError('completed preflight phase is not a recognized no-daemon boundary')
     parent, birth = record['identity'], heartbeat.get('supervisor_process_birth')
     maintenance = heartbeat.get('supervisor_maintenance')
     if (not isinstance(birth, Mapping) or not isinstance(maintenance, Mapping)

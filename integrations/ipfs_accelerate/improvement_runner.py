@@ -917,6 +917,127 @@ def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: s
                             "Cross-worktree reconciliation and dynamic guardrail/refill task generation are disabled for this fixed campaign; native dependency readiness, process fencing and implementation watchdog remain enabled."]}
 
 
+def _recovery_start_admission(state_dir: Path, expected_launcher_sha256: str | None) -> str | None:
+    """Keep automatic stopped recovery bound to its original launcher and holds."""
+    if expected_launcher_sha256 is None:
+        return None
+    current = _read_json(state_dir / "launcher.json")
+    digest = hashlib.sha256(json.dumps(current, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if (not isinstance(expected_launcher_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_launcher_sha256) is None
+            or digest != expected_launcher_sha256):
+        return "launcher_changed_before_recovery"
+    try:
+        _require_no_operator_hold(state_dir)
+        (state_dir / "implementation-protected-path-incident.json").lstat()
+    except FileNotFoundError:
+        return None
+    except CampaignOperatorHold:
+        return "watchdog_manual_hold"
+    except OSError:
+        return "protected_fence_unavailable"
+    return "protected_incident"
+
+
+def _reconcile_stopped_fence_before_start(repo_root: Path, spec_path: Path, state_dir: Path, *,
+                                         expected_launcher_sha256: str | None) -> tuple[str | None, dict[str, Any] | None]:
+    """Reconcile a stopped crash fence before compilation, outside start's lock.
+
+    Marker presence only selects this admission path. The public recovery seam
+    retains all Native custody, closure, accounting and callback requirements.
+    """
+    active = state_dir / "implementation-protected-path-active.json"
+    incident = state_dir / "implementation-protected-path-incident.json"
+    markers, unavailable = [], False
+    for path in (active, incident):
+        try:
+            path.lstat()
+            markers.append(path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            unavailable = True
+    if not markers and not unavailable:
+        return expected_launcher_sha256, None
+    record = _read_json(state_dir / "launcher.json")
+    # The ordinary locked route proves campaign identity and reuses this owner.
+    if owns_process(record):
+        return expected_launcher_sha256, None
+
+    def refuse(reason, recovery=None):
+        return expected_launcher_sha256, {"status": "not_ready", "reason": reason,
+            "execution_started": False, "paid_calls": 0, "completion_authority": False,
+            "prestart_recovery": recovery}
+
+    if unavailable:
+        return refuse("protected_fence_unavailable")
+    if incident in markers:
+        return refuse("protected_incident")
+    digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    admission = _recovery_start_admission(state_dir,
+        digest if expected_launcher_sha256 is None else expected_launcher_sha256)
+    if admission:
+        return refuse(admission)
+    if (not _full_launch_record(record) or record.get("status") != "stopped"
+            or not _campaign_tuple_matches(record, repo_root, spec_path, state_dir)
+            or _owner_liveness(record.get("identity")) != "dead"):
+        return refuse("prestart_recovery_owner_unverified")
+    from .improvement_shutdown import _context, _parent_closed
+    from .improvement_recovery import _owned_bytes
+    try:
+        snapshot = json.loads(_owned_bytes(active, 32 * 1024 * 1024, legacy_group_write=True))
+        if (not isinstance(snapshot, dict)
+                or snapshot.get("schema") != "implementation-protected-path-active-v1"
+                or not isinstance(snapshot.get("snapshot"), dict)):
+            return refuse("protected_fence_unavailable")
+        before, source = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
+        if not isinstance(before, dict) or not isinstance(source, dict):
+            return refuse("prestart_recovery_source_unverified")
+        authority = Path(str(source.get("authority_path") or ""))
+        if (before.get("read_error") or source.get("source") not in {"native_control_plane", "legacy_json"}
+                or not authority.is_absolute() or authority.resolve(strict=True) != authority
+                or not authority.is_relative_to(state_dir) or not authority.is_file()):
+            return refuse("prestart_recovery_source_unverified")
+        if any(before.get(key) for key in ("manual_hold", "manual_cancellation", "capacity_quarantine", "protected_incident")):
+            return refuse("prestart_recovery_native_hold")
+        context = _context(state_dir, record)
+        if context is None:
+            return refuse("prestart_recovery_owner_unverified")
+        _parent_closed(state_dir, record, context, False)
+        shutdown = json.loads(_owned_bytes(state_dir / "container_shutdown.json"))
+        worktrees, _ = recorded_worktree_root(record, state_dir)
+        if (not _shutdown_verified(record, shutdown, repo_root, state_dir)
+                or not _observe_campaign_containers(repo_root, state_dir, worktrees, record, shutdown)):
+            return refuse("prestart_recovery_closure_unverified")
+        admission = _recovery_start_admission(state_dir, digest)
+        if admission:
+            return refuse(admission)
+        recovery = recover_stalled_worker(repo_root, spec_path, state_dir, expected_launcher_sha256=digest)
+        if (not isinstance(recovery, dict) or recovery.get("reconciled") is not True
+                or any(recovery.get(key) is not True for key in
+                    ("counters_preserved", "progress_preserved", "manual_holds_preserved"))
+                or any(recovery.get(key) is not False for key in
+                    ("selection_performed", "paid_dispatch", "attempt_refunded", "completion_authority"))):
+            return refuse("prestart_quiesced_recovery_refused", recovery)
+        admission = _recovery_start_admission(state_dir, digest)
+        if admission:
+            return refuse(admission, recovery)
+        for path in (active, incident):
+            try:
+                path.lstat()
+                return refuse("prestart_protected_fence_retained", recovery)
+            except FileNotFoundError:
+                pass
+        after, after_source = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
+        if (not isinstance(after, dict) or after.get("read_error") or after_source != source or any(after.get(key) != before.get(key)
+                for key in ("implementation_attempts", "implementation_attempts_by_cid", "completed_task_ids"))):
+            return refuse("prestart_recovery_accounting_unverified", recovery)
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError) as error:
+        return refuse("prestart_recovery_evidence_unverified", {"error_type": type(error).__name__})
+    # The original stopped launcher must still match under the normal start lock.
+    return digest, None
+
+
 def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: Path | None = None,
           expected_launcher_sha256: str | None = None) -> dict[str, Any]:
     state_dir = state_dir.resolve()
@@ -925,6 +1046,10 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
     if not resources["ready"]:
         return {"status": "not_ready", "reason": CampaignResourceHold.code, "resource_capacity": resources,
                 "paid_calls": 0, "execution_started": False}
+    expected_launcher_sha256, refusal = _reconcile_stopped_fence_before_start(
+        repo_root, spec_path, state_dir, expected_launcher_sha256=expected_launcher_sha256)
+    if refusal is not None:
+        return refusal
     with _lock(state_dir):
         owner_path = state_dir / "launcher.json"
         previous = _read_json(owner_path)
@@ -2583,7 +2708,8 @@ def _claim_proof_conflict(native_state: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None) -> dict[str, Any]:
+def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None,
+                            expected_launcher_sha256: str | None = None) -> dict[str, Any]:
     """Fence a proven-dead ordinary attempt and reconcile it through native APIs.
 
     A live PID, stale heartbeat, or missing birth is not permission to refund an
@@ -2591,6 +2717,9 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
     dispatch another paid provider call. Lock contention and a temporarily
     unavailable dependency wait on a capped cooldown.
     """
+    admission = _recovery_start_admission(state_dir, expected_launcher_sha256)
+    if admission:
+        return _refusal(admission, {})
     observed = status(repo_root, spec_path, state_dir)
     moment = time.time() if now is None else now
     native_state = observed.get("native_state") if isinstance(observed.get("native_state"), dict) else {}
@@ -2649,6 +2778,9 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
         with ExitStack() as stack:
             for name in ("recovery.lock", "launcher.lock", "runner.lock"):
                 stack.enter_context(_lock(state_dir, name, blocking=False))
+            admission = _recovery_start_admission(state_dir, expected_launcher_sha256)
+            if admission:
+                return _refusal(admission, observed)
             if _recovery_preimage(repo_root, state_dir, record) != preimage:
                 return _refusal("recovery_preimage_changed", observed)
             _parent_closed(state_dir, record, context, False)
@@ -2679,6 +2811,9 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             # genuine existing queue before retaining its writer guard, then
             # inject that same instance into the non-implementing reconciler.
             _parent_closed(state_dir, record, context, False)
+            admission = _recovery_start_admission(state_dir, expected_launcher_sha256)
+            if admission:
+                return _refusal(admission, observed)
             queue_instance = MergeQueue(state_dir / "merge-queue")
             if read_merge_queue_settlement(state_dir / "merge-queue", **queue_args) != queue_before:
                 return _refusal("merge_queue_changed_during_preparation", observed)
@@ -2704,6 +2839,9 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             if _recovery_preimage(repo_root, state_dir, record) != preimage:
                 return _refusal("recovery_preimage_changed", observed)
             _parent_closed(state_dir, record, context, False)
+            admission = _recovery_start_admission(state_dir, expected_launcher_sha256)
+            if admission:
+                return _refusal(admission, observed)
             daemon = _open_recovery_daemon(repo_root, state_dir, record, merge_queue=queue_instance)
             attempt_result = daemon.reconcile_quiesced_active_attempt()
             claim_result = None
@@ -2750,8 +2888,19 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
                 if unfinished and nonterminal_claim and unfinished != claim_result.get("task_id"):
                     raise ValueError("pending_candidate_handoff_conflicts_with_current_claim")
                 _, native = _native_modules(repo_root)
-                pending_claim_result = reconcile_pending_claim(repo_root, spec_path, state_dir,
-                    record, native, daemon, unfinished or str(claim_result.get("task_id") or ""))
+                try:
+                    pending_claim_result = reconcile_pending_claim(repo_root, spec_path, state_dir,
+                        record, native, daemon, unfinished or str(claim_result.get("task_id") or ""))
+                except ValueError as error:
+                    if str(error) != "latest_exact_start_required":
+                        raise
+                    # Waiting cannot supply missing attempt provenance. Retain
+                    # the claim refusal and run the accounting checks below;
+                    # this classification grants no recovery or retry authority.
+                    pending_claim_result = {"reconciled": False, "blocked": True,
+                        "reason": "latest_exact_start_required", "completion_authority": False,
+                        "attempt_refunded": False, "provider_callback_settled": False,
+                        "new_attempt_authority": False}
                 if pending_claim_result.get("reconciled") is True and not pending_claim_result.get("blocked"):
                     # The companion releases only the exact claim. Let the
                     # unchanged Native API finish its ordinary stale-lock cleanup.
@@ -2805,14 +2954,16 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
                              diagnostics=[type(exc).__name__, str(exc)[:500]])
 
 
-def recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None) -> dict[str, Any]:
+def recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None,
+                           expected_launcher_sha256: str | None = None) -> dict[str, Any]:
     """Explicit stopped-only operator seam; the native watchdog owns live work."""
     previous = dict(os.environ)
     try:
         effective = campaign_environment(repo_root, state_dir=state_dir)
         os.environ.clear()
         os.environ.update(effective)
-        return _recover_stalled_worker(repo_root, spec_path, state_dir, now=now)
+        return _recover_stalled_worker(repo_root, spec_path, state_dir, now=now,
+            expected_launcher_sha256=expected_launcher_sha256)
     finally:
         os.environ.clear()
         os.environ.update(previous)
