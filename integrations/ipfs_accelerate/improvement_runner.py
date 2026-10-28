@@ -669,6 +669,29 @@ class CampaignResourceHold(RuntimeError):
         super().__init__("campaign_resource_hold:" + str(observation.get("reason", "unavailable")))
 
 
+class CampaignOperatorHold(RuntimeError):
+    """Refuse the next Native pass without interrupting an active pass."""
+
+    def __init__(self, marker: str):
+        self.observation = {"schema": "complaint-campaign-operator-admission@1",
+            "reason": "operator_hold_present", "marker": marker, "stage": "before_native_pass",
+            "paid_dispatch": False, "accounting_changed": False, "attempt_refunded": False}
+        super().__init__("campaign_operator_hold:" + marker)
+
+
+def _require_no_operator_hold(state_dir: Path) -> None:
+    # Any directory entry fences admission, including a dangling symlink.
+    # Never read, follow, replace or retire another operator's marker.
+    for name in ("HOLD", "OPERATOR_STOP"):
+        try:
+            (state_dir / "watchdog" / name).lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            raise CampaignOperatorHold(name) from None
+        raise CampaignOperatorHold(name)
+
+
 def _containerd_metadata_directory() -> Path:
     """Native's standard rootful containerd metadata location, independently of DockerRootDir.
 
@@ -761,6 +784,7 @@ def _resource_admission_hook(repo_root: Path, state_dir: Path, worktree_root: Pa
     # Convert it inside the callback so this mandatory admission check refuses
     # before run_once; every other hold also propagates through the sole loop.
     def before_pass(_context):
+        _require_no_operator_hold(state_dir)
         try:
             _require_resource_capacity(repo_root, state_dir, worktree_root, environment,
                                        stage="before_native_pass")
@@ -777,7 +801,10 @@ def _resource_admission_hook(repo_root: Path, state_dir: Path, worktree_root: Pa
                 "ready": False, "reason": "resource_observation_timed_out", "stage": "before_native_pass",
                 "paid_dispatch": False, "accounting_changed": False, "attempt_refunded": False,
                 "live_wait_or_lease_claimed": False}) from None
-    return DaemonLoopHook(phase="before", message="Campaign resource admission hold: %s", callback=before_pass)
+        # Sizing can take time. Recheck at the end of admission as well; a
+        # hold created while the previous pass runs must fence the next pass.
+        _require_no_operator_hold(state_dir)
+    return DaemonLoopHook(phase="before", message="Campaign before-pass admission hold: %s", callback=before_pass)
 
 
 def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktree_root: Path | None = None,

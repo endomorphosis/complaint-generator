@@ -85,6 +85,48 @@ def observe_actual_executor(world, mode):
         assert (workspace/'executor-ready').exists() and pulse_path.is_file(), (results,errors)
         pulse = runner._read_validation_activity(pulse_path)
         assert runner._validation_activity_record_valid(pulse,binding,now_ts=time.time())
+        if mode == 'validation_pulse_race':
+            from integrations.ipfs_accelerate import reconciliation_activity
+            original_evidence = reconciliation_activity.evidence
+            original_read = runner._read_validation_activity
+            race = {}
+            def after_new_pulse(*args, now_ts):
+                observer_thread = threading.get_ident()
+                def read(path):
+                    value = original_read(path)
+                    if path == pulse_path and threading.get_ident() == observer_thread:
+                        until = time.monotonic()+8
+                        while value['observed_at'] <= now_ts and time.monotonic() < until:
+                            time.sleep(.01)
+                            value = original_read(path)
+                        assert value['observed_at'] > now_ts
+                        race.update(captured_at=now_ts, pulse_observed_at=value['observed_at'],
+                            deadline_at=value['deadline_at'], old_clock_accepts=
+                            runner._validation_activity_record_valid(value,binding,now_ts=now_ts))
+                    return value
+                with pytest.MonkeyPatch.context() as patch:
+                    patch.setattr(runner, '_read_validation_activity', read)
+                    return original_evidence(*args, now_ts=now_ts)
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(reconciliation_activity, 'evidence', after_new_pulse)
+                raced = status()
+            # This explicitly damaged copy tests refusal; it is never written
+            # to the real executor's private activity record.
+            def future_read(path):
+                value = original_read(path)
+                return {**value, 'observed_at':time.time()+60} if path == pulse_path else value
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(runner, '_read_validation_activity', future_read)
+                future = status()
+            expired = original_evidence(runner,world['root'],campaign,
+                runner._read_json(campaign/'launcher.json'),runner._validation_activity_snapshot(campaign)['body'],
+                now_ts=binding['phase_deadline'])
+            assert 'deadline_at' in race, (raced, future)
+            assert original_read(pulse_path)['deadline_at'] == pulse['deadline_at'] == race['deadline_at']
+            assert world['claim_path'].read_bytes() == before_claim
+            assert world['lease_path'].read_bytes() == before_lease
+            assert vars(state) == before
+            return {'raced_pulse':raced, 'race':race, 'future_pulse':future, 'expired':expired}
         observed = {'canonical_pulse':status()}
         # Strict current ownership and the existing single validation deadline
         # remain necessary even while a genuine executor is still running.
@@ -136,3 +178,17 @@ def test_actual_rescue_thought_keeps_original_provider_deadline(tmp_path):
     assert observed['auto_rescue_activity_verified'] is False
     assert observed['validation_activity_verified'] is False
     assert observed['progress_verified'] is False
+
+
+def test_real_canonical_pulse_published_during_status_read_is_not_a_false_stall(tmp_path):
+    observed = _status_in_owned_parent(tmp_path,'validation_pulse_race')
+    assert observed['race']['captured_at'] < observed['race']['pulse_observed_at']
+    assert observed['race']['old_clock_accepts'] is False
+    live = observed['raced_pulse']
+    assert live['status'] == 'active' and live['healthy'] is True,live
+    assert live['validation_activity_verified'] is True,live
+    assert live['validation_activity_evidence']['deadline_at'] == observed['race']['deadline_at']
+    assert observed['expired'] is None
+    future = observed['future_pulse']
+    assert future['validation_activity_verified'] is False,future
+    assert future['status'] == 'stalled' and future['healthy'] is False,future

@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 from types import SimpleNamespace
 
 
@@ -246,10 +247,17 @@ def evidence(runner, repo_root, state_dir, record, state, *, now_ts):
             pulse = runner._read_validation_activity(runner._validation_activity_path(value))
         except (OSError, ValueError, TypeError):
             pulse = None
+        # status() captures its clock before parsing provider logs and proving
+        # this exact owner. A real executor can publish another pulse during
+        # those reads. Validate against the clock after reading that pulse,
+        # rather than misclassifying its new observation as a future timestamp.
+        # An explicitly later caller clock remains authoritative for expiry;
+        # neither this observation nor the pulse can extend a fixed deadline.
+        observed_now = max(now_ts, time.time())
         finalizing = False
-        if not runner._validation_activity_record_valid(pulse, value, now_ts=now_ts):
+        if not runner._validation_activity_record_valid(pulse, value, now_ts=observed_now):
             from .validation_handoff import read
-            pulse = read(runner, value, now_ts=now_ts)
+            pulse = read(runner, value, now_ts=observed_now)
             if pulse is None:
                 return None
             finalizing = True
