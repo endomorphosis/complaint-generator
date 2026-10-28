@@ -192,7 +192,7 @@ Implementation instructions:
 
 ## CIMP-UX-07 Unify chat, split view, and rich workspace modes
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
