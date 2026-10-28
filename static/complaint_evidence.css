@@ -1,0 +1,126 @@
+.evidence-library {
+    margin: 16px 0 22px;
+    padding: 16px;
+    border: 1px solid var(--line, #d7d2c8);
+    border-radius: 18px;
+    background: rgba(255, 252, 247, 0.92);
+    min-width: 0;
+}
+
+.evidence-library-toolbar,
+.evidence-library-switch,
+.evidence-library-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 12px;
+    align-items: end;
+    min-width: 0;
+}
+
+.evidence-library-toolbar label {
+    display: grid;
+    gap: 4px;
+    font-weight: 700;
+    min-width: 0;
+    flex: 1 1 180px;
+}
+
+.evidence-library-toolbar input,
+.evidence-library-toolbar select {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+}
+
+.evidence-library-summary {
+    margin: 12px 0;
+}
+
+.evidence-library-body {
+    display: grid;
+    grid-template-columns: minmax(200px, 34%) minmax(0, 1fr);
+    gap: 14px;
+    min-width: 0;
+}
+
+.evidence-library-list,
+.evidence-library-detail,
+.evidence-library-state {
+    min-width: 0;
+    border: 1px solid var(--line, #d7d2c8);
+    border-radius: 14px;
+    background: #fff;
+}
+
+.evidence-library-list {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    max-height: min(640px, 70vh);
+    overflow: auto;
+    padding: 8px;
+}
+
+.evidence-library-item {
+    display: grid;
+    gap: 4px;
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    text-align: left;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    background: #f7f4ee;
+}
+
+.evidence-library-item[aria-pressed="true"] {
+    border-color: #1f4b3a;
+    background: #e7f2ec;
+}
+
+.evidence-library-item small,
+.evidence-library-detail p {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.evidence-library-detail {
+    padding: 14px 16px;
+}
+
+.evidence-library-detail h3 {
+    margin: 0 0 8px;
+}
+
+.evidence-library-detail section + section {
+    margin-top: 12px;
+}
+
+.evidence-library-state {
+    padding: 14px 16px;
+}
+
+.evidence-library-state[hidden],
+.evidence-library-body[hidden],
+.evidence-library-switch[hidden] {
+    display: none;
+}
+
+.evidence-library[data-layout="list-detail"] .evidence-library-body {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.evidence-library[data-layout="list-detail"][data-pane="list"] .evidence-library-detail,
+.evidence-library[data-layout="list-detail"][data-pane="detail"] .evidence-library-list {
+    display: none;
+}
+
+.evidence-library[data-layout="master-detail"] .evidence-library-switch {
+    display: none;
+}
+
+@media (max-width: 767px) {
+    .evidence-library {
+        padding: 12px;
+    }
+}

@@ -3405,6 +3405,7 @@
     <link id="workspace-shell-style" rel="stylesheet" href="/static/complaint_app_shell.css">
     <link id="complaint-experience-tokens" rel="stylesheet" href="/static/complaint_experience_tokens.css">
     <link id="complaint-case-shell-style" rel="stylesheet" href="/static/complaint_case_shell.css">
+    <link id="complaint-evidence-style" rel="stylesheet" href="/static/complaint_evidence.css">
     <style id="complaint-presentation-style">
         html[data-workspace-presentation="chat-only"] [data-tab-panel="intake"],
         html[data-workspace-presentation="chat-plus-context"] [data-tab-panel="intake"],
@@ -4181,6 +4182,78 @@
                             <span>The strongest missing element has at least one concrete supporting item, and the saved records are tied to the right claim elements before Draft takes over attention.</span>
                         </div>
                     </div>
+                    <h2>Evidence library</h2>
+                    <p class="muted">Search the authorized case catalog and open one artifact. Receipt is not authenticity, relevance, or claim support.</p>
+                    <section id="evidence-library" class="evidence-library" data-state="empty" data-layout="master-detail" data-pane="list" data-selected-id="" aria-label="Evidence library">
+                        <div class="evidence-library-toolbar">
+                            <label for="evidence-library-search">Search evidence
+                                <input id="evidence-library-search" type="search" autocomplete="off" placeholder="Source, link, or note">
+                            </label>
+                            <label for="evidence-library-status-filter">Status
+                                <select id="evidence-library-status-filter">
+                                    <option value="">All statuses</option>
+                                    <option value="received">Received</option>
+                                    <option value="extracted">Extracted</option>
+                                    <option value="needs-review">Needs review</option>
+                                    <option value="linked">Linked</option>
+                                    <option value="failed">Failed</option>
+                                    <option value="unavailable">Unavailable</option>
+                                </select>
+                            </label>
+                            <button class="secondary" id="evidence-library-refresh" type="button">Refresh library</button>
+                            <button class="secondary" id="evidence-library-clear" type="button">Clear filters</button>
+                        </div>
+                        <div class="evidence-library-switch" id="evidence-library-switch">
+                            <button class="secondary" id="evidence-library-show-list" type="button">List</button>
+                            <button class="secondary" id="evidence-library-show-detail" type="button">Detail</button>
+                        </div>
+                        <p class="evidence-library-summary" id="evidence-library-summary" role="status">The evidence library has not loaded.</p>
+                        <div class="evidence-library-state" id="evidence-library-empty">
+                            <strong>No artifacts are in this case catalog.</strong>
+                            <p>Upload a file through the private case store. A chosen file is not evidence until ingestion finishes.</p>
+                            <button class="primary" id="evidence-library-add" type="button">Choose a file to upload</button>
+                        </div>
+                        <div class="evidence-library-state" id="evidence-library-error" hidden>
+                            <strong>The evidence library could not be loaded.</strong>
+                            <p id="evidence-library-error-detail">The catalog request failed. The previous selection is kept.</p>
+                            <button class="primary" id="evidence-library-retry" type="button">Try the catalog again</button>
+                        </div>
+                        <div class="evidence-library-state" id="evidence-library-locked" hidden>
+                            <strong>This evidence catalog is locked.</strong>
+                            <p id="evidence-library-locked-detail">Unlock the case key or open an authorized case, then refresh. Locked evidence is not shown.</p>
+                            <button class="primary" id="evidence-library-unlock" type="button">Refresh after access returns</button>
+                        </div>
+                        <div class="evidence-library-body" id="evidence-library-body" hidden>
+                            <div id="evidence-library-list" class="evidence-library-list" role="listbox" aria-label="Evidence artifacts"></div>
+                            <article id="evidence-library-detail" class="evidence-library-detail" aria-live="polite">
+                                <h3 id="evidence-detail-title">No artifact selected</h3>
+                                <section>
+                                    <h4>Status</h4>
+                                    <p id="evidence-detail-status">Select an artifact.</p>
+                                </section>
+                                <section>
+                                    <h4>Source</h4>
+                                    <p id="evidence-detail-source"></p>
+                                </section>
+                                <section>
+                                    <h4>Dates</h4>
+                                    <p id="evidence-detail-dates"></p>
+                                </section>
+                                <section>
+                                    <h4>Attributed notes</h4>
+                                    <p id="evidence-detail-notes"></p>
+                                </section>
+                                <section>
+                                    <h4>Classification</h4>
+                                    <p id="evidence-detail-classification"></p>
+                                </section>
+                                <section>
+                                    <h4>Current complaint links</h4>
+                                    <p id="evidence-detail-links"></p>
+                                </section>
+                            </article>
+                        </div>
+                    </section>
                     <h2>Evidence Intake</h2>
                     <p class="muted">Collect both testimony and documents, and attach each item to a claim element so support gaps are obvious.</p>
                     <div class="section-intro">
