@@ -3406,6 +3406,7 @@
     <link id="complaint-experience-tokens" rel="stylesheet" href="/static/complaint_experience_tokens.css">
     <link id="complaint-case-shell-style" rel="stylesheet" href="/static/complaint_case_shell.css">
     <link id="complaint-evidence-style" rel="stylesheet" href="/static/complaint_evidence.css">
+    <link id="complaint-conversation-style" rel="stylesheet" href="/static/complaint_conversation.css">
     <style id="complaint-presentation-style">
         html[data-workspace-presentation="chat-only"] [data-tab-panel="intake"],
         html[data-workspace-presentation="chat-plus-context"] [data-tab-panel="intake"],
@@ -3903,6 +3904,18 @@
                     </div>
                     <h2>Intake Questions</h2>
                     <p class="muted">Capture the facts once, then reuse them everywhere else in the workflow. Court details are optional and can wait until the story is clear.</p>
+                    <section id="mediator-conversation" class="mediator-conversation" aria-labelledby="mediator-conversation-title" data-lifecycle="idle" data-retry-count="0" aria-busy="false">
+                        <h3 id="mediator-conversation-title">Mediator conversation</h3>
+                        <p id="mediator-conversation-context">No case conversation is loaded.</p>
+                        <ol id="mediator-conversation-log" class="mediator-conversation__log" role="log" aria-live="polite" aria-relevant="additions"></ol>
+                        <p id="mediator-conversation-status" class="mediator-conversation__status" role="status">The conversation has not been loaded.</p>
+                        <div class="mediator-conversation__controls">
+                            <button type="button" id="mediator-conversation-refresh">Refresh conversation</button>
+                            <button type="button" id="mediator-conversation-cancel" disabled>Cancel refresh</button>
+                            <button type="button" id="mediator-conversation-retry" disabled>Retry refresh</button>
+                        </div>
+                        <div id="mediator-conversation-actions" class="mediator-conversation__actions" aria-label="Conversation next actions"></div>
+                    </section>
                     <section id="adaptive-inquiry" data-task="CIMP-GUI-16">
                         <h3>Adaptive questions from the shared mediator</h3>
                         <p class="muted">Enter the complaint narrative. The question that appears is the pending inquiry from the shared mediator. Later questions follow answers and open graph gaps. The fixed intake fields below do not choose this question.</p>
@@ -6291,6 +6304,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
     <script src="/static/complaint_case_shell.js"></script>
     <script src="/static/complaint_graph_view.js"></script>
     <script src="/static/complaint_evidence.js"></script>
+    <script src="/static/complaint_conversation.js"></script>
     <script>
         const { ComplaintMcpClient } = window.ComplaintMcpSdk;
         const operationSurfaceAttempts = {graph: 0, research: 0, collaboration: 0};
@@ -14734,6 +14748,7 @@ function extractComplaintOutputSignals(result) {
             workspacePrivacyEpoch += 1;
             workspacePrivacyInactive = true;
             if (window.complaintEvidenceLibrary) window.complaintEvidenceLibrary.clearPrivateState();
+            if (window.complaintConversation) window.complaintConversation.clear();
             clearCaseProcessingConsentView();
             clearLegalContextView();
             clearProofTraceView();
@@ -14905,6 +14920,7 @@ function extractComplaintOutputSignals(result) {
             renderFactualCorrectionOffer(payload);
             renderFiniteInterviewOutcome(payload);
             renderInquiryExplanation(payload, view);
+            if (window.complaintConversation) window.complaintConversation.project(payload);
         }
 
         function pendingInquiryRecord(payload) {
