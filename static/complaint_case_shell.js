@@ -152,6 +152,26 @@
             if (!button) return;
             setPresentationMode(button.getAttribute("data-presentation-mode"));
         });
+        host.querySelector("#complaint-presentation-modes").addEventListener("keydown", function (event) {
+            var button = event.target.closest("[data-presentation-mode]");
+            if (!button || event.altKey || event.ctrlKey || event.metaKey) return;
+            var index = PRESENTATION_MODES.indexOf(button.getAttribute("data-presentation-mode"));
+            if (index < 0) return;
+            if (event.key === "ArrowRight" || event.key === "ArrowDown") index += 1;
+            else if (event.key === "ArrowLeft" || event.key === "ArrowUp") index -= 1;
+            else if (event.key === "Home") index = 0;
+            else if (event.key === "End") index = PRESENTATION_MODES.length - 1;
+            else return;
+            event.preventDefault();
+            var mode = PRESENTATION_MODES[(index + PRESENTATION_MODES.length) % PRESENTATION_MODES.length];
+            setPresentationMode(mode).then(function (changed) {
+                // Keep the real continuity/access checks and do not steal
+                // focus if the person tabbed away during the session read.
+                if (!changed || document.activeElement !== button) return;
+                var selected = document.querySelector('#complaint-presentation-modes [data-presentation-mode="' + mode + '"]');
+                if (selected) selected.focus();
+            });
+        });
         showTask("overview");
         applyPresentation();
         applyViewport();
@@ -619,6 +639,7 @@
         Array.prototype.forEach.call(document.querySelectorAll("[data-presentation-mode]"), function (button) {
             var on = button.getAttribute("data-presentation-mode") === presentationMode;
             button.setAttribute("aria-checked", on ? "true" : "false");
+            button.tabIndex = on ? 0 : -1;
         });
         var context = document.getElementById("complaint-presentation-context");
         if (context) context.hidden = presentationMode !== "chat-plus-context";
