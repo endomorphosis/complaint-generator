@@ -120,6 +120,12 @@
 }
 
 @media (max-width: 767px) {
+    /* The expanded case header can cover most of a narrow viewport. Keep
+       evidence controls reachable when the user scrolls this workbench. */
+    body:has([data-tab-panel="evidence"].is-active) .case-shell {
+        position: static;
+    }
+
     .evidence-library {
         padding: 12px;
     }

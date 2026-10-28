@@ -8,6 +8,7 @@ actionable and do not present receipt as a complaint link or legal conclusion.
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -95,12 +96,44 @@ def _link(client, case, csrf, evidence_id):
     return linked.json()
 
 
+def _receive_from_browser(page, case, source, original, key):
+    result = page.evaluate(
+        """async payload => {
+            const response = await fetch('/api/cases/evidence', {
+                method: 'POST', credentials: 'same-origin',
+                headers: Object.assign({}, payload.headers, {
+                    'content-type': 'application/json',
+                    'x-csrf-token': window.workspaceClient.csrfToken,
+                }),
+                body: JSON.stringify(payload.body),
+            });
+            return {status: response.status, body: await response.json()};
+        }""",
+        {
+            "headers": _composed_headers(case),
+            "body": {
+                "tenant_id": case.tenant_id,
+                "case_id": case.case_id,
+                "resource_id": case.resource_id,
+                "source_filename": source,
+                "original_filename": original,
+                "media_type": "text/plain",
+                "content_base64": base64.b64encode(f"synthetic {source}".encode()).decode("ascii"),
+                "idempotency_key": key,
+            },
+        },
+    )
+    assert result["status"] == 201, result
+    return result["body"]
+
+
 def _browser(tmp_path, monkeypatch):
     world = _ready(tmp_path)
     denial = browser.probe_inherited_network_denial()
     if not denial["af_unix_only"]:
         raise browser.BrowserCapabilityError("inherited AF_UNIX-only denial is not active")
     bridge = browser.SameOriginAsgiBridge(world.app)
+    world.browser_bridge = bridge
     node, chromium = browser.pin_executables()
     monkeypatch.setenv("PLAYWRIGHT_NODEJS_PATH", node.path)
     profile = tmp_path / "ux15-profile"
@@ -272,9 +305,9 @@ def test_empty_error_and_locked_library_states_are_actionable(tmp_path, monkeypa
         assert page.evaluate("() => document.activeElement.id") == "evidence-attachment"
         assert "No artifacts are in this case catalog." in page.locator("#evidence-library-summary").inner_text()
 
-        with TestClient(world.app, base_url="https://testserver") as client:
-            csrf = _composed_login(client)
-            created = _receive(client, world.case, csrf, OTHER_SOURCE, OTHER_ORIGINAL, "ux15-empty-then")
+        created = _receive_from_browser(
+            page, world.case, OTHER_SOURCE, OTHER_ORIGINAL, "ux15-empty-then"
+        )
         page.click("#evidence-library-refresh")
         page.wait_for_function(
             """id => document.getElementById('evidence-library').dataset.selectedId === id""",
@@ -328,5 +361,54 @@ def test_empty_error_and_locked_library_states_are_actionable(tmp_path, monkeypa
         assert "cannot open" in denied
         assert OTHER_SOURCE not in denied
         assert page.locator("#evidence-library-list [data-evidence-id]").count() == 0
+    finally:
+        _close(playwright, context, node, profile, observed)
+
+
+@pytest.mark.parametrize("boundary", ["clear", "case"])
+def test_delayed_catalog_cannot_restore_retired_evidence(tmp_path, monkeypatch, boundary):
+    world, page, playwright, context, node, profile, observed = _browser(tmp_path, monkeypatch)
+    other_case = world.cases.create_case(actor_principal_id=world.owner.principal_id)
+    returned_counts = []
+    try:
+        with TestClient(world.app, base_url="https://testserver") as client:
+            csrf = _composed_login(client)
+            _receive(client, world.case, csrf, OTHER_SOURCE, OTHER_ORIGINAL, "ux15-retired-read")
+        _open(page, world)
+        page.wait_for_function("() => document.getElementById('evidence-library').dataset.state === 'ready'")
+        assert OTHER_SOURCE in _detail(page)["source"]
+        original = world.browser_bridge.handle
+
+        def retire_before_response(request):
+            # Preserve the real application's status, headers, and bytes. Move
+            # the local privacy boundary between its read and HTTP delivery.
+            result = original(request)
+            if (request.method == "GET" and not returned_counts
+                    and request.url.startswith(browser.SAME_ORIGIN + "/api/cases/evidence?")):
+                assert result.status == 200
+                body = result.body
+                returned_counts.append(len(json.loads(body)["items"]))
+                page.evaluate(
+                    """payload => {
+                        if (payload.boundary === 'clear') {
+                            document.getElementById('workspace-clear-private-state').click();
+                        } else window.workspaceClient.setCaseContext(payload.context);
+                    }""",
+                    {"boundary": boundary, "context": {
+                        "tenant_id": other_case.tenant_id, "case_id": other_case.case_id,
+                        "resource_id": other_case.resource_id, "revision": other_case.revision}},
+                )
+                assert result.body == body
+            return result
+
+        monkeypatch.setattr(world.browser_bridge, "handle", retire_before_response)
+        page.evaluate("() => window.complaintEvidenceLibrary.refresh()")
+        assert returned_counts == [1], "the original real catalog did not return its artifact"
+        library_text = page.locator("#evidence-library").text_content()
+        assert OTHER_SOURCE not in library_text
+        assert OTHER_ORIGINAL not in library_text
+        assert page.locator("#evidence-library-list [data-evidence-id]").count() == 0
+        assert page.locator("#evidence-library-detail").get_attribute("data-evidence-id") in (None, "")
+        assert page.evaluate("() => window.complaintEvidenceLibrary.selectedId()") == ""
     finally:
         _close(playwright, context, node, profile, observed)

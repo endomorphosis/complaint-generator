@@ -14733,6 +14733,7 @@ function extractComplaintOutputSignals(result) {
         function resetPrivateWorkspaceView(state, message) {
             workspacePrivacyEpoch += 1;
             workspacePrivacyInactive = true;
+            if (window.complaintEvidenceLibrary) window.complaintEvidenceLibrary.clearPrivateState();
             clearCaseProcessingConsentView();
             clearLegalContextView();
             clearProofTraceView();

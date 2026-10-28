@@ -264,7 +264,7 @@
             if (!again.ok) return fail(again.payload);
             remember(again.payload);
             paint("sealed", "Idempotent retry returned the sealed upload.", again.payload.ingestion_status, 100);
-            refreshLibrary();
+            if (window.complaintEvidenceLibrary) window.complaintEvidenceLibrary.refresh();
             return again.payload;
         }
         var resumed = await post("/api/cases/evidence/uploads/retry", identity({
@@ -304,6 +304,7 @@
     var QUALITIES = ["authenticity", "relevance", "admissibility", "claim_support"];
     var generation = 0;
     var items = [];
+    var itemsScope = null;
     var selectedId = "";
     var readAt = "";
 
@@ -314,6 +315,49 @@
     function caseContext() {
         var client = window.workspaceClient;
         return client && client.caseContext ? client.caseContext : null;
+    }
+
+    function captureScope() {
+        var client = window.workspaceClient;
+        var context = caseContext();
+        if (!client || !context || client._privacyActive === false) return null;
+        return {
+            client: client,
+            epoch: client._privacyEpoch,
+            principal: client.activePrincipalId,
+            caseKey: JSON.stringify([context.tenant_id, context.case_id, context.resource_id])
+        };
+    }
+
+    function currentScope(scope) {
+        var current = captureScope();
+        return Boolean(scope && current && scope.client === current.client
+            && scope.epoch === current.epoch && scope.principal === current.principal
+            && scope.caseKey === current.caseKey);
+    }
+
+    function clearPrivateState() {
+        generation += 1;
+        items = [];
+        itemsScope = null;
+        selectedId = "";
+        readAt = "";
+        var host = root();
+        if (host) {
+            host.dataset.selectedId = "";
+            delete host.dataset.catalogRead;
+        }
+        var list = document.getElementById("evidence-library-list");
+        if (list) list.textContent = "";
+        paintDetail(null);
+        setState("locked", "Private evidence was cleared. Open an authorized case to read its catalog again.");
+    }
+
+    function currentRead(token, scope) {
+        if (token !== generation) return false;
+        if (currentScope(scope)) return true;
+        clearPrivateState();
+        return false;
     }
 
     function text(id, value) {
@@ -379,7 +423,9 @@
     }
 
     function paintDetail(item) {
+        var detail = document.getElementById("evidence-library-detail");
         if (!item) {
+            if (detail) detail.dataset.evidenceId = "";
             text("evidence-detail-title", "No artifact selected");
             text("evidence-detail-status", "Select an artifact from the library.");
             text("evidence-detail-source", "");
@@ -420,7 +466,6 @@
         }).join("\n") + "\nClassification is not verified support or governing law.");
         var links = linksFor(item);
         text("evidence-detail-links", links.length ? links.join("\n") : "No current complaint link.");
-        var detail = document.getElementById("evidence-library-detail");
         if (detail) detail.dataset.evidenceId = item.evidence_id || "";
     }
 
@@ -428,6 +473,10 @@
         var host = root();
         var list = document.getElementById("evidence-library-list");
         if (!host || !list || host.dataset.state !== "ready") return;
+        if (!currentScope(itemsScope)) {
+            clearPrivateState();
+            return;
+        }
         layout();
         var shown = visibleItems();
         list.textContent = "";
@@ -491,14 +540,16 @@
     async function load() {
         var host = root();
         if (!host) return;
+        var scope = captureScope();
+        if (itemsScope && !currentScope(itemsScope)) clearPrivateState();
         var token = ++generation;
         var context = caseContext();
-        if (!context) {
-            items = [];
+        if (!scope || !context) {
+            clearPrivateState();
             setState("locked", "Select an authorized case before opening its evidence library.");
-            paintDetail(null);
             return;
         }
+        itemsScope = scope;
         var params = new URLSearchParams({
             tenant_id: context.tenant_id,
             case_id: context.case_id,
@@ -511,13 +562,14 @@
                 headers: {"Accept": "application/json"}
             });
         } catch (error) {
-            if (token !== generation) return;
+            if (!currentRead(token, scope)) return;
             setState("error", "The catalog request did not reach the server. Try again.");
             return;
         }
-        if (token !== generation) return;
+        if (!currentRead(token, scope)) return;
         var body = {};
         try { body = await response.json(); } catch (error) { body = {}; }
+        if (!currentRead(token, scope)) return;
         if (response.status === 401 || response.status === 403 || body.error === "key_unavailable" || body.error === "not_owner" || body.error === "unauthenticated") {
             items = [];
             selectedId = host.dataset.selectedId || selectedId;
@@ -583,6 +635,7 @@
 
     window.complaintEvidenceLibrary = {
         refresh: load,
+        clearPrivateState: clearPrivateState,
         selectedId: function () { return selectedId; }
     };
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bind);
