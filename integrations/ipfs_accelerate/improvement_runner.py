@@ -2625,14 +2625,18 @@ def _recovery_config(repo_root: Path, state_dir: Path, record: Mapping[str, Any]
     return supervisor.supervisor_config_from_args(supervisor.parse_args(args), repo_root=repo_root)
 
 
-def _open_recovery_daemon(repo_root: Path, state_dir: Path, record: Mapping[str, Any], *, merge_queue=None):
+def _open_recovery_daemon(repo_root: Path, state_dir: Path, record: Mapping[str, Any], *, merge_queue=None,
+                          common_checkout_owner: bool = False):
     """Native quiesced reconciliation has no implementation/selection authority."""
     _, native = _native_modules(repo_root)
     config = _recovery_config(repo_root, state_dir, record)
     return native.PortalImplementationDaemon(
         todo_path=config.todo_path, state_path=config.state_path, strategy_path=config.strategy_path,
         events_path=state_dir / f"{STATE_PREFIX}_events.jsonl", repo_root=repo_root,
-        task_header_prefix=config.task_prefix, board_namespace=config.board_namespace, implement=False,
+        task_header_prefix=config.task_prefix,
+        # Native supervisor recovery owns the common checkout journal; the
+        # remaining Host recovery keeps its separate board-scoped lease.
+        board_namespace="" if common_checkout_owner else config.board_namespace, implement=False,
         implementation_command=config.implementation_command,
         implementation_timeout=config.implementation_timeout, max_task_attempts=config.max_task_attempts,
         use_ephemeral_worktree=False, worktree_root=config.worktree_root,
@@ -2714,6 +2718,72 @@ def _claim_proof_conflict(native_state: Mapping[str, Any]) -> str | None:
     if native_state.get("proof_stale") or native_state.get("stale_proof"):
         return "stale_proof"
     return None
+
+
+def _settle_obsolete_checkout_journal(daemon, state_dir: Path, lease,
+                                      preimage: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Settle Native metadata before holding the queue's separate writer FD.
+
+    The typed owner API reads completed queue requests. Holding the external
+    writer guard during that read would lock this process against itself.
+    Only its one proved settlement event may refresh recovery evidence.
+    """
+    from .improvement_recovery import _owned_bytes
+    from ipfs_accelerate_py.agent_supervisor.proof.formal_verification_contracts import content_identity
+    from ipfs_accelerate_py.agent_supervisor.runtime.event_log import _event_identity, _event_stream_binding
+    from ipfs_accelerate_py.agent_supervisor.merge.checkout_lock import read_checkout_mutation_lease
+    event_path = state_dir / f"{STATE_PREFIX}_events.jsonl"
+    if _recovery_preimage(daemon.repo_root, state_dir, _read_json(state_dir / "launcher.json")) != preimage:
+        raise ValueError("native_completion_journal_settlement_preimage_changed")
+    events_before = _owned_bytes(event_path, MAX_EVENT_HISTORY_BYTES, legacy_group_write=True)
+    if hashlib.sha256(events_before).hexdigest() != preimage[str(event_path)][3]:
+        raise ValueError("native_completion_journal_settlement_event_preimage_changed")
+    journal_before = _owned_bytes(lease.lock_path, 32 * 1024 * 1024, legacy_group_write=True)
+    if read_checkout_mutation_lease(lease.lock_path) != lease:
+        raise ValueError("native_completion_journal_settlement_lease_changed")
+    result = daemon.reconcile_obsolete_protected_completion_journal()
+    if (result.get("checkout_mutation_lease_recovered") is not True
+            or result.get("reason") != "obsolete_completion_journal_settled"
+            or any(result.get(key) is not False for key in ("completion_authority", "attempt_refunded", "old_guard_trusted"))):
+        raise ValueError("native_completion_journal_settlement_required")
+    archive_path = Path(str(result.get("settlement_path") or ""))
+    if (not archive_path.is_absolute() or archive_path.resolve(strict=True) != archive_path
+            or archive_path.parent != state_dir / "protected-checkout-settlements"):
+        raise ValueError("native_completion_journal_settlement_path_changed")
+    archive = json.loads(_owned_bytes(archive_path, 64 * 1024 * 1024))
+    if not isinstance(archive, dict) or not isinstance(archive.get("proof"), dict):
+        raise ValueError("native_completion_journal_settlement_archive_invalid")
+    proof = archive.get("proof") or {}
+    if (archive.get("retired") is not True or archive.get("settlement_id") != result.get("settlement_id")
+            or content_identity(proof) != result.get("settlement_id")
+            or proof.get("old_lease_id") != lease.lease_id
+            or proof.get("old_lease_device") != lease.device or proof.get("old_lease_inode") != lease.inode
+            or proof.get("old_journal") != dict(lease.metadata)
+            or proof.get("old_journal_raw_hex") != journal_before.hex()
+            or proof.get("completion_authority") is not False or proof.get("attempt_refunded") is not False
+            or os.path.lexists(lease.lock_path)):
+        raise ValueError("native_completion_journal_settlement_proof_changed")
+    events_after = _owned_bytes(event_path, MAX_EVENT_HISTORY_BYTES, legacy_group_write=True)
+    appended = events_after[len(events_before):].splitlines() if events_after.startswith(events_before) else []
+    event = json.loads(appended[0]) if len(appended) == 1 else {}
+    previous = json.loads(events_before.splitlines()[-1]) if events_before.strip() else {}
+    stream, snapshot = _event_stream_binding(event_path)
+    if (not isinstance(event, dict) or not isinstance(previous, dict)
+            or type(previous.get("sequence", 0)) is not int
+            or event.get("type") != "obsolete_completion_journal_settled"
+            or not event.get("timestamp") or any(event.get(key) != value for key, value in result.items())
+            or type(event.get("sequence")) is not int or event["sequence"] != previous.get("sequence", 0) + 1
+            or event.get("previous_event_id") != previous.get("event_id", "")
+            or event.get("stream_id") != stream or event.get("snapshot_id") != snapshot
+            or event.get("event_id") != _event_identity(event)):
+        raise ValueError("native_completion_journal_settlement_event_changed")
+    current = _recovery_preimage(daemon.repo_root, state_dir, _read_json(state_dir / "launcher.json"))
+    old_events = preimage[str(event_path)]
+    if (current[str(event_path)][:3] != old_events[:3]
+            or {key: value for key, value in current.items() if key != str(event_path)}
+            != {key: value for key, value in preimage.items() if key != str(event_path)}):
+        raise ValueError("native_completion_journal_settlement_changed_recovery_evidence")
+    return result, current
 
 
 def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None,
@@ -2825,6 +2895,37 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             queue_instance = MergeQueue(state_dir / "merge-queue")
             if read_merge_queue_settlement(state_dir / "merge-queue", **queue_args) != queue_before:
                 return _refusal("merge_queue_changed_during_preparation", observed)
+            from ipfs_accelerate_py.agent_supervisor.merge.checkout_lock import (
+                checkout_mutation_lock_path, read_checkout_mutation_lease,
+            )
+            daemon = None
+            checkout_settlement = None
+            native_lease = read_checkout_mutation_lease(checkout_mutation_lock_path(repo_root))
+            if (native_lease is not None and native_lease.metadata.get("protected_recovery_required") is True
+                    and native_lease.metadata.get("protected_recovery_owner") == "implementation_daemon"
+                    and native_lease.metadata.get("operation") == "mark_tasks_completed"):
+                native_owner = _open_recovery_daemon(repo_root, state_dir, record, merge_queue=queue_instance,
+                    common_checkout_owner=True)
+                if native_owner._repo_merge_lock_path() != native_lease.lock_path:
+                    return _refusal("native_completion_journal_owner_path_mismatch", observed)
+                try:
+                    checkout_settlement, preimage = _settle_obsolete_checkout_journal(
+                        native_owner, state_dir, native_lease, preimage)
+                except (OSError, ValueError, RuntimeError, TypeError) as error:
+                    return _refusal("native_completion_journal_settlement_unverified", observed,
+                        diagnostics=[str(error)[:500]], effects_uncertain=True,
+                        counters_preserved=None, progress_preserved=None)
+                _parent_closed(state_dir, record, context, False)
+                admission = _recovery_start_admission(state_dir, expected_launcher_sha256)
+                if admission:
+                    return _refusal(admission, observed)
+                containers = _read_json(state_dir / "container_shutdown.json")
+                if (not _fence_owned_tree(record).get("fenced")
+                        or not _shutdown_verified(record, containers, repo_root, state_dir)
+                        or not _observe_campaign_containers(repo_root, state_dir, selected_root, record, containers)):
+                    return _refusal("container_or_process_closure_unverified", observed)
+                if read_merge_queue_settlement(state_dir / "merge-queue", **queue_args) != queue_before:
+                    return _refusal("merge_queue_changed_during_checkout_settlement", observed)
             queue = stack.enter_context(hold_merge_queue_settlement(state_dir / "merge-queue",
                 target_repository_id=checkout_repository_id(repo_root), target_branch=record["merge_target"],
                 lock_timeout_seconds=0.01))
@@ -2850,7 +2951,8 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             admission = _recovery_start_admission(state_dir, expected_launcher_sha256)
             if admission:
                 return _refusal(admission, observed)
-            daemon = _open_recovery_daemon(repo_root, state_dir, record, merge_queue=queue_instance)
+            if daemon is None:
+                daemon = _open_recovery_daemon(repo_root, state_dir, record, merge_queue=queue_instance)
             attempt_result = daemon.reconcile_quiesced_active_attempt()
             claim_result = None
             pending_claim_result = None
@@ -2950,6 +3052,7 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
                     "attempt_reconciliation": attempt_result, "claim_reconciliation": claim_result,
                     "pending_claim_reconciliation": pending_claim_result,
                     "completed_claim_reconciliation": completed_claim_result,
+                    "checkout_journal_settlement": checkout_settlement,
                     "fence": fence, "container_shutdown": containers,
                     "selection_performed": False, "paid_dispatch": False, "attempt_refunded": False,
                     "completion_authority": False, "counters_preserved": True, "progress_preserved": True,
