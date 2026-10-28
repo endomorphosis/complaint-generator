@@ -331,9 +331,12 @@
 
     function currentScope(scope) {
         var current = captureScope();
+        return sameIdentity(scope, current) && scope.epoch === current.epoch;
+    }
+
+    function sameIdentity(scope, current) {
         return Boolean(scope && current && scope.client === current.client
-            && scope.epoch === current.epoch && scope.principal === current.principal
-            && scope.caseKey === current.caseKey);
+            && scope.principal === current.principal && scope.caseKey === current.caseKey);
     }
 
     function clearPrivateState() {
@@ -353,10 +356,18 @@
         setState("locked", "Private evidence was cleared. Open an authorized case to read its catalog again.");
     }
 
-    function currentRead(token, scope) {
+    function currentRead(token, scope, rescopeCount) {
         if (token !== generation) return false;
         if (currentScope(scope)) return true;
+        var current = captureScope();
+        var requestedSelection = selectedId;
         clearPrivateState();
+        // A same-case SDK rebind also retires pending reads. Obtain a new
+        // authorized catalog once; never reuse the response from its old epoch.
+        if (rescopeCount < 1 && sameIdentity(scope, current)) {
+            selectedId = requestedSelection;
+            load(rescopeCount + 1);
+        }
         return false;
     }
 
@@ -474,7 +485,14 @@
         var list = document.getElementById("evidence-library-list");
         if (!host || !list || host.dataset.state !== "ready") return;
         if (!currentScope(itemsScope)) {
+            var current = captureScope();
+            var previous = itemsScope;
+            var requestedSelection = selectedId;
             clearPrivateState();
+            if (sameIdentity(previous, current)) {
+                selectedId = requestedSelection;
+                load(1);
+            }
             return;
         }
         layout();
@@ -537,11 +555,17 @@
         if (state !== "ready" && detail) text("evidence-library-summary", detail);
     }
 
-    async function load() {
+    async function load(rescopeCount) {
         var host = root();
         if (!host) return;
+        rescopeCount = rescopeCount === 1 ? 1 : 0;
         var scope = captureScope();
-        if (itemsScope && !currentScope(itemsScope)) clearPrivateState();
+        if (itemsScope && !currentScope(itemsScope)) {
+            var previous = itemsScope;
+            var requestedSelection = selectedId;
+            clearPrivateState();
+            if (sameIdentity(previous, scope)) selectedId = requestedSelection;
+        }
         var token = ++generation;
         var context = caseContext();
         if (!scope || !context) {
@@ -562,14 +586,14 @@
                 headers: {"Accept": "application/json"}
             });
         } catch (error) {
-            if (!currentRead(token, scope)) return;
+            if (!currentRead(token, scope, rescopeCount)) return;
             setState("error", "The catalog request did not reach the server. Try again.");
             return;
         }
-        if (!currentRead(token, scope)) return;
+        if (!currentRead(token, scope, rescopeCount)) return;
         var body = {};
         try { body = await response.json(); } catch (error) { body = {}; }
-        if (!currentRead(token, scope)) return;
+        if (!currentRead(token, scope, rescopeCount)) return;
         if (response.status === 401 || response.status === 403 || body.error === "key_unavailable" || body.error === "not_owner" || body.error === "unauthenticated") {
             items = [];
             selectedId = host.dataset.selectedId || selectedId;

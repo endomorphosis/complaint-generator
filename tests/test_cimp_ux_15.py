@@ -223,6 +223,11 @@ def test_library_filters_catalog_and_keeps_selection_on_mobile(tmp_path, monkeyp
                 && document.querySelectorAll('#evidence-library-list [data-evidence-id]').length === 2"""
         )
         page.click(f"#evidence-library-list [data-evidence-id='{other['evidence_id']}']")
+        page.wait_for_function(
+            """id => document.getElementById('evidence-library').dataset.state === 'ready'
+                && document.getElementById('evidence-library').dataset.selectedId === id""",
+            arg=other["evidence_id"],
+        )
         desktop = _detail(page)
         assert desktop["layout"] == "master-detail"
         assert desktop["selectedId"] == other["evidence_id"]
@@ -257,6 +262,11 @@ def test_library_filters_catalog_and_keeps_selection_on_mobile(tmp_path, monkeyp
 
         page.click("#evidence-library-clear")
         page.click(f"#evidence-library-list [data-evidence-id='{linked['evidence_id']}']")
+        page.wait_for_function(
+            """id => document.getElementById('evidence-library').dataset.state === 'ready'
+                && document.getElementById('evidence-library').dataset.selectedId === id""",
+            arg=linked["evidence_id"],
+        )
         chosen = _detail(page)
         assert chosen["selectedId"] == linked["evidence_id"]
         assert "Status: linked" in chosen["status"]
@@ -291,6 +301,38 @@ def test_library_filters_catalog_and_keeps_selection_on_mobile(tmp_path, monkeyp
         assert restored["links"] == LINK_ID
         assert page.locator("#evidence-library-list").is_visible()
         assert page.locator("#evidence-library-detail").is_visible()
+    finally:
+        _close(playwright, context, node, profile, observed)
+
+
+def test_same_case_rebind_reads_catalog_again_before_restoring_selection(tmp_path, monkeypatch):
+    world, page, playwright, context, node, profile, observed = _browser(tmp_path, monkeypatch)
+    try:
+        with TestClient(world.app, base_url="https://testserver") as client:
+            csrf = _composed_login(client)
+            created = [
+                _receive(client, world.case, csrf, name, name, "ux15-rebind-" + name)
+                for name in ("first-note.txt", "second-note.txt")
+            ]
+        _open(page, world)
+        page.wait_for_function("() => document.getElementById('evidence-library').dataset.state === 'ready'")
+        selected = _detail(page)["selectedId"]
+        desired = next(item["evidence_id"] for item in created if item["evidence_id"] != selected)
+        page.click(f"#evidence-library-list [data-evidence-id='{desired}']")
+        page.wait_for_function(
+            "id => document.getElementById('evidence-library').dataset.selectedId === id", arg=desired
+        )
+        page.evaluate("() => window.workspaceClient.setCaseContext(window.workspaceClient.caseContext)")
+        with page.expect_response(lambda response: response.request.method == "GET"
+                and response.url.startswith(browser.SAME_ORIGIN + "/api/cases/evidence?")) as reauthorized:
+            page.click(f"#evidence-library-list [data-evidence-id='{desired}']")
+        assert reauthorized.value.status == 200
+        assert desired in [item["evidence_id"] for item in reauthorized.value.json()["items"]]
+        page.wait_for_function(
+            """id => document.getElementById('evidence-library').dataset.state === 'ready'
+                && document.getElementById('evidence-library').dataset.selectedId === id""", arg=desired
+        )
+        assert _detail(page)["selectedId"] == desired
     finally:
         _close(playwright, context, node, profile, observed)
 
