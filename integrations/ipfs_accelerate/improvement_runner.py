@@ -701,6 +701,12 @@ def _containerd_metadata_directory() -> Path:
     return Path("/var/lib/containerd")
 
 
+def _native_validation_temporary_directory() -> Path:
+    # Native creates each Linux validation HOME under this short root so
+    # Chromium's AF_UNIX paths fit. It may differ from the profile TMPDIR.
+    return Path("/tmp")
+
+
 def _resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
                        environment: Mapping[str, str]) -> dict[str, Any]:
     """Observe each storage role without creating paths or reserving capacity.
@@ -712,6 +718,8 @@ def _resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
              "home": Path(environment.get("HOME") or Path.home()),
              "temporary": Path(environment.get("TMPDIR") or tempfile.gettempdir()),
              "containerd_metadata": _containerd_metadata_directory()}
+    if sys.platform.startswith("linux"):
+        paths["validation_temporary"] = _native_validation_temporary_directory()
     roles = {}
     timed_out = False
     for role, raw_path in paths.items():
@@ -722,7 +730,7 @@ def _resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
                 raise ValueError("resource path is not canonical")
             probe = path
             daemon_metadata = role == "containerd_metadata"
-            if not daemon_metadata:
+            if not daemon_metadata and role != "validation_temporary":
                 while not probe.exists() and probe != probe.parent:
                     probe = probe.parent
             info = probe.stat()

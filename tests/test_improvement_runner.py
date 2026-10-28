@@ -1353,7 +1353,7 @@ def test_absent_resource_locations_use_owned_ancestor_without_creation(tmp_path,
     monkeypatch.setattr(runner.os, 'statvfs', lambda path: checked.append(Path(path)) or _capacity_metadata())
     monkeypatch.setattr(runner.os, 'access', lambda *a, **k: True)
     observed = runner._resource_capacity(root, state, worktrees, {'HOME': str(home), 'TMPDIR': str(temporary)})
-    assert observed['ready'] is True and len(checked) == 6
+    assert observed['ready'] is True and len(checked) == 6 + int(sys.platform.startswith('linux'))
     assert observed['roles']['state']['filesystem_path'] == str(tmp_path)
     assert not state.parent.exists() and not worktrees.parent.exists() and not temporary.parent.exists()
     assert observed['capacity_reserved'] is False
