@@ -997,23 +997,33 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         'signals_sent': False, 'completion_authority': False, 'attempt_refunded': False}
 
 
-def _preheartbeat_stop_closed(state_dir: Path, record: Mapping[str, Any],
-                              context: Mapping[str, Any]) -> dict[str, Any]:
-    """Reobserve a public stop which preceded this launch's first heartbeat.
+def _preheartbeat_closed(state_dir: Path, record: Mapping[str, Any],
+                         context: Mapping[str, Any], *, fresh_start: bool) -> dict[str, Any]:
+    """Observe a never-heartbeated launch through complete negative evidence.
 
-    A retained stop binds the launch, not present process absence. Old Native
-    metadata supplies historical scope only; two fresh complete censuses and
-    unchanged owned evidence are required on every call, including repeat stops.
+    An unclosed starting record needs no invented stop time or borrowed receipt.
+    A previously stopped record additionally retains its public-stop provenance.
+    Old Native metadata supplies historical scope only; both modes require two
+    fresh complete censuses and unchanged owned evidence on every call.
+
+    As with the ordinary runner, the private owned launcher is trusted output
+    of start(), which freshly proves the preceding launch closed before writing
+    this starting record. This census proves the current launch's descendants
+    absent, including escaped descendants; it does not certify arbitrary work
+    predating that admission. Older births still receive group/session checks.
     """
     from . import improvement_runner as runner
     from .improvement_recovery import _campaign_process_argv
-    source = 'owned_preheartbeat_stop_and_double_complete_proc_inventory'
+    source = ('owned_dead_preheartbeat_start_and_double_complete_proc_inventory' if fresh_start
+              else 'owned_preheartbeat_stop_and_double_complete_proc_inventory')
     parent = record['identity']
-    started, stopped = context['started_at'], _timestamp(record.get('stopped_at'))
+    started = context['started_at']
+    stopped = None if fresh_start else _timestamp(record.get('stopped_at'))
     boot_path = Path('/proc/sys/kernel/random/boot_id')
     boot = boot_path.read_text().strip()
-    if (record.get('status') != 'stopped' or not started <= stopped <= time.time()
-            or parent['boot_id'] != boot):
+    if (parent['boot_id'] != boot
+            or (fresh_start and (record.get('status') != 'starting' or 'stopped_at' in record))
+            or (not fresh_start and (record.get('status') != 'stopped' or not started <= stopped <= time.time()))):
         raise ValueError('preheartbeat stop epoch is unverified')
     names = {'launcher.json': 65536, RECEIPT_NAME: 2_000_000,
         'complaint_intake_supervisor_status.json': 2_000_000,
@@ -1057,18 +1067,20 @@ def _preheartbeat_stop_closed(state_dir: Path, record: Mapping[str, Any],
 
     before = custody()
     launch, retained = before['launcher.json'], before[RECEIPT_NAME]
-    if (launch is None or retained is None or json.loads(launch[0]) != record
+    if (launch is None or (not fresh_start and retained is None) or json.loads(launch[0]) != record
             or hashlib.sha256(launch[0]).hexdigest() != context['launcher_sha256']):
         raise ValueError('preheartbeat launcher custody differs')
-    shutdown = json.loads(retained[0])
-    if not isinstance(shutdown, dict) or not runner._shutdown_verified(record, shutdown, Path(context['repo_root']), state_dir):
-        raise ValueError('preheartbeat public stop receipt is unverified')
     serialized_sha = lambda value: hashlib.sha256((json.dumps(value, indent=2, sort_keys=True) + '\n').encode()).hexdigest()
     starting = {key: value for key, value in record.items() if key != 'stopped_at'}
     starting['status'] = 'starting'
     starting_sha = serialized_sha(starting)
     binding = _retained_launch_binding(record, context)
-    if shutdown.get('launcher_sha256') != starting_sha:
+    shutdown = None
+    if not fresh_start:
+        shutdown = json.loads(retained[0])
+        if not isinstance(shutdown, dict) or not runner._shutdown_verified(record, shutdown, Path(context['repo_root']), state_dir):
+            raise ValueError('preheartbeat public stop receipt is unverified')
+    if not fresh_start and shutdown.get('launcher_sha256') != starting_sha:
         # Ordinary repeated stop records the stopped launcher before updating
         # stopped_at. Preserve its previously observed provenance, then repeat
         # all live observations rather than treating that proof as authority.
@@ -1134,7 +1146,7 @@ def _preheartbeat_stop_closed(state_dir: Path, record: Mapping[str, Any],
                 raise ValueError('preheartbeat stop has subsequent Native events')
     task_events = before['complaint_intake_events.jsonl']
     event_sha = hashlib.sha256(task_events[0]).hexdigest() if task_events is not None else ''
-    if shutdown.get('event_log_sha256') != event_sha:
+    if not fresh_start and shutdown.get('event_log_sha256') != event_sha:
         raise ValueError('preheartbeat retained event history changed')
     worktree_root, repo = Path(context['worktree_root']), Path(context['repo_root'])
     def scoped(value, root):
@@ -1166,12 +1178,25 @@ def _preheartbeat_stop_closed(state_dir: Path, record: Mapping[str, Any],
         exclusions.append(sum(value.get('prelaunch_scope_excluded') is True for value in inventory))
         foreign.append([value['foreign_cwd_proof'] for value in inventory if value.get('foreign_cwd_proof') is not None])
     return {'source': source, 'starting_launcher_sha256': starting_sha, 'launch_binding': binding,
-        'observed_stopped_at': stopped, 'historical_heartbeat_only': heartbeat_entry is not None,
+        **({'observed_stopped_at': stopped} if not fresh_start else {}),
+        'historical_heartbeat_only': heartbeat_entry is not None,
         'observations': 2, 'proc_census_complete': True, 'recorded_pids_absent': True,
         'matching_processes': 0, 'canonical_markers_absent': True, 'event_log_sha256': event_sha,
         'minimum_owned_start_ticks': parent['start_ticks'], 'prelaunch_scope_exclusions': exclusions,
         'foreign_cwd_observations': foreign, 'signals_sent': False,
         'completion_authority': False, 'attempt_refunded': False}
+
+
+def _preheartbeat_stop_closed(state_dir: Path, record: Mapping[str, Any],
+                              context: Mapping[str, Any]) -> dict[str, Any]:
+    """Reobserve an actual public stop without weakening its retained lineage."""
+    return _preheartbeat_closed(state_dir, record, context, fresh_start=False)
+
+
+def _preheartbeat_start_closed(state_dir: Path, record: Mapping[str, Any],
+                               context: Mapping[str, Any]) -> dict[str, Any]:
+    """Prove a dead starting launch closed without manufacturing a stop receipt."""
+    return _preheartbeat_closed(state_dir, record, context, fresh_start=True)
 
 
 def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[str, Any], supplied: bool,
@@ -1186,17 +1211,19 @@ def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[
         if retained_native_child_proof is not None:
             raise ValueError('retained native observation never grants live fencing authority')
         return
+    preheartbeat = (_preheartbeat_start_closed if record.get('status') == 'starting'
+                    and 'stopped_at' not in record else _preheartbeat_stop_closed)
     try:
         heartbeat = _object(state_dir / 'complaint_intake_supervisor_status.json', legacy_group_write=True)
     except FileNotFoundError:
         if retained_native_child_proof is not None:
             raise ValueError('preheartbeat closure cannot borrow retained Native child authority')
-        return _preheartbeat_stop_closed(state_dir, record, context)
+        return preheartbeat(state_dir, record, context)
     if (heartbeat.get('repo_root') != context['repo_root'] or heartbeat.get('supervisor_pid') != birth['pid']
             or _timestamp(heartbeat.get('updated_at')) < context['started_at']):
         if retained_native_child_proof is not None:
             raise ValueError('preheartbeat closure cannot borrow retained Native child authority')
-        return _preheartbeat_stop_closed(state_dir, record, context)
+        return preheartbeat(state_dir, record, context)
     if heartbeat.get('status') == 'stopped' and (heartbeat.get('managed_daemon_cleanup') or {}).get('quiesced') is True:
         return
     if heartbeat.get('status') in {'running', 'termination_blocked', 'agentic_maintenance_failed', 'agentic_maintenance_completed'}:
