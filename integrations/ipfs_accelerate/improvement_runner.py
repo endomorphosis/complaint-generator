@@ -830,6 +830,7 @@ def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktre
         "--implementation-max-timeout", str(TIMEOUT_SECONDS),
         "--implementation-log-stall-seconds", str(STALL_SECONDS),
         "--max-task-attempts", "3", "--max-restarts", "5", "--validation-max-workers", "1",
+        "--worktree-reconciliation-max-merges", "2",
         "--task-shard-count", "1", "--task-shard-index", "0",
         "--worktree-root", str(worktree_root if worktree_root is not None else state_dir / "worktrees"), "--merge-target-branch", merge_target,
         # Every task validation imports datasets, and shared interviews use
@@ -3909,6 +3910,9 @@ def _validation_aware_supervisor_class(native_class):
             if getattr(self, "_complaint_startup_preflight_pending", False):
                 if result.get("maintenance_blocked") is True:
                     raise RuntimeError("Native startup preflight blocked: " + str(result.get("reason") or "maintenance unavailable"))
+                if any(item.get("reason") == "reconciliation_limit_reached" for item in
+                        result.get("worktree_reconciliation", {}).get("skipped", ())):
+                    raise RuntimeError("Native startup candidate recovery remains unresolved")
                 from .startup_rejected_candidate import retained_replay_rejection
                 if any(item.get("merged") is not True and not _startup_candidate_is_completed(self, item)
                         and not retained_replay_rejection(self, item, maintenance_result=result) for item in
