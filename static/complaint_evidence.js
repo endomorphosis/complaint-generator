@@ -303,10 +303,13 @@
 (function () {
     var QUALITIES = ["authenticity", "relevance", "admissibility", "claim_support"];
     var generation = 0;
+    var previewGeneration = 0;
     var items = [];
     var itemsScope = null;
     var selectedId = "";
     var readAt = "";
+    var previewBlobs = [];
+    var previewController = null;
 
     function root() {
         return document.getElementById("evidence-library");
@@ -352,8 +355,297 @@
         }
         var list = document.getElementById("evidence-library-list");
         if (list) list.textContent = "";
+        clearPreview();
         paintDetail(null);
         setState("locked", "Private evidence was cleared. Open an authorized case to read its catalog again.");
+    }
+
+    function revokePreviewBlobs() {
+        previewBlobs.splice(0).forEach(function (url) {
+            try { URL.revokeObjectURL(url); } catch (error) { /* already revoked */ }
+        });
+    }
+
+    function clearPreview() {
+        previewGeneration += 1;
+        if (previewController) {
+            previewController.abort();
+            previewController = null;
+        }
+        revokePreviewBlobs();
+        var host = document.getElementById("evidence-preview");
+        if (!host) return;
+        host.dataset.kind = "";
+        host.dataset.supported = "";
+        host.dataset.scope = "";
+        host.dataset.evidenceId = "";
+        host.dataset.version = "";
+        text("evidence-preview-status", "");
+        text("evidence-preview-zoom-value", "100%");
+        host.dataset.zoom = "100";
+        var anchors = document.getElementById("evidence-preview-anchors");
+        var stage = document.getElementById("evidence-preview-stage");
+        var alternative = document.getElementById("evidence-preview-alternative");
+        if (anchors) anchors.textContent = "";
+        if (stage) {
+            stage.textContent = "";
+            stage.style.fontSize = "16px";
+            stage.style.transform = "scale(1)";
+        }
+        if (alternative) {
+            alternative.hidden = true;
+            alternative.textContent = "";
+        }
+    }
+
+    function ensurePreview() {
+        var detail = document.getElementById("evidence-library-detail");
+        if (!detail || document.getElementById("evidence-preview")) return;
+        var section = document.createElement("section");
+        section.id = "evidence-preview";
+        section.dataset.kind = "";
+        section.dataset.zoom = "100";
+        section.dataset.supported = "";
+        section.style.overflow = "auto";
+        section.style.maxWidth = "100%";
+        var heading = document.createElement("h4");
+        heading.textContent = "Preview";
+        var status = document.createElement("p");
+        status.id = "evidence-preview-status";
+        var controls = document.createElement("div");
+        controls.id = "evidence-preview-zoom";
+        controls.style.display = "flex";
+        controls.style.flexWrap = "wrap";
+        controls.style.gap = "8px";
+        function zoomButton(id, label, delta) {
+            var button = document.createElement("button");
+            button.type = "button";
+            button.className = "secondary";
+            button.id = id;
+            button.textContent = label;
+            button.addEventListener("click", function () { setZoom(delta); });
+            return button;
+        }
+        controls.appendChild(zoomButton("evidence-preview-zoom-out", "Zoom out", -25));
+        controls.appendChild(zoomButton("evidence-preview-zoom-in", "Zoom in", 25));
+        var reset = document.createElement("button");
+        reset.type = "button";
+        reset.className = "secondary";
+        reset.id = "evidence-preview-zoom-reset";
+        reset.textContent = "Reset zoom";
+        reset.addEventListener("click", function () { applyZoom(100); });
+        controls.appendChild(reset);
+        var value = document.createElement("span");
+        value.id = "evidence-preview-zoom-value";
+        value.textContent = "100%";
+        controls.appendChild(value);
+        var versionLabel = document.createElement("label");
+        versionLabel.htmlFor = "evidence-preview-version";
+        versionLabel.textContent = "Artifact version";
+        var version = document.createElement("select");
+        version.id = "evidence-preview-version";
+        version.addEventListener("change", function () {
+            var current = items.filter(function (item) { return item.evidence_id === selectedId; })[0];
+            if (current) loadPreview(current);
+        });
+        var anchors = document.createElement("nav");
+        anchors.id = "evidence-preview-anchors";
+        anchors.setAttribute("aria-label", "Preview pages and spans");
+        var viewport = document.createElement("div");
+        viewport.id = "evidence-preview-viewport";
+        viewport.style.overflow = "auto";
+        viewport.style.maxWidth = "100%";
+        viewport.style.maxHeight = "320px";
+        var stage = document.createElement("div");
+        stage.id = "evidence-preview-stage";
+        stage.style.transformOrigin = "top left";
+        stage.style.fontSize = "16px";
+        viewport.appendChild(stage);
+        var alternative = document.createElement("p");
+        alternative.id = "evidence-preview-alternative";
+        alternative.hidden = true;
+        section.appendChild(heading);
+        section.appendChild(status);
+        section.appendChild(controls);
+        section.appendChild(versionLabel);
+        section.appendChild(version);
+        section.appendChild(anchors);
+        section.appendChild(viewport);
+        section.appendChild(alternative);
+        detail.appendChild(section);
+    }
+
+    function applyZoom(next) {
+        var zoom = Math.max(50, Math.min(200, next));
+        var host = document.getElementById("evidence-preview");
+        var stage = document.getElementById("evidence-preview-stage");
+        if (host) host.dataset.zoom = String(zoom);
+        if (stage) {
+            stage.style.fontSize = (16 * zoom / 100) + "px";
+            stage.style.transform = "scale(" + (zoom / 100) + ")";
+        }
+        text("evidence-preview-zoom-value", zoom + "%");
+    }
+
+    function setZoom(delta) {
+        var host = document.getElementById("evidence-preview");
+        var current = host ? Number(host.dataset.zoom || "100") : 100;
+        applyZoom((Number.isFinite(current) ? current : 100) + delta);
+    }
+
+    function fillVersions(item) {
+        var select = document.getElementById("evidence-preview-version");
+        if (!select) return "";
+        var versions = (item && item.artifact_versions) || [];
+        var wanted = select.value;
+        select.textContent = "";
+        versions.forEach(function (version) {
+            var option = document.createElement("option");
+            option.value = String(version.version);
+            option.textContent = "Version " + version.version + (version.kind ? " (" + version.kind + ")" : "");
+            select.appendChild(option);
+        });
+        if (wanted && Array.prototype.some.call(select.options, function (option) { return option.value === wanted; })) {
+            select.value = wanted;
+        } else if (versions.length) {
+            select.value = String(versions[versions.length - 1].version);
+        }
+        return select.value;
+    }
+
+    function renderPreview(body, scope, token) {
+        if (token !== previewGeneration || !currentScope(scope)) return;
+        if (!body || body.case_id !== caseContext().case_id || body.tenant_id !== caseContext().tenant_id) return;
+        if (body.evidence_id !== selectedId) return;
+        ensurePreview();
+        var host = document.getElementById("evidence-preview");
+        var stage = document.getElementById("evidence-preview-stage");
+        var anchors = document.getElementById("evidence-preview-anchors");
+        var alternative = document.getElementById("evidence-preview-alternative");
+        if (!host || !stage || !anchors || !alternative) return;
+        revokePreviewBlobs();
+        stage.textContent = "";
+        anchors.textContent = "";
+        alternative.hidden = true;
+        alternative.textContent = "";
+        host.dataset.kind = body.preview_kind || "";
+        host.dataset.supported = body.supported ? "true" : "false";
+        host.dataset.scope = body.cache_scope || "";
+        host.dataset.evidenceId = body.evidence_id || "";
+        host.dataset.version = String(body.version || "");
+        host.dataset.modelInvoked = "false";
+        if (!body.supported) {
+            var note = (body.alternative && body.alternative.message) || "This format cannot be previewed safely inside the workspace.";
+            var safeText = (body.alternative && body.alternative.safe_text) || "";
+            alternative.hidden = false;
+            alternative.textContent = note + (safeText ? "\nReadable excerpt:\n" + safeText : "\nNo readable text is available.");
+            text("evidence-preview-status", "Safe alternative. The original file was not executed.");
+            return;
+        }
+        (body.pages || []).forEach(function (page) {
+            var pageAnchor = document.createElement("a");
+            pageAnchor.href = "#evidence-preview-" + page.anchor;
+            pageAnchor.textContent = "Page " + page.page;
+            pageAnchor.addEventListener("click", function (event) {
+                event.preventDefault();
+                var target = document.getElementById("evidence-preview-" + page.anchor);
+                if (target) target.focus();
+            });
+            anchors.appendChild(pageAnchor);
+            anchors.appendChild(document.createTextNode(" "));
+            var block = document.createElement("section");
+            block.id = "evidence-preview-" + page.anchor;
+            block.tabIndex = -1;
+            var pageLabel = document.createElement("h5");
+            pageLabel.textContent = "Page " + page.page;
+            block.appendChild(pageLabel);
+            (page.spans || []).forEach(function (span) {
+                var link = document.createElement("a");
+                link.href = "#evidence-preview-" + span.anchor;
+                link.textContent = "Span " + span.span;
+                link.addEventListener("click", function (event) {
+                    event.preventDefault();
+                    var target = document.getElementById("evidence-preview-" + span.anchor);
+                    if (target) target.focus();
+                });
+                anchors.appendChild(link);
+                anchors.appendChild(document.createTextNode(" "));
+                var row = document.createElement("p");
+                row.id = "evidence-preview-" + span.anchor;
+                row.tabIndex = 0;
+                row.textContent = span.text || "";
+                block.appendChild(row);
+            });
+            stage.appendChild(block);
+        });
+        if (body.preview_kind === "image" && body.image && body.image.content_base64) {
+            var media = body.image.media_type;
+            if (media !== "image/png" && media !== "image/jpeg" && media !== "image/webp") return;
+            var binary = atob(body.image.content_base64);
+            var bytes = new Uint8Array(binary.length);
+            for (var index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+            var blob = new Blob([bytes], {type: media});
+            var url = URL.createObjectURL(blob);
+            previewBlobs.push(url);
+            var image = document.createElement("img");
+            image.id = "evidence-preview-image";
+            image.alt = body.accessible_text || "Evidence image preview";
+            image.src = url;
+            image.style.maxWidth = "100%";
+            image.style.height = "auto";
+            stage.appendChild(image);
+        }
+        text("evidence-preview-status", body.preview_kind === "image"
+            ? "Image preview. Zoom changes the display size. The image is not sent to a model."
+            : "Text preview. Choose a page or span. Zoom changes the display size.");
+        applyZoom(Number(host.dataset.zoom || "100"));
+    }
+
+    function loadPreview(item) {
+        ensurePreview();
+        var scope = captureScope();
+        var context = caseContext();
+        if (!item || !scope || !context) {
+            clearPreview();
+            return;
+        }
+        var token = ++previewGeneration;
+        if (previewController) previewController.abort();
+        previewController = new AbortController();
+        var signal = previewController.signal;
+        var version = fillVersions(item);
+        var params = new URLSearchParams({
+            tenant_id: context.tenant_id,
+            case_id: context.case_id,
+            resource_id: context.resource_id,
+            evidence_id: item.evidence_id
+        });
+        if (version) params.set("version", version);
+        text("evidence-preview-status", "Opening the encrypted preview…");
+        fetch("/api/cases/evidence/preview?" + params.toString(), {
+            credentials: "same-origin",
+            headers: {"Accept": "application/json"},
+            signal: signal
+        }).then(function (response) {
+            return response.json().then(function (body) { return {ok: response.ok, status: response.status, body: body}; });
+        }).then(function (result) {
+            if (token !== previewGeneration || !currentScope(scope)) return;
+            if (!result.ok || !result.body || result.body.error) {
+                ensurePreview();
+                text("evidence-preview-status", result.status === 401 || result.status === 403
+                    ? "This preview is not available for the current case."
+                    : "The preview could not be opened. The encrypted artifact is unchanged.");
+                var stage = document.getElementById("evidence-preview-stage");
+                if (stage) stage.textContent = "";
+                revokePreviewBlobs();
+                return;
+            }
+            renderPreview(result.body, scope, token);
+        }).catch(function (error) {
+            if (error && error.name === "AbortError") return;
+            if (token !== previewGeneration || !currentScope(scope)) return;
+            text("evidence-preview-status", "The preview could not be opened. The encrypted artifact is unchanged.");
+        });
     }
 
     function currentRead(token, scope, rescopeCount) {
@@ -444,6 +736,7 @@
             text("evidence-detail-notes", "");
             text("evidence-detail-classification", "");
             text("evidence-detail-links", "");
+            clearPreview();
             return;
         }
         var version = (item.artifact_versions || [])[item.artifact_versions.length - 1] || {};
@@ -478,6 +771,7 @@
         var links = linksFor(item);
         text("evidence-detail-links", links.length ? links.join("\n") : "No current complaint link.");
         if (detail) detail.dataset.evidenceId = item.evidence_id || "";
+        loadPreview(item);
     }
 
     function render() {
@@ -602,6 +896,7 @@
             setState("locked", response.status === 403
                 ? "This account cannot open the evidence catalog for the selected case."
                 : "The case key or session cannot open the evidence catalog. Refresh after access returns.");
+            clearPreview();
             paintDetail(null);
             return;
         }
@@ -629,6 +924,7 @@
         var host = root();
         if (!host || host.dataset.bound === "true") return;
         host.dataset.bound = "true";
+        ensurePreview();
         layout();
         document.getElementById("evidence-library-search").addEventListener("input", render);
         document.getElementById("evidence-library-status-filter").addEventListener("change", render);
