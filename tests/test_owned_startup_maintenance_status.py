@@ -72,6 +72,26 @@ def _owned_main(base):
             now_ts=time.time() if now_ts is None else now_ts)
     good=check(); assert good is not None
     observations['fixed_bound']=good
+    # The caller's observation begins before Native publishes its next real
+    # heartbeat/receipt. Later reads must use their actual post-read clock.
+    captured=time.time()
+    supervisor._write_supervisor_maintenance_status('run_once',status='running',started_at=started,
+        maintenance_window=window)
+    later_heartbeat=runner._read_json(heartbeat_path);later_receipt=runner._read_json(receipt_path)
+    published=native.parse_timestamp(later_heartbeat['updated_at']).timestamp()
+    assert captured < published <= time.time()
+    observations['heartbeat_read_race']={'captured':captured,'published':published,
+        'result':check(beat=later_heartbeat,now_ts=captured),
+        'original_deadline':native.parse_timestamp(window.deadline_at).timestamp()}
+    future=stamp(time.time()+60)
+    runner._atomic_json(heartbeat_path,{**later_heartbeat,'updated_at':future})
+    runner._atomic_json(receipt_path,{**later_receipt,'updated_at':future})
+    observations['future_heartbeat_refused']=check(beat=runner._read_json(heartbeat_path)) is None
+    runner._atomic_json(heartbeat_path,later_heartbeat);runner._atomic_json(receipt_path,later_receipt)
+    observations['race_deadline_refused']=check(beat=later_heartbeat,
+        now_ts=native.parse_timestamp(window.deadline_at).timestamp()) is None
+    observations['race_stale_heartbeat_refused']=check(beat=later_heartbeat,now_ts=published+121) is None
+    runner._atomic_json(heartbeat_path,heartbeat);runner._atomic_json(receipt_path,receipt)
     refused={}
     for damage in ('birth','receipt_scope','receipt_start','missing_receipt','phase','error','window_timeout',
                    'window_deadline','old_launch','heartbeat_stale','completed_deadline','live_daemon_marker',
@@ -137,6 +157,8 @@ def _owned_main(base):
         value=runner.status(root,spec,campaign)
         observations['spawned']={key:value.get(key) for key in ('status','owned_process_alive',
             'startup_activity_verified','progress_verified','native_read_errors')}
+        observations['spawned']['board_complete']=bool(value['board']['count']
+            and value['board']['count']==value['board']['completed'])
     finally:
         child.terminate();child.wait(timeout=10)
         supervisor._managed_daemon_pid_path().unlink()
@@ -185,7 +207,8 @@ def test_actual_owned_receipt_refuses_changed_scope_or_fixed_deadline(owned_obse
 def test_actual_native_spawn_hands_status_to_existing_managed_child_guard(owned_observations):
     value=owned_observations['spawned']
     assert value['native_read_errors']=={} and value['owned_process_alive'] is True,value
-    assert value['status']=='maintenance' and value['startup_activity_verified'] is False,value
+    expected='complete' if value['board_complete'] else 'maintenance'
+    assert value['status']==expected and value['startup_activity_verified'] is False,value
     assert value['progress_verified'] is False
 
 
@@ -193,3 +216,18 @@ def test_completed_observation_uses_only_original_fixed_handoff(owned_observatio
     value=owned_observations['fixed_bound']
     assert value['reason']=='bounded_native_startup_handoff'
     assert value['work_progress_verified'] is False and value['completion_authority'] is False
+
+
+def test_real_native_heartbeat_published_after_caller_clock_is_current_liveness(owned_observations):
+    race=owned_observations['heartbeat_read_race']
+    assert race['captured'] < race['published']
+    assert race['result'] is not None
+    assert race['result']['reason']=='bounded_native_startup_maintenance'
+    assert race['result']['deadline_at']==race['original_deadline']
+    assert race['result']['work_progress_verified'] is False
+
+
+def test_fresh_read_clock_cannot_admit_future_or_expired_native_heartbeat(owned_observations):
+    assert owned_observations['future_heartbeat_refused'] is True
+    assert owned_observations['race_deadline_refused'] is True
+    assert owned_observations['race_stale_heartbeat_refused'] is True

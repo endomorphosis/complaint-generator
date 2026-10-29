@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import os
 from pathlib import Path
+import time
 
 HANDOFF_SECONDS = 30.0
 
@@ -37,6 +38,9 @@ def observe(runner, repo_root, spec_path, campaign, launcher, heartbeat, state, 
         actual_launch, actual_heartbeat, receipt = (read(path) for path in paths)
         if actual_launch != launcher or actual_heartbeat != heartbeat or not isinstance(receipt,dict):
             return None
+        # Native may publish these records after status captured its clock.
+        # Observe them against the post-read clock without moving any bound.
+        now_ts = max(now_ts, time.time())
         if not runner._campaign_tuple_matches(launcher,root,Path(spec_path),campaign):
             return None
         birth = native.read_process_birth(launcher.get('identity',{}).get('pid'))

@@ -107,6 +107,29 @@ def test_synthetic_reconciliation_binding_keeps_zero_paid_ordinal_and_original_d
     assert b["phase_deadline"] <= datetime.fromisoformat(c.body["active_phase_started_at"]).timestamp()+900
 
 
+def test_reconciliation_file_reads_after_caller_clock_keep_original_bounds(reconciled):
+    """Explicit synthetic custody; real Git/files, no validation authority."""
+    c=reconciled;before=deepcopy(c.body)
+    original=_binding(c);assert original is not None
+    captured=time.time()
+    time.sleep(.002)
+    published=datetime.now(timezone.utc).isoformat()
+    assert captured < datetime.fromisoformat(published).timestamp()
+    c.heartbeat['updated_at']=c.receipt['updated_at']=published
+    heartbeat=c.campaign/(runner.STATE_PREFIX+'_'+ 'supervisor_status.json')
+    receipt=c.campaign/(runner.STATE_PREFIX+'_'+ 'supervisor_maintenance_receipt.json')
+    _write(heartbeat,c.heartbeat);_write(receipt,c.receipt)
+    observed=_binding(c,now=captured)
+    assert observed==original
+    future=datetime.fromtimestamp(time.time()+60,timezone.utc).isoformat()
+    _write(heartbeat,{**c.heartbeat,'updated_at':future});_write(receipt,{**c.receipt,'updated_at':future})
+    assert _binding(c) is None
+    _write(heartbeat,c.heartbeat);_write(receipt,c.receipt)
+    assert _binding(c,now=original['phase_deadline']) is None
+    assert _binding(c,now=datetime.fromisoformat(published).timestamp()+121) is None
+    assert c.body==before
+
+
 @pytest.mark.parametrize("damage",["paid_attempt","ordinary_phase","wrong_cid","wrong_key","workspace","owner","lease",
     "claim","receipt","heartbeat_only","expiry","deadline_widened","rejected","proposal_baseline","missing_proposal",
     "candidate_dirty","candidate_changed","branch","terminal","event_chain","log_replaced","log_mode",

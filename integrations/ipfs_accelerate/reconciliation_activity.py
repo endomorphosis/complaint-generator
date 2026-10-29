@@ -109,6 +109,9 @@ def binding(runner, daemon, native, *, campaign, target, workspace, state, task,
     claim = runner._read_validation_watchdog_authority(claim_path)
     if not all(isinstance(value, dict) for value in (launcher, heartbeat, receipt, lease, claim)):
         return None
+    # A valid heartbeat/receipt may be newer than status's initial clock.
+    # Their actual read time does not renew the fixed maintenance deadline.
+    now_ts = max(now_ts, time.time())
     owner_pid = os.getpid() if owner_pid is None else owner_pid
     birth = native.read_process_birth(owner_pid) if type(owner_pid) is int and owner_pid > 1 else None
     launch_birth = launcher.get("identity", {})
