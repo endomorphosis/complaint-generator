@@ -502,7 +502,7 @@ Implementation instructions:
 
 ## CIMP-UX-17 Persist comments and annotations on exact evidence versions
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
