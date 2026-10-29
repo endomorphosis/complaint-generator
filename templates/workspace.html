@@ -3928,6 +3928,18 @@
                             <p id="adaptive-pending-prompt">No pending inquiry yet. Enter a narrative to ask the shared mediator.</p>
                             <p id="adaptive-pending-meta"></p>
                         </div>
+                        <article id="inquiry-card" data-source="shared_mediator" data-pending="false" data-from-fixed-intake="false" data-inquiry-id="" data-revision="" data-stores-answer="false" aria-labelledby="inquiry-card-title">
+                            <h3 id="inquiry-card-title">Current question</h3>
+                            <p id="inquiry-card-question">No server question is loaded. The fixed intake form is not the interview.</p>
+                            <p id="inquiry-card-revision"></p>
+                            <p id="inquiry-card-why"></p>
+                            <h4 id="inquiry-card-gaps-title">Factual gaps</h4>
+                            <ul id="inquiry-card-gaps"></ul>
+                            <h4 id="inquiry-card-requirements-title">Legal requirements</h4>
+                            <ul id="inquiry-card-requirements"></ul>
+                            <div id="inquiry-card-actions" aria-label="Allowed question actions"></div>
+                            <p id="inquiry-card-note" role="status" data-stored-as-answer="false" data-action="">Why and status read the interview. They do not save an answer.</p>
+                        </article>
                         <section id="inquiry-explanation" data-task="CIMP-GUI-17" data-explanation-id="" data-revision="" data-stores-answer="false" data-changes-law="false" data-legal-sufficiency="false">
                             <h3>Why this question is asked</h3>
                             <p class="muted">The explanation names the factual target and the related legal requirement. Each part cites its own graph. Why and Review do not store an answer and do not change the legal rule.</p>
@@ -4168,7 +4180,8 @@
                         <div class="intake-wizard-shell">
                             <div class="intake-progress-line" id="intake-step-progress">Step 1 of intake will appear here.</div>
                             <div class="intake-step-list" id="intake-step-list" aria-label="Intake question steps"></div>
-                            <div class="intake-interview is-wizard" id="intake-question-grid"></div>
+                            <p class="muted" id="intake-form-boundary">These fields record optional case details. They do not replace the shared mediator question.</p>
+                            <div class="intake-interview is-wizard" id="intake-question-grid" data-replaces-shared-interview="false"></div>
                             <div class="button-row intake-wizard-controls">
                                 <button class="secondary" id="intake-back-button" type="button">Back</button>
                                 <button class="secondary" id="intake-show-all-button" type="button" aria-pressed="false">Show all intake fields</button>
@@ -15024,7 +15037,56 @@ function extractComplaintOutputSignals(result) {
                     ? 'The action was stored as an answer.'
                     : `${action === 'why' ? 'Why' : 'Review'} did not store an answer and did not change the legal rule. Explanation ${beforeId} revision ${beforeRevision} is unchanged.`;
             }
+            const cardNote = document.getElementById('inquiry-card-note');
+            if (cardNote) {
+                cardNote.dataset.storedAsAnswer = stored ? 'true' : 'false';
+                cardNote.dataset.action = action;
+                cardNote.dataset.inquiryUnchanged = 'true';
+                cardNote.textContent = stored
+                    ? 'The action was stored as an answer.'
+                    : `${action === 'why' ? 'Why' : 'Review'} did not save an answer. The current question is unchanged.`;
+            }
             setStatus(action === 'why' ? 'Why was read. The pending question is unchanged.' : 'The explanation was reviewed. The pending question is unchanged.');
+        }
+
+        async function readInquiryStatus() {
+            const capture = adaptiveRequestCapture();
+            if (!adaptiveRequestCurrent(capture)) return;
+            const view = adaptiveInquiryState || adaptiveViewFrom(workspaceSession);
+            if (!view || !view.pending) {
+                setStatus('There is no mediator question to check.');
+                return;
+            }
+            const answerField = document.getElementById('adaptive-answer');
+            const answerBefore = answerField ? answerField.value : '';
+            const beforeId = String(view.inquiry_id || '');
+            const beforeRevision = view.revision === undefined || view.revision === null ? '' : String(view.revision);
+            setBusyStatus('Reading interview status…');
+            let result;
+            try {
+                result = await client.runIntakeChatTurn(workspaceUserId, '', view.inquiry_id, {interview_action: 'status'});
+                if (!adaptiveRequestCurrent(capture)) return;
+            } catch (error) {
+                if (!adaptiveRequestCurrent(capture)) return;
+                setStatus(`Interview status could not be read: ${String((error && error.message) || error)}`);
+                return;
+            }
+            if (answerField) answerField.value = answerBefore;
+            workspaceSession = result;
+            renderAdaptiveInquiry(result, capture);
+            const next = adaptiveViewFrom(result);
+            const same = String(next.inquiry_id || '') === beforeId && String(next.revision === undefined || next.revision === null ? '' : next.revision) === beforeRevision;
+            const stored = result && result.stored_as_answer === true;
+            const cardNote = document.getElementById('inquiry-card-note');
+            if (cardNote) {
+                cardNote.dataset.storedAsAnswer = stored ? 'true' : 'false';
+                cardNote.dataset.action = 'status';
+                cardNote.dataset.inquiryUnchanged = same ? 'true' : 'false';
+                cardNote.textContent = stored
+                    ? 'Status was stored as an answer.'
+                    : 'Status did not save an answer. The current question is unchanged.';
+            }
+            setStatus(same && !stored ? 'Interview status was read. The pending question is unchanged.' : 'Interview status changed the pending question.');
         }
 
         function renderFiniteInterviewOutcome(payload) {
@@ -16621,6 +16683,9 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('factual-graph-refresh').addEventListener('click', refreshFactualGraphInspector);
         document.getElementById('factual-graph-view-list').addEventListener('click', () => setFactualGraphView('list'));
         document.getElementById('factual-graph-view-graph').addEventListener('click', () => setFactualGraphView('graph'));
+        window.answerAdaptiveInquiry = answerAdaptiveInquiry;
+        window.explainOrReviewInquiry = explainOrReviewInquiry;
+        window.readInquiryStatus = readInquiryStatus;
         document.getElementById('adaptive-unknown').addEventListener('click', () => answerAdaptiveInquiry('unknown'));
         document.getElementById('adaptive-defer').addEventListener('click', () => answerAdaptiveInquiry('deferred'));
         document.getElementById('adaptive-model-extract').addEventListener('click', askAdaptiveModel);
