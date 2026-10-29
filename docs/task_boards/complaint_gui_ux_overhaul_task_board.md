@@ -223,7 +223,7 @@ Implementation instructions:
 
 ## CIMP-UX-08 Render the mediator conversation with clear provenance and actions
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
