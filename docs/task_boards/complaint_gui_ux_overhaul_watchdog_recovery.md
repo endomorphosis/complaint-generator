@@ -101,3 +101,20 @@ Before preparation or worker dispatch, start now sends a stopped, bound crash fe
 The Native pin `34868efd24355fed7b91cbc9e898d67c57e07423` repairs an undefined incident hook without granting automatic clearance. Explicit operator rollback proof may follow a descendant HEAD only when protected content and meaningful identities match, every protected Git diff is empty, full history contains no protected-path changes, and current marker generations remain unchanged through the final check. All 22 new cases and seven existing public-clearance cases passed; unrelated legacy protected-path tests are not claimed green. Four local documentation gates passed.
 
 Native reports a preflight stopped at its protected-path guard as completed maintenance before Host startup rejects it. Public stop now recognizes that exact no-daemon phase with its genuine terminal receipt, unchanged fixed deadline, absent new managed run, no implementation start and two fresh process censuses. It grants shutdown observation only, not task completion.
+
+### Settled failed validations during startup
+
+Startup may continue past a retained candidate whose declared validation has
+already failed through Native. The failure must have an accepted proposal gate,
+actual failed command results, matching canonical task identity and current
+recovery key, intact Native and supervisor event chains, clean Git custody,
+stopped execution state, and no pending merge, active claim, quarantine or hold.
+The observer rechecks this evidence under Native's maintenance lock. Cached
+reports carry no execution authority; they require the same original receipts.
+
+This is a negative observation. It preserves the rejected candidate, failed
+validation, task status, paid history and retry limits. It grants no merge or
+completion and dispatches no provider. Native's ordinary scheduler can then
+select ready work under its existing policy. Unknown effects, a changed source,
+a changed binding or a live validation remain blocking. A healthy doctor or a
+successful launch alone does not establish resumed task progress.
