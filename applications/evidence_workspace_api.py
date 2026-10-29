@@ -25,6 +25,7 @@ import os
 import re
 import struct
 import zlib
+from pathlib import Path
 from typing import Any, Mapping
 
 from starlette.concurrency import run_in_threadpool
@@ -32,6 +33,7 @@ from starlette.requests import Request
 
 from applications.browser_sessions import SESSION_COOKIE, BrowserSessionError, BrowserSessionService
 from applications.case_directory import CaseDirectoryError
+from applications.evidence_annotation_store import ANNOTATION_TASK_ID, EvidenceAnnotationStore
 
 from integrations.evidence_workspace import (
     INGESTION_STATUSES,
@@ -40,7 +42,7 @@ from integrations.evidence_workspace import (
     EvidenceWorkspaceError,
     legal_qualities,
 )
-from integrations.private_storage import PrivateStorageError, retrieve_private_artifact
+from integrations.private_storage import BoundPrivateRecordError, PrivateStorageError, retrieve_private_artifact
 
 UPLOAD_TASK_ID = "CIMP-UX-14"
 PREVIEW_TASK_ID = "CIMP-UX-16"
@@ -78,10 +80,12 @@ def evidence_http_status(code: str) -> int:
         return 401
     if code in {"not_owner", "tenant_mismatch", "selector_rejected", "legal_quality_rejected", "missing_evidence"}:
         return 403
-    if code in {"revision_conflict", "replay_mismatch", "lifecycle_conflict", "operation_revoked", "upload_stale"}:
+    if code in {"revision_conflict", "replay_mismatch", "lifecycle_conflict", "operation_revoked", "upload_stale", "artifact_version_mismatch"}:
         return 409
-    if code in {"request_body", "content_rejected", "action", "source_filename", "original_filename", "idempotency_key", "evidence_id", "failure_code", "complaint_link_id", "media_type", "actor", "media_rejected", "oversized", "upload_offset", "upload_id"}:
+    if code in {"request_body", "content_rejected", "action", "source_filename", "original_filename", "idempotency_key", "evidence_id", "failure_code", "complaint_link_id", "media_type", "actor", "media_rejected", "oversized", "upload_offset", "upload_id", "annotation_rejected", "artifact_version", "adoption_requires_explicit_action", "kind"}:
         return 400
+    if code == "missing_annotation":
+        return 404
     if code == "upload_missing":
         return 404
     return 503
@@ -249,6 +253,59 @@ def mount_evidence_workspace(app: Any) -> None:
     async def evidence_upload_status(request: Request):
         try:
             payload = await _call_upload(request, _upload_status)
+        except EvidenceWorkspaceError as exc:
+            return _fail(exc)
+        return JSONResponse(payload, status_code=200, headers=_NO_STORE_HEADERS)
+
+    @app.post("/api/cases/evidence/annotations")
+    async def create_evidence_annotation(request: Request):
+        try:
+            verify = _verify(request)
+            verify()
+            service, actor, material = _service(request), _actor(request), _material(request)
+            verify_key = await run_in_threadpool(service.key_scope_verifier, actor, _annotation_scope_body(material))
+            verify()
+            payload = await run_in_threadpool(
+                _create_annotation, request, service, actor, material, verify_request=verify_key,
+            )
+            await run_in_threadpool(verify_key)
+            verify()
+        except EvidenceWorkspaceError as exc:
+            return _fail(exc)
+        status = 200 if payload.get("idempotent_replay") else 201
+        return JSONResponse(payload, status_code=status, headers=_NO_STORE_HEADERS)
+
+    @app.post("/api/cases/evidence/annotations/adopt")
+    async def adopt_evidence_annotation(request: Request):
+        try:
+            verify = _verify(request)
+            verify()
+            service, actor, material = _service(request), _actor(request), _material(request)
+            verify_key = await run_in_threadpool(service.key_scope_verifier, actor, _annotation_scope_body(material))
+            verify()
+            payload = await run_in_threadpool(
+                _adopt_annotation, request, service, actor, material, verify_request=verify_key,
+            )
+            await run_in_threadpool(verify_key)
+            verify()
+        except EvidenceWorkspaceError as exc:
+            return _fail(exc)
+        status = 200 if payload.get("idempotent_replay") else 201
+        return JSONResponse(payload, status_code=status, headers=_NO_STORE_HEADERS)
+
+    @app.get("/api/cases/evidence/annotations")
+    async def list_evidence_annotations(request: Request):
+        try:
+            verify = _verify(request)
+            verify()
+            service, actor, material = _service(request), _actor(request), _material(request)
+            verify_key = await run_in_threadpool(service.key_scope_verifier, actor, _annotation_scope_body(material))
+            verify()
+            payload = await run_in_threadpool(
+                _list_annotations, request, service, actor, material, verify_request=verify_key,
+            )
+            await run_in_threadpool(verify_key)
+            verify()
         except EvidenceWorkspaceError as exc:
             return _fail(exc)
         return JSONResponse(payload, status_code=200, headers=_NO_STORE_HEADERS)
@@ -983,3 +1040,198 @@ def _webp_size(content: bytes) -> tuple[int, int] | None:
         bits = int.from_bytes(content[21:25], "little")
         return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
     return None
+
+
+_ANNOTATION_DOCUMENT_FIELDS = frozenset({
+    "content_base64",
+    "source_filename",
+    "original_filename",
+    "media_type",
+    "extracted_content_base64",
+})
+_ANNOTATION_AUTHORITY_FIELDS = frozenset({
+    "key",
+    "passphrase",
+    "role",
+    "roles",
+    "trusted_local",
+    "cid",
+    "admin_key",
+})
+
+
+def _annotation_scope_body(body: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(body, Mapping):
+        raise EvidenceWorkspaceError("request_body")
+    return {
+        "tenant_id": body.get("tenant_id"),
+        "case_id": body.get("case_id"),
+        "resource_id": body.get("resource_id"),
+    }
+
+
+def _annotation_store(request: Request, service: EvidenceWorkspace) -> EvidenceAnnotationStore:
+    root = getattr(service, "_root", None)
+    if root is None:
+        raise EvidenceWorkspaceError("evidence_unavailable")
+    path = Path(root) / "annotations"
+    current = getattr(request.app.state, "evidence_annotation_store", None)
+    if isinstance(current, EvidenceAnnotationStore) and Path(getattr(current, "_root")) == path:
+        return current
+    store = EvidenceAnnotationStore(path)
+    request.app.state.evidence_annotation_store = store
+    return store
+
+
+def _annotation_case(service: EvidenceWorkspace, actor: str, body: Mapping[str, Any]):
+    identity = service._identity(actor, _annotation_scope_body(body), content=False, idempotency=False)
+    return service._open(identity)
+
+
+def _case_revision(body: Mapping[str, Any], case: Any) -> None:
+    expected = body.get("expected_case_revision")
+    if isinstance(expected, str) and expected.strip().lstrip("-").isdigit():
+        expected = int(expected.strip())
+    if type(expected) is not int or isinstance(expected, bool) or expected != case.revision:
+        raise EvidenceWorkspaceError("revision_conflict")
+
+
+def _artifact_version_value(body: Mapping[str, Any]) -> int:
+    value = body.get("artifact_version")
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if type(value) is not int or isinstance(value, bool):
+        raise EvidenceWorkspaceError("artifact_version")
+    return value
+
+
+def _bound_evidence(service: EvidenceWorkspace, actor: str, body: Mapping[str, Any], verify_request):
+    if verify_request is not None:
+        verify_request()
+    if not isinstance(body, Mapping):
+        raise EvidenceWorkspaceError("request_body")
+    if any(name in body for name in _ANNOTATION_AUTHORITY_FIELDS):
+        raise EvidenceWorkspaceError("selector_rejected")
+    if any(name in body for name in _ANNOTATION_DOCUMENT_FIELDS):
+        raise EvidenceWorkspaceError("content_rejected")
+    claimed_actor = body.get("actor_principal_id")
+    if claimed_actor is not None and claimed_actor != actor:
+        raise EvidenceWorkspaceError("actor")
+    scope = _annotation_case(service, actor, body)
+    _case_revision(body, scope.case)
+    claimed_owner = body.get("canonical_owner_principal_id")
+    if claimed_owner is not None and claimed_owner != scope.case.tenant_id:
+        raise EvidenceWorkspaceError("selector_rejected")
+    evidence_id = body.get("evidence_id")
+    if not isinstance(evidence_id, str) or evidence_id.strip() == "" or evidence_id != evidence_id.strip():
+        raise EvidenceWorkspaceError("evidence_id")
+    version = _artifact_version_value(body)
+    catalog = service.list_catalog(actor, _annotation_scope_body(body), verify_request=verify_request)
+    items = list(catalog.get("items") or [])
+    item = next((entry for entry in items if entry.get("evidence_id") == evidence_id), None)
+    if item is None:
+        raise EvidenceWorkspaceError("missing_evidence")
+    known = {entry.get("version") for entry in item.get("artifact_versions") or []}
+    if version not in known:
+        raise EvidenceWorkspaceError("artifact_version_mismatch")
+    if verify_request is not None:
+        verify_request()
+    return scope, evidence_id, version, [entry.get("evidence_id") for entry in items]
+
+
+def _store_call(operation):
+    try:
+        return operation()
+    except BoundPrivateRecordError as exc:
+        raise EvidenceWorkspaceError(exc.code) from exc
+
+
+def _create_annotation(request: Request, service: EvidenceWorkspace, actor: str, body: Mapping[str, Any], *, verify_request=None) -> dict[str, Any]:
+    if body.get("adopted") is True or body.get("adopt") is True:
+        raise EvidenceWorkspaceError("adoption_requires_explicit_action")
+    scope, evidence_id, version, evidence_ids = _bound_evidence(service, actor, body, verify_request)
+    idempotency = body.get("idempotency_key")
+    expected = body.get("expected_annotation_revision")
+    if not isinstance(idempotency, str) or idempotency.strip() == "":
+        raise EvidenceWorkspaceError("idempotency_key")
+    if not isinstance(expected, str):
+        raise EvidenceWorkspaceError("revision_conflict")
+    kind = body.get("kind")
+    if not isinstance(kind, str):
+        raise EvidenceWorkspaceError("kind")
+    store = _annotation_store(request, service)
+    payload = _store_call(lambda: store.commit_attributed_annotation(
+        evidence_id=evidence_id,
+        artifact_version=version,
+        kind=kind,
+        actor_principal_id=actor,
+        canonical_owner_principal_id=scope.case.tenant_id,
+        tenant_id=scope.case.tenant_id,
+        case_id=scope.case.case_id,
+        idempotency_key=idempotency,
+        expected_annotation_revision=expected,
+        key=scope.data_key,
+        key_id=scope.key_id,
+        note=body.get("note") if isinstance(body.get("note"), str) else "",
+        label=body.get("label") if isinstance(body.get("label"), str) else "",
+        page=body.get("page") if kind == "page_span" else None,
+        span_start=body.get("span_start") if kind == "page_span" else None,
+        span_end=body.get("span_end") if kind == "page_span" else None,
+        claim_element=body.get("claim_element") if "claim_element" in body else None,
+        display_role=body.get("display_role") if isinstance(body.get("display_role"), str) else None,
+    ))
+    after = service.list_catalog(actor, _annotation_scope_body(body), verify_request=verify_request)
+    after_ids = [entry.get("evidence_id") for entry in after.get("items") or []]
+    payload["evidence_ids"] = after_ids
+    payload["synthesized_evidence"] = after_ids != evidence_ids
+    payload["task_id"] = ANNOTATION_TASK_ID
+    payload["display_role_authoritative"] = False
+    return payload
+
+
+def _adopt_annotation(request: Request, service: EvidenceWorkspace, actor: str, body: Mapping[str, Any], *, verify_request=None) -> dict[str, Any]:
+    scope, evidence_id, version, evidence_ids = _bound_evidence(service, actor, body, verify_request)
+    annotation_id = body.get("annotation_id")
+    idempotency = body.get("idempotency_key")
+    expected = body.get("expected_annotation_revision")
+    if not isinstance(annotation_id, str) or not isinstance(idempotency, str) or not isinstance(expected, str):
+        raise EvidenceWorkspaceError("annotation_rejected")
+    store = _annotation_store(request, service)
+    payload = _store_call(lambda: store.adopt_annotation(
+        evidence_id=evidence_id,
+        artifact_version=version,
+        annotation_id=annotation_id,
+        actor_principal_id=actor,
+        canonical_owner_principal_id=scope.case.tenant_id,
+        tenant_id=scope.case.tenant_id,
+        case_id=scope.case.case_id,
+        idempotency_key=idempotency,
+        expected_annotation_revision=expected,
+        key=scope.data_key,
+        key_id=scope.key_id,
+        adopt=body.get("adopt") is True,
+        display_role=body.get("display_role") if isinstance(body.get("display_role"), str) else None,
+    ))
+    after = service.list_catalog(actor, _annotation_scope_body(body), verify_request=verify_request)
+    after_ids = [entry.get("evidence_id") for entry in after.get("items") or []]
+    payload["evidence_ids"] = after_ids
+    payload["synthesized_evidence"] = after_ids != evidence_ids
+    payload["adopted_as_evidence"] = False
+    payload["task_id"] = ANNOTATION_TASK_ID
+    return payload
+
+
+def _list_annotations(request: Request, service: EvidenceWorkspace, actor: str, body: Mapping[str, Any], *, verify_request=None) -> dict[str, Any]:
+    scope, evidence_id, version, evidence_ids = _bound_evidence(service, actor, body, verify_request)
+    store = _annotation_store(request, service)
+    payload = _store_call(lambda: store.list_attributed_annotations(
+        evidence_id=evidence_id,
+        artifact_version=version,
+        canonical_owner_principal_id=scope.case.tenant_id,
+        tenant_id=scope.case.tenant_id,
+        case_id=scope.case.case_id,
+        key=scope.data_key,
+    ))
+    payload["evidence_ids"] = evidence_ids
+    payload["display_role_authoritative"] = False
+    return payload
