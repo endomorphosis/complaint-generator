@@ -278,10 +278,15 @@ def compose_case_routes(app: Any, *, authorizer: Optional[CaseActionAuthorizer],
         raise CaseAccessError("case_storage")
     mount_case_storage(app)
     from .evidence_workspace_api import mount_evidence_workspace
+    from .evidence_annotation_store import EvidenceAnnotationStore
     from integrations.evidence_workspace import EvidenceWorkspace
     if evidence_workspace is not None and not isinstance(evidence_workspace, EvidenceWorkspace):
         raise CaseAccessError("evidence_workspace")
     mount_evidence_workspace(app)
+    annotation_root = getattr(evidence_workspace, "_root", None)
+    app.state.evidence_annotation_store = (
+        EvidenceAnnotationStore(Path(annotation_root) / "annotations") if annotation_root is not None else None
+    )
     if case_messages is not None and case_attachments is not None:
         case_attachments.bind_message_admission(case_messages.store)
         case_messages.bind_attachments(case_attachments)
