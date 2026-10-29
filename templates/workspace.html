@@ -2486,6 +2486,18 @@
                 display: none;
             }
 
+            /* A user-marked deadline is an attributed reminder. Keep Mark Deadline
+               reachable on mobile even before a response date exists. */
+            .docket-mobile-action-strip:not(.is-empty) #docket-mobile-step-deadline.is-secondary.is-locked-accordion {
+                display: grid;
+            }
+
+            #docket-mobile-step-deadline.is-locked-accordion[data-step-state="waiting"] summary,
+            #docket-mobile-step-deadline.is-locked-accordion[data-step-state="blocked"] summary {
+                cursor: pointer;
+                pointer-events: auto;
+            }
+
             .docket-mobile-step-label {
                 color: var(--accent-strong);
                 font-size: 0.78rem;
@@ -6303,6 +6315,57 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
     <script src="/static/complaint_mcp_sdk.js"></script>
     <script src="/static/complaint_case_shell.js"></script>
     <script src="/static/complaint_graph_view.js"></script>
+    <dialog id="evidence-annotation-editor" aria-labelledby="evidence-annotation-editor-title" style="width:min(36rem, calc(100vw - 1.5rem)); max-height:calc(100vh - 1.5rem); overflow:auto;">
+        <form id="evidence-annotation-form" data-expected-revision="">
+            <h2 id="evidence-annotation-editor-title">Add label</h2>
+            <p id="evidence-annotation-editor-kind-note"></p>
+            <p id="evidence-annotation-editor-state" data-save-state="idle" role="status" tabindex="-1">Editor closed.</p>
+            <label for="evidence-annotation-evidence">Evidence artifact</label>
+            <select id="evidence-annotation-evidence"></select>
+            <label for="evidence-annotation-version">Artifact version</label>
+            <select id="evidence-annotation-version"></select>
+            <div data-editor-panel="label">
+                <label for="evidence-annotation-label">Label</label>
+                <input id="evidence-annotation-label" maxlength="80" autocomplete="off">
+            </div>
+            <div data-editor-panel="annotation" hidden>
+                <label for="evidence-annotation-note">Annotation</label>
+                <textarea id="evidence-annotation-note" maxlength="4000"></textarea>
+                <label for="evidence-annotation-page">Page</label>
+                <input id="evidence-annotation-page" inputmode="numeric" autocomplete="off">
+                <label for="evidence-annotation-span-start">Span start</label>
+                <input id="evidence-annotation-span-start" inputmode="numeric" autocomplete="off">
+                <label for="evidence-annotation-span-end">Span end</label>
+                <input id="evidence-annotation-span-end" inputmode="numeric" autocomplete="off">
+            </div>
+            <div data-editor-panel="reminder" hidden>
+                <p>This save is an attributed reminder. It does not become a filing deadline or a legal requirement by itself.</p>
+                <label for="evidence-annotation-reminder-date">Reminder date</label>
+                <input id="evidence-annotation-reminder-date" type="date">
+                <label for="evidence-annotation-reminder-note">What to remember</label>
+                <textarea id="evidence-annotation-reminder-note" maxlength="2000"></textarea>
+                <fieldset>
+                    <legend>Optional admitted lineage</legend>
+                    <label for="evidence-annotation-lineage-source">Admitted source</label>
+                    <input id="evidence-annotation-lineage-source" autocomplete="off">
+                    <label for="evidence-annotation-lineage-jurisdiction">Jurisdiction</label>
+                    <input id="evidence-annotation-lineage-jurisdiction" autocomplete="off">
+                    <label for="evidence-annotation-lineage-date">Authority date</label>
+                    <input id="evidence-annotation-lineage-date" type="date">
+                    <label for="evidence-annotation-lineage-version">Authority version</label>
+                    <input id="evidence-annotation-lineage-version" autocomplete="off">
+                    <label><input id="evidence-annotation-lineage-reviewed" type="checkbox"> I reviewed that admitted source, jurisdiction, date, and version</label>
+                    <label><input id="evidence-annotation-claim-filing-deadline" type="checkbox"> Record a filing-deadline or legal-requirement claim</label>
+                </fieldset>
+                <p id="evidence-annotation-lineage-block">Without admitted source, jurisdiction, date, version, and review, the save stays an attributed reminder.</p>
+            </div>
+            <ul id="evidence-annotation-saved"></ul>
+            <div class="button-row">
+                <button id="evidence-annotation-save" type="submit">Save</button>
+                <button id="evidence-annotation-close" type="button">Close</button>
+            </div>
+        </form>
+    </dialog>
     <script src="/static/complaint_evidence.js"></script>
     <script src="/static/complaint_conversation.js"></script>
     <script>
@@ -12309,6 +12372,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 ).trim(),
                 primary_action: claimElement ? 'Use In Draft' : 'Review',
                 source_ref: String((item && (item.source_url || item.input_path || item.path)) || metadata.source_url || '').trim(),
+                evidence_id: String((item && item.evidence_id) || metadata.evidence_id || '').trim(),
+                artifact_version: Number((item && (item.artifact_version || item.version || item.current_version)) || metadata.artifact_version || metadata.version || 0) || 0,
                 text,
             };
         }
@@ -12773,8 +12838,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 mobileLabelButton.className = 'secondary docket-mobile-secondary-action';
                 mobileAnnotationButton.className = 'secondary docket-mobile-secondary-action';
                 mobileDeadlineButton.className = 'secondary docket-mobile-deadline-action';
-                [draftButton, reviewButton, labelButton, annotationButton, deadlineButton, mobileLabelButton, mobileAnnotationButton, mobileDeadlineButton].forEach((button) => {
+                [draftButton, reviewButton].forEach((button) => {
                     button.disabled = true;
+                });
+                [labelButton, annotationButton, deadlineButton, mobileLabelButton, mobileAnnotationButton, mobileDeadlineButton].forEach((button) => {
+                    button.disabled = false;
                 });
                 mobileChatLink.textContent = 'Locked: Ask About Document';
                 mobileAskScope.textContent = 'Select a document before asking the chatbot.';
@@ -13008,9 +13076,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             mobileDeadlineSummary.textContent = item.deadline
                 ? `Available: confirm ${item.deadline}.`
                 : 'Locked: add a response date in Step 3 first.';
-            mobileDeadlineButton.disabled = !item.deadline;
-            mobileLabelButton.disabled = !step1Complete;
-            mobileAnnotationButton.disabled = !step1Complete || labelCount === 0;
+            mobileLabelButton.disabled = false;
+            mobileAnnotationButton.disabled = false;
+            mobileDeadlineButton.disabled = false;
             mobileDeadlineButton.setAttribute('aria-describedby', 'docket-mobile-deadline-state');
             const currentMobileStep = !step1Complete
                 ? 'ask'
@@ -16701,12 +16769,43 @@ function extractComplaintOutputSignals(result) {
         });
         document.getElementById('docket-use-in-draft-button').addEventListener('click', () => jumpToStage('draft', '#draft-title', 'Opened Draft with the selected docket item available as source context.'));
         document.getElementById('docket-open-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the selected docket document.'));
-        document.getElementById('docket-add-label-button').addEventListener('click', () => setStatus('Docket label editing will save labels as annotations in the next implementation slice.'));
-        document.getElementById('docket-add-annotation-button').addEventListener('click', () => setStatus('Docket annotation capture will save page, span, confidence, and disputed-state notes in the next implementation slice.'));
-        document.getElementById('docket-mark-deadline-button').addEventListener('click', () => setStatus('Docket deadline marking will save date, source sentence, urgency, and confidence in the next implementation slice.'));
-        document.getElementById('docket-mobile-label-button').addEventListener('click', () => setStatus('Docket label editing will save labels as annotations in the next implementation slice.'));
-        document.getElementById('docket-mobile-annotation-button').addEventListener('click', () => setStatus('Docket annotation capture will save page, span, confidence, and disputed-state notes in the next implementation slice.'));
-        document.getElementById('docket-mobile-deadline-button').addEventListener('click', () => setStatus('Docket deadline marking will save date, source sentence, urgency, and confidence in the next implementation slice.'));
+        function openDocketEvidenceEditor(mode, trigger) {
+            const api = window.complaintEvidenceAnnotations;
+            if (!api || typeof api.open !== 'function') {
+                setStatus('The evidence annotation editor is not available in this page.');
+                return;
+            }
+            const selected = buildDocketItems(workspaceSession || {}).find((item) => item.docket_item_id === selectedDocketItemId);
+            api.open({
+                mode,
+                trigger,
+                evidenceId: selected && selected.evidence_id ? selected.evidence_id : '',
+                artifactVersion: selected && selected.artifact_version ? selected.artifact_version : '',
+            });
+        }
+        document.getElementById('docket-add-label-button').addEventListener('click', (event) => openDocketEvidenceEditor('label', event.currentTarget));
+        document.getElementById('docket-add-annotation-button').addEventListener('click', (event) => openDocketEvidenceEditor('annotation', event.currentTarget));
+        document.getElementById('docket-mark-deadline-button').addEventListener('click', (event) => openDocketEvidenceEditor('reminder', event.currentTarget));
+        document.getElementById('docket-mobile-label-button').addEventListener('click', (event) => openDocketEvidenceEditor('label', event.currentTarget));
+        document.getElementById('docket-mobile-annotation-button').addEventListener('click', (event) => openDocketEvidenceEditor('annotation', event.currentTarget));
+        document.getElementById('docket-mobile-deadline-button').addEventListener('click', (event) => openDocketEvidenceEditor('reminder', event.currentTarget));
+        window.addEventListener('complaint-evidence-catalog', (event) => {
+            const items = (event.detail && event.detail.items) || [];
+            if (!items.length) return;
+            if (latestDocketDatasetView && Array.isArray(latestDocketDatasetView.documents) && latestDocketDatasetView.documents.length && latestDocketDatasetView.source !== 'evidence-catalog') return;
+            latestDocketDatasetView = {
+                source: 'evidence-catalog',
+                documents: items.map((item) => ({
+                    evidence_id: item.evidence_id,
+                    docket_item_id: item.evidence_id,
+                    title: item.original_filename || item.source_filename || item.evidence_id,
+                    document_type: 'evidence',
+                    source: 'sealed evidence catalog',
+                    artifact_version: Number(item.current_version || (item.artifact_versions && item.artifact_versions[0] && item.artifact_versions[0].version) || 1),
+                })),
+            };
+            renderDocketLane(workspaceSession || {});
+        });
         document.getElementById('docket-open-advanced-tools-button').addEventListener('click', () => jumpToStage('integrations', '#packaged-docket-manifest-path', 'Opened CLI + MCP packaged docket controls from the Docket lane.'));
         document.getElementById('docket-load-operator-dashboard-button').addEventListener('click', async () => {
             const path = document.getElementById('docket-dataset-path').value.trim() || syncDocketDatasetPathFromSavedManifest();

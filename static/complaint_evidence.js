@@ -906,6 +906,7 @@
         }
         items = Array.isArray(body.items) ? body.items : [];
         readAt = new Date().toISOString();
+        window.dispatchEvent(new CustomEvent("complaint-evidence-catalog", {detail: {items: items}}));
         host.dataset.catalogRead = readAt;
         if (selectedId && !items.some(function (item) { return item.evidence_id === selectedId; })) selectedId = "";
         if (!items.length) {
@@ -958,6 +959,499 @@
         clearPrivateState: clearPrivateState,
         selectedId: function () { return selectedId; }
     };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bind);
+    else bind();
+}());
+
+/* Label, annotation, and reminder editors.
+   Saves go to the case evidence annotation API. A date the user marks is an
+   attributed reminder unless admitted source, jurisdiction, date, version,
+   and review are all present. The client does not derive a filing deadline. */
+(function () {
+    var mode = "label";
+    var trigger = null;
+    var catalog = [];
+    var listed = [];
+    var observedAt = "";
+
+    function dialog() { return document.getElementById("evidence-annotation-editor"); }
+    function form() { return document.getElementById("evidence-annotation-form"); }
+    function node(id) { return document.getElementById(id); }
+
+    function caseContext() {
+        var client = window.workspaceClient;
+        return client && client.caseContext ? client.caseContext : null;
+    }
+
+    function caseRevision(context) {
+        var value = context.expected_revision;
+        if (value === undefined || value === null || value === "") value = context.revision;
+        return value;
+    }
+
+    function headers() {
+        var client = window.workspaceClient;
+        var context = caseContext();
+        var result = {"Content-Type": "application/json", "Accept": "application/json"};
+        if (context) {
+            result["x-tenant-id"] = context.tenant_id;
+            result["x-case-id"] = context.case_id;
+            result["x-resource-id"] = context.resource_id;
+        }
+        if (client && client.csrfToken) result["x-csrf-token"] = client.csrfToken;
+        return result;
+    }
+
+    function setState(state, message) {
+        var status = node("evidence-annotation-editor-state");
+        var root = dialog();
+        if (status) {
+            status.dataset.saveState = state;
+            status.textContent = message;
+        }
+        if (root) root.dataset.saveState = state;
+        var save = node("evidence-annotation-save");
+        if (save) save.disabled = state === "pending";
+    }
+
+    function focusable() {
+        var root = dialog();
+        if (!root) return [];
+        return Array.prototype.filter.call(root.querySelectorAll("input, select, textarea, button"), function (element) {
+            return !element.disabled && !element.closest("[hidden]");
+        });
+    }
+
+    function focusEditor() {
+        var preferred = mode === "annotation"
+            ? "evidence-annotation-note"
+            : mode === "reminder"
+                ? "evidence-annotation-reminder-date"
+                : "evidence-annotation-label";
+        var field = node(preferred);
+        var evidence = node("evidence-annotation-evidence");
+        var target = evidence && !evidence.value ? evidence : field;
+        if (target) target.focus();
+    }
+
+    function onKey(event) {
+        if (event.key === "Escape") {
+            event.preventDefault();
+            close();
+            return;
+        }
+        if (event.key !== "Tab") return;
+        var nodes = focusable();
+        if (!nodes.length) return;
+        var first = nodes[0];
+        var last = nodes[nodes.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    }
+
+    function panels() {
+        Array.prototype.forEach.call(document.querySelectorAll("[data-editor-panel]"), function (panel) {
+            panel.hidden = panel.getAttribute("data-editor-panel") !== mode;
+        });
+        var title = node("evidence-annotation-editor-title");
+        var note = node("evidence-annotation-editor-kind-note");
+        if (mode === "label") {
+            if (title) title.textContent = "Add label";
+            if (note) note.textContent = "A label is an attributed note on this artifact version. It does not adopt the note as evidence.";
+        } else if (mode === "annotation") {
+            if (title) title.textContent = "Add annotation";
+            if (note) note.textContent = "Save a note, or a note with a page and span, on the selected artifact version.";
+        } else {
+            if (title) title.textContent = "Mark an attributed reminder";
+            if (note) note.textContent = "A date you mark here is your reminder. It is not a filing deadline and it is not a legal requirement unless you supply admitted source, jurisdiction, date, version, and review.";
+        }
+    }
+
+    function selectedVersion() {
+        var select = node("evidence-annotation-version");
+        var value = select ? Number(select.value) : NaN;
+        return Number.isInteger(value) && value >= 1 ? value : null;
+    }
+
+    function fillVersions() {
+        var evidenceId = node("evidence-annotation-evidence").value;
+        var item = catalog.filter(function (entry) { return entry.evidence_id === evidenceId; })[0];
+        var select = node("evidence-annotation-version");
+        var versions = item && Array.isArray(item.artifact_versions) ? item.artifact_versions : [];
+        select.textContent = "";
+        versions.forEach(function (version) {
+            var number = Number(version && version.version);
+            if (!Number.isInteger(number)) return;
+            var option = document.createElement("option");
+            option.value = String(number);
+            option.textContent = "version " + number;
+            select.appendChild(option);
+        });
+        if (!select.options.length) {
+            var missing = document.createElement("option");
+            missing.value = "";
+            missing.textContent = "No artifact version";
+            select.appendChild(missing);
+        }
+    }
+
+    function scopeQuery() {
+        var context = caseContext();
+        if (!context) return null;
+        var evidenceId = node("evidence-annotation-evidence").value;
+        var version = selectedVersion();
+        if (!evidenceId || version === null) return null;
+        return new URLSearchParams({
+            tenant_id: context.tenant_id,
+            case_id: context.case_id,
+            resource_id: context.resource_id,
+            evidence_id: evidenceId,
+            artifact_version: String(version),
+            expected_case_revision: String(caseRevision(context))
+        });
+    }
+
+    function reminderClass(note) {
+        var text = String(note || "");
+        if (text.indexOf("record_class: reviewed_lineage_claim") === 0) return "reviewed";
+        if (text.indexOf("record_class: attributed_reminder") === 0) return "reminder";
+        return "";
+    }
+
+    function paintSaved() {
+        var list = node("evidence-annotation-saved");
+        var docket = node("docket-annotation-list");
+        if (!list) return;
+        list.textContent = "";
+        if (!listed.length) {
+            var empty = document.createElement("li");
+            empty.textContent = "No annotations saved on this artifact version yet.";
+            list.appendChild(empty);
+        }
+        listed.forEach(function (item) {
+            var row = document.createElement("li");
+            row.tabIndex = -1;
+            row.dataset.annotationId = item.annotation_id || "";
+            var title = document.createElement("strong");
+            var kind = reminderClass(item.note);
+            if (item.kind === "label") title.textContent = "Label: " + (item.label || "");
+            else if (kind === "reminder") title.textContent = "Attributed reminder";
+            else if (kind === "reviewed") title.textContent = "Reviewed lineage claim";
+            else if (item.kind === "page_span") title.textContent = "Annotation " + (item.anchor || "");
+            else title.textContent = "Annotation";
+            var body = document.createElement("div");
+            body.textContent = item.kind === "label" ? "" : (item.note || "");
+            var meta = document.createElement("div");
+            meta.textContent = "Author: " + (item.actor_principal_id || "unknown")
+                + ". Artifact version: " + item.artifact_version
+                + ". Annotation revision: " + (item.annotation_revision || form().dataset.expectedRevision || "")
+                + ". Record time: not provided by the annotation API."
+                + (observedAt ? " Browser observed the list at " + observedAt + "." : "");
+            if (kind === "reminder") {
+                var limit = document.createElement("div");
+                limit.textContent = "This reminder is not a filing deadline and it is not a legal requirement.";
+                row.appendChild(limit);
+            }
+            if (kind === "reviewed") {
+                var claim = document.createElement("div");
+                claim.textContent = "The admitted source, jurisdiction, date, and version were recorded with review. The system did not derive this claim.";
+                row.appendChild(claim);
+            }
+            row.appendChild(title);
+            if (body.textContent) row.appendChild(body);
+            row.appendChild(meta);
+            list.appendChild(row);
+        });
+        if (docket) {
+            docket.textContent = "";
+            var source = list.textContent || "No annotations saved on this artifact version yet.";
+            var copy = document.createElement("div");
+            copy.className = "item";
+            copy.textContent = source;
+            docket.appendChild(copy);
+        }
+    }
+
+    async function refreshList() {
+        var params = scopeQuery();
+        var current = form();
+        if (!params || !current) return;
+        var response = await fetch("/api/cases/evidence/annotations?" + params.toString(), {
+            credentials: "same-origin",
+            headers: headers()
+        });
+        var body = {};
+        try { body = await response.json(); } catch (error) { body = {}; }
+        if (!response.ok) {
+            setState("error", "The annotation list returned " + (body.error || response.status) + ".");
+            return;
+        }
+        listed = Array.isArray(body.items) ? body.items : [];
+        current.dataset.expectedRevision = typeof body.annotation_revision === "string" ? body.annotation_revision : "";
+        observedAt = new Date().toISOString();
+        paintSaved();
+    }
+
+    async function loadCatalog(preferredId, preferredVersion) {
+        var context = caseContext();
+        var select = node("evidence-annotation-evidence");
+        select.textContent = "";
+        catalog = [];
+        if (!context) {
+            setState("locked", "Select an authorized case before editing labels, annotations, or reminders.");
+            return;
+        }
+        var params = new URLSearchParams({
+            tenant_id: context.tenant_id,
+            case_id: context.case_id,
+            resource_id: context.resource_id
+        });
+        var response = await fetch("/api/cases/evidence?" + params.toString(), {
+            credentials: "same-origin",
+            headers: {"Accept": "application/json"}
+        });
+        var body = {};
+        try { body = await response.json(); } catch (error) { body = {}; }
+        if (response.status === 401 || response.status === 403) {
+            setState("locked", "The case key or session cannot open evidence annotations.");
+            return;
+        }
+        if (!response.ok) {
+            setState("error", "The evidence catalog returned " + (body.error || response.status) + ".");
+            return;
+        }
+        catalog = Array.isArray(body.items) ? body.items : [];
+        if (!catalog.length) {
+            var empty = document.createElement("option");
+            empty.value = "";
+            empty.textContent = "No sealed evidence in this case";
+            select.appendChild(empty);
+            setState("empty", "Save sealed evidence before adding a label, annotation, or reminder.");
+            return;
+        }
+        catalog.forEach(function (item) {
+            var option = document.createElement("option");
+            option.value = item.evidence_id;
+            option.textContent = item.original_filename || item.source_filename || item.evidence_id;
+            select.appendChild(option);
+        });
+        if (preferredId && catalog.some(function (item) { return item.evidence_id === preferredId; })) select.value = preferredId;
+        fillVersions();
+        var versionSelect = node("evidence-annotation-version");
+        if (preferredVersion && Array.prototype.some.call(versionSelect.options, function (option) {
+            return option.value === String(preferredVersion);
+        })) versionSelect.value = String(preferredVersion);
+        setState("pending", "Loading saved annotations.");
+        await refreshList();
+        if (dialog().dataset.saveState !== "error") {
+            setState("idle", "Editor ready. Nothing is saved until you use Save.");
+        }
+    }
+
+    function lineage() {
+        return {
+            source: node("evidence-annotation-lineage-source").value.trim(),
+            jurisdiction: node("evidence-annotation-lineage-jurisdiction").value.trim(),
+            date: node("evidence-annotation-lineage-date").value.trim(),
+            version: node("evidence-annotation-lineage-version").value.trim(),
+            reviewed: node("evidence-annotation-lineage-reviewed").checked,
+            claim: node("evidence-annotation-claim-filing-deadline").checked
+        };
+    }
+
+    function buildPayload() {
+        var context = caseContext();
+        var evidenceId = node("evidence-annotation-evidence").value;
+        var version = selectedVersion();
+        if (!context) return {error: "Select an authorized case first.", focus: "evidence-annotation-evidence"};
+        if (!evidenceId || version === null) return {error: "Choose a sealed evidence artifact and version.", focus: "evidence-annotation-evidence"};
+        var payload = {
+            tenant_id: context.tenant_id,
+            case_id: context.case_id,
+            resource_id: context.resource_id,
+            evidence_id: evidenceId,
+            artifact_version: version,
+            expected_case_revision: caseRevision(context),
+            expected_annotation_revision: form().dataset.expectedRevision || "",
+            idempotency_key: "ann-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10)
+        };
+        if (mode === "label") {
+            var label = node("evidence-annotation-label").value.trim();
+            if (!label || label.length > 80) return {error: "Enter a label of 1 to 80 characters.", focus: "evidence-annotation-label"};
+            payload.kind = "label";
+            payload.label = label;
+            payload.note = "";
+            return {payload: payload};
+        }
+        if (mode === "annotation") {
+            var note = node("evidence-annotation-note").value.trim();
+            var pageRaw = node("evidence-annotation-page").value.trim();
+            var startRaw = node("evidence-annotation-span-start").value.trim();
+            var endRaw = node("evidence-annotation-span-end").value.trim();
+            if (!note) return {error: "Enter the annotation note.", focus: "evidence-annotation-note"};
+            var hasSpan = pageRaw !== "" || startRaw !== "" || endRaw !== "";
+            if (!hasSpan) {
+                payload.kind = "comment";
+                payload.note = note;
+                payload.label = "";
+                return {payload: payload};
+            }
+            var page = Number(pageRaw);
+            var start = Number(startRaw);
+            var end = Number(endRaw);
+            if (!Number.isInteger(page) || page < 1 || !Number.isInteger(start) || start < 0 || !Number.isInteger(end) || end <= start) {
+                return {error: "A page span needs a page, a start, and an end after the start.", focus: "evidence-annotation-page"};
+            }
+            payload.kind = "page_span";
+            payload.note = note;
+            payload.label = "";
+            payload.page = page;
+            payload.span_start = start;
+            payload.span_end = end;
+            return {payload: payload};
+        }
+        var when = node("evidence-annotation-reminder-date").value.trim();
+        var reminderNote = node("evidence-annotation-reminder-note").value.trim();
+        if (!when) return {error: "Choose the reminder date.", focus: "evidence-annotation-reminder-date"};
+        if (!reminderNote) return {error: "Enter what this reminder is for.", focus: "evidence-annotation-reminder-note"};
+        var admitted = lineage();
+        if (admitted.claim) {
+            var missing = !admitted.source ? "evidence-annotation-lineage-source"
+                : !admitted.jurisdiction ? "evidence-annotation-lineage-jurisdiction"
+                : !admitted.date ? "evidence-annotation-lineage-date"
+                : !admitted.version ? "evidence-annotation-lineage-version"
+                : !admitted.reviewed ? "evidence-annotation-lineage-reviewed"
+                : "";
+            if (missing) {
+                return {
+                    error: "A filing deadline or legal requirement needs admitted source, jurisdiction, date, version, and review. Nothing was saved.",
+                    focus: missing
+                };
+            }
+            payload.note = [
+                "record_class: reviewed_lineage_claim",
+                "when: " + when,
+                "text: " + reminderNote,
+                "admitted_source: " + admitted.source,
+                "jurisdiction: " + admitted.jurisdiction,
+                "authority_date: " + admitted.date,
+                "authority_version: " + admitted.version,
+                "reviewed: true",
+                "system_derived_filing_deadline: false",
+                "legal_requirement_derived: false"
+            ].join("\n");
+        } else {
+            payload.note = [
+                "record_class: attributed_reminder",
+                "when: " + when,
+                "text: " + reminderNote,
+                "filing_deadline: false",
+                "legal_requirement: false",
+                "system_derived_filing_deadline: false"
+            ].join("\n");
+        }
+        payload.kind = "comment";
+        payload.label = "";
+        return {payload: payload};
+    }
+
+    async function save(event) {
+        event.preventDefault();
+        if (dialog() && dialog().dataset.saveState === "pending") return;
+        var built = buildPayload();
+        if (built.error) {
+            setState("error", built.error);
+            var field = node(built.focus);
+            if (field) field.focus();
+            return;
+        }
+        setState("pending", "Saving through the evidence annotation API.");
+        var response;
+        try {
+            response = await fetch("/api/cases/evidence/annotations", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: headers(),
+                body: JSON.stringify(built.payload)
+            });
+        } catch (error) {
+            setState("error", "The annotation request did not reach the server. Nothing was saved.");
+            node("evidence-annotation-editor-state").focus();
+            return;
+        }
+        var body = {};
+        try { body = await response.json(); } catch (error) { body = {}; }
+        if (response.status === 409 || body.error === "revision_conflict") {
+            await refreshList().catch(function () { return null; });
+            setState("conflict", "Someone saved this artifact version first. The editor loaded the current revision. Review it, then save again.");
+            node("evidence-annotation-editor-state").focus();
+            return;
+        }
+        if (!response.ok) {
+            setState("error", "The annotation API returned " + (body.error || response.status) + ". Nothing new was saved.");
+            node("evidence-annotation-editor-state").focus();
+            return;
+        }
+        form().dataset.expectedRevision = body.annotation_revision || form().dataset.expectedRevision || "";
+        await refreshList();
+        setState("saved", "Saved " + (body.annotation_id || "annotation") + " by " + (body.actor_principal_id || "the session actor") + " on artifact version " + body.artifact_version + ", revision " + (body.annotation_revision || "") + ".");
+        var saved = node("evidence-annotation-saved").querySelector("[data-annotation-id='" + body.annotation_id + "']");
+        if (saved) saved.focus();
+        else node("evidence-annotation-editor-state").focus();
+    }
+
+    function close() {
+        var root = dialog();
+        if (root && root.open) root.close();
+        if (trigger && typeof trigger.focus === "function") trigger.focus();
+    }
+
+    async function open(options) {
+        options = options || {};
+        mode = options.mode === "annotation" || options.mode === "reminder" ? options.mode : "label";
+        trigger = options.trigger || document.activeElement;
+        var root = dialog();
+        if (!root || !form()) return;
+        panels();
+        setState("pending", "Loading the evidence catalog and saved annotations.");
+        if (!root.open) root.showModal();
+        try {
+            await loadCatalog(options.evidenceId || "", options.artifactVersion || "");
+        } catch (error) {
+            setState("error", "The editor could not reach the evidence annotation API.");
+        }
+        if (root.dataset.saveState !== "error" && root.dataset.saveState !== "locked" && root.dataset.saveState !== "empty") {
+            setState(root.dataset.saveState || "idle", node("evidence-annotation-editor-state").textContent);
+        }
+        focusEditor();
+    }
+
+    function bind() {
+        var root = dialog();
+        var current = form();
+        if (!root || !current || root.dataset.bound === "true") return;
+        root.dataset.bound = "true";
+        root.addEventListener("keydown", onKey);
+        current.addEventListener("submit", function (event) {
+            save(event).catch(function () { setState("error", "The save stopped before the annotation API answered."); });
+        });
+        node("evidence-annotation-close").addEventListener("click", close);
+        node("evidence-annotation-evidence").addEventListener("change", function () {
+            fillVersions();
+            refreshList().catch(function () { setState("error", "The annotation list could not be loaded."); });
+        });
+        node("evidence-annotation-version").addEventListener("change", function () {
+            refreshList().catch(function () { setState("error", "The annotation list could not be loaded."); });
+        });
+        node("evidence-annotation-editor-state").tabIndex = -1;
+    }
+
+    window.complaintEvidenceAnnotations = {open: open, close: close};
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bind);
     else bind();
 }());
