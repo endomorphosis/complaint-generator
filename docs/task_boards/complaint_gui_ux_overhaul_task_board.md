@@ -471,7 +471,7 @@ Implementation instructions:
 
 ## CIMP-UX-16 Render safe document, image, and text previews
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
