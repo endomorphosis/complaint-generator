@@ -440,7 +440,7 @@ Implementation instructions:
 
 ## CIMP-UX-15 Build an evidence library and detail workbench
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
