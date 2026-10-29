@@ -9,6 +9,12 @@ Uploads are chunked control messages over the same catalog owner. Bytes are
 held only until the private artifact owner seals them, then discarded. Progress
 stays inside 0–99 until that seal, and a cancelled or stale attempt cannot
 become a successful receipt.
+
+Previews decrypt one requested artifact version for the current actor and
+case, then drop those bytes. Text and PDF pages become plain strings. Raster
+images are returned only when their bytes match a still image type. Other
+formats get a safe alternative. Nothing in a preview is sent to a model, and
+plaintext is not cached on the process.
 """
 
 from __future__ import annotations
@@ -16,6 +22,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import re
+import struct
+import zlib
 from typing import Any, Mapping
 
 from starlette.concurrency import run_in_threadpool
@@ -31,8 +40,15 @@ from integrations.evidence_workspace import (
     EvidenceWorkspaceError,
     legal_qualities,
 )
+from integrations.private_storage import PrivateStorageError, retrieve_private_artifact
 
 UPLOAD_TASK_ID = "CIMP-UX-14"
+PREVIEW_TASK_ID = "CIMP-UX-16"
+_PREVIEW_TEXT = frozenset({"text/plain", "text/csv"})
+_PREVIEW_IMAGES = frozenset({"image/png", "image/jpeg", "image/webp"})
+_PREVIEW_REFUSED = frozenset({
+    "invoke_model", "model", "prompt", "provider", "consent", "messages",
+})
 _MAX_UPLOAD_BYTES = 256 * 1024
 _MAX_CHUNK_BYTES = 64 * 1024
 _ALLOWED_MEDIA = frozenset({
@@ -233,6 +249,23 @@ def mount_evidence_workspace(app: Any) -> None:
     async def evidence_upload_status(request: Request):
         try:
             payload = await _call_upload(request, _upload_status)
+        except EvidenceWorkspaceError as exc:
+            return _fail(exc)
+        return JSONResponse(payload, status_code=200, headers=_NO_STORE_HEADERS)
+
+    @app.get("/api/cases/evidence/preview")
+    async def preview_evidence(request: Request):
+        try:
+            verify = _verify(request)
+            verify()
+            service, actor, material = _service(request), _actor(request), _material(request)
+            verify_key = await run_in_threadpool(service.key_scope_verifier, actor, material)
+            verify()
+            payload = await run_in_threadpool(
+                _preview_evidence, service, actor, material, verify_request=verify_key,
+            )
+            await run_in_threadpool(verify_key)
+            verify()
         except EvidenceWorkspaceError as exc:
             return _fail(exc)
         return JSONResponse(payload, status_code=200, headers=_NO_STORE_HEADERS)
@@ -562,3 +595,391 @@ def _upload_status(request: Request, actor: str, body: Mapping[str, Any], *, ver
             and generation.isascii() and generation.isdecimal()):
         material["upload_generation"] = int(generation)
     return _view(_session_for(request, actor, material, upload_id=upload_id))
+
+
+def _preview_evidence(service: EvidenceWorkspace, actor: str, body: Mapping[str, Any], *, verify_request=None) -> dict[str, Any]:
+    """Decrypt one artifact version and describe a safe preview.
+
+    The decrypted buffer lives only in this call. Callers receive plain text
+    or a still-image encoding, never an HTML document and never a model request.
+    """
+
+    if verify_request is not None:
+        verify_request()
+    if any(name in body for name in _PREVIEW_REFUSED):
+        raise EvidenceWorkspaceError("selector_rejected")
+    evidence_id = body.get("evidence_id")
+    if not isinstance(evidence_id, str) or evidence_id.strip() == "":
+        raise EvidenceWorkspaceError("evidence_id")
+    requested = _preview_version(body.get("version"))
+    identity = service._identity(actor, body, content=False, idempotency=False)
+    with service._lock:
+        scope = service._open(identity, verify_request=verify_request)
+        case, key_id, data_key = scope.case, scope.key_id, scope.data_key
+        document = service._load(identity, case, key_id, data_key, scope)
+        item = document["items"].get(evidence_id)
+        if item is None or item.get("actor_principal_id") != identity["actor_principal_id"]:
+            raise EvidenceWorkspaceError("missing_evidence")
+        if item.get("case_id") != case.case_id or item.get("tenant_id") != case.tenant_id:
+            raise EvidenceWorkspaceError("tenant_mismatch")
+        version = _selected_version(item, requested)
+        try:
+            opened = retrieve_private_artifact(
+                version["ciphertext_cid"],
+                access=_artifact_access(service, case),
+                tenant_id=case.tenant_id,
+                case_id=case.case_id,
+                artifact_kind="evidence-artifact",
+                revision=f"{evidence_id}-v{version['version']}",
+                principal_id=case.tenant_id,
+                key=data_key,
+                key_id=key_id,
+                backend=service._backend,
+                backend_name=service._backend_name,
+            )
+        except PrivateStorageError as exc:
+            raise EvidenceWorkspaceError("ciphertext_unavailable") from exc
+        service._verify_scope(scope)
+    payload = opened.get("data")
+    if not isinstance(payload, (bytes, bytearray)):
+        raise EvidenceWorkspaceError("ciphertext_unavailable")
+    content = bytes(payload)
+    if hashlib.sha256(content).hexdigest() != version["integrity_sha256"]:
+        raise EvidenceWorkspaceError("ciphertext_unavailable")
+    preview = _safe_preview(content, str(item.get("media_type") or "application/octet-stream"))
+    preview.update({
+        "task_id": PREVIEW_TASK_ID,
+        "evidence_id": evidence_id,
+        "tenant_id": case.tenant_id,
+        "case_id": case.case_id,
+        "resource_id": item.get("resource_id") or identity["resource_id"],
+        "actor_principal_id": identity["actor_principal_id"],
+        "version": version["version"],
+        "media_type": item.get("media_type") or "",
+        "integrity_sha256": version["integrity_sha256"],
+        "byte_length": len(content),
+        "model_invoked": False,
+        "model_input_sent": False,
+        "active_content_executed": False,
+        "external_fetch": False,
+        "plaintext_cached": False,
+        "cache_scope": "\n".join((
+            case.tenant_id, case.case_id, identity["actor_principal_id"],
+            evidence_id, str(version["version"]), version["integrity_sha256"],
+        )),
+        "legal": legal_qualities(),
+        "receipt_establishes_legal_quality": False,
+    })
+    del content
+    return preview
+
+
+def _artifact_access(service: EvidenceWorkspace, case: Any):
+    access_type = service._observe.__func__.__globals__["_Access"]
+    return access_type(trust="authenticated", principal_id=case.tenant_id, case_id=case.case_id)
+
+
+def _preview_version(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, str) and value.isascii() and value.isdecimal() and 0 < len(value) <= 9:
+        value = int(value)
+    if type(value) is not int or isinstance(value, bool) or value < 1:
+        raise EvidenceWorkspaceError("evidence_id")
+    return value
+
+
+def _selected_version(item: Mapping[str, Any], requested: int | None) -> Mapping[str, Any]:
+    versions = list(item.get("artifact_versions") or [])
+    if requested is None:
+        if not versions:
+            raise EvidenceWorkspaceError("missing_evidence")
+        return versions[-1]
+    for version in versions:
+        if version.get("version") == requested and isinstance(version.get("ciphertext_cid"), str):
+            return version
+    raise EvidenceWorkspaceError("missing_evidence")
+
+
+def _safe_preview(content: bytes, media: str) -> dict[str, Any]:
+    active = _declares_active_content(content)
+    if media in _PREVIEW_TEXT:
+        return _text_preview(content, active)
+    if media == "application/pdf":
+        pages = _pdf_pages(content)
+        if pages is None:
+            return _alternative(content, media, "content_not_renderable", active)
+        return _page_preview(pages, "pdf", active)
+    if media in _PREVIEW_IMAGES:
+        image = _still_image(content, media)
+        if image is None:
+            return _alternative(content, media, "content_not_renderable", active)
+        return {
+            "supported": True,
+            "preview_kind": "image",
+            "active_content_present": active,
+            "pages": [{
+                "page": 1,
+                "anchor": "page-1",
+                "spans": [{
+                    "span": 1,
+                    "anchor": "page-1-span-1",
+                    "text": image["accessible_text"],
+                }],
+            }],
+            "accessible_text": image["accessible_text"],
+            "image": image,
+            "alternative": None,
+        }
+    return _alternative(content, media, "unsupported_format", active)
+
+
+def _text_preview(content: bytes, active: bool) -> dict[str, Any]:
+    text = content.decode("utf-8", errors="replace").replace("\x00", "")
+    lines = text.splitlines() or [""]
+    pages = []
+    spans = []
+    for index, line in enumerate(lines, start=1):
+        page_number = ((index - 1) // 40) + 1
+        span_number = index - ((page_number - 1) * 40)
+        spans.append({
+            "page": page_number,
+            "span": span_number,
+            "anchor": f"page-{page_number}-span-{span_number}",
+            "text": line[:4000],
+        })
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for span in spans:
+        grouped.setdefault(span["page"], []).append({key: span[key] for key in ("span", "anchor", "text")})
+    for page_number, page_spans in grouped.items():
+        pages.append({"page": page_number, "anchor": f"page-{page_number}", "spans": page_spans})
+    accessible = "\n".join(span["text"] for span in spans)
+    return {
+        "supported": True,
+        "preview_kind": "text",
+        "active_content_present": active,
+        "pages": pages,
+        "accessible_text": accessible[:20000],
+        "image": None,
+        "alternative": None,
+    }
+
+
+def _page_preview(pages: list[list[str]], kind: str, active: bool) -> dict[str, Any]:
+    rendered = []
+    pieces = []
+    for page_number, lines in enumerate(pages, start=1):
+        spans = []
+        usable = lines or ["No extractable text on this page."]
+        for span_number, line in enumerate(usable, start=1):
+            text = line[:4000]
+            spans.append({
+                "span": span_number,
+                "anchor": f"page-{page_number}-span-{span_number}",
+                "text": text,
+            })
+            pieces.append(text)
+        rendered.append({"page": page_number, "anchor": f"page-{page_number}", "spans": spans})
+    return {
+        "supported": True,
+        "preview_kind": kind,
+        "active_content_present": active,
+        "pages": rendered,
+        "accessible_text": "\n".join(pieces)[:20000],
+        "image": None,
+        "alternative": None,
+    }
+
+
+def _alternative(content: bytes, media: str, reason: str, active: bool) -> dict[str, Any]:
+    excerpt = _safe_excerpt(content)
+    message = (
+        "This format cannot be previewed safely inside the workspace. "
+        "The file stays encrypted in the case. No script, remote address, or model request was used."
+    )
+    return {
+        "supported": False,
+        "preview_kind": "unsupported",
+        "active_content_present": active,
+        "pages": [],
+        "accessible_text": excerpt,
+        "image": None,
+        "alternative": {
+            "reason": reason,
+            "message": message,
+            "media_type": media,
+            "byte_length": len(content),
+            "safe_text": excerpt,
+        },
+    }
+
+
+def _safe_excerpt(content: bytes) -> str:
+    text = content.decode("utf-8", errors="replace")
+    cleaned = "".join(char if char.isprintable() or char in "\n\t" else " " for char in text).strip()
+    if sum(char.isalnum() for char in cleaned) < 4:
+        return ""
+    return cleaned[:800]
+
+
+def _declares_active_content(content: bytes) -> bool:
+    sample = content[:8000].lower()
+    markers = (b"<script", b"javascript:", b"/javascript", b"/js", b"/launch", b"/submitform", b"<iframe", b"<html")
+    return any(marker in sample for marker in markers)
+
+
+def _pdf_pages(content: bytes) -> list[list[str]] | None:
+    if not content.startswith(b"%PDF-"):
+        return None
+    page_count = len(re.findall(br"/Type\s*/Page(?!s)", content))
+    streams = _pdf_streams(content)
+    text_pages = [lines for lines in (_pdf_text_lines(stream) for stream in streams) if lines]
+    if page_count <= 0 and not text_pages:
+        return None
+    count = page_count or len(text_pages)
+    pages: list[list[str]] = []
+    for index in range(count):
+        pages.append(text_pages[index] if index < len(text_pages) else [])
+    if len(text_pages) > count:
+        pages[-1].extend(line for extra in text_pages[count:] for line in extra)
+    return pages
+
+
+def _pdf_streams(content: bytes) -> list[bytes]:
+    streams = []
+    for match in re.finditer(br"<<(.*?)>>\s*stream\r?\n", content, re.S):
+        header = match.group(1)
+        start = match.end()
+        end = content.find(b"endstream", start)
+        if end < 0:
+            continue
+        raw = content[start:end]
+        if raw.endswith(b"\r\n"):
+            raw = raw[:-2]
+        elif raw.endswith(b"\n"):
+            raw = raw[:-1]
+        if b"FlateDecode" in header:
+            try:
+                raw = zlib.decompress(raw)
+            except zlib.error:
+                continue
+        streams.append(raw)
+    return streams
+
+
+def _pdf_text_lines(stream: bytes) -> list[str]:
+    lines = []
+    for match in re.finditer(br"\[(.*?)\]\s*TJ", stream, re.S):
+        lines.extend(_pdf_strings(match.group(1)))
+    for match in re.finditer(br"(\((?:\\.|[^\\)])*\))\s*(?:Tj|'|\")", stream, re.S):
+        lines.extend(_pdf_strings(match.group(1)))
+    return [line for line in lines if line.strip()]
+
+
+def _pdf_strings(blob: bytes) -> list[str]:
+    found = []
+    for match in re.finditer(br"\(((?:\\.|[^\\)])*)\)", blob, re.S):
+        found.append(_pdf_unescape(match.group(1)))
+    return found
+
+
+def _pdf_unescape(raw: bytes) -> str:
+    out = bytearray()
+    index = 0
+    while index < len(raw):
+        if raw[index] != 0x5C or index + 1 >= len(raw):
+            out.append(raw[index])
+            index += 1
+            continue
+        nxt = raw[index + 1]
+        mapped = {ord("n"): 10, ord("r"): 13, ord("t"): 9, ord("b"): 8, ord("f"): 12, ord("("): 40, ord(")"): 41, ord("\\"): 92}
+        if nxt in mapped:
+            out.append(mapped[nxt])
+            index += 2
+            continue
+        if nxt in b"01234567":
+            digits = bytes([nxt])
+            index += 2
+            while index < len(raw) and raw[index] in b"01234567" and len(digits) < 3:
+                digits += bytes([raw[index]])
+                index += 1
+            out.append(int(digits, 8) & 0xFF)
+            continue
+        out.append(nxt)
+        index += 2
+    return out.decode("utf-8", errors="replace")
+
+
+def _still_image(content: bytes, media: str) -> dict[str, Any] | None:
+    size = _image_size(content, media)
+    if size is None:
+        return None
+    width, height = size
+    if width < 1 or height < 1 or width > 20000 or height > 20000:
+        return None
+    accessible = f"Image preview, {width} by {height} pixels. No text was extracted from this image."
+    return {
+        "media_type": media,
+        "byte_length": len(content),
+        "width": width,
+        "height": height,
+        "content_base64": base64.b64encode(content).decode("ascii"),
+        "accessible_text": accessible,
+    }
+
+
+def _image_size(content: bytes, media: str) -> tuple[int, int] | None:
+    if media == "image/png":
+        if not content.startswith(b"\x89PNG\r\n\x1a\n") or content[12:16] != b"IHDR" or len(content) < 24:
+            return None
+        return struct.unpack(">II", content[16:24])
+    if media == "image/jpeg":
+        return _jpeg_size(content)
+    if media == "image/webp":
+        return _webp_size(content)
+    return None
+
+
+def _jpeg_size(content: bytes) -> tuple[int, int] | None:
+    if not content.startswith(b"\xff\xd8"):
+        return None
+    index = 2
+    while index + 8 < len(content):
+        if content[index] != 0xFF:
+            return None
+        while index < len(content) and content[index] == 0xFF:
+            index += 1
+        if index >= len(content):
+            return None
+        marker = content[index]
+        index += 1
+        if marker in {0xD8, 0xD9}:
+            continue
+        if index + 2 > len(content):
+            return None
+        if marker in {0xC0, 0xC1, 0xC2}:
+            height, width = struct.unpack(">HH", content[index + 3:index + 7])
+            return width, height
+        length = struct.unpack(">H", content[index:index + 2])[0]
+        if length < 2:
+            return None
+        index += length
+    return None
+
+
+def _webp_size(content: bytes) -> tuple[int, int] | None:
+    if len(content) < 30 or content[:4] != b"RIFF" or content[8:12] != b"WEBP":
+        return None
+    kind = content[12:16]
+    if kind == b"VP8X" and len(content) >= 30:
+        width = 1 + int.from_bytes(content[24:27], "little")
+        height = 1 + int.from_bytes(content[27:30], "little")
+        return width, height
+    if kind == b"VP8 " and content[23:26] == b"\x9d\x01\x2a":
+        width = int.from_bytes(content[26:28], "little") & 0x3FFF
+        height = int.from_bytes(content[28:30], "little") & 0x3FFF
+        return width, height
+    if kind == b"VP8L" and len(content) >= 25 and content[20] == 0x2F:
+        bits = int.from_bytes(content[21:25], "little")
+        return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+    return None
