@@ -189,6 +189,7 @@
     }
 
     function render(payload) {
+        placeInquiryWorkbench();
         root = $("mediator-conversation");
         if (!root) return;
         var log = $("mediator-conversation-log");
@@ -201,6 +202,7 @@
             actions.replaceChildren();
             lifecycle = "blocked";
             paintControls();
+            renderInquiryCard(payload);
             return;
         }
         var session = sessionOf(payload);
@@ -231,6 +233,150 @@
             lifecycle = messages.length ? "settled" : "idle";
         }
         paintControls();
+        renderInquiryCard(payload);
+    }
+
+    function placeInquiryWorkbench() {
+        var panel = document.querySelector("#complaint-case-shell [data-case-panel='mediator']");
+        var card = $("inquiry-card");
+        var editor = $("inquiry-response-editor");
+        if (!panel || !card || !editor) return;
+        // Keep the original controls and their privacy/revision handlers.
+        // Shell summary refreshes replace the body, so retain these siblings.
+        [card, editor].forEach(function (node) {
+            if (node.parentNode !== panel) panel.appendChild(node);
+        });
+    }
+
+    function inquiryRecord(payload) {
+        var session = sessionOf(payload);
+        var interview = session.shared_interview && typeof session.shared_interview === "object" ? session.shared_interview : {};
+        var pending = interview.pending_inquiry && typeof interview.pending_inquiry === "object" ? interview.pending_inquiry : null;
+        var adaptive = payload && payload.adaptive_inquiry && typeof payload.adaptive_inquiry === "object" ? payload.adaptive_inquiry : null;
+        return { session: session, interview: interview, pending: pending, adaptive: adaptive };
+    }
+
+    function allowedInquiryActions(record) {
+        var pending = record.pending;
+        var adaptive = record.adaptive;
+        var issued = pending && text(pending.question) && text(pending.inquiry_id).indexOf("inq-") === 0;
+        if (!issued || (adaptive && adaptive.from_fixed_intake_fields === true)) return [];
+        var declared = pending.allowed_actions || (adaptive && adaptive.allowed_actions);
+        var known = { answer: true, unknown: true, defer: true, deferred: true };
+        if (Array.isArray(declared) && declared.length) {
+            return declared.map(function (item) { return text(item).toLowerCase(); }).filter(function (item) {
+                return known[item] === true;
+            }).map(function (item) { return item === "deferred" ? "defer" : item; });
+        }
+        return ["answer", "unknown", "defer"];
+    }
+
+    function renderInquiryCard(payload) {
+        var card = $("inquiry-card");
+        if (!card) return;
+        var questionNode = $("inquiry-card-question");
+        var revisionNode = $("inquiry-card-revision");
+        var whyNode = $("inquiry-card-explanation");
+        var gapsNode = $("inquiry-card-gaps");
+        var requirementsNode = $("inquiry-card-requirements");
+        var actionsNode = $("inquiry-card-actions");
+        var note = $("inquiry-card-note");
+        if (!questionNode || !revisionNode || !whyNode || !gapsNode || !requirementsNode || !actionsNode) return;
+        var editor = $("inquiry-response-editor");
+        if (blocked()) {
+            if (editor) editor.hidden = true;
+            card.dataset.pending = "false";
+            card.dataset.inquiryId = "";
+            card.dataset.revision = "";
+            card.dataset.fromFixedIntake = "false";
+            card.dataset.storesAnswer = "false";
+            questionNode.textContent = "This case cannot be shown. No question is available.";
+            revisionNode.textContent = "";
+            whyNode.textContent = "";
+            gapsNode.replaceChildren();
+            requirementsNode.replaceChildren();
+            actionsNode.replaceChildren();
+            if (note && note.dataset.action !== "why" && note.dataset.action !== "status") {
+                note.textContent = "Why and status read the interview. They do not save an answer.";
+            }
+            return;
+        }
+        var record = inquiryRecord(payload || {});
+        var pending = record.pending;
+        var explanation = pending && pending.inquiry_explanation && pending.inquiry_explanation.schema === "inquiry-explanation-v1"
+            ? pending.inquiry_explanation : null;
+        var issued = pending && text(pending.question) && text(pending.inquiry_id).indexOf("inq-") === 0
+            && !(record.adaptive && record.adaptive.from_fixed_intake_fields === true);
+        var revision = issued && pending.revision !== undefined && pending.revision !== null ? String(pending.revision) : "";
+        var previous = card.dataset.inquiryId || "";
+        card.dataset.source = "shared_mediator";
+        card.dataset.fromFixedIntake = "false";
+        card.dataset.storesAnswer = "false";
+        card.dataset.pending = issued ? "true" : "false";
+        if (editor) editor.hidden = !issued;
+        card.dataset.inquiryId = issued ? text(pending.inquiry_id) : "";
+        card.dataset.revision = revision;
+        if (!issued) {
+            questionNode.textContent = "No server question is loaded. The fixed intake form is not the interview.";
+            revisionNode.textContent = "";
+            whyNode.textContent = "Why this matters is unavailable until the shared mediator asks a question.";
+            gapsNode.innerHTML = "<li data-gap-kind=\"none\">No factual gap is linked.</li>";
+            requirementsNode.innerHTML = "<li data-requirement-id=\"\">No legal requirement is linked.</li>";
+            actionsNode.replaceChildren();
+            if (note && previous !== "") {
+                note.dataset.action = "";
+                note.dataset.storedAsAnswer = "false";
+                note.textContent = "Why and status read the interview. They do not save an answer.";
+            }
+            return;
+        }
+        var factual = explanation && explanation.factual_target && typeof explanation.factual_target === "object" ? explanation.factual_target : {};
+        var law = explanation && explanation.sourced_legal_requirement && typeof explanation.sourced_legal_requirement === "object" ? explanation.sourced_legal_requirement : {};
+        var why = text(explanation && explanation.why_asked) || text(pending.why_it_matters) || "Why this matters has not been recorded for this question.";
+        questionNode.textContent = text(pending.question);
+        revisionNode.textContent = "Revision " + revision;
+        whyNode.textContent = why;
+        var gaps = [];
+        var preserved = record.interview.preserved_gaps;
+        if (!Array.isArray(preserved) && record.adaptive && Array.isArray(record.adaptive.preserved_gaps)) preserved = record.adaptive.preserved_gaps;
+        if (text(factual.target_id) || text(factual.label)) {
+            gaps.push({
+                kind: "factual",
+                label: text(factual.label) || "unknown",
+                targetId: text(factual.target_id) || "unknown"
+            });
+        }
+        (Array.isArray(preserved) ? preserved : []).forEach(function (item) {
+            if (!item || typeof item !== "object") return;
+            gaps.push({
+                kind: text(item.disposition) || "open",
+                label: text(item.target_id) || "Open gap",
+                targetId: text(item.target_id) || "unknown"
+            });
+        });
+        if (!gaps.length) gaps.push({ kind: "unresolved", label: "The linked factual gap is unresolved.", targetId: "unknown" });
+        gapsNode.innerHTML = gaps.map(function (item) {
+            return '<li data-gap-kind="' + escapeHtml(item.kind) + '" data-target-id="' + escapeHtml(item.targetId) + '">'
+                + escapeHtml(item.label) + "</li>";
+        }).join("");
+        var requirementId = text(law.requirement_id) || "unknown";
+        var requirementLabel = text(law.label) || "unknown";
+        requirementsNode.innerHTML = '<li data-requirement-id="' + escapeHtml(requirementId) + '" data-law-derived="'
+            + (law.law_derived === true ? "true" : "false") + '">' + escapeHtml(requirementLabel) + "</li>";
+        var labels = { answer: "Answer", unknown: "I don't know", defer: "Defer" };
+        var buttons = allowedInquiryActions(record).map(function (action) {
+            var id = action === "answer" ? "inquiry-card-answer" : (action === "unknown" ? "inquiry-card-unknown" : "inquiry-card-defer");
+            return '<button type="button" id="' + id + '" data-inquiry-action="' + action + '">' + labels[action] + "</button>";
+        });
+        buttons.push('<button type="button" id="inquiry-card-why" data-inquiry-action="why">Why</button>');
+        buttons.push('<button type="button" id="inquiry-card-status" data-inquiry-action="status">Interview status</button>');
+        actionsNode.innerHTML = buttons.join("");
+        if (note && previous !== card.dataset.inquiryId) {
+            note.dataset.action = "";
+            note.dataset.storedAsAnswer = "false";
+            note.dataset.inquiryUnchanged = "";
+            note.textContent = "Why and status read the interview. They do not save an answer.";
+        }
     }
 
     function focusAction(action) {
@@ -272,6 +418,7 @@
         paintControls();
         var status = $("mediator-conversation-status");
         if (status) status.textContent = "Conversation text was cleared because this case is no longer open.";
+        renderInquiryCard(null);
     }
 
     function project(payload) {
@@ -349,6 +496,7 @@
     }
 
     function bind() {
+        placeInquiryWorkbench();
         root = $("mediator-conversation");
         if (!root || root.dataset.bound === "true") return;
         root.dataset.bound = "true";
@@ -379,6 +527,20 @@
             }
         }
         paintControls();
+        var card = $("inquiry-card");
+        if (card && card.dataset.bound !== "true") {
+            card.dataset.bound = "true";
+            card.addEventListener("click", function (event) {
+                var button = event.target.closest("button");
+                if (!button || !card.contains(button)) return;
+                var action = button.dataset.inquiryAction || "";
+                if (action === "answer") focusAction("answer");
+                else if (action === "unknown" && typeof window.answerAdaptiveInquiry === "function") window.answerAdaptiveInquiry("unknown");
+                else if (action === "defer" && typeof window.answerAdaptiveInquiry === "function") window.answerAdaptiveInquiry("deferred");
+                else if (action === "why" && typeof window.explainOrReviewInquiry === "function") window.explainOrReviewInquiry("why");
+                else if (action === "status" && typeof window.readInquiryStatus === "function") window.readInquiryStatus();
+            });
+        }
     }
 
     window.complaintConversation = {
