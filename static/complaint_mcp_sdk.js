@@ -298,6 +298,27 @@ class ComplaintMcpClient {
         return {configured: true};
     }
 
+    async selectCanonicalCase(caseId) {
+        if (typeof caseId !== 'string' || !caseId || !this.activePrincipalId) throw stateChangedError();
+        const principalId = this.activePrincipalId;
+        this.clearPrivateBrowserState();
+        this.caseContext = null;
+        const epoch = this._privacyEpoch;
+        const current = () => epoch === this._privacyEpoch && principalId === this.activePrincipalId;
+        // Lifecycle requests still use the real cookie, CSRF check and server
+        // catalog authorization while old private requests remain retired.
+        const actor = await this._request(`${this.baseUrl}/auth/session`, {method: 'GET'}, true);
+        if (!current() || actor.authenticated !== true || actor.principal_id !== principalId) throw stateChangedError();
+        this.csrfToken = typeof actor.csrf_token === 'string' ? actor.csrf_token : '';
+        const record = await this._request('/api/cases/' + encodeURIComponent(caseId) + '/select',
+            {method: 'POST', body: JSON.stringify({})}, true);
+        if (!current() || record.case_id !== caseId || record.actor_principal_id !== principalId
+                || record.plaintext_available === false) throw stateChangedError();
+        this.setBrowserSession(actor);
+        this.setCaseContext(Object.assign({}, record, {expected_revision: record.directory_revision}));
+        return record;
+    }
+
     _caseArguments(argumentsPayload) {
         const args = Object.assign({}, argumentsPayload || {});
         // Canonical storage owner is not an actor claim. Other explicit
