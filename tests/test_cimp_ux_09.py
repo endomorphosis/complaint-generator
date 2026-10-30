@@ -102,8 +102,11 @@ def _workspace(page, inquiry_id):
     page.wait_for_function("""(inquiryId) => {
         const card = document.getElementById('inquiry-card');
         return card && card.dataset.pending === 'true' && card.dataset.inquiryId === inquiryId
-            && document.getElementById('inquiry-card-answer');
+            && document.getElementById('inquiry-card-answer')
+            && document.getElementById('complaint-case-shell').getAttribute('aria-busy') === 'false';
     }""", arg=inquiry_id)
+    page.locator('#complaint-case-shell-nav [data-case-task="mediator"]').click()
+    page.locator('[data-case-panel="mediator"] #inquiry-card').wait_for(state="visible")
 
 
 def _card(page):
@@ -122,7 +125,7 @@ def _card(page):
             storesAnswer: card.dataset.storesAnswer,
             question: document.getElementById('inquiry-card-question').textContent,
             revisionText: document.getElementById('inquiry-card-revision').textContent,
-            why: document.getElementById('inquiry-card-why').textContent,
+            why: document.getElementById('inquiry-card-explanation').textContent,
             gaps: Array.from(document.querySelectorAll('#inquiry-card-gaps li')).map((node) => node.textContent),
             requirements: Array.from(document.querySelectorAll('#inquiry-card-requirements li')).map((node) => ({
                 id: node.dataset.requirementId,
@@ -137,13 +140,24 @@ def _card(page):
 
 def _server_pending(page):
     return page.evaluate("""async () => {
-        const response = await fetch('/api/complaint-workspace/session', {credentials: 'same-origin'});
+        const binding = window.complaintCaseShell.binding();
+        if (!binding || !binding.case_id) throw new Error('Selected case is unavailable');
+        const response = await fetch('/api/complaint-workspace/session?case_id=' + encodeURIComponent(binding.case_id), {
+            credentials: 'same-origin',
+            headers: {
+                'x-case-id': binding.case_id,
+                'x-tenant-id': binding.tenant_id,
+                'x-resource-id': binding.resource_id,
+            },
+        });
         const body = await response.json();
         const session = body.session || {};
         const pending = ((session.shared_interview || {}).pending_inquiry) || {};
         const answers = session.intake_answers || {};
         return {
             status: response.status,
+            caseId: session.case_id || '',
+            selectedCaseId: binding.case_id,
             inquiryId: pending.inquiry_id || '',
             revision: pending.revision,
             question: pending.question || '',
@@ -192,6 +206,7 @@ def test_inquiry_card_shows_the_server_question_and_unknown_uses_the_mediator(tm
         assert after["question"] != shown["genericPrompt"]
         assert "party_name" not in after["inquiryId"]
         assert server["status"] == 200
+        assert server["caseId"] == server["selectedCaseId"] == world.case.case_id
         assert server["inquiryId"] == after["inquiryId"]
         assert server["fromFixed"] is False
         assert server["partyName"] == ""
@@ -207,6 +222,9 @@ def test_why_and_status_do_not_save_and_fixed_intake_does_not_replace_the_questi
     try:
         _sign_in(page)
         _workspace(page, seeded["inquiry_id"])
+        page.locator("#inquiry-card-answer").click()
+        assert page.evaluate("() => document.activeElement.id") == "adaptive-answer"
+        page.locator('[data-case-panel="mediator"] #adaptive-answer').click()
         page.fill("#adaptive-answer", "A draft the status action must leave in the field.")
         page.locator("#inquiry-card-why").click()
         page.wait_for_function("""() => document.getElementById('inquiry-card-note').dataset.action === 'why'""")
@@ -224,9 +242,19 @@ def test_why_and_status_do_not_save_and_fixed_intake_does_not_replace_the_questi
         assert server["revision"] == seeded["revision"]
         assert server["history"] == seeded["history"]
         assert server["question"] == seeded["question"]
+        assert server["status"] == 200
+        assert server["caseId"] == server["selectedCaseId"] == world.case.case_id
+        page.locator("#intake-show-all-button").click()
         page.fill("#intake-party_name", GENERIC_NAME)
         page.locator("#save-intake-button").click()
-        page.wait_for_function("""(name) => document.getElementById('intake-party_name').value === name""", arg=GENERIC_NAME)
+        page.wait_for_function("""(name) => document.getElementById('intake-party_name').value === name
+            && document.getElementById('workspace-status').textContent.includes('Intake answers saved.')""", arg=GENERIC_NAME)
+        persisted = _server_pending(page)
+        assert persisted["status"] == 200
+        assert persisted["caseId"] == world.case.case_id
+        assert persisted["partyName"] == GENERIC_NAME
+        assert persisted["inquiryId"] == seeded["inquiry_id"]
+        assert persisted["question"] == seeded["question"]
         kept = _card(page)
         assert kept["inquiryId"] == seeded["inquiry_id"]
         assert kept["question"] == seeded["question"]

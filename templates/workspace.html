@@ -3405,6 +3405,11 @@
     <link id="workspace-shell-style" rel="stylesheet" href="/static/complaint_app_shell.css">
     <link id="complaint-experience-tokens" rel="stylesheet" href="/static/complaint_experience_tokens.css">
     <link id="complaint-case-shell-style" rel="stylesheet" href="/static/complaint_case_shell.css">
+    <style id="complaint-workspace-shell-scroll">
+        /* The workbench can be taller than the viewport. Let the document
+           scroll so its remaining case controls stay reachable. */
+        #complaint-case-shell { position: static; }
+    </style>
     <link id="complaint-evidence-style" rel="stylesheet" href="/static/complaint_evidence.css">
     <link id="complaint-conversation-style" rel="stylesheet" href="/static/complaint_conversation.css">
     <style id="complaint-presentation-style">
@@ -3932,7 +3937,7 @@
                             <h3 id="inquiry-card-title">Current question</h3>
                             <p id="inquiry-card-question">No server question is loaded. The fixed intake form is not the interview.</p>
                             <p id="inquiry-card-revision"></p>
-                            <p id="inquiry-card-why"></p>
+                            <p id="inquiry-card-explanation"></p>
                             <h4 id="inquiry-card-gaps-title">Factual gaps</h4>
                             <ul id="inquiry-card-gaps"></ul>
                             <h4 id="inquiry-card-requirements-title">Legal requirements</h4>
@@ -3954,14 +3959,16 @@
                             </div>
                             <div class="status" id="inquiry-explanation-status" data-stored-as-answer="false" data-changes-law="false" data-law-unchanged="true">Why and Review leave the answer record and the legal rule unchanged.</div>
                         </section>
-                        <label for="adaptive-answer">Answer to the pending inquiry</label>
-                        <textarea id="adaptive-answer" placeholder="Answer only the pending inquiry."></textarea>
-                        <div class="button-row">
-                            <button class="primary" id="adaptive-submit-answer" type="button">Answer pending inquiry</button>
-                            <button class="secondary" id="adaptive-unknown" type="button">I don't know</button>
-                            <button class="secondary" id="adaptive-defer" type="button">Defer</button>
+                        <div id="inquiry-response-editor" role="group" aria-label="Answer the current question" hidden>
+                            <label for="adaptive-answer">Answer to the pending inquiry</label>
+                            <textarea id="adaptive-answer" placeholder="Answer only the pending inquiry."></textarea>
+                            <div class="button-row">
+                                <button class="primary" id="adaptive-submit-answer" type="button">Answer pending inquiry</button>
+                                <button class="secondary" id="adaptive-unknown" type="button">I don't know</button>
+                                <button class="secondary" id="adaptive-defer" type="button">Defer</button>
+                            </div>
+                            <div class="status" id="adaptive-gap-status" data-gap-preserved="unknown">Unknown and deferred answers keep the graph gap open.</div>
                         </div>
-                        <div class="status" id="adaptive-gap-status" data-gap-preserved="unknown">Unknown and deferred answers keep the graph gap open.</div>
                         <section id="finite-interview-outcome" data-task="CIMP-GUI-19" data-stop="" data-legal-sufficiency="false" data-user-waiting-is-worker-stall="false" data-reasons-visible="true">
                             <h3>Finite interview outcome</h3>
                             <p id="finite-interview-summary">The interview stops on saturation, a cap, a pause, cancellation, or an unavailable capability. Waiting for the user is not a development worker stall.</p>

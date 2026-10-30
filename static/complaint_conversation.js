@@ -189,6 +189,7 @@
     }
 
     function render(payload) {
+        placeInquiryWorkbench();
         root = $("mediator-conversation");
         if (!root) return;
         var log = $("mediator-conversation-log");
@@ -235,6 +236,18 @@
         renderInquiryCard(payload);
     }
 
+    function placeInquiryWorkbench() {
+        var panel = document.querySelector("#complaint-case-shell [data-case-panel='mediator']");
+        var card = $("inquiry-card");
+        var editor = $("inquiry-response-editor");
+        if (!panel || !card || !editor) return;
+        // Keep the original controls and their privacy/revision handlers.
+        // Shell summary refreshes replace the body, so retain these siblings.
+        [card, editor].forEach(function (node) {
+            if (node.parentNode !== panel) panel.appendChild(node);
+        });
+    }
+
     function inquiryRecord(payload) {
         var session = sessionOf(payload);
         var interview = session.shared_interview && typeof session.shared_interview === "object" ? session.shared_interview : {};
@@ -263,13 +276,15 @@
         if (!card) return;
         var questionNode = $("inquiry-card-question");
         var revisionNode = $("inquiry-card-revision");
-        var whyNode = $("inquiry-card-why");
+        var whyNode = $("inquiry-card-explanation");
         var gapsNode = $("inquiry-card-gaps");
         var requirementsNode = $("inquiry-card-requirements");
         var actionsNode = $("inquiry-card-actions");
         var note = $("inquiry-card-note");
         if (!questionNode || !revisionNode || !whyNode || !gapsNode || !requirementsNode || !actionsNode) return;
+        var editor = $("inquiry-response-editor");
         if (blocked()) {
+            if (editor) editor.hidden = true;
             card.dataset.pending = "false";
             card.dataset.inquiryId = "";
             card.dataset.revision = "";
@@ -298,6 +313,7 @@
         card.dataset.fromFixedIntake = "false";
         card.dataset.storesAnswer = "false";
         card.dataset.pending = issued ? "true" : "false";
+        if (editor) editor.hidden = !issued;
         card.dataset.inquiryId = issued ? text(pending.inquiry_id) : "";
         card.dataset.revision = revision;
         if (!issued) {
@@ -480,6 +496,7 @@
     }
 
     function bind() {
+        placeInquiryWorkbench();
         root = $("mediator-conversation");
         if (!root || root.dataset.bound === "true") return;
         root.dataset.bound = "true";
