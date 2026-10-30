@@ -1024,7 +1024,8 @@ def test_correction_product_changes_require_the_bounded_accepted_companion(tmp_p
         runtime._impacted_behavioral_checks(tmp_path, [changed])
 
 
-@pytest.mark.parametrize("mode", ["passes", "strong_fails", "weakens", "omits", "full_file"])
+@pytest.mark.parametrize("mode", ["passes", "strong_fails", "weakens", "omits", "full_file",
+                                  "filtered_node", "filtered_file", "parameters"])
 def test_measured_correction_selector_enforces_success_without_running_unrelated_cases(tmp_path, monkeypatch, mode):
     """Synthetic selector fixture, separate from the genuine browser acceptance.
 
@@ -1038,9 +1039,14 @@ def test_measured_correction_selector_enforces_success_without_running_unrelated
     _, executor, environment = _gate(tmp_path, _task(), _observation(tmp_path), _return_measurement=True)
     relative, _, function = runtime._FACTUAL_CORRECTION_ACCEPTANCE.partition("::")
     companion = tmp_path / relative
-    companion.write_text("import adapter\n\ndef " + function + "():\n    assert adapter.VERSION == 2\n"
-                         "\ndef test_unrelated_case_stays_out_of_bounded_selector():\n    assert "
-                         + ("True" if mode == "full_file" else "False") + "\n")
+    declaration = ("@pytest.mark.parametrize('expected', [2, 2], ids=['first', 'second'])\n"
+                   "def " + function + "(expected):\n    assert adapter.VERSION == expected\n"
+                   if mode == "parameters" else "def " + function + "():\n    assert adapter.VERSION == 2\n")
+    companion.write_text("import adapter, pytest\n\n" + declaration
+                         + "\ndef test_unrelated_case_stays_out_of_bounded_selector():\n    assert "
+                         + ("True" if mode == "full_file" else "False") + "\n"
+                         + ("\ndef test_weak_declared_only():\n    assert adapter.VERSION > 0\n"
+                            if mode == "filtered_node" else ""))
     reviewed = tmp_path / "reviewed-companion-baseline"
     baseline = reviewed / relative
     baseline.parent.mkdir(parents=True)
@@ -1049,27 +1055,43 @@ def test_measured_correction_selector_enforces_success_without_running_unrelated
     monkeypatch.setattr(runtime, "_preserve_existing_behavioral_definitions",
         lambda root, paths: real_preserve(root, paths, trusted_root=reviewed))
     key = "unit-fixture/bounded-correction-selector"
-    monkeypatch.setitem(runtime._IMPACTED_BEHAVIORAL_CHECKS, key, (runtime._FACTUAL_CORRECTION_ACCEPTANCE,))
-    (tmp_path / "adapter.py").write_text("VERSION=" + ("2" if mode in {"passes", "full_file"} else "1") + "\n")
+    impacted = [relative] if mode == "filtered_file" else [runtime._FACTUAL_CORRECTION_ACCEPTANCE]
+    monkeypatch.setitem(runtime._IMPACTED_BEHAVIORAL_CHECKS, key, tuple(impacted))
+    (tmp_path / "adapter.py").write_text("VERSION=" + ("2" if mode in {"passes", "full_file", "parameters"} else "1") + "\n")
     if mode == "weakens":
         companion.write_text(companion.read_text().replace("adapter.VERSION == 2", "adapter.VERSION > 0"))
     elif mode == "omits":
         companion.write_text(companion.read_text().replace("def " + function + "(", "def omitted_accepted_companion("))
-    command = COMMAND + (" " + relative if mode == "full_file" else "")
+    command = COMMAND + (" " + relative if mode in {"full_file", "filtered_node"} else "")
+    if mode == "filtered_node":
+        command += " -k weak"
+    elif mode == "filtered_file":
+        command += " -k local_node_evidence"
     observed = runtime.measure_behavioral_command(tmp_path, tmp_path / "selector-runs", _task(command=command),
         "PYTHONPATH=" + shlex.quote(environment["PYTHONPATH"]) + " " + command,
         runner=executor, environment=environment, timeout_seconds=45, declared_command=command,
         context={"changed_paths": [key], "require_child_guard": True, "pytest_guard_plugin": "complaint_fixture_guard"})
     measured = observed["host_measurement"]
-    assert measured["impacted_checks"] == [runtime._FACTUAL_CORRECTION_ACCEPTANCE]
+    assert measured["impacted_checks"] == impacted
     assert measured["completion_authority"] is False
-    if mode in {"weakens", "omits"}:
+    if mode in {"filtered_node", "filtered_file"}:
+        assert measured["reason"] == "impacted_required_case_missing"
+        assert measured["missing_impacted_checks"] == impacted
+        assert [row["mode"] for row in measured["results"]] == ["collect"]
+        assert measured["results"][0]["returncode"] == 0
+        expected = relative + "::test_weak_declared_only" if mode == "filtered_node" else NODE_A
+        assert observed["required_nodeids"] == [expected]
+        assert not (Path(measured["run_path"]) / "run.json").exists()
+    elif mode in {"weakens", "omits"}:
         assert measured["reason"] == "existing_behavioral_definition_changed"
         assert measured["behavioral_definition_diagnostic"]["candidate_executed"] is False
         assert not measured["results"]
     else:
         assert measured["reason"] == ("failed_assertion" if mode == "strong_fails" else "")
-        expected = {NODE_A, NODE_B, runtime._FACTUAL_CORRECTION_ACCEPTANCE}
+        companion_nodes = ({runtime._FACTUAL_CORRECTION_ACCEPTANCE + "[first]",
+                            runtime._FACTUAL_CORRECTION_ACCEPTANCE + "[second]"}
+                           if mode == "parameters" else {runtime._FACTUAL_CORRECTION_ACCEPTANCE})
+        expected = {NODE_A, NODE_B, *companion_nodes}
         if mode == "full_file":
             expected.add(relative + "::test_unrelated_case_stays_out_of_bounded_selector")
         assert set(observed["required_nodeids"]) == expected
@@ -1079,5 +1101,5 @@ def test_measured_correction_selector_enforces_success_without_running_unrelated
         phases = json.loads((Path(measured["run_path"]) / "run.json").read_text())
         cases = {row["nodeid"]: row["outcome"] for row in phases["reports"] if row["when"] == "call"}
         assert cases[NODE_A] == cases[NODE_B] == "passed"
-        assert cases[runtime._FACTUAL_CORRECTION_ACCEPTANCE] == ("failed" if mode == "strong_fails" else "passed")
+        assert all(cases[node] == ("failed" if mode == "strong_fails" else "passed") for node in companion_nodes)
         assert any(row["path"] == relative for row in measured["preserved_behavioral_definitions"])

@@ -4800,6 +4800,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     release_qualification_before = None
     release_qualification_after = None
     preserved_behavioral_definitions = None
+    missing_impacted_checks = []
     behavioral_definition_diagnostic = None
     python_global_preflight = None
     browser_http_preflight = None
@@ -4996,6 +4997,14 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             raise ValueError("zero_test_collection")
         if len(required) != len(set(required)) or any(not isinstance(n, str) or not n for n in required):
             raise ValueError("required_test_identity_malformed")
+        # Caller filters and candidate collection hooks may omit a trusted
+        # companion even when its file was already declared. Require its
+        # actual frozen population before executing a passing subset.
+        missing_impacted_checks = [selector for selector in impacted if not any(
+            node == selector or node.startswith(selector + ("[" if "::" in selector else "::"))
+            for node in required)]
+        if missing_impacted_checks:
+            raise ValueError("impacted_required_case_missing")
         if before != _source_freeze(root, freeze_inputs):
             raise ValueError("stale_source_hash")
         executed, phases, (sealed_nodes, imported) = execute("run")
@@ -5034,7 +5043,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
         if isinstance(exc, _BehavioralDefinitionError):
             behavioral_definition_diagnostic = exc.diagnostics
-        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable", "new_duplicate_python_module_global", "python_global_preflight_unavailable", "synthetic_browser_http_response", "browser_http_preflight_unavailable", *infrastructure_reasons} else "host_measurement_unavailable"
+        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "impacted_required_case_missing", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable", "new_duplicate_python_module_global", "python_global_preflight_unavailable", "synthetic_browser_http_response", "browser_http_preflight_unavailable", *infrastructure_reasons} else "host_measurement_unavailable"
     try:
         if replica_binding != _private_replica_acceptance_binding(root, task, impacted):
             reason = "trusted_replica_acceptance_changed"
@@ -5056,6 +5065,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     measured = {"schema": "complaint-owned-behavioral-measurement@1", "reason": reason,
                 "infrastructure_failure": any(row.get("infrastructure_failure") is True for row in results),
                 "preserved_behavioral_definitions": preserved_behavioral_definitions,
+                "missing_impacted_checks": missing_impacted_checks,
                 "behavioral_definition_diagnostic": behavioral_definition_diagnostic,
                 "python_global_preflight": python_global_preflight,
                 "browser_http_preflight": browser_http_preflight,
