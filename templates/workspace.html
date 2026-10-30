@@ -3417,6 +3417,11 @@
     <link id="workspace-shell-style" rel="stylesheet" href="/static/complaint_app_shell.css">
     <link id="complaint-experience-tokens" rel="stylesheet" href="/static/complaint_experience_tokens.css">
     <link id="complaint-case-shell-style" rel="stylesheet" href="/static/complaint_case_shell.css">
+    <style id="workspace-case-shell-scroll">
+        /* The workspace shell includes forms and can exceed the viewport.
+           Keep document controls reachable through ordinary scrolling. */
+        #complaint-case-shell { position: static; }
+    </style>
     <link id="complaint-evidence-style" rel="stylesheet" href="/static/complaint_evidence.css">
     <link id="complaint-conversation-style" rel="stylesheet" href="/static/complaint_conversation.css">
     <style id="complaint-presentation-style">
