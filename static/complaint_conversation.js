@@ -586,7 +586,7 @@
             }
             rememberHead(payload);
             lastPayload = payload;
-        projectCorrectionOffer(payload);
+            projectCorrectionOffer(payload);
             retryCount = 0;
             lifecycle = "settled";
             render(payload);

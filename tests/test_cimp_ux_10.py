@@ -287,11 +287,30 @@ def test_answer_and_correction_update_graphs_once_and_stale_replies_do_not(tmp_p
         _workspace(page, seeded["inquiry_id"])
         page.on("request", remember)
         page.fill("#adaptive-answer", ANSWER)
-        page.click("#adaptive-submit-answer")
-        page.wait_for_function("""() => {
-            const node = document.getElementById('inquiry-graph-change');
-            return node && node.dataset.applied === 'true' && node.dataset.changesLaw === 'false';
-        }""")
+        with page.expect_response(lambda response: _rpc_arguments(response.request, "answer") is not None) as answer_response:
+            page.click("#adaptive-submit-answer")
+        actual_answer = answer_response.value
+        assert actual_answer.status == 200
+        answer_payload = _rpc_payload(actual_answer)
+        assert answer_payload["support_projection_updated"] is True, json.dumps({
+            "interview": answer_payload.get("interview"), "conflict": answer_payload.get("conflict"),
+            "updated": answer_payload.get("support_projection_updated"),
+        }, sort_keys=True)
+        try:
+            page.wait_for_function("""() => {
+                const node = document.getElementById('inquiry-graph-change');
+                return node && node.dataset.applied === 'true' && node.dataset.changesLaw === 'false';
+            }""")
+        except Exception as exc:
+            state = page.evaluate("""() => ({
+                change: (document.getElementById('inquiry-graph-change') || {}).outerHTML || null,
+                card: document.getElementById('inquiry-card').outerHTML,
+                shell: window.complaintCaseShell.snapshot(),
+                privacyActive: window.workspaceClient._privacyActive,
+                privacyEpoch: window.workspaceClient._privacyEpoch,
+                context: window.workspaceClient.caseContext,
+            })""")
+            raise AssertionError("The actual accepted answer did not render: " + json.dumps(state, sort_keys=True)) from exc
         shown = page.evaluate("""() => {
             const card = document.getElementById('inquiry-card');
             const change = document.getElementById('inquiry-graph-change');
