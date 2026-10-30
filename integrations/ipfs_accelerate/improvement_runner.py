@@ -4409,10 +4409,28 @@ def _source_freeze(root: Path, extra=()):
     return {**value, "digest": _digest(value)}
 
 
+_PYTEST_INVOCATION_PATTERN = r"(?<![\w-])(?:python(?:3(?:\.\d+)*)?\s+-m\s+pytest|pytest)(?=\s|$)"
+
+
+def _pytest_population_filtered(command):
+    """Treat caller discovery controls as unknown whole-file coverage."""
+    import shlex
+    matches = list(re.finditer(_PYTEST_INVOCATION_PATTERN, command))
+    if len(matches) != 1:
+        return True
+    # Exclude the Python interpreter's -m from pytest's marker filter.
+    arguments = shlex.split(command[matches[0].end():])
+    controls = {"--deselect", "--ignore", "--ignore-glob", "--lf", "--last-failed",
+                "--lfnf", "--last-failed-no-failures", "--sw", "--stepwise",
+                "--sw-skip", "--stepwise-skip", "--override-ini", "--config-file"}
+    return any(argument.startswith(("-k", "-m", "-o", "-c"))
+               or argument.partition("=")[0] in controls for argument in arguments)
+
+
 def _pytest_instrument(command, arguments, *, pythonpath=()):
     # Keep the original shell/environment prefix and original selectors. This
     # adapter supports one explicit pytest invocation, not arbitrary scripts.
-    pattern = r"(?<![\w-])(?:python(?:3(?:\.\d+)*)?\s+-m\s+pytest|pytest)(?=\s|$)"
+    pattern = _PYTEST_INVOCATION_PATTERN
     matches = list(re.finditer(pattern, command))
     if len(matches) != 1 or any(flag in command for flag in ("--junit", "--collect-only", "--complaint-evidence-path", " -p no:")):
         raise ValueError("unsupported_behavioral_command")
@@ -4804,6 +4822,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     release_qualification_after = None
     preserved_behavioral_definitions = None
     missing_impacted_checks = []
+    filtered_whole_file_companions = []
     behavioral_definition_diagnostic = None
     python_global_preflight = None
     browser_http_preflight = None
@@ -5006,6 +5025,12 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         missing_impacted_checks = [selector for selector in impacted if not any(
             node == selector or node.startswith(selector + ("[" if "::" in selector else "::"))
             for node in required)]
+        whole_files = [selector for selector in impacted if "::" not in selector]
+        if whole_files and _pytest_population_filtered(command):
+            # One retained test does not prove a whole companion file ran.
+            # Fail closed instead of collecting its unfiltered matrix again.
+            filtered_whole_file_companions = whole_files
+            missing_impacted_checks = sorted(set(missing_impacted_checks) | set(whole_files))
         if missing_impacted_checks:
             raise ValueError("impacted_required_case_missing")
         if before != _source_freeze(root, freeze_inputs):
@@ -5069,6 +5094,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                 "infrastructure_failure": any(row.get("infrastructure_failure") is True for row in results),
                 "preserved_behavioral_definitions": preserved_behavioral_definitions,
                 "missing_impacted_checks": missing_impacted_checks,
+                "filtered_whole_file_companions": filtered_whole_file_companions,
                 "behavioral_definition_diagnostic": behavioral_definition_diagnostic,
                 "python_global_preflight": python_global_preflight,
                 "browser_http_preflight": browser_http_preflight,

@@ -1026,7 +1026,7 @@ def test_correction_product_changes_require_the_bounded_accepted_companion(tmp_p
 
 
 @pytest.mark.parametrize("mode", ["passes", "strong_fails", "weakens", "omits", "full_file",
-                                  "filtered_node", "filtered_file", "parameters", "late_fails", "one_node_only"])
+                                  "filtered_node", "filtered_file", "parameters", "late_fails", "one_node_only", "partial_file"])
 def test_measured_correction_selector_enforces_success_without_running_unrelated_cases(tmp_path, monkeypatch, mode):
     """Synthetic selector fixture, separate from the genuine browser acceptance.
 
@@ -1062,23 +1062,23 @@ def test_measured_correction_selector_enforces_success_without_running_unrelated
     product.parent.mkdir()
     product.write_text("// Explicit synthetic impact input; real browser acceptance is qualified separately.\n")
     impacted = sorted(runtime._IMPACTED_BEHAVIORAL_CHECKS[key])
-    if mode == "filtered_file":
+    if mode in {"filtered_file", "partial_file"}:
         # Separate generic whole-file policy control, retaining real collection.
         impacted = [relative]
         monkeypatch.setitem(runtime._IMPACTED_BEHAVIORAL_CHECKS, key, tuple(impacted))
-    version = "2" if mode in {"passes", "full_file", "parameters", "late_fails", "one_node_only"} else "1"
+    version = "2" if mode in {"passes", "full_file", "parameters", "late_fails", "one_node_only", "partial_file"} else "1"
     case = "old-case" if mode == "late_fails" else "new-case"
     (tmp_path / "adapter.py").write_text("VERSION=" + version + "\nCASE_ID=" + repr(case) + "\n")
     if mode == "weakens":
         companion.write_text(companion.read_text().replace("adapter.VERSION == 2", "adapter.VERSION > 0"))
     elif mode == "omits":
         companion.write_text(companion.read_text().replace("def " + function + "(", "def omitted_accepted_companion("))
-    command = COMMAND + (" " + relative if mode in {"full_file", "filtered_node", "one_node_only"} else "")
+    command = COMMAND + (" " + relative if mode in {"full_file", "filtered_node", "one_node_only", "partial_file"} else "")
     if mode == "filtered_node":
         command += " -k weak"
     elif mode == "filtered_file":
         command += " -k local_node_evidence"
-    elif mode == "one_node_only":
+    elif mode in {"one_node_only", "partial_file"}:
         command += " -k answer_and_correction_update_graphs_once"
     observed = runtime.measure_behavioral_command(tmp_path, tmp_path / "selector-runs", _task(command=command),
         "PYTHONPATH=" + shlex.quote(environment["PYTHONPATH"]) + " " + command,
@@ -1087,13 +1087,13 @@ def test_measured_correction_selector_enforces_success_without_running_unrelated
     measured = observed["host_measurement"]
     assert measured["impacted_checks"] == impacted
     assert measured["completion_authority"] is False
-    if mode in {"filtered_node", "filtered_file", "one_node_only"}:
+    if mode in {"filtered_node", "filtered_file", "one_node_only", "partial_file"}:
         assert measured["reason"] == "impacted_required_case_missing"
         missing = [runtime._CASE_SWITCH_ACCEPTANCE] if mode == "one_node_only" else impacted
         assert measured["missing_impacted_checks"] == missing
         assert [row["mode"] for row in measured["results"]] == ["collect"]
         assert measured["results"][0]["returncode"] == 0
-        expected = (runtime._FACTUAL_CORRECTION_ACCEPTANCE if mode == "one_node_only" else
+        expected = (runtime._FACTUAL_CORRECTION_ACCEPTANCE if mode in {"one_node_only", "partial_file"} else
                     relative + "::test_weak_declared_only" if mode == "filtered_node" else NODE_A)
         assert observed["required_nodeids"] == [expected]
         assert not (Path(measured["run_path"]) / "run.json").exists()
