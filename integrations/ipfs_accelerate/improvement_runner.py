@@ -2277,6 +2277,34 @@ def qualify_new_campaign_startup(repo_root: Path, spec_path: Path, state_dir: Pa
         os.chdir(started)
 
 
+
+def _attempt_budget_block(native_state: Mapping[str, Any], board: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Report Native's exhausted ready set without changing retry accounting."""
+    reason = "all_selectable_ready_tasks_reached_max_task_attempts"
+    ready = board.get("ready_task_ids")
+    if (native_state.get("selection_idle_reason") != reason
+            or native_state.get("selectable_ready_task_ids") != []
+            or not isinstance(ready, list) or not ready
+            or any(type(task_id) is not str for task_id in ready)
+            or native_state.get("ready_task_ids") != ready):
+        return None
+    attempts = native_state.get("implementation_attempts")
+    by_cid = native_state.get("implementation_attempts_by_cid")
+    identities = native_state.get("task_identities")
+    if not all(isinstance(value, Mapping) for value in (attempts, by_cid, identities)):
+        return None
+    counts = {}
+    for task_id in ready:
+        identity = identities.get(task_id)
+        cid = identity.get("canonical_task_cid") if isinstance(identity, Mapping) else None
+        count = by_cid.get(cid) if isinstance(cid, str) and cid else None
+        if type(count) is not int or count < 3 or attempts.get(task_id) != count:
+            return None
+        counts[task_id] = count
+    return {"reason": reason, "max_task_attempts": 3, "task_ids": list(ready),
+            "attempts": counts, "completion_authority": False}
+
+
 def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     record = _read_json(state_dir / "launcher.json")
     owned = owns_process(record)
@@ -2411,6 +2439,8 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         current_state=current_state, now_ts=now)
         if owned and current_state and not board.get("read_error")
         and not provider_progress and not validation_evidence else {"verified": False})
+    attempt_budget = (_attempt_budget_block(native_state, board)
+        if owned and current_state and not native_execution_unsettled and not intentional_wait else None)
     if not owned:
         if identity and process_identity(identity.get("pid")):
             health = "identity_mismatch"
@@ -2440,6 +2470,11 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "active"
     elif active and attempt_age is not None and attempt_age > TIMEOUT_SECONDS:
         health = "stalled"
+    elif attempt_budget is not None and since_start > STARTUP_SECONDS:
+        # Repeated bounded maintenance and backpressure events cannot turn
+        # exhausted ready tasks into healthy work. Actual validation/rescue
+        # above retains its existing deadline; no paid attempt is rearmed.
+        health = "budget_exhausted"
     elif startup_activity is not None:
         health = "maintenance"  # Liveness only, within Native's fixed window/handoff.
     elif heartbeat_age is not None and startup_maintenance:
@@ -2527,6 +2562,7 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         "active", "post_provider", "running", "maintenance", "waiting_for_user", "selected", "complete", "retry_cooldown",
     })
     return {"status": health, "healthy": healthy, "owned_process_alive": owned,
+            "attempt_budget": attempt_budget,
             "worker_liveness": worker_liveness,
             "scope_liveness": {key: scope_liveness[key] for key in ("claim", "worker", "provider", "validation", "merge")},
             "scope_monitors": scope_liveness["monitors"],

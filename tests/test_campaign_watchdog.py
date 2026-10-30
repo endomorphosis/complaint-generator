@@ -81,6 +81,23 @@ def test_intentional_wait_never_stops_or_restarts(tmp_path, monkeypatch, reason)
     assert result["status"] == "held" and result["reason"] == reason
 
 
+
+def test_native_attempt_budget_block_never_restarts_or_rearms_ready_work(tmp_path, monkeypatch):
+    watcher, _, view = _adapter(tmp_path, monkeypatch, state="budget_exhausted")
+    view["board"]["ready_task_ids"] = ["TASK-1"]
+    view["attempt_budget"] = {"reason": "all_selectable_ready_tasks_reached_max_task_attempts",
+                              "task_ids": ["TASK-1"], "attempts": {"TASK-1": 3}}
+    monkeypatch.setattr(watcher, "recover", lambda *_: pytest.fail("budget block dispatched recovery"))
+    before = deepcopy(view)
+    result = watcher.run_once()
+    assert result["status"] == "held"
+    assert watcher.latest_observation["status"] == "budget_exhausted"
+    assert not watcher.latest_observation["recovery_permitted"]
+    assert not watcher.latest_observation["progress_verified"]
+    assert view == before
+    assert not (watcher.directory / "campaign-progress-watchdog.json").exists()
+
+
 def test_observation_token_excludes_polling_heartbeat_and_age(tmp_path, monkeypatch):
     watcher, _, view = _adapter(tmp_path, monkeypatch)
     first = watcher.observe()

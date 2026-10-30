@@ -997,6 +997,135 @@ def test_status_reports_native_attempt_limit_block_despite_ready_dependencies(ca
     assert runner.status(root, spec, state)["status"] == "blocked"
 
 
+
+def _attempt_limited_native_state():
+    # Native keeps ready-but-budget-limited tasks out of blocked_task_ids.
+    return {
+        "active_task_id": "", "active_task_cid": "", "active_attempt": 0,
+        "active_phase": "", "implementation_in_progress": False,
+        "ready_task_ids": ["CIMP-UX-09", "CIMP-UX-18"],
+        "selectable_ready_task_ids": [], "blocked_task_ids": [],
+        "selection_idle_reason": "all_selectable_ready_tasks_reached_max_task_attempts",
+        "implementation_attempts": {"CIMP-UX-09": 3, "CIMP-UX-18": 3},
+        "implementation_attempts_by_cid": {"fixture-cid-09": 3, "fixture-cid-18": 3},
+        "task_identities": {task: {"canonical_task_cid": cid} for task, cid in (
+            ("CIMP-UX-09", "fixture-cid-09"), ("CIMP-UX-18", "fixture-cid-18"))},
+    }
+
+
+def _attempt_limited_status_fixture(campaign, monkeypatch):
+    body = _attempt_limited_native_state()
+    root, spec, state, record = _status_fixture(campaign, monkeypatch, native_state=body,
+        board={"count": 68, "completed": 15, "ready_task_ids": body["ready_task_ids"],
+               "manual_hold_task_ids": []})
+    record["started_at"] = runner.time.time() - 3600
+    runner._atomic_json(state / "launcher.json", record)
+    # A fresh poll repeats backpressure; it is activity, never useful progress.
+    events = state / f"{runner.STATE_PREFIX}_events.jsonl"
+    events.write_text(json.dumps({"type": "task_attempt_limit_backpressure",
+        "timestamp": datetime.now(timezone.utc).isoformat(), "max_task_attempts": 3,
+        "limited_task_ids": body["ready_task_ids"], "selection_idle_reason": body["selection_idle_reason"]}) + "\n")
+    return root, spec, state, record, body
+
+
+@pytest.mark.parametrize("heartbeat_status", ["running", "agentic_maintenance_started", "agentic_maintenance_completed"])
+def test_status_reports_actual_native_attempt_limit_without_claiming_heartbeat_progress(campaign, monkeypatch, heartbeat_status):
+    root, spec, state, _, body = _attempt_limited_status_fixture(campaign, monkeypatch)
+    heartbeat_path = state / f"{runner.STATE_PREFIX}_supervisor_status.json"
+    heartbeat = json.loads(heartbeat_path.read_text())
+    heartbeat.update(status=heartbeat_status)
+    runner._atomic_json(heartbeat_path, heartbeat)
+    if heartbeat_status != "running":
+        from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_activity
+        monkeypatch.setattr(supervisor_activity, "observe_supervisor_activity", lambda *a, **k:
+                            SimpleNamespace(phase_ready=True))
+    paths = [state / "launcher.json", state / f"{runner.STATE_PREFIX}_task_state.json", heartbeat_path,
+             state / f"{runner.STATE_PREFIX}_events.jsonl"]
+    before = {p: p.read_bytes() for p in paths}
+    result = runner.status(root, spec, state)
+    assert result["status"] == "budget_exhausted" and not result["healthy"]
+    assert not result["progress_verified"]
+    assert result["attempt_budget"] == {
+        "reason": body["selection_idle_reason"], "max_task_attempts": 3,
+        "task_ids": ["CIMP-UX-09", "CIMP-UX-18"],
+        "attempts": {"CIMP-UX-09": 3, "CIMP-UX-18": 3},
+        "completion_authority": False,
+    }
+    assert before == {p: p.read_bytes() for p in paths}
+
+
+@pytest.mark.parametrize("change", ["available_task", "different_idle_reason", "new_cid", "active", "intentional_wait"])
+def test_attempt_limit_observation_preserves_other_native_states(campaign, monkeypatch, change):
+    root, spec, state, _, body = _attempt_limited_status_fixture(campaign, monkeypatch)
+    expected = "running"
+    if change == "available_task":
+        body["selectable_ready_task_ids"] = ["CIMP-UX-18"]
+        body["implementation_attempts"]["CIMP-UX-18"] = 2
+        body["implementation_attempts_by_cid"]["fixture-cid-18"] = 2
+    elif change == "different_idle_reason":
+        body["selection_idle_reason"] = "no_ready_tasks"
+    elif change == "new_cid":
+        body["task_identities"]["CIMP-UX-18"]["canonical_task_cid"] = "fixture-new-cid"
+    elif change == "active":
+        body.update(active_task_id="CIMP-UX-09", active_task_cid="fixture-cid-09",
+                    active_attempt=3, implementation_in_progress=True,
+                    active_phase="implementation", active_task_started_at=datetime.now(timezone.utc).isoformat())
+        expected = "active"
+    else:
+        body.update(active_phase="waiting_for_user", active_task_id="CIMP-UX-09")
+        expected = "waiting_for_user"
+    runner._atomic_json(state / f"{runner.STATE_PREFIX}_task_state.json", body)
+    result = runner.status(root, spec, state)
+    assert result["status"] == expected
+    assert result["attempt_budget"] is None
+
+
+
+def test_attempt_limit_reads_real_native_authority_without_a_json_mirror(campaign, monkeypatch):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import portal_task_state_control_plane as plane
+    root, spec, state, _, body = _attempt_limited_status_fixture(campaign, monkeypatch)
+    path = state / f"{runner.STATE_PREFIX}_task_state.json"
+    path.unlink()
+    monkeypatch.setenv(runner.ORCHESTRATION_DIR_ENV, str(state / "control-plane"))
+    body["heartbeat_at"] = body["last_progress_at"] = datetime.fromtimestamp(
+        runner.time.time() - 1800, timezone.utc).isoformat()
+    plane.save_portal_task_state(path.stem, body, state_path=path)
+    assert not path.exists()
+    result = runner.status(root, spec, state)
+    assert result["status"] == "budget_exhausted" and not result["healthy"]
+    assert result["native_state_source"]["source"] == "native_control_plane"
+    assert result["attempt_budget"]["attempts"] == {"CIMP-UX-09": 3, "CIMP-UX-18": 3}
+    after = plane.read_task_state_payload(path)
+    assert after["implementation_attempts"] == body["implementation_attempts"]
+    assert after["implementation_attempts_by_cid"] == body["implementation_attempts_by_cid"]
+    assert not path.exists()
+
+
+def test_attempt_limit_does_not_hide_real_canonical_validation(campaign, monkeypatch):
+    root, spec, state, _, _ = _attempt_limited_status_fixture(campaign, monkeypatch)
+    from integrations.ipfs_accelerate import reconciliation_activity
+    monkeypatch.setattr(reconciliation_activity, "evidence", lambda *a, **k:
+                        {"type": "canonical_native_executor_in_flight", "deadline_at": runner.time.time() + 30})
+    result = runner.status(root, spec, state)
+    assert result["status"] == "active" and result["healthy"]
+    assert result["validation_activity_verified"] and result["progress_verified"]
+
+
+def test_attempt_limit_keeps_initial_bounded_maintenance_grace(campaign, monkeypatch):
+    root, spec, state, record, _ = _attempt_limited_status_fixture(campaign, monkeypatch)
+    record["started_at"] = runner.time.time() - 10
+    runner._atomic_json(state / "launcher.json", record)
+    heartbeat_path = state / f"{runner.STATE_PREFIX}_supervisor_status.json"
+    heartbeat = json.loads(heartbeat_path.read_text())
+    heartbeat.update(status="agentic_maintenance_started")
+    runner._atomic_json(heartbeat_path, heartbeat)
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_activity
+    monkeypatch.setattr(supervisor_activity, "observe_supervisor_activity", lambda *a, **k:
+                        SimpleNamespace(phase_ready=True))
+    result = runner.status(root, spec, state)
+    assert result["status"] == "maintenance" and result["healthy"]
+
+
 def test_status_detects_expired_attempt_without_log(campaign, monkeypatch):
     started = datetime.fromtimestamp(runner.time.time() - 1000, timezone.utc).isoformat()
     root, spec, state, _ = _status_fixture(campaign, monkeypatch, native_state={
