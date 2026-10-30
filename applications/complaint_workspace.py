@@ -4257,6 +4257,10 @@ class ComplaintWorkspaceRequestHandlers:
         edit of another participant's assertion is refused and does not write.
         """
 
+        prior_support_effects = {
+            str(item.get("effect_id") or "") for item in (state.get("affected_support_projection") or [])
+            if isinstance(item, Mapping)
+        }
         parsed = _parse_gui_correction_message(
             message,
             expected_graph_revision=expected_graph_revision,
@@ -4294,6 +4298,17 @@ class ComplaintWorkspaceRequestHandlers:
             fresh = state
         payload = self.workspace._build_intake_chat_payload(fresh)
         payload["factual_correction"] = receipt
+        new_correction_effects = [
+            item for item in payload.get("affected_support_projection", [])
+            if isinstance(item, Mapping) and item.get("kind") == "correction"
+            and str(item.get("effect_id") or "") not in prior_support_effects
+        ]
+        payload["support_projection_updated"] = receipt.get("status") == "applied" and bool(new_correction_effects)
+        correction = receipt.get("correction") if isinstance(receipt.get("correction"), Mapping) else {}
+        payload["support_projection_duplicate"] = (
+            receipt.get("status") == "applied" and correction.get("idempotent_replay") is True
+            and not new_correction_effects
+        )
         payload["stored_as_answer"] = receipt.get("status") == "applied"
         payload["command"] = "correct"
         payload["legal_sufficiency"] = False

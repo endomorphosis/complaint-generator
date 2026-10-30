@@ -398,6 +398,9 @@ def test_answer_and_correction_update_graphs_once_and_stale_replies_do_not(tmp_p
         }, sort_keys=True)
         assert receipt["correction"]["lineage"]["previous_envelope_retained"] is True
         assert receipt["correction"]["lineage"]["previous_status"] == "superseded"
+        assert payload["support_projection_updated"] is True
+        assert payload["support_projection_duplicate"] is False
+        assert len(payload["affected_support_projection"]) == 2
         page.wait_for_function("""() => {
             const node = document.getElementById('inquiry-graph-change');
             return node && node.dataset.applied === 'true' && node.dataset.count === '2'
