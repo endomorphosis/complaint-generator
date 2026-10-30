@@ -148,6 +148,7 @@ def _server_pending(page):
                 'x-case-id': binding.case_id,
                 'x-tenant-id': binding.tenant_id,
                 'x-resource-id': binding.resource_id,
+                'x-expected-revision': String(binding.directory_revision),
             },
         });
         const body = await response.json();
@@ -202,11 +203,11 @@ def test_inquiry_card_shows_the_server_question_and_unknown_uses_the_mediator(tm
         }""", arg=seeded["inquiry_id"])
         after = _card(page)
         server = _server_pending(page)
+        assert server["status"] == 200
+        assert server["caseId"] == server["selectedCaseId"] == world.case.case_id
         assert after["question"] == server["question"]
         assert after["question"] != shown["genericPrompt"]
         assert "party_name" not in after["inquiryId"]
-        assert server["status"] == 200
-        assert server["caseId"] == server["selectedCaseId"] == world.case.case_id
         assert server["inquiryId"] == after["inquiryId"]
         assert server["fromFixed"] is False
         assert server["partyName"] == ""
@@ -238,12 +239,12 @@ def test_why_and_status_do_not_save_and_fixed_intake_does_not_replace_the_questi
         assert page.get_attribute("#inquiry-card-note", "data-stored-as-answer") == "false"
         assert page.locator("#inquiry-card-question").inner_text() == seeded["question"]
         server = _server_pending(page)
+        assert server["status"] == 200
+        assert server["caseId"] == server["selectedCaseId"] == world.case.case_id
         assert server["inquiryId"] == seeded["inquiry_id"]
         assert server["revision"] == seeded["revision"]
         assert server["history"] == seeded["history"]
         assert server["question"] == seeded["question"]
-        assert server["status"] == 200
-        assert server["caseId"] == server["selectedCaseId"] == world.case.case_id
         page.locator("#intake-show-all-button").click()
         page.fill("#intake-party_name", GENERIC_NAME)
         page.locator("#save-intake-button").click()
