@@ -4716,15 +4716,18 @@ def _private_replica_acceptance_capability(junit, binding):
 
 _FACTUAL_CORRECTION_ACCEPTANCE = ("tests/test_cimp_ux_10.py::"
     "test_answer_and_correction_update_graphs_once_and_stale_replies_do_not")
+_CASE_SWITCH_ACCEPTANCE = ("tests/test_cimp_ux_10.py::"
+    "test_delayed_answer_cannot_repaint_a_new_selected_case")
+_INTERVIEW_BEHAVIORAL_ACCEPTANCE = (_FACTUAL_CORRECTION_ACCEPTANCE, _CASE_SWITCH_ACCEPTANCE)
 
 
 _IMPACTED_BEHAVIORAL_CHECKS = {
     "integrations/ipfs_datasets/legal.py": ("tests/test_explicit_legal_context.py", "tests/test_ipfs_adapter_layer.py"),
     "integrations/ipfs_datasets/storage.py": ("tests/test_private_storage_adapter.py", "tests/test_ipfs_kit_storage_adapter.py", "tests/test_proof_report_and_pinning.py", _PRIVATE_REPLICA_ACCEPTANCE),
     "integrations/private_storage.py": ("tests/test_private_workspace_crypto.py", "tests/test_private_workspace_keys.py", "tests/test_private_storage_adapter.py", _PRIVATE_REPLICA_ACCEPTANCE),
-    "applications/complaint_workspace.py": ("tests/test_private_workspace_isolation.py", "tests/test_private_workspace_policy.py", "tests/test_private_workspace_keys.py", _FACTUAL_CORRECTION_ACCEPTANCE),
-    "static/complaint_conversation.js": (_FACTUAL_CORRECTION_ACCEPTANCE,),
-    "static/complaint_mcp_sdk.js": (_FACTUAL_CORRECTION_ACCEPTANCE,),
+    "applications/complaint_workspace.py": ("tests/test_private_workspace_isolation.py", "tests/test_private_workspace_policy.py", "tests/test_private_workspace_keys.py", *_INTERVIEW_BEHAVIORAL_ACCEPTANCE),
+    "static/complaint_conversation.js": _INTERVIEW_BEHAVIORAL_ACCEPTANCE,
+    "static/complaint_mcp_sdk.js": _INTERVIEW_BEHAVIORAL_ACCEPTANCE,
     "integrations/ipfs_datasets/llm.py": ("tests/test_grok47_router_contract.py", "tests/test_private_workspace_policy.py"),
     "mediator/mediator.py": ("tests/test_factual_correction_replay.py", "tests/test_tui_shared_interview.py"),
 }
