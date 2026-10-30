@@ -533,7 +533,7 @@ Implementation instructions:
 
 ## CIMP-UX-18 Replace placeholder label and annotation actions with real editors
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
