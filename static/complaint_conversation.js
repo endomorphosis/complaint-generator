@@ -5,6 +5,9 @@
     var BLOCKED = { "missing-key": true, denied: true, unavailable: true, locked: true, revoked: true };
     var root = null;
     var generation = 0;
+    var renderedHead = null;
+    var renderedCaseId = "";
+    var submitting = false;
     var retryCount = 0;
     var lifecycle = "idle";
     var controller = null;
@@ -402,6 +405,8 @@
 
     function clear() {
         generation += 1;
+        renderedHead = null;
+        renderedCaseId = "";
         if (controller) controller.abort();
         controller = null;
         lastPayload = null;
@@ -421,6 +426,103 @@
         renderInquiryCard(null);
     }
 
+    function headOf(payload) {
+        var head = payload && payload.encrypted_head;
+        var session = sessionOf(payload || {});
+        var revision = head && head.private_revision !== undefined ? Number(head.private_revision) : null;
+        return {
+            caseId: text((head && head.case_id) || session.case_id),
+            revision: Number.isFinite(revision) ? revision : null
+        };
+    }
+
+    function replyConflict(payload) {
+        if (!payload || typeof payload !== "object") return "";
+        if (payload.conflict) return text(payload.conflict);
+        var interview = payload.interview;
+        if (interview && interview.status === "refused") {
+            var error = interview.error && typeof interview.error === "object" ? interview.error : {};
+            return text(error.code || interview.status);
+        }
+        var correction = payload.factual_correction;
+        if (correction && correction.status && correction.status !== "applied") {
+            var correctionError = correction.error && typeof correction.error === "object" ? correction.error : {};
+            return text(correctionError.code || correction.status);
+        }
+        return "";
+    }
+
+    function currentCaseId() {
+        var binding = window.complaintCaseShell && window.complaintCaseShell.binding ? window.complaintCaseShell.binding() : null;
+        return binding && binding.case_id ? text(binding.case_id) : "";
+    }
+
+    function acceptPayload(payload) {
+        if (!payload || blocked()) return false;
+        var head = headOf(payload);
+        var openCase = currentCaseId();
+        if (openCase && renderedCaseId && openCase !== renderedCaseId) {
+            renderedCaseId = "";
+            renderedHead = null;
+        }
+        if (openCase && head.caseId && head.caseId !== openCase) return false;
+        if (renderedCaseId && head.caseId && head.caseId !== renderedCaseId) return false;
+        if (renderedHead !== null && head.revision !== null && head.revision < renderedHead) return false;
+        if (replyConflict(payload)) return false;
+        return true;
+    }
+
+    function rememberHead(payload) {
+        var head = headOf(payload);
+        if (head.caseId) renderedCaseId = head.caseId;
+        if (head.revision !== null) renderedHead = head.revision;
+    }
+
+    function graphChangeNode() {
+        var node = $("inquiry-graph-change");
+        if (node) return node;
+        node = document.createElement("section");
+        node.id = "inquiry-graph-change";
+        node.dataset.applied = "false";
+        node.dataset.changesLaw = "false";
+        node.dataset.conflict = "";
+        node.dataset.count = "0";
+        node.innerHTML = '<p id="inquiry-graph-change-text"></p><button type="button" id="inquiry-graph-recover">Reload the current question</button>';
+        var card = $("inquiry-card");
+        if (card && card.parentNode) card.parentNode.insertBefore(node, card.nextSibling);
+        else if ($("mediator-conversation")) $("mediator-conversation").appendChild(node);
+        return node;
+    }
+
+    function showGraphChange(payload, conflict) {
+        var node = graphChangeNode();
+        if (!node) return;
+        var rows = payload && Array.isArray(payload.affected_support_projection) ? payload.affected_support_projection : [];
+        var latest = rows.length ? rows[rows.length - 1] : null;
+        var applied = !conflict && payload && payload.support_projection_updated === true;
+        node.dataset.applied = applied ? "true" : "false";
+        node.dataset.changesLaw = "false";
+        node.dataset.conflict = conflict || "";
+        node.dataset.count = String(rows.length);
+        node.dataset.effectId = latest ? text(latest.effect_id) : "";
+        node.dataset.inquiryId = latest ? text(latest.inquiry_id) : "";
+        var head = headOf(payload || {});
+        node.dataset.caseId = head.caseId;
+        node.dataset.privateRevision = head.revision === null ? "" : String(head.revision);
+        var textNode = $("inquiry-graph-change-text");
+        if (!textNode) return;
+        if (conflict) {
+            textNode.textContent = "This reply is stale. The current question and encrypted case were kept. Reload the current question.";
+            return;
+        }
+        if (applied) {
+            var affected = latest && Array.isArray(latest.affected) ? latest.affected.length : 0;
+            textNode.textContent = "The factual graph was updated once. Support links affected: " + affected + ". Admitted legal requirements were not rewritten.";
+            return;
+        }
+        textNode.textContent = "No new factual graph update was stored.";
+    }
+
     function project(payload) {
         if (generation < 0) return;
         if (blocked()) {
@@ -429,6 +531,13 @@
             paintControls();
             return;
         }
+        if (!acceptPayload(payload)) {
+            if (replyConflict(payload) || (payload && headOf(payload).caseId && headOf(payload).caseId !== currentCaseId())) {
+                showGraphChange(payload, replyConflict(payload) || "newer_case");
+            }
+            return;
+        }
+        rememberHead(payload);
         lastPayload = payload;
         if (lifecycle === "pending") return;
         render(payload);
@@ -458,6 +567,13 @@
                 clear();
                 return;
             }
+            if (!acceptPayload(payload)) {
+                lifecycle = "settled";
+                showGraphChange(payload, replyConflict(payload) || "newer_case");
+                paintControls();
+                return;
+            }
+            rememberHead(payload);
             lastPayload = payload;
             retryCount = 0;
             lifecycle = "settled";
@@ -527,6 +643,20 @@
             }
         }
         paintControls();
+        document.addEventListener("click", function (event) {
+            var button = event.target && event.target.closest ? event.target.closest("button") : null;
+            if (!button) return;
+            if (button.id === "inquiry-graph-recover") {
+                event.preventDefault();
+                refresh();
+                return;
+            }
+            if (button.id !== "adaptive-submit-answer" && button.id !== "factual-correction-submit") return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (button.id === "adaptive-submit-answer") submitAnswer();
+            else submitCorrection();
+        }, true);
         var card = $("inquiry-card");
         if (card && card.dataset.bound !== "true") {
             card.dataset.bound = "true";
@@ -543,12 +673,102 @@
         }
     }
 
+    function offeredCorrection() {
+        var adaptive = lastPayload && lastPayload.adaptive_inquiry;
+        var offer = adaptive && adaptive.factual_correction;
+        return offer && typeof offer === "object" ? offer : {};
+    }
+
+    function fieldValue(id) {
+        var node = $(id);
+        return node ? text(node.value) : "";
+    }
+
+    async function submitAnswer() {
+        if (submitting || blocked()) return;
+        var card = $("inquiry-card");
+        var questionId = card ? text(card.dataset.inquiryId) : "";
+        var revision = card && card.dataset.revision !== "" ? Number(card.dataset.revision) : NaN;
+        var message = fieldValue("adaptive-answer");
+        var client = window.workspaceClient;
+        if (!client || typeof client.submitCanonicalGraphAnswer !== "function") return;
+        if (!questionId || !Number.isSafeInteger(revision) || !message) return;
+        var caseId = currentCaseId();
+        var userId = (client.caseContext && client.caseContext.tenant_id) || client.activePrincipalId || "";
+        submitting = true;
+        try {
+            var result = await client.submitCanonicalGraphAnswer(userId, message, {
+                question_id: questionId,
+                expected_question_revision: revision
+            });
+            if (currentCaseId() !== caseId) {
+                showGraphChange(result && result.payload, "newer_case");
+                return;
+            }
+            var payload = result && result.payload;
+            var conflict = result && result.conflict ? result.conflict : replyConflict(payload);
+            if (!result || result.accepted !== true || conflict) {
+                showGraphChange(payload, conflict || "stale_question");
+                return;
+            }
+            project(payload);
+            showGraphChange(payload, "");
+        } catch (error) {
+            showGraphChange(null, "unavailable");
+        } finally {
+            submitting = false;
+        }
+    }
+
+    async function submitCorrection() {
+        if (submitting || blocked()) return;
+        var offer = offeredCorrection();
+        var graphRevision = fieldValue("factual-correction-graph-revision") || text(offer.expected_graph_revision);
+        var sessionText = fieldValue("factual-correction-session-revision");
+        var sessionRevision = sessionText === "" ? Number(offer.expected_session_revision) : Number(sessionText);
+        var targetId = fieldValue("factual-correction-target") || text(offer.target_stable_id);
+        var actor = fieldValue("factual-correction-actor") || text(offer.actor_principal_id);
+        var replacement = fieldValue("factual-correction-replacement");
+        var client = window.workspaceClient;
+        if (!client || typeof client.submitCanonicalGraphCorrection !== "function" || !replacement) return;
+        var caseId = currentCaseId();
+        var userId = (client.caseContext && client.caseContext.tenant_id) || client.activePrincipalId || "";
+        submitting = true;
+        try {
+            var result = await client.submitCanonicalGraphCorrection(userId, replacement, {
+                question_id: targetId,
+                target_stable_id: targetId,
+                actor_principal_id: actor,
+                expected_graph_revision: graphRevision,
+                expected_session_revision: sessionRevision
+            });
+            if (currentCaseId() !== caseId) {
+                showGraphChange(result && result.payload, "newer_case");
+                return;
+            }
+            var payload = result && result.payload;
+            var conflict = result && result.accepted === true ? "" : ((result && result.conflict) || replyConflict(payload) || "stale_target");
+            if (conflict) {
+                showGraphChange(payload, conflict);
+                return;
+            }
+            project(payload);
+            showGraphChange(payload, "");
+        } catch (error) {
+            showGraphChange(null, "unavailable");
+        } finally {
+            submitting = false;
+        }
+    }
+
     window.complaintConversation = {
         project: project,
         clear: clear,
         refresh: refresh,
         cancel: cancel,
-        retry: retry
+        retry: retry,
+        submitAnswer: submitAnswer,
+        submitCorrection: submitCorrection
     };
 
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bind);

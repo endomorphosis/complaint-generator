@@ -21,11 +21,11 @@ const SYNC_PUBLIC_FIELDS = [
     'action',
 ];
 const PRIVATE_STORAGE_KEY = /(synopsis|handoff|narrative|evidence|summary|token|secret|password|passphrase|api[_-]?key|private[_-]?key|raw[_-]?key|uiReadiness|sdkSyncEvent|sdkLastToolCall|sdkToolLedger|gmail-user|authorization|credential|bearer)/i;
-const PUBLIC_ERROR_CODES = /^(authorization_denied|authentication_failed|session_required|workspace_operation_failed|stale_question|mcp_tool_error|JSON-RPC request failed|pin refused|http_\d{3})$/;
+const PUBLIC_ERROR_CODES = /^(authorization_denied|authentication_failed|session_required|workspace_operation_failed|stale_question|stale_target|revision_conflict|mcp_tool_error|JSON-RPC request failed|pin refused|http_\d{3})$/;
 
 const PUBLIC_TOOL_NAMES = new Set(["complaint.analyze_complaint_output", "complaint.build_mediator_prompt", "complaint.build_mike_handoff", "complaint.execute_packaged_docket_proof_revalidation_queue", "complaint.export_complaint_docx", "complaint.export_complaint_markdown", "complaint.export_complaint_packet", "complaint.export_complaint_pdf", "complaint.generate_complaint", "complaint.get_client_release_gate", "complaint.get_complaint_readiness", "complaint.get_docket_dataset_graph", "complaint.get_docket_dataset_metadata", "complaint.get_draft_proof_report", "complaint.get_filing_provenance", "complaint.get_formal_diagnostics", "complaint.get_mike_integration_status", "complaint.get_packaged_docket_operator_dashboard", "complaint.get_proof_history", "complaint.get_provider_diagnostics", "complaint.get_tooling_contract", "complaint.get_ui_readiness", "complaint.get_workflow_capabilities", "complaint.get_workspace_data_schema", "complaint.import_gmail_evidence", "complaint.import_local_evidence", "complaint.improve_draft", "complaint.list_claim_elements", "complaint.list_intake_questions", "complaint.load_packaged_docket_operator_dashboard_report", "complaint.migrate_legacy_workspace_data", "complaint.optimize_ui", "complaint.persist_packaged_docket_proof_revalidation_queue", "complaint.pin_draft_proof_report", "complaint.render_draft_proof_report", "complaint.reset_session", "complaint.review_case", "complaint.review_generated_exports", "complaint.review_ui", "complaint.run_browser_audit", "complaint.run_gmail_duckdb_pipeline", "complaint.run_intake_chat_turn", "complaint.save_evidence", "complaint.score_draft_quality", "complaint.search_docket_dataset", "complaint.search_email_duckdb_corpus", "complaint.search_workspace_dataset", "complaint.start_session", "complaint.submit_intake", "complaint.sync_mike_final_draft", "complaint.update_case_synopsis", "complaint.update_claim_type", "complaint.update_draft", "complaint.view_docket_dataset", "complaint.view_workspace_dataset"]);
 const PUBLIC_EVENT_TYPES = new Set(['workspace.updated', 'workspace.reset', 'docket.updated', 'docket.persisted']);
-const PUBLIC_ACTIONS = new Set(['start', 'answer', 'status', 'resume', 'defer', 'revise', 'continue']);
+const PUBLIC_ACTIONS = new Set(['start', 'answer', 'status', 'resume', 'defer', 'revise', 'continue', 'correct']);
 function publicRevision(value) { return Number.isSafeInteger(value) && value >= 0 ? value : null; }
 function publicAction(value) { return PUBLIC_ACTIONS.has(value) ? value : ''; }
 function publicTimestamp(value) {
@@ -352,15 +352,18 @@ class ComplaintMcpClient {
                 if (response.status === 429) code = 'rate_limited';
                 if (response.status === 408 || response.status === 504) code = 'timeout';
                 let contract;
+                let readable = null;
                 if (response.status === 409) {
                     try {
                         const conflictBody = await response.json();
-                        const body = conflictBody && conflictBody.result ? conflictBody.result : conflictBody;
+                        readable = conflictBody && conflictBody.result ? conflictBody.result : conflictBody;
+                        const body = readable;
                         const publicCode = publicToolErrorCode(body);
-                        if (['stale_question', 'revision_conflict', 'inquiry_mismatch'].includes(publicCode)) code = publicCode;
+                        if (['stale_question', 'revision_conflict', 'inquiry_mismatch', 'stale_target'].includes(publicCode)) code = publicCode;
                         const structured = body && body.structuredContent ? body.structuredContent : body;
                         const interview = structured && structured.interview ? structured.interview : {};
                         contract = projectSyncDetail(Object.assign({}, structured, {session_revision: interview.session_revision}));
+                        if (structured && structured !== readable) readable = structured;
                     } catch (readError) { /* The fixed HTTP code remains truthful. */ }
                 }
                 if (!lifecycle && epoch !== this._privacyEpoch) throw stateChangedError();
@@ -368,6 +371,7 @@ class ComplaintMcpClient {
                 error.code = code;
                 error.status = response.status; error.authorizationDenied = denied; error.isError = true;
                 if (contract) error.contract = contract;
+                if (readable && typeof readable === 'object') error.readable = readable;
                 throw error;
             }
             const payload = await response.json();
@@ -418,6 +422,9 @@ class ComplaintMcpClient {
         if (payload.result && payload.result.isError === true) {
             const code = publicToolErrorCode(payload.result);
             const error = new Error(code); error.isError = true; error.authorizationDenied = code === 'authorization_denied';
+            error.readable = payload.result.structuredContent && typeof payload.result.structuredContent === 'object'
+                ? payload.result.structuredContent
+                : payload.result;
             throw error;
         }
         if (!Object.prototype.hasOwnProperty.call(payload, 'result')) throw new Error('mcp_tool_error');
@@ -807,7 +814,71 @@ class ComplaintMcpClient {
         if (extra.interview_action) {
             args.interview_action = extra.interview_action;
         }
+        if (extra.expected_graph_revision !== undefined && extra.expected_graph_revision !== null && extra.expected_graph_revision !== '') {
+            args.expected_graph_revision = extra.expected_graph_revision;
+        }
+        if (extra.expected_session_revision !== undefined && extra.expected_session_revision !== null && extra.expected_session_revision !== '') {
+            args.expected_session_revision = extra.expected_session_revision;
+        }
         return this.callTool('complaint.run_intake_chat_turn', args);
+    }
+
+    async _readableGraphResult(error) {
+        const body = error && error.readable && typeof error.readable === 'object' ? error.readable : null;
+        if (!body) throw error;
+        return {accepted: false, conflict: String(error.code || body.conflict || ''), payload: body};
+    }
+
+    async submitCanonicalGraphAnswer(userId, message, options = {}) {
+        const extra = options && typeof options === 'object' ? options : {};
+        const questionId = String(extra.question_id || '').trim();
+        const revision = Number(extra.expected_question_revision);
+        if (!questionId.startsWith('inq-') || !Number.isSafeInteger(revision)) {
+            const error = new Error('question_revision_required');
+            error.code = 'question_revision_required';
+            throw error;
+        }
+        try {
+            const payload = await this.runIntakeChatTurn(userId, message, questionId, {
+                expected_question_revision: revision,
+                interview_action: extra.interview_action || 'answer',
+            });
+            const conflict = payload && (payload.conflict || (payload.interview && payload.interview.status === 'refused' ? (payload.interview.error && payload.interview.error.code) : ''));
+            return {accepted: !conflict, conflict: conflict || '', payload: payload};
+        } catch (error) {
+            return this._readableGraphResult(error);
+        }
+    }
+
+    async submitCanonicalGraphCorrection(userId, replacement, options = {}) {
+        const extra = options && typeof options === 'object' ? options : {};
+        const graphRevision = String(extra.expected_graph_revision || '').trim();
+        const sessionRevision = Number(extra.expected_session_revision);
+        if (!graphRevision || !Number.isSafeInteger(sessionRevision)) {
+            const error = new Error('question_revision_required');
+            error.code = 'question_revision_required';
+            throw error;
+        }
+        const message = JSON.stringify({
+            schema: 'gui-factual-correction-v1',
+            replacement: String(replacement || ''),
+            expected_graph_revision: graphRevision,
+            expected_session_revision: sessionRevision,
+            target_stable_id: String(extra.target_stable_id || ''),
+            actor_principal_id: String(extra.actor_principal_id || ''),
+        });
+        try {
+            const payload = await this.runIntakeChatTurn(userId, message, extra.question_id || extra.target_stable_id || '', {
+                interview_action: 'correct',
+                expected_graph_revision: graphRevision,
+                expected_session_revision: sessionRevision,
+            });
+            const receipt = payload && payload.factual_correction ? payload.factual_correction : {};
+            const conflict = receipt.status && receipt.status !== 'applied' ? String((receipt.error && receipt.error.code) || receipt.status) : (payload && payload.conflict) || '';
+            return {accepted: receipt.status === 'applied', conflict: conflict, payload: payload};
+        } catch (error) {
+            return this._readableGraphResult(error);
+        }
     }
 
     clearPrivateBrowserState() {
