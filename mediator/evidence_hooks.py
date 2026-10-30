@@ -17,6 +17,8 @@ import os
 import json
 import hashlib
 import mimetypes
+import base64
+import uuid
 from typing import Dict, List, Optional, Any, BinaryIO
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
@@ -257,7 +259,7 @@ class PrivateDerivedIndex:
             self._secrets.append(payload)
             return token
         self._counter += 1
-        revision = f"index-{self._counter}"
+        revision = f"index-{uuid.uuid4().hex}"
         body = json.dumps({"text": payload, "kind": kind, "case_id": self.case_id}, sort_keys=True).encode("utf-8")
         try:
             from integrations.private_storage import (
@@ -281,6 +283,12 @@ class PrivateDerivedIndex:
                 backend_name=str(context.get("backend_name") or "local_cache"),
                 pin_content=bool(context.get("pin_content", False)),
             )
+            cid = str(receipt.get("cid") or "")
+            if not cid or str(receipt.get("status") or "") not in {"available", "degraded"}:
+                raise PrivateDerivedIndexUnavailable("Private derived index is unavailable.", code="persistence_unavailable")
+            entry = {"case_id": self.case_id, "kind": kind, "durable": True,
+                "cid": cid, "revision": revision, "text": None}
+            token = self._seal_durable_reference(entry)
         except PrivateDerivedIndexUnavailable:
             raise
         except Exception as exc:
@@ -297,20 +305,60 @@ class PrivateDerivedIndex:
                 "Private derived index is unavailable.",
                 code=code,
             ) from exc
-        cid = str(receipt.get("cid") or "")
-        if not cid or str(receipt.get("status") or "") not in {"available", "degraded"}:
-            raise PrivateDerivedIndexUnavailable("Private derived index is unavailable.", code="persistence_unavailable")
-        token = f"cgidx:cid:{self._counter}"
-        self.entries[token] = {
-            "text": None,
-            "case_id": self.case_id,
-            "kind": kind,
-            "durable": True,
-            "cid": cid,
-            "revision": revision,
-        }
+        self.entries[token] = entry
         self._secrets.append(payload)
         return token
+
+    def _reference_key(self):
+        """Resolve current authority; a token never supplies its own AAD or key."""
+        from integrations.private_storage import (
+            PrivateArtifactBinding, PrivateKeyMaterialError, assert_access_matches_binding,
+        )
+        context = self.context or {}
+        binding = PrivateArtifactBinding(tenant_id=str(context.get("tenant_id") or ""),
+            case_id=self.case_id, artifact_kind="index-reference", revision="v1",
+            principal_id=str(context.get("principal_id") or ""))
+        assert_access_matches_binding(context.get("access"), binding)
+        provider = context.get("key_provider")
+        if provider is None:
+            raise PrivateKeyMaterialError("key_unavailable")
+        key_id, key = provider.resolve(binding)
+        return binding, key_id, key
+
+    def _seal_durable_reference(self, entry: Dict[str, Any]) -> str:
+        """Persist the reference as ciphertext, without a process-local lookup."""
+        from integrations.private_storage import PrivateArtifactIntegrityError, seal_private_artifact
+        binding, key_id, key = self._reference_key()
+        descriptor = {name: entry[name] for name in ("cid", "revision", "kind")}
+        raw = json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        envelope = seal_private_artifact(raw, binding=binding, key=key, key_id=key_id)
+        encoded = base64.urlsafe_b64encode(envelope).decode("ascii")
+        if len(encoded) > 16384:
+            raise PrivateArtifactIntegrityError("oversized")
+        return "cgidx:ref:v1:" + encoded
+
+    def _open_durable_reference(self, token: str) -> Dict[str, Any]:
+        from integrations.private_storage import PrivateArtifactIntegrityError, open_private_artifact
+        # A reference is small routing ciphertext, never a replacement for the
+        # separately authenticated content artifact or its current key owner.
+        encoded = token[len("cgidx:ref:v1:"):]
+        if not encoded or len(encoded) > 16384:
+            raise PrivateArtifactIntegrityError("malformed")
+        try:
+            envelope = base64.b64decode(encoded, altchars=b"-_", validate=True)
+        except (ValueError, UnicodeEncodeError):
+            raise PrivateArtifactIntegrityError("malformed") from None
+        binding, key_id, key = self._reference_key()
+        raw = open_private_artifact(envelope, binding=binding, key=key, expected_key_id=key_id)
+        try:
+            descriptor = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise PrivateArtifactIntegrityError("malformed") from None
+        if not isinstance(descriptor, dict) or set(descriptor) != {"cid", "revision", "kind"}:
+            raise PrivateArtifactIntegrityError("malformed")
+        if any(not isinstance(value, str) or not value for value in descriptor.values()):
+            raise PrivateArtifactIntegrityError("malformed")
+        return {**descriptor, "case_id": self.case_id, "durable": True, "text": None}
 
     def cache_public_law(self, *, citation: str, text: str) -> str:
         digest = hashlib.sha256(f"{citation}\n{text}".encode("utf-8")).hexdigest()[:24]
@@ -334,13 +382,23 @@ class PrivateDerivedIndex:
             }
         if self.mode == "ephemeral" and self.closed:
             return {"status": "unavailable", "code": "index_closed", "plaintext_fallback": False}
-        entry = self.entries.get(token)
+        if self.mode == "durable" and isinstance(token, str) and token.startswith("cgidx:ref:v1:"):
+            try:
+                entry = self._open_durable_reference(token)
+            except Exception as exc:
+                return {"status": "unavailable", "code": str(getattr(exc, "code", "") or "persistence_unavailable"),
+                    "plaintext_fallback": False}
+        else:
+            # Old counter-only tokens remain usable by their original warm
+            # owner. Missing historical mappings cannot be reconstructed.
+            entry = self.entries.get(token)
         if not entry or entry.get("case_id") != self.case_id:
             return {"status": "unavailable", "code": "case_mismatch", "plaintext_fallback": False}
         if entry.get("durable"):
             opened = self._open_durable(entry)
             if opened.get("status") != "available":
                 return opened
+            self.entries[token] = entry
             return {"status": "available", "text": opened["text"], "case_id": self.case_id, "encrypted": True}
         if self.closed:
             return {"status": "unavailable", "code": "index_closed", "plaintext_fallback": False}
@@ -378,6 +436,8 @@ class PrivateDerivedIndex:
             return {"status": "unavailable", "code": "persistence_unavailable", "plaintext_fallback": False}
         if str(payload.get("case_id") or "") != self.case_id:
             return {"status": "unavailable", "code": "case_mismatch", "plaintext_fallback": False}
+        if payload.get("kind") != entry.get("kind"):
+            return {"status": "unavailable", "code": "binding_rejected", "plaintext_fallback": False}
         return {"status": "available", "text": str(payload.get("text") or "")}
 
     def close(self, *, crash: bool = False) -> Dict[str, Any]:
