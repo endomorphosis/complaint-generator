@@ -4714,11 +4714,17 @@ def _private_replica_acceptance_capability(junit, binding):
     return capability
 
 
+_FACTUAL_CORRECTION_ACCEPTANCE = ("tests/test_cimp_ux_10.py::"
+    "test_answer_and_correction_update_graphs_once_and_stale_replies_do_not")
+
+
 _IMPACTED_BEHAVIORAL_CHECKS = {
     "integrations/ipfs_datasets/legal.py": ("tests/test_explicit_legal_context.py", "tests/test_ipfs_adapter_layer.py"),
     "integrations/ipfs_datasets/storage.py": ("tests/test_private_storage_adapter.py", "tests/test_ipfs_kit_storage_adapter.py", "tests/test_proof_report_and_pinning.py", _PRIVATE_REPLICA_ACCEPTANCE),
     "integrations/private_storage.py": ("tests/test_private_workspace_crypto.py", "tests/test_private_workspace_keys.py", "tests/test_private_storage_adapter.py", _PRIVATE_REPLICA_ACCEPTANCE),
-    "applications/complaint_workspace.py": ("tests/test_private_workspace_isolation.py", "tests/test_private_workspace_policy.py", "tests/test_private_workspace_keys.py"),
+    "applications/complaint_workspace.py": ("tests/test_private_workspace_isolation.py", "tests/test_private_workspace_policy.py", "tests/test_private_workspace_keys.py", _FACTUAL_CORRECTION_ACCEPTANCE),
+    "static/complaint_conversation.js": (_FACTUAL_CORRECTION_ACCEPTANCE,),
+    "static/complaint_mcp_sdk.js": (_FACTUAL_CORRECTION_ACCEPTANCE,),
     "integrations/ipfs_datasets/llm.py": ("tests/test_grok47_router_contract.py", "tests/test_private_workspace_policy.py"),
     "mediator/mediator.py": ("tests/test_factual_correction_replay.py", "tests/test_tui_shared_interview.py"),
 }
@@ -4728,7 +4734,7 @@ def _impacted_behavioral_checks(root, changed_paths):
     selected = set()
     for changed in changed_paths:
         selected.update(_IMPACTED_BEHAVIORAL_CHECKS.get(changed, ()))
-    if any(not (root / path).is_file() for path in selected):
+    if any(not (root / path.partition("::")[0]).is_file() for path in selected):
         raise ValueError("impacted_check_missing")
     return sorted(selected)
 
@@ -4844,7 +4850,11 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         options = ["-p", network_guard["module"]] + (["-p", str(context["pytest_guard_plugin"])] if (context or {}).get("pytest_guard_plugin") else []) + ["-p", "integrations.ipfs_accelerate.improvement_plan", "-p", "ipfs_accelerate_py.testing.pytest_ast_seal",
                    "--complaint-evidence-path=" + str(manifest)]
         options += ["--collect-only"] if mode == "collect" else ["--junitxml=" + str(junit), "-o", "junit_family=xunit2"]
-        options += [p for p in impacted if p not in command.split()]
+        # A bounded companion may name one node. A declared whole-file run
+        # already includes it; adding both would duplicate required nodeids.
+        declared_tokens = shlex.split(command)
+        options += [p for p in impacted if p not in declared_tokens
+                    and p.partition("::")[0] not in declared_tokens]
         instrumented = _pytest_instrument(command, options, pythonpath=bootstrap_roots)
         export = "export IPFS_ACCELERATE_PYTEST_SEAL_DUCKDB=" + shlex.quote(str(catalog))
         # Never depend on ambient pytest injection or a shared/reused catalog.
@@ -4923,7 +4933,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             if python_global_preflight.get("passed") is not True:
                 raise ValueError(python_global_preflight["reason"])
         preserved_behavioral_definitions = _preserve_existing_behavioral_definitions(
-            root, [*extra, *impacted, *(context or {}).get("changed_paths", ())])
+            root, [*extra, *(p.partition("::")[0] for p in impacted),
+                   *(context or {}).get("changed_paths", ())])
         replica_kit_before = _private_replica_kit_qualification(root, state_dir, task, before,
             campaign_state_dir=(context or {}).get("campaign_state_dir"))
         if release_script:
