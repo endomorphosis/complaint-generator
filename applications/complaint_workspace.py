@@ -3259,6 +3259,101 @@ class _ComplaintWorkspaceHandlerBackend(Protocol):
     ) -> Dict[str, Any]: ...
 
 
+def _encrypted_head(state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Public identity of the current encrypted case head.
+
+    The ciphertext itself stays in private storage. Callers compare this
+    revision to detect a reply that is older than the head they already show.
+    """
+
+    return {
+        "schema": "encrypted-case-head-v1",
+        "case_id": str(state.get("case_id") or ""),
+        "private_revision": str(state.get("private_revision") or "0"),
+    }
+
+
+def _legal_graph_digest(graph: Any) -> str:
+    if not isinstance(graph, Mapping):
+        return ""
+    try:
+        body = json.dumps(graph, sort_keys=True, default=str, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return ""
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _relationship_rows(graph: Any) -> List[Dict[str, str]]:
+    raw = graph.get("relationships") if isinstance(graph, Mapping) else None
+    values = raw.values() if isinstance(raw, Mapping) else list(raw or [])
+    rows: List[Dict[str, str]] = []
+    for rel in values:
+        if not isinstance(rel, Mapping):
+            continue
+        attributes = rel.get("attributes") if isinstance(rel.get("attributes"), Mapping) else {}
+        rows.append({
+            "relationship_id": str(rel.get("id") or ""),
+            "relation_type": str(rel.get("relation_type") or rel.get("type") or ""),
+            "source_id": str(rel.get("source_id") or ""),
+            "target_id": str(rel.get("target_id") or ""),
+            "activity_status": str(attributes.get("activity_status") or ""),
+        })
+    rows.sort(key=lambda item: (item["relationship_id"], item["source_id"], item["target_id"], item["activity_status"]))
+    return rows
+
+
+def _record_support_projection(
+    state: Dict[str, Any],
+    *,
+    effect_id: str,
+    kind: str,
+    inquiry_id: str,
+    revision: Any,
+    before_graph: Any,
+    after_graph: Any,
+    legal_digest: str,
+    affected: Optional[List[Any]] = None,
+) -> Dict[str, Any]:
+    """Append one support projection for an accepted answer or correction.
+
+    The same effect id is a replay. It does not append a second row and it
+    does not rewrite the legal-graph digest stored with the first row.
+    """
+
+    ledger = state.get("affected_support_projection")
+    if not isinstance(ledger, list):
+        ledger = []
+        state["affected_support_projection"] = ledger
+    for item in ledger:
+        if isinstance(item, dict) and item.get("effect_id") == effect_id:
+            return {"applied": False, "duplicate": True, "entry": item, "count": len(ledger)}
+    before_rows = _relationship_rows(before_graph)
+    after_rows = _relationship_rows(after_graph)
+    before_keys = {(row["relationship_id"], row["activity_status"], row["source_id"], row["target_id"]) for row in before_rows}
+    changed = [
+        row for row in after_rows
+        if (row["relationship_id"], row["activity_status"], row["source_id"], row["target_id"]) not in before_keys
+    ]
+    if isinstance(affected, list) and affected:
+        changed = [dict(item) if isinstance(item, Mapping) else {"target_id": str(item)} for item in affected]
+    after_mapping = after_graph if isinstance(after_graph, Mapping) else {}
+    before_mapping = before_graph if isinstance(before_graph, Mapping) else {}
+    entry = {
+        "effect_id": effect_id,
+        "kind": kind,
+        "inquiry_id": str(inquiry_id or ""),
+        "expected_question_revision": revision,
+        "graph_version": str(after_mapping.get("graph_version") or ""),
+        "previous_graph_version": str(before_mapping.get("graph_version") or ""),
+        "factual_graph_changed": _legal_graph_digest(after_mapping) != _legal_graph_digest(before_mapping),
+        "affected": changed,
+        "legal_graph_sha256": legal_digest,
+        "changes_law": False,
+    }
+    ledger.append(entry)
+    return {"applied": True, "duplicate": False, "entry": entry, "count": len(ledger)}
+
+
 def _pending_inquiry_copy(state: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
     projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
     pending = projection.get("pending_inquiry") if isinstance(projection, Mapping) else None
@@ -3892,6 +3987,11 @@ class ComplaintWorkspaceRequestHandlers:
                 active_question=self.workspace._next_question(answers),
             ),
             "legal_sufficiency": False,
+            "changes_law": False,
+            "encrypted_head": _encrypted_head(state),
+            "affected_support_projection": [
+                dict(item) for item in (state.get("affected_support_projection") or []) if isinstance(item, dict)
+            ],
         }
 
     def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
@@ -3986,6 +4086,9 @@ class ComplaintWorkspaceRequestHandlers:
             payload["interview"] = interview
             return payload
         normalized_question_id = str(question_id or "").strip()
+        interview_projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        before_factual = deepcopy(interview_projection.get("knowledge_graph") or {})
+        before_legal_digest = _legal_graph_digest(interview_projection.get("dependency_graph"))
         narrative_turn = normalized_question_id == ORIGINAL_COMPLAINT_QUESTION_ID or (
             not normalized_question_id and _narrative_is_open(state)
         )
@@ -4098,7 +4201,28 @@ class ComplaintWorkspaceRequestHandlers:
         if interview.get("status") == "refused":
             payload = workspace._build_intake_chat_payload(state)
             payload["interview"] = interview
+            payload["support_projection_updated"] = False
+            payload["changes_law"] = False
             return payload
+        accepted_graph_answer = bool(
+            normalized_message
+            and interview.get("status") not in {"refused", "unavailable"}
+            and (graph_inquiry or normalized_action == "answer")
+            and normalized_action not in {"status", "resume", "review", "why"}
+        )
+        support_update = {"applied": False, "duplicate": False, "count": len(state.get("affected_support_projection") or [])}
+        if accepted_graph_answer:
+            after_interview = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+            support_update = _record_support_projection(
+                state,
+                effect_id=f"answer:{normalized_question_id}:{expected_question_revision}",
+                kind="answer",
+                inquiry_id=normalized_question_id,
+                revision=expected_question_revision,
+                before_graph=before_factual,
+                after_graph=after_interview.get("knowledge_graph") or {},
+                legal_digest=before_legal_digest,
+            )
         if joined_effect is not None:
             workspace._commit_joined_snapshot(state, effect_id=joined_effect,
                 question_id=identity_question, answer=normalized_message)
@@ -4110,6 +4234,9 @@ class ComplaintWorkspaceRequestHandlers:
             requested_question_id=None if accepted_answer is not None or graph_inquiry else question_id,
         )
         payload["interview"] = interview
+        payload["support_projection_updated"] = bool(support_update.get("applied"))
+        payload["support_projection_duplicate"] = bool(support_update.get("duplicate"))
+        payload["changes_law"] = False
         if show_privacy_notice:
             payload["privacy_notice"] = _PRIVACY_MODE_NOTICE
             if str(payload.get("message") or "").startswith("Let's start with the basics."):
@@ -4130,6 +4257,10 @@ class ComplaintWorkspaceRequestHandlers:
         edit of another participant's assertion is refused and does not write.
         """
 
+        prior_support_effects = {
+            str(item.get("effect_id") or "") for item in (state.get("affected_support_projection") or [])
+            if isinstance(item, Mapping)
+        }
         parsed = _parse_gui_correction_message(
             message,
             expected_graph_revision=expected_graph_revision,
@@ -4167,6 +4298,17 @@ class ComplaintWorkspaceRequestHandlers:
             fresh = state
         payload = self.workspace._build_intake_chat_payload(fresh)
         payload["factual_correction"] = receipt
+        new_correction_effects = [
+            item for item in payload.get("affected_support_projection", [])
+            if isinstance(item, Mapping) and item.get("kind") == "correction"
+            and str(item.get("effect_id") or "") not in prior_support_effects
+        ]
+        payload["support_projection_updated"] = receipt.get("status") == "applied" and bool(new_correction_effects)
+        correction = receipt.get("correction") if isinstance(receipt.get("correction"), Mapping) else {}
+        payload["support_projection_duplicate"] = (
+            receipt.get("status") == "applied" and correction.get("idempotent_replay") is True
+            and not new_correction_effects
+        )
         payload["stored_as_answer"] = receipt.get("status") == "applied"
         payload["command"] = "correct"
         payload["legal_sufficiency"] = False
@@ -4242,6 +4384,9 @@ class ComplaintWorkspaceRequestHandlers:
                 pending_inquiry=_pending_inquiry_copy(state),
             ))
         projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else None
+        before_factual = deepcopy(projection.get("knowledge_graph") or {}) if isinstance(projection, dict) else {}
+        legal_snapshot = deepcopy(projection.get("dependency_graph")) if isinstance(projection, dict) and isinstance(projection.get("dependency_graph"), dict) else None
+        legal_digest = _legal_graph_digest(legal_snapshot)
         if not isinstance(projection, dict) or projection.get("schema_version") != "shared-interview-session-v1":
             return _terminal_edit_receipt(
                 status="unavailable",
@@ -4393,6 +4538,10 @@ class ComplaintWorkspaceRequestHandlers:
             ))
         pending, reselected = _reselect_affected_pending(actions, knowledge, target, pending_before)
         exported = actions.export_session_projection()
+        if isinstance(exported, dict) and legal_snapshot is not None:
+            # A factual correction may invalidate support. It must not rewrite
+            # the admitted legal dependency graph that was current at the edit.
+            exported["dependency_graph"] = legal_snapshot
         if not isinstance(exported, dict):
             return finish(_terminal_edit_receipt(
                 status="unavailable",
@@ -4406,6 +4555,17 @@ class ComplaintWorkspaceRequestHandlers:
             _append_correction_history(
                 state, target, text, receipt,
                 actor_principal_id=actor_id if require_expected_revision else "",
+            )
+            _record_support_projection(
+                state,
+                effect_id="correction:" + str(receipt.get("event_id") or target.get("stable_id") or ""),
+                kind="correction",
+                inquiry_id=str(target.get("question_id") or ""),
+                revision=expected_session_revision,
+                before_graph=before_factual,
+                after_graph=exported.get("knowledge_graph") or {},
+                legal_digest=legal_digest,
+                affected=list(receipt.get("affected_support_targets") or []),
             )
         _note_terminal_edit_controls(
             state,
@@ -4888,10 +5048,13 @@ class ComplaintWorkspaceService:
                 if restored.get("error"):
                     return restored
             prior_pending = None
+            legal_snapshot = None
             if graph_question or action == "answer":
                 current_projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
                 current_pending = current_projection.get("pending_inquiry") if isinstance(current_projection.get("pending_inquiry"), dict) else None
                 prior_pending = dict(current_pending) if current_pending else None
+                if isinstance(current_projection.get("dependency_graph"), dict):
+                    legal_snapshot = deepcopy(current_projection.get("dependency_graph"))
             if action == "resume":
                 receipt = mediator.transition_shared_interview(action="resume", **kwargs)
             elif narrative_turn or action == "start":
@@ -4916,6 +5079,8 @@ class ComplaintWorkspaceService:
             if receipt.get("status") == "refused":
                 return receipt
             exported = mediator.workflow_actions.export_session_projection()
+            if isinstance(exported, dict) and legal_snapshot is not None:
+                exported["dependency_graph"] = legal_snapshot
             if exported:
                 state["shared_interview"] = exported
                 pending = exported.get("pending_inquiry") if isinstance(exported.get("pending_inquiry"), dict) else None
@@ -7673,6 +7838,11 @@ class ComplaintWorkspaceService:
         payload["finite_interview_outcome"] = finite_interview_outcome(state, active_question=active_question)
         payload["worker_stalled"] = False if payload["finite_interview_outcome"].get("user_waiting") else bool(payload["finite_interview_outcome"].get("worker_stalled"))
         payload["user_waiting_is_worker_stall"] = False
+        payload["changes_law"] = False
+        payload["encrypted_head"] = _encrypted_head(state)
+        payload["affected_support_projection"] = [
+            dict(item) for item in (state.get("affected_support_projection") or []) if isinstance(item, dict)
+        ]
         return payload
 
     def record_finite_interview_stop(self, state: Dict[str, Any], control: str) -> Dict[str, Any]:
@@ -17631,6 +17801,8 @@ class ComplaintWorkspaceService:
                 question_id=args.get("question_id"),
                 expected_question_revision=args.get("expected_question_revision"),
                 interview_action=args.get("interview_action"),
+                expected_graph_revision=args.get("expected_graph_revision"),
+                expected_session_revision=args.get("expected_session_revision"),
             )
         if tool_name == "complaint.save_evidence":
             return self.save_evidence(
