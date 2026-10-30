@@ -285,7 +285,7 @@ Implementation instructions:
 
 ## CIMP-UX-10 Make answers and corrections update the canonical graphs safely
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
