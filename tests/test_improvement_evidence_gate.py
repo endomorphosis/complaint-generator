@@ -1005,3 +1005,117 @@ def test_real_sealed_pytest_bootstrap_survives_declared_pythonpath_export(tmp_pa
     assert [row["mode"] for row in network["proofs"]] == ["collect", "run"]
     assert all(Path(row["path"]).is_file() and row["sha256"] for row in network["proofs"])
     assert observed["completion_authority"] is False if "completion_authority" in observed else measured["completion_authority"] is False
+
+
+@pytest.mark.parametrize("changed", ["applications/complaint_workspace.py", "static/complaint_conversation.js", "static/complaint_mcp_sdk.js"])
+def test_correction_product_changes_require_the_bounded_accepted_companion(tmp_path, changed):
+    from integrations.ipfs_accelerate import improvement_runner as runtime
+    selector = ("tests/test_cimp_ux_10.py::"
+                "test_answer_and_correction_update_graphs_once_and_stale_replies_do_not")
+    expected = runtime._IMPACTED_BEHAVIORAL_CHECKS[changed]
+    late_selector = "tests/test_cimp_ux_10.py::test_delayed_answer_cannot_repaint_a_new_selected_case"
+    assert {selector, late_selector} <= set(expected)
+    for relative in expected:
+        path = tmp_path / relative.partition("::")[0]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    assert runtime._impacted_behavioral_checks(tmp_path, [changed]) == sorted(expected)
+    (tmp_path / "tests/test_cimp_ux_10.py").unlink()
+    with pytest.raises(ValueError, match="impacted_check_missing"):
+        runtime._impacted_behavioral_checks(tmp_path, [changed])
+
+
+@pytest.mark.parametrize("mode", ["passes", "strong_fails", "weakens", "omits", "full_file",
+                                  "filtered_node", "filtered_file", "parameters", "late_fails", "one_node_only", "partial_file"])
+def test_measured_correction_selector_enforces_success_without_running_unrelated_cases(tmp_path, monkeypatch, mode):
+    """Synthetic selector fixture, separate from the genuine browser acceptance.
+
+    A declared positive-VERSION test permits VERSION1. The trusted companion
+    requires VERSION2; unrelated failing cases prove the selector stays bounded.
+    The fixture retains the real sealed executor, AST and child/network guards.
+    """
+    import shlex
+    from integrations.ipfs_accelerate import improvement_runner as runtime
+    _write_output(tmp_path, "CIMP-OPS-04")
+    _, executor, environment = _gate(tmp_path, _task(), _observation(tmp_path), _return_measurement=True)
+    relative, _, function = runtime._FACTUAL_CORRECTION_ACCEPTANCE.partition("::")
+    late_function = runtime._CASE_SWITCH_ACCEPTANCE.partition("::")[2]
+    companion = tmp_path / relative
+    declaration = ("@pytest.mark.parametrize('expected', [2, 2], ids=['first', 'second'])\n"
+                   "def " + function + "(expected):\n    assert adapter.VERSION == expected\n"
+                   if mode == "parameters" else "def " + function + "():\n    assert adapter.VERSION == 2\n")
+    companion.write_text("import adapter, pytest\n\n" + declaration
+                         + "\ndef " + late_function + "():\n    assert adapter.CASE_ID == 'new-case'\n"
+                         + "\ndef test_unrelated_case_stays_out_of_bounded_selector():\n    assert "
+                         + ("True" if mode == "full_file" else "False") + "\n"
+                         + ("\ndef test_weak_declared_only():\n    assert adapter.VERSION > 0\n"
+                            if mode == "filtered_node" else ""))
+    reviewed = tmp_path / "reviewed-companion-baseline"
+    baseline = reviewed / relative
+    baseline.parent.mkdir(parents=True)
+    baseline.write_bytes(companion.read_bytes())
+    real_preserve = runtime._preserve_existing_behavioral_definitions
+    monkeypatch.setattr(runtime, "_preserve_existing_behavioral_definitions",
+        lambda root, paths: real_preserve(root, paths, trusted_root=reviewed))
+    key = "static/complaint_conversation.js"
+    product = tmp_path / key
+    product.parent.mkdir()
+    product.write_text("// Explicit synthetic impact input; real browser acceptance is qualified separately.\n")
+    impacted = sorted(runtime._IMPACTED_BEHAVIORAL_CHECKS[key])
+    if mode in {"filtered_file", "partial_file"}:
+        # Separate generic whole-file policy control, retaining real collection.
+        impacted = [relative]
+        monkeypatch.setitem(runtime._IMPACTED_BEHAVIORAL_CHECKS, key, tuple(impacted))
+    version = "2" if mode in {"passes", "full_file", "parameters", "late_fails", "one_node_only", "partial_file"} else "1"
+    case = "old-case" if mode == "late_fails" else "new-case"
+    (tmp_path / "adapter.py").write_text("VERSION=" + version + "\nCASE_ID=" + repr(case) + "\n")
+    if mode == "weakens":
+        companion.write_text(companion.read_text().replace("adapter.VERSION == 2", "adapter.VERSION > 0"))
+    elif mode == "omits":
+        companion.write_text(companion.read_text().replace("def " + function + "(", "def omitted_accepted_companion("))
+    command = COMMAND + (" " + relative if mode in {"full_file", "filtered_node", "one_node_only", "partial_file"} else "")
+    if mode == "filtered_node":
+        command += " -k weak"
+    elif mode == "filtered_file":
+        command += " -k local_node_evidence"
+    elif mode in {"one_node_only", "partial_file"}:
+        command += " -k answer_and_correction_update_graphs_once"
+    observed = runtime.measure_behavioral_command(tmp_path, tmp_path / "selector-runs", _task(command=command),
+        "PYTHONPATH=" + shlex.quote(environment["PYTHONPATH"]) + " " + command,
+        runner=executor, environment=environment, timeout_seconds=45, declared_command=command,
+        context={"changed_paths": [key], "require_child_guard": True, "pytest_guard_plugin": "complaint_fixture_guard"})
+    measured = observed["host_measurement"]
+    assert measured["impacted_checks"] == impacted
+    assert measured["completion_authority"] is False
+    if mode in {"filtered_node", "filtered_file", "one_node_only", "partial_file"}:
+        assert measured["reason"] == "impacted_required_case_missing"
+        missing = [runtime._CASE_SWITCH_ACCEPTANCE] if mode == "one_node_only" else impacted
+        assert measured["missing_impacted_checks"] == missing
+        assert [row["mode"] for row in measured["results"]] == ["collect"]
+        assert measured["results"][0]["returncode"] == 0
+        expected = (runtime._FACTUAL_CORRECTION_ACCEPTANCE if mode in {"one_node_only", "partial_file"} else
+                    relative + "::test_weak_declared_only" if mode == "filtered_node" else NODE_A)
+        assert observed["required_nodeids"] == [expected]
+        assert not (Path(measured["run_path"]) / "run.json").exists()
+    elif mode in {"weakens", "omits"}:
+        assert measured["reason"] == "existing_behavioral_definition_changed"
+        assert measured["behavioral_definition_diagnostic"]["candidate_executed"] is False
+        assert not measured["results"]
+    else:
+        assert measured["reason"] == ("failed_assertion" if mode in {"strong_fails", "late_fails"} else "")
+        companion_nodes = ({runtime._FACTUAL_CORRECTION_ACCEPTANCE + "[first]",
+                            runtime._FACTUAL_CORRECTION_ACCEPTANCE + "[second]"}
+                           if mode == "parameters" else {runtime._FACTUAL_CORRECTION_ACCEPTANCE})
+        expected = {NODE_A, NODE_B, *companion_nodes, runtime._CASE_SWITCH_ACCEPTANCE}
+        if mode == "full_file":
+            expected.add(relative + "::test_unrelated_case_stays_out_of_bounded_selector")
+        assert set(observed["required_nodeids"]) == expected
+        assert observed["collected_count"] == len(expected)
+        # Host deliberately stops projecting cases at the first failure.
+        # The genuine phase manifest still records every executed test.
+        phases = json.loads((Path(measured["run_path"]) / "run.json").read_text())
+        cases = {row["nodeid"]: row["outcome"] for row in phases["reports"] if row["when"] == "call"}
+        assert cases[NODE_A] == cases[NODE_B] == "passed"
+        assert all(cases[node] == ("failed" if mode == "strong_fails" else "passed") for node in companion_nodes)
+        assert cases[runtime._CASE_SWITCH_ACCEPTANCE] == ("failed" if mode == "late_fails" else "passed")
+        assert any(row["path"] == relative for row in measured["preserved_behavioral_definitions"])

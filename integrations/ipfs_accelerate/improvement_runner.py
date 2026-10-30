@@ -4409,10 +4409,28 @@ def _source_freeze(root: Path, extra=()):
     return {**value, "digest": _digest(value)}
 
 
+_PYTEST_INVOCATION_PATTERN = r"(?<![\w-])(?:python(?:3(?:\.\d+)*)?\s+-m\s+pytest|pytest)(?=\s|$)"
+
+
+def _pytest_population_filtered(command):
+    """Treat caller discovery controls as unknown whole-file coverage."""
+    import shlex
+    matches = list(re.finditer(_PYTEST_INVOCATION_PATTERN, command))
+    if len(matches) != 1:
+        return True
+    # Exclude the Python interpreter's -m from pytest's marker filter.
+    arguments = shlex.split(command[matches[0].end():])
+    controls = {"--deselect", "--ignore", "--ignore-glob", "--lf", "--last-failed",
+                "--lfnf", "--last-failed-no-failures", "--sw", "--stepwise",
+                "--sw-skip", "--stepwise-skip", "--override-ini", "--config-file"}
+    return any(argument.startswith(("-k", "-m", "-o", "-c"))
+               or argument.partition("=")[0] in controls for argument in arguments)
+
+
 def _pytest_instrument(command, arguments, *, pythonpath=()):
     # Keep the original shell/environment prefix and original selectors. This
     # adapter supports one explicit pytest invocation, not arbitrary scripts.
-    pattern = r"(?<![\w-])(?:python(?:3(?:\.\d+)*)?\s+-m\s+pytest|pytest)(?=\s|$)"
+    pattern = _PYTEST_INVOCATION_PATTERN
     matches = list(re.finditer(pattern, command))
     if len(matches) != 1 or any(flag in command for flag in ("--junit", "--collect-only", "--complaint-evidence-path", " -p no:")):
         raise ValueError("unsupported_behavioral_command")
@@ -4714,11 +4732,20 @@ def _private_replica_acceptance_capability(junit, binding):
     return capability
 
 
+_FACTUAL_CORRECTION_ACCEPTANCE = ("tests/test_cimp_ux_10.py::"
+    "test_answer_and_correction_update_graphs_once_and_stale_replies_do_not")
+_CASE_SWITCH_ACCEPTANCE = ("tests/test_cimp_ux_10.py::"
+    "test_delayed_answer_cannot_repaint_a_new_selected_case")
+_INTERVIEW_BEHAVIORAL_ACCEPTANCE = (_FACTUAL_CORRECTION_ACCEPTANCE, _CASE_SWITCH_ACCEPTANCE)
+
+
 _IMPACTED_BEHAVIORAL_CHECKS = {
     "integrations/ipfs_datasets/legal.py": ("tests/test_explicit_legal_context.py", "tests/test_ipfs_adapter_layer.py"),
     "integrations/ipfs_datasets/storage.py": ("tests/test_private_storage_adapter.py", "tests/test_ipfs_kit_storage_adapter.py", "tests/test_proof_report_and_pinning.py", _PRIVATE_REPLICA_ACCEPTANCE),
     "integrations/private_storage.py": ("tests/test_private_workspace_crypto.py", "tests/test_private_workspace_keys.py", "tests/test_private_storage_adapter.py", _PRIVATE_REPLICA_ACCEPTANCE),
-    "applications/complaint_workspace.py": ("tests/test_private_workspace_isolation.py", "tests/test_private_workspace_policy.py", "tests/test_private_workspace_keys.py"),
+    "applications/complaint_workspace.py": ("tests/test_private_workspace_isolation.py", "tests/test_private_workspace_policy.py", "tests/test_private_workspace_keys.py", *_INTERVIEW_BEHAVIORAL_ACCEPTANCE),
+    "static/complaint_conversation.js": _INTERVIEW_BEHAVIORAL_ACCEPTANCE,
+    "static/complaint_mcp_sdk.js": _INTERVIEW_BEHAVIORAL_ACCEPTANCE,
     "integrations/ipfs_datasets/llm.py": ("tests/test_grok47_router_contract.py", "tests/test_private_workspace_policy.py"),
     "mediator/mediator.py": ("tests/test_factual_correction_replay.py", "tests/test_tui_shared_interview.py"),
 }
@@ -4728,7 +4755,7 @@ def _impacted_behavioral_checks(root, changed_paths):
     selected = set()
     for changed in changed_paths:
         selected.update(_IMPACTED_BEHAVIORAL_CHECKS.get(changed, ()))
-    if any(not (root / path).is_file() for path in selected):
+    if any(not (root / path.partition("::")[0]).is_file() for path in selected):
         raise ValueError("impacted_check_missing")
     return sorted(selected)
 
@@ -4794,6 +4821,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     release_qualification_before = None
     release_qualification_after = None
     preserved_behavioral_definitions = None
+    missing_impacted_checks = []
+    filtered_whole_file_companions = []
     behavioral_definition_diagnostic = None
     python_global_preflight = None
     browser_http_preflight = None
@@ -4844,7 +4873,11 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         options = ["-p", network_guard["module"]] + (["-p", str(context["pytest_guard_plugin"])] if (context or {}).get("pytest_guard_plugin") else []) + ["-p", "integrations.ipfs_accelerate.improvement_plan", "-p", "ipfs_accelerate_py.testing.pytest_ast_seal",
                    "--complaint-evidence-path=" + str(manifest)]
         options += ["--collect-only"] if mode == "collect" else ["--junitxml=" + str(junit), "-o", "junit_family=xunit2"]
-        options += [p for p in impacted if p not in command.split()]
+        # A bounded companion may name one node. A declared whole-file run
+        # already includes it; adding both would duplicate required nodeids.
+        declared_tokens = shlex.split(command)
+        options += [p for p in impacted if p not in declared_tokens
+                    and p.partition("::")[0] not in declared_tokens]
         instrumented = _pytest_instrument(command, options, pythonpath=bootstrap_roots)
         export = "export IPFS_ACCELERATE_PYTEST_SEAL_DUCKDB=" + shlex.quote(str(catalog))
         # Never depend on ambient pytest injection or a shared/reused catalog.
@@ -4923,7 +4956,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             if python_global_preflight.get("passed") is not True:
                 raise ValueError(python_global_preflight["reason"])
         preserved_behavioral_definitions = _preserve_existing_behavioral_definitions(
-            root, [*extra, *impacted, *(context or {}).get("changed_paths", ())])
+            root, [*extra, *(p.partition("::")[0] for p in impacted),
+                   *(context or {}).get("changed_paths", ())])
         replica_kit_before = _private_replica_kit_qualification(root, state_dir, task, before,
             campaign_state_dir=(context or {}).get("campaign_state_dir"))
         if release_script:
@@ -4985,6 +5019,20 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             raise ValueError("zero_test_collection")
         if len(required) != len(set(required)) or any(not isinstance(n, str) or not n for n in required):
             raise ValueError("required_test_identity_malformed")
+        # Caller filters and candidate collection hooks may omit a trusted
+        # companion even when its file was already declared. Require its
+        # actual frozen population before executing a passing subset.
+        missing_impacted_checks = [selector for selector in impacted if not any(
+            node == selector or node.startswith(selector + ("[" if "::" in selector else "::"))
+            for node in required)]
+        whole_files = [selector for selector in impacted if "::" not in selector]
+        if whole_files and _pytest_population_filtered(command):
+            # One retained test does not prove a whole companion file ran.
+            # Fail closed instead of collecting its unfiltered matrix again.
+            filtered_whole_file_companions = whole_files
+            missing_impacted_checks = sorted(set(missing_impacted_checks) | set(whole_files))
+        if missing_impacted_checks:
+            raise ValueError("impacted_required_case_missing")
         if before != _source_freeze(root, freeze_inputs):
             raise ValueError("stale_source_hash")
         executed, phases, (sealed_nodes, imported) = execute("run")
@@ -5023,7 +5071,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
         if isinstance(exc, _BehavioralDefinitionError):
             behavioral_definition_diagnostic = exc.diagnostics
-        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable", "new_duplicate_python_module_global", "python_global_preflight_unavailable", "synthetic_browser_http_response", "browser_http_preflight_unavailable", *infrastructure_reasons} else "host_measurement_unavailable"
+        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "impacted_required_case_missing", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable", "new_duplicate_python_module_global", "python_global_preflight_unavailable", "synthetic_browser_http_response", "browser_http_preflight_unavailable", *infrastructure_reasons} else "host_measurement_unavailable"
     try:
         if replica_binding != _private_replica_acceptance_binding(root, task, impacted):
             reason = "trusted_replica_acceptance_changed"
@@ -5045,6 +5093,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     measured = {"schema": "complaint-owned-behavioral-measurement@1", "reason": reason,
                 "infrastructure_failure": any(row.get("infrastructure_failure") is True for row in results),
                 "preserved_behavioral_definitions": preserved_behavioral_definitions,
+                "missing_impacted_checks": missing_impacted_checks,
+                "filtered_whole_file_companions": filtered_whole_file_companions,
                 "behavioral_definition_diagnostic": behavioral_definition_diagnostic,
                 "python_global_preflight": python_global_preflight,
                 "browser_http_preflight": browser_http_preflight,
