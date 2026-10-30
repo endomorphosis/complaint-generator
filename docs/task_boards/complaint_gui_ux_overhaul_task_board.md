@@ -254,7 +254,7 @@ Implementation instructions:
 
 ## CIMP-UX-09 Build inquiry cards with Why, unknown, defer, and supporting context
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
