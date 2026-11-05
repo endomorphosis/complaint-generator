@@ -23,6 +23,7 @@ CHAT_FACT = "Synthetic chat fact about a fictional employer and no real person."
 DRAFT_NOTE = "Synthetic correspondence that stays in the composer until a real send."
 OWNER_CREDENTIAL = "synthetic-owner-credential"
 LAWYER_CREDENTIAL = "synthetic-lawyer-credential"
+STRANGER_CREDENTIAL = "synthetic-stranger-credential"
 
 
 def load_contract() -> dict:
@@ -127,3 +128,66 @@ def declared_visual_widths(contract: dict | None = None) -> list[dict]:
 
 def baseline_manifest() -> dict:
     return json.loads((BASELINE_DIR / "screenshot_manifest.json").read_text(encoding="utf-8"))
+
+
+# Public complaint journey. A completed screen is not legal sufficiency or a filing.
+JOURNEY_STAGES = (
+    "original_complaint",
+    "adaptive_question",
+    "corrected_factual_graph",
+    "private_annotated_evidence",
+    "source_bound_legal_requirement",
+    "cited_draft",
+    "lawyer_message",
+    "lawyer_review",
+    "owner_acceptance",
+    "cold_resume",
+)
+JOURNEY_FAILURES = (
+    "unresolved",
+    "unknown",
+    "cancelled",
+    "provider",
+    "source",
+    "proof",
+    "storage",
+    "unauthorized",
+)
+
+
+def complete_journey_world(tmp_path: Path):
+    """Journey owners with the private evidence workbench mounted.
+
+    Document routes stay the production draft owner. They are attached here
+    because the shared journey app leaves them off; this does not invent a
+    second interview or case database.
+    """
+
+    from applications.document_api import attach_document_routes
+    from integrations.evidence_workspace import EvidenceWorkspace, MemoryByteBackend
+
+    world = synthetic_capture_world(tmp_path)
+    backend = MemoryByteBackend()
+    world.app.state.evidence_workspace = EvidenceWorkspace(
+        world.cases,
+        {world.owner.principal_id: world.owner_keys, world.lawyer.principal_id: world.recipient},
+        backend,
+        tmp_path / "evidence-root",
+    )
+    world.evidence_backend = backend
+    attach_document_routes(world.app, world.service)
+    return world
+
+
+def assert_success_is_not_filing(payload: dict) -> None:
+    """A successful journey payload must not claim sufficiency or a court filing."""
+
+    if not isinstance(payload, dict):
+        raise ValueError("journey_payload_required")
+    if payload.get("legal_sufficiency") is True or payload.get("court_filed") is True:
+        raise ValueError("success_claimed_legal_sufficiency")
+    if payload.get("automatic_court_filing") is True or payload.get("governing_legal_authority") is True:
+        raise ValueError("success_claimed_filing_or_governing_law")
+    nested = payload.get("readiness")
+    if isinstance(nested, dict) and (nested.get("legal_sufficiency") is True or nested.get("court_filed") is True):
+        raise ValueError("success_claimed_legal_sufficiency")
